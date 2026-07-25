@@ -25,11 +25,16 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { formatDisplayAmount } from "../payments/payments-overview.utils";
+import {
+  formatDisplayAmount,
+  resolveTransferTokenLabel,
+} from "../payments/payments-overview.utils";
 
 interface WalletActivitySectionProps {
   isVisible?: boolean;
   walletId: string;
+  /** Symbols already resolved for this wallet's balances, keyed by mint. */
+  symbolsByMint?: Readonly<Record<string, string>>;
 }
 
 const EMPTY_WALLET_ACTIVITY: WalletActivityPayload = {
@@ -81,7 +86,11 @@ function TruncatedText({ value, className }: { value: string; className?: string
   );
 }
 
-export function WalletActivitySection({ walletId, isVisible = true }: WalletActivitySectionProps) {
+export function WalletActivitySection({
+  walletId,
+  isVisible = true,
+  symbolsByMint,
+}: WalletActivitySectionProps) {
   const t = useTranslations();
   const locale = useLocale();
   const {
@@ -189,10 +198,15 @@ export function WalletActivitySection({ walletId, isVisible = true }: WalletActi
                 </TableHeader>
                 <TableBody>
                   {liveRows.map((row: WalletActivityRow) => {
+                    // row.token is a mint address, so it has to be resolved to a
+                    // symbol here too or the Asset column shows raw base58.
+                    // The balances map names tokens the catalogue does not know,
+                    // keeping this column consistent with the Balances card.
+                    const assetToken = resolveTransferTokenLabel(row.token, symbolsByMint);
                     const assetLabel =
-                      row.amount && row.token
-                        ? formatDisplayAmount(row.amount, row.token, locale)
-                        : (row.token ?? t("DashboardCustody.unknownAsset"));
+                      row.amount && assetToken
+                        ? formatDisplayAmount(row.amount, assetToken, locale)
+                        : (assetToken ?? t("DashboardCustody.unknownAsset"));
                     const createdLabel = formatTimestamp(row.createdAt, locale);
                     const address = row.address ?? t("DashboardCustody.unknown");
 
