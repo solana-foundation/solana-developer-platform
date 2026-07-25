@@ -90,29 +90,44 @@ function AssetFilter({ value, onChange }: { value: string; onChange: (value: str
   const t = useTranslations();
 
   return (
-    <Input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={t("DashboardPayments.transactions.assetPlaceholder")}
-      aria-label={t("DashboardPayments.transactions.assetPlaceholder")}
-    />
+    <FieldWithLabel
+      htmlFor="transactions-asset"
+      label={t("DashboardPayments.transactions.filterAsset")}
+    >
+      <Input
+        id="transactions-asset"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t("DashboardPayments.transactions.assetPlaceholder")}
+      />
+    </FieldWithLabel>
   );
 }
 
+/**
+ * Captions every control in the advanced grid. Labelling only some of them left
+ * the labelled ones taller than the rest, so the row no longer lined up.
+ * htmlFor is omitted for the design-system Select, which renders no native form
+ * control to point at — those carry the same text as an aria-label instead.
+ */
 function FieldWithLabel({
   htmlFor,
   label,
   children,
 }: {
-  htmlFor: string;
+  htmlFor?: string;
   label: string;
   children: ReactNode;
 }) {
   return (
     <div className="min-w-0">
-      <label htmlFor={htmlFor} className="mb-1 block text-tertiary text-xs">
-        {label}
-      </label>
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className="mb-1 block text-tertiary text-xs">
+          {label}
+        </label>
+      ) : (
+        <span className="mb-1 block text-tertiary text-xs">{label}</span>
+      )}
       {children}
     </div>
   );
@@ -125,18 +140,21 @@ function buildTransactionsHref(filters: TransactionFilters): string {
 
 function SelectFilter({
   value,
+  label,
   allLabel,
   ariaLabel,
   onChange,
   children,
 }: {
   value?: string;
+  /** Omitted in the compact top bar, where captions would crowd the row. */
+  label?: string;
   allLabel: string;
   ariaLabel: string;
   onChange: (value: string | undefined) => void;
   children: ReactNode;
 }) {
-  return (
+  const select = (
     <Select
       value={value ?? "all"}
       ariaLabel={ariaLabel}
@@ -146,6 +164,8 @@ function SelectFilter({
       {children}
     </Select>
   );
+
+  return label ? <FieldWithLabel label={label}>{select}</FieldWithLabel> : select;
 }
 
 function AdvancedFilters({
@@ -182,6 +202,7 @@ function AdvancedFilters({
       data-transaction-advanced-filters
     >
       <SelectFilter
+        label={t("DashboardPayments.transactions.filterType")}
         value={filters.type}
         allLabel={t("DashboardPayments.transactions.allTypes")}
         ariaLabel={t("DashboardPayments.transactions.allTypes")}
@@ -194,6 +215,7 @@ function AdvancedFilters({
         ))}
       </SelectFilter>
       <SelectFilter
+        label={t("DashboardPayments.transactions.filterDirection")}
         value={filters.direction}
         allLabel={t("DashboardPayments.transactions.allDirections")}
         ariaLabel={t("DashboardPayments.transactions.allDirections")}
@@ -205,6 +227,7 @@ function AdvancedFilters({
         <SelectItem value="outbound">{t("DashboardPayments.transactions.outbound")}</SelectItem>
       </SelectFilter>
       <SelectFilter
+        label={t("DashboardPayments.transactions.filterWallet")}
         value={filters.walletId}
         allLabel={
           optionsLoading
@@ -221,6 +244,7 @@ function AdvancedFilters({
         ))}
       </SelectFilter>
       <SelectFilter
+        label={t("DashboardPayments.transactions.filterCounterparty")}
         value={filters.counterpartyId}
         allLabel={
           optionsLoading
@@ -237,6 +261,7 @@ function AdvancedFilters({
         ))}
       </SelectFilter>
       <SelectFilter
+        label={t("DashboardPayments.transactions.filterProvider")}
         value={filters.provider}
         allLabel={t("DashboardPayments.transactions.allProviders")}
         ariaLabel={t("DashboardPayments.transactions.allProviders")}
