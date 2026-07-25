@@ -614,11 +614,14 @@ export const revokeInvitation = async (c: AppContext) => {
   );
 
   if (match) {
-    // An API key has no Clerk user of its own, so fall back to whoever sent the
-    // invitation. Clerk requires a requesting user and rejects the call without
-    // one, which previously meant the whole revocation was silently skipped.
+    // An API key has no Clerk user of its own. Clerk's own inviter_id is the
+    // most reliable fallback: it is a valid Clerk user by construction, and it
+    // still resolves when invited_by is the "system" sentinel recorded for
+    // invitations an API key sent without a created_by user.
     const requestingUserId =
-      clerk?.clerkUserId ?? (await getClerkUserId(getDb(c.env), invitation.invited_by));
+      clerk?.clerkUserId ??
+      match.inviter_id ??
+      (await getClerkUserId(getDb(c.env), invitation.invited_by));
 
     if (!requestingUserId) {
       throw new AppError(
