@@ -716,8 +716,12 @@ export const revokeInvitation = async (c: AppContext) => {
       // follow it back to pending. This is what keeps the two from diverging
       // into a live acceptance link recorded locally as revoked.
       //
-      // If this check itself fails we stay revoked, since that is the only
-      // remaining case where the outcome is genuinely unknown.
+      // If the verification itself also fails, assume the invitation is still
+      // live. The two mistakes are not equally bad: keeping it revoked while
+      // Clerk still accepts it lets someone join an organization that believes
+      // it rejected them, whereas releasing it when Clerk did revoke leaves an
+      // invitation that merely reads as pending and cannot be accepted. Take
+      // the harmless error.
       const stillPendingInClerk = await clerkService
         .listPendingOrganizationInvitations(clerkOrgId)
         .then((entries) =>
@@ -725,7 +729,7 @@ export const revokeInvitation = async (c: AppContext) => {
             (entry) => entry.email_address?.toLowerCase() === invitation.email.toLowerCase()
           )
         )
-        .catch(() => false);
+        .catch(() => true);
 
       if (stillPendingInClerk) {
         await releaseClaim();
