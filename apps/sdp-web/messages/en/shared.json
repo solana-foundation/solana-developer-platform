@@ -18,8 +18,25 @@
     "description": "Allowlist management will be available in a future update."
   },
   "members": {
-    "comingSoon": "Coming soon",
-    "description": "Member management will be available in a future update."
+    "title": "Members",
+    "description": "People with access to this organization.",
+    "invite": "Invite member",
+    "inviteEmail": "Email address",
+    "inviteEmailPlaceholder": "teammate@company.com",
+    "inviteRole": "Role",
+    "roleAdmin": "Admin",
+    "roleMember": "Member",
+    "inviteSubmit": "Send invite",
+    "inviteSending": "Sending…",
+    "inviteSent": "Invitation sent to {email}.",
+    "inviteFailed": "Could not send the invitation: {error}",
+    "emailRequired": "Enter an email address.",
+    "columnMember": "Member",
+    "columnRole": "Role",
+    "columnJoined": "Joined",
+    "empty": "No members yet.",
+    "loadFailed": "Members could not be loaded: {error}",
+    "unnamed": "Unnamed"
   },
   "SharedComponents": {
     "copied": "Copied",

@@ -22,20 +22,33 @@ export async function listMembers(): Promise<Member[]> {
   return response.members;
 }
 
-export async function inviteMember(formData: FormData) {
+export type InviteMemberResult = { ok: true; email: string } | { ok: false; error: string };
+
+/**
+ * Returns the failure instead of throwing so the form can render it inline. A
+ * thrown server action surfaces as an error boundary, which discards the
+ * typed-in address and tells the user nothing actionable.
+ */
+export async function inviteMember(formData: FormData): Promise<InviteMemberResult> {
   const t = await getTranslations();
   const email = String(formData.get("email") ?? "").trim();
   const role = String(formData.get("role") ?? "member").trim();
 
   if (!email) {
-    throw new Error(t("Shared.validation.emailRequired"));
+    return { ok: false, error: t("Shared.members.emailRequired") };
   }
 
-  const client = await createOrgSdpApiClient();
-  await client.fetch("/v1/members/invite", {
-    method: "POST",
-    body: JSON.stringify({ email, role }),
-  });
+  try {
+    const client = await createOrgSdpApiClient();
+    await client.fetch("/v1/members/invite", {
+      method: "POST",
+      body: JSON.stringify({ email, role }),
+    });
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 
-  revalidatePath("/members");
+  // The page lives at /dashboard/members; /members only redirects there.
+  revalidatePath("/dashboard/members");
+  return { ok: true, email };
 }
