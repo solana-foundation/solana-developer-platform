@@ -69,6 +69,27 @@ export function shortenAddress(address: string): string {
   return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
 }
 
+/**
+ * Turns a transfer's `token` field into something displayable. The field holds a
+ * mint address, so rendering it directly puts a 44-character base58 string in a
+ * table cell. Every surface that shows a transfer token should go through here,
+ * otherwise the same transfer reads as "USDC" on one screen and
+ * "4zMMC9srt5…" on another.
+ */
+export function resolveTransferTokenLabel(token: string | null | undefined): string | undefined {
+  const trimmed = token?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const knownSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(trimmed)?.symbol;
+  if (knownSymbol) {
+    return knownSymbol;
+  }
+
+  return trimmed.length > 10 ? shortenAddress(trimmed) : trimmed;
+}
+
 const TOKEN_AMOUNT_PATTERN = /^-?\d+(?:\.\d+)?$/;
 export function formatTokenAmount(value: number | string, locale?: string): string {
   const rawValue = String(value).trim();

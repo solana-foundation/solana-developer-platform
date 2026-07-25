@@ -19,6 +19,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
 import { updateWalletPolicy } from "@/app/dashboard/payments/payments-workspace.data";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { TokenMark } from "@/components/token-mark";
@@ -1072,16 +1073,22 @@ function AssetEditor({
             {assets.map((mint) => {
               const walletAsset = uniqueWalletAssets.find((asset) => asset.mint === mint);
               const label = walletAsset?.token ?? t("DashboardCustody.policyCustomMint");
+              // Named tokens read better than a 44-character address; the full
+              // mint stays available on hover and for anything uncatalogued.
+              const secondary = walletAsset?.name ?? shortenAddress(mint);
               return (
                 <div key={mint} className="flex min-h-14 items-center gap-3 py-2.5">
+                  <TokenMark mint={mint} symbol={walletAsset?.token} size="md" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-primary">{label}</span>
                     <span className="block truncate text-xs text-muted" title={mint}>
-                      {mint}
+                      {secondary}
                     </span>
                   </span>
-                  {walletAsset ? (
-                    <span className="shrink-0 text-xs text-secondary">{walletAsset.uiAmount}</span>
+                  {walletAsset?.uiAmount ? (
+                    <span className="shrink-0 text-xs text-secondary tabular-nums">
+                      {walletAsset.uiAmount}
+                    </span>
                   ) : null}
                   <Button
                     type="button"
