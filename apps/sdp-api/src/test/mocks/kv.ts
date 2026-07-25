@@ -36,7 +36,7 @@ export async function seedCachedApiKey(
  */
 export async function clearKVStores(env: Env): Promise<void> {
   const kv = createKVStoreSet(env);
-  const stores = [kv.apiKeys, kv.rateLimits, kv.cache, kv.sessions];
+  const stores = [kv.apiKeys, kv.rateLimits, kv.cache];
 
   for (const store of stores) {
     const list = await store.list();
