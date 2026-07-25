@@ -11,13 +11,13 @@ import {
   isEmptyMemoRow,
   type MemoRow,
   type MemoRowError,
+  type MemoRowErrorCode,
   memoRowsToRecord,
   splitPastedMemoRows,
   validateMemoRows,
 } from "../memo";
 
 interface MemoDialogProps {
-  open: boolean;
   memo: Record<string, string>;
   onClose: () => void;
   onSave: (memo: Record<string, string>) => void;
@@ -41,6 +41,40 @@ function editableMemoRow(row: MemoRow): EditableMemoRow {
 }
 
 /**
+ * Translates a memo validation error code into user-facing copy.
+ *
+ * @param t - Translator resolved from the i18n provider.
+ * @param code - Validation error code from validateMemoRows.
+ * @returns The localized error message.
+ */
+function memoErrorText(t: ReturnType<typeof useTranslations>, code: MemoRowErrorCode): string {
+  switch (code) {
+    case "keyRequired":
+      return t("DashboardPayments.ramps.memoErrorKeyRequired");
+    case "keyTooLong":
+      return t("DashboardPayments.ramps.memoErrorKeyTooLong", {
+        limit: RAMPS_MEMO_LIMITS.maxKeyLength,
+      });
+    case "keyDuplicate":
+      return t("DashboardPayments.ramps.memoErrorKeyDuplicate");
+    case "valueRequired":
+      return t("DashboardPayments.ramps.memoErrorValueRequired");
+    case "valueTooLong":
+      return t("DashboardPayments.ramps.memoErrorValueTooLong", {
+        limit: RAMPS_MEMO_LIMITS.maxValueLength,
+      });
+    case "tooManyFields":
+      return t("DashboardPayments.ramps.memoErrorTooManyFields", {
+        limit: RAMPS_MEMO_LIMITS.maxEntries,
+      });
+    default: {
+      const exhaustive: never = code;
+      throw new Error(`Unhandled memo error code: ${String(exhaustive)}`);
+    }
+  }
+}
+
+/**
  * Renders the editable memo modal for ramp quote reconciliation fields.
  * Mounted only while open so each opening reseeds the grid from the saved
  * memo.
@@ -48,7 +82,7 @@ function editableMemoRow(row: MemoRow): EditableMemoRow {
  * @param props - Dialog visibility, saved memo, and close/save callbacks.
  * @returns The memo editing modal.
  */
-export function MemoDialog({ open, memo, onClose, onSave }: MemoDialogProps) {
+export function MemoDialog({ memo, onClose, onSave }: MemoDialogProps) {
   const t = useTranslations();
   const [rows, setRows] = useState<EditableMemoRow[]>(() => {
     const savedRows = Object.entries(memo).map(([key, value]) => editableMemoRow({ key, value }));
@@ -56,11 +90,13 @@ export function MemoDialog({ open, memo, onClose, onSave }: MemoDialogProps) {
   });
   const [errors, setErrors] = useState<MemoRowError[]>([]);
 
+  const clearErrors = () => setErrors((current) => (current.length === 0 ? current : []));
+
   const updateRow = (index: number, field: keyof MemoRow, value: string) => {
     setRows((current) =>
       current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row))
     );
-    setErrors([]);
+    clearErrors();
   };
 
   const removeRow = (index: number) => {
@@ -68,7 +104,7 @@ export function MemoDialog({ open, memo, onClose, onSave }: MemoDialogProps) {
       const remaining = current.filter((_, rowIndex) => rowIndex !== index);
       return remaining.length === 0 ? [editableMemoRow(emptyMemoRow())] : remaining;
     });
-    setErrors([]);
+    clearErrors();
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
@@ -81,7 +117,7 @@ export function MemoDialog({ open, memo, onClose, onSave }: MemoDialogProps) {
       const populated = current.filter((row) => !isEmptyMemoRow(row));
       return [...populated, ...parsed.map(editableMemoRow)];
     });
-    setErrors([]);
+    clearErrors();
   };
 
   const handleSave = () => {
@@ -96,7 +132,7 @@ export function MemoDialog({ open, memo, onClose, onSave }: MemoDialogProps) {
 
   return (
     <Modal
-      isOpen={open}
+      isOpen
       onClose={onClose}
       ariaLabel={t("DashboardPayments.ramps.memoDialogAriaLabel")}
       size="xl"
@@ -149,7 +185,7 @@ export function MemoDialog({ open, memo, onClose, onSave }: MemoDialogProps) {
                 {rowErrors.length > 0 ? (
                   <div className="col-span-3 space-y-1 text-xs text-error">
                     {rowErrors.map((error) => (
-                      <p key={error.message}>{error.message}</p>
+                      <p key={error.code}>{memoErrorText(t, error.code)}</p>
                     ))}
                   </div>
                 ) : null}
@@ -173,7 +209,7 @@ export function MemoDialog({ open, memo, onClose, onSave }: MemoDialogProps) {
             {errors
               .filter((error) => error.row === 0)
               .map((error) => (
-                <p key={error.message}>{error.message}</p>
+                <p key={error.code}>{memoErrorText(t, error.code)}</p>
               ))}
           </div>
         ) : null}

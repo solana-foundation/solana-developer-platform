@@ -34,9 +34,7 @@ export function MemoField({ memo, onChange }: MemoFieldProps) {
         </span>
         <span className="text-tertiary">{t("DashboardPayments.ramps.memoOptional")}</span>
       </button>
-      {open ? (
-        <MemoDialog open={open} memo={memo} onClose={() => setOpen(false)} onSave={onChange} />
-      ) : null}
+      {open ? <MemoDialog memo={memo} onClose={() => setOpen(false)} onSave={onChange} /> : null}
     </>
   );
 }

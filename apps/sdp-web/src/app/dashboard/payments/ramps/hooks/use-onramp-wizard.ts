@@ -5,7 +5,6 @@ import {
   type PaymentOnrampQuoteRequest,
   type PaymentTransferSummary,
 } from "@sdp/types";
-import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -68,14 +67,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     advanceRequirementsBeforeQuote: true,
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",
-    buildQuotePayload: ({
-      fields,
-      provider,
-      selectedRampPair,
-      cryptoToken,
-      collectedData,
-      rampsMemo,
-    }) =>
+    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>
       ({
         provider,
         counterpartyId: fields.counterpartyId,
@@ -87,8 +79,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
         domain: window.location.hostname,
         rampsMemo,
-        collectedData,
-      }) satisfies PaymentOnrampQuoteRequest & { collectedData: CollectedFieldData },
+      }) satisfies PaymentOnrampQuoteRequest,
     onQuoteCreated: () => {
       setQuoteSimulationLoading(false);
       setQuoteSimulationSucceeded(false);

@@ -4,6 +4,7 @@ import {
   ONRAMP_CRYPTO_RAILS,
   RAMP_FIAT_CURRENCIES,
   RAMP_PROVIDERS,
+  RAMPS_MEMO_LIMITS,
 } from "@sdp/types";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -733,10 +734,15 @@ export const transferSchema = z
       .max(256)
       .optional()
       .openapi({ description: "Optional memo for the transfer." }),
-    rampsMemo: z.record(z.string(), z.string()).openapi({
-      description: "Free-form key-value memo for offchain reconciliation of ramp transfers.",
-      example: { invoice: "INV-123", po: "PO-9" },
-    }),
+    rampsMemo: z
+      .record(
+        z.string().min(1).max(RAMPS_MEMO_LIMITS.maxKeyLength),
+        z.string().min(1).max(RAMPS_MEMO_LIMITS.maxValueLength)
+      )
+      .openapi({
+        description: `Free-form key-value memo for offchain reconciliation of ramp transfers. At most ${RAMPS_MEMO_LIMITS.maxEntries} entries.`,
+        example: { invoice: "INV-123", po: "PO-9" },
+      }),
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema.optional(),
     provider: z.enum(RAMP_PROVIDERS).optional().openapi({

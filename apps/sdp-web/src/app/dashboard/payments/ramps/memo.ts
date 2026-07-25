@@ -5,9 +5,17 @@ export interface MemoRow {
   value: string;
 }
 
+export type MemoRowErrorCode =
+  | "keyRequired"
+  | "keyTooLong"
+  | "keyDuplicate"
+  | "valueRequired"
+  | "valueTooLong"
+  | "tooManyFields";
+
 export interface MemoRowError {
   row: number;
-  message: string;
+  code: MemoRowErrorCode;
 }
 
 /**
@@ -76,30 +84,21 @@ export function validateMemoRows(rows: MemoRow[]): MemoRowError[] {
     }
     const rowNumber = index + 1;
     if (row.key.length === 0) {
-      errors.push({ row: rowNumber, message: "Key is required." });
+      errors.push({ row: rowNumber, code: "keyRequired" });
     } else if (row.key.length > RAMPS_MEMO_LIMITS.maxKeyLength) {
-      errors.push({
-        row: rowNumber,
-        message: `Key must be ${RAMPS_MEMO_LIMITS.maxKeyLength} characters or fewer.`,
-      });
+      errors.push({ row: rowNumber, code: "keyTooLong" });
     } else if (keyCounts.get(row.key) !== 1) {
-      errors.push({ row: rowNumber, message: "Keys must be unique." });
+      errors.push({ row: rowNumber, code: "keyDuplicate" });
     }
     if (row.value.length === 0) {
-      errors.push({ row: rowNumber, message: "Value is required." });
+      errors.push({ row: rowNumber, code: "valueRequired" });
     } else if (row.value.length > RAMPS_MEMO_LIMITS.maxValueLength) {
-      errors.push({
-        row: rowNumber,
-        message: `Value must be ${RAMPS_MEMO_LIMITS.maxValueLength} characters or fewer.`,
-      });
+      errors.push({ row: rowNumber, code: "valueTooLong" });
     }
   });
 
   if (populatedRows.length > RAMPS_MEMO_LIMITS.maxEntries) {
-    errors.push({
-      row: 0,
-      message: `Memo can contain at most ${RAMPS_MEMO_LIMITS.maxEntries} fields.`,
-    });
+    errors.push({ row: 0, code: "tooManyFields" });
   }
 
   return errors;
