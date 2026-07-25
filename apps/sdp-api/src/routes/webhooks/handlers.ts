@@ -12,6 +12,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
+import { invitationWasRevoked } from "@/lib/invitations";
 import { success } from "@/lib/response";
 import {
   ensureClerkOrganizationMapping,
@@ -258,15 +259,8 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
     .catch((error) => console.error("Failed to revoke sessions after user deletion:", error));
 }
 
-/**
- * Whether this organization withdrew its most recent invitation to the user.
- *
- * Only the newest invitation counts: a revoked one followed by a fresh invite
- * has been superseded, and blocking on the older record would make a re-invite
- * impossible. No invitation at all is not a refusal — members added straight
- * from the Clerk dashboard never have one.
- */
-async function invitationWasRevoked(
+/** Resolves the user's address, then applies the shared revoked-invitation rule. */
+async function membershipWasWithdrawn(
   c: AppContext,
   organizationId: string,
   userId: string
@@ -280,18 +274,7 @@ async function invitationWasRevoked(
     return false;
   }
 
-  const latest = await getDb(c.env)
-    .prepare(
-      `SELECT status
-         FROM invitations
-        WHERE organization_id = ? AND email = ?
-        ORDER BY created_at DESC
-        LIMIT 1`
-    )
-    .bind(organizationId, user.email.toLowerCase())
-    .first<{ status: string }>();
-
-  return latest?.status === "revoked";
+  return invitationWasRevoked(getDb(c.env), organizationId, user.email);
 }
 
 async function upsertVerifiedMembership(
@@ -317,7 +300,7 @@ async function upsertVerifiedMembership(
 
   if (
     existing?.status !== "active" &&
-    (await invitationWasRevoked(c, organizationId, data.userId))
+    (await membershipWasWithdrawn(c, organizationId, data.userId))
   ) {
     // Clerk says join, we say the invitation was withdrawn. Clerk mints the
     // acceptance link and we cannot expire it, so this sync is the last point

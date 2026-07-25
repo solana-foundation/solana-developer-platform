@@ -20,6 +20,7 @@ import {
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
+import { invitationWasRevoked } from "@/lib/invitations";
 import { ensureClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import {
@@ -231,6 +232,17 @@ async function ensureMembership(
         .bind(pendingInvite.id)
         .run();
     }
+  }
+
+  // Reached only when the caller holds no membership row at all — an existing
+  // member returned above — so this can decline a join but never revoke access
+  // someone already has.
+  //
+  // Without it, revoking an invitation stopped the local token while Clerk's
+  // acceptance link stayed live: signing in through that link fell through to
+  // the Clerk role below and provisioned the membership anyway.
+  if (!invitedRole && (await invitationWasRevoked(db, params.organizationId, params.email))) {
+    throw unauthorized("Invitation to this organization was revoked");
   }
 
   const role = invitedRole ?? mapClerkRoleToOrgRole(params.clerkRole);
