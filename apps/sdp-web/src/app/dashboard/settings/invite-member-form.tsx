@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { type InviteMemberResult, inviteMember } from "@/app/members/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,12 +20,33 @@ export function InviteMemberForm() {
   const t = useTranslations();
   const [state, formAction, isPending] = useActionState<InviteState, FormData>(submitInvite, null);
   const [role, setRole] = useState<"admin" | "member">("member");
+  const formRef = useRef<HTMLFormElement>(null);
+  // useActionState keeps the last result, so react to identity changes rather
+  // than value: two failures with the same message must still both surface.
+  const reportedState = useRef<InviteState>(null);
+
+  useEffect(() => {
+    if (!state || state === reportedState.current) {
+      return;
+    }
+    reportedState.current = state;
+
+    if (state.ok) {
+      toast.success(t("Shared.members.inviteSent", { email: state.email }));
+      // Clear the field only on success, so a rejected address stays editable.
+      formRef.current?.reset();
+      setRole("member");
+      return;
+    }
+
+    toast.error(t("Shared.members.inviteFailed", { error: state.error }));
+  }, [state, t]);
 
   return (
     // Grid rather than a flex row: the status message needs a full-width row of
     // its own, and as a flex child it collapsed the email field to nothing and
     // stacked the two captions on top of each other.
-    <form action={formAction} className="space-y-3">
+    <form ref={formRef} action={formAction} className="space-y-3">
       <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto]">
         <div className="min-w-0">
           <label htmlFor="invite-email" className="mb-2 block font-medium text-primary text-sm">
@@ -62,14 +84,6 @@ export function InviteMemberForm() {
           {isPending ? t("Shared.members.inviteSending") : t("Shared.members.inviteSubmit")}
         </Button>
       </div>
-
-      {state ? (
-        <p role="status" className={state.ok ? "text-success text-sm" : "text-error text-sm"}>
-          {state.ok
-            ? t("Shared.members.inviteSent", { email: state.email })
-            : t("Shared.members.inviteFailed", { error: state.error })}
-        </p>
-      ) : null}
     </form>
   );
 }
