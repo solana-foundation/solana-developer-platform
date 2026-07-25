@@ -220,37 +220,11 @@ async function ensureMembership(
     .bind(params.organizationId, params.email.toLowerCase())
     .first<{ id: string; role: string; expires_at: string }>();
 
-  let role: OrganizationRole | null = null;
+  let invitedRole: OrganizationRole | null = null;
 
   if (pendingInvite) {
     if (new Date(pendingInvite.expires_at) >= new Date()) {
-      const invitedRole = normalizeOrganizationRole(pendingInvite.role);
-
-      // Claim the invitation before granting membership, not after. Creating
-      // the membership first and accepting afterwards let a concurrent
-      // revocation win the invitation transition while organization access had
-      // already been created and persisted — the invitee stayed active against
-      // an invitation we had recorded as revoked.
-      //
-      // The role normalization folds into the same write, so there is one
-      // transition rather than a read, a role fixup and a later accept.
-      const claimed = await db
-        .prepare(
-          `UPDATE invitations
-              SET status = 'accepted', accepted_at = datetime('now'), role = ?
-            WHERE id = ? AND status = 'pending'`
-        )
-        .bind(invitedRole, pendingInvite.id)
-        .run();
-
-      // Zero rows means the invitation stopped being pending between the read
-      // above and here. Revocation is the case that matters, and granting
-      // access off a just-revoked invitation is the failure worth refusing.
-      if (claimed === 0) {
-        throw unauthorized("Invitation is no longer valid");
-      }
-
-      role = invitedRole;
+      invitedRole = normalizeOrganizationRole(pendingInvite.role);
     } else {
       await db
         .prepare("UPDATE invitations SET status = 'expired' WHERE id = ?")
@@ -259,20 +233,46 @@ async function ensureMembership(
     }
   }
 
-  if (!role) {
-    role = mapClerkRoleToOrgRole(params.clerkRole);
-  }
-
+  const role = invitedRole ?? mapClerkRoleToOrgRole(params.clerkRole);
   const memberId = `mem_${crypto.randomUUID()}`;
+
   try {
-    await db
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(memberId, params.organizationId, params.userId, role)
-      .run();
+    // The claim and the membership insert have to commit together. Claiming
+    // first alone would let a failing insert consume the invitation without
+    // granting access, and inserting first would let a concurrent revocation
+    // win the invitation transition after access was already persisted.
+    await db.transaction(async (tx) => {
+      if (pendingInvite && invitedRole) {
+        // Role normalization folds in here, so there is one transition rather
+        // than a read, a role fixup and a later accept.
+        const claimed = await tx
+          .prepare(
+            `UPDATE invitations
+                SET status = 'accepted', accepted_at = datetime('now'), role = ?
+              WHERE id = ? AND status = 'pending'`
+          )
+          .bind(invitedRole, pendingInvite.id)
+          .run();
+
+        // Zero rows means it stopped being pending between the read and here.
+        // Revocation is the case that matters, and granting access off a
+        // just-revoked invitation is the failure worth refusing.
+        if (claimed === 0) {
+          throw unauthorized("Invitation is no longer valid");
+        }
+      }
+
+      await tx
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+             VALUES (?, ?, ?, ?, 'active')`
+        )
+        .bind(memberId, params.organizationId, params.userId, role)
+        .run();
+    });
   } catch (error) {
+    // A concurrent sign-in may have created the membership first; the rollback
+    // released our claim, so deferring to the row that won is correct.
     const existingAfterInsert = await resolveOrgMembership(
       db,
       params.userId,

@@ -639,6 +639,8 @@ export const revokeInvitation = async (c: AppContext) => {
     throw badRequest("Only a pending invitation can be revoked");
   }
 
+  let clerkRevocationAttempted = false;
+
   try {
     const clerk = c.get("clerk");
     const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
@@ -669,6 +671,7 @@ export const revokeInvitation = async (c: AppContext) => {
         );
       }
 
+      clerkRevocationAttempted = true;
       await clerkService.revokeOrganizationInvitation({
         organizationId: clerkOrgId,
         invitationId: match.id,
@@ -676,13 +679,20 @@ export const revokeInvitation = async (c: AppContext) => {
       });
     }
   } catch (error) {
-    // Clerk mints the acceptance link, so a local revocation we could not carry
-    // out there would leave the invite redeemable while we report it revoked.
-    // Release the claim so the state stays truthful and the caller can retry.
-    await getDb(c.env)
-      .prepare("UPDATE invitations SET status = 'pending' WHERE id = ? AND status = 'revoked'")
-      .bind(invitation.id)
-      .run();
+    // Release the claim only when Clerk was never asked. Clerk mints the
+    // acceptance link, so failing before the call means the invite is still
+    // redeemable and reporting it revoked would be a lie.
+    //
+    // Once the call is in flight its outcome is ambiguous — a timeout can still
+    // have revoked the credential — and reopening the local token would hand
+    // back an invitation whose acceptance link may already be dead. Leaving it
+    // revoked is the truthful side of that uncertainty.
+    if (!clerkRevocationAttempted) {
+      await getDb(c.env)
+        .prepare("UPDATE invitations SET status = 'pending' WHERE id = ? AND status = 'revoked'")
+        .bind(invitation.id)
+        .run();
+    }
     throw error;
   }
 
