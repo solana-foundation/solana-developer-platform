@@ -666,15 +666,21 @@ export const revokeInvitation = async (c: AppContext) => {
 
     clerkService = new ClerkOrganizationsService(c.env);
     const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
-    const match = pending.find(
+
+    // Every pending Clerk invitation for this address, not just the first.
+    // Clerk's invitation id is not persisted locally, so email is the only key
+    // available and it is not unique — picking one match would leave any
+    // duplicate live and still redeemable after we reported the revocation.
+    // The invariant worth enforcing is that none survive, which sidesteps
+    // identifying which one was ours.
+    const matches = pending.filter(
       (entry) => entry.email_address?.toLowerCase() === invitation.email.toLowerCase()
     );
 
-    if (match) {
+    for (const match of matches) {
       // An API key has no Clerk user of its own. Clerk's own inviter_id is the
-      // most reliable fallback: it is a valid Clerk user by construction, and it
-      // still resolves when invited_by is the "system" sentinel recorded for
-      // invitations an API key sent without a created_by user.
+      // most reliable fallback: it is a valid Clerk user by construction, so it
+      // holds even when invited_by has no matching auth_user_identities row.
       const requestingUserId =
         clerk?.clerkUserId ??
         match.inviter_id ??
