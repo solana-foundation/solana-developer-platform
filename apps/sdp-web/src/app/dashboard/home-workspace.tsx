@@ -1,6 +1,7 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
+import { ExternalLink } from "lucide-react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
@@ -18,7 +19,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatRelativeTime } from "./activity-format-utils";
+import type { HomeActivityExplorerRef, HomeActivityRow } from "./home-page.data";
 import { fetchHomeActivity } from "./home-workspace.data";
 import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
 
@@ -41,6 +45,38 @@ function TruncatedTableText({ value, className }: { value: string; className?: s
         {value}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function explorerHref(ref: HomeActivityExplorerRef, cluster: SolanaCluster): string {
+  return ref.kind === "tx"
+    ? explorerTxUrl(ref.value, cluster)
+    : explorerAddressUrl(ref.value, cluster);
+}
+
+/** Renders the activity address, linked to Solana Explorer on the active cluster when linkable. */
+function ActivityAddress({
+  row,
+  cluster,
+  className,
+}: {
+  row: HomeActivityRow;
+  cluster: SolanaCluster;
+  className?: string;
+}) {
+  if (!row.explorer) {
+    return <TruncatedTableText value={row.address} className={className} />;
+  }
+  return (
+    <a
+      href={explorerHref(row.explorer, cluster)}
+      target="_blank"
+      rel="noreferrer"
+      className="flex min-w-0 max-w-full items-center gap-1 text-primary underline underline-offset-2"
+    >
+      <TruncatedTableText value={row.address} className={`min-w-0 ${className ?? "truncate"}`} />
+      <ExternalLink className="size-3 shrink-0" aria-hidden />
+    </a>
   );
 }
 
@@ -75,6 +111,7 @@ function MetricCard({
 export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: HomeWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const cluster = useSolanaCluster();
   const { dashboardAccess } = useDashboardWorkspace();
   const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
     HOME_ACTIVITY_KEY,
@@ -221,8 +258,9 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
                                 <div className="mt-1 truncate text-xs text-tertiary">
                                   {amountLabel}
                                 </div>
-                                <TruncatedTableText
-                                  value={row.address}
+                                <ActivityAddress
+                                  row={row}
+                                  cluster={cluster}
                                   className="mt-1 truncate font-mono text-xs text-tertiary"
                                 />
                               </div>
@@ -237,7 +275,7 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
                               <TruncatedTableText value={amountLabel} className="truncate" />
                             </TableCell>
                             <TableCell className="hidden pr-6 font-mono text-xs text-secondary md:table-cell">
-                              <TruncatedTableText value={row.address} className="truncate" />
+                              <ActivityAddress row={row} cluster={cluster} className="truncate" />
                             </TableCell>
                           </TableRow>
                         );
