@@ -22,7 +22,7 @@ describe("fetchTransactionsPage", () => {
     const result = await fetchTransactionsPage(request, filters);
 
     expect(request).toHaveBeenCalledTimes(1);
-    expect(String(request.mock.calls[0]?.[0])).toContain("includeObserved=false");
+    expect(String(request.mock.calls[0]?.[0])).toContain("includeObserved=true");
     expect(String(request.mock.calls[0]?.[0])).toContain("status=confirmed");
     expect(String(request.mock.calls[0]?.[0])).toContain("search=invoice");
     expect(result).toMatchObject({ page: 2, pageSize: 25, total: 51, hasMore: true });

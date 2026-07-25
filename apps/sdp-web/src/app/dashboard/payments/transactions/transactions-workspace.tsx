@@ -17,6 +17,7 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
+import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -55,6 +56,8 @@ interface TransactionFilterContextValue {
 }
 
 const TransactionFilterContext = createContext<TransactionFilterContextValue | null>(null);
+
+const INCLUDE_OBSERVED_LABEL_ID = "transactions-include-observed-label";
 
 export function useTransactionFilters(): TransactionFilterContextValue {
   const value = useContext(TransactionFilterContext);
@@ -239,6 +242,19 @@ function AdvancedFilters({
         onChange={(event) => updateFilters({ to: event.target.value || undefined })}
         aria-label={t("DashboardPayments.transactions.toDate")}
       />
+      {/* Spans the row so the switch is not mistaken for another dropdown.
+          Not a <label>: ToggleSwitch renders a button[role=switch] rather than
+          a form control, so the caption is associated with aria-labelledby. */}
+      <div className="flex items-center gap-2.5 sm:col-span-2 xl:col-span-4">
+        <ToggleSwitch
+          checked={filters.includeObserved}
+          onChange={(checked) => updateFilters({ includeObserved: checked })}
+          aria-labelledby={INCLUDE_OBSERVED_LABEL_ID}
+        />
+        <span id={INCLUDE_OBSERVED_LABEL_ID} className="text-secondary text-sm">
+          {t("DashboardPayments.transactions.includeObserved")}
+        </span>
+      </div>
     </div>
   );
 }
@@ -383,6 +399,7 @@ export function TransactionsWorkspace({
       provider: undefined,
       from: undefined,
       to: undefined,
+      includeObserved: true,
       sortBy: "createdAt",
       sortDirection: "desc",
       page: 1,

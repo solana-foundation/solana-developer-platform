@@ -960,7 +960,8 @@
       "updated": "Updated",
       "viewOnExplorer": "View on Solana Explorer",
       "unavailable": "Unavailable",
-      "loadingOptions": "Loading options…"
+      "loadingOptions": "Loading options…",
+      "includeObserved": "Include on-chain deposits"
     },
     "requests": {
       "loadFailed": "Unable to load payment requests",
