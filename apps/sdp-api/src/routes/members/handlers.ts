@@ -603,6 +603,20 @@ export const removeMember = async (c: AppContext) => {
   return noContent(c);
 };
 
+/**
+ * Whether Clerk received a revocation call and refused it outright.
+ *
+ * The service surfaces the HTTP status on the error details, so a 4xx means
+ * Clerk answered and declined to act — the invitation is still live there.
+ * 404 is deliberately excluded: it means the invitation no longer exists in
+ * Clerk, so the local row should stay revoked rather than be reopened.
+ */
+function clerkDefinitivelyRefused(error: unknown): boolean {
+  if (!(error instanceof AppError)) return false;
+  const status = error.details?.status;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 404;
+}
+
 export const revokeInvitation = async (c: AppContext) => {
   const { invitationId } = c.req.param();
   const { organizationId, userId, apiKeyId } = resolveActor(c);
@@ -679,15 +693,22 @@ export const revokeInvitation = async (c: AppContext) => {
       });
     }
   } catch (error) {
-    // Release the claim only when Clerk was never asked. Clerk mints the
-    // acceptance link, so failing before the call means the invite is still
-    // redeemable and reporting it revoked would be a lie.
+    // Release the claim only when the invitation is known to still be live in
+    // Clerk, because Clerk mints the acceptance link and recording a revocation
+    // we did not carry out there would leave the invite redeemable.
     //
-    // Once the call is in flight its outcome is ambiguous — a timeout can still
-    // have revoked the credential — and reopening the local token would hand
-    // back an invitation whose acceptance link may already be dead. Leaving it
-    // revoked is the truthful side of that uncertainty.
-    if (!clerkRevocationAttempted) {
+    // Never asked: nothing happened remotely, so release.
+    //
+    // Asked and definitively refused: Clerk received the call and rejected it,
+    // so the invitation is still live and the local row has to follow.
+    // A 404 is excluded — it means the invitation is already gone from Clerk,
+    // which is the state revocation was trying to reach.
+    //
+    // Anything else — a timeout, a transport failure, a 5xx — is ambiguous.
+    // The call may well have succeeded, and reopening the token would hand back
+    // an invitation whose acceptance link is already dead. Staying revoked is
+    // the truthful side of that uncertainty.
+    if (!clerkRevocationAttempted || clerkDefinitivelyRefused(error)) {
       await getDb(c.env)
         .prepare("UPDATE invitations SET status = 'pending' WHERE id = ? AND status = 'revoked'")
         .bind(invitation.id)
