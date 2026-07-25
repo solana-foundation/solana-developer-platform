@@ -47,7 +47,16 @@
     "revoking": "Révocation…",
     "revoked": "Invitation à {email} révoquée.",
     "revokeFailed": "Impossible de révoquer l'invitation : {error}",
-    "invitationActions": "Actions pour {email}"
+    "invitationActions": "Actions pour {email}",
+    "memberActions": "Actions pour {member}",
+    "removeMember": "Retirer le membre",
+    "removeConfirm": "{member} perdra immédiatement l'accès à cette organisation. Cette action est irréversible.",
+    "removing": "Retrait…",
+    "removed": "{member} a été retiré.",
+    "removeFailed": "Impossible de retirer le membre : {error}",
+    "cannotRemoveSelf": "Vous ne pouvez pas vous retirer",
+    "cannotRemoveLastAdmin": "Le dernier administrateur ne peut pas être retiré",
+    "cancel": "Annuler"
   },
   "SharedComponents": {
     "copied": "Copié",

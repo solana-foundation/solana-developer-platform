@@ -47,7 +47,16 @@
     "revoking": "Revoking…",
     "revoked": "Invitation to {email} revoked.",
     "revokeFailed": "Could not revoke the invitation: {error}",
-    "invitationActions": "Actions for {email}"
+    "invitationActions": "Actions for {email}",
+    "memberActions": "Actions for {member}",
+    "removeMember": "Remove member",
+    "removeConfirm": "{member} will lose access to this organization immediately. This cannot be undone.",
+    "removing": "Removing…",
+    "removed": "{member} was removed.",
+    "removeFailed": "Could not remove the member: {error}",
+    "cannotRemoveSelf": "You cannot remove yourself",
+    "cannotRemoveLastAdmin": "The last admin cannot be removed",
+    "cancel": "Cancel"
   },
   "SharedComponents": {
     "copied": "Copied",

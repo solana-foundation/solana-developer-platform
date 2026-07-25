@@ -15,6 +15,8 @@ export interface Member {
   role: string;
   status: string;
   createdAt: string;
+  /** Set by the API; the client holds emails, not the actor's user id. */
+  isSelf?: boolean;
   user: {
     id: string;
     email: string;
@@ -36,10 +38,29 @@ export interface PendingInvitation {
 export interface MemberDirectory {
   members: Member[];
   invitations: PendingInvitation[];
-  meta: { total: number; page: number; pageSize: number; hasMore: boolean };
+  meta: {
+    total: number;
+    page: number;
+    pageSize: number;
+    hasMore: boolean;
+    activeAdminCount: number;
+  };
 }
 
 export type RevokeInvitationResult = { ok: true } | { ok: false; error: string };
+export type RemoveMemberResult = { ok: true } | { ok: false; error: string };
+
+export async function removeMember(memberId: string): Promise<RemoveMemberResult> {
+  try {
+    const client = await createSdpApiClient();
+    await client.fetch(`/v1/members/${encodeURIComponent(memberId)}`, { method: "DELETE" });
+  } catch (error) {
+    return { ok: false, error: readableApiError(error) };
+  }
+
+  revalidatePath("/dashboard/settings");
+  return { ok: true };
+}
 
 export async function revokeInvitation(invitationId: string): Promise<RevokeInvitationResult> {
   try {
@@ -77,6 +98,7 @@ export async function listMembers(page = 1): Promise<MemberDirectory> {
       page: 1,
       pageSize: MEMBERS_PAGE_SIZE,
       hasMore: false,
+      activeAdminCount: response.members.filter((member) => member.role === "admin").length,
     },
   };
 }

@@ -13,6 +13,7 @@ import { getTranslations } from "@/i18n/server";
 import { readableApiError } from "@/lib/sdp-api-error";
 import { InvitationActions } from "./invitation-actions";
 import { InviteMemberForm } from "./invite-member-form";
+import { MemberActions } from "./member-actions";
 import { MembersPagination } from "./members-pagination";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -46,7 +47,7 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
 
   let members: Member[] = [];
   let invitations: PendingInvitation[] = [];
-  let meta = { total: 0, page: 1, pageSize: 25, hasMore: false };
+  let meta = { total: 0, page: 1, pageSize: 25, hasMore: false, activeAdminCount: 0 };
   let loadError: string | null = null;
 
   // A failed list must not take the invite form down with it — an admin whose
@@ -113,9 +114,14 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
                     <TableCell className="text-secondary text-sm">
                       {formatJoined(member.createdAt)}
                     </TableCell>
-                    {/* Members carry no actions yet; the cell keeps the
-                        invitation menu from shifting the column widths. */}
-                    <TableCell />
+                    <TableCell className="text-right">
+                      <MemberActions
+                        memberId={member.id}
+                        label={name || email}
+                        isSelf={Boolean(member.isSelf)}
+                        isLastAdmin={member.role === "admin" && meta.activeAdminCount <= 1}
+                      />
+                    </TableCell>
                   </TableRow>
                 );
               })}

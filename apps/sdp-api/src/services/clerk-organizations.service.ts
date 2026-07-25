@@ -110,6 +110,16 @@ export class ClerkOrganizationsService {
     );
   }
 
+  async deleteOrganizationMembership(params: {
+    organizationId: string;
+    userId: string;
+  }): Promise<void> {
+    await this.request<unknown>(
+      `/organizations/${params.organizationId}/memberships/${params.userId}`,
+      { method: "DELETE" }
+    );
+  }
+
   async updateOrganizationPrivateMetadata(
     organizationId: string,
     privateMetadata: Record<string, unknown>

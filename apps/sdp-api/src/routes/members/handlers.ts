@@ -121,7 +121,7 @@ function resolveMembersPaging(c: AppContext): { page: number; pageSize: number }
 }
 
 export const listMembers = async (c: AppContext) => {
-  const { organizationId } = resolveActor(c);
+  const { organizationId, userId: actorUserId } = resolveActor(c);
   const { page, pageSize } = resolveMembersPaging(c);
 
   const totalRow = await getDb(c.env)
@@ -152,6 +152,9 @@ export const listMembers = async (c: AppContext) => {
     role: normalizeOrganizationRole(row.role as string),
     status: row.status as string,
     createdAt: row.created_at as string,
+    // The caller cannot reliably work this out: it holds emails, not the
+    // actor's user id, and matching on email is the wrong key.
+    isSelf: Boolean(actorUserId) && row.user_id === actorUserId,
     user: {
       id: row.user_id as string,
       email: row.email as string,
@@ -189,6 +192,15 @@ export const listMembers = async (c: AppContext) => {
     acceptUrl: acceptUrlByEmail.get((row.email as string).toLowerCase()) ?? null,
   }));
 
+  const adminCountRow = await getDb(c.env)
+    .prepare(
+      `SELECT COUNT(*) as total
+         FROM organization_members
+        WHERE organization_id = ? AND status = 'active' AND role = 'admin'`
+    )
+    .bind(organizationId)
+    .first<{ total: number }>();
+
   return success(c, {
     members: memberList,
     invitations: invitationList,
@@ -197,6 +209,9 @@ export const listMembers = async (c: AppContext) => {
       page,
       pageSize,
       hasMore: page * pageSize < total,
+      // Counted across the organization, not the page, so the last-admin rule
+      // is right even when admins fall on a page the caller is not viewing.
+      activeAdminCount: Number(adminCountRow?.total ?? 0),
     },
   });
 };
@@ -464,18 +479,53 @@ export const removeMember = async (c: AppContext) => {
 
   // Ensure member belongs to same org
   const member = await getDb(c.env)
-    .prepare("SELECT id, user_id FROM organization_members WHERE id = ? AND organization_id = ?")
+    .prepare(
+      `SELECT id, user_id, role, status
+         FROM organization_members
+        WHERE id = ? AND organization_id = ?`
+    )
     .bind(memberId, organizationId)
-    .first<{ id: string; user_id: string }>();
+    .first<{ id: string; user_id: string; role: string; status: string }>();
 
   if (!member) {
     throw notFound("Member");
+  }
+
+  if (member.status !== "active") {
+    throw badRequest("Member has already been removed");
+  }
+
+  // Removing yourself revokes your own sessions mid-request and, for a sole
+  // admin, leaves the organization with nobody able to administer it.
+  if (userId && member.user_id === userId) {
+    throw badRequest("You cannot remove yourself from the organization");
+  }
+
+  if (normalizeOrganizationRole(member.role) === "admin") {
+    const adminCount = await getDb(c.env)
+      .prepare(
+        `SELECT COUNT(*) as total
+           FROM organization_members
+          WHERE organization_id = ? AND status = 'active' AND role = 'admin'`
+      )
+      .bind(organizationId)
+      .first<{ total: number }>();
+
+    if (Number(adminCount?.total ?? 0) <= 1) {
+      throw badRequest("The last admin cannot be removed");
+    }
   }
 
   await getDb(c.env)
     .prepare("UPDATE organization_members SET status = 'removed' WHERE id = ?")
     .bind(memberId)
     .run();
+
+  // Clerk drives sign-in, so leaving the membership there would keep the
+  // organization visible in its switcher even though our API rejects it.
+  await removeClerkMembership(c, organizationId, member.user_id).catch((error) =>
+    console.error("Failed to remove Clerk membership after member removal:", error)
+  );
 
   const sessionService = new SessionService(getDb(c.env));
   await sessionService
@@ -558,3 +608,37 @@ export const revokeInvitation = async (c: AppContext) => {
 
   return noContent(c);
 };
+
+/**
+ * Mirrors a removal into Clerk. Best effort: our own membership row is already
+ * the gate that clerk-auth enforces, so a Clerk failure must not fail the
+ * removal and leave the two out of step in the other direction.
+ */
+async function removeClerkMembership(
+  c: AppContext,
+  organizationId: string,
+  userId: string
+): Promise<void> {
+  const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+  if (!clerkOrgId) {
+    return;
+  }
+
+  const identity = await getDb(c.env)
+    .prepare(
+      `SELECT provider_user_id
+         FROM auth_user_identities
+        WHERE provider = 'clerk' AND user_id = ?`
+    )
+    .bind(userId)
+    .first<{ provider_user_id: string }>();
+
+  if (!identity?.provider_user_id) {
+    return;
+  }
+
+  await new ClerkOrganizationsService(c.env).deleteOrganizationMembership({
+    organizationId: clerkOrgId,
+    userId: identity.provider_user_id,
+  });
+}
