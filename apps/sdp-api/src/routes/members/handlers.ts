@@ -654,15 +654,17 @@ export const revokeInvitation = async (c: AppContext) => {
   }
 
   let clerkRevocationAttempted = false;
+  let clerkService: ClerkOrganizationsService | null = null;
+  let clerkOrgId: string | null = null;
 
   try {
     const clerk = c.get("clerk");
-    const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+    clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
     if (!clerkOrgId) {
       throw badRequest("Organization is not linked to Clerk");
     }
 
-    const clerkService = new ClerkOrganizationsService(c.env);
+    clerkService = new ClerkOrganizationsService(c.env);
     const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
     const match = pending.find(
       (entry) => entry.email_address?.toLowerCase() === invitation.email.toLowerCase()
@@ -695,25 +697,41 @@ export const revokeInvitation = async (c: AppContext) => {
   } catch (error) {
     // Release the claim only when the invitation is known to still be live in
     // Clerk, because Clerk mints the acceptance link and recording a revocation
-    // we did not carry out there would leave the invite redeemable.
-    //
-    // Never asked: nothing happened remotely, so release.
-    //
-    // Asked and definitively refused: Clerk received the call and rejected it,
-    // so the invitation is still live and the local row has to follow.
-    // A 404 is excluded — it means the invitation is already gone from Clerk,
-    // which is the state revocation was trying to reach.
-    //
-    // Anything else — a timeout, a transport failure, a 5xx — is ambiguous.
-    // The call may well have succeeded, and reopening the token would hand back
-    // an invitation whose acceptance link is already dead. Staying revoked is
-    // the truthful side of that uncertainty.
-    if (!clerkRevocationAttempted || clerkDefinitivelyRefused(error)) {
+    // we did not carry out there would leave the invite redeemable while we
+    // report it revoked.
+    const releaseClaim = async () => {
       await getDb(c.env)
         .prepare("UPDATE invitations SET status = 'pending' WHERE id = ? AND status = 'revoked'")
         .bind(invitation.id)
         .run();
+    };
+
+    if (!clerkRevocationAttempted || clerkDefinitivelyRefused(error)) {
+      // Never asked, or asked and refused outright: nothing was revoked there.
+      await releaseClaim();
+    } else if (clerkService && clerkOrgId) {
+      // A transport failure or 5xx says nothing about whether Clerk applied the
+      // revocation. Rather than guess, ask: if the invitation is still pending
+      // there, the revocation did not take effect and the local row has to
+      // follow it back to pending. This is what keeps the two from diverging
+      // into a live acceptance link recorded locally as revoked.
+      //
+      // If this check itself fails we stay revoked, since that is the only
+      // remaining case where the outcome is genuinely unknown.
+      const stillPendingInClerk = await clerkService
+        .listPendingOrganizationInvitations(clerkOrgId)
+        .then((entries) =>
+          entries.some(
+            (entry) => entry.email_address?.toLowerCase() === invitation.email.toLowerCase()
+          )
+        )
+        .catch(() => false);
+
+      if (stillPendingInClerk) {
+        await releaseClaim();
+      }
     }
+
     throw error;
   }
 
