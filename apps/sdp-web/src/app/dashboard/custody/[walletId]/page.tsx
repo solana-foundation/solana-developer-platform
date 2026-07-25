@@ -493,31 +493,24 @@ export async function WalletBalancesSection({
  * appearing unrestricted.
  */
 /**
- * Mints the profile plainly permits — the only ones honest to render under
- * "Allowed assets".
+ * Mints named by an allow-action asset rule — the only rules that express an
+ * allowlist, and so the only ones honest to render under "Allowed assets".
  *
- * Excluded, because each states something other than "allowed":
- *   - any rule whose action is deny or approval_required
- *   - every approval rule, which gates its mints on approval regardless of
- *     whether an action is set; listing those as allowed would tell an
- *     operator the opposite of what the evaluator enforces
+ * Everything else is excluded because it says something different:
+ *   - deny or approval_required actions restrict rather than permit
+ *   - approval rules gate on approval regardless of whether an action is set
+ *   - amount rules only cap the mints they name; other assets stay transferable,
+ *     so surfacing them here would report an allowlist that does not exist
  *
- * Amount rules are included when they permit, since an amount cap scoped to a
- * mint still allows that mint.
+ * A profile restricted solely by one of those still reads as restricted:
+ * walletPolicyHasRestrictions counts any rule, rather than deriving from this.
  */
 function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
   const mints = new Set<string>();
 
   for (const rule of policy?.rules ?? []) {
-    if (rule.kind === "approval") {
-      continue;
-    }
-    if (rule.action && rule.action !== "allow") {
-      continue;
-    }
-    if (rule.kind !== "asset" && rule.kind !== "amount") {
-      continue;
-    }
+    if (rule.kind !== "asset") continue;
+    if (rule.action && rule.action !== "allow") continue;
 
     for (const mint of rule.assets ?? (rule.asset ? [rule.asset] : [])) {
       mints.add(mint);
