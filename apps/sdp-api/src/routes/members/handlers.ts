@@ -437,53 +437,62 @@ export const acceptInvitation = async (c: AppContext) => {
     throw new AppError("EXPIRED_INVITATION", "Invitation has expired");
   }
 
-  // Claim the invitation before creating anything. The status check above is a
-  // read, so on its own it leaves a window in which a concurrent revocation —
-  // or a second acceptance — can act on a row this request still believes is
-  // pending. Moving the transition to a conditional write makes exactly one
-  // caller win, and a loser here has created no user or membership to undo.
-  const claimed = await getDb(c.env)
-    .prepare(
-      `UPDATE invitations
-          SET status = 'accepted', accepted_at = sdp_datetime_now()
-        WHERE id = ? AND status = 'pending'`
-    )
-    .bind(invitation.id)
-    .run();
-
-  if (claimed === 0) {
-    throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
-  }
-
-  // Check if user exists
-  let user = await getDb(c.env)
-    .prepare("SELECT id, email FROM users WHERE email = ?")
-    .bind(invitation.email)
-    .first<{ id: string; email: string }>();
-
-  if (!user) {
-    // Create new user
-    const userId = `usr_${crypto.randomUUID()}`;
-    await getDb(c.env)
+  // Claim the invitation and create the membership in one transaction.
+  //
+  // The status check above is only a read, so on its own it leaves a window in
+  // which a concurrent revocation — or a second acceptance — can act on a row
+  // this request still believes is pending. The conditional write below closes
+  // that: exactly one caller flips pending to accepted.
+  //
+  // It has to commit together with the user and membership inserts, though.
+  // Claiming first and failing afterwards would consume the invitation without
+  // producing a membership, and the retry would be rejected as no longer valid
+  // — stranding an invitee holding a token that is still rightfully theirs.
+  await getDb(c.env).transaction(async (tx) => {
+    const claimed = await tx
       .prepare(
-        `INSERT INTO users (id, email, name, email_verified, status)
-       VALUES (?, ?, ?, 1, 'active')`
+        `UPDATE invitations
+            SET status = 'accepted', accepted_at = datetime('now')
+          WHERE id = ? AND status = 'pending'`
       )
-      .bind(userId, invitation.email, name ?? null)
+      .bind(invitation.id)
       .run();
 
-    user = { id: userId, email: invitation.email };
-  }
+    if (claimed === 0) {
+      throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
+    }
 
-  // Create membership
-  const memberId = `mem_${crypto.randomUUID()}`;
-  await getDb(c.env)
-    .prepare(
-      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-     VALUES (?, ?, ?, ?, 'active')`
-    )
-    .bind(memberId, invitation.organization_id, user.id, normalizeOrganizationRole(invitation.role))
-    .run();
+    let user = await tx
+      .prepare("SELECT id, email FROM users WHERE email = ?")
+      .bind(invitation.email)
+      .first<{ id: string; email: string }>();
+
+    if (!user) {
+      const userId = `usr_${crypto.randomUUID()}`;
+      await tx
+        .prepare(
+          `INSERT INTO users (id, email, name, email_verified, status)
+             VALUES (?, ?, ?, 1, 'active')`
+        )
+        .bind(userId, invitation.email, name ?? null)
+        .run();
+
+      user = { id: userId, email: invitation.email };
+    }
+
+    await tx
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        `mem_${crypto.randomUUID()}`,
+        invitation.organization_id,
+        user.id,
+        normalizeOrganizationRole(invitation.role)
+      )
+      .run();
+  });
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
