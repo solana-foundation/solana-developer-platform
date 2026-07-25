@@ -99,6 +99,25 @@ function AssetFilter({ value, onChange }: { value: string; onChange: (value: str
   );
 }
 
+function FieldWithLabel({
+  htmlFor,
+  label,
+  children,
+}: {
+  htmlFor: string;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <label htmlFor={htmlFor} className="mb-1 block text-tertiary text-xs">
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
 function buildTransactionsHref(filters: TransactionFilters): string {
   const query = serializeTransactionFilters(filters).toString();
   return `/dashboard/payments/transactions${query ? `?${query}` : ""}`;
@@ -230,18 +249,31 @@ function AdvancedFilters({
         ))}
       </SelectFilter>
       <AssetFilter value={assetValue} onChange={onAssetChange} />
-      <Input
-        type="date"
-        value={filters.from ?? ""}
-        onChange={(event) => updateFilters({ from: event.target.value || undefined })}
-        aria-label={t("DashboardPayments.transactions.fromDate")}
-      />
-      <Input
-        type="date"
-        value={filters.to ?? ""}
-        onChange={(event) => updateFilters({ to: event.target.value || undefined })}
-        aria-label={t("DashboardPayments.transactions.toDate")}
-      />
+      {/* Every Select in this grid names itself through its "All …" option. The
+          date inputs only had an invisible aria-label, so they read as two
+          unexplained dd/mm/yyyy boxes. Visible captions put them on the same
+          footing without changing what they accept. */}
+      <FieldWithLabel
+        htmlFor="transactions-from"
+        label={t("DashboardPayments.transactions.fromDate")}
+      >
+        <Input
+          id="transactions-from"
+          type="date"
+          value={filters.from ?? ""}
+          onChange={(event) => updateFilters({ from: event.target.value || undefined })}
+          max={filters.to || undefined}
+        />
+      </FieldWithLabel>
+      <FieldWithLabel htmlFor="transactions-to" label={t("DashboardPayments.transactions.toDate")}>
+        <Input
+          id="transactions-to"
+          type="date"
+          value={filters.to ?? ""}
+          onChange={(event) => updateFilters({ to: event.target.value || undefined })}
+          min={filters.from || undefined}
+        />
+      </FieldWithLabel>
       {/* Spans the row so the switch is not mistaken for another dropdown.
           Not a <label>: ToggleSwitch renders a button[role=switch] rather than
           a form control, so the caption is associated with aria-labelledby. */}
