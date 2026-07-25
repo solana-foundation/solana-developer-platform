@@ -765,21 +765,19 @@ export const revokeInvitation = async (c: AppContext) => {
       // the same address cannot be mistaken for ours and reopen a token that
       // was in fact revoked.
       //
-      // If the verification itself also fails we default to pending, i.e. to
-      // "still live". Note this is not a harmless default in one direction and
-      // a harmful one in the other — both are wrong in the same way if guessed
-      // badly, because the local row is not what gates joining. A live Clerk
-      // invitation provisions a membership through clerk-auth whatever this row
-      // says (`clerk-auth.ts:236` falls back to the Clerk role when no pending
-      // invitation is found), so marking it revoked does not close that door.
-      // What this row does control is the local token path and what the admin
-      // is shown. Defaulting to pending reports the only thing we actually
-      // know — the revocation did not complete — and prompts a retry, rather
-      // than showing a revoked invitation we never confirmed was revoked.
+      // If the verification itself also fails, the claim stays. The two doors
+      // are not equally ours: a live Clerk invitation provisions a membership
+      // through clerk-auth whatever this row says (`clerk-auth.ts:236` falls
+      // back to the Clerk role when no pending invitation is found), so
+      // reopening the row does not close that one. The local token is the door
+      // we do control, and reopening it would leave a credential we issued
+      // redeemable after a revocation that may well have succeeded. Keeping the
+      // claim gives up nothing we could have protected and keeps that credential
+      // dead. The admin still learns the attempt failed — this path throws.
       const stillPendingInClerk = await clerkService
         .listPendingOrganizationInvitations(clerkOrgId)
         .then((entries) => entries.some(matchesClerkInvitation(invitation)))
-        .catch(() => true);
+        .catch(() => false);
 
       if (stillPendingInClerk) {
         await releaseClaim();

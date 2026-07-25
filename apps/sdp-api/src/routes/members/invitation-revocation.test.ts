@@ -45,7 +45,12 @@ function clerkInvitation(id: string): ClerkInvitationStub {
  * follow-up reconciliation lookup see a different world than the first read —
  * which is the whole situation being exercised here.
  */
-function stubClerk(options: { pendingByCall: ClerkInvitationStub[][]; revokeStatus?: number }): {
+function stubClerk(options: {
+  pendingByCall: ClerkInvitationStub[][];
+  revokeStatus?: number;
+  /** Makes the follow-up reconciliation lookup fail, leaving the outcome unknown. */
+  failListAfterFirst?: boolean;
+}): {
   revokedIds: string[];
 } {
   const revokedIds: string[] = [];
@@ -55,6 +60,9 @@ function stubClerk(options: { pendingByCall: ClerkInvitationStub[][]; revokeStat
     const url = typeof input === "string" ? input : String(input);
 
     if (url.includes("/invitations?status=pending")) {
+      if (options.failListAfterFirst && listCall > 0) {
+        throw new TypeError("network error");
+      }
       const page = options.pendingByCall[listCall] ?? options.pendingByCall.at(-1) ?? [];
       listCall += 1;
       return new Response(JSON.stringify({ data: page }), {
@@ -208,6 +216,23 @@ describe("invitation revocation identity", () => {
     // Clerk never applied it, so the acceptance link is still live and the local
     // row must not claim otherwise.
     expect(await invitationStatus()).toBe("pending");
+  });
+
+  it("keeps the token dead when the revocation and its verification both fail", async () => {
+    await seedInvitation(OUR_CLERK_INVITATION_ID);
+    stubClerk({
+      pendingByCall: [[clerkInvitation(OUR_CLERK_INVITATION_ID)]],
+      revokeStatus: 500,
+      failListAfterFirst: true,
+    });
+
+    await revoke();
+
+    // Nothing is known about whether Clerk applied it. Reopening would leave a
+    // token we issued redeemable after a revocation that may have succeeded,
+    // and would not close the Clerk side either — clerk-auth provisions from
+    // Clerk org membership regardless of this row.
+    expect(await invitationStatus()).toBe("revoked");
   });
 
   it("revokes every invitation for the address when the row predates the stored id", async () => {
