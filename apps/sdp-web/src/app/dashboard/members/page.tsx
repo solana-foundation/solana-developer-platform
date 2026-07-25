@@ -1,4 +1,4 @@
-import { listMembers, type Member } from "@/app/members/actions";
+import { listMembers, type Member, readableApiError } from "@/app/members/actions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -36,7 +36,7 @@ export default async function DashboardMembersPage() {
   try {
     members = await listMembers();
   } catch (error) {
-    loadError = error instanceof Error ? error.message : String(error);
+    loadError = readableApiError(error);
   }
 
   return (
