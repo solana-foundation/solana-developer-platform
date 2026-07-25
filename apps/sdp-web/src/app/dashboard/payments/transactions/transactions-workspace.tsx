@@ -361,6 +361,17 @@ export function TransactionsWorkspace({
     { dedupingInterval: 60_000, revalidateOnFocus: false }
   );
 
+  // filtersOpen is seeded from hasAdvancedFilter once. Client-side navigation
+  // updates the filter props without remounting, so a URL that activates a
+  // filter would otherwise show the active-filter badge over a panel that is
+  // still collapsed — the badge with no visible cause this PR set out to fix.
+  // Only forced open: collapsing again is the reader's choice.
+  useEffect(() => {
+    if (hasAdvancedFilter) {
+      setFiltersOpen(true);
+    }
+  }, [hasAdvancedFilter]);
+
   useEffect(() => {
     const handleBrowserNavigation = () => {
       browserNavigationRef.current = true;
