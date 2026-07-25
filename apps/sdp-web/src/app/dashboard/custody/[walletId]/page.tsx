@@ -441,12 +441,31 @@ export async function WalletBalancesSection({
   );
 }
 
+/**
+ * Distinct mints named by the profile's asset rules. The rules array is the
+ * source of truth for allowed assets; destinationAllowlist and the amount caps
+ * are stored separately and say nothing about which tokens are permitted.
+ */
+function walletPolicyAssetCount(policy: PaymentWalletPolicy | null): number {
+  const mints = new Set<string>();
+  for (const rule of policy?.rules ?? []) {
+    if (rule.kind !== "asset") continue;
+    for (const mint of rule.assets ?? (rule.asset ? [rule.asset] : [])) {
+      mints.add(mint);
+    }
+  }
+  return mints.size;
+}
+
 function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
   if (!policy) return false;
   return (
     policy.destinationAllowlist.length > 0 ||
     Boolean(policy.maxTransferAmount) ||
-    Boolean(policy.maxDailyAmount)
+    Boolean(policy.maxDailyAmount) ||
+    // Without this a profile restricted only by asset reported "allow by
+    // default", which is the opposite of what it enforces.
+    walletPolicyAssetCount(policy) > 0
   );
 }
 
@@ -462,6 +481,7 @@ async function WalletControlsPanel({
   const { policy, error: policyError } = await policyPromise;
   const hasRestrictions = walletPolicyHasRestrictions(policy);
   const destinationCount = policy?.destinationAllowlist.length ?? 0;
+  const assetCount = walletPolicyAssetCount(policy);
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
 
   return (
@@ -481,7 +501,11 @@ async function WalletControlsPanel({
           {policyError ? (
             <p className="text-sm text-error">{policyError}</p>
           ) : (
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <WalletControlMetric
+                label={t("DashboardCustody.policyAllowedAssets")}
+                value={assetCount > 0 ? String(assetCount) : t("DashboardCustody.open")}
+              />
               <WalletControlMetric
                 label={t("DashboardCustody.destinations")}
                 value={destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")}
