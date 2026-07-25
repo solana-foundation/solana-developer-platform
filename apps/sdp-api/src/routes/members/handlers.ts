@@ -68,6 +68,20 @@ async function getClerkOrgId(db: DatabaseClient, organizationId: string): Promis
   return row?.provider_org_id ?? null;
 }
 
+/** Clerk user id for an SDP user, or null when they have no Clerk identity. */
+async function getClerkUserId(db: DatabaseClient, userId: string): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT provider_user_id
+         FROM auth_user_identities
+        WHERE provider = 'clerk' AND user_id = ?`
+    )
+    .bind(userId)
+    .first<{ provider_user_id: string }>();
+
+  return row?.provider_user_id ?? null;
+}
+
 function resolveInviteRedirectUrl(env: Env): string | undefined {
   const base = env.FRONTEND_URL?.replace(/\/$/, "");
   if (!base) {
@@ -423,43 +437,62 @@ export const acceptInvitation = async (c: AppContext) => {
     throw new AppError("EXPIRED_INVITATION", "Invitation has expired");
   }
 
-  // Check if user exists
-  let user = await getDb(c.env)
-    .prepare("SELECT id, email FROM users WHERE email = ?")
-    .bind(invitation.email)
-    .first<{ id: string; email: string }>();
-
-  if (!user) {
-    // Create new user
-    const userId = `usr_${crypto.randomUUID()}`;
-    await getDb(c.env)
+  // Claim the invitation and create the membership in one transaction.
+  //
+  // The status check above is only a read, so on its own it leaves a window in
+  // which a concurrent revocation — or a second acceptance — can act on a row
+  // this request still believes is pending. The conditional write below closes
+  // that: exactly one caller flips pending to accepted.
+  //
+  // It has to commit together with the user and membership inserts, though.
+  // Claiming first and failing afterwards would consume the invitation without
+  // producing a membership, and the retry would be rejected as no longer valid
+  // — stranding an invitee holding a token that is still rightfully theirs.
+  await getDb(c.env).transaction(async (tx) => {
+    const claimed = await tx
       .prepare(
-        `INSERT INTO users (id, email, name, email_verified, status)
-       VALUES (?, ?, ?, 1, 'active')`
+        `UPDATE invitations
+            SET status = 'accepted', accepted_at = datetime('now')
+          WHERE id = ? AND status = 'pending'`
       )
-      .bind(userId, invitation.email, name ?? null)
+      .bind(invitation.id)
       .run();
 
-    user = { id: userId, email: invitation.email };
-  }
+    if (claimed === 0) {
+      throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
+    }
 
-  // Create membership
-  const memberId = `mem_${crypto.randomUUID()}`;
-  await getDb(c.env)
-    .prepare(
-      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-     VALUES (?, ?, ?, ?, 'active')`
-    )
-    .bind(memberId, invitation.organization_id, user.id, normalizeOrganizationRole(invitation.role))
-    .run();
+    let user = await tx
+      .prepare("SELECT id, email FROM users WHERE email = ?")
+      .bind(invitation.email)
+      .first<{ id: string; email: string }>();
 
-  // Mark invitation as accepted
-  await getDb(c.env)
-    .prepare(
-      "UPDATE invitations SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?"
-    )
-    .bind(invitation.id)
-    .run();
+    if (!user) {
+      const userId = `usr_${crypto.randomUUID()}`;
+      await tx
+        .prepare(
+          `INSERT INTO users (id, email, name, email_verified, status)
+             VALUES (?, ?, ?, 1, 'active')`
+        )
+        .bind(userId, invitation.email, name ?? null)
+        .run();
+
+      user = { id: userId, email: invitation.email };
+    }
+
+    await tx
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        `mem_${crypto.randomUUID()}`,
+        invitation.organization_id,
+        user.id,
+        normalizeOrganizationRole(invitation.role)
+      )
+      .run();
+  });
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -501,25 +534,48 @@ export const removeMember = async (c: AppContext) => {
     throw badRequest("You cannot remove yourself from the organization");
   }
 
-  if (normalizeOrganizationRole(member.role) === "admin") {
-    const adminCount = await getDb(c.env)
-      .prepare(
-        `SELECT COUNT(*) as total
-           FROM organization_members
-          WHERE organization_id = ? AND status = 'active' AND role = 'admin'`
-      )
-      .bind(organizationId)
-      .first<{ total: number }>();
+  const removesAnAdmin = normalizeOrganizationRole(member.role) === "admin";
 
-    if (Number(adminCount?.total ?? 0) <= 1) {
-      throw badRequest("The last admin cannot be removed");
+  await getDb(c.env).transaction(async (tx) => {
+    if (removesAnAdmin) {
+      // Lock every active admin row before counting them. A conditional UPDATE
+      // is not enough on its own: it only locks the row it writes, so under
+      // READ COMMITTED two concurrent removals of *different* admins each
+      // evaluate the count against the pre-removal state, both see more than
+      // one, and the organization is left with none. Locking the counted set
+      // makes the second removal block here and re-read after the first
+      // commits, at which point it correctly sees itself as the last admin.
+      const admins = await tx
+        .prepare(
+          `SELECT id
+             FROM organization_members
+            WHERE organization_id = ? AND status = 'active' AND role = 'admin'
+              FOR UPDATE`
+        )
+        .bind(organizationId)
+        .all<{ id: string }>();
+
+      const remainingAdmins = admins.results.filter((row) => row.id !== memberId);
+      if (remainingAdmins.length === 0) {
+        throw badRequest("The last admin cannot be removed");
+      }
     }
-  }
 
-  await getDb(c.env)
-    .prepare("UPDATE organization_members SET status = 'removed' WHERE id = ?")
-    .bind(memberId)
-    .run();
+    const removal = await tx
+      .prepare(
+        `UPDATE organization_members
+            SET status = 'removed'
+          WHERE id = ? AND status = 'active'`
+      )
+      .bind(memberId)
+      .run();
+
+    // run() resolves to the affected-row count, so a zero means the row stopped
+    // being active between the check above and this write.
+    if (removal === 0) {
+      throw badRequest("Member has already been removed");
+    }
+  });
 
   // Clerk drives sign-in, so leaving the membership there would keep the
   // organization visible in its switcher even though our API rejects it.
@@ -553,12 +609,12 @@ export const revokeInvitation = async (c: AppContext) => {
 
   const invitation = await getDb(c.env)
     .prepare(
-      `SELECT id, email, status
+      `SELECT id, email, status, invited_by
          FROM invitations
         WHERE id = ? AND organization_id = ?`
     )
     .bind(invitationId, organizationId)
-    .first<{ id: string; email: string; status: string }>();
+    .first<{ id: string; email: string; status: string; invited_by: string }>();
 
   // Scoped by organization so an id from another org reads as missing rather
   // than as a permission failure.
@@ -570,11 +626,26 @@ export const revokeInvitation = async (c: AppContext) => {
     throw badRequest("Only a pending invitation can be revoked");
   }
 
-  // Revoke in Clerk first: leaving a live accept link behind while our own
-  // record says revoked would let the invite still be redeemed.
-  const clerk = c.get("clerk");
-  const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
-  if (clerkOrgId && clerk?.clerkUserId) {
+  // Claim the row before calling Clerk. Revoking in Clerk first leaves a window
+  // in which an acceptance consumes the still-pending local token and creates a
+  // membership that the local update below never removes, leaving the invitee
+  // active against a revoked invitation. A conditional write closes that window.
+  const claimed = await getDb(c.env)
+    .prepare("UPDATE invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'")
+    .bind(invitation.id)
+    .run();
+
+  if (claimed === 0) {
+    throw badRequest("Only a pending invitation can be revoked");
+  }
+
+  try {
+    const clerk = c.get("clerk");
+    const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+    if (!clerkOrgId) {
+      throw badRequest("Organization is not linked to Clerk");
+    }
+
     const clerkService = new ClerkOrganizationsService(c.env);
     const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
     const match = pending.find(
@@ -582,18 +653,38 @@ export const revokeInvitation = async (c: AppContext) => {
     );
 
     if (match) {
+      // An API key has no Clerk user of its own. Clerk's own inviter_id is the
+      // most reliable fallback: it is a valid Clerk user by construction, and it
+      // still resolves when invited_by is the "system" sentinel recorded for
+      // invitations an API key sent without a created_by user.
+      const requestingUserId =
+        clerk?.clerkUserId ??
+        match.inviter_id ??
+        (await getClerkUserId(getDb(c.env), invitation.invited_by));
+
+      if (!requestingUserId) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          "Cannot revoke this invitation: no Clerk user is available to attribute the revocation to"
+        );
+      }
+
       await clerkService.revokeOrganizationInvitation({
         organizationId: clerkOrgId,
         invitationId: match.id,
-        requestingUserId: clerk.clerkUserId,
+        requestingUserId,
       });
     }
+  } catch (error) {
+    // Clerk mints the acceptance link, so a local revocation we could not carry
+    // out there would leave the invite redeemable while we report it revoked.
+    // Release the claim so the state stays truthful and the caller can retry.
+    await getDb(c.env)
+      .prepare("UPDATE invitations SET status = 'pending' WHERE id = ? AND status = 'revoked'")
+      .bind(invitation.id)
+      .run();
+    throw error;
   }
-
-  await getDb(c.env)
-    .prepare("UPDATE invitations SET status = 'revoked' WHERE id = ?")
-    .bind(invitation.id)
-    .run();
 
   const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
@@ -624,21 +715,13 @@ async function removeClerkMembership(
     return;
   }
 
-  const identity = await getDb(c.env)
-    .prepare(
-      `SELECT provider_user_id
-         FROM auth_user_identities
-        WHERE provider = 'clerk' AND user_id = ?`
-    )
-    .bind(userId)
-    .first<{ provider_user_id: string }>();
-
-  if (!identity?.provider_user_id) {
+  const clerkUserId = await getClerkUserId(getDb(c.env), userId);
+  if (!clerkUserId) {
     return;
   }
 
   await new ClerkOrganizationsService(c.env).deleteOrganizationMembership({
     organizationId: clerkOrgId,
-    userId: identity.provider_user_id,
+    userId: clerkUserId,
   });
 }

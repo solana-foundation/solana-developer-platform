@@ -9,6 +9,8 @@ export interface ClerkOrganizationInvitation {
   created_at?: number;
   /** Shareable accept link Clerk mints; the only copy that exists. */
   url?: string;
+  /** Clerk's own record of who sent it — a valid Clerk user by construction. */
+  inviter_id?: string;
 }
 
 export interface ClerkOrganization {
@@ -84,16 +86,35 @@ export class ClerkOrganizationsService {
     );
   }
 
+  /**
+   * Every pending invitation, following pagination.
+   *
+   * A single capped page is not safe here: revocation matches against this
+   * list, so an invitation beyond the cap would be reported as absent and its
+   * acceptance link would stay live.
+   */
   async listPendingOrganizationInvitations(
     organizationId: string
   ): Promise<ClerkOrganizationInvitation[]> {
-    const response = await this.request<
-      { data?: ClerkOrganizationInvitation[] } | ClerkOrganizationInvitation[]
-    >(`/organizations/${organizationId}/invitations?status=pending&limit=100`);
+    const pageSize = 100;
+    const all: ClerkOrganizationInvitation[] = [];
 
-    // Clerk has returned both a bare array and a { data } envelope across
-    // versions, so accept either rather than depending on the current shape.
-    return Array.isArray(response) ? response : (response.data ?? []);
+    for (let offset = 0; ; offset += pageSize) {
+      const response = await this.request<
+        { data?: ClerkOrganizationInvitation[] } | ClerkOrganizationInvitation[]
+      >(
+        `/organizations/${organizationId}/invitations?status=pending&limit=${pageSize}&offset=${offset}`
+      );
+
+      // Clerk has returned both a bare array and a { data } envelope across
+      // versions, so accept either rather than depending on the current shape.
+      const page = Array.isArray(response) ? response : (response.data ?? []);
+      all.push(...page);
+
+      if (page.length < pageSize) {
+        return all;
+      }
+    }
   }
 
   async revokeOrganizationInvitation(params: {

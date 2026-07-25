@@ -268,9 +268,14 @@ async function ensureMembership(
   }
 
   if (pendingInvite && role === normalizeOrganizationRole(pendingInvite.role)) {
+    // Conditional on the row still being pending. This runs after the read
+    // above, so a revocation can land in between; an unconditional write would
+    // resurrect that invitation as accepted and hide the revocation entirely.
     await db
       .prepare(
-        "UPDATE invitations SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?"
+        `UPDATE invitations
+            SET status = 'accepted', accepted_at = datetime('now')
+          WHERE id = ? AND status = 'pending'`
       )
       .bind(pendingInvite.id)
       .run();
