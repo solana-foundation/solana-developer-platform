@@ -39,6 +39,7 @@ import {
   formatCurrencyAmount,
   formatDisplayAmount,
   resolveTotalBalance,
+  resolveTransferTokenLabel,
   shortenAddress,
 } from "../../payments/payments-overview.utils";
 
@@ -446,7 +447,7 @@ export async function WalletBalancesSection({
  * source of truth for allowed assets; destinationAllowlist and the amount caps
  * are stored separately and say nothing about which tokens are permitted.
  */
-function walletPolicyAssetCount(policy: PaymentWalletPolicy | null): number {
+function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
   const mints = new Set<string>();
   for (const rule of policy?.rules ?? []) {
     if (rule.kind !== "asset") continue;
@@ -454,7 +455,7 @@ function walletPolicyAssetCount(policy: PaymentWalletPolicy | null): number {
       mints.add(mint);
     }
   }
-  return mints.size;
+  return [...mints];
 }
 
 function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
@@ -465,7 +466,7 @@ function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolea
     Boolean(policy.maxDailyAmount) ||
     // Without this a profile restricted only by asset reported "allow by
     // default", which is the opposite of what it enforces.
-    walletPolicyAssetCount(policy) > 0
+    walletPolicyAssets(policy).length > 0
   );
 }
 
@@ -481,7 +482,7 @@ async function WalletControlsPanel({
   const { policy, error: policyError } = await policyPromise;
   const hasRestrictions = walletPolicyHasRestrictions(policy);
   const destinationCount = policy?.destinationAllowlist.length ?? 0;
-  const assetCount = walletPolicyAssetCount(policy);
+  const allowedAssets = walletPolicyAssets(policy);
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
 
   return (
@@ -501,23 +502,49 @@ async function WalletControlsPanel({
           {policyError ? (
             <p className="text-sm text-error">{policyError}</p>
           ) : (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <WalletControlMetric
-                label={t("DashboardCustody.policyAllowedAssets")}
-                value={assetCount > 0 ? String(assetCount) : t("DashboardCustody.open")}
-              />
-              <WalletControlMetric
-                label={t("DashboardCustody.destinations")}
-                value={destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")}
-              />
-              <WalletControlMetric
-                label={t("DashboardCustody.perTransfer")}
-                value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
-              />
-              <WalletControlMetric
-                label={t("DashboardCustody.daily")}
-                value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
-              />
+            <div className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <WalletControlMetric
+                  label={t("DashboardCustody.policyAllowedAssets")}
+                  value={
+                    allowedAssets.length > 0
+                      ? String(allowedAssets.length)
+                      : t("DashboardCustody.open")
+                  }
+                />
+                <WalletControlMetric
+                  label={t("DashboardCustody.destinations")}
+                  value={
+                    destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")
+                  }
+                />
+                <WalletControlMetric
+                  label={t("DashboardCustody.perTransfer")}
+                  value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
+                />
+                <WalletControlMetric
+                  label={t("DashboardCustody.daily")}
+                  value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
+                />
+              </div>
+              {/* Named here rather than under Balances: these are the assets the
+                  wallet may move, which is not the same as what it holds. */}
+              {allowedAssets.length > 0 ? (
+                <ul className="flex flex-wrap gap-2">
+                  {allowedAssets.map((mint) => (
+                    <li
+                      key={mint}
+                      className="flex items-center gap-2 rounded-full border border-border-subtle bg-fill-subtle py-1 pr-3 pl-1"
+                      title={mint}
+                    >
+                      <TokenMark mint={mint} size="sm" />
+                      <span className="text-xs font-medium text-secondary">
+                        {resolveTransferTokenLabel(mint)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           )}
         </div>
