@@ -520,16 +520,44 @@ function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
   return [...mints];
 }
 
+/**
+ * Whether a rule actually constrains anything.
+ *
+ * A rule's presence is not enough: an `always` rule with allow (or no action)
+ * is inert, and reporting it as a restriction makes the card advertise controls
+ * that gate nothing. Conversely a deny or approval_required action constrains
+ * whatever it matches, and an allow-action asset, amount or destination rule
+ * still narrows the wallet to what it names.
+ */
+function policyRuleRestricts(rule: NonNullable<PaymentWalletPolicy["rules"]>[number]): boolean {
+  if (rule.action === "deny" || rule.action === "approval_required") {
+    return true;
+  }
+  if (rule.kind === "approval") {
+    return true;
+  }
+
+  switch (rule.kind) {
+    case "asset":
+      return Boolean(rule.assets?.length || rule.asset);
+    case "amount":
+      return Boolean(rule.min || rule.max);
+    case "destination":
+      return Boolean(rule.allowlist?.length || rule.blocklist?.length);
+    default:
+      // always / operation_family / operation_type with an allow action permit
+      // rather than restrict.
+      return false;
+  }
+}
+
 function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
   if (!policy) return false;
   return (
     policy.destinationAllowlist.length > 0 ||
     Boolean(policy.maxTransferAmount) ||
     Boolean(policy.maxDailyAmount) ||
-    // Any rule at all is a restriction. Deriving this from the allowed-asset
-    // list instead would report "allow by default" for a profile whose only
-    // rule denies or gates on approval — the opposite of what it enforces.
-    (policy.rules?.length ?? 0) > 0
+    (policy.rules ?? []).some(policyRuleRestricts)
   );
 }
 
