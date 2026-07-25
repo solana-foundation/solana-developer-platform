@@ -224,13 +224,33 @@ async function ensureMembership(
 
   if (pendingInvite) {
     if (new Date(pendingInvite.expires_at) >= new Date()) {
-      role = normalizeOrganizationRole(pendingInvite.role);
-      if (role !== pendingInvite.role) {
-        await db
-          .prepare("UPDATE invitations SET role = ? WHERE id = ?")
-          .bind(role, pendingInvite.id)
-          .run();
+      const invitedRole = normalizeOrganizationRole(pendingInvite.role);
+
+      // Claim the invitation before granting membership, not after. Creating
+      // the membership first and accepting afterwards let a concurrent
+      // revocation win the invitation transition while organization access had
+      // already been created and persisted — the invitee stayed active against
+      // an invitation we had recorded as revoked.
+      //
+      // The role normalization folds into the same write, so there is one
+      // transition rather than a read, a role fixup and a later accept.
+      const claimed = await db
+        .prepare(
+          `UPDATE invitations
+              SET status = 'accepted', accepted_at = datetime('now'), role = ?
+            WHERE id = ? AND status = 'pending'`
+        )
+        .bind(invitedRole, pendingInvite.id)
+        .run();
+
+      // Zero rows means the invitation stopped being pending between the read
+      // above and here. Revocation is the case that matters, and granting
+      // access off a just-revoked invitation is the failure worth refusing.
+      if (claimed === 0) {
+        throw unauthorized("Invitation is no longer valid");
       }
+
+      role = invitedRole;
     } else {
       await db
         .prepare("UPDATE invitations SET status = 'expired' WHERE id = ?")
@@ -265,20 +285,6 @@ async function ensureMembership(
       throw unauthorized("Organization membership is inactive");
     }
     throw error;
-  }
-
-  if (pendingInvite && role === normalizeOrganizationRole(pendingInvite.role)) {
-    // Conditional on the row still being pending. This runs after the read
-    // above, so a revocation can land in between; an unconditional write would
-    // resurrect that invitation as accepted and hide the revocation entirely.
-    await db
-      .prepare(
-        `UPDATE invitations
-            SET status = 'accepted', accepted_at = datetime('now')
-          WHERE id = ? AND status = 'pending'`
-      )
-      .bind(pendingInvite.id)
-      .run();
   }
 
   return role;
