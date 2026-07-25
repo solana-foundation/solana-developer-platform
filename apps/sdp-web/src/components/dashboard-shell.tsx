@@ -24,6 +24,7 @@ import {
   Settings2Icon,
   ShieldCheckIcon,
   UsersIcon,
+  UsersRoundIcon,
   WalletIcon,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
@@ -1139,8 +1140,16 @@ export function DashboardShell({
       icon: LibraryIcon,
       external: true,
     },
+    // Members sits with Settings rather than under Manage: it is organization
+    // administration, not a product module. Same org:write gate, which is what
+    // inviting actually requires.
     ...(dashboardAccess.capabilities.canManageOrgSettings
       ? [
+          {
+            label: t("Shared.dashboardShell.members"),
+            href: DASHBOARD_SIDE_NAV_HREFS.members,
+            icon: UsersRoundIcon,
+          },
           {
             label: t("Shared.dashboardShell.settings"),
             href: DASHBOARD_SIDE_NAV_HREFS.settings,

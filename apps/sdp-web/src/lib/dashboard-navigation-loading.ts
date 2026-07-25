@@ -6,6 +6,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   apiKeys: "/dashboard/api-keys",
   policies: "/dashboard/policies",
   approvals: "/dashboard/approvals",
+  members: "/dashboard/members",
   settings: "/dashboard/settings",
 } as const;
 
