@@ -11,7 +11,9 @@ import {
 } from "@/components/ui/table";
 import { getTranslations } from "@/i18n/server";
 import { readableApiError } from "@/lib/sdp-api-error";
+import { InvitationActions } from "./invitation-actions";
 import { InviteMemberForm } from "./invite-member-form";
+import { MembersPagination } from "./members-pagination";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 
@@ -39,19 +41,21 @@ function displayEmail(value: string): string {
   return looksLikeAddress ? trimmed : "—";
 }
 
-export async function MembersSection() {
+export async function MembersSection({ page = 1 }: { page?: number }) {
   const t = await getTranslations();
 
   let members: Member[] = [];
   let invitations: PendingInvitation[] = [];
+  let meta = { total: 0, page: 1, pageSize: 25, hasMore: false };
   let loadError: string | null = null;
 
   // A failed list must not take the invite form down with it — an admin whose
   // org list is erroring can still need to add someone.
   try {
-    const directory = await listMembers();
+    const directory = await listMembers(page);
     members = directory.members;
     invitations = directory.invitations;
+    meta = directory.meta;
   } catch (error) {
     loadError = readableApiError(error);
   }
@@ -80,6 +84,9 @@ export async function MembersSection() {
                 <TableHead>{t("Shared.members.columnMember")}</TableHead>
                 <TableHead className="w-40">{t("Shared.members.columnRole")}</TableHead>
                 <TableHead className="w-40">{t("Shared.members.columnJoined")}</TableHead>
+                <TableHead className="w-16 text-right">
+                  <span className="sr-only">{t("Shared.members.columnActions")}</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -106,6 +113,9 @@ export async function MembersSection() {
                     <TableCell className="text-secondary text-sm">
                       {formatJoined(member.createdAt)}
                     </TableCell>
+                    {/* Members carry no actions yet; the cell keeps the
+                        invitation menu from shifting the column widths. */}
+                    <TableCell />
                   </TableRow>
                 );
               })}
@@ -129,11 +139,20 @@ export async function MembersSection() {
                     {roleLabel(invitation.role, t)}
                   </TableCell>
                   <TableCell className="text-muted text-sm">—</TableCell>
+                  <TableCell className="text-right">
+                    <InvitationActions
+                      invitationId={invitation.id}
+                      email={invitation.email}
+                      acceptUrl={invitation.acceptUrl}
+                    />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         )}
+
+        {!loadError && meta.total > meta.pageSize ? <MembersPagination meta={meta} /> : null}
       </CardContent>
     </Card>
   );

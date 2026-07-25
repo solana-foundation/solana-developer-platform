@@ -38,7 +38,16 @@
     "loadFailed": "Impossible de charger les membres : {error}",
     "unnamed": "Sans nom",
     "statusPending": "En attente",
-    "invitedOn": "Invité le {date}"
+    "invitedOn": "Invité le {date}",
+    "columnActions": "Actions",
+    "copyInviteLink": "Copier le lien d'invitation",
+    "inviteLinkCopied": "Lien d'invitation copié.",
+    "inviteLinkCopyFailed": "Impossible de copier le lien d'invitation.",
+    "revokeInvite": "Révoquer l'invitation",
+    "revoking": "Révocation…",
+    "revoked": "Invitation à {email} révoquée.",
+    "revokeFailed": "Impossible de révoquer l'invitation : {error}",
+    "invitationActions": "Actions pour {email}"
   },
   "SharedComponents": {
     "copied": "Copié",

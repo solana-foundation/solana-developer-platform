@@ -33,7 +33,20 @@ type ProjectListResponse = {
   }>;
 };
 
-export default async function SettingsPage() {
+/** Anything that is not a positive integer falls back to the first page. */
+function resolveMembersPage(value: string | string[] | undefined): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const membersPage = resolveMembersPage((await searchParams).membersPage);
+
   const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -159,7 +172,9 @@ export default async function SettingsPage() {
 
       {/* Same gate as the settings form above: canManageOrgSettings resolves to
           org:write, which is what inviting a member requires. */}
-      {dashboardAccess.capabilities.canManageOrgSettings ? <MembersSection /> : null}
+      {dashboardAccess.capabilities.canManageOrgSettings ? (
+        <MembersSection page={membersPage} />
+      ) : null}
     </div>
   );
 }

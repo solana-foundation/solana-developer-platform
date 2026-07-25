@@ -29,21 +29,56 @@ export interface PendingInvitation {
   status: string;
   createdAt: string;
   expiresAt: string;
+  /** Clerk's shareable accept link; null when Clerk could not be reached. */
+  acceptUrl: string | null;
 }
 
 export interface MemberDirectory {
   members: Member[];
   invitations: PendingInvitation[];
+  meta: { total: number; page: number; pageSize: number; hasMore: boolean };
 }
 
-export async function listMembers(): Promise<MemberDirectory> {
+export type RevokeInvitationResult = { ok: true } | { ok: false; error: string };
+
+export async function revokeInvitation(invitationId: string): Promise<RevokeInvitationResult> {
+  try {
+    const client = await createSdpApiClient();
+    await client.fetch(`/v1/members/invitations/${encodeURIComponent(invitationId)}`, {
+      method: "DELETE",
+    });
+  } catch (error) {
+    return { ok: false, error: readableApiError(error) };
+  }
+
+  revalidatePath("/dashboard/settings");
+  return { ok: true };
+}
+
+const MEMBERS_PAGE_SIZE = 25;
+
+export async function listMembers(page = 1): Promise<MemberDirectory> {
   const client = await createSdpApiClient();
+  const query = new URLSearchParams({
+    page: String(Math.max(1, page)),
+    pageSize: String(MEMBERS_PAGE_SIZE),
+  });
   const response = await client.fetch<{
     members: Member[];
     invitations?: PendingInvitation[];
-  }>("/v1/members");
+    meta?: MemberDirectory["meta"];
+  }>(`/v1/members?${query.toString()}`);
 
-  return { members: response.members, invitations: response.invitations ?? [] };
+  return {
+    members: response.members,
+    invitations: response.invitations ?? [],
+    meta: response.meta ?? {
+      total: response.members.length,
+      page: 1,
+      pageSize: MEMBERS_PAGE_SIZE,
+      hasMore: false,
+    },
+  };
 }
 
 export type InviteMemberResult = { ok: true; email: string } | { ok: false; error: string };
