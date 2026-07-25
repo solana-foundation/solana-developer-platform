@@ -1,5 +1,6 @@
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
+import { describeClerkFailure } from "./clerk-error";
 
 export interface ClerkOrganizationInvitation {
   id: string;
@@ -40,7 +41,7 @@ export class ClerkOrganizationsService {
 
     if (!res.ok) {
       const body = await res.text();
-      throw new AppError("INTERNAL_ERROR", "Clerk request failed", {
+      throw new AppError("INTERNAL_ERROR", describeClerkFailure(res.status, body), {
         status: res.status,
         body,
       });
