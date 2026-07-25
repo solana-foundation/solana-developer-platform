@@ -3,6 +3,7 @@ import type {
   CustodyWalletMetadataResponse,
   CustodyWalletTokenBalance,
   PaymentWalletPolicy,
+  PolicyRuleAction,
 } from "@sdp/types";
 import { SlidersHorizontal } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
@@ -521,32 +522,47 @@ function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
 }
 
 /**
- * Whether a rule actually constrains anything.
+ * Whether a rule can produce anything other than `allow`.
  *
- * A rule's presence is not enough: an `always` rule with allow (or no action)
- * is inert, and reporting it as a restriction makes the card advertise controls
- * that gate nothing. Conversely a deny or approval_required action constrains
- * whatever it matches, and an allow-action asset, amount or destination rule
- * still narrows the wallet to what it names.
+ * This mirrors evaluatePolicyRule in the API's policy-evaluation service. Two
+ * details there drive the shape below:
+ *
+ * 1. An explicit `action` is authoritative for every kind — the evaluator
+ *    applies it verbatim and only falls back to a per-kind default when the
+ *    action is absent. So an `approval` rule pinned to `allow` permits, and a
+ *    `review` or `provider_approval_required` action restricts on any kind.
+ * 2. A rule with no criteria is not inert. `asset` with no assets, `amount`
+ *    with no bounds and `destination` with neither list all resolve to
+ *    `review`, which is a restriction rather than a no-op.
  */
+const RESTRICTIVE_RULE_ACTIONS = new Set<PolicyRuleAction>([
+  "deny",
+  "approval_required",
+  "provider_approval_required",
+  "review",
+]);
+
 function policyRuleRestricts(rule: NonNullable<PaymentWalletPolicy["rules"]>[number]): boolean {
-  if (rule.action === "deny" || rule.action === "approval_required") {
-    return true;
-  }
-  if (rule.kind === "approval") {
-    return true;
+  if (rule.action) {
+    return RESTRICTIVE_RULE_ACTIONS.has(rule.action);
   }
 
   switch (rule.kind) {
-    case "asset":
-      return Boolean(rule.assets?.length || rule.asset);
+    case "approval":
+      // Defaults to approval_required rather than allow.
+      return true;
     case "amount":
-      return Boolean(rule.min || rule.max);
+      // Denies outside its bounds, and reviews when it has none.
+      return true;
     case "destination":
-      return Boolean(rule.allowlist?.length || rule.blocklist?.length);
+      // Denies on a blocklist hit or outside an allowlist, reviews when empty.
+      return true;
+    case "asset":
+      // Allows on a match and abstains otherwise, so it only restricts when it
+      // names nothing and falls through to review.
+      return !(rule.assets?.length || rule.asset);
     default:
-      // always / operation_family / operation_type with an allow action permit
-      // rather than restrict.
+      // always / operation_family / operation_type permit on a match.
       return false;
   }
 }
@@ -557,6 +573,9 @@ function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolea
     policy.destinationAllowlist.length > 0 ||
     Boolean(policy.maxTransferAmount) ||
     Boolean(policy.maxDailyAmount) ||
+    // Operations matching no rule fall through to the policy default, so a
+    // non-allow default is itself a restriction.
+    (policy.defaultAction !== undefined && policy.defaultAction !== "allow") ||
     (policy.rules ?? []).some(policyRuleRestricts)
   );
 }
