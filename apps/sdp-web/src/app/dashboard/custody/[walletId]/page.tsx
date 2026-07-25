@@ -480,14 +480,38 @@ export async function WalletBalancesSection({
  * source of truth for allowed assets; destinationAllowlist and the amount caps
  * are stored separately and say nothing about which tokens are permitted.
  */
+/**
+ * Mints a profile permits.
+ *
+ * Only `allow` rules count. An asset rule can equally carry `deny` or
+ * `approval_required`, and listing those mints under "Allowed assets" would
+ * state the opposite of what the profile enforces — the worst kind of wrong on
+ * a custody screen.
+ *
+ * `amount` and `approval` rules can be scoped by asset too, so a profile whose
+ * only asset restriction rides on one of those is still counted rather than
+ * appearing unrestricted.
+ */
 function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
   const mints = new Set<string>();
+
   for (const rule of policy?.rules ?? []) {
-    if (rule.kind !== "asset") continue;
-    for (const mint of rule.assets ?? (rule.asset ? [rule.asset] : [])) {
+    if (rule.action && rule.action !== "allow") {
+      continue;
+    }
+
+    const scoped =
+      rule.kind === "asset" || rule.kind === "amount"
+        ? (rule.assets ?? (rule.asset ? [rule.asset] : []))
+        : rule.kind === "approval"
+          ? (rule.assets ?? [])
+          : [];
+
+    for (const mint of scoped) {
       mints.add(mint);
     }
   }
+
   return [...mints];
 }
 
