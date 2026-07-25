@@ -76,10 +76,23 @@ export function shortenAddress(address: string): string {
  * otherwise the same transfer reads as "USDC" on one screen and
  * "4zMMC9srt5…" on another.
  */
-export function resolveTransferTokenLabel(token: string | null | undefined): string | undefined {
+export function resolveTransferTokenLabel(
+  token: string | null | undefined,
+  /**
+   * Symbols the caller has already resolved, keyed by mint. Surfaces that load
+   * balances get this for free and can name tokens the catalogue has never
+   * heard of; surfaces without it fall back to the shortened mint.
+   */
+  symbolsByMint?: Readonly<Record<string, string>>
+): string | undefined {
   const trimmed = token?.trim();
   if (!trimmed) {
     return undefined;
+  }
+
+  const resolvedSymbol = symbolsByMint?.[trimmed]?.trim();
+  if (resolvedSymbol && resolvedSymbol !== trimmed) {
+    return resolvedSymbol;
   }
 
   const knownSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(trimmed)?.symbol;

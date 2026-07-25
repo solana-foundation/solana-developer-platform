@@ -334,9 +334,42 @@ export default async function WalletDetailPage({
         />
       </Suspense>
 
-      <WalletActivityViewport walletId={resolvedWalletId} />
+      <Suspense fallback={<WalletActivityViewport walletId={resolvedWalletId} />}>
+        <WalletActivityWithBalanceSymbols
+          walletId={resolvedWalletId}
+          balancesPromise={trackedBalancesPromise}
+        />
+      </Suspense>
     </DashboardWorkspaceOverviewPanel>
   );
+}
+
+/**
+ * Hands the activity table the symbols the balances lookup already resolved, so
+ * a token the well-known catalogue has never seen still reads as its symbol
+ * rather than a shortened mint. The fallback renders the same viewport without
+ * the map, so activity is never gated on balances loading.
+ */
+async function WalletActivityWithBalanceSymbols({
+  walletId,
+  balancesPromise,
+}: {
+  walletId: string;
+  balancesPromise: Promise<WalletTrackedBalancesResult>;
+}) {
+  const { balances } = await balancesPromise;
+  const symbolsByMint: Record<string, string> = {};
+  for (const balance of balances) {
+    const mint = balance.mint?.trim();
+    const token = balance.token?.trim();
+    // Skip entries whose "symbol" is just the mint again — they carry no
+    // information and would defeat the shortened-address fallback.
+    if (mint && token && token !== mint) {
+      symbolsByMint[mint] = token;
+    }
+  }
+
+  return <WalletActivityViewport walletId={walletId} symbolsByMint={symbolsByMint} />;
 }
 
 export async function WalletBalanceSummary({
