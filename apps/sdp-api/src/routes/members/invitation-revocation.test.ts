@@ -2,6 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { invitationWasRevoked } from "@/lib/invitations";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
@@ -233,6 +234,31 @@ describe("invitation revocation identity", () => {
     // and would not close the Clerk side either — clerk-auth provisions from
     // Clerk org membership regardless of this row.
     expect(await invitationStatus()).toBe("revoked");
+  });
+
+  it("locks the invitation rows so a revocation cannot commit mid-check", async () => {
+    await seedInvitation(OUR_CLERK_INVITATION_ID);
+    const db = getDb(env);
+
+    await db.transaction(async (tx) => {
+      expect(await invitationWasRevoked(tx, ORGANIZATION_ID, INVITEE_EMAIL, { lock: true })).toBe(
+        false
+      );
+
+      // NOWAIT fails outright rather than blocking, so this asserts the rows are
+      // genuinely locked without depending on a timeout. Without the lock the
+      // revocation would commit between the check and the membership write.
+      await expect(
+        db
+          .prepare(
+            `SELECT id FROM invitations
+              WHERE organization_id = ? AND email = ?
+              FOR UPDATE NOWAIT`
+          )
+          .bind(ORGANIZATION_ID, INVITEE_EMAIL)
+          .all()
+      ).rejects.toThrow();
+    });
   });
 
   it("revokes every invitation for the address when the row predates the stored id", async () => {

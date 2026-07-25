@@ -259,22 +259,14 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
     .catch((error) => console.error("Failed to revoke sessions after user deletion:", error));
 }
 
-/** Resolves the user's address, then applies the shared revoked-invitation rule. */
-async function membershipWasWithdrawn(
-  c: AppContext,
-  organizationId: string,
-  userId: string
-): Promise<boolean> {
+/** The address the revoked-invitation rule is keyed on. */
+async function resolveMemberEmail(c: AppContext, userId: string): Promise<string | null> {
   const user = await getDb(c.env)
     .prepare("SELECT email FROM users WHERE id = ?")
     .bind(userId)
     .first<{ email: string }>();
 
-  if (!user?.email) {
-    return false;
-  }
-
-  return invitationWasRevoked(getDb(c.env), organizationId, user.email);
+  return user?.email ?? null;
 }
 
 async function upsertVerifiedMembership(
@@ -298,29 +290,31 @@ async function upsertVerifiedMembership(
     .bind(organizationId, data.userId)
     .first<{ role: string; status: string }>();
 
-  if (
-    existing?.status !== "active" &&
-    (await membershipWasWithdrawn(c, organizationId, data.userId))
-  ) {
-    // Clerk says join, we say the invitation was withdrawn. Clerk mints the
-    // acceptance link and we cannot expire it, so this sync is the last point
-    // that can honour the revocation — without this, revoking an invitation
-    // stopped the local token but not the Clerk link.
-    //
-    // Scoped to users who are not already active members, so this can only
-    // decline a join, never strip access from someone who has it. A revoked
-    // invitation for an existing member is stale and irrelevant.
-    console.warn("webhooks: declined membership for a revoked invitation", {
-      requestId: c.get("requestId"),
-      organizationId,
-      userId: data.userId,
-    });
-    return;
-  }
+  const email = await resolveMemberEmail(c, data.userId);
 
-  await getDb(c.env)
-    .prepare(
-      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+  // The check and the write share one transaction, and the check locks the
+  // invitation rows. Reading the status and inserting as separate statements
+  // let a revocation commit in between and still admit the member.
+  const admitted = await getDb(c.env).transaction(async (tx) => {
+    if (
+      existing?.status !== "active" &&
+      email &&
+      (await invitationWasRevoked(tx, organizationId, email, { lock: true }))
+    ) {
+      // Clerk says join, we say the invitation was withdrawn. Clerk mints the
+      // acceptance link and we cannot expire it, so this sync is the last point
+      // that can honour the revocation — without this, revoking an invitation
+      // stopped the local token but not the Clerk link.
+      //
+      // Scoped to users who are not already active members, so this can only
+      // decline a join, never strip access from someone who has it. A revoked
+      // invitation for an existing member is stale and irrelevant.
+      return false;
+    }
+
+    await tx
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
        VALUES (?, ?, ?, ?, 'active')
        ON CONFLICT(organization_id, user_id)
        DO UPDATE SET
@@ -330,9 +324,21 @@ async function upsertVerifiedMembership(
              THEN organization_members.status
            ELSE 'active'
          END`
-    )
-    .bind(memberId, organizationId, data.userId, role, data.reactivateRemoved ? 1 : 0)
-    .run();
+      )
+      .bind(memberId, organizationId, data.userId, role, data.reactivateRemoved ? 1 : 0)
+      .run();
+
+    return true;
+  });
+
+  if (!admitted) {
+    console.warn("webhooks: declined membership for a revoked invitation", {
+      requestId: c.get("requestId"),
+      organizationId,
+      userId: data.userId,
+    });
+    return;
+  }
 
   if (existing?.status === "active" && existing.role !== role) {
     const sessionService = new SessionService(getDb(c.env));

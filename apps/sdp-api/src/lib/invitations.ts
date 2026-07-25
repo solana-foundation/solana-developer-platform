@@ -1,4 +1,4 @@
-import type { DatabaseClient } from "@/db/client";
+import type { DatabaseExecutor } from "@/db/client";
 
 /**
  * Whether an organization withdrew its invitation to an address and has not
@@ -18,11 +18,29 @@ import type { DatabaseClient } from "@/db/client";
  * - **An accepted or expired newest record.** Neither is a withdrawal.
  */
 export async function invitationWasRevoked(
-  db: DatabaseClient,
+  db: DatabaseExecutor,
   organizationId: string,
-  email: string
+  email: string,
+  options: { lock?: boolean } = {}
 ): Promise<boolean> {
   const normalizedEmail = email.toLowerCase();
+
+  if (options.lock) {
+    // Reading the status and writing the membership are separate statements, so
+    // a revocation committing between them would otherwise still admit the
+    // member. Locking every invitation row for this address makes the two
+    // orderings the only possible ones: the revocation waits for this caller to
+    // finish, or it lands first and is seen below. Requires an open transaction.
+    await db
+      .prepare(
+        `SELECT id
+           FROM invitations
+          WHERE organization_id = ? AND email = ?
+          FOR UPDATE`
+      )
+      .bind(organizationId, normalizedEmail)
+      .all();
+  }
 
   const livePendingInvite = await db
     .prepare(
