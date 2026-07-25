@@ -66,7 +66,7 @@ export const WELL_KNOWN_TOKENS = {
     symbol: "USDG",
     decimals: 6,
     isUsdStable: true,
-    tokenProgram: "spl-token",
+    tokenProgram: "token-2022",
     mints: {
       // biome-ignore lint/security/noSecrets: Devnet USDG mint address constant, not a secret.
       devnet: "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7",
