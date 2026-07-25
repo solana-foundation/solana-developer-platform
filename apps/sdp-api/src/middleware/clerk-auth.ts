@@ -294,7 +294,10 @@ async function ensureDefaultProjects(
 async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJwtPayload) {
   const email = resolveClerkEmail(payload);
   if (!email) {
-    throw new AppError("UNAUTHORIZED", "Clerk token missing email");
+    throw new AppError(
+      "UNAUTHORIZED",
+      "Clerk token has no usable email claim. Check the JWT template: an invalid shortcode is passed through unsubstituted rather than resolved."
+    );
   }
 
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {
