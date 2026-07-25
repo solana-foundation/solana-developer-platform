@@ -700,9 +700,6 @@ function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  if (pathname.startsWith("/dashboard/members")) {
-    return { title: t("Shared.dashboardShell.members") };
-  }
   if (pathname.startsWith("/dashboard/settings")) {
     return { title: t("Shared.dashboardShell.settings") };
   }
@@ -718,10 +715,6 @@ function ApiKeyNewLoading() {
 
 function ApiKeyEditLoading() {
   return <ApiKeyAuthoringSkeleton route="api-key-edit" />;
-}
-
-function MembersLoading() {
-  return <CompactOperationsCardSkeleton route="members" />;
 }
 
 function AllowlistLoading() {
@@ -801,8 +794,6 @@ function resolvePageLoadingComponent(
       return ApprovalInboxSkeleton;
     case "approval-detail":
       return ApprovalDetailSkeleton;
-    case "members":
-      return MembersLoading;
     case "settings":
       return SettingsPageSkeleton;
     case "allowlist":

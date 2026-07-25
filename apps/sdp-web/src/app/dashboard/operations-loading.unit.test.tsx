@@ -12,7 +12,6 @@ import IssuanceOverviewLoading from "./issuance/(overview)/loading";
 import IssuanceDetailLoading from "./issuance/[tokenId]/loading";
 import IssuanceCreateLoading from "./issuance/create/loading";
 import { IssuancePlaygroundLoading } from "./issuance/issuance-playground-loading";
-import MembersLoading from "./members/loading";
 import PoliciesLoading from "./policies/loading";
 import SettingsLoading from "./settings/loading";
 
@@ -27,7 +26,6 @@ const EXPECTED_ROUTE_LAYOUTS = [
   "approvals-list",
   "approval-detail",
   "allowlist",
-  "members",
   "settings",
 ];
 
@@ -44,7 +42,6 @@ function renderAllRouteLoadingStates(): string {
       <ApprovalsLoading />
       <ApprovalDetailLoading />
       <AllowlistLoading />
-      <MembersLoading />
       <SettingsLoading />
     </I18nProvider>
   );
