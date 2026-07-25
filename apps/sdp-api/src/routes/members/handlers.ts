@@ -517,36 +517,46 @@ export const removeMember = async (c: AppContext) => {
 
   const removesAnAdmin = normalizeOrganizationRole(member.role) === "admin";
 
-  // The last-admin guard lives in the UPDATE rather than in a preceding SELECT.
-  // Two concurrent removals of different admins, with exactly two remaining,
-  // could both observe a count of two and both proceed — leaving the
-  // organization with no active administrator. Re-checking inside the write
-  // makes the second one match zero rows instead.
-  const removal = await getDb(c.env)
-    .prepare(
-      removesAnAdmin
-        ? `UPDATE organization_members
-              SET status = 'removed'
-            WHERE id = ?
-              AND status = 'active'
-              AND (
-                SELECT COUNT(*) FROM organization_members
-                 WHERE organization_id = ? AND status = 'active' AND role = 'admin'
-              ) > 1`
-        : `UPDATE organization_members
-              SET status = 'removed'
-            WHERE id = ? AND status = 'active'`
-    )
-    .bind(...(removesAnAdmin ? [memberId, organizationId] : [memberId]))
-    .run();
+  await getDb(c.env).transaction(async (tx) => {
+    if (removesAnAdmin) {
+      // Lock every active admin row before counting them. A conditional UPDATE
+      // is not enough on its own: it only locks the row it writes, so under
+      // READ COMMITTED two concurrent removals of *different* admins each
+      // evaluate the count against the pre-removal state, both see more than
+      // one, and the organization is left with none. Locking the counted set
+      // makes the second removal block here and re-read after the first
+      // commits, at which point it correctly sees itself as the last admin.
+      const admins = await tx
+        .prepare(
+          `SELECT id
+             FROM organization_members
+            WHERE organization_id = ? AND status = 'active' AND role = 'admin'
+              FOR UPDATE`
+        )
+        .bind(organizationId)
+        .all<{ id: string }>();
 
-  // run() resolves to the affected-row count, so a zero means the guard in the
-  // statement matched nothing rather than that the write failed.
-  if (removal === 0) {
-    throw badRequest(
-      removesAnAdmin ? "The last admin cannot be removed" : "Member has already been removed"
-    );
-  }
+      const remainingAdmins = admins.results.filter((row) => row.id !== memberId);
+      if (remainingAdmins.length === 0) {
+        throw badRequest("The last admin cannot be removed");
+      }
+    }
+
+    const removal = await tx
+      .prepare(
+        `UPDATE organization_members
+            SET status = 'removed'
+          WHERE id = ? AND status = 'active'`
+      )
+      .bind(memberId)
+      .run();
+
+    // run() resolves to the affected-row count, so a zero means the row stopped
+    // being active between the check above and this write.
+    if (removal === 0) {
+      throw badRequest("Member has already been removed");
+    }
+  });
 
   // Clerk drives sign-in, so leaving the membership there would keep the
   // organization visible in its switcher even though our API rejects it.
