@@ -258,6 +258,42 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
     .catch((error) => console.error("Failed to revoke sessions after user deletion:", error));
 }
 
+/**
+ * Whether this organization withdrew its most recent invitation to the user.
+ *
+ * Only the newest invitation counts: a revoked one followed by a fresh invite
+ * has been superseded, and blocking on the older record would make a re-invite
+ * impossible. No invitation at all is not a refusal — members added straight
+ * from the Clerk dashboard never have one.
+ */
+async function invitationWasRevoked(
+  c: AppContext,
+  organizationId: string,
+  userId: string
+): Promise<boolean> {
+  const user = await getDb(c.env)
+    .prepare("SELECT email FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ email: string }>();
+
+  if (!user?.email) {
+    return false;
+  }
+
+  const latest = await getDb(c.env)
+    .prepare(
+      `SELECT status
+         FROM invitations
+        WHERE organization_id = ? AND email = ?
+        ORDER BY created_at DESC
+        LIMIT 1`
+    )
+    .bind(organizationId, user.email.toLowerCase())
+    .first<{ status: string }>();
+
+  return latest?.status === "revoked";
+}
+
 async function upsertVerifiedMembership(
   c: AppContext,
   data: {
@@ -278,6 +314,26 @@ async function upsertVerifiedMembership(
     )
     .bind(organizationId, data.userId)
     .first<{ role: string; status: string }>();
+
+  if (
+    existing?.status !== "active" &&
+    (await invitationWasRevoked(c, organizationId, data.userId))
+  ) {
+    // Clerk says join, we say the invitation was withdrawn. Clerk mints the
+    // acceptance link and we cannot expire it, so this sync is the last point
+    // that can honour the revocation — without this, revoking an invitation
+    // stopped the local token but not the Clerk link.
+    //
+    // Scoped to users who are not already active members, so this can only
+    // decline a join, never strip access from someone who has it. A revoked
+    // invitation for an existing member is stale and irrelevant.
+    console.warn("webhooks: declined membership for a revoked invitation", {
+      requestId: c.get("requestId"),
+      organizationId,
+      userId: data.userId,
+    });
+    return;
+  }
 
   await getDb(c.env)
     .prepare(
