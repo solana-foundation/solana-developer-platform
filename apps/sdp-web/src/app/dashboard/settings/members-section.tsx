@@ -1,4 +1,5 @@
-import { listMembers, type Member } from "@/app/members/actions";
+import { listMembers, type Member, type PendingInvitation } from "@/app/members/actions";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -30,15 +31,20 @@ export async function MembersSection() {
   const t = await getTranslations();
 
   let members: Member[] = [];
+  let invitations: PendingInvitation[] = [];
   let loadError: string | null = null;
 
   // A failed list must not take the invite form down with it — an admin whose
   // org list is erroring can still need to add someone.
   try {
-    members = await listMembers();
+    const directory = await listMembers();
+    members = directory.members;
+    invitations = directory.invitations;
   } catch (error) {
     loadError = readableApiError(error);
   }
+
+  const isEmpty = members.length === 0 && invitations.length === 0;
 
   return (
     <Card>
@@ -53,7 +59,7 @@ export async function MembersSection() {
           <div className="rounded-xl border border-destructive-border bg-destructive-bg px-3 py-2 text-destructive-strong text-sm">
             {t("Shared.members.loadFailed", { error: loadError })}
           </div>
-        ) : members.length === 0 ? (
+        ) : isEmpty ? (
           <p className="text-secondary text-sm">{t("Shared.members.empty")}</p>
         ) : (
           <Table>
@@ -79,6 +85,28 @@ export async function MembersSection() {
                   <TableCell className="text-secondary text-sm">
                     {formatJoined(member.createdAt)}
                   </TableCell>
+                </TableRow>
+              ))}
+
+              {/* Invited people hold no membership row until they accept, so
+                  without this an invite looks like it did nothing. */}
+              {invitations.map((invitation) => (
+                <TableRow key={invitation.id}>
+                  <TableCell className="min-w-0">
+                    <span className="flex items-center gap-2">
+                      <span className="truncate font-medium text-primary text-sm">
+                        {invitation.email}
+                      </span>
+                      <Badge variant="warning">{t("Shared.members.statusPending")}</Badge>
+                    </span>
+                    <span className="block truncate text-muted text-xs">
+                      {t("Shared.members.invitedOn", { date: formatJoined(invitation.createdAt) })}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-secondary text-sm">
+                    {roleLabel(invitation.role, t)}
+                  </TableCell>
+                  <TableCell className="text-muted text-sm">—</TableCell>
                 </TableRow>
               ))}
             </TableBody>

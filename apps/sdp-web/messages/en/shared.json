@@ -36,7 +36,9 @@
     "columnJoined": "Joined",
     "empty": "No members yet.",
     "loadFailed": "Members could not be loaded: {error}",
-    "unnamed": "Unnamed"
+    "unnamed": "Unnamed",
+    "statusPending": "Pending",
+    "invitedOn": "Invited {date}"
   },
   "SharedComponents": {
     "copied": "Copied",

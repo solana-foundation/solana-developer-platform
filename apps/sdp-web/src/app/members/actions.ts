@@ -22,10 +22,28 @@ export interface Member {
   };
 }
 
-export async function listMembers(): Promise<Member[]> {
+export interface PendingInvitation {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface MemberDirectory {
+  members: Member[];
+  invitations: PendingInvitation[];
+}
+
+export async function listMembers(): Promise<MemberDirectory> {
   const client = await createSdpApiClient();
-  const response = await client.fetch<{ members: Member[] }>("/v1/members");
-  return response.members;
+  const response = await client.fetch<{
+    members: Member[];
+    invitations?: PendingInvitation[];
+  }>("/v1/members");
+
+  return { members: response.members, invitations: response.invitations ?? [] };
 }
 
 export type InviteMemberResult = { ok: true; email: string } | { ok: false; error: string };

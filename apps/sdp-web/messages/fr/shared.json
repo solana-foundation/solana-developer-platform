@@ -36,7 +36,9 @@
     "columnJoined": "Rejoint le",
     "empty": "Aucun membre pour l'instant.",
     "loadFailed": "Impossible de charger les membres : {error}",
-    "unnamed": "Sans nom"
+    "unnamed": "Sans nom",
+    "statusPending": "En attente",
+    "invitedOn": "Invité le {date}"
   },
   "SharedComponents": {
     "copied": "Copié",

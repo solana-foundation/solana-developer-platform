@@ -129,7 +129,30 @@ export const listMembers = async (c: AppContext) => {
     },
   }));
 
-  return success(c, { members: memberList });
+  // Invitations are returned alongside members because an invited person is
+  // otherwise invisible: they hold no organization_members row until they
+  // accept, so sending an invite appeared to do nothing. Expired ones are
+  // excluded — they cannot be accepted, so listing them only misleads.
+  const invitationRows = await getDb(c.env)
+    .prepare(
+      `SELECT id, email, role, status, created_at, expires_at
+         FROM invitations
+        WHERE organization_id = ? AND status = 'pending' AND expires_at > ?
+        ORDER BY created_at DESC`
+    )
+    .bind(organizationId, new Date().toISOString())
+    .all();
+
+  const invitationList = invitationRows.results.map((row) => ({
+    id: row.id as string,
+    email: row.email as string,
+    role: normalizeOrganizationRole(row.role as string),
+    status: row.status as string,
+    createdAt: row.created_at as string,
+    expiresAt: row.expires_at as string,
+  }));
+
+  return success(c, { members: memberList, invitations: invitationList });
 };
 
 export const inviteMember = async (c: AppContext) => {
