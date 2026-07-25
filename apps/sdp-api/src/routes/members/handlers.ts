@@ -437,6 +437,24 @@ export const acceptInvitation = async (c: AppContext) => {
     throw new AppError("EXPIRED_INVITATION", "Invitation has expired");
   }
 
+  // Claim the invitation before creating anything. The status check above is a
+  // read, so on its own it leaves a window in which a concurrent revocation —
+  // or a second acceptance — can act on a row this request still believes is
+  // pending. Moving the transition to a conditional write makes exactly one
+  // caller win, and a loser here has created no user or membership to undo.
+  const claimed = await getDb(c.env)
+    .prepare(
+      `UPDATE invitations
+          SET status = 'accepted', accepted_at = sdp_datetime_now()
+        WHERE id = ? AND status = 'pending'`
+    )
+    .bind(invitation.id)
+    .run();
+
+  if (claimed === 0) {
+    throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
+  }
+
   // Check if user exists
   let user = await getDb(c.env)
     .prepare("SELECT id, email FROM users WHERE email = ?")
@@ -465,14 +483,6 @@ export const acceptInvitation = async (c: AppContext) => {
      VALUES (?, ?, ?, ?, 'active')`
     )
     .bind(memberId, invitation.organization_id, user.id, normalizeOrganizationRole(invitation.role))
-    .run();
-
-  // Mark invitation as accepted
-  await getDb(c.env)
-    .prepare(
-      "UPDATE invitations SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?"
-    )
-    .bind(invitation.id)
     .run();
 
   // Audit log
@@ -607,50 +617,65 @@ export const revokeInvitation = async (c: AppContext) => {
     throw badRequest("Only a pending invitation can be revoked");
   }
 
-  // Revoke in Clerk first, and refuse to record a local revocation we could not
-  // carry out there. Clerk mints the acceptance link, so marking our row revoked
-  // while that link stays live would leave the invite redeemable — and its
-  // membership webhook would then activate a user we believe we rejected.
-  const clerk = c.get("clerk");
-  const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
-  if (!clerkOrgId) {
-    throw badRequest("Organization is not linked to Clerk");
-  }
-
-  const clerkService = new ClerkOrganizationsService(c.env);
-  const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
-  const match = pending.find(
-    (entry) => entry.email_address?.toLowerCase() === invitation.email.toLowerCase()
-  );
-
-  if (match) {
-    // An API key has no Clerk user of its own. Clerk's own inviter_id is the
-    // most reliable fallback: it is a valid Clerk user by construction, and it
-    // still resolves when invited_by is the "system" sentinel recorded for
-    // invitations an API key sent without a created_by user.
-    const requestingUserId =
-      clerk?.clerkUserId ??
-      match.inviter_id ??
-      (await getClerkUserId(getDb(c.env), invitation.invited_by));
-
-    if (!requestingUserId) {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "Cannot revoke this invitation: no Clerk user is available to attribute the revocation to"
-      );
-    }
-
-    await clerkService.revokeOrganizationInvitation({
-      organizationId: clerkOrgId,
-      invitationId: match.id,
-      requestingUserId,
-    });
-  }
-
-  await getDb(c.env)
-    .prepare("UPDATE invitations SET status = 'revoked' WHERE id = ?")
+  // Claim the row before calling Clerk. Revoking in Clerk first leaves a window
+  // in which an acceptance consumes the still-pending local token and creates a
+  // membership that the local update below never removes, leaving the invitee
+  // active against a revoked invitation. A conditional write closes that window.
+  const claimed = await getDb(c.env)
+    .prepare("UPDATE invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'")
     .bind(invitation.id)
     .run();
+
+  if (claimed === 0) {
+    throw badRequest("Only a pending invitation can be revoked");
+  }
+
+  try {
+    const clerk = c.get("clerk");
+    const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+    if (!clerkOrgId) {
+      throw badRequest("Organization is not linked to Clerk");
+    }
+
+    const clerkService = new ClerkOrganizationsService(c.env);
+    const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
+    const match = pending.find(
+      (entry) => entry.email_address?.toLowerCase() === invitation.email.toLowerCase()
+    );
+
+    if (match) {
+      // An API key has no Clerk user of its own. Clerk's own inviter_id is the
+      // most reliable fallback: it is a valid Clerk user by construction, and it
+      // still resolves when invited_by is the "system" sentinel recorded for
+      // invitations an API key sent without a created_by user.
+      const requestingUserId =
+        clerk?.clerkUserId ??
+        match.inviter_id ??
+        (await getClerkUserId(getDb(c.env), invitation.invited_by));
+
+      if (!requestingUserId) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          "Cannot revoke this invitation: no Clerk user is available to attribute the revocation to"
+        );
+      }
+
+      await clerkService.revokeOrganizationInvitation({
+        organizationId: clerkOrgId,
+        invitationId: match.id,
+        requestingUserId,
+      });
+    }
+  } catch (error) {
+    // Clerk mints the acceptance link, so a local revocation we could not carry
+    // out there would leave the invite redeemable while we report it revoked.
+    // Release the claim so the state stays truthful and the caller can retry.
+    await getDb(c.env)
+      .prepare("UPDATE invitations SET status = 'pending' WHERE id = ? AND status = 'revoked'")
+      .bind(invitation.id)
+      .run();
+    throw error;
+  }
 
   const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
