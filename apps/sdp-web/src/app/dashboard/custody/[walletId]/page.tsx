@@ -492,22 +492,34 @@ export async function WalletBalancesSection({
  * only asset restriction rides on one of those is still counted rather than
  * appearing unrestricted.
  */
+/**
+ * Mints the profile plainly permits — the only ones honest to render under
+ * "Allowed assets".
+ *
+ * Excluded, because each states something other than "allowed":
+ *   - any rule whose action is deny or approval_required
+ *   - every approval rule, which gates its mints on approval regardless of
+ *     whether an action is set; listing those as allowed would tell an
+ *     operator the opposite of what the evaluator enforces
+ *
+ * Amount rules are included when they permit, since an amount cap scoped to a
+ * mint still allows that mint.
+ */
 function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
   const mints = new Set<string>();
 
   for (const rule of policy?.rules ?? []) {
+    if (rule.kind === "approval") {
+      continue;
+    }
     if (rule.action && rule.action !== "allow") {
       continue;
     }
+    if (rule.kind !== "asset" && rule.kind !== "amount") {
+      continue;
+    }
 
-    const scoped =
-      rule.kind === "asset" || rule.kind === "amount"
-        ? (rule.assets ?? (rule.asset ? [rule.asset] : []))
-        : rule.kind === "approval"
-          ? (rule.assets ?? [])
-          : [];
-
-    for (const mint of scoped) {
+    for (const mint of rule.assets ?? (rule.asset ? [rule.asset] : [])) {
       mints.add(mint);
     }
   }
@@ -521,9 +533,10 @@ function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolea
     policy.destinationAllowlist.length > 0 ||
     Boolean(policy.maxTransferAmount) ||
     Boolean(policy.maxDailyAmount) ||
-    // Without this a profile restricted only by asset reported "allow by
-    // default", which is the opposite of what it enforces.
-    walletPolicyAssets(policy).length > 0
+    // Any rule at all is a restriction. Deriving this from the allowed-asset
+    // list instead would report "allow by default" for a profile whose only
+    // rule denies or gates on approval — the opposite of what it enforces.
+    (policy.rules?.length ?? 0) > 0
   );
 }
 
