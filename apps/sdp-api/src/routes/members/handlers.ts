@@ -73,7 +73,9 @@ function resolveInviteRedirectUrl(env: Env): string | undefined {
   if (!base) {
     return undefined;
   }
-  return `${base}/members`;
+  // Members live on the settings page. /members only redirects there, so
+  // pointing at it made every accepted invite take an extra hop.
+  return `${base}/dashboard/settings`;
 }
 
 function randomBase64Url(byteLength: number): string {
@@ -102,8 +104,35 @@ function randomBase64Url(byteLength: number): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+const MEMBERS_DEFAULT_PAGE_SIZE = 25;
+const MEMBERS_MAX_PAGE_SIZE = 100;
+
+function resolveMembersPaging(c: AppContext): { page: number; pageSize: number } {
+  const rawPage = Number.parseInt(c.req.query("page") ?? "", 10);
+  const rawPageSize = Number.parseInt(c.req.query("pageSize") ?? "", 10);
+
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+  const pageSize =
+    Number.isFinite(rawPageSize) && rawPageSize > 0
+      ? Math.min(rawPageSize, MEMBERS_MAX_PAGE_SIZE)
+      : MEMBERS_DEFAULT_PAGE_SIZE;
+
+  return { page, pageSize };
+}
+
 export const listMembers = async (c: AppContext) => {
-  const { organizationId } = resolveActor(c);
+  const { organizationId, userId: actorUserId } = resolveActor(c);
+  const { page, pageSize } = resolveMembersPaging(c);
+
+  const totalRow = await getDb(c.env)
+    .prepare(
+      `SELECT COUNT(*) as total
+         FROM organization_members
+        WHERE organization_id = ? AND status = 'active'`
+    )
+    .bind(organizationId)
+    .first<{ total: number }>();
+  const total = Number(totalRow?.total ?? 0);
 
   const results = await getDb(c.env)
     .prepare(
@@ -112,9 +141,10 @@ export const listMembers = async (c: AppContext) => {
      FROM organization_members om
      JOIN users u ON om.user_id = u.id
      WHERE om.organization_id = ? AND om.status = 'active'
-     ORDER BY om.created_at ASC`
+     ORDER BY om.created_at ASC
+     LIMIT ? OFFSET ?`
     )
-    .bind(organizationId)
+    .bind(organizationId, pageSize, (page - 1) * pageSize)
     .all();
 
   const memberList = results.results.map((row) => ({
@@ -122,6 +152,9 @@ export const listMembers = async (c: AppContext) => {
     role: normalizeOrganizationRole(row.role as string),
     status: row.status as string,
     createdAt: row.created_at as string,
+    // The caller cannot reliably work this out: it holds emails, not the
+    // actor's user id, and matching on email is the wrong key.
+    isSelf: Boolean(actorUserId) && row.user_id === actorUserId,
     user: {
       id: row.user_id as string,
       email: row.email as string,
@@ -129,8 +162,93 @@ export const listMembers = async (c: AppContext) => {
     },
   }));
 
-  return success(c, { members: memberList });
+  // Invitations are returned alongside members because an invited person is
+  // otherwise invisible: they hold no organization_members row until they
+  // accept, so sending an invite appeared to do nothing. Expired ones are
+  // excluded — they cannot be accepted, so listing them only misleads.
+  const invitationRows = await getDb(c.env)
+    .prepare(
+      `SELECT id, email, role, status, created_at, expires_at
+         FROM invitations
+        WHERE organization_id = ? AND status = 'pending' AND expires_at > ?
+        ORDER BY created_at DESC`
+    )
+    .bind(organizationId, new Date().toISOString())
+    .all();
+
+  // Clerk mints the accept link and we only keep a hash of our own token, so
+  // the shareable URL has to come from Clerk. Delivery of the invitation email
+  // is not observable from here, so surfacing the link is the only way an
+  // admin can unblock someone whose mail never arrived.
+  const acceptUrlByEmail = await resolveClerkInviteUrls(c, organizationId);
+
+  const invitationList = invitationRows.results.map((row) => ({
+    id: row.id as string,
+    email: row.email as string,
+    role: normalizeOrganizationRole(row.role as string),
+    status: row.status as string,
+    createdAt: row.created_at as string,
+    expiresAt: row.expires_at as string,
+    acceptUrl: acceptUrlByEmail.get((row.email as string).toLowerCase()) ?? null,
+  }));
+
+  const adminCountRow = await getDb(c.env)
+    .prepare(
+      `SELECT COUNT(*) as total
+         FROM organization_members
+        WHERE organization_id = ? AND status = 'active' AND role = 'admin'`
+    )
+    .bind(organizationId)
+    .first<{ total: number }>();
+
+  return success(c, {
+    members: memberList,
+    invitations: invitationList,
+    meta: {
+      total,
+      page,
+      pageSize,
+      hasMore: page * pageSize < total,
+      // Counted across the organization, not the page, so the last-admin rule
+      // is right even when admins fall on a page the caller is not viewing.
+      activeAdminCount: Number(adminCountRow?.total ?? 0),
+    },
+  });
 };
+
+/**
+ * Best-effort lookup of Clerk's accept URLs, keyed by email. A Clerk outage
+ * must not take the member list down with it, so a failure degrades to no
+ * links rather than an error.
+ */
+async function resolveClerkInviteUrls(
+  c: AppContext,
+  organizationId: string
+): Promise<Map<string, string>> {
+  const urls = new Map<string, string>();
+
+  try {
+    const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+    if (!clerkOrgId) {
+      return urls;
+    }
+
+    const clerkService = new ClerkOrganizationsService(c.env);
+    for (const invitation of await clerkService.listPendingOrganizationInvitations(clerkOrgId)) {
+      if (invitation.email_address && invitation.url) {
+        urls.set(invitation.email_address.toLowerCase(), invitation.url);
+      }
+    }
+  } catch (error) {
+    console.error("listMembers: failed to resolve Clerk invitation URLs", {
+      requestId: c.get("requestId"),
+      organizationId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return urls;
+}
 
 export const inviteMember = async (c: AppContext) => {
   const { organizationId, userId, apiKeyId } = resolveActor(c);
@@ -361,18 +479,53 @@ export const removeMember = async (c: AppContext) => {
 
   // Ensure member belongs to same org
   const member = await getDb(c.env)
-    .prepare("SELECT id, user_id FROM organization_members WHERE id = ? AND organization_id = ?")
+    .prepare(
+      `SELECT id, user_id, role, status
+         FROM organization_members
+        WHERE id = ? AND organization_id = ?`
+    )
     .bind(memberId, organizationId)
-    .first<{ id: string; user_id: string }>();
+    .first<{ id: string; user_id: string; role: string; status: string }>();
 
   if (!member) {
     throw notFound("Member");
+  }
+
+  if (member.status !== "active") {
+    throw badRequest("Member has already been removed");
+  }
+
+  // Removing yourself revokes your own sessions mid-request and, for a sole
+  // admin, leaves the organization with nobody able to administer it.
+  if (userId && member.user_id === userId) {
+    throw badRequest("You cannot remove yourself from the organization");
+  }
+
+  if (normalizeOrganizationRole(member.role) === "admin") {
+    const adminCount = await getDb(c.env)
+      .prepare(
+        `SELECT COUNT(*) as total
+           FROM organization_members
+          WHERE organization_id = ? AND status = 'active' AND role = 'admin'`
+      )
+      .bind(organizationId)
+      .first<{ total: number }>();
+
+    if (Number(adminCount?.total ?? 0) <= 1) {
+      throw badRequest("The last admin cannot be removed");
+    }
   }
 
   await getDb(c.env)
     .prepare("UPDATE organization_members SET status = 'removed' WHERE id = ?")
     .bind(memberId)
     .run();
+
+  // Clerk drives sign-in, so leaving the membership there would keep the
+  // organization visible in its switcher even though our API rejects it.
+  await removeClerkMembership(c, organizationId, member.user_id).catch((error) =>
+    console.error("Failed to remove Clerk membership after member removal:", error)
+  );
 
   const sessionService = new SessionService(getDb(c.env));
   await sessionService
@@ -393,3 +546,99 @@ export const removeMember = async (c: AppContext) => {
 
   return noContent(c);
 };
+
+export const revokeInvitation = async (c: AppContext) => {
+  const { invitationId } = c.req.param();
+  const { organizationId, userId, apiKeyId } = resolveActor(c);
+
+  const invitation = await getDb(c.env)
+    .prepare(
+      `SELECT id, email, status
+         FROM invitations
+        WHERE id = ? AND organization_id = ?`
+    )
+    .bind(invitationId, organizationId)
+    .first<{ id: string; email: string; status: string }>();
+
+  // Scoped by organization so an id from another org reads as missing rather
+  // than as a permission failure.
+  if (!invitation) {
+    throw notFound("Invitation");
+  }
+
+  if (invitation.status !== "pending") {
+    throw badRequest("Only a pending invitation can be revoked");
+  }
+
+  // Revoke in Clerk first: leaving a live accept link behind while our own
+  // record says revoked would let the invite still be redeemed.
+  const clerk = c.get("clerk");
+  const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+  if (clerkOrgId && clerk?.clerkUserId) {
+    const clerkService = new ClerkOrganizationsService(c.env);
+    const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
+    const match = pending.find(
+      (entry) => entry.email_address?.toLowerCase() === invitation.email.toLowerCase()
+    );
+
+    if (match) {
+      await clerkService.revokeOrganizationInvitation({
+        organizationId: clerkOrgId,
+        invitationId: match.id,
+        requestingUserId: clerk.clerkUserId,
+      });
+    }
+  }
+
+  await getDb(c.env)
+    .prepare("UPDATE invitations SET status = 'revoked' WHERE id = ?")
+    .bind(invitation.id)
+    .run();
+
+  const auditService = new AuditService(getDb(c.env));
+  await auditService.log(c, {
+    action: "revoke",
+    resourceType: "invitation",
+    resourceId: invitation.id,
+    metadata: { email: invitation.email },
+    organizationId,
+    userId: userId || undefined,
+    apiKeyId: apiKeyId || undefined,
+  });
+
+  return noContent(c);
+};
+
+/**
+ * Mirrors a removal into Clerk. Best effort: our own membership row is already
+ * the gate that clerk-auth enforces, so a Clerk failure must not fail the
+ * removal and leave the two out of step in the other direction.
+ */
+async function removeClerkMembership(
+  c: AppContext,
+  organizationId: string,
+  userId: string
+): Promise<void> {
+  const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+  if (!clerkOrgId) {
+    return;
+  }
+
+  const identity = await getDb(c.env)
+    .prepare(
+      `SELECT provider_user_id
+         FROM auth_user_identities
+        WHERE provider = 'clerk' AND user_id = ?`
+    )
+    .bind(userId)
+    .first<{ provider_user_id: string }>();
+
+  if (!identity?.provider_user_id) {
+    return;
+  }
+
+  await new ClerkOrganizationsService(c.env).deleteOrganizationMembership({
+    organizationId: clerkOrgId,
+    userId: identity.provider_user_id,
+  });
+}
