@@ -27,6 +27,18 @@ function roleLabel(role: string, t: Translate): string {
   return role === "admin" ? t("Shared.members.roleAdmin") : t("Shared.members.roleMember");
 }
 
+/**
+ * A misconfigured Clerk JWT template can store an unsubstituted placeholder —
+ * literally `{{user.primary_email_address.email_address}}` — as a user's
+ * email. Printing that verbatim reads as a rendering bug rather than as the
+ * data problem it is, so anything that is not an address is not shown as one.
+ */
+function displayEmail(value: string): string {
+  const trimmed = value?.trim() ?? "";
+  const looksLikeAddress = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+  return looksLikeAddress ? trimmed : "—";
+}
+
 export async function MembersSection() {
   const t = await getTranslations();
 
@@ -71,22 +83,32 @@ export async function MembersSection() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {members.map((member) => (
-                <TableRow key={member.id}>
-                  <TableCell className="min-w-0">
-                    <span className="block truncate font-medium text-primary text-sm">
-                      {member.user.name?.trim() || t("Shared.members.unnamed")}
-                    </span>
-                    <span className="block truncate text-muted text-xs">{member.user.email}</span>
-                  </TableCell>
-                  <TableCell className="text-secondary text-sm">
-                    {roleLabel(member.role, t)}
-                  </TableCell>
-                  <TableCell className="text-secondary text-sm">
-                    {formatJoined(member.createdAt)}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {members.map((member) => {
+                const name = member.user.name?.trim();
+                const email = displayEmail(member.user.email);
+
+                return (
+                  <TableRow key={member.id}>
+                    <TableCell className="min-w-0">
+                      {/* Without a name the email is the identity, so it moves
+                          up rather than sitting under an "Unnamed" placeholder
+                          that says nothing and reads as an error. */}
+                      <span className="block truncate font-medium text-primary text-sm">
+                        {name || email}
+                      </span>
+                      {name ? (
+                        <span className="block truncate text-muted text-xs">{email}</span>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-secondary text-sm">
+                      {roleLabel(member.role, t)}
+                    </TableCell>
+                    <TableCell className="text-secondary text-sm">
+                      {formatJoined(member.createdAt)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
 
               {/* Invited people hold no membership row until they accept, so
                   without this an invite looks like it did nothing. */}

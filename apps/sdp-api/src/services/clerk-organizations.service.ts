@@ -7,6 +7,8 @@ export interface ClerkOrganizationInvitation {
   role: string;
   status: string;
   created_at?: number;
+  /** Shareable accept link Clerk mints; the only copy that exists. */
+  url?: string;
 }
 
 export interface ClerkOrganization {
@@ -78,6 +80,32 @@ export class ClerkOrganizationsService {
       {
         method: "POST",
         body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  async listPendingOrganizationInvitations(
+    organizationId: string
+  ): Promise<ClerkOrganizationInvitation[]> {
+    const response = await this.request<
+      { data?: ClerkOrganizationInvitation[] } | ClerkOrganizationInvitation[]
+    >(`/organizations/${organizationId}/invitations?status=pending&limit=100`);
+
+    // Clerk has returned both a bare array and a { data } envelope across
+    // versions, so accept either rather than depending on the current shape.
+    return Array.isArray(response) ? response : (response.data ?? []);
+  }
+
+  async revokeOrganizationInvitation(params: {
+    organizationId: string;
+    invitationId: string;
+    requestingUserId: string;
+  }): Promise<ClerkOrganizationInvitation> {
+    return this.request<ClerkOrganizationInvitation>(
+      `/organizations/${params.organizationId}/invitations/${params.invitationId}/revoke`,
+      {
+        method: "POST",
+        body: JSON.stringify({ requesting_user_id: params.requestingUserId }),
       }
     );
   }
