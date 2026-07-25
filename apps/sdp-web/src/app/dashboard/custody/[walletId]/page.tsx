@@ -3,6 +3,7 @@ import type {
   CustodyWalletMetadataResponse,
   CustodyWalletTokenBalance,
   PaymentWalletPolicy,
+  PolicyRuleAction,
 } from "@sdp/types";
 import { SlidersHorizontal } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
@@ -480,15 +481,79 @@ export async function WalletBalancesSection({
  * source of truth for allowed assets; destinationAllowlist and the amount caps
  * are stored separately and say nothing about which tokens are permitted.
  */
+/**
+ * Mints named by an allow-action asset rule — the only rules that express an
+ * allowlist, and so the only ones honest to render under "Allowed assets".
+ *
+ * An asset rule can equally carry `deny` or `approval_required`, and listing
+ * those mints as allowed would state the opposite of what the profile
+ * enforces — the worst kind of wrong on a custody screen.
+ *
+ * Other kinds are excluded because they say something different: `amount`
+ * rules only cap the mints they name, leaving other assets transferable, and
+ * `approval` rules gate rather than permit. A profile restricted solely by one
+ * of those still reads as restricted — see policyRuleRestricts, which
+ * classifies rules independently of this list.
+ */
 function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
   const mints = new Set<string>();
+
   for (const rule of policy?.rules ?? []) {
     if (rule.kind !== "asset") continue;
+    if (rule.action && rule.action !== "allow") continue;
+
     for (const mint of rule.assets ?? (rule.asset ? [rule.asset] : [])) {
       mints.add(mint);
     }
   }
+
   return [...mints];
+}
+
+/**
+ * Whether a rule can produce anything other than `allow`.
+ *
+ * This mirrors evaluatePolicyRule in the API's policy-evaluation service. Two
+ * details there drive the shape below:
+ *
+ * 1. An explicit `action` is authoritative for every kind — the evaluator
+ *    applies it verbatim and only falls back to a per-kind default when the
+ *    action is absent. So an `approval` rule pinned to `allow` permits, and a
+ *    `review` or `provider_approval_required` action restricts on any kind.
+ * 2. A rule with no criteria is not inert. `asset` with no assets, `amount`
+ *    with no bounds and `destination` with neither list all resolve to
+ *    `review`, which is a restriction rather than a no-op.
+ */
+const RESTRICTIVE_RULE_ACTIONS = new Set<PolicyRuleAction>([
+  "deny",
+  "approval_required",
+  "provider_approval_required",
+  "review",
+]);
+
+function policyRuleRestricts(rule: NonNullable<PaymentWalletPolicy["rules"]>[number]): boolean {
+  if (rule.action) {
+    return RESTRICTIVE_RULE_ACTIONS.has(rule.action);
+  }
+
+  switch (rule.kind) {
+    case "approval":
+      // Defaults to approval_required rather than allow.
+      return true;
+    case "amount":
+      // Denies outside its bounds, and reviews when it has none.
+      return true;
+    case "destination":
+      // Denies on a blocklist hit or outside an allowlist, reviews when empty.
+      return true;
+    case "asset":
+      // Allows on a match and abstains otherwise, so it only restricts when it
+      // names nothing and falls through to review.
+      return !(rule.assets?.length || rule.asset);
+    default:
+      // always / operation_family / operation_type permit on a match.
+      return false;
+  }
 }
 
 function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
@@ -497,9 +562,10 @@ function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolea
     policy.destinationAllowlist.length > 0 ||
     Boolean(policy.maxTransferAmount) ||
     Boolean(policy.maxDailyAmount) ||
-    // Without this a profile restricted only by asset reported "allow by
-    // default", which is the opposite of what it enforces.
-    walletPolicyAssets(policy).length > 0
+    // Operations matching no rule fall through to the policy default, so a
+    // non-allow default is itself a restriction.
+    (policy.defaultAction !== undefined && policy.defaultAction !== "allow") ||
+    (policy.rules ?? []).some(policyRuleRestricts)
   );
 }
 

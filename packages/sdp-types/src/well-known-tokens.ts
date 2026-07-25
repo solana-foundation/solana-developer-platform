@@ -51,9 +51,16 @@ export const SOL_MINT = "So11111111111111111111111111111111111111112";
  * separate deployments, so a token appears on a cluster only when it has a
  * verified mint there.
  *
- * Every entry — address, decimals and owning token program — is checked against
- * chain by the well-known token conformance test. Add tokens by running that
- * test, never by copying an address from a chat or a search result.
+ * Every entry here — address, decimals and owning token program — was verified
+ * against mainnet and devnet before being added, which is how USDG was found to
+ * be a Token-2022 mint and how devnet USDS was rejected for having different
+ * decimals than its mainnet counterpart.
+ *
+ * There is no automated conformance check yet. Until there is, verify a new
+ * entry against chain yourself with getAccountInfo (jsonParsed) on the target
+ * cluster and confirm the account is a mint, its decimals match, and its owner
+ * matches the declared tokenProgram. Never add an address copied from a chat or
+ * a search result: spoofed tokens share the name and symbol of the real asset.
  */
 export const WELL_KNOWN_TOKENS = {
   SOL: {
