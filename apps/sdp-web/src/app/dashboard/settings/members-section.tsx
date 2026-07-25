@@ -64,7 +64,8 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
   const isEmpty = members.length === 0 && invitations.length === 0;
 
   return (
-    <Card>
+    // Anchored so the retired /dashboard/members route can deep-link here.
+    <Card id="members" className="scroll-mt-6">
       <CardHeader>
         <CardTitle>{t("Shared.members.title")}</CardTitle>
         <CardDescription>{t("Shared.members.description")}</CardDescription>
