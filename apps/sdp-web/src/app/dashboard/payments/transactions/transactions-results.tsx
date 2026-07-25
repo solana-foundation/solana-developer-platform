@@ -450,7 +450,11 @@ export function TransactionsResults({
           serverFilters.asset ||
           serverFilters.provider ||
           serverFilters.from ||
-          serverFilters.to
+          serverFilters.to ||
+          // Excluding observed deposits can be the sole reason a wallet looks
+          // empty, so the empty state must offer to clear filters rather than
+          // claim there is nothing to show.
+          !serverFilters.includeObserved
       ),
     [serverFilters]
   );

@@ -344,7 +344,11 @@ export function TransactionsWorkspace({
       displayFilters.asset ||
       displayFilters.provider ||
       displayFilters.from ||
-      displayFilters.to
+      displayFilters.to ||
+      // Counted by countActiveTransactionFilters, so it has to open the panel
+      // too. Otherwise excluding observed deposits shows an active-filter badge
+      // over a collapsed panel with no visible cause.
+      !displayFilters.includeObserved
   );
   const [filtersOpen, setFiltersOpen] = useState(hasAdvancedFilter);
   const debouncedSearch = useDebounce(searchValue.trim(), 300);
