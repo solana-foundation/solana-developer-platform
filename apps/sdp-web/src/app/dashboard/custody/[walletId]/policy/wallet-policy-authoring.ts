@@ -8,6 +8,7 @@ import {
   type SdpEnvironment,
   type WalletOperationFamily,
   WELL_KNOWN_TOKENS,
+  type WellKnownTokenCategory,
   type WellKnownTokenSymbol,
   wellKnownMint,
 } from "@sdp/types";
@@ -31,6 +32,9 @@ export interface OperationTypeRuleInput {
 export interface PolicyAssetOption {
   token: string;
   mint: string;
+  /** Full token name, shown under the symbol when the catalogue knows it. */
+  name?: string;
+  category?: WellKnownTokenCategory;
   /** Only wallet holdings carry a balance; well-known mints are offered even when the wallet holds none. */
   uiAmount?: string;
   source: "wallet" | "well-known";
@@ -55,10 +59,17 @@ export function buildPolicyAssetOptions(
 
   const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
   for (const symbol of Object.keys(WELL_KNOWN_TOKENS) as WellKnownTokenSymbol[]) {
+    const token = WELL_KNOWN_TOKENS[symbol];
     const mint = wellKnownMint(symbol, cluster);
     // Tokens without a mint on this cluster (e.g. USDT on devnet) must not be offered.
     if (!mint || options.has(mint)) continue;
-    options.set(mint, { token: WELL_KNOWN_TOKENS[symbol].symbol, mint, source: "well-known" });
+    options.set(mint, {
+      token: token.symbol,
+      name: token.name,
+      category: token.category,
+      mint,
+      source: "well-known",
+    });
   }
 
   return [...options.values()];

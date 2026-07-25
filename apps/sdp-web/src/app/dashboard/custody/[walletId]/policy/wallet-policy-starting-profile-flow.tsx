@@ -21,6 +21,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { updateWalletPolicy } from "@/app/dashboard/payments/payments-workspace.data";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -862,14 +863,38 @@ function AssetEditor({
     () => buildPolicyAssetOptions(walletAssets, sdpEnvironment),
     [walletAssets, sdpEnvironment]
   );
-  const matchingWalletAssets = uniqueWalletAssets
-    .filter(
-      (asset) =>
-        !normalizedQuery ||
-        asset.token.toLowerCase().includes(normalizedQuery) ||
-        asset.mint.toLowerCase().includes(normalizedQuery)
-    )
-    .slice(0, 8);
+  const matchingWalletAssets = useMemo(
+    () =>
+      uniqueWalletAssets.filter(
+        (asset) =>
+          !normalizedQuery ||
+          asset.token.toLowerCase().includes(normalizedQuery) ||
+          asset.name?.toLowerCase().includes(normalizedQuery) ||
+          asset.mint.toLowerCase().includes(normalizedQuery)
+      ),
+    [uniqueWalletAssets, normalizedQuery]
+  );
+  // Holdings and suggestions are labelled separately so it stays obvious which
+  // assets the wallet actually holds; the list scrolls rather than truncating,
+  // which used to hide catalogue entries behind an arbitrary cut-off.
+  const assetGroups = useMemo(
+    () =>
+      (
+        [
+          {
+            key: "wallet",
+            label: t("DashboardCustody.policyAssetsInWallet"),
+            items: matchingWalletAssets.filter((asset) => asset.source === "wallet"),
+          },
+          {
+            key: "well-known",
+            label: t("DashboardCustody.policyAssetsCommon"),
+            items: matchingWalletAssets.filter((asset) => asset.source === "well-known"),
+          },
+        ] as const
+      ).filter((group) => group.items.length > 0),
+    [matchingWalletAssets, t]
+  );
   const canAddCustomMint =
     isValidSolanaAddress(query) &&
     !assets.includes(query.trim()) &&
@@ -956,38 +981,54 @@ function AssetEditor({
             aria-multiselectable="true"
             className="absolute z-20 mt-2 w-full overflow-hidden rounded-lg border border-border-default bg-surface-raised shadow-lg"
           >
-            {matchingWalletAssets.length > 0 ? (
-              matchingWalletAssets.map((asset) => {
-                const selected = assets.includes(asset.mint);
-                return (
-                  <button
-                    key={asset.mint}
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    className="flex w-full items-center gap-3 border-b border-border-default px-3 py-2.5 text-left last:border-b-0 hover:bg-surface-sunken"
-                    onClick={() => toggleWalletAsset(asset.mint)}
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium text-primary">{asset.token}</span>
-                      <span className="block truncate text-xs text-muted">{asset.mint}</span>
-                    </span>
-                    {asset.uiAmount ? (
-                      <span className="shrink-0 text-xs text-secondary">{asset.uiAmount}</span>
-                    ) : null}
-                    <span
-                      className={cn(
-                        "flex size-5 shrink-0 items-center justify-center rounded border",
-                        selected
-                          ? "border-primary bg-primary text-on-primary"
-                          : "border-border-strong bg-surface-raised text-transparent"
-                      )}
-                    >
-                      <Check className="size-3.5" />
-                    </span>
-                  </button>
-                );
-              })
+            {assetGroups.length > 0 ? (
+              <div className="max-h-72 overflow-y-auto">
+                {assetGroups.map((group) => (
+                  <div key={group.key}>
+                    <p className="sticky top-0 z-10 bg-surface-raised px-3 pt-2.5 pb-1 font-medium text-[11px] text-muted uppercase tracking-wide">
+                      {group.label}
+                    </p>
+                    {group.items.map((asset) => {
+                      const selected = assets.includes(asset.mint);
+                      return (
+                        <button
+                          key={asset.mint}
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-sunken"
+                          onClick={() => toggleWalletAsset(asset.mint)}
+                        >
+                          <TokenMark mint={asset.mint} symbol={asset.token} size="md" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-primary text-sm font-medium">
+                              {asset.token}
+                            </span>
+                            <span className="block truncate text-muted text-xs">
+                              {asset.name ?? asset.mint}
+                            </span>
+                          </span>
+                          {asset.uiAmount ? (
+                            <span className="shrink-0 text-secondary text-xs tabular-nums">
+                              {asset.uiAmount}
+                            </span>
+                          ) : null}
+                          <span
+                            className={cn(
+                              "flex size-5 shrink-0 items-center justify-center rounded border",
+                              selected
+                                ? "border-primary bg-primary text-on-primary"
+                                : "border-border-strong bg-surface-raised text-transparent"
+                            )}
+                          >
+                            <Check className="size-3.5" />
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
             ) : query.trim() && !canAddCustomMint ? (
               <p className="px-3 py-4 text-sm text-muted">
                 {t("DashboardCustody.policyNoMatchingAssets")}

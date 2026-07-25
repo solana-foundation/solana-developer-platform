@@ -347,4 +347,39 @@ describe("buildPolicyAssetOptions", () => {
 
     expect(options.filter((option) => option.mint === SOL_HOLDING.mint)).toHaveLength(1);
   });
+
+  it("offers the tokens that are genuinely deployed on devnet", () => {
+    const symbols = buildPolicyAssetOptions([], "sandbox").map((option) => option.token);
+
+    expect(symbols).toContain("EURC");
+    expect(symbols).toContain("JitoSOL");
+    expect(symbols).toContain("mSOL");
+    expect(symbols).toContain("bSOL");
+  });
+
+  it("withholds tokens whose devnet address is not the same asset", () => {
+    const symbols = buildPolicyAssetOptions([], "sandbox").map((option) => option.token);
+
+    // An account exists at the USDS address on devnet, but it is a different
+    // mint with 9 decimals; offering it would misscale every amount.
+    expect(symbols).not.toContain("USDS");
+    // These resolve to System Program accounts on devnet rather than mints.
+    expect(symbols).not.toContain("cbBTC");
+    expect(symbols).not.toContain("INF");
+  });
+
+  it("carries the catalogue name and category through to the picker", () => {
+    const usdc = buildPolicyAssetOptions([], "production").find(
+      (option) => option.token === "USDC"
+    );
+
+    expect(usdc).toMatchObject({ name: "USD Coin", category: "stablecoin" });
+  });
+
+  it("labels staked SOL and wrapped assets by category on mainnet", () => {
+    const options = buildPolicyAssetOptions([], "production");
+
+    expect(options.find((o) => o.token === "JitoSOL")?.category).toBe("staked-sol");
+    expect(options.find((o) => o.token === "cbBTC")?.category).toBe("wrapped");
+  });
 });
