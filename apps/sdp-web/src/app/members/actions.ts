@@ -74,7 +74,7 @@ export async function inviteMember(formData: FormData): Promise<InviteMemberResu
     return { ok: false, error: readableApiError(error) };
   }
 
-  // The page lives at /dashboard/members; /members only redirects there.
-  revalidatePath("/dashboard/members");
+  // Members render inside the settings page; /members only redirects there.
+  revalidatePath("/dashboard/settings");
   return { ok: true, email };
 }

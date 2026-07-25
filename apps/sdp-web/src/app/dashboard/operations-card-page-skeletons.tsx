@@ -1,6 +1,6 @@
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
-export function CompactOperationsCardSkeleton({ route }: { route: "allowlist" | "members" }) {
+export function CompactOperationsCardSkeleton({ route }: { route: "allowlist" }) {
   return (
     <div
       className="flex w-full max-w-5xl flex-col gap-6"

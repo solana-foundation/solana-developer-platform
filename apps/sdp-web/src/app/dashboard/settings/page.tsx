@@ -8,6 +8,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
+import { MembersSection } from "./members-section";
 import { OrganizationRpcSettingsForm } from "./organization-rpc-settings-form";
 
 type OrganizationSettings = {
@@ -155,6 +156,10 @@ export default async function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Same gate as the settings form above: canManageOrgSettings resolves to
+          org:write, which is what inviting a member requires. */}
+      {dashboardAccess.capabilities.canManageOrgSettings ? <MembersSection /> : null}
     </div>
   );
 }

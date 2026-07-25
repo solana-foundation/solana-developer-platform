@@ -24,7 +24,6 @@ import {
   Settings2Icon,
   ShieldCheckIcon,
   UsersIcon,
-  UsersRoundIcon,
   WalletIcon,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
@@ -701,9 +700,6 @@ function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  if (pathname.startsWith("/dashboard/members")) {
-    return { title: t("Shared.dashboardShell.members") };
-  }
   if (pathname.startsWith("/dashboard/settings")) {
     return { title: t("Shared.dashboardShell.settings") };
   }
@@ -719,10 +715,6 @@ function ApiKeyNewLoading() {
 
 function ApiKeyEditLoading() {
   return <ApiKeyAuthoringSkeleton route="api-key-edit" />;
-}
-
-function MembersLoading() {
-  return <CompactOperationsCardSkeleton route="members" />;
 }
 
 function AllowlistLoading() {
@@ -802,8 +794,6 @@ function resolvePageLoadingComponent(
       return ApprovalInboxSkeleton;
     case "approval-detail":
       return ApprovalDetailSkeleton;
-    case "members":
-      return MembersLoading;
     case "settings":
       return SettingsPageSkeleton;
     case "allowlist":
@@ -1140,16 +1130,8 @@ export function DashboardShell({
       icon: LibraryIcon,
       external: true,
     },
-    // Members sits with Settings rather than under Manage: it is organization
-    // administration, not a product module. Same org:write gate, which is what
-    // inviting actually requires.
     ...(dashboardAccess.capabilities.canManageOrgSettings
       ? [
-          {
-            label: t("Shared.dashboardShell.members"),
-            href: DASHBOARD_SIDE_NAV_HREFS.members,
-            icon: UsersRoundIcon,
-          },
           {
             label: t("Shared.dashboardShell.settings"),
             href: DASHBOARD_SIDE_NAV_HREFS.settings,
