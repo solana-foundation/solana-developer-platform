@@ -4,20 +4,26 @@ import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
+  ArrowDownLeftIcon,
   ArrowLeftIcon,
   ArrowLeftRightIcon,
+  ArrowUpRightIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   CircleCheckBigIcon,
   CoinsIcon,
+  FileTextIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
   LibraryIcon,
   LockIcon,
   PanelLeftIcon,
   PanelRightIcon,
+  ReceiptTextIcon,
+  RepeatIcon,
   Settings2Icon,
   ShieldCheckIcon,
+  UsersIcon,
   WalletIcon,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
@@ -92,6 +98,8 @@ import { cn } from "@/lib/utils";
 type SubNavItem = {
   label: string;
   href: string;
+  /** Optional so nav groups that have not been given icons keep rendering unchanged. */
+  icon?: LucideIcon;
   disabled?: boolean;
 };
 
@@ -119,23 +127,32 @@ function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[]
     {
       label: t("Shared.dashboardShell.transactions"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.transactions,
+      icon: ReceiptTextIcon,
     },
     {
       label: t("Shared.dashboardShell.counterparty"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
+      icon: UsersIcon,
     },
-    { label: t("Shared.dashboardShell.pay"), href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay },
+    {
+      label: t("Shared.dashboardShell.pay"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay,
+      icon: ArrowUpRightIcon,
+    },
     {
       label: t("Shared.dashboardShell.deposit"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.deposit,
+      icon: ArrowDownLeftIcon,
     },
     {
       label: t("Shared.dashboardShell.requests"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.requests,
+      icon: FileTextIcon,
     },
     {
       label: t("Shared.dashboardShell.recurring"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
+      icon: RepeatIcon,
     },
   ];
 }
@@ -937,7 +954,10 @@ function SidebarGroup({
                           )}
                         />
                         {child.disabled ? (
-                          <span className="flex h-9 flex-1 cursor-not-allowed items-center rounded-lg px-3 text-sm text-tertiary">
+                          <span className="flex h-9 flex-1 cursor-not-allowed items-center gap-2.5 rounded-lg px-3 text-sm text-tertiary">
+                            {child.icon ? (
+                              <child.icon aria-hidden="true" className="size-4 shrink-0" />
+                            ) : null}
                             {child.label}
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
@@ -946,10 +966,13 @@ function SidebarGroup({
                             href={child.href}
                             onClick={onNavigate}
                             className={cn(
-                              "flex h-9 flex-1 items-center rounded-lg px-3 text-sm transition-colors",
+                              "flex h-9 flex-1 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors",
                               childActive ? navItemActive : navItemInactive
                             )}
                           >
+                            {child.icon ? (
+                              <child.icon aria-hidden="true" className="size-4 shrink-0" />
+                            ) : null}
                             {child.label}
                           </DashboardNavigationLink>
                         )}
