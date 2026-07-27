@@ -11,7 +11,7 @@ describe("resolveTokenLabel", () => {
   });
 
   it("falls back to the well-known token symbol", () => {
-    expect(resolveTokenLabel(WELL_KNOWN_TOKENS.USDC.mints.devnet)).toBe("USDC");
+    expect(resolveTokenLabel(WELL_KNOWN_TOKENS.USDC.mints.devnet.address)).toBe("USDC");
   });
 
   it("falls back to the mint address when no symbol is known", () => {

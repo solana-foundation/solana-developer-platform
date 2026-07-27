@@ -479,7 +479,7 @@
     "policySelectedAssets": "Actifs sélectionnés",
     "policySelectedAssetCount": "{count} sélectionné(s)",
     "policyCustomMint": "Mint personnalisé",
-    "policyNoMatchingAssets": "Aucun actif de portefeuille correspondant.",
+    "policyNoMatchingAssets": "Aucun actif correspondant.",
     "policyAddCustomMint": "Ajouter un mint personnalisé",
     "policyInvalidMint": "Entrez une adresse de mint Solana valide.",
     "policyDuplicateAsset": "Cet actif est déjà sélectionné.",
@@ -776,6 +776,8 @@
     "apiKeySaveFailed": "La clé API n'a pas pu être enregistrée : {error}",
     "apiKeyEditMissingId": "L'identifiant de la clé API est requis pour enregistrer les modifications.",
     "apiKeyReplaceBindingsConfirmationRequired": "Confirmez Remplacer les liaisons avant d'enregistrer cette modification de liaison.",
-    "apiKeyClearBindingsConfirmationRequired": "Confirmez Supprimer les liaisons avant d'enregistrer cette modification de liaison."
+    "apiKeyClearBindingsConfirmationRequired": "Confirmez Supprimer les liaisons avant d'enregistrer cette modification de liaison.",
+    "policyAssetsInWallet": "Dans ce portefeuille",
+    "policyAssetsCommon": "Jetons courants"
   }
 }

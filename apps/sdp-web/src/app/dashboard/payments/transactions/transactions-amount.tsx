@@ -1,6 +1,6 @@
 import { type PaymentTransferSummary, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { cn } from "@/lib/utils";
-import { formatDisplayAmount, shortenAddress } from "../payments-overview.utils";
+import { formatDisplayAmount, resolveTransferTokenLabel } from "../payments-overview.utils";
 
 type TransactionAmountFields = Pick<PaymentTransferSummary, "amount" | "token">;
 
@@ -16,7 +16,7 @@ export function getTransactionAmountPresentation(
 ): TransactionAmountPresentation {
   const token = transfer.token?.trim() || undefined;
   const knownSymbol = token ? WELL_KNOWN_TOKEN_BY_MINT.get(token)?.symbol : undefined;
-  const displayToken = knownSymbol ?? (token && token.length > 10 ? shortenAddress(token) : token);
+  const displayToken = resolveTransferTokenLabel(token);
   const display = formatDisplayAmount(transfer.amount, displayToken, locale);
   const full = formatDisplayAmount(transfer.amount, knownSymbol ?? token, locale);
 

@@ -1,11 +1,11 @@
 import {
   type CustodyWalletAggregate,
   type CustodyWalletTokenBalance,
+  SOL_DECIMALS,
   SOL_MINT,
   type PaymentTransferSummary as TransferRecord,
   type PaymentsDashboardWallet as WalletRecord,
   WELL_KNOWN_TOKEN_BY_MINT,
-  WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { toTitleCase } from "../activity-format-utils";
@@ -69,6 +69,40 @@ export function shortenAddress(address: string): string {
   return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
 }
 
+/**
+ * Turns a transfer's `token` field into something displayable. The field holds a
+ * mint address, so rendering it directly puts a 44-character base58 string in a
+ * table cell. Every surface that shows a transfer token should go through here,
+ * otherwise the same transfer reads as "USDC" on one screen and
+ * "4zMMC9srt5…" on another.
+ */
+export function resolveTransferTokenLabel(
+  token: string | null | undefined,
+  /**
+   * Symbols the caller has already resolved, keyed by mint. Surfaces that load
+   * balances get this for free and can name tokens the catalogue has never
+   * heard of; surfaces without it fall back to the shortened mint.
+   */
+  symbolsByMint?: Readonly<Record<string, string>>
+): string | undefined {
+  const trimmed = token?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const resolvedSymbol = symbolsByMint?.[trimmed]?.trim();
+  if (resolvedSymbol && resolvedSymbol !== trimmed) {
+    return resolvedSymbol;
+  }
+
+  const knownSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(trimmed)?.symbol;
+  if (knownSymbol) {
+    return knownSymbol;
+  }
+
+  return trimmed.length > 10 ? shortenAddress(trimmed) : trimmed;
+}
+
 const TOKEN_AMOUNT_PATTERN = /^-?\d+(?:\.\d+)?$/;
 
 /**
@@ -103,7 +137,7 @@ export function formatTokenAmount(value: number | string, locale?: string): stri
 }
 
 export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
-  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, WELL_KNOWN_TOKENS.SOL.decimals), locale)} SOL`;
+  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
 }
 
 export function formatDisplayAmount(value?: string, token?: string, locale?: string): string {
@@ -251,8 +285,11 @@ export function resolveTransferFlow(transfer: TransferRecord): {
   receive: string | null;
 } {
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
+  const transferTokenLabel = resolveTransferTokenLabel(transfer.token);
   const cryptoLabel =
-    transfer.amount && transfer.token ? formatDisplayAmount(transfer.amount, transfer.token) : null;
+    transfer.amount && transferTokenLabel
+      ? formatDisplayAmount(transfer.amount, transferTokenLabel)
+      : null;
   const fiatLabel =
     transfer.fiatAmount && transfer.fiatCurrency
       ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
