@@ -29,6 +29,7 @@ import {
 } from "@/lib/ramps";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { useZodForm } from "@/lib/use-zod-form";
+import { type MemoRow, memoRowsToRecord, validateMemoRows } from "../memo";
 import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
@@ -64,6 +65,7 @@ export interface RampWizardConfig<TId extends string = string> {
   stepSchemas: Partial<Record<TId, z.ZodTypeAny>>;
   /** Step at which the quote is created; the wizard then advances to the next step. */
   quoteStepId: TId;
+  memoStepId?: TId;
   selectionSchema: z.ZodTypeAny;
   quoteEndpoint: string;
   buildQuotePayload: (args: RampQuotePayloadArgs) => Record<string, unknown>;
@@ -151,7 +153,7 @@ export function useRampWizard<TId extends string>(
   const [quote, setQuote] = useState<PaymentRampQuote | null>(null);
   const [hostedQuoteLoading, setHostedQuoteLoading] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
-  const [rampsMemo, setRampsMemo] = useState<Record<string, string>>({});
+  const [memoRows, setMemoRows] = useState<MemoRow[]>([]);
   const { values: fields, setField } = useZodForm(rampSelectionSchema, {
     walletId: "",
     amount: "",
@@ -217,11 +219,11 @@ export function useRampWizard<TId extends string>(
     if (isRequirementsStep) {
       return requirements.isComplete;
     }
-    // Block leaving the provider-selection step until the requirements answer has
-    // resolved AND isn't a blocker (fetch error, or an `unsupported` provider for
-    // this counterparty) — otherwise the quote could fire before collected fields
-    // exist / for an unsupported counterparty, or the step could appear under the
-    // user on retry.
+    // Block leaving the step that precedes the requirements insertion until the
+    // requirements answer has resolved AND isn't a blocker (fetch error, or an
+    // `unsupported` provider for this counterparty) — otherwise the quote could
+    // fire before collected fields exist / for an unsupported counterparty, or
+    // the step could appear under the user on retry.
     if (
       requirementsConfig &&
       currentStepId === requirementsConfig.insertAfter &&
@@ -230,9 +232,14 @@ export function useRampWizard<TId extends string>(
     ) {
       return false;
     }
+    if (config.memoStepId !== undefined && currentStepId === config.memoStepId) {
+      return validateMemoRows(memoRows).length === 0;
+    }
     return stepSchema ? stepSchema.safeParse(fields).success : true;
   }, [
     isRequirementsStep,
+    config.memoStepId,
+    memoRows,
     requirements.isComplete,
     requirements.isResolved,
     requirements.blockReason,
@@ -263,7 +270,7 @@ export function useRampWizard<TId extends string>(
           selectedRampPair,
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
           collectedData: requirements.collectedData,
-          rampsMemo,
+          rampsMemo: memoRowsToRecord(memoRows),
         }),
         t
       );
@@ -305,7 +312,7 @@ export function useRampWizard<TId extends string>(
           selectedRampPair,
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
           collectedData: requirements.collectedData,
-          rampsMemo,
+          rampsMemo: memoRowsToRecord(memoRows),
         }),
         t
       );
@@ -313,8 +320,11 @@ export function useRampWizard<TId extends string>(
     } catch {}
   };
 
+  // Only auto-fire the quote while the user sits on the transaction stage —
+  // stepping back to edit selections must not create a quote from mid-edit state.
   useSWR(
     config.advanceRequirementsBeforeQuote &&
+      isLastStep &&
       requirements.onboarding?.status === "ready" &&
       quote === null
       ? ([requirementsConfig?.direction ?? "ramp", "ready-quote"] as const)
@@ -473,8 +483,8 @@ export function useRampWizard<TId extends string>(
     fields,
     setField,
     quote,
-    rampsMemo,
-    setRampsMemo,
+    memoRows,
+    setMemoRows,
     refreshQuote,
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,
