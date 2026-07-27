@@ -3,9 +3,9 @@ import {
   type SolanaCluster,
   WELL_KNOWN_TOKEN_BY_MINT,
   WELL_KNOWN_TOKENS,
+  type WellKnownToken,
   wellKnownDecimals,
   wellKnownMint,
-  type WellKnownToken,
 } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 
