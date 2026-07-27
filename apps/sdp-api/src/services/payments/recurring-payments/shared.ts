@@ -44,7 +44,7 @@ export async function assertRecurringPaymentTokenMint(
   const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
   if (wellKnown) {
     const cluster = getSolanaConfig(env).network;
-    if (wellKnown.isUsdStable && wellKnown.mints[cluster] === mint) {
+    if (wellKnown.isUsdStable && wellKnown.clusters.includes(cluster)) {
       return mint;
     }
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);

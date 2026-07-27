@@ -8,7 +8,7 @@ describe("transaction amount presentation", () => {
   it("uses the human symbol for a well-known mint", () => {
     expect(
       getTransactionAmountPresentation(
-        { amount: "12.5", token: WELL_KNOWN_TOKENS.USDC.mints.devnet },
+        { amount: "12.5", token: WELL_KNOWN_TOKENS.USDC.mints.devnet.address },
         "en-US"
       )
     ).toEqual({

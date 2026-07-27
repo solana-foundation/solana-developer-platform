@@ -66,7 +66,7 @@ describe("home issuance activity", () => {
     const transfer = {
       id: "xfr_1",
       direction: "outbound",
-      token: WELL_KNOWN_TOKENS.USDC.mints.devnet,
+      token: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       amount: "100",
       destination: "wallet_2",
       createdAt: "2026-07-17T15:00:00.000Z",

@@ -1,11 +1,11 @@
 import {
   type CustodyWalletAggregate,
   type CustodyWalletTokenBalance,
+  SOL_DECIMALS,
   SOL_MINT,
   type PaymentTransferSummary as TransferRecord,
   type PaymentsDashboardWallet as WalletRecord,
   WELL_KNOWN_TOKEN_BY_MINT,
-  WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { toTitleCase } from "../activity-format-utils";
@@ -137,7 +137,7 @@ export function formatTokenAmount(value: number | string, locale?: string): stri
 }
 
 export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
-  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, WELL_KNOWN_TOKENS.SOL.decimals), locale)} SOL`;
+  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
 }
 
 export function formatDisplayAmount(value?: string, token?: string, locale?: string): string {
