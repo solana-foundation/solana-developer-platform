@@ -291,9 +291,6 @@ export class TokenService {
   // Token CRUD
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Create a new token
-   */
   async createToken(input: CreateTokenInput): Promise<Token> {
     const id = `tok_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
@@ -482,9 +479,6 @@ export class TokenService {
     };
   }
 
-  /**
-   * Get a token by mint address
-   */
   async getTokenByMint(mintAddress: string): Promise<Token | null> {
     const row = await this.db
       .prepare(
@@ -507,9 +501,6 @@ export class TokenService {
     return this.mapRowToToken(row, extensionState);
   }
 
-  /**
-   * List tokens for a project
-   */
   async listTokens(
     projectId: string,
     options: { status?: TokenStatus; limit?: number; offset?: number } = {}
@@ -561,9 +552,6 @@ export class TokenService {
     };
   }
 
-  /**
-   * Update a token
-   */
   async updateToken(tokenId: string, input: UpdateTokenInput): Promise<Token> {
     const existing = await this._getTokenById(tokenId);
     if (!existing) {
@@ -794,9 +782,6 @@ export class TokenService {
       .run();
   }
 
-  /**
-   * Set token as deployed with mint address and optional ABL list
-   */
   async setTokenDeployed(
     tokenId: string,
     mintAddress: string,
@@ -839,9 +824,6 @@ export class TokenService {
     return updated;
   }
 
-  /**
-   * Update token supply after mint/burn
-   */
   async updateSupply(tokenId: string, delta: string, operation: "mint" | "burn"): Promise<void> {
     const token = await this._getTokenById(tokenId);
     if (!token) {
@@ -878,9 +860,6 @@ export class TokenService {
       .run();
   }
 
-  /**
-   * Set token supply directly from a base-units on-chain value.
-   */
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
       throw new Error("INVALID_SUPPLY");
@@ -906,9 +885,6 @@ export class TokenService {
   // Token Transactions
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Create a token transaction record
-   */
   async createTransaction(input: CreateTokenTransactionInput): Promise<CreateTransactionResult> {
     if (input.idempotencyKey && !input.idempotencyFingerprint) {
       throw badRequest("Missing idempotency fingerprint for idempotency key");
@@ -1110,9 +1086,6 @@ export class TokenService {
     return this.mapRowToTransaction(row);
   }
 
-  /**
-   * Find a token transaction by organization + idempotency key
-   */
   async findTransactionByIdempotency(
     organizationId: string,
     idempotencyKey: string
@@ -1135,9 +1108,6 @@ export class TokenService {
     return this.mapRowToTransaction(row);
   }
 
-  /**
-   * List transactions for a token
-   */
   async listTokenTransactions(
     tokenId: string,
     options: {
@@ -1509,9 +1479,6 @@ export class TokenService {
     return entry;
   }
 
-  /**
-   * Get an allowlist entry by ID
-   */
   async getAllowlistEntry(entryId: string): Promise<TokenAllowlistEntry | null> {
     const row = await this.db
       .prepare(
@@ -1529,9 +1496,6 @@ export class TokenService {
     return this.mapRowToAllowlistEntry(row);
   }
 
-  /**
-   * List allowlist entries for a token
-   */
   async listAllowlistEntries(
     tokenId: string,
     options: {
@@ -1620,9 +1584,6 @@ export class TokenService {
     };
   }
 
-  /**
-   * Check if an address is on the allowlist
-   */
   async isAddressAllowed(tokenId: string, address: string): Promise<boolean> {
     const row = await this.db
       .prepare(
@@ -1654,9 +1615,6 @@ export class TokenService {
     return row?.status ?? null;
   }
 
-  /**
-   * Revoke an allowlist entry
-   */
   async revokeAllowlistEntry(entryId: string): Promise<void> {
     const now = new Date().toISOString();
     await this.db
@@ -1685,9 +1643,6 @@ export class TokenService {
   // Freeze Management
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Freeze an account
-   */
   async freezeAccount(input: FreezeAccountInput): Promise<FrozenAccount> {
     const existing = await this.db
       .prepare(

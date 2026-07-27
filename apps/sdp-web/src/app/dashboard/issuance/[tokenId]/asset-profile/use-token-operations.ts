@@ -22,6 +22,7 @@ import type {
 } from "../token-management-workspace.types";
 import {
   asOptionalString,
+  classifyAuthorityControl,
   createInitialAllowlistForm,
   createInitialAuthorityForm,
   createInitialBurnForm,
@@ -29,7 +30,6 @@ import {
   createInitialFreezeForm,
   createInitialMintForm,
   createInitialSeizeForm,
-  findWalletByPublicKey,
   findWalletByWalletId,
   getBurnValidationErrors,
   getBurnValidationReason,
@@ -48,6 +48,7 @@ import {
   getTokenActionDisabledReasons,
   isPositiveAmount,
   resolveAuthorityAddressForRole,
+  summarizeAuthorityControl,
 } from "../token-management-workspace.utils";
 import { useTokenActionRunner } from "../use-token-action-runner";
 import { fetchTokenAllowlistLabels } from "./allowlist.data";
@@ -339,13 +340,11 @@ export function useTokenOperations({
       authorityWallets,
     });
     const rowWithDisplayedValue = { ...row, value: displayedAuthorityAddress };
-    const controlStatus: PermissionControlStatus = !displayedAuthorityAddress
-      ? "none"
-      : !authorityControlKnown
-        ? "unknown"
-        : findWalletByPublicKey(authorityWallets, displayedAuthorityAddress)
-          ? "sdp"
-          : "external";
+    const controlStatus: PermissionControlStatus = classifyAuthorityControl(
+      displayedAuthorityAddress,
+      authorityWallets,
+      authorityControlKnown
+    );
 
     return {
       ...rowWithDisplayedValue,
@@ -365,21 +364,15 @@ export function useTokenOperations({
     };
   });
 
-  // Roll-up for the overview "Authorities SDP-controlled: N of M" tile and the
-  // permissions-tab external-authority warning. Counts only authorities that are
-  // actually set (control status other than none/unknown).
-  const authoritySummary = (() => {
-    const known = permissionRows.filter(
-      (row) => row.controlStatus === "sdp" || row.controlStatus === "external"
-    );
-    const controlled = known.filter((row) => row.controlStatus === "sdp").length;
-    return {
-      controlled,
-      total: known.length,
-      hasExternal: known.some((row) => row.controlStatus === "external"),
-      known: authorityControlKnown,
-    };
-  })();
+  // Roll-up for the overview "Managed authorities: N of M" tile and the
+  // permissions-tab external-authority warning. Shared with the issuance list's
+  // expanded card so both surfaces count identically.
+  const authoritySummary = summarizeAuthorityControl({
+    token,
+    authorityWallets,
+    controlKnown: authorityControlKnown,
+    t,
+  });
   const displayedMintAuthority = getDisplayedAuthorityAddress({
     token,
     role: "mint",

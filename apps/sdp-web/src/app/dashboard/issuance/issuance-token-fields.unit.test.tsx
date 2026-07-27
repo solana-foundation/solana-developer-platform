@@ -1,10 +1,12 @@
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import type { AuthorityRoleKey } from "./asset-overview-hero";
 import {
-  buildExpandedFields,
+  buildOverviewHeroData,
   getTokenChips,
   type IssuanceTokenView,
 } from "./issuance-token-fields";
@@ -41,8 +43,21 @@ function baseToken(overrides: Partial<IssuanceTokenView> = {}): IssuanceTokenVie
     description: null,
     uri: null,
     signingWalletId: null,
+    mintAuthority: null,
+    metadataAuthority: null,
+    freezeAuthority: null,
+    permanentDelegate: null,
     assetProfile: null,
     ...overrides,
+  };
+}
+
+function wallet(publicKey: string): PaymentsDashboardWallet {
+  return {
+    id: `id_${publicKey}`,
+    walletId: `wid_${publicKey}`,
+    publicKey,
+    label: "Treasury",
   };
 }
 
@@ -63,40 +78,188 @@ const stablecoinProfile: IssuanceTokenView["assetProfile"] = {
   },
 };
 
-describe("buildExpandedFields", () => {
-  it("surfaces stablecoin type-specific fields when a profile is present", () => {
-    const fields = buildExpandedFields(baseToken({ assetProfile: stablecoinProfile }), t, "en");
-    const byLabel = new Map(fields.map((field) => [field.label, field.value]));
+describe("buildOverviewHeroData", () => {
+  const MANAGED = "MANAGEDpubkey1111111111111111111111111111111";
+  const EXTERNAL = "EXTERNALpubkey222222222222222222222222222222";
+  const rowFor = (data: ReturnType<typeof buildOverviewHeroData>, role: AuthorityRoleKey) =>
+    data.authorityRows.find((authorityRow) => authorityRow.role === role);
 
-    expect(byLabel.get(t("DashboardIssuance.list.decimals"))).toBe("6");
-    expect(byLabel.get(t("DashboardIssuance.config.pegTarget"))).toBe("1.00 USD");
-    expect(byLabel.get(t("DashboardIssuance.config.reserveAsset"))).toBe(
-      "Cash & short-dated US Treasury bills"
+  it("resolves each applicable authority's control against the org custody wallets", () => {
+    const data = buildOverviewHeroData(
+      baseToken({
+        mintAuthority: MANAGED,
+        freezeAuthority: MANAGED,
+        metadataAuthority: MANAGED,
+      }),
+      [wallet(MANAGED)],
+      t,
+      "en"
     );
-    expect(byLabel.get(t("DashboardIssuance.config.reserveCustodian"))).toBe(
-      "Meridian Trust Bank, N.A."
-    );
-    // redemptionEnabled is a toggle → rendered as yes/no.
-    expect(byLabel.get(t("DashboardIssuance.config.redemption"))).toBe(
-      t("DashboardIssuance.list.yes")
-    );
-    // Website carries an external link.
-    const website = fields.find((f) => f.label === t("DashboardIssuance.list.website"));
-    expect(website?.href).toBe("https://veritas.finance");
+
+    // mint + freeze + metadata are set & custodied by the org → green (sdp).
+    for (const role of ["mint", "freeze", "metadata"] as const) {
+      const row = rowFor(data, role);
+      expect(row?.applicable).toBe(true);
+      expect(row?.address).toBe(MANAGED);
+      expect(row?.control).toBe("sdp");
+    }
+    // The permanent delegate is unset → not applicable, so the glyph isn't drawn.
+    expect(rowFor(data, "permanentDelegate")?.applicable).toBe(false);
   });
 
-  it("falls back to core fields when there is no asset profile", () => {
-    const fields = buildExpandedFields(baseToken(), t, "en");
-    const labels = fields.map((field) => field.label);
+  it("marks an authority held outside the org as external", () => {
+    const data = buildOverviewHeroData(
+      baseToken({
+        mintAuthority: MANAGED,
+        freezeAuthority: EXTERNAL,
+        metadataAuthority: MANAGED,
+      }),
+      [wallet(MANAGED)],
+      t,
+      "en"
+    );
 
-    expect(labels).toContain(t("DashboardIssuance.list.type"));
-    expect(labels).toContain(t("DashboardIssuance.list.maxSupply"));
-    // No profile means no peg/reserve rows.
-    expect(labels).not.toContain(t("DashboardIssuance.config.pegTarget"));
-    const maxSupply = fields.find((f) => f.label === t("DashboardIssuance.list.maxSupply"));
-    expect(maxSupply?.value).toBe(t("DashboardIssuance.list.unlimited"));
-    const transfers = fields.find((f) => f.label === t("DashboardIssuance.list.transfers"));
-    expect(transfers?.value).toBe(t("DashboardIssuance.list.unrestricted"));
+    expect(rowFor(data, "freeze")?.control).toBe("external");
+    expect(rowFor(data, "mint")?.control).toBe("sdp");
+    expect(rowFor(data, "metadata")?.control).toBe("sdp");
+  });
+
+  it("reports control as unknown when no custody wallets are loaded", () => {
+    const data = buildOverviewHeroData(
+      baseToken({ mintAuthority: MANAGED, freezeAuthority: MANAGED }),
+      [],
+      t,
+      "en"
+    );
+
+    // Without wallets we can't classify custody → control "unknown" (muted glyph),
+    // but the address itself is still resolvable from the row.
+    const mint = rowFor(data, "mint");
+    expect(mint?.control).toBe("unknown");
+    expect(mint?.address).toBe(MANAGED);
+  });
+
+  // The authority popovers render the same compact identity badge as the signer
+  // tile, so each row carries a resolved holder — not just a bare address.
+  it("resolves an SDP-held authority to its named custody wallet", () => {
+    const data = buildOverviewHeroData(
+      baseToken({ mintAuthority: MANAGED }),
+      [wallet(MANAGED)],
+      t,
+      "en"
+    );
+
+    expect(rowFor(data, "mint")?.identity).toEqual({
+      state: "managed",
+      name: "Treasury",
+      provider: null,
+      publicKey: MANAGED,
+    });
+  });
+
+  it("carries the bare address for an externally held authority", () => {
+    const data = buildOverviewHeroData(
+      baseToken({ mintAuthority: MANAGED, freezeAuthority: EXTERNAL }),
+      [wallet(MANAGED)],
+      t,
+      "en"
+    );
+
+    expect(rowFor(data, "freeze")?.identity).toEqual({
+      state: "external",
+      publicKey: EXTERNAL,
+    });
+  });
+
+  it("claims neither managed nor external while custody wallets are unknown", () => {
+    const data = buildOverviewHeroData(baseToken({ mintAuthority: MANAGED }), [], t, "en");
+
+    expect(rowFor(data, "mint")?.identity).toEqual({ state: "unknown", publicKey: MANAGED });
+  });
+
+  it("reports an unset authority as none", () => {
+    const data = buildOverviewHeroData(baseToken(), [wallet(MANAGED)], t, "en");
+
+    expect(rowFor(data, "permanentDelegate")?.identity).toEqual({ state: "none" });
+  });
+
+  it("formats a compact supply / max, using ∞ when uncapped", () => {
+    expect(
+      buildOverviewHeroData(
+        baseToken({ totalSupply: "1000000", maxSupply: "2000000000" }),
+        [],
+        t,
+        "en"
+      ).supply
+    ).toBe("1M / 2B");
+    expect(buildOverviewHeroData(baseToken({ totalSupply: "0" }), [], t, "en").supply).toBe(
+      "0 / ∞"
+    );
+  });
+
+  it("resolves the signing wallet to its custody wallet", () => {
+    const signer = wallet(MANAGED);
+    const data = buildOverviewHeroData(
+      baseToken({ signingWalletId: signer.walletId }),
+      [signer],
+      t,
+      "en"
+    );
+
+    expect(data.signerWallet).toEqual({
+      state: "managed",
+      name: "Treasury",
+      provider: null,
+      publicKey: MANAGED,
+    });
+  });
+
+  // A signer is always a custody wallet (the API takes a walletId, resolved via
+  // createOrgSigner), so the only non-managed states are "none pinned" and
+  // "pinned but unresolvable".
+  it("reports the project-default signer when no wallet is pinned", () => {
+    const data = buildOverviewHeroData(
+      baseToken({ signingWalletId: null }),
+      [wallet(MANAGED)],
+      t,
+      "en"
+    );
+
+    expect(data.signerWallet).toEqual({ state: "default" });
+  });
+
+  it("flags a pinned signer that no longer resolves to a custody wallet", () => {
+    const data = buildOverviewHeroData(
+      baseToken({ signingWalletId: "wlt_removed" }),
+      [wallet(MANAGED)],
+      t,
+      "en"
+    );
+
+    expect(data.signerWallet).toEqual({ state: "unresolved", walletId: "wlt_removed" });
+  });
+
+  it("stays neutral for a pinned signer while the custody wallets are unknown", () => {
+    const data = buildOverviewHeroData(baseToken({ signingWalletId: "wlt_1" }), [], t, "en");
+
+    expect(data.signerWallet).toBeNull();
+  });
+
+  it("derives issuer + category tiles from the asset profile", () => {
+    const data = buildOverviewHeroData(baseToken({ assetProfile: stablecoinProfile }), [], t, "en");
+
+    expect(data.issuer).toBe("Veritas Finance");
+    expect(data.category).toEqual({
+      label: t("DashboardIssuance.config.currency"),
+      value: "USD",
+    });
+  });
+
+  it("derives the website from the asset profile, or null without one", () => {
+    expect(
+      buildOverviewHeroData(baseToken({ assetProfile: stablecoinProfile }), [], t, "en").website
+    ).toBe("https://veritas.finance");
+    expect(buildOverviewHeroData(baseToken(), [], t, "en").website).toBeNull();
   });
 });
 
@@ -120,13 +283,16 @@ describe("IssuanceTokenList", () => {
     const markup = renderWithI18n(
       <IssuanceTokenList
         tokens={[baseToken({ assetProfile: stablecoinProfile })]}
+        signerWallets={[]}
+        openIds={new Set()}
+        onToggle={() => undefined}
         onCreate={() => undefined}
       />
     );
     expect(markup).toContain("vUSD");
     expect(markup).toContain("Veritas Finance");
     expect(markup).toContain(t("DashboardIssuance.workspace.manage"));
-    // Collapsed by default → chips visible, expanded field grid not rendered.
+    // Collapsed row shows the taxonomy chip.
     expect(markup).toContain(t("DashboardIssuance.taxonomy.fiatBacked"));
   });
 });

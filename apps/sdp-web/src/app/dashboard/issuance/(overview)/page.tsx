@@ -44,6 +44,13 @@ interface IssuanceTokenView {
   description: string | null;
   uri: string | null;
   signingWalletId: string | null;
+  // Authority addresses (already on the full Token rows; previously dropped) —
+  // power the Overview-style expanded card's mint authority + managed-authorities
+  // roll-up.
+  mintAuthority: string | null;
+  metadataAuthority: string | null;
+  freezeAuthority: string | null;
+  permanentDelegate: string | null;
   // Merged from /v1/issuance/asset-profiles by tokenId; null for legacy tokens
   // without a profile (list falls back to core fields).
   assetProfile: IssuanceAssetProfileView | null;
@@ -165,6 +172,10 @@ async function fetchTokens(
         description?: string | null;
         uri?: string | null;
         signingWalletId?: string | null;
+        mintAuthority?: string | null;
+        metadataAuthority?: string | null;
+        freezeAuthority?: string | null;
+        extensions?: { permanentDelegate?: string | null } | null;
       }>;
     };
 
@@ -189,6 +200,10 @@ async function fetchTokens(
         description: token.description ?? null,
         uri: token.uri ?? null,
         signingWalletId: token.signingWalletId ?? null,
+        mintAuthority: token.mintAuthority ?? null,
+        metadataAuthority: token.metadataAuthority ?? null,
+        freezeAuthority: token.freezeAuthority ?? null,
+        permanentDelegate: token.extensions?.permanentDelegate ?? null,
         assetProfile: null as IssuanceAssetProfileView | null,
       }));
 

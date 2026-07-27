@@ -45,7 +45,7 @@ interface TokenSettingsSectionProps {
 // Token-2022 feature it represents. Keyed by the row `id` unions, so these
 // records are exhaustive: adding or renaming a row id in the workspace layer
 // fails to compile here until the icon is supplied — no silent fallback.
-const PERMISSION_ROW_ICONS: Record<PermissionRowId, LucideIcon> = {
+export const PERMISSION_ROW_ICONS: Record<PermissionRowId, LucideIcon> = {
   "mint-authority": Coins,
   "freeze-authority": Snowflake,
   "metadata-authority": FileText,

@@ -30,6 +30,16 @@ const ISSUANCE_DETAIL_TAB_IDS = [
   "issuance-detail-tab-4",
   "issuance-detail-tab-5",
   "issuance-detail-tab-6",
+  "issuance-detail-tab-7",
+];
+
+const ISSUANCE_HERO_TILE_IDS = [
+  "issuance-hero-tile-1",
+  "issuance-hero-tile-2",
+  "issuance-hero-tile-3",
+  "issuance-hero-tile-4",
+  "issuance-hero-tile-5",
+  "issuance-hero-tile-6",
 ];
 
 const ISSUANCE_WIZARD_CARD_IDS = [
@@ -41,6 +51,24 @@ const ISSUANCE_WIZARD_CARD_IDS = [
   "issuance-wizard-card-6",
 ];
 
+function TokenCardStatSkeleton({
+  labelWidth,
+  valueWidth,
+}: {
+  labelWidth: string;
+  valueWidth: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center gap-1">
+        <SkeletonBlock className="size-3 shrink-0 rounded-[3px]" />
+        <SkeletonBlock className={`h-3 ${labelWidth}`} />
+      </div>
+      <SkeletonBlock className={`mt-1 h-4 ${valueWidth}`} />
+    </div>
+  );
+}
+
 function IssuanceTokenCardSkeleton() {
   return (
     <article
@@ -50,38 +78,38 @@ function IssuanceTokenCardSkeleton() {
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <SkeletonBlock className="h-11 w-11 shrink-0 rounded-full" />
-          <div className="min-w-0 space-y-1.5">
+          <div className="min-w-0">
             <SkeletonBlock className="h-3 w-12" />
-            <SkeletonBlock className="h-5 w-32" />
+            <SkeletonBlock className="mt-1.5 h-5 w-32" />
           </div>
         </div>
         <SkeletonBlock className="h-6 w-16 shrink-0 rounded-full" />
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <SkeletonBlock className="h-6 w-24 rounded-full" />
-        <SkeletonBlock className="h-6 w-20 rounded-full" />
+        <SkeletonBlock className="h-5 w-28 rounded-full" />
+        <SkeletonBlock className="h-5 w-20 rounded-full" />
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <SkeletonBlock className="h-3 w-14" />
-          <SkeletonBlock className="h-4 w-20" />
-        </div>
-        <div className="space-y-1.5">
-          <SkeletonBlock className="h-3 w-16" />
-          <SkeletonBlock className="h-4 w-12" />
-        </div>
+        <TokenCardStatSkeleton labelWidth="w-12" valueWidth="w-16" />
+        <TokenCardStatSkeleton labelWidth="w-14" valueWidth="w-8" />
       </div>
 
       <div className="mt-auto flex items-end justify-between pt-4">
-        <div className="space-y-1.5">
-          <SkeletonBlock className="h-3 w-14" />
-          <SkeletonBlock className="h-4 w-24" />
-        </div>
+        <TokenCardStatSkeleton labelWidth="w-12" valueWidth="w-20" />
         <SkeletonBlock className="size-9 shrink-0 rounded-[10px]" />
       </div>
     </article>
+  );
+}
+
+function IssuanceAddTokenCardSkeleton() {
+  return (
+    <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong bg-surface-raised">
+      <SkeletonBlock className="size-6 rounded-md" />
+      <SkeletonBlock className="h-4 w-28" />
+    </div>
   );
 }
 
@@ -156,6 +184,7 @@ export function IssuancePageSkeleton({
         {ISSUANCE_SKELETON_IDS.map((id) => (
           <IssuanceTokenCardSkeleton key={id} />
         ))}
+        <IssuanceAddTokenCardSkeleton />
       </div>
     </DashboardWorkspaceOverviewPanel>
   );
@@ -260,6 +289,44 @@ export function IssuanceCreateSkeleton() {
   );
 }
 
+function HeroIdentityFieldSkeleton({ valueWidth }: { valueWidth: string }) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5">
+        <SkeletonBlock className="size-3 shrink-0 rounded-[3px]" />
+        <SkeletonBlock className="h-3 w-20" />
+      </div>
+      <SkeletonBlock className={`mt-1 h-4 ${valueWidth}`} />
+    </div>
+  );
+}
+
+function HeroStatTileSkeleton() {
+  return (
+    <div className="flex h-full flex-col py-2.5 md:px-3">
+      <div className="flex items-center gap-1.5">
+        <SkeletonBlock className="size-3 shrink-0 rounded-[3px]" />
+        <SkeletonBlock className="h-3 w-16" />
+      </div>
+      <div className="mt-auto pt-0.5">
+        <SkeletonBlock className="h-4 w-20" />
+      </div>
+    </div>
+  );
+}
+
+function ClassificationCellSkeleton() {
+  return (
+    <div className="flex flex-1 items-center gap-3 p-4">
+      <SkeletonBlock className="size-9 shrink-0 rounded-lg" />
+      <div className="min-w-0 flex-1">
+        <SkeletonBlock className="h-4 w-28" />
+        <SkeletonBlock className="mt-1.5 h-3 w-full max-w-64" />
+      </div>
+    </div>
+  );
+}
+
 export function IssuanceDetailSkeleton() {
   return (
     <div className="space-y-4 pb-8" data-loading-layout="issuance-detail" aria-busy="true">
@@ -268,11 +335,11 @@ export function IssuanceDetailSkeleton() {
           <SkeletonBlock className="size-16 shrink-0 rounded-full" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2.5">
-              <SkeletonBlock className="h-9 w-56 max-w-full" />
+              <SkeletonBlock className="h-8 w-56 max-w-full" />
               <SkeletonBlock className="h-6 w-16 rounded-full" />
               <SkeletonBlock className="h-6 w-20 rounded-full" />
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2.5 flex flex-wrap gap-2">
               <SkeletonBlock className="h-7 w-28 rounded-full" />
               <SkeletonBlock className="h-7 w-32 rounded-full" />
             </div>
@@ -295,8 +362,9 @@ export function IssuanceDetailSkeleton() {
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <SkeletonBlock className="h-10 w-24 rounded-[10px]" />
+        {/* API Playground + Explorer */}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <SkeletonBlock className="h-10 w-36 rounded-[10px]" />
           <SkeletonBlock className="h-10 w-28 rounded-[10px]" />
         </div>
       </header>
@@ -312,58 +380,46 @@ export function IssuanceDetailSkeleton() {
 
       <div className="space-y-4 pt-1">
         <section className="rounded-2xl border border-border-default bg-surface-raised p-5">
-          <div className="grid gap-5 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 md:gap-5">
             <div className="flex min-w-0 flex-col">
               <SkeletonBlock className="h-4 w-full" />
               <SkeletonBlock className="mt-2 h-4 w-4/5" />
-              <div className="mt-8 space-y-3 md:mt-auto">
-                <SkeletonBlock className="h-3 w-20" />
-                <SkeletonBlock className="h-4 w-full max-w-64" />
+              <div className="mt-6 flex flex-col gap-3 md:mt-auto md:pt-6">
+                <HeroIdentityFieldSkeleton valueWidth="w-40" />
+                <HeroIdentityFieldSkeleton valueWidth="w-full max-w-72" />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-x-5 gap-y-4 md:border-l md:border-border-subtle md:pl-5">
-              {ISSUANCE_WIZARD_CARD_IDS.map((id) => (
-                <div key={id} className="space-y-2 py-1">
-                  <SkeletonBlock className="h-3 w-20" />
-                  <SkeletonBlock className="h-4 w-24 max-w-full" />
-                </div>
+            <div className="grid grid-cols-2 gap-x-4 md:gap-0 md:border-l md:border-border-subtle md:pl-5">
+              {ISSUANCE_HERO_TILE_IDS.map((id) => (
+                <HeroStatTileSkeleton key={id} />
               ))}
             </div>
           </div>
         </section>
 
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <section className="grid overflow-hidden rounded-2xl border border-border-default bg-surface-raised sm:grid-cols-2 sm:divide-x sm:divide-border-subtle">
-            <div className="flex items-start gap-3 p-4">
-              <SkeletonBlock className="size-9 shrink-0 rounded-lg" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <SkeletonBlock className="h-4 w-28" />
-                <SkeletonBlock className="h-3 w-full" />
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-4">
-              <SkeletonBlock className="size-9 shrink-0 rounded-lg" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <SkeletonBlock className="h-4 w-28" />
-                <SkeletonBlock className="h-3 w-full" />
-              </div>
-            </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+          <section className="flex flex-col divide-y divide-border-subtle overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
+            <ClassificationCellSkeleton />
+            <ClassificationCellSkeleton />
           </section>
-          {/* Low-fidelity placeholder; the event-shaped skeleton lives in the
-              live card's own loading state, not this whole-page fallback. */}
-          <section className="flex h-full flex-col rounded-2xl border border-border-default bg-surface-raised p-4">
+          <section className="flex h-full flex-col rounded-2xl border border-border-default bg-surface-raised px-4 pt-4">
             <div className="flex items-center justify-between gap-2">
               <SkeletonBlock className="h-4 w-28" />
-              <SkeletonBlock className="h-3 w-16" />
+              <SkeletonBlock className="h-3.5 w-16" />
             </div>
-            <div className="mt-4 flex flex-col gap-4">
+            <ul className="mt-3 flex min-h-0 flex-1 flex-col">
               {RECENT_ACTIVITY_ROW_IDS.map((id) => (
-                <div key={id} className="flex items-center justify-between gap-3">
-                  <SkeletonBlock className="h-3.5 w-2/5" />
-                  <SkeletonBlock className="h-3.5 w-14" />
-                </div>
+                <li
+                  key={id}
+                  className="flex flex-1 items-center justify-between gap-3 border-t border-border-subtle py-3 first:border-t-0"
+                >
+                  <SkeletonBlock className="h-6 w-28 shrink-0 rounded-md" />
+                  <SkeletonBlock className="h-3.5 w-32" />
+                  <SkeletonBlock className="h-4 w-16 shrink-0 rounded-full" />
+                  <SkeletonBlock className="h-3.5 w-24 shrink-0" />
+                </li>
               ))}
-            </div>
+            </ul>
           </section>
         </div>
       </div>

@@ -19,6 +19,7 @@ import type {
   MetadataFormState,
   MintFormState,
   MintValidationErrors,
+  PermissionControlStatus,
   PermissionRow,
   SeizeFormState,
   SeizeValidationErrors,
@@ -614,6 +615,68 @@ export function getPermissionRows(
       authorityRole: "permanentDelegate",
     },
   ];
+}
+
+// Classify who controls a single authority address. `none` = unset,
+// `unknown` = custody wallets not yet known (loading/error), `sdp` = the address
+// matches one of the org's custody wallets, `external` = a set address we don't
+// custody. Single source for both the permissions-tab rows and the roll-up below.
+export function classifyAuthorityControl(
+  displayedAuthorityAddress: string | null,
+  authorityWallets: PaymentsDashboardWallet[],
+  controlKnown: boolean
+): PermissionControlStatus {
+  if (!displayedAuthorityAddress) {
+    return "none";
+  }
+  if (!controlKnown) {
+    return "unknown";
+  }
+  return findWalletByPublicKey(authorityWallets, displayedAuthorityAddress) ? "sdp" : "external";
+}
+
+export interface AuthorityControlSummary {
+  controlled: number;
+  total: number;
+  hasExternal: boolean;
+  known: boolean;
+}
+
+// Roll-up for the overview "Managed authorities: N of M" tile — counts only
+// authorities that are actually set and whose custody is resolvable (control
+// status other than none/unknown). Powers both the asset-management detail page
+// and the issuance list's expanded card, so the two never diverge.
+export function summarizeAuthorityControl({
+  token,
+  authorityWallets,
+  controlKnown,
+  t,
+}: {
+  token: Token;
+  authorityWallets: PaymentsDashboardWallet[];
+  controlKnown: boolean;
+  t: Translate;
+}): AuthorityControlSummary {
+  const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
+  const statuses = getPermissionRows(token, metadataAuthority, t).map((row) =>
+    classifyAuthorityControl(
+      getDisplayedAuthorityAddress({
+        token,
+        role: row.authorityRole,
+        metadataAuthority,
+        authorityWallets,
+      }),
+      authorityWallets,
+      controlKnown
+    )
+  );
+  const known = statuses.filter((status) => status === "sdp" || status === "external");
+  return {
+    controlled: known.filter((status) => status === "sdp").length,
+    total: known.length,
+    hasExternal: known.some((status) => status === "external"),
+    known: controlKnown,
+  };
 }
 
 function getPendingAuthoritySignerWallet(

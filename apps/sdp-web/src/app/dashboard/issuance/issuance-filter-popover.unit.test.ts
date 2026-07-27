@@ -27,6 +27,10 @@ function token(overrides: Partial<IssuanceTokenView> = {}): IssuanceTokenView {
     description: null,
     uri: null,
     signingWalletId: null,
+    mintAuthority: null,
+    metadataAuthority: null,
+    freezeAuthority: null,
+    permanentDelegate: null,
     assetProfile: null,
     ...overrides,
   };

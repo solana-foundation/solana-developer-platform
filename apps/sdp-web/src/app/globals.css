@@ -46,6 +46,19 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* Radix modal overlays (dropdown menus, dialogs, selects) mount react-remove-scroll,
+   which locks <body> and adds `margin-right` sized to the scrollbar it "removed". But
+   `scrollbar-gutter: stable` above reserves that track permanently, so nothing is ever
+   actually removed and the compensation is phantom width. It measures 0 on macOS/Chrome
+   overlay scrollbars (invisible) but equals the reserved gutter on Firefox's classic
+   scrollbars, shoving the whole page left on every menu open. Zero it; the scroll lock
+   (overflow: hidden) still applies. The library sets its margin with `!important`, so the
+   override must too — the extra `html` type selector outranks its `body[data-scroll-locked]`. */
+html body[data-scroll-locked] {
+  /* biome-ignore lint/complexity/noImportantStyles: must override react-remove-scroll's own !important compensation. */
+  margin-right: 0 !important;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: gray transparent;

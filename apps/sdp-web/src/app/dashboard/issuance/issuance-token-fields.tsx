@@ -2,24 +2,34 @@ import type {
   AssetCategory,
   AssetProfile,
   IssuanceMetadata,
+  PaymentsDashboardWallet,
   Token,
   TokenStatus,
   TokenTemplate,
 } from "@sdp/types";
-import { ExternalLink, type LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import type { AppLocale } from "@/i18n/config";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { profileToDraftState } from "./[tokenId]/asset-profile/asset-profile-mapping";
-import { detailFieldOptionLabel, getDetailSections } from "./create/asset-details-config";
+import {
+  classifyAuthorityControl,
+  findWalletByPublicKey,
+  findWalletByWalletId,
+  formatDate as formatDateLong,
+  getDisplayedAuthorityAddress,
+} from "./[tokenId]/token-management-workspace.utils";
+import { type AccessControlMode, getTokenAccessControlMode } from "./access-control.utils";
+import type { AuthorityControl, AuthorityGlyphRow, WalletIdentity } from "./asset-overview-hero";
+import { type DetailFieldKey, detailFieldOptionLabel } from "./create/asset-details-config";
 import { getCategoryPresentation, getSubTypePresentation } from "./create/asset-taxonomy";
-import { safeLinkHref } from "./create/draft-mapping";
+import type { DraftState } from "./create/issuance-draft-wizard.types";
 import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-catalog";
 
-// Shared model + type-aware field logic for the issuance asset list/grid. The
-// list's expanded "card" reuses the same category→fields engine as the create
-// wizard (getDetailSections + detailFieldOptionLabel) via profileToDraftState,
-// so a stablecoin shows peg/backing/reserve and a security shows jurisdiction/
-// terms without any list-specific field mapping. Tokens without an asset profile
-// (legacy, or the feature flag off) fall back to core token fields.
+// Shared model + derivations for the issuance asset list/grid. The list view
+// (`IssuanceTokenView`) is a lightweight projection of the full `Token`; adapters
+// (`viewAsToken` / `viewToProfile`) rebuild the shapes the shared helpers expect
+// so the list's expanded card can reuse the asset-management Overview hero
+// (`buildOverviewHeroData`) without any list-specific field mapping.
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -51,6 +61,10 @@ export interface IssuanceTokenView {
   description: string | null;
   uri: string | null;
   signingWalletId: string | null;
+  mintAuthority: string | null;
+  metadataAuthority: string | null;
+  freezeAuthority: string | null;
+  permanentDelegate: string | null;
   assetProfile: IssuanceAssetProfileView | null;
 }
 
@@ -92,6 +106,15 @@ export function formatSupply(value: string, locale: string): string {
   }).format(parsed);
 }
 
+export function formatSmartSupply(
+  totalSupply: string,
+  maxSupply: string | null,
+  locale: string
+): string {
+  const max = maxSupply ? formatSupply(maxSupply, locale) : "∞";
+  return `${formatSupply(totalSupply, locale)} / ${max}`;
+}
+
 export function getTokenTypeLabel(template: IssuanceTokenView["template"], t: Translate): string {
   const templateEntry = getTemplateCatalogEntry(template);
   if (templateEntry) {
@@ -117,10 +140,6 @@ function explorerHref(mintAddress: string | null): string | null {
       ? ""
       : `?cluster=${encodeURIComponent(cluster)}`;
   return `https://explorer.solana.com/address/${mintAddress}${clusterQuery}`;
-}
-
-function shortAddress(address: string): string {
-  return address.length > 12 ? `${address.slice(0, 4)}…${address.slice(-4)}` : address;
 }
 
 // ── Classification chips (Stablecoin / Fiat-backed, etc.) ────────────────────
@@ -149,14 +168,6 @@ export function getTokenChips(view: IssuanceTokenView, t: Translate): TokenChip[
   return [{ label: getTokenTypeLabel(view.template, t), icon: null }];
 }
 
-// ── Type-aware expanded fields ───────────────────────────────────────────────
-
-export interface ExpandedField {
-  label: string;
-  value: string;
-  href?: string | null;
-}
-
 // Build a Token-shaped object from the list view so profileToDraftState (which
 // reads name/symbol/decimals/description/imageUrl/uri/signingWalletId) can run.
 // Fields not read by the mapping are filled with inert defaults.
@@ -167,9 +178,9 @@ function viewAsToken(view: IssuanceTokenView): Token {
     organizationId: "",
     signingWalletId: view.signingWalletId,
     mintAddress: view.mintAddress,
-    mintAuthority: null,
-    metadataAuthority: null,
-    freezeAuthority: null,
+    mintAuthority: view.mintAuthority,
+    metadataAuthority: view.metadataAuthority,
+    freezeAuthority: view.freezeAuthority,
     ablListAddress: null,
     name: view.name,
     symbol: view.symbol,
@@ -178,7 +189,7 @@ function viewAsToken(view: IssuanceTokenView): Token {
     uri: view.uri,
     imageUrl: view.imageUrl,
     template: view.template as TokenTemplate,
-    extensions: null,
+    extensions: view.permanentDelegate ? { permanentDelegate: view.permanentDelegate } : null,
     totalSupply: view.totalSupply,
     totalSupplyUpdatedAt: null,
     maxSupply: view.maxSupply,
@@ -211,123 +222,171 @@ function viewToProfile(profile: IssuanceAssetProfileView, view: IssuanceTokenVie
   };
 }
 
-type PushField = (label: string, value: string | null | undefined, href?: string | null) => void;
+const AUTHORITY_ROLES = ["mint", "freeze", "metadata", "permanentDelegate"] as const;
 
-// The type-specific rows: reuse the create wizard's category→sections engine so
-// a stablecoin surfaces peg/backing/reserve and a security surfaces jurisdiction/
-// terms, humanizing select values and rendering toggles as yes/no.
-function pushTypeAwareFields(view: IssuanceTokenView, t: Translate, push: PushField): void {
+export function buildAuthorityGlyphRows(
+  token: Token,
+  authorityWallets: PaymentsDashboardWallet[],
+  controlKnown: boolean,
+  t: Translate
+): AuthorityGlyphRow[] {
+  const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
+  return AUTHORITY_ROLES.map((role) => {
+    const address = getDisplayedAuthorityAddress({
+      token,
+      role,
+      metadataAuthority,
+      authorityWallets,
+    });
+    const applicable =
+      role === "mint"
+        ? token.isMintable
+        : role === "freeze"
+          ? token.isFreezable
+          : role === "metadata"
+            ? true
+            : address !== null;
+    const control = classifyAuthorityControl(address, authorityWallets, controlKnown);
+    return {
+      role,
+      applicable,
+      address,
+      control,
+      identity: buildWalletIdentityForAuthority(address, control, authorityWallets, t),
+    };
+  });
+}
+
+function buildWalletIdentityForAuthority(
+  address: string | null,
+  control: AuthorityControl,
+  authorityWallets: PaymentsDashboardWallet[],
+  t: Translate
+): WalletIdentity {
+  if (!address) {
+    return { state: "none" };
+  }
+  if (control === "sdp") {
+    const wallet = findWalletByPublicKey(authorityWallets, address);
+    if (wallet) {
+      return {
+        state: "managed",
+        name: wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled"),
+        provider: wallet.provider ?? null,
+        publicKey: wallet.publicKey,
+      };
+    }
+  }
+  return { state: control === "external" ? "external" : "unknown", publicKey: address };
+}
+
+export function resolveAccessMode(token: Token, draft: DraftState | null): AccessControlMode {
+  return draft?.accessControl || getTokenAccessControlMode(token);
+}
+
+function buildCategoryTile(
+  view: IssuanceTokenView,
+  draft: DraftState,
+  t: Translate
+): { label: string; value: string } | null {
   const profile = view.assetProfile;
   if (!profile) {
-    return;
+    return null;
   }
-  const draft = profileToDraftState(viewToProfile(profile, view), viewAsToken(view));
-
-  for (const section of getDetailSections(profile.assetCategory, profile.assetType)) {
-    for (const field of section.fields) {
-      const raw = draft[field.key];
-      if (field.control === "toggle") {
-        push(
-          t(field.labelKey),
-          raw ? t("DashboardIssuance.list.yes") : t("DashboardIssuance.list.no")
-        );
-        continue;
-      }
-      const stored = String(raw ?? "").trim();
-      if (!stored) {
-        continue;
-      }
-      const value =
-        field.control === "select"
-          ? (detailFieldOptionLabel(field.key, stored, t) ?? stored)
-          : stored;
-      push(t(field.labelKey), value);
+  const tile = (labelKey: MessageKey, raw: string, humanizeKey?: DetailFieldKey) => {
+    const value = raw.trim();
+    if (!value) {
+      return null;
     }
-  }
-
-  push(t("DashboardIssuance.list.website"), draft.website, safeLinkHref(draft.website));
-}
-
-function pushMintAndCreated(
-  view: IssuanceTokenView,
-  t: Translate,
-  locale: string,
-  push: PushField
-): void {
-  if (view.mintAddress) {
-    push(
-      t("DashboardIssuance.list.mintAddress"),
-      shortAddress(view.mintAddress),
-      explorerHref(view.mintAddress)
-    );
-  }
-  push(t("DashboardIssuance.list.created"), formatDate(view.createdAt, locale));
-}
-
-export function buildExpandedFields(
-  view: IssuanceTokenView,
-  t: Translate,
-  locale: string
-): ExpandedField[] {
-  const fields: ExpandedField[] = [];
-  const push: PushField = (label, value, href) => {
-    const normalized = (value ?? "").toString().trim();
-    if (!normalized) {
-      return;
-    }
-    fields.push({ label, value: normalized, href: href ?? null });
+    const display = humanizeKey ? (detailFieldOptionLabel(humanizeKey, value, t) ?? value) : value;
+    return { label: t(labelKey), value: display };
   };
-
-  // Type-aware fields when the token has an asset profile.
-  if (view.assetProfile) {
-    push(t("DashboardIssuance.list.decimals"), String(view.decimals));
-    push(t("DashboardIssuance.list.supply"), formatSupply(view.totalSupply, locale));
-    pushTypeAwareFields(view, t, push);
-    pushMintAndCreated(view, t, locale, push);
-    return fields;
+  if (profile.assetCategory === "stablecoin") {
+    return tile("DashboardIssuance.config.currency", draft.pegCurrency);
   }
+  if (profile.assetCategory === "tokenized_security") {
+    return tile("DashboardIssuance.config.jurisdiction", draft.jurisdiction, "jurisdiction");
+  }
+  if (profile.assetType === "real_estate") {
+    return tile("DashboardIssuance.config.propertyType", draft.propertyType, "propertyType");
+  }
+  return tile("DashboardIssuance.config.underlyingAsset", draft.underlyingAsset);
+}
 
-  // Core fallback — tokens without an asset profile (legacy / flag off).
-  push(t("DashboardIssuance.list.type"), getTokenTypeLabel(view.template, t));
-  push(t("DashboardIssuance.list.decimals"), String(view.decimals));
-  push(t("DashboardIssuance.list.supply"), formatSupply(view.totalSupply, locale));
-  push(
-    t("DashboardIssuance.list.maxSupply"),
-    view.maxSupply ? formatSupply(view.maxSupply, locale) : t("DashboardIssuance.list.unlimited")
-  );
-  push(
-    t("DashboardIssuance.list.transfers"),
-    view.requiresAllowlist
-      ? t("DashboardIssuance.list.restricted")
-      : t("DashboardIssuance.list.unrestricted")
-  );
-  pushMintAndCreated(view, t, locale, push);
-  return fields;
+export function buildWalletIdentityForSigner(
+  signingWalletId: string | null | undefined,
+  authorityWallets: PaymentsDashboardWallet[],
+  t: Translate
+): WalletIdentity | null {
+  if (!signingWalletId) {
+    return { state: "default" };
+  }
+  if (authorityWallets.length === 0) {
+    return null;
+  }
+  const wallet = findWalletByWalletId(authorityWallets, signingWalletId);
+  if (!wallet) {
+    return { state: "unresolved", walletId: signingWalletId };
+  }
+  return {
+    state: "managed",
+    name: wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled"),
+    provider: wallet.provider ?? null,
+    publicKey: wallet.publicKey,
+  };
+}
+
+export interface ListCardHeroData {
+  description: string | null;
+  website: string | null;
+  mintAddress: string | null;
+  /** Compact "supply / max" — e.g. "100K / 2B", or "100K / ∞" when uncapped. */
+  supply: string;
+  /** Smart date: deployed tokens show the deploy date, drafts the created date. */
+  date: { label: string; value: string; tooltip: string };
+  authorityRows: AuthorityGlyphRow[];
+  accessMode: AccessControlMode;
+  signerWallet: WalletIdentity | null;
+  issuer: string | null;
+  category: { label: string; value: string } | null;
+}
+
+export function buildOverviewHeroData(
+  view: IssuanceTokenView,
+  authorityWallets: PaymentsDashboardWallet[],
+  t: Translate,
+  locale: AppLocale
+): ListCardHeroData {
+  const token = viewAsToken(view);
+  const controlKnown = authorityWallets.length > 0;
+  const draft = view.assetProfile
+    ? profileToDraftState(viewToProfile(view.assetProfile, view), token)
+    : null;
+  const deployed = Boolean(view.deployedAt);
+  return {
+    description: view.description,
+    website: draft?.website ?? null,
+    mintAddress: view.mintAddress,
+    supply: formatSmartSupply(view.totalSupply, view.maxSupply, locale),
+    date: deployed
+      ? {
+          label: t("DashboardIssuance.overview.deployed"),
+          value: formatDateLong(view.deployedAt, locale),
+          tooltip: t("DashboardIssuance.overview.deployedTooltip"),
+        }
+      : {
+          label: t("DashboardIssuance.list.created"),
+          value: formatDateLong(view.createdAt, locale),
+          tooltip: t("DashboardIssuance.overview.createdTooltip"),
+        },
+    authorityRows: buildAuthorityGlyphRows(token, authorityWallets, controlKnown, t),
+    accessMode: resolveAccessMode(token, draft),
+    signerWallet: buildWalletIdentityForSigner(view.signingWalletId, authorityWallets, t),
+    issuer: draft?.issuerName.trim() || null,
+    category: draft ? buildCategoryTile(view, draft, t) : null,
+  };
 }
 
 export function tokenExplorerHref(mintAddress: string | null): string | null {
   return explorerHref(mintAddress);
-}
-
-// ── Read-only field row (mirrors SummaryRow from draft-summary-rail) ─────────
-
-export function FieldRow({ label, value, href }: ExpandedField) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs text-tertiary">{label}</span>
-      {href ? (
-        <a
-          href={href}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 break-all text-sm font-normal text-primary hover:underline"
-        >
-          {value}
-          <ExternalLink className="h-3 w-3 shrink-0" />
-        </a>
-      ) : (
-        <span className="break-words text-sm font-normal text-primary">{value}</span>
-      )}
-    </div>
-  );
 }

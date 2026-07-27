@@ -3,7 +3,7 @@
 import { Copy, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "@/i18n/provider";
-import { TokenSettingsSection } from "../../token-settings-section";
+import { PERMISSION_ROW_ICONS, TokenSettingsSection } from "../../token-settings-section";
 import type { TokenOperations } from "../use-token-operations";
 
 export function PermissionsTab({
@@ -70,14 +70,18 @@ function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
         <p className="text-sm font-medium text-warning">
           {t("DashboardIssuance.permissions.externalWarningTitle")}
         </p>
-        {externalRows.map((row) => (
-          <span
-            key={row.id}
-            className="inline-flex items-center rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning ring-1 ring-warning-border ring-inset"
-          >
-            {row.title}
-          </span>
-        ))}
+        {externalRows.map((row) => {
+          const Icon = PERMISSION_ROW_ICONS[row.id];
+          return (
+            <span
+              key={row.id}
+              className="inline-flex items-center gap-1 rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning ring-1 ring-warning-border ring-inset"
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+              {row.title}
+            </span>
+          );
+        })}
       </div>
       <p className="mt-1 text-sm text-warning">
         {t("DashboardIssuance.permissions.externalWarningBody")}
