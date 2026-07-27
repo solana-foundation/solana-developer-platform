@@ -1,11 +1,11 @@
 import {
   type CustodyWalletAggregate,
   type CustodyWalletTokenBalance,
+  SOL_DECIMALS,
   SOL_MINT,
   type PaymentTransferSummary as TransferRecord,
   type PaymentsDashboardWallet as WalletRecord,
   WELL_KNOWN_TOKEN_BY_MINT,
-  WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { toTitleCase } from "../activity-format-utils";
@@ -104,22 +104,40 @@ export function resolveTransferTokenLabel(
 }
 
 const TOKEN_AMOUNT_PATTERN = /^-?\d+(?:\.\d+)?$/;
+
+/**
+ * Formats a token amount for display with locale-appropriate grouping and
+ * decimal separators. Exact decimal strings keep every input digit; other
+ * numeric input falls back to standard number formatting.
+ *
+ * @param value - The amount as a number or exact decimal string.
+ * @param locale - Locale used for grouping and decimal separators.
+ * @returns The locale-formatted amount.
+ */
 export function formatTokenAmount(value: number | string, locale?: string): string {
   const rawValue = String(value).trim();
+  const formatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 9 });
   if (TOKEN_AMOUNT_PATTERN.test(rawValue)) {
-    const [whole = "", fraction] = rawValue.split(".");
-    const groupedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    return fraction ? `${groupedWhole}.${fraction}` : groupedWhole;
+    const negative = rawValue.startsWith("-");
+    const [whole, fraction] = (negative ? rawValue.slice(1) : rawValue).split(".");
+    const sign = negative ? "-" : "";
+    const groupedWhole = `${sign}${formatter.format(BigInt(whole))}`;
+    if (fraction === undefined) {
+      return groupedWhole;
+    }
+    const decimalPart = formatter.formatToParts(1.1).find((part) => part.type === "decimal");
+    if (decimalPart === undefined) {
+      throw new Error(`Locale ${locale} produced no decimal separator`);
+    }
+    return `${groupedWhole}${decimalPart.value}${fraction}`;
   }
 
   const numericValue = Number(rawValue);
-  return Number.isFinite(numericValue)
-    ? new Intl.NumberFormat(locale, { maximumFractionDigits: 9 }).format(numericValue)
-    : String(value);
+  return Number.isFinite(numericValue) ? formatter.format(numericValue) : String(value);
 }
 
 export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
-  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, WELL_KNOWN_TOKENS.SOL.decimals), locale)} SOL`;
+  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
 }
 
 export function formatDisplayAmount(value?: string, token?: string, locale?: string): string {

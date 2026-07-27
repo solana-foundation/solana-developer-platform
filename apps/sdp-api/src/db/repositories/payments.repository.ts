@@ -55,6 +55,7 @@ export interface PaymentTransferRow {
   delivery_mode: PaymentTransferDeliveryMode | null;
   fiat_currency: string | null;
   fiat_amount: string | null;
+  ramps_memo: Record<string, string>;
   provider_data: Record<string, unknown>;
   signature: string | null;
   serialized_tx: string | null;
@@ -91,6 +92,7 @@ export interface CreatePaymentTransferInput {
   deliveryMode: PaymentTransferDeliveryMode | null;
   fiatCurrency: string | null;
   fiatAmount: string | null;
+  rampsMemo?: Record<string, string>;
   providerData: Record<string, unknown>;
   serializedTx: string | null;
   signature: string | null;

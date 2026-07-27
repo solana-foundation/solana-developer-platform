@@ -129,6 +129,10 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
       label: "Helius",
       isConfigured: (env) => hasEnv(env, "SOLANA_RPC_HELIUS_URL"),
     },
+    nodit: {
+      label: "Nodit",
+      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_NODIT_URL"),
+    },
     quicknode: {
       label: "QuickNode",
       isConfigured: (env) => hasEnv(env, "SOLANA_RPC_QUICKNODE_URL"),
