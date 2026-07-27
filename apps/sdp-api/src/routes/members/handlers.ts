@@ -85,6 +85,37 @@ async function getClerkUserId(db: DatabaseClient, userId: string): Promise<strin
   return row?.provider_user_id ?? null;
 }
 
+/**
+ * Clerk user id of any active administrator of the organisation.
+ *
+ * Clerk requires a `requesting_user_id` to revoke an invitation, and the more
+ * specific sources can all come up empty: an API key carries no Clerk user of
+ * its own, `invited_by` may be the `"system"` sentinel with no identity row,
+ * and Clerk's own `inviter_id` is optional on its invitation object. An
+ * administrator is entitled to revoke, so attributing it to one keeps the
+ * revocation possible rather than failing it. The local audit trail still
+ * records the real actor; this only decides who Clerk is told asked.
+ */
+async function getAnyOrgAdminClerkUserId(
+  db: DatabaseClient,
+  organizationId: string
+): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT i.provider_user_id
+         FROM organization_members m
+         JOIN auth_user_identities i
+           ON i.user_id = m.user_id AND i.provider = 'clerk'
+        WHERE m.organization_id = ? AND m.role = 'admin' AND m.status = 'active'
+        ORDER BY m.user_id
+        LIMIT 1`
+    )
+    .bind(organizationId)
+    .first<{ provider_user_id: string }>();
+
+  return row?.provider_user_id ?? null;
+}
+
 function resolveInviteRedirectUrl(env: Env): string | undefined {
   const base = env.FRONTEND_URL?.replace(/\/$/, "");
   if (!base) {
@@ -720,10 +751,16 @@ export const revokeInvitation = async (c: AppContext) => {
       // An API key has no Clerk user of its own. Clerk's own inviter_id is the
       // most reliable fallback: it is a valid Clerk user by construction, so it
       // holds even when invited_by has no matching auth_user_identities row.
+      // `||` rather than `??` on purpose: Clerk returns `inviter_id` as an
+      // empty string rather than omitting it when an invitation has no inviter,
+      // and an empty id is as unusable as a missing one.
       const requestingUserId =
-        clerk?.clerkUserId ??
-        match.inviter_id ??
-        (await getClerkUserId(getDb(c.env), invitation.invited_by));
+        clerk?.clerkUserId ||
+        match.inviter_id ||
+        (await getClerkUserId(getDb(c.env), invitation.invited_by)) ||
+        // Last resort so an invitation is never unrevokable: any active admin
+        // is entitled to revoke, and Clerk demands some requesting user.
+        (await getAnyOrgAdminClerkUserId(getDb(c.env), organizationId));
 
       if (!requestingUserId) {
         throw new AppError(
