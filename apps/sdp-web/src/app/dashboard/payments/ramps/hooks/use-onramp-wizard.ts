@@ -8,14 +8,17 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { formatTokenAmount } from "@/app/dashboard/payments/payments-overview.utils";
 import {
   fetchTransferByProviderReference,
   simulateSandboxTransfer,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
-import { ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { getRampProviderLabel, ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
+import { memoSummaryDetails, optionalDetail } from "../wizard-summary";
 import {
   isTerminalRampTransferStatus,
   type RampWizardStep,
@@ -24,7 +27,7 @@ import {
 } from "./use-ramp-wizard";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-export type OnrampStepId = "DEPOSIT" | "PROVIDER" | "REQUIREMENTS";
+export type OnrampStepId = "DEPOSIT" | "MEMO" | "PROVIDER" | "REQUIREMENTS";
 
 export function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStepId>[] {
   return [
@@ -32,6 +35,11 @@ export function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStep
       id: "DEPOSIT",
       label: t("DashboardPayments.ramps.onrampDepositStep"),
       title: t("DashboardPayments.ramps.onrampDepositTitle"),
+    },
+    {
+      id: "MEMO",
+      label: t("DashboardPayments.ramps.rampMemoStep"),
+      title: t("DashboardPayments.ramps.rampMemoStepTitle"),
     },
     {
       id: "PROVIDER",
@@ -51,6 +59,7 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
 
 export function useOnrampWizard(props: UseRampWizardProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
@@ -58,10 +67,11 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     pairs: ONRAMP_PAIRS,
     steps: getOnrampSteps(t),
     stepSchemas: { DEPOSIT: depositAmountSchema },
-    quoteStepId: "DEPOSIT",
+    quoteStepId: "MEMO",
+    memoStepId: "MEMO",
     requirements: {
       step: getOnrampRequirementsStep(t),
-      insertAfter: "DEPOSIT",
+      insertAfter: "MEMO",
       direction: "onramp",
     },
     advanceRequirementsBeforeQuote: true,
@@ -85,6 +95,28 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       setQuoteSimulationSucceeded(false);
     },
   });
+
+  const summaryDetails: WizardSummaryDetail[] = [
+    ...optionalDetail(
+      wizard.selectedWallet === null ? null : wizard.selectedWallet.label,
+      t("DashboardPayments.ramps.destinationWallet")
+    ),
+    ...optionalDetail(
+      wizard.fields.amount.length === 0
+        ? null
+        : `${formatTokenAmount(wizard.fields.amount, locale)} ${wizard.selectedRampPair.fiatCurrency}`,
+      t("DashboardPayments.ramps.amount")
+    ),
+    {
+      label: t("DashboardPayments.onchainReceive.receive"),
+      value: toRampCryptoToken(wizard.selectedRampPair.assetRail),
+    },
+    ...optionalDetail(
+      wizard.fields.provider === null ? null : getRampProviderLabel(wizard.fields.provider),
+      t("DashboardPayments.ramps.provider")
+    ),
+    ...memoSummaryDetails(t, wizard.memoRows),
+  ];
 
   const transferStatusKey = wizard.quote
     ? (["onramp-transfer-status", wizard.quote.provider, wizard.quote.id] as const)
@@ -181,6 +213,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
   return {
     ...wizard,
+    summaryDetails,
     transferStatus,
     transferStatusLoading,
     quoteSimulationLoading,

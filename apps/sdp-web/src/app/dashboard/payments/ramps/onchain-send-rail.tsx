@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "@/i18n/provider";
+import { WizardSummaryList } from "../wizard-summary-list";
 import { OnchainSendStepContent } from "./components/onchain-send-step-content";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import {
@@ -9,6 +10,7 @@ import {
   useOnchainSendWizard,
 } from "./hooks/use-onchain-send-wizard";
 import type { RailProps } from "./ramp-action-page";
+import { preStepSummaryDetails } from "./wizard-summary";
 
 function sendPrimaryLabel(
   wizard: OnchainSendWizard,
@@ -32,6 +34,7 @@ export function OnchainSendRail({
   issuedTokenSymbolsByMint,
   counterpartyId,
   counterpartyName,
+  methodLabel,
   preSteps,
   onExit,
 }: RailProps) {
@@ -43,7 +46,6 @@ export function OnchainSendRail({
     counterpartyId,
     onExit,
   });
-
   return (
     <RampWizardShell
       steps={[...preSteps, ...getOnchainSendSteps(t)]}
@@ -56,6 +58,14 @@ export function OnchainSendRail({
       counterpartyDialogOpen={false}
       setCounterpartyDialogOpen={() => {}}
       onCounterpartyCreated={() => {}}
+      summary={
+        <WizardSummaryList
+          details={[
+            ...preStepSummaryDetails(t, counterpartyName, methodLabel),
+            ...wizard.summaryDetails,
+          ]}
+        />
+      }
     >
       <OnchainSendStepContent wizard={wizard} counterpartyName={counterpartyName} />
     </RampWizardShell>

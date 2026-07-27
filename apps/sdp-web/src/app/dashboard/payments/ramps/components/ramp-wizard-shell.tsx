@@ -46,6 +46,7 @@ interface RampWizardShellProps {
   children: ReactNode;
   /** Rendered top-right, next to the step title (e.g. the "Powered by" badge). */
   header?: ReactNode;
+  summary?: ReactNode;
   footerActions?: ReactNode;
   hidePrimary?: boolean;
   /** Confirm before running the secondary action — used once a transaction is live. */
@@ -68,6 +69,7 @@ export function RampWizardShell({
   onCounterpartyCreated,
   children,
   header,
+  summary,
   footerActions,
   hidePrimary,
   confirmSecondary,
@@ -86,6 +88,7 @@ export function RampWizardShell({
           total: steps.length,
         })}
         header={header}
+        summary={summary}
         footer={
           <div className="flex items-center justify-between gap-3">
             {hideSecondary ? (

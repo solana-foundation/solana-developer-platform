@@ -8,14 +8,17 @@ import type {
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { formatTokenAmount } from "@/app/dashboard/payments/payments-overview.utils";
 import {
   createTransfer,
   fetchTransferByProviderReference,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
-import { OFFRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { getRampProviderLabel, OFFRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
+import { memoSummaryDetails, optionalDetail } from "../wizard-summary";
 import {
   isTerminalRampTransferStatus,
   type RampWizardStep,
@@ -32,7 +35,7 @@ function isCryptoDepositInstruction(
 }
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-export type OfframpStepId = "WALLET" | "WITHDRAW" | "COMPLETE" | "REQUIREMENTS";
+export type OfframpStepId = "WALLET" | "WITHDRAW" | "MEMO" | "COMPLETE" | "REQUIREMENTS";
 
 export function getOfframpSteps(t: Translate): readonly RampWizardStep<OfframpStepId>[] {
   return [
@@ -45,6 +48,11 @@ export function getOfframpSteps(t: Translate): readonly RampWizardStep<OfframpSt
       id: "WITHDRAW",
       label: t("DashboardPayments.ramps.offrampWithdrawStep"),
       title: t("DashboardPayments.ramps.offrampWithdrawTitle"),
+    },
+    {
+      id: "MEMO",
+      label: t("DashboardPayments.ramps.rampMemoStep"),
+      title: t("DashboardPayments.ramps.rampMemoStepTitle"),
     },
     {
       id: "COMPLETE",
@@ -64,6 +72,7 @@ function getOfframpRequirementsStep(t: Translate): RampWizardStep<OfframpStepId>
 
 export function useOfframpWizard(props: UseRampWizardProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const [onchainSendLoading, setOnchainSendLoading] = useState(false);
   const [onchainSendResult, setOnchainSendResult] = useState<PaymentTransferSummary | null>(null);
   const [quoteExpired, setQuoteExpired] = useState(false);
@@ -72,10 +81,11 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     pairs: OFFRAMP_PAIRS,
     steps: getOfframpSteps(t),
     stepSchemas: { WALLET: sourceWalletSchema, WITHDRAW: withdrawAmountSchema },
-    quoteStepId: "WITHDRAW",
+    quoteStepId: "MEMO",
+    memoStepId: "MEMO",
     requirements: {
       step: getOfframpRequirementsStep(t),
-      insertAfter: "WITHDRAW",
+      insertAfter: "MEMO",
       direction: "offramp",
     },
     advanceRequirementsBeforeQuote: true,
@@ -137,6 +147,28 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     );
     return balance?.mint ?? null;
   }, [wizard.selectedWallet, offrampCryptoToken]);
+
+  const summaryDetails: WizardSummaryDetail[] = [
+    ...optionalDetail(
+      wizard.selectedWallet === null ? null : wizard.selectedWallet.label,
+      t("DashboardPayments.ramps.sourceWallet")
+    ),
+    ...optionalDetail(
+      wizard.fields.amount.length === 0
+        ? null
+        : `${formatTokenAmount(wizard.fields.amount, locale)} ${offrampCryptoToken}`,
+      t("DashboardPayments.ramps.amount")
+    ),
+    {
+      label: t("DashboardPayments.payoutCurrency"),
+      value: wizard.selectedRampPair.fiatCurrency,
+    },
+    ...optionalDetail(
+      wizard.fields.provider === null ? null : getRampProviderLabel(wizard.fields.provider),
+      t("DashboardPayments.ramps.provider")
+    ),
+    ...memoSummaryDetails(t, wizard.memoRows),
+  ];
 
   const hasCryptoDepositInstruction = cryptoDepositInstruction !== null;
   const canSendOnchain =
@@ -211,6 +243,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
 
   return {
     ...wizard,
+    summaryDetails,
     transferStatus,
     transferStatusLoading,
     sourceTokenMint,
