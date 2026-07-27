@@ -70,7 +70,7 @@ export function PaymentsWizardFrame({
               <div className="flex w-full shrink-0 items-center gap-3 sm:w-auto">
                 {header}
                 {showSummaryButton ? (
-                  <Button type="button" variant="secondary" onClick={() => setSummaryOpen(true)}>
+                  <Button type="button" variant="ghost" onClick={() => setSummaryOpen(true)}>
                     {t("DashboardPayments.viewSummary")}
                   </Button>
                 ) : null}
