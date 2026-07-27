@@ -206,6 +206,7 @@
       "compliance": "Compliance",
       "operations": "Operations",
       "permissions": "Permissions",
+      "workflows": "Workflows",
       "activity": "Activity"
     },
     "activity": {

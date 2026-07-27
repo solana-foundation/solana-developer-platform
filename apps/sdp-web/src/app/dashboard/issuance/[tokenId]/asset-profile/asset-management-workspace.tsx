@@ -29,6 +29,7 @@ import { OpsActionForms } from "./tabs/ops-action-forms";
 import { OverviewTab } from "./tabs/overview-tab";
 import { PermissionsTab } from "./tabs/permissions-tab";
 import { PublicInfoTab } from "./tabs/public-info-tab";
+import { WorkflowsTab } from "./tabs/workflows-tab";
 import { useAssetProfileForm } from "./use-asset-profile-form";
 import { useTokenOperations } from "./use-token-operations";
 
@@ -39,6 +40,7 @@ type AssetManagementTab =
   | "compliance"
   | "operations"
   | "permissions"
+  | "workflows"
   | "activity";
 
 const managementTabIds: AssetManagementTab[] = [
@@ -48,6 +50,7 @@ const managementTabIds: AssetManagementTab[] = [
   "compliance",
   "operations",
   "permissions",
+  "workflows",
   "activity",
 ];
 
@@ -127,6 +130,7 @@ export function AssetManagementWorkspace({
       : []),
     { id: "operations", label: t("DashboardIssuance.tabs.operations") },
     { id: "permissions", label: t("DashboardIssuance.tabs.permissions") },
+    { id: "workflows", label: t("DashboardIssuance.tabs.workflows") },
     { id: "activity", label: t("DashboardIssuance.tabs.activity") },
   ];
 
@@ -298,6 +302,9 @@ export function AssetManagementWorkspace({
         {activeTab === "operations" ? <OperationsTab ops={ops} tokenId={token.id} /> : null}
         {activeTab === "permissions" ? (
           <PermissionsTab ops={ops} canManageTokenAdmin={canManageTokenAdmin} />
+        ) : null}
+        {activeTab === "workflows" ? (
+          <WorkflowsTab tokenId={token.id} canManage={canManageTokenAdmin} />
         ) : null}
         {activeTab === "activity" ? <ActivityTab tokenId={token.id} /> : null}
       </motion.div>
