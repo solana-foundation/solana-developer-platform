@@ -5,6 +5,7 @@ import type {
   PaymentsDashboardWallet,
   PaymentTransferSummary,
 } from "@sdp/types";
+import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -13,11 +14,13 @@ import {
   fetchCounterpartyAccounts,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { useZodForm } from "@/lib/use-zod-form";
+import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
 import { walletBalanceAssetOptions } from "../wallet-options";
+import { optionalDetail, summaryAmount } from "../wizard-summary";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
@@ -69,6 +72,7 @@ export function useOnchainSendWizard({
 }: UseOnchainSendWizardProps) {
   const router = useDashboardRouter();
   const t = useTranslations();
+  const locale = useLocale();
   const steps = getOnchainSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
   const { values: fields, setField } = useZodForm(onchainSendSchema, {
@@ -242,7 +246,26 @@ export function useOnchainSendWizard({
     setStepIndex((current) => Math.max(0, current - 1));
   };
 
+  const summaryDetails: WizardSummaryDetail[] = [
+    ...optionalDetail(
+      selectedWallet === null ? null : selectedWallet.label,
+      t("DashboardPayments.onchainSend.sourceWallet"),
+      WalletIcon
+    ),
+    ...optionalDetail(
+      selectedAsset === null ? null : selectedAsset.label,
+      t("DashboardPayments.onchainSend.asset"),
+      CoinsIcon
+    ),
+    ...optionalDetail(
+      summaryAmount(fields.amount, locale),
+      t("DashboardPayments.onchainSend.amount"),
+      DollarSignIcon
+    ),
+  ];
+
   return {
+    summaryDetails,
     stepIndex,
     currentStepId,
     isLastStep,
