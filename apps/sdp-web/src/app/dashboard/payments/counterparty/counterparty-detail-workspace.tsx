@@ -44,9 +44,11 @@ import {
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import {
@@ -57,7 +59,6 @@ import {
   resolveTransferTypeLabel,
   shortenAddress,
 } from "../payments-overview.utils";
-import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 
@@ -542,6 +543,7 @@ function TransferDetailModal({
   onClose: () => void;
 }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
   if (!transfer) {
     return null;
   }
@@ -718,7 +720,7 @@ function TransferDetailModal({
             className="w-full"
             iconLeft={<ExternalLinkIcon className="size-4" />}
             onClick={() =>
-              window.open(getDevnetExplorerUrl(signature), "_blank", "noopener,noreferrer")
+              window.open(explorerTxUrl(signature, cluster), "_blank", "noopener,noreferrer")
             }
           >
             {t("DashboardPayments.counterparty.viewOnExplorer")}
