@@ -1,9 +1,11 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type { MuralWebhookEvent } from "@sdp/payments/ramps/providers/mural/client";
+import type { MuralKycStatus } from "@sdp/payments/ramps/providers/mural/provider-data";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import type { SdpEnvironment } from "@sdp/types";
+import type { KycStatus, SdpEnvironment } from "@sdp/types";
 import {
   createCounterpartiesRepository,
+  createKycWalletsRepository,
   createPaymentsRepository,
   type PaymentsRepository,
   type PaymentTransferRow,
@@ -12,7 +14,24 @@ import {
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
+import { emitKycApprovedForClearedEnrollments } from "@/services/workflows/clearance";
 import type { AppContext, WebhookProcessor } from "./processor";
+
+// Map Mural's provider KYC status onto SDP's normalized status. Mural is the first
+// writer into the SDP-owned kyc_wallets.kyc_status; other providers plug in the same way.
+function mapMuralKycStatusToSdp(status: MuralKycStatus): KycStatus {
+  switch (status) {
+    case "approved":
+      return "verified";
+    case "rejected":
+    case "errored":
+      return "rejected";
+    case "pending":
+      return "pending";
+    default:
+      return "unverified";
+  }
+}
 
 function readMuralWebhookPublicKey(
   env: Record<string, string | undefined>,
@@ -103,6 +122,23 @@ async function handleOrganizationLifecycleEvent(
     organizationId: event.organizationId,
     organization,
   });
+
+  // Workflow trigger seam: mirror the KYC status onto the SDP-owned kyc_wallets, then
+  // emit a kyc_approved event for every asset this counterparty's wallets are cleared
+  // for. No-op when the counterparty has no registered kyc_wallets.
+  if (event.kind === "kyc_status") {
+    const status = mapMuralKycStatusToSdp(event.kycStatus);
+    const wallets = await createKycWalletsRepository(c.env).setKycStatusByCounterparty({
+      counterpartyId: counterparty.id,
+      status,
+      provider: "mural",
+    });
+    if (status === "verified") {
+      for (const wallet of wallets) {
+        await emitKycApprovedForClearedEnrollments(c.env, { kycWallet: wallet, provider: "mural" });
+      }
+    }
+  }
 }
 
 export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralWebhookEvent> {

@@ -1,0 +1,92 @@
+import { assertValidAddress } from "@sdp/solana/address";
+import type { Context } from "hono";
+import { z } from "zod";
+import { getDb } from "@/db";
+import {
+  createKycWalletsRepository,
+  createWalletAssetEnrollmentsRepository,
+} from "@/db/repositories";
+import { badRequest, notFound } from "@/lib/errors";
+import { created, success } from "@/lib/response";
+import { TokenService } from "@/services/token.service";
+import { emitKycApprovedForClearedEnrollments } from "@/services/workflows/clearance";
+import type { Env } from "@/types/env";
+import { requireProjectScope } from "../helpers";
+
+type AppContext = Context<{ Bindings: Env }>;
+
+const enrollHolderSchema = z.object({
+  walletAddress: z.string(),
+  counterpartyId: z.string().nullish(),
+  reviewMode: z.enum(["auto", "manual"]).optional(),
+});
+
+// Enroll a holder for an asset — the v1 "clearance" act: upsert the SDP-owned
+// kyc_wallets identity row (+ counterparty link) and an active enrollment. If the
+// wallet is already verified, this completes clearance and emits kyc_approved.
+export const enrollHolder = async (c: AppContext) => {
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+
+  const parsed = enrollHolderSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", { errors: z.flattenError(parsed.error).fieldErrors });
+  }
+  assertValidAddress(parsed.data.walletAddress, "walletAddress");
+
+  const token = await new TokenService(getDb(c.env)).getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const wallet = await createKycWalletsRepository(c.env).upsertKycWallet({
+    organizationId: orgId,
+    projectId,
+    walletAddress: parsed.data.walletAddress,
+    counterpartyId: parsed.data.counterpartyId ?? null,
+    createdBy: auth.id,
+  });
+  if (!wallet) {
+    throw badRequest("Failed to register KYC wallet");
+  }
+
+  const enrollment = await createWalletAssetEnrollmentsRepository(c.env).upsertEnrollment({
+    organizationId: orgId,
+    projectId,
+    kycWalletId: wallet.id,
+    tokenId,
+    reviewMode: parsed.data.reviewMode,
+    createdBy: auth.id,
+  });
+
+  // Covers the "KYC approved before the operator enrolled them" ordering.
+  const dispatched = await emitKycApprovedForClearedEnrollments(c.env, { kycWallet: wallet });
+
+  return created(c, { wallet, enrollment, dispatched });
+};
+
+// The asset's enrolled (verified/pending) wallets — the reverse lookup.
+export const listHolders = async (c: AppContext) => {
+  const { tokenId } = c.req.param();
+  const { projectId, orgId } = requireProjectScope(c);
+
+  const page = Number.parseInt(c.req.query("page") ?? "1", 10);
+  const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 200);
+  const offset = (page - 1) * pageSize;
+
+  const { rows, total } = await createWalletAssetEnrollmentsRepository(
+    c.env
+  ).listEnrolledWalletsForToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+    limit: pageSize,
+    offset,
+  });
+
+  return success(c, { holders: rows, total, page, pageSize });
+};

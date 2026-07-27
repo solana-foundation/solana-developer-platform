@@ -19,6 +19,7 @@ import {
 } from "./handlers/deploy";
 import { executeForceBurn, prepareForceBurn } from "./handlers/force-burn";
 import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
+import { enrollHolder, listHolders } from "./handlers/holders";
 import { serveTokenMetadata } from "./handlers/metadata";
 import { executeMint, prepareMint } from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
@@ -27,6 +28,13 @@ import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
 import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
+import { listWorkflowExecutions, retryWorkflowExecution } from "./handlers/workflow-executions";
+import {
+  createWorkflow,
+  listWorkflowCatalog,
+  listWorkflows,
+  updateWorkflow,
+} from "./handlers/workflows";
 
 const issuance = new Hono<{ Bindings: Env }>();
 
@@ -135,6 +143,34 @@ issuance.delete(
   "/tokens/:tokenId/allowlist/:entryId",
   requirePermissions("tokens:write"),
   removeAllowlistEntry
+);
+
+// Holders (KYC-wallet enrollment for an asset)
+issuance.get("/tokens/:tokenId/holders", requirePermissions("tokens:read"), listHolders);
+issuance.post("/tokens/:tokenId/holders", requirePermissions("tokens:write"), enrollHolder);
+
+// Workflow builder — catalog + rules (register static paths before :workflowId)
+issuance.get(
+  "/tokens/:tokenId/workflows/catalog",
+  requirePermissions("tokens:read"),
+  listWorkflowCatalog
+);
+issuance.get(
+  "/tokens/:tokenId/workflows/executions",
+  requirePermissions("tokens:read"),
+  listWorkflowExecutions
+);
+issuance.post(
+  "/tokens/:tokenId/workflows/executions/:executionId/retry",
+  requirePermissions("tokens:write"),
+  retryWorkflowExecution
+);
+issuance.get("/tokens/:tokenId/workflows", requirePermissions("tokens:read"), listWorkflows);
+issuance.post("/tokens/:tokenId/workflows", requirePermissions("tokens:write"), createWorkflow);
+issuance.patch(
+  "/tokens/:tokenId/workflows/:workflowId",
+  requirePermissions("tokens:write"),
+  updateWorkflow
 );
 
 export default issuance;
