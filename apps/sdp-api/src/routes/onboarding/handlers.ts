@@ -10,6 +10,7 @@ import { getDb } from "@/db";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { assertProviderAvailable } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import { ONBOARDING_VERSION, resolveOnboardingSetup } from "./state";
 
@@ -188,6 +189,7 @@ export const completeOnboarding = async (c: AppContext) => {
   if (!rpcProvider) {
     throw badRequest("Select an RPC provider before finishing setup");
   }
+  await assertProviderAvailable(c.env, db, organization.id, "rpc", rpcProvider);
   if (!custodyProvider) {
     throw badRequest(
       "Create and select a default custody wallet for the sandbox project before finishing setup"

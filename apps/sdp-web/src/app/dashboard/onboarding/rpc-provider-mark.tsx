@@ -15,6 +15,11 @@ const RPC_PROVIDER_LOGOS: Record<
     backgroundClassName: "bg-[white]",
     paddingClassName: "p-0.5",
   },
+  nodit: {
+    src: "/provider-logos/nodit.svg",
+    backgroundClassName: "bg-[white]",
+    paddingClassName: "p-1",
+  },
   quicknode: {
     src: "/provider-logos/quicknode.svg",
     backgroundClassName: "bg-[#080b09]",
@@ -32,11 +37,27 @@ const RPC_PROVIDER_LOGOS: Record<
   },
 };
 
-export function RpcProviderMark({
-  provider,
-}: {
-  provider: Exclude<OrganizationRpcProvider, "default">;
-}) {
+export function RpcProviderMark({ provider }: { provider: OrganizationRpcProvider }) {
+  // The platform default ("SDP") has no vendor logo; mark it with the Solana glyph.
+  if (provider === "default") {
+    return (
+      <span
+        className="relative inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border-subtle bg-[white]"
+        aria-hidden="true"
+      >
+        <span className="relative h-full w-full p-1">
+          <Image
+            src="/landing/solana-logo.svg"
+            alt=""
+            fill
+            sizes="28px"
+            className="object-contain"
+          />
+        </span>
+      </span>
+    );
+  }
+
   const logo = RPC_PROVIDER_LOGOS[provider];
 
   return (
