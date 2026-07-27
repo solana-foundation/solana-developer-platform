@@ -3,10 +3,14 @@ import { createPiiCipher, type PiiCipher } from "@/services/pii-cipher/pii-ciphe
 import type { Env } from "@/types/env";
 import type { AssetProfilesRepository } from "./asset-profile.repository";
 import { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
+import type { AssetWorkflowsRepository } from "./asset-workflow.repository";
+import { createPostgresAssetWorkflowsRepository } from "./asset-workflow.repository.postgres";
 import type { CounterpartiesRepository } from "./counterparty.repository";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { CounterpartyAccountsRepository } from "./counterparty-account.repository";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
+import type { KycWalletsRepository } from "./kyc-wallet.repository";
+import { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
@@ -21,6 +25,10 @@ import type { PolicyRepository } from "./policy.repository";
 import { createPostgresPolicyRepository } from "./policy.repository.postgres";
 import type { TokenRepository } from "./token.repository";
 import { createPostgresTokenRepository } from "./token.repository.postgres";
+import type { WalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository";
+import { createPostgresWalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository.postgres";
+import type { WorkflowExecutionsRepository } from "./workflow-execution.repository";
+import { createPostgresWorkflowExecutionsRepository } from "./workflow-execution.repository.postgres";
 
 export function createPaymentsRepository(env: Env): PaymentsRepository {
   return createPostgresPaymentsRepository(getDb(env));
@@ -67,4 +75,20 @@ export function createPolicyRepository(env: Env): PolicyRepository {
 
 export function createAssetProfilesRepository(env: Env): AssetProfilesRepository {
   return createPostgresAssetProfilesRepository(getDb(env));
+}
+
+export function createKycWalletsRepository(env: Env): KycWalletsRepository {
+  return createPostgresKycWalletsRepository(getDb(env));
+}
+
+export function createWalletAssetEnrollmentsRepository(env: Env): WalletAssetEnrollmentsRepository {
+  return createPostgresWalletAssetEnrollmentsRepository(getDb(env));
+}
+
+export function createAssetWorkflowsRepository(env: Env): AssetWorkflowsRepository {
+  return createPostgresAssetWorkflowsRepository(getDb(env));
+}
+
+export function createWorkflowExecutionsRepository(env: Env): WorkflowExecutionsRepository {
+  return createPostgresWorkflowExecutionsRepository(getDb(env));
 }
