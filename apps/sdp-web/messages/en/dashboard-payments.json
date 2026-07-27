@@ -115,8 +115,6 @@
       "memoErrorValueRequired": "Value is required.",
       "memoErrorValueTooLong": "Value must be {limit} characters or fewer.",
       "memoErrorTooManyFields": "Memo can contain at most {limit} fields.",
-      "memoSummaryCountOne": "1 field",
-      "memoSummaryCountOther": "{count} fields",
       "rampMemoStep": "Memo",
       "rampMemoStepTitle": "Add a memo (optional)",
       "detailsStep": "Details",

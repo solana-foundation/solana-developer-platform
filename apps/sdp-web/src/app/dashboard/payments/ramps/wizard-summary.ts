@@ -89,26 +89,21 @@ export function providerSummaryDetail(
 }
 
 /**
- * Builds the memo field-count summary detail from the wizard memo rows,
- * carrying the memo payload for the summary's JSON drill-in.
+ * Builds the memo summary detail from the wizard memo rows, carrying the
+ * memo payload for the summary's JSON drill-in.
  *
  * @param t - Translator resolved from the i18n provider.
  * @param memoRows - Current memo rows from the ramp wizard.
- * @returns A single field-count detail, or none while the memo is empty.
+ * @returns A single memo detail, or none while the memo is empty.
  */
 export function memoSummaryDetails(t: Translate, memoRows: MemoRow[]): WizardSummaryDetail[] {
-  const count = memoRows.filter((row) => !isEmptyMemoRow(row)).length;
-  if (count === 0) {
+  if (!memoRows.some((row) => !isEmptyMemoRow(row))) {
     return [];
   }
   return [
     {
       icon: FileTextIcon,
       label: t("DashboardPayments.ramps.rampMemoStep"),
-      value:
-        count === 1
-          ? t("DashboardPayments.ramps.memoSummaryCountOne")
-          : t("DashboardPayments.ramps.memoSummaryCountOther", { count }),
       json: memoRowsToRecord(memoRows),
     },
   ];

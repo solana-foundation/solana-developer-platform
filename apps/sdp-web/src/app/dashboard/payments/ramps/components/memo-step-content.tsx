@@ -24,7 +24,7 @@ interface EditableMemoRow extends MemoRow {
 }
 
 const INPUT_CLASS =
-  "h-10 min-w-0 flex-1 rounded-lg border border-border-default bg-[var(--input-bg-idle)] px-3 text-sm text-primary placeholder:text-tertiary hover:bg-[var(--input-bg-hover)] focus:border-[var(--input-border-focus)] focus:outline-none";
+  "h-[var(--input-height-xl)] min-w-0 flex-1 rounded-[var(--input-radius-xl)] border border-border-default bg-[var(--input-bg-idle)] px-[var(--input-padding-x-xl)] text-base text-primary placeholder:text-tertiary hover:bg-[var(--input-bg-hover)] focus:border-[var(--input-border-focus)] focus:outline-none";
 
 /**
  * Creates a memo row with stable render identity.
@@ -159,7 +159,7 @@ export function MemoStepContent({ rows, onChange }: MemoStepContentProps) {
                   type="button"
                   onClick={() => removeRow(index)}
                   aria-label={t("DashboardPayments.ramps.removeMemoRow", { row: index + 1 })}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
+                  className="flex h-[var(--input-height-xl)] w-9 shrink-0 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
                 >
                   <XIcon className="size-4" />
                 </button>

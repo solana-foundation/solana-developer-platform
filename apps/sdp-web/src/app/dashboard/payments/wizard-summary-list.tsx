@@ -3,13 +3,15 @@
 import { ChevronLeftIcon, type LucideIcon } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
 export interface WizardSummaryDetail {
   /** Lucide icon component, or an image path for logo rows (e.g. providers). */
   icon: LucideIcon | string;
   label: string;
-  value: string;
+  /** Omitted for rows whose payload is reached through the JSON drill-in. */
+  value?: string;
   /** When set, the row offers a View JSON drill-in rendering this payload. */
   json?: Record<string, string>;
 }
@@ -74,18 +76,18 @@ export function WizardSummaryList({ details }: { details: WizardSummaryDetail[] 
               <detail.icon className="mt-0.5 size-4 shrink-0 text-muted" />
             )}
             <span className="shrink-0 text-sm text-tertiary">{detail.label}</span>
-            <span className="ml-auto min-w-0 break-words text-right text-sm font-medium text-primary">
-              {detail.value}
+            <span className="ml-auto flex min-w-0 items-start gap-3">
+              {detail.value === undefined ? null : (
+                <span className="min-w-0 break-words text-right text-sm font-medium text-primary">
+                  {detail.value}
+                </span>
+              )}
+              {detail.json ? (
+                <Button type="button" size="xs" onClick={() => setJsonDetail(detail)}>
+                  {t("DashboardPayments.ramps.memoViewJson")}
+                </Button>
+              ) : null}
             </span>
-            {detail.json ? (
-              <button
-                type="button"
-                onClick={() => setJsonDetail(detail)}
-                className="shrink-0 text-sm font-medium text-secondary transition-colors hover:text-primary"
-              >
-                {t("DashboardPayments.ramps.memoViewJson")}
-              </button>
-            ) : null}
           </div>
         ))}
       </div>
