@@ -93,10 +93,10 @@ export const SOL_DECIMALS = 9;
  * to be an unrelated 9-decimal mint rather than USDS.
  *
  * After adding or changing an entry, check it against chain with
- * `pnpm --filter @sdp/types mints:verify`. That confirms, for every cluster a
- * token is declared on, that the account parses as a mint, that its decimals
- * match, and that its owner is the declared token program. It is not in CI
- * because it needs public RPC, so it only helps if you run it.
+ * `pnpm check:well-known-mints` from the repository root. That confirms, for
+ * every cluster a token is declared on, that the account parses as a mint, that
+ * its decimals match, and that its owner is the declared token program. It is
+ * not in CI because it needs public RPC, so it only helps if you run it.
  *
  * Never add an address copied from a chat or a search result — spoofed tokens
  * share the name and symbol of the real asset, and only the mint distinguishes

@@ -16,6 +16,13 @@
 // Deliberately not wired into CI: it needs public RPC, and a rate-limited
 // endpoint would make the pipeline flaky for no safety gain. Run it by hand
 // whenever you add or change a catalogue entry.
+//
+// Run it through the root script, not with bare `node`. It imports the
+// catalogue straight from TypeScript source, and `engines.node` here is
+// `>=22.0.0` while unflagged type stripping only arrives in Node 23.6. Bare
+// `node` would therefore fail on the Node 22 that CI itself uses, so the root
+// script borrows the `tsx` that `@sdp/api` already depends on rather than
+// adding one this workspace's release-age policy will not resolve.
 
 import {
   SPL_TOKEN_PROGRAMS,
