@@ -302,10 +302,15 @@ function IssuanceTokenListRow({
 
       {/* Pre-mounted, absolutely-positioned panel. Absolute → no layout impact;
           the rows below make room by translating. Fades with opacity (compositor)
-          and never paints while closed. */}
+          and never paints while closed.
+          `inert` while closed is load-bearing: the panel stays in the DOM, so its
+          explorer links and Manage link would otherwise stay tabbable and land
+          keyboard users on invisible controls (opacity/pointer-events suppress
+          neither). inert removes the subtree from sequential focus, hit testing,
+          and the accessibility tree in one go. */}
       <div
         ref={panelRef}
-        aria-hidden={!open}
+        inert={!open}
         className="absolute inset-x-0 overflow-hidden rounded-2xl border border-border-default bg-surface-raised"
         style={{
           top: `calc(100% + ${ROW_GAP_PX}px)`,
