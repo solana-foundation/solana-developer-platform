@@ -1,6 +1,10 @@
 "use client";
 
-import { isMuralSandboxPayinCurrency, type PaymentTransferSummary } from "@sdp/types";
+import {
+  isMuralSandboxPayinCurrency,
+  type PaymentOnrampQuoteRequest,
+  type PaymentTransferSummary,
+} from "@sdp/types";
 import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -63,18 +67,19 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     advanceRequirementsBeforeQuote: true,
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",
-    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, collectedData }) => ({
-      provider,
-      counterpartyId: fields.counterpartyId,
-      destinationWallet: fields.walletId,
-      cryptoToken,
-      fiatCurrency: selectedRampPair.fiatCurrency,
-      fiatAmount: fields.amount.trim(),
-      redirectUrl: `${window.location.origin}/dashboard/payments`,
-      // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
-      domain: window.location.hostname,
-      collectedData,
-    }),
+    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>
+      ({
+        provider,
+        counterpartyId: fields.counterpartyId,
+        destinationWallet: fields.walletId,
+        cryptoToken,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+        fiatAmount: fields.amount.trim(),
+        redirectUrl: `${window.location.origin}/dashboard/payments`,
+        // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
+        domain: window.location.hostname,
+        rampsMemo,
+      }) satisfies PaymentOnrampQuoteRequest,
     onQuoteCreated: () => {
       setQuoteSimulationLoading(false);
       setQuoteSimulationSucceeded(false);
