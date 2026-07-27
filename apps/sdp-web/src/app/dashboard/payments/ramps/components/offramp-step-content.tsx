@@ -11,7 +11,7 @@ import { toRampCryptoToken } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
-import { MemoField } from "./memo-field";
+import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle } from "./providers";
@@ -116,8 +116,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     refreshQuote,
     onboarding,
     retryOnboarding,
-    rampsMemo,
-    setRampsMemo,
+    memoRows,
+    setMemoRows,
   } = wizard;
 
   const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
@@ -168,7 +168,6 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           onPairChange={handlePairChange}
           onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
         />
-        <MemoField memo={rampsMemo} onChange={setRampsMemo} />
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
             {requirementsBlocker}
@@ -176,6 +175,10 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
         ) : null}
       </div>
     );
+  }
+
+  if (currentStepId === "MEMO") {
+    return <MemoStepContent rows={memoRows} onChange={setMemoRows} />;
   }
 
   if (currentStepId === "REQUIREMENTS") {
