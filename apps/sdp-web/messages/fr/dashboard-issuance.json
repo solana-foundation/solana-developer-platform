@@ -9,7 +9,16 @@
       "status": "Statut",
       "signature": "Signature",
       "created": "Créé",
-      "showing": "Affichage des {count} premières transactions{total}. Utilisez la pagination pour voir les anciennes."
+      "showing": "Affichage des {count} premières transactions{total}. Utilisez la pagination pour voir les anciennes.",
+      "loadError": "Impossible de charger les transactions.",
+      "noMatches": "Aucune transaction ne correspond à ces filtres.",
+      "filterByType": "Filtrer par type",
+      "filterAllTypes": "Tous les types",
+      "filterByStatus": "Filtrer par statut",
+      "filterAllStatuses": "Tous les statuts"
+    },
+    "pagination": {
+      "range": "{start}–{end} sur {total}"
     },
     "errors": {
       "unknown": "Erreur inconnue",
@@ -74,7 +83,9 @@
       "searchPlaceholder": "Rechercher dans {label}…",
       "allLabels": "Tous les libellés",
       "noMatches": "Aucune entrée ne correspond à votre recherche.",
-      "filterByLabel": "Filtrer par libellé"
+      "filterByLabel": "Filtrer par libellé",
+      "loading": "Chargement des entrées…",
+      "loadError": "Impossible de charger les entrées."
     },
     "wallet": {
       "none": "Aucun",
@@ -214,7 +225,6 @@
       "empty": "Aucune activité enregistrée pour le moment.",
       "loading": "Chargement de l'activité…",
       "error": "Impossible de charger l'activité.",
-      "loadMore": "Afficher plus",
       "recentTitle": "Activité récente",
       "viewAll": "Tout afficher"
     },
@@ -1019,6 +1029,7 @@
       "unfreezeAccount": "Unfreeze compte",
       "listFrozenAccounts": "Lister les comptes Freeze",
       "listAllowlist": "Lister l'Allowlist",
+      "listAllowlistLabels": "Lister les libellés de l'Allowlist",
       "addAllowlistEntry": "Ajouter une entrée Allowlist",
       "removeAllowlistEntry": "Supprimer une entrée Allowlist",
       "tokenIdPlaceholder": "ID Token (ex. tok_abc123)",

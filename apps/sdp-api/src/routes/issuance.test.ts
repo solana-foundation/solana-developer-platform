@@ -330,6 +330,53 @@ describe("Issuance Routes", () => {
     await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
   });
 
+  describe("GET /v1/issuance/tokens/{tokenId}/transactions", () => {
+    it("filters the per-token list by type with an accurate total", async () => {
+      const token = await seedIssuedToken();
+      await seedIssuanceTransaction({
+        id: "ptx_mint",
+        type: "mint",
+        params: {},
+        createdAt: "2024-02-02T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ptx_burn",
+        type: "burn",
+        params: {},
+        createdAt: "2024-02-01T00:00:00.000Z",
+      });
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}/transactions?type=mint&page=1&pageSize=10`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(1);
+      expect(body.data.map((tx: { id: string }) => tx.id)).toEqual(["ptx_mint"]);
+    });
+
+    it("rejects an invalid type with 400", async () => {
+      const token = await seedIssuedToken();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}/transactions?type=not_a_real_type`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+    });
+  });
+
   describe("GET /v1/issuance/transactions", () => {
     async function cacheProjectApiKey(overrides: Record<string, unknown>) {
       const { apiKeys } = createKVStoreSet(env);

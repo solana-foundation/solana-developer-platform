@@ -1,4 +1,4 @@
-import type { AssetAuditEvent } from "@sdp/types";
+import type { TokenAllowlistEntry } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
@@ -15,44 +15,42 @@ function parseErrorMessage(body: string): string {
   }
 }
 
-// Matches the API's server-side pageSize cap (the parsePositiveInteger max in
-// the issuance audit handler). The dashboard pages with a fixed size under this;
-// the clamp is just a defensive bound on the incoming param.
-const MAX_PAGE_SIZE = 100;
+// Matches the API's server-side pageSize cap for the allowlist list handler.
+const MAX_PAGE_SIZE = 500;
+const DEFAULT_PAGE_SIZE = 25;
 
 export async function GET(request: Request, { params }: { params: Promise<{ tokenId: string }> }) {
-  const trace = createTimedTrace("route.dashboard.issuance.token.audit", request);
+  const trace = createTimedTrace("route.dashboard.issuance.token.allowlist", request);
 
   try {
     const { tokenId } = await params;
     const requestUrl = new URL(request.url);
-    const action = requestUrl.searchParams.get("action")?.trim();
-    const status = requestUrl.searchParams.get("status")?.trim();
-    const type = requestUrl.searchParams.get("type")?.trim();
+    const search = requestUrl.searchParams.get("search")?.trim();
+    const label = requestUrl.searchParams.get("label")?.trim();
     const pageRaw = Number.parseInt(requestUrl.searchParams.get("page") ?? "1", 10);
     const page = Number.isInteger(pageRaw) && pageRaw > 0 ? pageRaw : 1;
-    const pageSizeRaw = Number.parseInt(requestUrl.searchParams.get("pageSize") ?? "50", 10);
+    const pageSizeRaw = Number.parseInt(
+      requestUrl.searchParams.get("pageSize") ?? String(DEFAULT_PAGE_SIZE),
+      10
+    );
     const pageSize = Number.isInteger(pageSizeRaw)
       ? Math.min(Math.max(pageSizeRaw, 1), MAX_PAGE_SIZE)
-      : 50;
+      : DEFAULT_PAGE_SIZE;
 
     const apiClient = await createSdpApiClient(
-      trace.childContext("route.dashboard.issuance.token.audit.api")
+      trace.childContext("route.dashboard.issuance.token.allowlist.api")
     );
 
     const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-    if (action) {
-      query.set("action", action);
+    if (search) {
+      query.set("search", search);
     }
-    if (status) {
-      query.set("status", status);
-    }
-    if (type) {
-      query.set("type", type);
+    if (label) {
+      query.set("label", label);
     }
 
     const response = await apiClient.request(
-      `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/audit?${query.toString()}`
+      `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist?${query.toString()}`
     );
 
     if (!response.ok) {
@@ -60,16 +58,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       return NextResponse.json(
         {
           data: [],
-          error: `Audit API ${response.status}: ${parseErrorMessage(body)}`,
+          error: `Allowlist API ${response.status}: ${parseErrorMessage(body)}`,
           total: 0,
           hasMore: false,
+          page,
+          pageSize,
         },
         { status: response.status }
       );
     }
 
     const payload = (await response.json()) as {
-      data?: AssetAuditEvent[];
+      data?: TokenAllowlistEntry[];
       meta?: { total?: number; hasMore?: boolean };
     };
 
@@ -88,6 +88,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
         error: error instanceof Error ? error.message : "Request failed",
         total: 0,
         hasMore: false,
+        page: 1,
+        pageSize: DEFAULT_PAGE_SIZE,
       },
       { status: 500 }
     );

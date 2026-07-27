@@ -165,6 +165,18 @@ export const tokenTransactionsResponse = paginatedResponseSchema(tokenTransactio
 export const issuanceTransactionsResponse = paginatedResponseSchema(tokenTransactionListItemSchema);
 export const tokenAllowlistListResponse = paginatedResponseSchema(tokenAllowlistEntrySchema);
 export const tokenAllowlistResponse = successResponseSchema(tokenAllowlistResponseSchema);
+export const tokenAllowlistLabelsResponse = successResponseSchema(
+  z.object({
+    labels: z.array(z.string()).openapi({
+      description: "Distinct labels used across the token's active control-list entries.",
+      example: ["Treasury", "Market maker"],
+    }),
+    total: z.number().int().openapi({
+      description: "Total active control-list entries (unfiltered), for the summary count.",
+      example: 42,
+    }),
+  })
+);
 export const frozenAccountResponse = successResponseSchema(frozenAccountResponseSchema);
 export const frozenAccountListResponse = paginatedResponseSchema(frozenAccountSchema);
 
