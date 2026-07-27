@@ -10,22 +10,27 @@ import { cn } from "@/lib/utils";
  * rather than hotlinking a third-party CDN: a custody dashboard should not make
  * requests to arbitrary origins on render, and IPFS and Arweave gateways are
  * not dependable enough to sit in a picker.
+ *
+ * SVG wherever the mark is published as one. Three are not: JitoSOL and USDG
+ * are distributed as PNG by their own issuers (Jito's token-metadata bucket and
+ * Paxos respectively), and every vector WBTC mark that could be found is drawn
+ * in flat white, which disappears against the white chip these render on.
  */
 const TOKEN_LOGOS: Partial<Record<WellKnownTokenSymbol, string>> = {
-  SOL: "/token-logos/sol.png",
-  USDC: "/token-logos/usdc.png",
+  SOL: "/token-logos/sol.svg",
+  USDC: "/token-logos/usdc.svg",
   USDT: "/token-logos/usdt.svg",
   USDG: "/token-logos/usdg.png",
-  PYUSD: "/token-logos/pyusd.png",
+  PYUSD: "/token-logos/pyusd.svg",
+  EURC: "/token-logos/eurc.svg",
   JITOSOL: "/token-logos/jitosol.png",
-  MSOL: "/token-logos/msol.png",
-  BSOL: "/token-logos/bsol.png",
+  MSOL: "/token-logos/msol.svg",
+  BSOL: "/token-logos/bsol.svg",
   WBTC: "/token-logos/wbtc.png",
 };
 
 /** Monogram tints for tokens without a bundled mark. Keyed by display symbol. */
 const MONOGRAM_TINTS: Record<string, string> = {
-  EURC: "bg-[#1667e6] text-[white]",
   USDS: "bg-[#1a1a1a] text-[white]",
   USDY: "bg-[#0b4f4a] text-[white]",
   INF: "bg-[#7c5cff] text-[white]",
