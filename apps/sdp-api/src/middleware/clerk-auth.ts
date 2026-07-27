@@ -20,6 +20,7 @@ import {
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
+import { invitationWasRevoked } from "@/lib/invitations";
 import { ensureClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import {
@@ -242,6 +243,22 @@ async function ensureMembership(
     // granting access, and inserting first would let a concurrent revocation
     // win the invitation transition after access was already persisted.
     await db.transaction(async (tx) => {
+      // Reached only when the caller holds no membership row at all — an
+      // existing member returned above — so this declines a join and never
+      // revokes access someone already has.
+      //
+      // Without it, revoking an invitation stopped the local token while
+      // Clerk's acceptance link stayed live: signing in through that link fell
+      // through to the Clerk role and provisioned the membership anyway. Inside
+      // the transaction and holding the invitation locks, so a revocation
+      // cannot land between this check and the insert below.
+      if (
+        !invitedRole &&
+        (await invitationWasRevoked(tx, params.organizationId, params.email, { lock: true }))
+      ) {
+        throw unauthorized("Invitation to this organization was revoked");
+      }
+
       if (pendingInvite && invitedRole) {
         // Role normalization folds in here, so there is one transition rather
         // than a read, a role fixup and a later accept.

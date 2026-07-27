@@ -10,6 +10,7 @@ import {
   type PolicyRule,
   type PrivateTransferRequest,
   RAMP_PROVIDERS,
+  RAMPS_MEMO_LIMITS,
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import { getI64Encoder, getU64Encoder } from "@solana/kit";
@@ -636,6 +637,15 @@ export const estimateOfframpSchema = z.object({
   cryptoAmount: paymentAmountSchema,
 });
 
+export const rampsMemoSchema = z
+  .record(
+    z.string().min(1).max(RAMPS_MEMO_LIMITS.maxKeyLength),
+    z.string().min(1).max(RAMPS_MEMO_LIMITS.maxValueLength)
+  )
+  .refine((value) => Object.keys(value).length <= RAMPS_MEMO_LIMITS.maxEntries, {
+    message: `rampsMemo must contain at most ${RAMPS_MEMO_LIMITS.maxEntries} key-value pairs`,
+  });
+
 export const createOnrampQuoteSchema = z.object({
   provider: rampProviderSchema,
   counterpartyId: z.string().min(1),
@@ -644,6 +654,7 @@ export const createOnrampQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
+  rampsMemo: rampsMemoSchema.optional(),
   // Embedding domain for Coinbase's Apple Pay payment link (browser origin host).
   domain: z.string().min(1).optional(),
 });
@@ -710,6 +721,7 @@ export const createOfframpQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
+  rampsMemo: rampsMemoSchema.optional(),
 });
 
 export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
