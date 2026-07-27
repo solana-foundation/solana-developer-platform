@@ -312,9 +312,12 @@ function DesktopTable({
                   {formatDirection(transfer.direction, t)}
                 </TableCell>
                 <TableCell className="min-w-0">
+                  {/* primary is already shortened when there is no display
+                      name, so titling it with itself showed the truncated
+                      string again on hover. The reference is the full value. */}
                   <span
                     className="block truncate text-sm text-secondary"
-                    title={counterparty.primary}
+                    title={counterparty.reference ?? counterparty.primary}
                   >
                     {counterparty.primary}
                   </span>
@@ -389,7 +392,10 @@ function MobileRows({
                 <p className="text-xs text-tertiary">
                   {t("DashboardPayments.transactions.counterparty")}
                 </p>
-                <p className="mt-1 truncate text-secondary" title={counterparty.primary}>
+                <p
+                  className="mt-1 truncate text-secondary"
+                  title={counterparty.reference ?? counterparty.primary}
+                >
                   {counterparty.primary}
                 </p>
                 {counterparty.secondary ? (
@@ -444,7 +450,11 @@ export function TransactionsResults({
           serverFilters.asset ||
           serverFilters.provider ||
           serverFilters.from ||
-          serverFilters.to
+          serverFilters.to ||
+          // Excluding observed deposits can be the sole reason a wallet looks
+          // empty, so the empty state must offer to clear filters rather than
+          // claim there is nothing to show.
+          !serverFilters.includeObserved
       ),
     [serverFilters]
   );

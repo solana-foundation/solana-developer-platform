@@ -8,6 +8,7 @@ import type { TransactionFilters } from "./transactions-query";
 
 function filters(overrides: Partial<TransactionFilters> = {}): TransactionFilters {
   return {
+    includeObserved: true,
     sortBy: "createdAt",
     sortDirection: "desc",
     snapshot: "2026-07-18T12:00:00.000Z",
