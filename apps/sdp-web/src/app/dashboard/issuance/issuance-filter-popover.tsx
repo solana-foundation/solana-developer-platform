@@ -126,7 +126,7 @@ export function IssuanceFilterPopover({
       <Popover.Trigger
         aria-label={t("DashboardIssuance.workspace.filters")}
         className={cn(
-          "relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border bg-surface-raised outline-none transition-colors",
+          "relative inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[10px] border bg-surface-raised outline-none transition-colors",
           "border-border-default text-secondary hover:border-border-strong hover:text-primary",
           "focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]",
           "data-[popup-open]:border-border-strong data-[popup-open]:text-primary"

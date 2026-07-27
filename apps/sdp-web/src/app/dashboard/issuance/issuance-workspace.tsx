@@ -505,7 +505,7 @@ export function IssuanceWorkspace({
                       : "DashboardIssuance.workspace.viewSwitchToGrid"
                   )}
                   onClick={() => changeView(view === "grid" ? "list" : "grid")}
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-border-default bg-surface-raised text-secondary outline-none transition-colors hover:border-border-strong hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
+                  className="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[10px] border border-border-default bg-surface-raised text-secondary outline-none transition-colors hover:border-border-strong hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
                 >
                   {view === "grid" ? (
                     <List className="h-4 w-4" />
@@ -516,7 +516,7 @@ export function IssuanceWorkspace({
               </div>
               <Button
                 type="button"
-                className="h-10 w-full rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
+                className="h-10 w-full cursor-pointer rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
                 onClick={startTokenCreation}
                 iconLeft={<Plus className="h-4 w-4" />}
               >

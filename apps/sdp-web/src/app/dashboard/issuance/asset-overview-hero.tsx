@@ -122,13 +122,13 @@ function IdentityFields({
               href={websiteHref}
               target="_blank"
               rel="noreferrer"
-              className="mt-0.5 inline-flex w-fit max-w-full items-center gap-1 text-[13px] font-medium text-primary hover:underline"
+              className="mt-0.5 inline-flex w-fit max-w-full items-center gap-1 text-[13px] font-normal text-primary hover:underline"
             >
               <span className="truncate">{website}</span>
               <ArrowUpRight className="h-3 w-3 shrink-0" />
             </a>
           ) : (
-            <p className="mt-0.5 truncate text-[13px] font-medium text-secondary">{website}</p>
+            <p className="mt-0.5 truncate text-[13px] font-normal text-secondary">{website}</p>
           )}
         </div>
       ) : null}
@@ -139,7 +139,7 @@ function IdentityFields({
         </div>
         {mintAddress ? (
           <div className="mt-0.5 flex w-fit max-w-full items-center gap-1.5">
-            <span className="min-w-0 truncate text-[13px] font-medium text-primary">
+            <span className="min-w-0 truncate text-[13px] font-normal text-primary">
               {mintAddress}
             </span>
             {onCopy ? (
@@ -202,7 +202,9 @@ export function StatTile({
       <div className="mt-auto flex items-center gap-1.5 pt-0.5">
         <span
           className={cn(
-            "min-w-0 text-[13px] font-medium",
+            // Same weight as the collapsed row's stat values — the hero is a denser
+            // read-out, not a set of headings, so values stay regular weight.
+            "min-w-0 text-[13px] font-normal",
             clamp ? "line-clamp-2" : "truncate",
             isEmpty || muted ? "text-muted" : "text-primary"
           )}
@@ -352,7 +354,7 @@ function IdentityShell({ mark, children }: { mark: ReactNode; children: ReactNod
 
 function IdentityName({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span className={cn("truncate text-[12px] leading-[15px] font-medium text-primary", className)}>
+    <span className={cn("truncate text-[12px] leading-[15px] font-normal text-primary", className)}>
       {children}
     </span>
   );
@@ -562,7 +564,22 @@ function AuthorityGlyphIcon({
                 so the old separate status line is redundant — "Held externally" /
                 "Not set" are the badge's own name line. */}
             <div className="px-3 py-2.5">
-              <p className="text-[12px] leading-snug font-medium text-primary">{label}</p>
+              {/* Role glyph in the same 24px mark slot the identity badge below
+                  uses (same size, same gap), so the role and its holder line up on
+                  one grid — and the chip echoes the trigger you hovered. */}
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-fill-subtle",
+                    authorityControlColor(row.control)
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                </span>
+                <p className="min-w-0 truncate text-[12px] leading-snug font-medium text-primary">
+                  {label}
+                </p>
+              </div>
               <div className="mt-2">
                 <WalletIdentityBadge identity={row.identity} onCopy={onCopy} />
               </div>
