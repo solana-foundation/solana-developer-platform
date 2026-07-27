@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@solana/design-system/badge";
-import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
+import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -76,10 +76,21 @@ function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-function buildInitialFieldValues(endpoint: ApiPlaygroundEndpointConfig): Record<string, string> {
+function buildInitialFieldValues(
+  endpoint: ApiPlaygroundEndpointConfig,
+  preselect?: Record<string, string>
+): Record<string, string> {
   return [...endpoint.pathFields, ...endpoint.bodyFields].reduce<Record<string, string>>(
     (values, field) => {
-      values[field.key] = field.defaultValue ?? "";
+      // A URL-provided preselection (e.g. ?tokenId=…) wins over the field's
+      // default, but only when it's usable: any value for a text field, or a
+      // valid option for a select field. Otherwise fall back to the default.
+      const desired = preselect?.[field.key];
+      const isUsable =
+        desired != null &&
+        desired !== "" &&
+        (field.kind !== "select" || (field.options ?? []).some((o) => o.value === desired));
+      values[field.key] = isUsable ? desired : (field.defaultValue ?? "");
       return values;
     },
     {}
@@ -336,6 +347,18 @@ function EmptyState({ children }: { children: string }) {
   );
 }
 
+/** Shown in the Response panel before a request runs, instead of placeholder JSON. */
+function ResponseEmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+      <span className="flex size-11 items-center justify-center rounded-xl bg-fill-strong text-tertiary">
+        <Braces className="size-5" aria-hidden="true" />
+      </span>
+      <p className="max-w-xs text-sm text-tertiary">{message}</p>
+    </div>
+  );
+}
+
 function MessageCard({ message }: { message: ApiPlaygroundMessage }) {
   return (
     <div
@@ -541,8 +564,16 @@ export function ApiPlaygroundShell({
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
   const initialEndpointId = initialEndpoint?.id ?? "";
+  // Deep links can preselect the active resource, e.g. ?tokenId=… from the asset
+  // management workspace, so the playground opens focused on that token. State
+  // stays shareable because it's the URL-driven endpoint + token.
+  const tokenIdParam = searchParams.get("tokenId");
+  const preselectedFieldValues = useMemo(
+    () => (tokenIdParam ? { tokenId: tokenIdParam } : undefined),
+    [tokenIdParam]
+  );
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
-    initialEndpoint ? buildInitialFieldValues(initialEndpoint) : {}
+    initialEndpoint ? buildInitialFieldValues(initialEndpoint, preselectedFieldValues) : {}
   );
   const [mobileSection, setMobileSection] = useState<"request" | "output">("request");
   const [activePanel, setActivePanel] = useState<"code" | "response" | "example">("code");
@@ -594,12 +625,12 @@ export function ApiPlaygroundShell({
       return;
     }
 
-    setFieldValues(buildInitialFieldValues(endpoint));
+    setFieldValues(buildInitialFieldValues(endpoint, preselectedFieldValues));
     setMobileSection("request");
     setActivePanel("code");
     setExecutionResult(null);
     setExecuteError(null);
-  }, [activeEndpointId]);
+  }, [activeEndpointId, preselectedFieldValues]);
 
   const requestBody = useMemo(
     () => (activeEndpoint ? buildRequestBody(activeEndpoint.bodyFields, fieldValues) : null),
@@ -660,7 +691,7 @@ export function ApiPlaygroundShell({
   };
 
   const handleReset = () => {
-    setFieldValues(buildInitialFieldValues(activeEndpoint));
+    setFieldValues(buildInitialFieldValues(activeEndpoint, preselectedFieldValues));
     setMobileSection("request");
     setActivePanel("code");
     setExecutionResult(null);
@@ -977,7 +1008,13 @@ export function ApiPlaygroundShell({
               }}
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                <CodeBlockContent content={panelContent} language={panelLanguage} />
+                {activePanel === "response" && !executionResult && !executeError ? (
+                  <ResponseEmptyState
+                    message={t("Shared.SharedComponents.runRequestToInspectOutput")}
+                  />
+                ) : (
+                  <CodeBlockContent content={panelContent} language={panelLanguage} />
+                )}
               </div>
               <div
                 className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3 text-sm"

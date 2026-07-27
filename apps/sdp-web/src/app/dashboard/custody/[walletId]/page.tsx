@@ -336,7 +336,7 @@ export default async function WalletDetailPage({
   );
 }
 
-async function WalletBalanceSummary({
+export async function WalletBalanceSummary({
   balancesPromise,
   providerLabel,
   publicKey,
@@ -353,7 +353,7 @@ async function WalletBalanceSummary({
   const totalBalance = balancesResult.error ? null : resolveTotalBalance(balancesResult.balances);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       <div className="space-y-6 p-6">
         <div>
           <p className="text-xs font-medium tracking-[0.14em] text-muted uppercase">
@@ -389,7 +389,7 @@ async function WalletBalanceSummary({
   );
 }
 
-async function WalletBalancesSection({
+export async function WalletBalancesSection({
   balancesPromise,
   ownedTokensByMintPromise,
   t,
@@ -414,7 +414,7 @@ async function WalletBalancesSection({
       ) : null}
 
       {balances.length > 0 ? (
-        <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
+        <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
           {balances.map((balance) => {
             const ownedToken =
               balance.token === "SOL" ? null : (ownedTokensByMint.get(balance.mint) ?? null);
@@ -431,7 +431,7 @@ async function WalletBalancesSection({
           })}
         </div>
       ) : (
-        <div className="rounded-2xl border border-border-default bg-white px-4 py-4 text-sm text-secondary">
+        <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-4 text-sm text-secondary">
           {t("DashboardCustody.noTrackedBalances")}
         </div>
       )}

@@ -1,112 +1,28 @@
 # Doppler Secrets Operations
 
-⚠️ **Maintainers Only** — This guide covers secret management and CI/CD configuration.
+> **Maintainers only.** This guide covers secret management and CI/CD configuration.
 
----
+SDP uses Doppler for team development, secret-aware CI, and configuration synced to the hosted web and docs applications. The API's Cloud Run services and jobs are a separate deployment boundary: their runtime environment and secret references are configured in GCP and are preserved when GitHub Actions updates an image.
 
-SDP now treats Doppler as the single source of truth for secret and environment-owned string configuration.
+## Doppler Configs
 
-The runtime model does not change:
+The monorepo uses these shared configs:
 
-- `wrangler.toml` remains the source of truth for Worker binding names and committed local defaults
-- environment-specific Cloudflare binding IDs live in Doppler and are rendered into a temporary Wrangler config during deploy
-- Cloudflare remains the deployed runtime store for Worker secrets
-- Vercel remains the deployed runtime store for `sdp-web` and `sdp-docs`
-- GitHub Actions keeps only Doppler bootstrap tokens plus non-secret deploy metadata
+| Config | Purpose |
+| --- | --- |
+| `dev` | Team development and the source for personal developer configs |
+| `dev_ci` | Secret-aware CI and integration tests |
+| `stg` | Preview/staging web and docs configuration |
+| `prd` | Production web/docs configuration and operator access |
 
-## Doppler Shape
-
-Create one Doppler project for the monorepo with these configs:
-
-- `dev`
-- `dev_ci`
-- `stg`
-- `prd`
-
-For local development, create personal configs cloned from `dev` and set `DOPPLER_CONFIG` before running the root repo commands.
+For local development, create a personal config cloned from `dev` and set `DOPPLER_CONFIG` before running root commands.
 
 ## Repo Commands
 
-- `pnpm dev`
-- `pnpm dev:api:local`
-- `pnpm dev:web`
-- `pnpm dev:docs`
-- `pnpm test`
-- `pnpm test:integration`
-  These root-level commands run under `doppler run` automatically and use the active `DOPPLER_CONFIG`.
-- `pnpm secrets:print:cloudflare`
-  Prints the allowlisted Worker secret payload used by deploy automation and `wrangler secret bulk`.
-
-## Same-Day Cutover Checklist
-
-Before merging the PR:
-
-1. Import current GitHub, Cloudflare, and Vercel values into the Doppler project.
-2. Create service tokens for:
-   - `dev_ci`
-   - `dev`
-   - `prd`
-3. Set GitHub secrets:
-   - repository secret `DOPPLER_TOKEN_CI`
-   - `dev` environment secret `DOPPLER_TOKEN`
-   - `production` environment secret `DOPPLER_TOKEN`
-4. Set GitHub environment variables for API deploy migrations:
-   - `GCP_WORKLOAD_IDENTITY_PROVIDER`
-   - `GCP_SERVICE_ACCOUNT`
-   - `CLOUD_SQL_INSTANCE_CONNECTION_NAME`
-5. Leave `RELEASE_PLEASE_TOKEN` unchanged in GitHub.
-6. Configure Doppler sync to Vercel for both apps:
-   - `apps/sdp-web`
-   - `apps/sdp-docs`
-7. Map Doppler configs to Vercel environments:
-   - `dev` -> Development
-   - `stg` -> Preview
-   - `prd` -> Production
-8. Keep old GitHub, Cloudflare, and Vercel secrets in place for one successful deploy cycle as rollback insurance, but do not let repo workflows read them anymore.
-
-## Required Doppler Coverage
-
-At minimum, the Doppler configs used by automation must include:
-
-- Cloudflare deploy credentials:
-  - `CLOUDFLARE_API_TOKEN`
-  - `CLOUDFLARE_ACCOUNT_ID`
-- Cloudflare deploy binding IDs:
-  - `CLOUDFLARE_HYPERDRIVE_ID`
-  - `CLOUDFLARE_KV_SDP_API_KEYS_ID`
-  - `CLOUDFLARE_KV_SDP_RATE_LIMITS_ID`
-  - `CLOUDFLARE_KV_SDP_CACHE_ID`
-  - `CLOUDFLARE_KV_SDP_SESSIONS_ID`
-- API deploy and migration values:
-  - `DATABASE_URL`
-  - `API_KEY_PEPPER`
-  - `CUSTODY_ENCRYPTION_KEY`
-- API integration/provider values used in CI and runtime:
-  - Solana RPC provider URLs and keys
-  - `KORA_*`
-  - `PRIVY_*`
-  - `CLERK_*`
-- Web and docs values synced to Vercel:
-  - `SDP_API_BASE_URL`
-  - `NEXT_PUBLIC_SDP_API_BASE_URL`
-  - `NEXT_PUBLIC_SDP_API_URL`
-  - `NEXT_PUBLIC_SDP_DOCS_URL`
-  - `NEXT_PUBLIC_SDP_WEB_URL`
-  - `SDP_DOCS_PROXY_ORIGIN`
-  - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-  - `CLERK_SECRET_KEY`
-  - `CLERK_JWT_TEMPLATE`
-  - `NEXT_PUBLIC_SENTRY_DSN`
-
-`SDP_DOCS_PROXY_ORIGIN` is the internal rewrite target for `sdp-web` `/docs` traffic. In production it must point at the docs project origin, `https://docs.platform.solana.com`, not the public canonical docs URL `https://platform.solana.com/docs`, otherwise the web app rewrites `/docs` back to itself.
-
-## Local Development
-
-1. Install the Doppler CLI and authenticate.
-2. Set your local config, for example `export DOPPLER_CONFIG=gui-dev`.
-3. Start the apps or tests from the repo root:
+These root commands automatically run through the Doppler wrapper and use the active `DOPPLER_CONFIG`:
 
 ```bash
+pnpm dev
 pnpm dev:api:local
 pnpm dev:web
 pnpm dev:docs
@@ -114,30 +30,86 @@ pnpm test
 pnpm test:integration
 ```
 
-If you run package-local commands directly instead of the root scripts, wrap them explicitly with `doppler run --config "${DOPPLER_CONFIG}" -- ...`.
+`pnpm secrets:print:docker` projects the allowlisted API environment into the format used by self-hosted Docker tooling. It does not update a hosted environment.
 
-Do not keep `apps/sdp-api/.dev.vars` in place while using `doppler run`. The local Worker script now fails fast if that legacy file is present, because Wrangler will otherwise prefer the file over injected process env.
+## Required Coverage
 
-## CI and Deploy Behavior
+At minimum, the configs used by local development and CI should contain the values needed by the exercised features:
 
-- Secret-aware CI jobs fetch runtime env directly from Doppler with `DOPPLER_TOKEN_CI`.
-- The API deploy workflow fetches deploy-time env from the target Doppler config using the GitHub environment secret `DOPPLER_TOKEN` and the Doppler Secrets Fetch action.
-- The API deploy workflow reads non-secret Cloud SQL identity metadata from GitHub environment variables.
-- Postgres migrations connect through Google Workload Identity and Cloud SQL Auth Proxy; the Doppler `DATABASE_URL` host is rewritten to the local proxy only for the migration process.
-- The deploy workflow renders a temporary Wrangler config with Doppler-backed Cloudflare binding IDs, then syncs the allowlisted Worker secret set via `wrangler secret bulk` before `wrangler deploy`.
+- API database and cache values such as `DATABASE_URL` and `REDIS_URL`
+- application secrets such as `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY`
+- authentication values under `CLERK_*`
+- Solana RPC URLs and API keys
+- Kora and custody-provider values used by integration tests
+- compliance and ramp-provider credentials used by live discovery or integration coverage
+- API observability values such as `SENTRY_DSN` and `SENTRY_TRACES_SAMPLE_RATE` when telemetry is enabled
 
-Keep these deploy identity values in GitHub environment variables rather than Doppler:
+The web and docs configs additionally provide their public URLs and browser-safe configuration, including:
 
-- `GCP_WORKLOAD_IDENTITY_PROVIDER`
-- `GCP_SERVICE_ACCOUNT`
-- `CLOUD_SQL_INSTANCE_CONNECTION_NAME`
+- `SDP_API_BASE_URL`
+- `NEXT_PUBLIC_SDP_API_BASE_URL`
+- `NEXT_PUBLIC_SDP_API_URL`
+- `NEXT_PUBLIC_SDP_DOCS_URL`
+- `NEXT_PUBLIC_SDP_WEB_URL`
+- `SDP_DOCS_PROXY_ORIGIN`
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `CLERK_SECRET_KEY`
+- `CLERK_JWT_TEMPLATE`
+- `NEXT_PUBLIC_SENTRY_DSN`
 
-They are not application secrets, and the GitHub workflow needs them before it can authenticate to Google Cloud and fetch Doppler-backed runtime configuration.
+`SDP_DOCS_PROXY_ORIGIN` is the internal rewrite target for `sdp-web` `/docs` traffic. In production it must point to the docs project origin, `https://docs.platform.solana.com`, rather than the public canonical URL `https://platform.solana.com/docs`; otherwise the web app rewrites `/docs` back to itself.
+
+Only expose `NEXT_PUBLIC_*` values that are safe to include in browser bundles.
+
+## Local Development
+
+1. Install and authenticate the Doppler CLI.
+2. Select a personal config, for example `export DOPPLER_CONFIG=gui-dev`.
+3. Start the required apps or tests from the repository root.
+
+If you run a package-local command directly, wrap it explicitly:
+
+```bash
+doppler run --config "${DOPPLER_CONFIG}" -- <command>
+```
+
+`apps/sdp-api/.env.local` remains available for local overrides and external contributors. The repository wrapper loads environment files as inert `KEY=VALUE` data; it does not source them as shell code. Do not commit local environment files.
+
+## CI Behavior
+
+- Secret-aware CI jobs use the repository secret `DOPPLER_TOKEN_CI` to read `dev_ci`.
+- Fork pull requests cannot access that secret and use the workflow's documented fork-safe paths or skip live provider coverage.
+- Vercel receives web/docs configuration through the configured Doppler integration.
+- Release automation does not need a Doppler token.
+
+Keep `DOPPLER_TOKEN_CI` narrowly scoped, rotate it through Doppler and GitHub together, and verify a secret-aware CI run after rotation.
+
+## Cloud Run Boundary
+
+The Cloud Run deploy workflows authenticate to Google Cloud using `DEPLOY_WIF_PROVIDER` and `DEPLOY_SA`. Push-triggered deployments build an image, push it to Artifact Registry, execute the migration job, update the API service, and update the cron job image. A manual production deployment instead resolves an existing SHA-tagged image to its immutable digest and never runs migrations.
+
+They do **not** fetch Doppler or write runtime secrets. Before deploying a feature that adds an environment variable:
+
+1. Add the variable to the application's environment contract and examples.
+2. Configure the value or Secret Manager reference on both the API service and the relevant jobs in dev.
+3. Deploy and verify dev.
+4. Configure the production service and jobs through the normal GCP change process.
+5. Confirm the value is present without printing it in GitHub Actions or Cloud Run logs.
+
+An image update preserves the service/job configuration already stored in GCP. A missing value therefore requires a configuration change, not a rebuild.
+
+## Rotation and Removal
+
+When rotating a runtime secret:
+
+1. Update its source of truth.
+2. Update every consumer boundary that uses it: local/CI Doppler configs, Vercel sync, and/or GCP Secret Manager references.
+3. Exercise the affected API or provider in dev.
+4. Roll the production service and jobs if the platform does not pick up the new secret version automatically.
+5. Revoke the old value only after all consumers are healthy.
+
+When removing a secret, first remove all code and deployment references, then remove it from Doppler, GitHub, Vercel, and GCP as applicable.
 
 ## Rollback
 
-If the Doppler cutover causes issues:
-
-1. Revert the PR.
-2. Restore the previous workflow inputs in GitHub Actions.
-3. Keep the old runtime secrets in Cloudflare and Vercel until the rollback is complete.
+Rolling back a Cloud Run image does not roll back runtime configuration or database schema. Keep configuration backward-compatible across the rollback window and follow [Release Operations](./release-operations.md) for the service and cron rollback procedure.

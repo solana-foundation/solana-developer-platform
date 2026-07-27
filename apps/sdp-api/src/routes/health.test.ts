@@ -27,17 +27,30 @@ describe("Health routes", () => {
   });
 
   describe("GET /health/ready", () => {
-    it("returns ready when database is accessible", async () => {
+    it("returns ready when Postgres and Redis are accessible", async () => {
       const res = await app.request("/health/ready", {}, env);
 
       expect(res.status).toBe(200);
 
       const body = (await res.json()) as {
         status: string;
-        checks: { database: string };
+        revision: string;
+        checks: { database: string; redis: string };
       };
       expect(body.status).toBe("ready");
+      expect(body.revision).toBe("local");
       expect(body.checks.database).toBe("ok");
+      expect(body.checks.redis).toBe("ok");
+    });
+
+    it("returns not ready when Redis is unavailable", async () => {
+      const res = await app.request("/health/ready", {}, { ...env, REDIS_URL: undefined });
+
+      expect(res.status).toBe(503);
+      await expect(res.json()).resolves.toMatchObject({
+        status: "not_ready",
+        checks: { database: "ok", redis: "error" },
+      });
     });
   });
 });

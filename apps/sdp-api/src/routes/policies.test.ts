@@ -6,7 +6,7 @@ import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG_ID = "org_policy_inventory";
 const TEST_PROJECT_ID = "prj_policy_inventory";
@@ -507,13 +507,13 @@ async function getInventory(query = ""): Promise<Response> {
 describe("GET /v1/policies", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
     await seedPolicyInventory();
   });
 
   afterEach(async () => {
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   it("returns wallet and API-key controls with summaries and redacted latest evaluations", async () => {

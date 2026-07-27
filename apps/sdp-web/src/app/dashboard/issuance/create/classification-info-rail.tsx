@@ -40,8 +40,9 @@ const STEPS: InfoStep[] = [
 
 export function ClassificationInfoRail() {
   const t = useTranslations();
+  // `top-0` keeps the rail flush with the step header (see draft-summary-rail).
   return (
-    <aside className="lg:sticky lg:top-4">
+    <aside className="lg:sticky lg:top-0">
       <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
         <p className="text-base font-medium text-primary">
           {t("DashboardIssuance.classificationRail.title")}

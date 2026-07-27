@@ -146,7 +146,7 @@ function withRequestTimeout(transport: RpcTransport, timeoutMs: number): RpcTran
       return await transport<TResponse>(config);
     }
     // AbortController + setTimeout (not AbortSignal.timeout) so the timer is
-    // cleared on settle and behaves consistently across runtimes (workerd/Node).
+    // cleared on settle and behaves consistently in Node and test environments.
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {

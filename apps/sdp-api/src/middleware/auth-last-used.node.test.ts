@@ -24,16 +24,16 @@ describe("API key last-used write scheduling", () => {
     const { db, preparedStatement } = createDatabase(run);
     const startedAt = 1_000_000;
 
-    const first = scheduleApiKeyLastUsedUpdate(db, "key-node-success", "node", startedAt);
-    const concurrent = scheduleApiKeyLastUsedUpdate(db, "key-node-success", "node", startedAt + 1);
+    const first = scheduleApiKeyLastUsedUpdate(db, "key-node-success", startedAt);
+    const concurrent = scheduleApiKeyLastUsedUpdate(db, "key-node-success", startedAt + 1);
     expect(concurrent).toBe(first);
     await Promise.all([first, concurrent]);
 
-    await scheduleApiKeyLastUsedUpdate(db, "key-node-success", "node", startedAt + 5 * 60_000 - 1);
+    await scheduleApiKeyLastUsedUpdate(db, "key-node-success", startedAt + 5 * 60_000 - 1);
     expect(run).toHaveBeenCalledOnce();
     expect(preparedStatement.bind).toHaveBeenCalledWith("key-node-success");
 
-    await scheduleApiKeyLastUsedUpdate(db, "key-node-success", "node", startedAt + 5 * 60_000);
+    await scheduleApiKeyLastUsedUpdate(db, "key-node-success", startedAt + 5 * 60_000);
     expect(run).toHaveBeenCalledTimes(2);
   });
 
@@ -44,8 +44,8 @@ describe("API key last-used write scheduling", () => {
     const secondDb = createDatabase(secondRun).db;
 
     await Promise.all([
-      scheduleApiKeyLastUsedUpdate(firstDb, "shared-key", "node", 2_000_000),
-      scheduleApiKeyLastUsedUpdate(secondDb, "shared-key", "node", 2_000_000),
+      scheduleApiKeyLastUsedUpdate(firstDb, "shared-key", 2_000_000),
+      scheduleApiKeyLastUsedUpdate(secondDb, "shared-key", 2_000_000),
     ]);
 
     expect(firstRun).toHaveBeenCalledOnce();
@@ -60,18 +60,8 @@ describe("API key last-used write scheduling", () => {
       .mockResolvedValue(1);
     const { db } = createDatabase(run);
 
-    await scheduleApiKeyLastUsedUpdate(db, "key-node-retry", "node", 3_000_000);
-    await scheduleApiKeyLastUsedUpdate(db, "key-node-retry", "node", 3_000_001);
-
-    expect(run).toHaveBeenCalledTimes(2);
-  });
-
-  it("preserves a write for every Cloudflare request", async () => {
-    const run = vi.fn(async () => 1);
-    const { db } = createDatabase(run);
-
-    await scheduleApiKeyLastUsedUpdate(db, "key-cloudflare", "cloudflare", 4_000_000);
-    await scheduleApiKeyLastUsedUpdate(db, "key-cloudflare", "cloudflare", 4_000_001);
+    await scheduleApiKeyLastUsedUpdate(db, "key-node-retry", 3_000_000);
+    await scheduleApiKeyLastUsedUpdate(db, "key-node-retry", 3_000_001);
 
     expect(run).toHaveBeenCalledTimes(2);
   });

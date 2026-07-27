@@ -1,12 +1,8 @@
 /**
- * Runtime-neutral observability (Sentry) abstraction.
+ * Observability (Sentry) abstraction.
  *
- * @sentry/cloudflare and @sentry/node share most of their public API surface,
- * but cannot be imported into the same bundle: cloudflare relies on the
- * Workers runtime, node pulls native modules. This module exposes only the
- * shared API shape and runtime-neutral helpers. Concrete implementations live
- * in observability-cf.ts (HOO-508) and observability-node.ts (wired up in
- * HOO-510 when server.ts lands).
+ * This module exposes the small API shape used by application code so tests can
+ * inject lightweight implementations while production uses `@sentry/node`.
  */
 
 import type { Env } from "@/types/env";
@@ -38,11 +34,9 @@ export interface SentryOptions {
  * Canonical "is Sentry configured?" check. Call this anywhere that needs to
  * branch on whether Sentry is enabled — never inline the env reads at
  * call-sites, since the definition may grow and inline checks would silently
- * diverge. Requires a DSN and a production NODE_ENV: wrangler statically
- * replaces `process.env.NODE_ENV` at build time ("development" under
- * `wrangler dev`, "production" on deploy), so local dev never ships telemetry
- * even though the Doppler-injected DSN reaches the worker env. Mirrors
- * sdp-web's NODE_ENV gate; fails closed anywhere NODE_ENV is unset.
+ * diverge. Requires a DSN and a production NODE_ENV, so local development does
+ * not ship telemetry even when a DSN is present. Mirrors sdp-web's NODE_ENV
+ * gate and fails closed anywhere NODE_ENV is unset.
  */
 export function isSentryEnabled(env: Pick<Env, "SENTRY_DSN">): boolean {
   return Boolean(env.SENTRY_DSN?.trim()) && process.env.NODE_ENV === "production";

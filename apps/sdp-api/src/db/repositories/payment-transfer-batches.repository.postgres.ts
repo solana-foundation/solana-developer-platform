@@ -15,6 +15,8 @@ import type {
   PaymentTransferBatchesRepository,
   PaymentTransferBatchRow,
   PaymentTransferRecipientRow,
+  RecomputeTransferBatchStatusInput,
+  SettlePaymentTransferBatchInput,
   UpdatePaymentTransferBatchInput,
   UpdatePaymentTransferRecipientInput,
   UpdatePaymentTransferRecipientsStatusInput,
@@ -22,6 +24,7 @@ import type {
   UpsertPaymentTransferRecipientInput,
 } from "./payment-transfer-batches.repository";
 import {
+  deriveTransferBatchStatus,
   generatePaymentTransferBatchId,
   generatePaymentTransferRecipientId,
 } from "./payment-transfer-batches.repository";
@@ -704,7 +707,7 @@ export function createPostgresPaymentTransferBatchesRepository(
             `SELECT *
                FROM payment_transfer_recipients
               WHERE ${scope.where}
-              ORDER BY created_at ASC
+              ORDER BY created_at ASC, id ASC
               LIMIT ? OFFSET ?`
           )
           .bind(...scope.values, input.limit, input.offset)
@@ -724,5 +727,141 @@ export function createPostgresPaymentTransferBatchesRepository(
         total: countRow?.total ?? 0,
       };
     },
+
+    async settleTransferBatch(input: SettlePaymentTransferBatchInput) {
+      return db.transaction(async (tx) => {
+        const claimed = await tx
+          .prepare(
+            `UPDATE payment_transfers
+                SET status = ?,
+                    slot = CASE WHEN ?::boolean THEN ? ELSE slot END,
+                    error = ?,
+                    updated_at = ?
+              WHERE id = ?
+                AND organization_id = ?
+                AND project_id IS NOT DISTINCT FROM ?
+                AND status = 'processing'
+              RETURNING id`
+          )
+          .bind(
+            input.transferStatus,
+            input.slot !== null,
+            input.slot,
+            input.error,
+            input.updatedAt,
+            input.transferId,
+            input.organizationId,
+            input.projectId
+          )
+          .all<{ id: string }>();
+
+        if (claimed.results.length === 0) {
+          return;
+        }
+
+        const recipientStatus = input.transferStatus === "failed" ? "failed" : "confirmed";
+        const recipients = await tx
+          .prepare(
+            `UPDATE payment_transfer_recipients
+                SET status = ?,
+                    error = ?,
+                    updated_at = sdp_iso_now()
+              WHERE organization_id = ?
+                AND project_id = ?
+                AND transfer_id = ?
+                AND status = 'processing'
+              RETURNING *`
+          )
+          .bind(
+            recipientStatus,
+            recipientStatus === "failed" ? input.error : null,
+            input.organizationId,
+            input.projectId,
+            input.transferId
+          )
+          .all<{ batch_id: string }>();
+
+        if (recipients.results.length === 0) {
+          throw internalError("Transfer batch recipients not found for settlement");
+        }
+
+        await recomputeBatchStatusInTransaction(tx, {
+          batchId: recipients.results[0].batch_id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+        });
+      });
+    },
+
+    async recomputeTransferBatchStatus(input: RecomputeTransferBatchStatusInput) {
+      return db.transaction((tx) => recomputeBatchStatusInTransaction(tx, input));
+    },
   };
+}
+
+/**
+ * Locks the batch row, derives the batch status from its recipient rows, and
+ * writes it — inside the caller's transaction. Taking the lock before the
+ * scan serializes concurrent recomputes of one batch, so each scan observes
+ * the previous writer's committed recipient statuses.
+ *
+ * @param tx - Transaction executor the recompute runs in.
+ * @param input.batchId - Batch to recompute.
+ * @returns The batch row after the recompute.
+ */
+async function recomputeBatchStatusInTransaction(
+  tx: DatabaseExecutor,
+  input: RecomputeTransferBatchStatusInput
+): Promise<PaymentTransferBatchRow> {
+  const locked = await tx
+    .prepare(
+      `SELECT id
+         FROM payment_transfer_batches
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+          FOR UPDATE`
+    )
+    .bind(input.batchId, input.organizationId, input.projectId)
+    .first<{ id: string }>();
+  if (!locked) {
+    throw internalError("Transfer batch not found for settlement");
+  }
+
+  const statusRows = await tx
+    .prepare(
+      `SELECT status
+         FROM payment_transfer_recipients
+        WHERE batch_id = ?
+          AND organization_id = ?
+          AND project_id = ?
+          AND status <> 'archived'`
+    )
+    .bind(input.batchId, input.organizationId, input.projectId)
+    .all<{ status: PaymentTransferRecipientRow["status"] }>();
+  const batchStatus = deriveTransferBatchStatus(statusRows.results.map((row) => row.status));
+  const batchError =
+    batchStatus === "failed" || batchStatus === "partially_failed"
+      ? "One or more transfer batch transactions failed during execution"
+      : null;
+
+  const updated = await tx
+    .prepare(
+      `UPDATE payment_transfer_batches
+          SET status = ?,
+              error = ?,
+              updated_at = sdp_iso_now()
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+          AND status <> 'archived'
+        RETURNING *`
+    )
+    .bind(batchStatus, batchError, input.batchId, input.organizationId, input.projectId)
+    .first<Record<string, unknown>>();
+  if (!updated) {
+    throw internalError("Transfer batch not found for settlement");
+  }
+
+  return mapPaymentTransferBatchRow(updated);
 }

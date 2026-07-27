@@ -3,6 +3,6 @@
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules"],
   "compilerOptions": {
-    "types": ["@cloudflare/workers-types", "node"]
+    "types": ["node"]
   }
 }

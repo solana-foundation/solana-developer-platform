@@ -227,6 +227,7 @@ export async function bootstrapLocalIssuanceFixtures({
     wallets: {
       treasury: treasuryWallet,
       delegated: delegatedWallet,
+      custodySignerWalletCount: walletBootstrap.wallets.length,
     },
     tokens: {
       pending: toFixtureToken(pendingToken),

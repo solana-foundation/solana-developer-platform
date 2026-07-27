@@ -27,7 +27,7 @@ export function isPaymentRequestExpired(expiresAt: string | null): boolean {
  * when a valid payment is found, records the inbound transfer and marks the
  * request paid.
  *
- * @param env - Worker bindings for RPC and DB access.
+ * @param env - API environment for RPC and database access.
  * @param row - The stored payment request row to reconcile.
  * @param options.bestEffort - When true, unexpected infra failures (e.g. an
  *   RPC outage) degrade to the stored row with a log so one bad row cannot

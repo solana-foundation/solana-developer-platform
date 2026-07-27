@@ -1,5 +1,149 @@
 # Changelog
 
+## [0.47.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.47.0...v0.47.1) (2026-07-24)
+
+### Bug Fixes
+
+* **api:** revoke stale organization sessions ([#896](https://github.com/solana-foundation/solana-developer-platform/pull/896)) ([cbcb084](https://github.com/solana-foundation/solana-developer-platform/commit/cbcb084ae90612c8769defa4033705f5e140f891))
+* **custody:** trust only server provider endpoints ([#902](https://github.com/solana-foundation/solana-developer-platform/pull/902)) ([d00495c](https://github.com/solana-foundation/solana-developer-platform/commit/d00495cefbe0c1d95048a220ef425714a37e9b8d))
+* **security:** isolate playground API keys by project ([#901](https://github.com/solana-foundation/solana-developer-platform/pull/901)) ([9955824](https://github.com/solana-foundation/solana-developer-platform/commit/995582428cd6c3d648f38fd8d3a45ef9370f0eb7))
+* **api:** authorize all MagicBlock custody signers ([#898](https://github.com/solana-foundation/solana-developer-platform/pull/898)) ([0ab0fb5](https://github.com/solana-foundation/solana-developer-platform/commit/0ab0fb54b3812b7b4784f650a728c4401513f99a))
+
+## [0.47.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.4...v0.47.0) (2026-07-24)
+
+### Features
+
+* issuance ui improvements and compliance tab gating ([#903](https://github.com/solana-foundation/solana-developer-platform/pull/903)) ([469400b](https://github.com/solana-foundation/solana-developer-platform/commit/469400b0e561a718108f3412bb899f1b9d55674b))
+* **web:** move product rollouts to Vercel Flags ([#894](https://github.com/solana-foundation/solana-developer-platform/pull/894)) ([3c578f1](https://github.com/solana-foundation/solana-developer-platform/commit/3c578f1a8d31937845722d89e9aea2ea3a4d7484))
+
+### Bug Fixes
+
+* **api:** enforce API key rotation deadlines ([#897](https://github.com/solana-foundation/solana-developer-platform/pull/897)) ([6a1130b](https://github.com/solana-foundation/solana-developer-platform/commit/6a1130ba4ff2db87ee20d5ee4668e8a17b920911))
+* **api:** enforce API key project isolation ([#899](https://github.com/solana-foundation/solana-developer-platform/pull/899)) ([eebea25](https://github.com/solana-foundation/solana-developer-platform/commit/eebea25eb9156518035ab6c473d3b650f41946ae))
+* **api:** enforce API key IP allowlists ([#895](https://github.com/solana-foundation/solana-developer-platform/pull/895)) ([fee986b](https://github.com/solana-foundation/solana-developer-platform/commit/fee986ba1b25adea9b28df232042ffdaff9dac9a))
+* **web:** clarify onboarding choices can change ([#905](https://github.com/solana-foundation/solana-developer-platform/pull/905)) ([c9d753c](https://github.com/solana-foundation/solana-developer-platform/commit/c9d753cf8d133eb62e18fc456462d635b22f1b69))
+
+## [0.46.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.3...v0.46.4) (2026-07-23)
+
+### Refactors
+
+* **approvals:** design-system filters and date-range presets ([#886](https://github.com/solana-foundation/solana-developer-platform/pull/886)) ([6b5c525](https://github.com/solana-foundation/solana-developer-platform/commit/6b5c52568156fe1571e899d3fd155fcf23adebdd))
+
+## [0.46.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.2...v0.46.3) (2026-07-23)
+
+### Bug Fixes
+
+* **ci:** probe private Cloud Run candidate safely ([#891](https://github.com/solana-foundation/solana-developer-platform/pull/891)) ([fff1eee](https://github.com/solana-foundation/solana-developer-platform/commit/fff1eeee14f687c4234f7a310f05da221faf5e7d))
+
+## [0.46.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.1...v0.46.2) (2026-07-23)
+
+### Bug Fixes
+
+* **policies:** stabilize search input and polish controls layout ([#885](https://github.com/solana-foundation/solana-developer-platform/pull/885)) ([4d659b1](https://github.com/solana-foundation/solana-developer-platform/commit/4d659b16cba4230afa07bd07169075d2bf87bcef))
+
+### Other Changes
+
+* Backfill existing organizations as enterprise approved ([#888](https://github.com/solana-foundation/solana-developer-platform/pull/888)) ([cb7ef8a](https://github.com/solana-foundation/solana-developer-platform/commit/cb7ef8a89e135c3538d427511a04b9e801e269f3))
+
+## [0.46.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.0...v0.46.1) (2026-07-23)
+
+### Bug Fixes
+
+* **api:** enforce per-key rate limit tiers after auth ([#855](https://github.com/solana-foundation/solana-developer-platform/pull/855)) ([a7890f8](https://github.com/solana-foundation/solana-developer-platform/commit/a7890f8fee3a6cca611168b4330fdfc505f808a4))
+
+### Maintenance
+
+* **deps:** bump next from 16.2.7 to 16.2.11 ([#872](https://github.com/solana-foundation/solana-developer-platform/pull/872)) ([5dfdb6b](https://github.com/solana-foundation/solana-developer-platform/commit/5dfdb6bb1946130ad8709aa2a97a51088df34710))
+
+## [0.46.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.45.0...v0.46.0) (2026-07-23)
+
+### Features
+
+* updates on issuance workspace and asset management UI ([#874](https://github.com/solana-foundation/solana-developer-platform/pull/874)) ([4163068](https://github.com/solana-foundation/solana-developer-platform/commit/4163068e03241f58f33320b505a022508300ae5b))
+* add the debug panel to local dev ([#875](https://github.com/solana-foundation/solana-developer-platform/pull/875)) ([6bcb1d1](https://github.com/solana-foundation/solana-developer-platform/commit/6bcb1d1b8085c73b564e4f2d40da483e01a75b39))
+
+### Performance Improvements
+
+* async confirmation + parallel chunks for transfer batches ([#878](https://github.com/solana-foundation/solana-developer-platform/pull/878)) ([0442373](https://github.com/solana-foundation/solana-developer-platform/commit/0442373fd23538c8f7f5752c9141a3ce871a34d6))
+
+### Refactors
+
+* **kv:** inline the single-runtime KV factory into kv-redis ([#880](https://github.com/solana-foundation/solana-developer-platform/pull/880)) ([4ed7455](https://github.com/solana-foundation/solana-developer-platform/commit/4ed74553b1048149363a40edf2a3487923ec9c51))
+
+## [0.45.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.44.0...v0.45.0) (2026-07-23)
+
+### Features
+
+* support business counterparties on Lightspark on-ramp ([#873](https://github.com/solana-foundation/solana-developer-platform/pull/873)) ([4094f81](https://github.com/solana-foundation/solana-developer-platform/commit/4094f81676bb4b94274aa2baa91da0fe8ef0c456))
+* add organization provider onboarding ([#844](https://github.com/solana-foundation/solana-developer-platform/pull/844)) ([496ac56](https://github.com/solana-foundation/solana-developer-platform/commit/496ac56a0b9b15ceeb2d4b7a7d7c32b4cd299efa))
+* compliance advanced settings ui improvements ([#861](https://github.com/solana-foundation/solana-developer-platform/pull/861)) ([e24451e](https://github.com/solana-foundation/solana-developer-platform/commit/e24451e2865a823f13c3c2959d25c1efc6a2eb1a))
+* **HOO-856:** move custody master key from plaintext env var to KMS envelope encryption ([#812](https://github.com/solana-foundation/solana-developer-platform/pull/812)) ([0d162f4](https://github.com/solana-foundation/solana-developer-platform/commit/0d162f402f3a73c4cd5ec94f71e9e58c5e73b0fa))
+
+### Bug Fixes
+
+* simplify API key wizard progress ([#869](https://github.com/solana-foundation/solana-developer-platform/pull/869)) ([2a4ac34](https://github.com/solana-foundation/solana-developer-platform/commit/2a4ac3496a58dd6bb8b2b26860f9bb8e0cc85588))
+* resolve boolean query param parsing and allow cancelling pending_activation recurring payments ([#789](https://github.com/solana-foundation/solana-developer-platform/pull/789)) ([87dac13](https://github.com/solana-foundation/solana-developer-platform/commit/87dac130b34658a1e2bee8621ca74c9b3d6e36df))
+* **api:** close DeepSec high-severity findings ([#848](https://github.com/solana-foundation/solana-developer-platform/pull/848)) ([68fe35d](https://github.com/solana-foundation/solana-developer-platform/commit/68fe35d3e4fd2036e8f7b649b74e53f5ddbf1188))
+
+### Maintenance
+
+* **deps:** bump the actions group across 1 directory with 10 updates ([#728](https://github.com/solana-foundation/solana-developer-platform/pull/728)) ([55e8acd](https://github.com/solana-foundation/solana-developer-platform/commit/55e8acd9df9cbd0802e66715b17a3d1a3b9d21d7))
+
+## [0.44.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.43.1...v0.44.0) (2026-07-22)
+
+### Features
+
+* add additional form fields per asset type ([#828](https://github.com/solana-foundation/solana-developer-platform/pull/828)) ([9051b31](https://github.com/solana-foundation/solana-developer-platform/commit/9051b31d12391eeef90ae0f91995b9bc4885451c))
+
+### Bug Fixes
+
+* **tests:** standardize test runs on TEST_DATABASE_URL ([#852](https://github.com/solana-foundation/solana-developer-platform/pull/852)) ([a7cf826](https://github.com/solana-foundation/solana-developer-platform/commit/a7cf8265329e294e5ebc267d8b4eea6a863ca191))
+* **e2e:** assert the signer UI the wallet fixtures dictate ([#856](https://github.com/solana-foundation/solana-developer-platform/pull/856)) ([511345b](https://github.com/solana-foundation/solana-developer-platform/commit/511345ba5f059dc7283c099a87c332382e4cb5ac))
+* **api:** surface frozen token accounts as 400 ACCOUNT_FROZEN, not 502 ([#776](https://github.com/solana-foundation/solana-developer-platform/pull/776)) ([50b6f70](https://github.com/solana-foundation/solana-developer-platform/commit/50b6f70202520348e3d83a979a359a20d5dc4fab))
+* counterparty data fill in ([#829](https://github.com/solana-foundation/solana-developer-platform/pull/829)) ([99194ae](https://github.com/solana-foundation/solana-developer-platform/commit/99194aeca2d3e60733aa4d99be6e0bec4f3ab27b))
+* enable non-prod asset profiles and dark-mode wallet cards ([#847](https://github.com/solana-foundation/solana-developer-platform/pull/847)) ([6863901](https://github.com/solana-foundation/solana-developer-platform/commit/68639017c51d6bebee1d2fc001f98801d2d9ac9b))
+
+### Refactors
+
+* **api:** retire Cloudflare infrastructure ([#842](https://github.com/solana-foundation/solana-developer-platform/pull/842)) ([9f6a2c4](https://github.com/solana-foundation/solana-developer-platform/commit/9f6a2c4ff0d0c98d211932cfda4ff1591ababa70))
+
+### Maintenance
+
+* **deps:** bump @hono/node-server from 2.0.5 to 2.0.10 ([#846](https://github.com/solana-foundation/solana-developer-platform/pull/846)) ([4a3622f](https://github.com/solana-foundation/solana-developer-platform/commit/4a3622f3d40599323383aa2b10bde91873b10db4))
+* **deps:** bump @hono/node-server from 2.0.4 to 2.0.5 ([#840](https://github.com/solana-foundation/solana-developer-platform/pull/840)) ([53c5a86](https://github.com/solana-foundation/solana-developer-platform/commit/53c5a86a8dbf99191749c816203f4dd2d77f2b56))
+
+## [0.43.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.43.0...v0.43.1) (2026-07-21)
+
+### Other Changes
+
+* fix wallet setup footer dark mode ([#838](https://github.com/solana-foundation/solana-developer-platform/pull/838)) ([3f22ee9](https://github.com/solana-foundation/solana-developer-platform/commit/3f22ee9a4dedd8e51e7b060ad61874366056d516))
+* fix organization bootstrap failure recovery ([#836](https://github.com/solana-foundation/solana-developer-platform/pull/836)) ([f6f61ee](https://github.com/solana-foundation/solana-developer-platform/commit/f6f61ee940808810100b015ac75019aef141383b))
+
+## [0.43.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.42.0...v0.43.0) (2026-07-21)
+
+### Features
+
+* **payments:** reconcile Coinbase onramp webhooks and surface order economics ([#826](https://github.com/solana-foundation/solana-developer-platform/pull/826)) ([856a014](https://github.com/solana-foundation/solana-developer-platform/commit/856a014fd8234ac9384b2b6b75223311cd7f5746))
+* HOO-681, HOO-680, HOO-683, HOO-679, HOO-682 - Advanced settings editor ([#806](https://github.com/solana-foundation/solana-developer-platform/pull/806)) ([bed4ba2](https://github.com/solana-foundation/solana-developer-platform/commit/bed4ba216b194b205278226ef5c21227364a807c))
+* HOO-767 Add credential admin auth boundary ([#808](https://github.com/solana-foundation/solana-developer-platform/pull/808)) ([84106a5](https://github.com/solana-foundation/solana-developer-platform/commit/84106a5e2ff613dd508357b8c05a7939a377234e))
+* share provider catalog metadata ([#813](https://github.com/solana-foundation/solana-developer-platform/pull/813)) ([afa8871](https://github.com/solana-foundation/solana-developer-platform/commit/afa8871c421eb07d7010967e46223b1fe3bd5836))
+* **payments:** enable MoneyGram on-ramp with self-hosted pinned widget SDK ([#820](https://github.com/solana-foundation/solana-developer-platform/pull/820)) ([0807370](https://github.com/solana-foundation/solana-developer-platform/commit/0807370175b42a1913cf0751c972ab887ada057e))
+* **api:** restrict recurring payment tokens to stablecoins and issued tokens ([#811](https://github.com/solana-foundation/solana-developer-platform/pull/811)) ([b509dc5](https://github.com/solana-foundation/solana-developer-platform/commit/b509dc528313f341043ade24aca0b8e0e879c3db))
+* **web:** Add complete French UI translation catalogs ([#685](https://github.com/solana-foundation/solana-developer-platform/pull/685)) ([535c05b](https://github.com/solana-foundation/solana-developer-platform/commit/535c05b60e88fb0cd47ef05467aea134274afecf))
+
+### Bug Fixes
+
+* prevent organization provisioning races ([#833](https://github.com/solana-foundation/solana-developer-platform/pull/833)) ([94b960b](https://github.com/solana-foundation/solana-developer-platform/commit/94b960ba66f199fa9673e832c296e6a21ac66aae))
+* surfpool test reliability ([#817](https://github.com/solana-foundation/solana-developer-platform/pull/817)) ([faff202](https://github.com/solana-foundation/solana-developer-platform/commit/faff202ae3f40cf60f78af56cba5fd0e3b0cd9ff))
+
+### Maintenance
+
+* add prod Cloud Run deploy workflow for sdp-api ([#825](https://github.com/solana-foundation/solana-developer-platform/pull/825)) ([f2ba580](https://github.com/solana-foundation/solana-developer-platform/commit/f2ba5800e1af42f66e37b3aff81302faf0b06769))
+
+### Other Changes
+
+* fix language picker layout shift ([#832](https://github.com/solana-foundation/solana-developer-platform/pull/832)) ([446887b](https://github.com/solana-foundation/solana-developer-platform/commit/446887b2d767aafa5ffad5ae77cf2a9b40b7d2d9))
+
 ## [0.42.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.41.0...v0.42.0) (2026-07-20)
 
 ### Features

@@ -4,19 +4,24 @@ import type { Token } from "@sdp/types";
 import {
   Boxes,
   Braces,
+  Building2,
   DollarSign,
   FileText,
+  Landmark,
   Lock,
   type LucideIcon,
+  PieChart,
   ScrollText,
+  ShieldCheck,
   SlidersHorizontal,
   Tag,
+  TrendingUp,
 } from "lucide-react";
 import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { getCategorySections } from "../../../create/asset-details-config";
+import { getDetailSections } from "../../../create/asset-details-config";
 import { DocumentRows } from "../../../create/document-rows";
 import { buildIssuanceMetadata, getRequiredAssetDetailKeys } from "../../../create/draft-mapping";
 import {
@@ -39,8 +44,13 @@ import type { TokenOperations } from "../use-token-operations";
 // presentation concern of this tab.
 const SECTION_ICONS: Record<string, LucideIcon> = {
   "DashboardIssuance.config.financialDetails": DollarSign,
+  "DashboardIssuance.config.collateralOracleDetails": ShieldCheck,
   "DashboardIssuance.config.securityDetails": ScrollText,
+  "DashboardIssuance.config.equityDetails": TrendingUp,
+  "DashboardIssuance.config.debtDetails": Landmark,
+  "DashboardIssuance.config.fundDetails": PieChart,
   "DashboardIssuance.config.categoryAssetDetails": Boxes,
+  "DashboardIssuance.config.realEstateDetails": Building2,
 };
 
 export function DetailsTab({
@@ -55,7 +65,7 @@ export function DetailsTab({
   const t = useTranslations();
   const { draft, updateDraft, saving, errors, showErrors } = form;
   const [jsonOpen, setJsonOpen] = useState(false);
-  const sections = getCategorySections(draft.assetCategory);
+  const sections = getDetailSections(draft.assetCategory, draft.assetType);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
 
   // Same reveal semantics as the creation wizard: live feedback once a field
@@ -70,6 +80,12 @@ export function DetailsTab({
   };
   const nameError = fieldError("name");
   const descriptionError = fieldError("description");
+  const symbolError = fieldError("symbol");
+  const decimalsError = fieldError("decimals");
+
+  // Symbol and decimals are baked into the mint at deploy, so they lock once
+  // the token is on-chain and stay editable only while it's a draft.
+  const isDeployed = Boolean(token.mintAddress);
 
   const signerWallet = findWalletByWalletId(ops.authorityWallets, draft.signingWalletId);
   const signerLabel = signerWallet
@@ -104,16 +120,42 @@ export function DetailsTab({
             error={nameError}
           />
           <div className="grid grid-cols-2 items-start gap-4">
-            <ReadOnlyField
-              label={t("DashboardIssuance.create.symbol")}
-              value={token.symbol}
-              lockReason={t("DashboardIssuance.assetDetails.lockedAfterCreation")}
-            />
-            <ReadOnlyField
-              label={t("DashboardIssuance.create.decimals")}
-              value={String(token.decimals)}
-              lockReason={t("DashboardIssuance.assetDetails.lockedAfterCreation")}
-            />
+            {isDeployed ? (
+              <>
+                <ReadOnlyField
+                  label={t("DashboardIssuance.create.symbol")}
+                  value={token.symbol}
+                  lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
+                />
+                <ReadOnlyField
+                  label={t("DashboardIssuance.create.decimals")}
+                  value={String(token.decimals)}
+                  lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
+                />
+              </>
+            ) : (
+              <>
+                <TextField
+                  label={t("DashboardIssuance.create.symbol")}
+                  required
+                  disabled={saving}
+                  value={draft.symbol}
+                  onChange={(value) => updateDraft({ symbol: value })}
+                  placeholder={t("DashboardIssuance.assetDetails.symbolPlaceholder")}
+                  error={symbolError}
+                />
+                <TextField
+                  label={t("DashboardIssuance.create.decimals")}
+                  required
+                  type="number"
+                  disabled={saving}
+                  value={draft.decimals}
+                  onChange={(value) => updateDraft({ decimals: value })}
+                  placeholder={t("DashboardIssuance.create.decimalsPlaceholder")}
+                  error={decimalsError}
+                />
+              </>
+            )}
           </div>
         </div>
         <div className="mt-4 grid gap-1.5">

@@ -1,5 +1,6 @@
 import { afterAll } from "vitest";
 import { closeDatabasePools } from "@/db";
+import { closeAllRedisClients } from "@/runtime/kv-redis";
 
 const globalWithSecureContext = globalThis as { isSecureContext?: boolean };
 
@@ -15,5 +16,5 @@ if (!globalWithSecureContext.isSecureContext) {
 }
 
 afterAll(async () => {
-  await closeDatabasePools();
+  await Promise.all([closeDatabasePools(), closeAllRedisClients()]);
 });

@@ -89,7 +89,7 @@ async function createSignature(input: {
   const secretBytes = decodeBase64(input.apiSecretBase64);
   const signingKey = await crypto.subtle.importKey(
     "raw",
-    secretBytes,
+    new Uint8Array(secretBytes),
     {
       name: "HMAC",
       hash: "SHA-256",

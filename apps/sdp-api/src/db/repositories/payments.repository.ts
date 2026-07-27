@@ -55,6 +55,7 @@ export interface PaymentTransferRow {
   delivery_mode: PaymentTransferDeliveryMode | null;
   fiat_currency: string | null;
   fiat_amount: string | null;
+  ramps_memo: Record<string, string>;
   provider_data: Record<string, unknown>;
   signature: string | null;
   serialized_tx: string | null;
@@ -91,6 +92,7 @@ export interface CreatePaymentTransferInput {
   deliveryMode: PaymentTransferDeliveryMode | null;
   fiatCurrency: string | null;
   fiatAmount: string | null;
+  rampsMemo?: Record<string, string>;
   providerData: Record<string, unknown>;
   serializedTx: string | null;
   signature: string | null;
@@ -104,6 +106,7 @@ export interface UpdatePaymentTransferInput {
   transferId: string;
   organizationId?: string;
   projectId?: string | null;
+  expectedStatus?: PaymentTransferStatus;
   status?: PaymentTransferStatus;
   signature?: string | null;
   serializedTx?: string | null;
@@ -216,6 +219,11 @@ export interface PaymentsRepository {
     organizationId: string;
     projectId: string | null;
   }): Promise<PaymentTransferRow | null>;
+  listTransfersByIds(params: {
+    transferIds: string[];
+    organizationId: string;
+    projectId: string | null;
+  }): Promise<PaymentTransferRow[]>;
   getTransferByProviderReference(
     params: GetTransferByProviderReferenceInput
   ): Promise<PaymentTransferRow | null>;

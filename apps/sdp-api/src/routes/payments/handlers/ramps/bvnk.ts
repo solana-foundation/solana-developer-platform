@@ -47,6 +47,7 @@ import type {
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
+import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, counterpartyNotProvisioned, internalError } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
@@ -68,6 +69,7 @@ export async function createPendingBvnkOfframpTransfer(
     cryptoToken: string;
     cryptoAmount: string;
     fiatCurrency: RampFiatCurrency;
+    rampsMemo: Record<string, string> | undefined;
   }
 ): Promise<PaymentTransferRow> {
   const apiKey = c.get("apiKey");
@@ -89,6 +91,7 @@ export async function createPendingBvnkOfframpTransfer(
     deliveryMode: null,
     fiatCurrency: input.fiatCurrency,
     fiatAmount: null,
+    rampsMemo: input.rampsMemo,
     providerData: {},
     serializedTx: null,
     signature: null,
@@ -133,8 +136,7 @@ type BvnkOnrampQuote = PaymentRampQuote & {
 };
 
 function requesterIpAddress(c: AppContext): string {
-  const forwarded = c.req.header("x-forwarded-for");
-  return c.req.header("cf-connecting-ip") ?? forwarded?.split(",")[0]?.trim() ?? "0.0.0.0";
+  return getClientIp(c) ?? "0.0.0.0";
 }
 
 async function persistBvnkOnrampState(

@@ -14,7 +14,7 @@ The hosted platform is available at https://platform.solana.com and the public d
 
 ## What is in this repo?
 
-- `apps/sdp-api`: Cloudflare Workers API, OpenAPI source, route handlers, Postgres/KV integrations
+- `apps/sdp-api`: Node.js API deployed to Cloud Run, OpenAPI source, route handlers, Postgres/Redis integrations
 - `apps/sdp-web`: dashboard application
 - `apps/sdp-docs`: public documentation site and generated API reference
 - `packages/sdp-types`: shared runtime types and product constants
@@ -31,6 +31,7 @@ Prerequisites:
 - Node.js 22+
 - pnpm 10.16+
 - Git
+- Docker or another Compose-compatible container runtime for local Postgres and Redis
 
 Install dependencies:
 
@@ -41,12 +42,12 @@ pnpm install
 Create a local API environment file:
 
 ```bash
-cp apps/sdp-api/.dev.vars.example apps/sdp-api/.dev.vars
+cp apps/sdp-api/.env.local.example apps/sdp-api/.env.local
 ```
 
-For local devnet work, set `SOLANA_RPC_URL=https://api.devnet.solana.com` in `apps/sdp-api/.dev.vars`.
+For local devnet work, set `SOLANA_RPC_URL=https://api.devnet.solana.com` in `apps/sdp-api/.env.local`.
 
-Start local services:
+Start the local Postgres and Redis services, then the apps:
 
 ```bash
 pnpm db:postgres:up

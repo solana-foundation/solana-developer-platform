@@ -1,8 +1,8 @@
 import { includesTransactionMethod, listRpcProviders, resolveRpcTarget } from "@sdp/rpc/relay";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { createKVStoreSet } from "@/runtime/factory";
 import type { KVStore, KVStoreSet } from "@/runtime/kv";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";

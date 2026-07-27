@@ -64,10 +64,10 @@ Hit [faucet.solana.com](https://faucet.solana.com) on Devnet, paste the wallet's
 
 ### 4. Wire the client and verify
 
-Wire two HTTP clients (Developer + Admin) against `https://sdp-api-production.solana.workers.dev` with Bearer auth. Switch to `https://api.solana.com` once the custom domain rollout completes.
+Wire two HTTP clients (Developer + Admin) against `https://api.solana.com` with Bearer auth.
 
 ```javascript
-const BASE = "https://sdp-api-production.solana.workers.dev";
+const BASE = "https://api.solana.com";
 
 class SdpError extends Error {
   constructor({ code, message, status, response }) {
@@ -709,7 +709,7 @@ The cutover from sandbox to production is not a configuration flip. The first ma
 
 ### 1. Switch projects, mint production keys
 
-Every organization auto-provisions a Default Production Project at signup. Switch to it in the workspace switcher at the top-left of the dashboard, mint two project-scoped keys from the API keys page (a Developer key for routine subscription and dividend distribution, an Admin key for compliance operations), and update your runtime environment to load the new keys. The `sk_live_` prefix is derived from the project's environment, not configured directly. The `SDP_API_BASE` from Section 2 (the workers.dev URL until the canonical `api.solana.com` rollout completes) remains the same; only the key values change.
+Every organization auto-provisions a Default Production Project at signup. Switch to it in the workspace switcher at the top-left of the dashboard, mint two project-scoped keys from the API keys page (a Developer key for routine subscription and dividend distribution, an Admin key for compliance operations), and update your runtime environment to load the new keys. The `sk_live_` prefix is derived from the project's environment, not configured directly. The canonical `SDP_API_BASE` remains `https://api.solana.com`; only the key values change.
 
 ![Workspace switcher at the top-left of the dashboard with Default Production Project selected for the mainnet cutover.](/tokenize-a-treasury-fund/05-workspace-switcher-production.png)
 

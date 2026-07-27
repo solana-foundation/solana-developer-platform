@@ -57,7 +57,7 @@ export function WorkspaceSwitcher({
   const activeProject = projects.find((project) => project.id === selectedProjectId) ?? null;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"

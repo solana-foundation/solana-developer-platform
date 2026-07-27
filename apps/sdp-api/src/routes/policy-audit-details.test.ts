@@ -6,7 +6,7 @@ import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG_ID = "org_policy_audit_routes";
 const OTHER_ORG_ID = "org_policy_audit_other";
@@ -440,7 +440,7 @@ describe("Wallet policy audit detail routes", () => {
 
   afterEach(async () => {
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   it("lists immutable control profile revisions and marks the active revision", async () => {

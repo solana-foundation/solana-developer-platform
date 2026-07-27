@@ -1,15 +1,15 @@
 /**
  * Background Job: Track Pending Transfers
  *
- * Runs on a Cloudflare Workers cron schedule to reconcile transfer statuses:
+ * Runs on the API cron schedule to reconcile transfer statuses:
  *
  * 1. Recover stuck "processing" transfers with no signature — created by
- *    executeTransfer but the worker may have crashed before receiving a signature.
+ *    executeTransfer but the process may have crashed before receiving a signature.
  *    Mark them failed after 5 minutes.
  *
  * 2. Sync on-chain status for "processing" transfers that do have a signature —
  *    these are submitted transactions whose final confirmation may not have been
- *    recorded due to a timeout or worker crash. We batch-check their statuses via
+ *    recorded due to a timeout or process crash. We batch-check their statuses via
  *    getSignatureStatuses and update DB accordingly.
  */
 
@@ -18,9 +18,15 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import {
   createPaymentsRepository,
+  createPaymentTransferBatchesRepository,
   type PaymentsRepository,
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories";
+import type {
+  PaymentTransferRow,
+  UpdatePaymentTransferInput,
+} from "@/db/repositories/payments.repository";
+import { internalError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
@@ -28,21 +34,56 @@ const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
 // getSignatureStatuses accepts at most 256 signatures per call.
 const MAX_SIGNATURES_PER_BATCH = 256;
 
+/**
+ * Applies a terminal status to a transfer. Batch chunks settle through
+ * settleTransferBatch, which atomically claims the transfer row from
+ * processing, settles its recipients, and recomputes the parent batch — a
+ * concurrent run that already settled the chunk makes this a no-op, so a
+ * delayed observation can never regress a newer terminal status. Other
+ * transfers settle through a processing-guarded update with the same
+ * no-op-on-conflict semantics.
+ */
+async function updateTerminalTransfer(
+  env: Env,
+  repo: PaymentsRepository,
+  transfer: PaymentTransferRow,
+  input: UpdatePaymentTransferInput &
+    ({ status: "confirmed" | "finalized" } | { status: "failed"; error: string })
+): Promise<void> {
+  if (transfer.type === "transfer_batch") {
+    if (transfer.project_id === null) {
+      throw internalError("Transfer batch transfer is missing a project");
+    }
+    await createPaymentTransferBatchesRepository(env).settleTransferBatch({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      transferStatus: input.status,
+      error: input.status === "failed" ? input.error : null,
+      slot: input.slot === undefined ? null : input.slot,
+      updatedAt: input.updatedAt,
+    });
+    return;
+  }
+  await repo.updateTransfer({ ...input, expectedStatus: "processing" });
+}
+
 export async function trackPendingTransfers(env: Env): Promise<void> {
   const repo = createPaymentsRepository(env);
   const now = new Date();
   const nowIso = now.toISOString();
 
-  await recoverStuckProcessingTransfers(repo, now, nowIso);
+  await recoverStuckProcessingTransfers(env, repo, now, nowIso);
   await syncProcessingTransfersOnChain(env, repo, nowIso);
 }
 
 /**
  * Fail processing transfers that have no signature and have been stuck for
- * longer than the recovery threshold, indicating the worker crashed before
+ * longer than the recovery threshold, indicating the process crashed before
  * obtaining a signature.
  */
 async function recoverStuckProcessingTransfers(
+  env: Env,
   repo: PaymentsRepository,
   now: Date,
   nowIso: string
@@ -59,7 +100,7 @@ async function recoverStuckProcessingTransfers(
 
   for (const transfer of stuckProcessing) {
     try {
-      await repo.updateTransfer({
+      await updateTerminalTransfer(env, repo, transfer, {
         transferId: transfer.id,
         status: "failed",
         error: "Transfer processing timed out",
@@ -122,7 +163,7 @@ async function syncProcessingTransfersOnChain(
         // enough, assume the transaction was dropped and mark it failed.
         const ageMs = now.getTime() - new Date(transfer.updated_at).getTime();
         if (ageMs > STUCK_PROCESSING_AFTER_MS) {
-          await repo.updateTransfer({
+          await updateTerminalTransfer(env, repo, transfer, {
             transferId: transfer.id,
             status: "failed",
             error: "Transaction not found on chain",
@@ -133,7 +174,7 @@ async function syncProcessingTransfersOnChain(
       }
 
       if (status.err) {
-        await repo.updateTransfer({
+        await updateTerminalTransfer(env, repo, transfer, {
           transferId: transfer.id,
           status: "failed",
           slot: Number(status.slot),
@@ -144,14 +185,14 @@ async function syncProcessingTransfersOnChain(
       }
 
       if (status.confirmationStatus === "finalized") {
-        await repo.updateTransfer({
+        await updateTerminalTransfer(env, repo, transfer, {
           transferId: transfer.id,
           status: "finalized",
           slot: Number(status.slot),
           updatedAt: nowIso,
         });
       } else if (status.confirmationStatus === "confirmed") {
-        await repo.updateTransfer({
+        await updateTerminalTransfer(env, repo, transfer, {
           transferId: transfer.id,
           status: "confirmed",
           slot: Number(status.slot),

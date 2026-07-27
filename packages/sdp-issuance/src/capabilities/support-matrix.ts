@@ -1,7 +1,7 @@
 // Support-matrix generator: derives human-readable matrix from ADVANCED_SETTINGS × ASSET_CAPABILITIES.
 // Regenerate with `pnpm --filter @sdp/issuance matrix:generate`.
 
-import type { AssetCategory, SettingAvailability, SettingSigning } from "@sdp/types";
+import type { AssetCategory, SettingAvailability } from "@sdp/types";
 import { ASSET_CAPABILITIES } from "./capabilities";
 import { ADVANCED_SETTINGS, SETTING_KEYS, type SettingKey } from "./settings";
 
@@ -10,7 +10,6 @@ export interface SupportMatrixSettingRow {
   group: string;
   extensions: string[];
   actions: string[];
-  signing: SettingSigning;
 }
 
 export interface SupportMatrixAvailabilityRow {
@@ -34,7 +33,6 @@ export function buildSupportMatrix(): SupportMatrix {
       group: setting.group,
       extensions: [...setting.extensions],
       actions: [...setting.actions],
-      signing: setting.signing,
     };
   });
 
@@ -49,11 +47,6 @@ export function buildSupportMatrix(): SupportMatrix {
 
   return { settings, availability };
 }
-
-const SIGNING_LABEL: Record<SettingSigning, string> = {
-  "custodial-or-wallet": "Custody (wallet-extension fallback)",
-  "custodial-only": "Custody only",
-};
 
 const AVAILABILITY_CELL: Record<SettingAvailability, string> = {
   locked: "req",
@@ -82,21 +75,13 @@ export function renderSupportMatrixMarkdown(matrix: SupportMatrix = buildSupport
   );
   lines.push("");
 
-  // Settings → SDP actions (+ extensions, signing/fallback).
+  // Settings → SDP actions (+ extensions).
   lines.push("## Settings → SDP actions");
   lines.push("");
-  lines.push(row(["Setting", "Group", "Extensions", "SDP actions", "Signing"]));
-  lines.push(row(["---", "---", "---", "---", "---"]));
+  lines.push(row(["Setting", "Group", "Extensions", "SDP actions"]));
+  lines.push(row(["---", "---", "---", "---"]));
   for (const s of matrix.settings) {
-    lines.push(
-      row([
-        s.key,
-        s.group,
-        s.extensions.join(", "),
-        s.actions.join(", ") || "—",
-        SIGNING_LABEL[s.signing],
-      ])
-    );
+    lines.push(row([s.key, s.group, s.extensions.join(", "), s.actions.join(", ") || "—"]));
   }
   lines.push("");
 

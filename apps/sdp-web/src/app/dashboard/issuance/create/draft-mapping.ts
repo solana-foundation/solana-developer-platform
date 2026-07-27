@@ -1,9 +1,11 @@
 import {
   ADVANCED_SETTINGS,
+  AUTHORITY_VALUED_SETTINGS,
   findIncompatibleExtensionPair,
   getRecommendedSettings,
   isSettingAllowed,
   pruneIncompatibleSettings,
+  resolveSettingsToExtensions,
   type SettingKey,
 } from "@sdp/issuance/capabilities";
 import {
@@ -11,6 +13,8 @@ import {
   type AssetCategory,
   getAssetTypeRegistryEntry,
   type IssuanceMetadata,
+  type TokenExtensionsConfig,
+  type TokenTemplate,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { detailFieldOptionLabel } from "./asset-details-config";
@@ -90,6 +94,9 @@ function buildSelectedSettings(
 }
 
 const SYMBOL_RE = /^[A-Za-z0-9.]{1,10}$/;
+// Mirrors the API's `description: z.string().max(500)` (create/updateTokenSchema)
+// so an over-long value is caught inline, not on a late 400.
+export const ASSET_DESCRIPTION_MAX_LENGTH = 500;
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 // Asset category -> deploy-time Token-2022 template (token creation still needs
@@ -146,6 +153,40 @@ export function buildTokenInput(draft: DraftState): TokenInput {
   };
 }
 
+// A best-effort preview of what the draft's advanced settings compile to at deploy
+// time — the resolver output (base template, decimals, allowlist, and the resolved
+// Token-2022 extension config). Authorities are deliberately omitted: mint/freeze/
+// delegate are assigned server-side from the signing wallet's custody at deploy, so
+// the client can't show the real on-chain values (the resolver omits an authority
+// rather than emit a bricking placeholder). Returns null before a category/type is
+// chosen — nothing to resolve yet.
+export interface DeployConfigPreview {
+  template: TokenTemplate;
+  decimals: number;
+  requiresAllowlist: boolean;
+  extensions: TokenExtensionsConfig | null;
+}
+
+export function buildDeployConfigPreview(draft: DraftState): DeployConfigPreview | null {
+  if (!draft.assetCategory || !draft.assetType) {
+    return null;
+  }
+  const selected = buildSelectedSettings(
+    sanitizeAdvancedSettings(draft.assetCategory, draft.assetType, draft.advancedSettings)
+  );
+  const decimals = Number(draft.decimals);
+  const resolution = resolveSettingsToExtensions(draft.assetCategory, draft.assetType, selected, {
+    decimals: Number.isFinite(decimals) ? decimals : 0,
+    requiresAllowlist: draft.accessControl === "allowlist",
+  });
+  return {
+    template: resolution.template,
+    decimals: resolution.decimals,
+    requiresAllowlist: resolution.requiresAllowlist,
+    extensions: resolution.extensions,
+  };
+}
+
 function pruneEmpty(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
@@ -179,23 +220,55 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
     description: draft.description.trim(),
     website: draft.website.trim(),
     issuerName: draft.issuerName.trim(),
+    // Set from the chosen sub-type at classification time for typed stablecoins
+    // (see impliedBackingType) so it can't contradict the type; issuer-entered
+    // for a generic stablecoin. Reflected verbatim here to keep load-then-save
+    // idempotent — no value is synthesized during the metadata build.
     backingType: draft.backingType,
     pegCurrency: draft.pegCurrency,
     pegTarget: draft.pegTarget.trim(),
     reserveAsset: draft.reserveAsset.trim(),
     reserveCustodian: draft.reserveCustodian.trim(),
     redemptionEnabled: draft.redemptionEnabled ? true : undefined,
+    collateralizationRatio: draft.collateralizationRatio.trim(),
+    oracleProvider: draft.oracleProvider.trim(),
+    minCollateralRatio: draft.minCollateralRatio.trim(),
     jurisdiction: draft.jurisdiction,
     offeringType: draft.offeringType,
+    shareClass: draft.shareClass.trim(),
+    votingRights: draft.votingRights ? true : undefined,
+    couponRate: draft.couponRate.trim(),
+    maturityDate: draft.maturityDate.trim(),
+    seniority: draft.seniority,
+    fundStrategy: draft.fundStrategy,
+    managementFee: draft.managementFee.trim(),
+    netAssetValue: draft.netAssetValue.trim(),
     underlyingAsset: draft.underlyingAsset.trim(),
     custodian: draft.custodian.trim(),
+    propertyType: draft.propertyType,
+    propertyLocation: draft.propertyLocation.trim(),
     documents: draft.documents
       .filter((doc) => doc.name.trim() || doc.url.trim())
       .map((doc) => ({ type: doc.docType.trim(), name: doc.name.trim(), url: doc.url.trim() })),
   });
 
+  // Off-chain capacities: presence = enabled. Store `{ enabled: true, config? }`
+  // (not a bare `{}`) so pruneEmpty keeps an enabled-but-unconfigured policy —
+  // it drops empty objects. Disabled ⇒ undefined ⇒ pruned. readCapacities also
+  // accepts the legacy `{ key: true }` boolean encoding.
   const capacities = pruneEmpty(
-    Object.fromEntries(CAPACITY_KEYS.map((key) => [key, draft.capacities[key] ? true : undefined]))
+    Object.fromEntries(
+      CAPACITY_KEYS.map((key) => {
+        const selection = draft.capacities[key];
+        if (!selection.enabled) {
+          return [key, undefined];
+        }
+        return [
+          key,
+          selection.config ? { enabled: true, config: selection.config } : { enabled: true },
+        ];
+      })
+    )
   );
   const compliance = pruneEmpty({
     accessControl: draft.accessControl || undefined,
@@ -311,11 +384,24 @@ const PATH_LABEL_KEYS: Record<string, MessageKey> = {
   "asset.backingType": "DashboardIssuance.config.backingType",
   "asset.reserveAsset": "DashboardIssuance.config.reserveAsset",
   "asset.reserveCustodian": "DashboardIssuance.config.reserveCustodian",
+  "asset.collateralizationRatio": "DashboardIssuance.config.collateralizationRatio",
+  "asset.oracleProvider": "DashboardIssuance.config.oracleProvider",
+  "asset.minCollateralRatio": "DashboardIssuance.config.minCollateralRatio",
   "asset.website": "DashboardIssuance.review.website",
   "asset.jurisdiction": "DashboardIssuance.config.jurisdiction",
   "asset.offeringType": "DashboardIssuance.config.offeringType",
+  "asset.shareClass": "DashboardIssuance.config.shareClass",
+  "asset.votingRights": "DashboardIssuance.config.votingRights",
+  "asset.couponRate": "DashboardIssuance.config.couponRate",
+  "asset.maturityDate": "DashboardIssuance.config.maturityDate",
+  "asset.seniority": "DashboardIssuance.config.seniority",
+  "asset.fundStrategy": "DashboardIssuance.config.fundStrategy",
+  "asset.managementFee": "DashboardIssuance.config.managementFee",
+  "asset.netAssetValue": "DashboardIssuance.config.netAssetValue",
   "asset.underlyingAsset": "DashboardIssuance.config.underlyingAsset",
   "asset.custodian": "DashboardIssuance.config.custodian",
+  "asset.propertyType": "DashboardIssuance.config.propertyType",
+  "asset.propertyLocation": "DashboardIssuance.config.propertyLocation",
   "chain.decimals": "DashboardIssuance.create.decimals",
 };
 
@@ -329,11 +415,27 @@ export const PUBLIC_FIELD_POOL: readonly { path: string; labelKey: MessageKey }[
   { path: "asset.backingType", labelKey: PATH_LABEL_KEYS["asset.backingType"] },
   { path: "asset.reserveAsset", labelKey: PATH_LABEL_KEYS["asset.reserveAsset"] },
   { path: "asset.reserveCustodian", labelKey: PATH_LABEL_KEYS["asset.reserveCustodian"] },
+  {
+    path: "asset.collateralizationRatio",
+    labelKey: PATH_LABEL_KEYS["asset.collateralizationRatio"],
+  },
+  { path: "asset.oracleProvider", labelKey: PATH_LABEL_KEYS["asset.oracleProvider"] },
+  { path: "asset.minCollateralRatio", labelKey: PATH_LABEL_KEYS["asset.minCollateralRatio"] },
   { path: "asset.website", labelKey: PATH_LABEL_KEYS["asset.website"] },
   { path: "asset.jurisdiction", labelKey: PATH_LABEL_KEYS["asset.jurisdiction"] },
   { path: "asset.offeringType", labelKey: PATH_LABEL_KEYS["asset.offeringType"] },
+  { path: "asset.shareClass", labelKey: PATH_LABEL_KEYS["asset.shareClass"] },
+  { path: "asset.votingRights", labelKey: PATH_LABEL_KEYS["asset.votingRights"] },
+  { path: "asset.couponRate", labelKey: PATH_LABEL_KEYS["asset.couponRate"] },
+  { path: "asset.maturityDate", labelKey: PATH_LABEL_KEYS["asset.maturityDate"] },
+  { path: "asset.seniority", labelKey: PATH_LABEL_KEYS["asset.seniority"] },
+  { path: "asset.fundStrategy", labelKey: PATH_LABEL_KEYS["asset.fundStrategy"] },
+  { path: "asset.managementFee", labelKey: PATH_LABEL_KEYS["asset.managementFee"] },
+  { path: "asset.netAssetValue", labelKey: PATH_LABEL_KEYS["asset.netAssetValue"] },
   { path: "asset.underlyingAsset", labelKey: PATH_LABEL_KEYS["asset.underlyingAsset"] },
   { path: "asset.custodian", labelKey: PATH_LABEL_KEYS["asset.custodian"] },
+  { path: "asset.propertyType", labelKey: PATH_LABEL_KEYS["asset.propertyType"] },
+  { path: "asset.propertyLocation", labelKey: PATH_LABEL_KEYS["asset.propertyLocation"] },
 ];
 
 export function pathLabel(path: string, t: Translate): string {
@@ -362,6 +464,21 @@ export function getPublicFieldCandidates(draft: DraftState, t: Translate): Publi
   const enabled = new Set(draft.publicFields);
   return PUBLIC_FIELD_POOL.flatMap(({ path, labelKey }) => {
     const raw = getByPath(metadata, path);
+    // Boolean toggles (e.g. voting rights) only reach here when true — a false
+    // toggle is pruned to undefined in the metadata — so show a human "Enabled"
+    // rather than the literal "true".
+    if (typeof raw === "boolean") {
+      return raw
+        ? [
+            {
+              path,
+              label: t(labelKey),
+              value: t("DashboardIssuance.review.enabled"),
+              enabled: enabled.has(path),
+            },
+          ]
+        : [];
+    }
     const rawValue = typeof raw === "string" ? raw.trim() : raw == null ? "" : String(raw);
     if (!rawValue) {
       return [];
@@ -472,8 +589,13 @@ export function getAssetDetailsErrors(
     errors.decimals = t("DashboardIssuance.errors.decimalsWholeNumber");
   }
 
-  if (!draft.description.trim()) {
+  const description = draft.description.trim();
+  if (!description) {
     errors.description = t("DashboardIssuance.errors.descriptionRequired");
+  } else if (description.length > ASSET_DESCRIPTION_MAX_LENGTH) {
+    errors.description = t("DashboardIssuance.errors.descriptionTooLong", {
+      max: ASSET_DESCRIPTION_MAX_LENGTH,
+    });
   }
 
   // Website and logo are optional, but must be valid URLs when provided.
@@ -513,6 +635,16 @@ export function getAssetDetailsErrors(
   });
   if (findIncompatibleExtensionPair(selectedExtensions)) {
     errors.advancedSettings = t("DashboardIssuance.errors.settingConflict");
+  }
+
+  // Authority-valued settings (e.g. permanent delegate) bind an on-chain authority
+  // to the signing wallet at deploy, so the server rejects the create without one.
+  // Require it here so the user gets inline guidance instead of a late 400.
+  const needsSigner = Object.keys(draft.advancedSettings).some((key) =>
+    (AUTHORITY_VALUED_SETTINGS as readonly string[]).includes(key)
+  );
+  if (needsSigner && !draft.signingWalletId.trim()) {
+    errors.signingWalletId = t("DashboardIssuance.errors.signerRequiredForSettings");
   }
 
   return errors;

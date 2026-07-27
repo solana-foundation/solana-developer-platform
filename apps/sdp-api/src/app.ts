@@ -1,12 +1,10 @@
 /**
- * SDP API — runtime-neutral Hono app factory.
+ * SDP API — Hono application factory.
  *
  * `createApp(deps)` builds the Hono instance with all middleware, routes, and
- * error handling wired up, but takes runtime-specific concerns (observability)
- * as injected dependencies. Runtime-specific bindings and SDKs are owned by
- * the entrypoints (`index.ts` on Workers, `server.ts` on Node — HOO-511); this
- * file must not import them, so the same Hono instance can be reused across
- * both runtimes.
+ * error handling wired up, while transport and process lifecycle concerns stay
+ * in `server.ts`. Observability remains injected so tests can use a lightweight
+ * implementation without initializing the production SDK.
  */
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
@@ -45,6 +43,7 @@ import organizations from "@/routes/organizations";
 import pay from "@/routes/pay";
 import payments from "@/routes/payments";
 import places from "@/routes/places";
+import playgroundInternal from "@/routes/playground-internal";
 import policies from "@/routes/policies";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
@@ -363,6 +362,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   }
 
   app.route("/v1", v1);
+
+  // Dashboard-only helpers. These routes are intentionally excluded from the
+  // public OpenAPI and AI discovery surfaces.
+  app.route("/internal/playground", playgroundInternal);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);

@@ -5,6 +5,7 @@ import {
   type AssetProfileFieldOptionsResponse,
   type AssetProfileResponse,
   getAssetTypeRegistryEntry,
+  hasPermission,
   isAssetTypeSupported,
   type ListAssetProfilesResponse,
 } from "@sdp/types";
@@ -13,6 +14,7 @@ import { getDb } from "@/db";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
+  AppError,
   badRequest,
   badRequestParams,
   badRequestQuery,
@@ -51,6 +53,79 @@ export function mapToAssetProfile(row: AssetProfileRow): AssetProfile {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+type MetadataRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): MetadataRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as MetadataRecord)
+    : null;
+}
+
+// Collapse the two capacity encodings — legacy `{ key: true }` and current
+// `{ key: { enabled, config } }` — so a re-serialized-but-unchanged policy does
+// not read as a change. Disabled entries drop out entirely.
+function normalizeCapacities(value: unknown): MetadataRecord | null {
+  const source = asRecord(value);
+  if (!source) {
+    return null;
+  }
+  const normalized: MetadataRecord = {};
+  for (const [key, raw] of Object.entries(source)) {
+    if (raw === true) {
+      normalized[key] = { enabled: true };
+      continue;
+    }
+    const entry = asRecord(raw);
+    if (!entry || entry.enabled === false) {
+      continue;
+    }
+    normalized[key] =
+      entry.config !== undefined ? { enabled: true, config: entry.config } : { enabled: true };
+  }
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+// A stable, order-independent view of just the admin-governed compliance policy:
+// advanced settings selection, the off-chain capacities, and the access-control
+// mode. Everything else on the profile (asset details, public-info visibility)
+// stays at tokens:write.
+function compliancePolicyView(metadata: unknown): unknown {
+  const source = asRecord(metadata) ?? {};
+  const settings = asRecord(source.settings);
+  const compliance = asRecord(source.compliance);
+  return {
+    // `settings.version` is server-stamped, not policy — compare the selection.
+    settings: settings?.selected ?? null,
+    accessControl: compliance?.accessControl ?? null,
+    capacities: normalizeCapacities(compliance?.capacities),
+  };
+}
+
+function sortRecursively(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortRecursively);
+  }
+  const record = asRecord(value);
+  if (!record) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.keys(record)
+      .sort()
+      .map((key) => [key, sortRecursively(record[key])])
+  );
+}
+
+// True when a PATCH would alter the compliance policy vs. the persisted profile.
+// Editing the policy requires tokens:admin even though the route gate is
+// tokens:write; this is the server backstop for the admin-only compliance tab.
+export function compliancePolicyChanged(before: unknown, after: unknown): boolean {
+  return (
+    JSON.stringify(sortRecursively(compliancePolicyView(before))) !==
+    JSON.stringify(sortRecursively(compliancePolicyView(after)))
+  );
 }
 
 export const getAssetProfileFieldOptions = async (c: AppContext) => {
@@ -168,6 +243,21 @@ export const updateAssetProfile = async (c: AppContext) => {
   });
   if (!current) {
     throw notFound("Asset profile");
+  }
+
+  // Compliance policy is admin-governed. The route gate (tokens:write) covers
+  // the rest of the profile, but changing the advanced settings, capacities, or
+  // access-control mode requires tokens:admin — mirroring the admin-only
+  // compliance tab in the dashboard.
+  if (
+    parsed.data.issuanceMetadata !== undefined &&
+    compliancePolicyChanged(current.issuance_metadata, parsed.data.issuanceMetadata) &&
+    !hasPermission(auth.permissions, "tokens:admin")
+  ) {
+    throw new AppError(
+      "INSUFFICIENT_PERMISSIONS",
+      "Editing compliance policy requires the tokens:admin permission"
+    );
   }
 
   // Resolve the effective category/type by merging the patch over the existing

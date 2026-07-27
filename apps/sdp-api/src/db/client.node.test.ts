@@ -17,40 +17,14 @@ interface MockPool {
   end: ReturnType<typeof vi.fn>;
 }
 
-interface MockClient {
-  config: Record<string, unknown>;
-  queries: unknown[][];
-  connect: ReturnType<typeof vi.fn>;
-  end: ReturnType<typeof vi.fn>;
-}
-
 const pgMock = vi.hoisted(() => ({
-  clients: [] as MockClient[],
   pools: [] as MockPool[],
-  clientQuery: async (): Promise<MockQueryResult> => ({ rows: [], rowCount: 0 }),
   poolQuery: async (): Promise<MockQueryResult> => ({ rows: [], rowCount: 0 }),
   poolClientQuery: async (): Promise<MockQueryResult> => ({ rows: [], rowCount: 0 }),
   poolEnd: async (): Promise<void> => {},
 }));
 
 vi.mock("pg", () => {
-  class Client {
-    readonly config: Record<string, unknown>;
-    readonly queries: unknown[][] = [];
-    readonly connect = vi.fn(async () => {});
-    readonly end = vi.fn(async () => {});
-
-    constructor(config: Record<string, unknown>) {
-      this.config = config;
-      pgMock.clients.push(this);
-    }
-
-    async query(...args: unknown[]): Promise<MockQueryResult> {
-      this.queries.push(args);
-      return pgMock.clientQuery();
-    }
-  }
-
   class Pool {
     readonly config: Record<string, unknown>;
     readonly queries: unknown[] = [];
@@ -88,7 +62,6 @@ vi.mock("pg", () => {
   }
 
   return {
-    Client,
     Pool,
     types: { setTypeParser: vi.fn() },
   };
@@ -96,25 +69,20 @@ vi.mock("pg", () => {
 
 let closeDatabasePools: typeof import("./client").closeDatabasePools;
 let createDatabaseClient: typeof import("./client").createDatabaseClient;
-let getDb: typeof import("./client").getDb;
 
 describe("database client connection management", () => {
   beforeAll(async () => {
-    // vitest.node.config.ts intentionally shares a module cache between files.
-    // Reload this module after installing the pg mock so targeted runs are not
-    // order-dependent on another test importing the real client first.
+    // Reload this module after installing the pg mock so targeted runs always
+    // exercise the mocked client, regardless of import timing within the file.
     vi.resetModules();
     const database = await import("./client");
     closeDatabasePools = database.closeDatabasePools;
     createDatabaseClient = database.createDatabaseClient;
-    getDb = database.getDb;
   });
 
   beforeEach(async () => {
     await closeDatabasePools();
-    pgMock.clients.length = 0;
     pgMock.pools.length = 0;
-    pgMock.clientQuery = async () => ({ rows: [], rowCount: 0 });
     pgMock.poolQuery = async () => ({ rows: [], rowCount: 0 });
     pgMock.poolClientQuery = async () => ({ rows: [], rowCount: 0 });
     pgMock.poolEnd = async () => {};
@@ -221,21 +189,6 @@ describe("database client connection management", () => {
       "ROLLBACK",
     ]);
     expect(client?.release).toHaveBeenCalledWith(rollbackFailure);
-  });
-
-  it("keeps Hyperdrive on a fresh connection for each query", async () => {
-    const db = getDb({
-      HYPERDRIVE: { connectionString: "postgresql://hyperdrive/sdp" },
-      DATABASE_URL: "postgresql://node-database/sdp",
-    });
-
-    await db.queryOne("SELECT 1");
-    await db.queryOne("SELECT 2");
-
-    expect(pgMock.pools).toHaveLength(0);
-    expect(pgMock.clients).toHaveLength(2);
-    expect(pgMock.clients.every((client) => client.connect.mock.calls.length === 1)).toBe(true);
-    expect(pgMock.clients.every((client) => client.end.mock.calls.length === 1)).toBe(true);
   });
 
   it("waits for every pool to close before shutdown completes", async () => {

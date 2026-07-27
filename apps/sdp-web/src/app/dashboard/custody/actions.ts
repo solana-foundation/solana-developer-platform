@@ -1,6 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
+import type { CustodyConfigsResponse } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
@@ -141,7 +142,6 @@ async function initializeCustodyWallet(formData: FormData) {
   const network = getOptionalString(formData, "network");
   const walletAddress = getOptionalString(formData, "walletAddress");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
-  const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
 
   const payload: Record<string, unknown> = {
     provider,
@@ -149,9 +149,6 @@ async function initializeCustodyWallet(formData: FormData) {
   };
 
   if (provider !== "fireblocks") {
-    if (apiBaseUrl) {
-      payload.apiBaseUrl = apiBaseUrl;
-    }
     if (network) {
       payload.network = network;
     }
@@ -177,6 +174,20 @@ async function initializeCustodyWallet(formData: FormData) {
       apiError?.status === 409 &&
       apiError.message.includes("Signing already initialized for org")
     ) {
+      const configurations = await client.fetch<CustodyConfigsResponse>("/v1/wallets/configs");
+      const readyConfiguration = configurations.configs.some(
+        (configuration) =>
+          configuration.provider === provider &&
+          configuration.isDefault &&
+          configuration.defaultWalletId !== null
+      );
+
+      if (readyConfiguration) {
+        return;
+      }
+
+      // Repair a provider connection whose first wallet did not finish
+      // persisting instead of leaving the organization trapped in onboarding.
       await client.fetch("/v1/wallets", {
         method: "POST",
         body: JSON.stringify({
@@ -235,6 +246,22 @@ export type WalletSetupActionResult =
     };
 
 export async function initializeCustodySetupAction(
+  formData: FormData
+): Promise<WalletSetupActionResult> {
+  const t = await getTranslations();
+  try {
+    await initializeCustodyWallet(formData);
+    revalidateWalletPaths();
+    return { status: "success" };
+  } catch (error) {
+    return {
+      status: "error",
+      message: toApiActionErrorMessage(error, t),
+    };
+  }
+}
+
+export async function initializeOnboardingCustodyAction(
   formData: FormData
 ): Promise<WalletSetupActionResult> {
   const t = await getTranslations();

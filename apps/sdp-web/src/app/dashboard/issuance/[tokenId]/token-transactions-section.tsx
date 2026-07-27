@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatDisplayLabel } from "@/lib/utils";
-import { formatDate } from "./token-management-workspace.utils";
+import { auditActionIcon, auditActionLabel } from "./asset-profile/asset-audit-presentation";
+import { formatDateTime } from "./token-management-workspace.utils";
 
 interface TokenTransactionsSectionProps {
   transactions: TokenTransaction[];
@@ -75,28 +76,43 @@ export function TokenTransactionsSection({
                   <TableHead>{t("DashboardIssuance.transactions.type")}</TableHead>
                   <TableHead>{t("DashboardIssuance.transactions.status")}</TableHead>
                   <TableHead>{t("DashboardIssuance.transactions.signature")}</TableHead>
-                  <TableHead>{t("DashboardIssuance.transactions.created")}</TableHead>
+                  <TableHead className="text-right">
+                    {t("DashboardIssuance.transactions.created")}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {transactions.slice(0, 12).map((transaction) => (
-                  <TableRow key={transaction.id} data-testid={`transaction-row-${transaction.id}`}>
-                    <TableCell>{formatDisplayLabel(transaction.type)}</TableCell>
-                    <TableCell>
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${transactionStatusBadgeClass(
-                          transaction.status
-                        )}`}
-                      >
-                        {formatDisplayLabel(transaction.status)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="max-w-[220px] truncate font-mono text-xs">
-                      {transaction.signature ?? "—"}
-                    </TableCell>
-                    <TableCell>{formatDate(transaction.createdAt, locale)}</TableCell>
-                  </TableRow>
-                ))}
+                {transactions.slice(0, 12).map((transaction) => {
+                  const ActionIcon = auditActionIcon(transaction.type);
+                  return (
+                    <TableRow
+                      key={transaction.id}
+                      data-testid={`transaction-row-${transaction.id}`}
+                    >
+                      <TableCell>
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-fill-subtle px-2 py-1 text-xs font-medium text-secondary">
+                          <ActionIcon className="h-3.5 w-3.5 shrink-0" />
+                          {auditActionLabel(transaction.type)}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${transactionStatusBadgeClass(
+                            transaction.status
+                          )}`}
+                        >
+                          {formatDisplayLabel(transaction.status)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="max-w-[220px] truncate font-mono text-xs">
+                        {transaction.signature ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {formatDateTime(transaction.createdAt, locale)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
             {transactionsHasMore ? (

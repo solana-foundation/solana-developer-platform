@@ -72,6 +72,12 @@ test("empty optional fields are omitted so runtime fallbacks apply", () => {
   assert.doesNotMatch(env, /^FEE_PAYER_PRIVATE_KEY=/m);
 });
 
+test("Cloud KMS custody key is emitted when configured", () => {
+  const keyName = "projects/sdp/locations/global/keyRings/custody/cryptoKeys/envelope";
+  const env = generateEnv({ ...defaultValues(), CUSTODY_KMS_KEY_NAME: keyName });
+  assert.match(env, new RegExp(`^CUSTODY_KMS_KEY_NAME=${keyName}$`, "m"));
+});
+
 test("a value with surrounding whitespace is emitted trimmed", () => {
   const env = generateEnv({ ...defaultValues(), CLERK_SECRET_KEY: "  sk_test_x  " });
   assert.match(env, /^CLERK_SECRET_KEY=sk_test_x$/m);
@@ -90,6 +96,17 @@ test("a value containing a newline cannot inject extra .env lines", () => {
 test("NEXT_PUBLIC_SOLANA_NETWORK is derived from SOLANA_NETWORK", () => {
   const env = generateEnv({ ...defaultValues(), SOLANA_NETWORK: "mainnet-beta" });
   assert.match(env, /^NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta$/m);
+});
+
+test("Asset Profiles remains an explicit production opt-in", () => {
+  const disabled = generateEnv(defaultValues());
+  assert.match(disabled, /^ASSET_PROFILES_ENABLED=false$/m);
+
+  const enabled = generateEnv({
+    ...defaultValues(),
+    ASSET_PROFILES_ENABLED: "true",
+  });
+  assert.match(enabled, /^ASSET_PROFILES_ENABLED=true$/m);
 });
 
 test("generated .env covers every base key in infra/self-hosted/.env.example", () => {

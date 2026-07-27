@@ -12,7 +12,7 @@ import {
   type ParsedTransaction,
   simulateTransaction,
 } from "@sdp/rpc/solana";
-import type { TokenResponse } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, type TokenResponse } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -251,7 +251,7 @@ export const deployToken = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken({
+  let token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
     projectId,
@@ -311,13 +311,28 @@ export const deployToken = async (c: AppContext) => {
     return success(c, { token });
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
-    auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
+  // Claim the token for deployment before reading the snapshot we mint from.
+  // This flips pending → deploying under a guard, so a concurrent identity PATCH
+  // (symbol/decimals/requiresAllowlist) can't land while the on-chain mint is
+  // created — which would otherwise leave the DB identity permanently out of
+  // sync with the immutable mint. `beginTokenDeploy` re-reads post-claim, so we
+  // mint from the now-frozen values.
+  const claimedToken = await tokenService.beginTokenDeploy(tokenId);
+  if (!claimedToken) {
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: "Token is already being deployed or was deployed",
+    });
+    throw new AppError(
+      "CONFLICT",
+      "Token is already being deployed or was deployed; re-fetch and retry"
+    );
+  }
+  token = claimedToken;
 
-  // Deploy using Mosaic templates - handles ABL setup automatically
+  // Deploy using Mosaic templates - handles ABL setup automatically. Pure reads
+  // of the frozen snapshot, so computing them here (before the try) can't strand
+  // the claim, and `aclMode` stays available to the catch's recovery path.
   const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
 
@@ -326,6 +341,16 @@ export const deployToken = async (c: AppContext) => {
   let custodyAddress: Address | undefined;
 
   try {
+    // Resolve the signing wallet inside the try: it can throw, and now that we
+    // hold the deploy claim (status=deploying) any failure before the mint lands
+    // must release it (catch below) — otherwise the draft is stranded in
+    // `deploying`, uneditable and un-redeployable.
+    const signingWalletId = resolveApiKeySigningWalletId(
+      auth,
+      parsed.data.signingWalletId ?? token.signingWalletId,
+      ["tokens:write"]
+    );
+
     // Get custody signer (resolves via 3-tier: project → org → env fallback)
     const signer = await createOrgSigner(
       c.env,
@@ -353,7 +378,10 @@ export const deployToken = async (c: AppContext) => {
         // points each environment at itself.
         uri:
           token.uri?.trim() ||
-          canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id),
+          canonicalMetadataUrl(
+            resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
+            token.id
+          ),
       },
       decimals: token.decimals,
       mintAuthority: signer,
@@ -443,6 +471,12 @@ export const deployToken = async (c: AppContext) => {
       );
     }
 
+    // The mint did not land on-chain (the only "mint exists" failure is the
+    // MintMetadataUpdateError handled above). Release the deploy claim so the
+    // draft returns to pending and stays editable / redeployable. Guarded, so
+    // it's a no-op if the token already advanced to active.
+    await tokenService.releaseTokenDeploy(tokenId);
+
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: error instanceof Error ? error.message : "Unknown error",
@@ -513,7 +547,11 @@ export const prepareDeploy = async (c: AppContext) => {
 
   // See deployToken above: SDP-hosted metadata fallback (HOO-466).
   const resolvedUri =
-    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id);
+    token.uri?.trim() ||
+    canonicalMetadataUrl(
+      resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
+      token.id
+    );
 
   const buildMetadata = (uri: string) => ({ name: token.name, symbol: token.symbol, uri });
   const prepareOptions = {
@@ -585,16 +623,15 @@ export const prepareDeploy = async (c: AppContext) => {
 // carries one targeting that mint. jsonParsed decodes both legacy `spl-token`
 // and `spl-token-2022` programs under the same instruction `type`.
 const MINT_INIT_INSTRUCTION_TYPES = new Set(["initializeMint", "initializeMint2"]);
+const TOKEN_PROGRAM_IDS = new Set<string>(Object.values(SPL_TOKEN_PROGRAMS));
 
-/**
- * Whether `tx` contains an instruction that initializes `mint` — i.e. the
- * transaction actually created this mint, rather than merely referencing or
- * coexisting with it. Used by `confirmDeploy` to bind a confirmed signature to
- * the mint a caller claims it produced.
- */
-const transactionInitializesMint = (tx: ParsedTransaction, mint: Address): boolean =>
-  tx.instructions.some(
+const findMintInitialization = (
+  tx: ParsedTransaction,
+  mint: Address
+): ParsedTransaction["instructions"][number] | undefined =>
+  tx.instructions.find(
     (ix) =>
+      TOKEN_PROGRAM_IDS.has(ix.programId) &&
       ix.parsedType !== null &&
       MINT_INIT_INSTRUCTION_TYPES.has(ix.parsedType) &&
       ix.info?.mint === mint
@@ -695,7 +732,8 @@ export const confirmDeploy = async (c: AppContext) => {
     );
   }
 
-  if (!transactionInitializesMint(confirmedTx, mint)) {
+  const mintInitialization = findMintInitialization(confirmedTx, mint);
+  if (!mintInitialization) {
     throw badRequest("Deploy transaction did not create this mint");
   }
 
@@ -714,6 +752,13 @@ export const confirmDeploy = async (c: AppContext) => {
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const custodyAddress = signer.address;
   const freezeAuthority = token.isFreezable ? custodyAddress : null;
+
+  if (
+    mintInitialization.info?.mintAuthority !== custodyAddress ||
+    (mintInitialization.info?.freezeAuthority ?? null) !== freezeAuthority
+  ) {
+    throw badRequest("Deploy transaction did not use the expected mint authorities");
+  }
 
   // Re-derive the ABL list address server-side instead of trusting the request
   // body's `listAddress`: for allowlist/blocklist tokens a wrong value would
@@ -811,7 +856,11 @@ export const prepareDeployMetadata = async (c: AppContext) => {
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at
   // the SDP-hosted (or issuer-supplied) URL.
   const resolvedUri =
-    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id);
+    token.uri?.trim() ||
+    canonicalMetadataUrl(
+      resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
+      token.id
+    );
 
   const prepared = await mosaic.prepareUpdateMetadata({
     mint: token.mintAddress as Address,

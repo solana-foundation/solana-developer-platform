@@ -1,6 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import type { SigningConfigRecord } from "@/services/adapters";
-import { createEncryptionService } from "@/services/encryption.service";
+import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 
 export interface LocalProviderConfig {
@@ -14,11 +14,13 @@ export interface FireblocksProviderConfig {
   apiSecretEncrypted: string;
   vaultAccountId: string;
   assetId: string;
+  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
 }
 
 export interface PrivyProviderConfig {
   provider: "privy";
+  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
   requestDelayMs?: number;
   privyAppId?: string;
@@ -27,6 +29,7 @@ export interface PrivyProviderConfig {
 
 export interface CoinbaseCdpProviderConfig {
   provider: "coinbase_cdp";
+  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
   network?: "solana" | "solana-devnet";
   accountPolicy?: string;
@@ -35,6 +38,7 @@ export interface CoinbaseCdpProviderConfig {
 
 export interface ParaProviderConfig {
   provider: "para";
+  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
   requestDelayMs?: number;
   walletId?: string;
@@ -45,6 +49,7 @@ export interface ParaProviderConfig {
 export interface TurnkeyProviderConfig {
   provider: "turnkey";
   organizationId?: string;
+  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
   requestDelayMs?: number;
   privateKeyId?: string;
@@ -53,6 +58,7 @@ export interface TurnkeyProviderConfig {
 
 export interface DfnsProviderConfig {
   provider: "dfns";
+  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
   network?: "Solana" | "SolanaDevnet";
   walletId?: string;
@@ -61,6 +67,7 @@ export interface DfnsProviderConfig {
 
 export interface IbmHavenProviderConfig {
   provider: "ibm_haven";
+  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
   network?: "Solana" | "SolanaDevnet";
   walletId?: string;
@@ -69,6 +76,7 @@ export interface IbmHavenProviderConfig {
 
 export interface AnchorageProviderConfig {
   provider: "anchorage";
+  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
   walletId?: string;
   network?: "solana" | "solana-devnet";
@@ -76,6 +84,7 @@ export interface AnchorageProviderConfig {
 
 export interface UtilaProviderConfig {
   provider: "utila";
+  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
   vaultId?: string;
   network?: "networks/solana-mainnet" | "networks/solana-devnet";
@@ -96,7 +105,8 @@ export type ProviderConfigRecord =
 export async function parseConfigRecord(
   env: Env,
   orgId: string,
-  record: SigningConfigRecord
+  record: SigningConfigRecord,
+  cipher: CustodyCipher = createCustodyCipher(env)
 ): Promise<ProviderConfigRecord> {
   const parsedDirect = tryParseJson(record.config);
   if (parsedDirect !== null) {
@@ -104,8 +114,7 @@ export async function parseConfigRecord(
   }
 
   try {
-    const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
-    const decrypted = await encryption.decrypt(orgId, record.config);
+    const decrypted = await cipher.decrypt(orgId, record.config);
     const parsedDecrypted = tryParseJson(decrypted);
     if (parsedDecrypted === null) {
       throw new SigningError(

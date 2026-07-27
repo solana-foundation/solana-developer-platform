@@ -286,7 +286,7 @@ export async function resolvePolicyCustodyWallet(
   auth: ApiKeyContext,
   walletId: string
 ): Promise<CustodyWalletLookup | null> {
-  const store = new CustodyConfigStore(getDb(env), env.CUSTODY_ENCRYPTION_KEY);
+  const store = new CustodyConfigStore(getDb(env), env);
   return store.findActiveWalletByIdentifier(
     auth.organizationId,
     auth.projectId ?? undefined,

@@ -1,16 +1,11 @@
 /**
- * Runtime-neutral background task abstraction.
+ * Background task abstraction.
  *
- * Both Cloudflare and Node runtimes have a notion of "fire-and-forget" work
- * that the request handler shouldn't await but that the runtime needs to keep
- * alive past the response. CF expresses this via `ctx.waitUntil`; Node has no
- * primitive — promises run in the background until the process exits. The Node
- * impl bridges the gap by tracking in-flight promises so a SIGTERM handler can
- * drain them before the process dies.
+ * Request handlers should not await fire-and-forget work, but the process must
+ * still track it so graceful shutdown can drain in-flight promises.
  *
- * Call-sites depend on this interface; the right impl is instantiated at the
- * entrypoint (CF uses WorkersBackgroundRunner, Node will use NodeBackgroundRunner
- * once `server.ts` lands in HOO-511).
+ * Call-sites depend on this interface; `server.ts` instantiates the Node
+ * implementation and adapts Hono's request context to it.
  */
 
 export interface BackgroundRunner {
@@ -22,17 +17,14 @@ export interface BackgroundRunner {
   run(promise: Promise<unknown>): void;
 
   /**
-   * Wait for all currently-tracked promises to settle. CF doesn't need this
-   * (the platform handles it); Node calls it on SIGTERM to drain in-flight
-   * work before exit. Implementations where the runtime drains automatically
-   * may return immediately.
+   * Wait for all currently-tracked promises to settle. The server calls this
+   * on SIGTERM before exiting.
    */
   awaitAll(): Promise<void>;
 
   /**
    * True while awaitAll() is in flight. Useful for diagnostics and for callers
-   * that want to refuse new work once shutdown has started. CF runtimes hand
-   * drain back to the platform and always report false.
+   * that want to refuse new work once shutdown has started.
    */
   readonly draining: boolean;
 }

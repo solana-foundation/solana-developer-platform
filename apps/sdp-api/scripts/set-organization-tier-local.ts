@@ -91,7 +91,7 @@ function buildDefaultDatabaseUrl(): string {
 async function main() {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const appDir = path.resolve(scriptDir, "..");
-  const localEnv = loadLocalEnvFile(path.join(appDir, ".dev.vars"));
+  const localEnv = loadLocalEnvFile(path.join(appDir, ".env.local"));
   const runtimeEnv = {
     ...localEnv,
     ...process.env,
@@ -142,7 +142,7 @@ async function main() {
   }
 
   if (!runtimeEnv.CLERK_SECRET_KEY?.trim()) {
-    throw new Error("CLERK_SECRET_KEY is required. Add it to apps/sdp-api/.dev.vars first.");
+    throw new Error("CLERK_SECRET_KEY is required. Add it to apps/sdp-api/.env.local first.");
   }
 
   const clerkService = new ClerkOrganizationsService(runtimeEnv as Env);

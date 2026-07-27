@@ -1,4 +1,4 @@
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
 import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
@@ -10,24 +10,15 @@ import {
   fetchActiveApiKeys,
   resolvePlaygroundApiBaseUrl,
 } from "@/app/dashboard/playground-api-data";
-import {
-  WalletsOnboardingSkeleton,
-  WalletsOverviewSkeleton,
-} from "@/app/dashboard/wallets/wallet-route-skeletons";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { WalletsOverviewSkeleton } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
+import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 import type { OnboardingStatusResponse } from "../onboarding-status";
 import { WalletsWorkspace } from "./wallets-workspace";
-
-interface ClerkOrganizationSummary {
-  id: string;
-  name: string | null;
-  slug: string | null;
-}
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
 
@@ -69,63 +60,6 @@ async function getCustodyWallets(
   return json.data?.wallets ?? [];
 }
 
-async function getClerkOrganizationSummary(
-  organizationId: string
-): Promise<ClerkOrganizationSummary> {
-  try {
-    const client = await clerkClient();
-    const organization = await client.organizations.getOrganization({
-      organizationId,
-    });
-    return {
-      id: organization.id,
-      name: organization.name ?? null,
-      slug: organization.slug ?? null,
-    };
-  } catch {
-    return {
-      id: organizationId,
-      name: null,
-      slug: null,
-    };
-  }
-}
-
-async function OnboardingGateSection({ orgId }: { orgId: string }) {
-  const t = await getTranslations();
-  const organization = await getClerkOrganizationSummary(orgId);
-
-  return (
-    <Card className="rounded-[24px] ring-border-subtle shadow-none">
-      <CardHeader>
-        <CardTitle>{t("DashboardCustody.waitingForOrganizationSync")}</CardTitle>
-        <CardDescription>{t("DashboardCustody.organizationSyncDescription")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="rounded-xl border border-border-default bg-fill-subtle p-4 text-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-secondary">{t("DashboardCustody.organizationName")}</span>
-            <span className="font-medium text-primary">
-              {organization.name ?? t("DashboardCustody.unavailable")}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-secondary">{t("DashboardCustody.organizationSlug")}</span>
-            <span className="font-mono text-xs text-primary">
-              {organization.slug ?? t("DashboardCustody.unavailable")}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-secondary">{t("DashboardCustody.clerkOrganizationId")}</span>
-            <span className="font-mono text-xs text-primary">{organization.id}</span>
-          </div>
-        </div>
-        <p className="text-sm text-secondary">{t("DashboardCustody.organizationSyncHelp")}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
 export default async function CustodyPage() {
   const [t, { getToken, userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
@@ -155,11 +89,7 @@ export default async function CustodyPage() {
         linked: false,
       });
 
-      return (
-        <Suspense fallback={<WalletsOnboardingSkeleton />}>
-          <OnboardingGateSection orgId={orgId} />
-        </Suspense>
-      );
+      redirect(`${WORKSPACE_LOADING_PATH}?return_to=${encodeURIComponent("/dashboard/wallets")}`);
     }
 
     if (!projectClient) {

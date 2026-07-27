@@ -129,7 +129,15 @@ export const pageSizeQuerySchema = z.number().int().positive().openapi({
   example: 50,
 });
 
-export const includeArchivedQuerySchema = z.boolean().openapi({
+export const queryBooleanSchema = withOpenApi(
+  z.stringbool({ truthy: ["true"], falsy: ["false"], case: "sensitive" }),
+  {
+    type: "boolean",
+    description: 'Boolean query parameter; accepts exactly "true" or "false".',
+  }
+);
+
+export const includeArchivedQuerySchema = withOpenApi(queryBooleanSchema, {
   description: "Include archived resources in results.",
   example: false,
 });

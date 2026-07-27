@@ -13,9 +13,11 @@ apps/sdp-api/generated/
 apps/sdp-api/.wrangler.*.generated.toml
 apps/sdp-api/.ramp-rails/raw/
 
-# Cloudflare
+# Legacy Cloudflare artifacts remain quarantined so old local credentials and
+# state cannot be staged while operators complete the hosted-resource teardown.
 .wrangler/
 .dev.vars
+.dev.vars.*
 .cloudflare.*.env
 
 # IDE

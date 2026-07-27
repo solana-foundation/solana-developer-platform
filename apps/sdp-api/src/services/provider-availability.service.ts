@@ -528,7 +528,7 @@ export async function getProviderAvailability(
 
 function getAvailabilityMessage(
   env: Env,
-  tier: OrganizationTier,
+  _tier: OrganizationTier,
   family: OrganizationProviderFamily,
   providerId: string,
   entry: ProviderAvailabilityEntry
@@ -539,9 +539,7 @@ function getAvailabilityMessage(
     if (isSelfHostedDeployment(env)) {
       return `${label} is disabled for this organization.`;
     }
-    return tier === "individual"
-      ? `${label} is only available on the enterprise tier.`
-      : `${label} is not enabled for this organization.`;
+    return `${label} requires manual activation for this organization.`;
   }
 
   if (!entry.configured) {

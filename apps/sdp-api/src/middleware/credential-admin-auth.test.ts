@@ -9,7 +9,7 @@ import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { credentialAdminAuthMiddleware } from "./credential-admin-auth";
 
@@ -104,7 +104,7 @@ describe("credentialAdminAuthMiddleware", () => {
 
   afterEach(async () => {
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   it("allows a Clerk organization admin and exposes Clerk auth to the handler", async () => {

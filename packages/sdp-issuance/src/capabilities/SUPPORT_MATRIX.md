@@ -6,21 +6,21 @@ Manager-facing advanced settings, the SDP actions and Token-2022 extensions each
 
 ## Settings → SDP actions
 
-| Setting | Group | Extensions | SDP actions | Signing |
-| --- | --- | --- | --- | --- |
-| freezeTransfers | compliance | pausable | pause, unpause, freeze, unfreeze | Custody (wallet-extension fallback) |
-| permanentDelegate | controls | permanentDelegate | seize, force_burn | Custody (wallet-extension fallback) |
-| transferFee | economics | transferFee | update_authority | Custody (wallet-extension fallback) |
-| interestBearing | economics | interestBearing | update_authority | Custody (wallet-extension fallback) |
-| scaledUiAmount | economics | scaledUiAmount | update_authority | Custody (wallet-extension fallback) |
-| nonTransferable | controls | nonTransferable | — | Custody only |
-| transferHook | controls | transferHook | update_authority | Custody (wallet-extension fallback) |
+| Setting | Group | Extensions | SDP actions |
+| --- | --- | --- | --- |
+| freezeTransfers | compliance | pausable | pause, unpause, freeze, unfreeze |
+| permanentDelegate | controls | permanentDelegate | seize, force_burn |
+| transferFee | economics | transferFee | update_authority |
+| interestBearing | economics | interestBearing | update_authority |
+| scaledUiAmount | economics | scaledUiAmount | update_authority |
+| transferHook | controls | transferHook | update_authority |
+| nonTransferable | controls | nonTransferable | — |
 
 ## Availability by asset type
 
 Legend: `req` = locked (forced on) · `rec` = recommended (default on) · `opt` = available (opt-in) · `—` = unsupported.
 
-| Asset type | Template | freezeTransfers | permanentDelegate | transferFee | interestBearing | scaledUiAmount | nonTransferable | transferHook |
+| Asset type | Template | freezeTransfers | permanentDelegate | transferFee | interestBearing | scaledUiAmount | transferHook | nonTransferable |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | generic/generic | custom | opt | opt | opt | opt | opt | opt | opt |
 | generic/commodity | custom | opt | opt | opt | opt | opt | opt | opt |
@@ -40,10 +40,10 @@ Legend: `req` = locked (forced on) · `rec` = recommended (default on) · `opt` 
 - `generic/commodity`: none
 - `generic/real_estate`: none
 - `generic/collectible`: none
-- `stablecoin/fiat_backed`: transferFee, interestBearing, scaledUiAmount, nonTransferable, transferHook
-- `stablecoin/crypto_backed`: transferFee, interestBearing, scaledUiAmount, nonTransferable, transferHook
-- `stablecoin/generic`: transferFee, interestBearing, scaledUiAmount, nonTransferable, transferHook
-- `tokenized_security/generic`: transferFee, interestBearing, nonTransferable, transferHook
-- `tokenized_security/equity`: transferFee, interestBearing, nonTransferable, transferHook
-- `tokenized_security/debt`: transferFee, interestBearing, nonTransferable, transferHook
-- `tokenized_security/fund`: transferFee, interestBearing, nonTransferable, transferHook
+- `stablecoin/fiat_backed`: transferFee, interestBearing, scaledUiAmount, transferHook, nonTransferable
+- `stablecoin/crypto_backed`: transferFee, interestBearing, scaledUiAmount, transferHook, nonTransferable
+- `stablecoin/generic`: transferFee, interestBearing, scaledUiAmount, transferHook, nonTransferable
+- `tokenized_security/generic`: transferFee, interestBearing, transferHook, nonTransferable
+- `tokenized_security/equity`: transferFee, interestBearing, transferHook, nonTransferable
+- `tokenized_security/debt`: transferFee, interestBearing, transferHook, nonTransferable
+- `tokenized_security/fund`: transferFee, interestBearing, transferHook, nonTransferable

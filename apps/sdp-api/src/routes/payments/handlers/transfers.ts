@@ -33,7 +33,7 @@ import {
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories/payments.repository";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
+import { AppError, accountFrozen, badRequest, badRequestQuery, solanaRpcError } from "@/lib/errors";
 import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import {
@@ -286,6 +286,26 @@ async function updateTransferRecord(
   }
 
   return updated;
+}
+
+/**
+ * Maps a transfer execution failure to the `AppError` the route should
+ * surface. `AppError`s thrown deeper in the stack (e.g. on-chain confirmation
+ * failures) pass through unchanged. Failures whose message carries the SPL
+ * Token / Token-2022 `AccountFrozen` program error — Kora surfaces simulation
+ * rejections as `custom program error: 0x11` (decimal code 17), the hex form
+ * from the JSON-RPC preflight response, not `@solana/kit`'s own decimal `#17`
+ * `SolanaError` formatting — are surfaced as the existing 400 `ACCOUNT_FROZEN`
+ * error instead of an opaque 502; anything else falls back to the generic
+ * `SOLANA_RPC_ERROR`.
+ */
+export function mapTransferExecutionError(error: unknown): AppError {
+  if (error instanceof AppError) {
+    return error;
+  }
+  const message = error instanceof Error ? error.message : "Unknown transfer error";
+  const programErrorCode = /custom program error: (0x[0-9a-f]+)/i.exec(message)?.[1].toLowerCase();
+  return programErrorCode === "0x11" ? accountFrozen(message) : solanaRpcError(message);
 }
 
 async function executeSolTransfer(
@@ -609,12 +629,12 @@ function addSponsoredFeePayerToPreparedTransaction(
 
 async function executePreparedPrivateTransfer(
   c: AppContext,
-  wallets: CustodyWallet[],
+  scope: ResolvedScope,
+  operation: OutboundPaymentOperation,
   serializedTx: string,
   metadata: PreparedPrivateTransferMetadata
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const auth = getAuth(c);
-  const walletsByAddress = new Map(wallets.map((wallet) => [wallet.publicKey, wallet]));
+  const walletsByAddress = new Map(scope.wallets.map((wallet) => [wallet.publicKey, wallet]));
   const signerWallets = new Map<string, CustodyWallet>();
   const requiredSigners = [...new Set(metadata.magicBlock.requiredSigners)];
   const decodedTransaction = decodeMagicBlockPreparedTransaction(serializedTx);
@@ -640,12 +660,54 @@ async function executePreparedPrivateTransfer(
     );
   }
 
+  // Provider-declared signers are untrusted: authorize the complete custody signer set before
+  // resolving any private keys so one denied signer cannot still produce partial signatures.
+  for (const wallet of signerWallets.values()) {
+    assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
+  }
+
+  for (const wallet of signerWallets.values()) {
+    // The source wallet's operation and legacy policies were enforced before preparation.
+    if (wallet.walletId === operation.sourceWallet.walletId) {
+      continue;
+    }
+
+    const signerOperation = {
+      ...operation,
+      sourceAddress: assertValidAddress(wallet.publicKey, "required signer"),
+      sourceWallet: wallet,
+    };
+    const enforcement = await enforcePaymentTransferOperationPolicy(c, scope, signerOperation, {
+      operationType: "payment_transfer_execute",
+      privateTransfer: true,
+      rawPayload: {
+        source: wallet.walletId,
+        destination: operation.destinationAddress,
+        token: operation.token,
+        amount: operation.amount,
+      },
+    });
+    try {
+      await assertWalletPolicyAllowsTransfer(c, {
+        organizationId: scope.auth.organizationId,
+        projectId: scope.auth.projectId,
+        wallet,
+        destinationAddress: operation.destinationAddress,
+        token: operation.token,
+        amount: operation.amount,
+      });
+    } catch (error) {
+      await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
+      throw error;
+    }
+  }
+
   const signers = await Promise.all(
     [...signerWallets.values()].map(async (wallet) => {
       const signer = await solanaServices.createOrgSigner(
         c.env,
-        auth.organizationId,
-        auth.projectId ?? undefined,
+        scope.auth.organizationId,
+        scope.auth.projectId ?? undefined,
         wallet.walletId
       );
 
@@ -922,7 +984,8 @@ export async function createTransfer(c: AppContext) {
     try {
       const result = await executePreparedPrivateTransfer(
         c,
-        scope.wallets,
+        scope,
+        operation,
         mapped.prepared.serializedTx,
         mapped.metadata
       );
@@ -946,11 +1009,7 @@ export async function createTransfer(c: AppContext) {
         blockTime: null,
       });
 
-      if (error instanceof AppError) {
-        throw error;
-      }
-
-      throw new AppError("SOLANA_RPC_ERROR", message);
+      throw mapTransferExecutionError(error);
     }
   }
 
@@ -1016,11 +1075,7 @@ export async function createTransfer(c: AppContext) {
       blockTime: null,
     });
 
-    if (error instanceof AppError) {
-      throw error;
-    }
-
-    throw new AppError("SOLANA_RPC_ERROR", message);
+    throw mapTransferExecutionError(error);
   }
 }
 

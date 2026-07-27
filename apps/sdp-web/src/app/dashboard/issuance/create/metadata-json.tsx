@@ -25,12 +25,12 @@ export function MetadataJsonToggle({ open, onToggle }: { open: boolean; onToggle
   );
 }
 
-// A code surface, so monospace is allowed here. `whitespace-pre-wrap` keeps the
-// indentation while wrapping long lines; `break-words` handles unbreakable
-// tokens (URLs); `overflow-auto` + `max-h-80` bound a large body.
-export function MetadataJsonPanel({ metadata }: { metadata: IssuanceMetadata }) {
+// A copyable JSON code surface. Monospace is allowed here (a code surface).
+// `whitespace-pre-wrap` keeps indentation while wrapping long lines; `break-words`
+// handles unbreakable tokens (URLs); `overflow-auto` + `max-h-80` bound a large body.
+export function JsonCodeBlock({ value }: { value: unknown }) {
   const t = useTranslations();
-  const jsonString = JSON.stringify(metadata, null, 2);
+  const jsonString = JSON.stringify(value, null, 2);
   const { copied, copy } = useCopy(1200);
 
   return (
@@ -52,4 +52,11 @@ export function MetadataJsonPanel({ metadata }: { metadata: IssuanceMetadata }) 
       </pre>
     </div>
   );
+}
+
+// The Asset details step's public-metadata JSON view (what the token publishes).
+// The on-chain deploy payload lives in the Advanced settings editor's technical
+// mode, next to the controls that produce it — deliberately not duplicated here.
+export function MetadataJsonPanel({ metadata }: { metadata: IssuanceMetadata }) {
+  return <JsonCodeBlock value={metadata} />;
 }

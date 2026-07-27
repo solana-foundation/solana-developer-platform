@@ -10,6 +10,7 @@ import {
   type PolicyRule,
   type PrivateTransferRequest,
   RAMP_PROVIDERS,
+  RAMPS_MEMO_LIMITS,
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import { getI64Encoder, getU64Encoder } from "@solana/kit";
@@ -636,6 +637,15 @@ export const estimateOfframpSchema = z.object({
   cryptoAmount: paymentAmountSchema,
 });
 
+export const rampsMemoSchema = z
+  .record(
+    z.string().min(1).max(RAMPS_MEMO_LIMITS.maxKeyLength),
+    z.string().min(1).max(RAMPS_MEMO_LIMITS.maxValueLength)
+  )
+  .refine((value) => Object.keys(value).length <= RAMPS_MEMO_LIMITS.maxEntries, {
+    message: `rampsMemo must contain at most ${RAMPS_MEMO_LIMITS.maxEntries} key-value pairs`,
+  });
+
 export const createOnrampQuoteSchema = z.object({
   provider: rampProviderSchema,
   counterpartyId: z.string().min(1),
@@ -644,9 +654,12 @@ export const createOnrampQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
+  rampsMemo: rampsMemoSchema.optional(),
   // Embedding domain for Coinbase's Apple Pay payment link (browser origin host).
   domain: z.string().min(1).optional(),
 });
+
+const collectedDataSchema = z.record(z.string(), z.string()).optional();
 
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
@@ -658,23 +671,27 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       cryptoToken: rampCurrencyCodeSchema,
       destinationWallet: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
-      collectedData: z.record(z.string(), z.string()).optional(),
+      collectedData: collectedDataSchema,
     }),
     z.object({
       provider: z.literal("bvnk"),
       direction: z.literal("offramp"),
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
-      collectedData: z.record(z.string(), z.string()).optional(),
+      collectedData: collectedDataSchema,
     }),
   ]),
   z.discriminatedUnion("direction", [
-    z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
+    z.object({
+      provider: z.literal("lightspark"),
+      direction: z.literal("onramp"),
+      collectedData: collectedDataSchema,
+    }),
     z.object({
       provider: z.literal("lightspark"),
       direction: z.literal("offramp"),
       fiatCurrency: rampFiatCurrencySchema,
-      collectedData: z.record(z.string(), z.string()).optional(),
+      collectedData: collectedDataSchema,
     }),
   ]),
   z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
@@ -704,6 +721,7 @@ export const createOfframpQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
+  rampsMemo: rampsMemoSchema.optional(),
 });
 
 export const moneygramRampEventSchema = z.discriminatedUnion("kind", [

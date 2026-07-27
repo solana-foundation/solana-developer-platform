@@ -1,7 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import { NodeBackgroundRunner } from "./background-node";
+import { createNodeExecutionContext, NodeBackgroundRunner } from "./background-node";
 
 describe("NodeBackgroundRunner", () => {
+  it("adapts Hono waitUntil calls into tracked Node background work", async () => {
+    const run = vi.fn();
+    const context = createNodeExecutionContext({ run });
+    const work = Promise.resolve("done");
+
+    context.waitUntil(work);
+
+    expect(run).toHaveBeenCalledWith(work);
+  });
+
   it("awaitAll resolves once all tracked promises settle", async () => {
     vi.useFakeTimers();
     try {
@@ -37,7 +47,7 @@ describe("NodeBackgroundRunner", () => {
     }
   });
 
-  it("awaitAll swallows rejections without throwing (matches CF waitUntil)", async () => {
+  it("awaitAll swallows tracked rejections without throwing", async () => {
     const bg = new NodeBackgroundRunner();
     bg.run(Promise.reject(new Error("boom")));
     bg.run(Promise.resolve("ok"));

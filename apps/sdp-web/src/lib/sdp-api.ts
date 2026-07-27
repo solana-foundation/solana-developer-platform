@@ -130,10 +130,20 @@ function createSdpApiRequest(
   };
 }
 
+export class SdpApiResponseError extends Error {
+  constructor(
+    readonly status: number,
+    readonly responseBody: string
+  ) {
+    super(`SDP API request failed (${status}): ${responseBody}`);
+    this.name = "SdpApiResponseError";
+  }
+}
+
 async function parseSdpApiResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`SDP API request failed (${res.status}): ${body}`);
+    throw new SdpApiResponseError(res.status, body);
   }
 
   if (res.status === 204) {

@@ -1,5 +1,5 @@
 import type { Address } from "@solana/addresses";
-import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
+import type { CustodyProvider, CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp-support.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
 import type {
@@ -19,6 +19,7 @@ export interface PaymentsDashboardWallet {
   walletId: string;
   publicKey: string;
   label: string | null;
+  provider?: CustodyProvider;
   balances?: CustodyWalletTokenBalance[];
 }
 
@@ -197,6 +198,7 @@ export interface PaymentTransferSummary {
   token?: string;
   amount?: string;
   memo?: string;
+  rampsMemo: Record<string, string>;
   provider?: RampProviderId;
   counterpartyId?: string;
   counterpartyDisplayName?: string;
@@ -854,6 +856,35 @@ export interface PaymentRampEstimateEnvelope {
   error?: {
     message?: string;
   };
+}
+
+export const RAMPS_MEMO_LIMITS = {
+  maxEntries: 20,
+  maxKeyLength: 64,
+  maxValueLength: 256,
+} as const satisfies Record<string, number>;
+
+export interface PaymentOnrampQuoteRequest {
+  provider: RampProviderId;
+  counterpartyId: string;
+  destinationWallet: string;
+  cryptoToken: string;
+  fiatCurrency: RampFiatCurrency;
+  fiatAmount: string;
+  redirectUrl?: string;
+  domain?: string;
+  rampsMemo?: Record<string, string>;
+}
+
+export interface PaymentOfframpQuoteRequest {
+  provider: RampProviderId;
+  counterpartyId: string;
+  sourceWallet: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  cryptoAmount: string;
+  redirectUrl?: string;
+  rampsMemo?: Record<string, string>;
 }
 
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "session_widget";

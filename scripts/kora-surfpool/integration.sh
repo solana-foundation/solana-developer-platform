@@ -75,8 +75,8 @@ export KORA_SURFPOOL_SHIM="${KORA_SURFPOOL_SHIM:-true}"
 export SOLANA_RPC_DEFAULT_PROVIDER=default
 export SDP_INTEGRATION_CUSTODY_PROVIDER="${SDP_INTEGRATION_CUSTODY_PROVIDER:-local}"
 configure_local_custody
-export DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}"
-export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="${DATABASE_URL}"
+export TEST_DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp_test}"
+export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379}"
 
 "${ROOT_DIR}/scripts/kora-surfpool/up.sh"
 if [ -f "${RUNTIME_ENV_FILE}" ]; then
@@ -89,9 +89,9 @@ fi
 # Re-derive DB bindings after runtime.env is sourced; up.sh may write a
 # KORA_SURFPOOL_DATABASE_URL override for the active harness.
 export SOLANA_RPC_DEFAULT_PROVIDER=default
-export DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}"
-export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="${DATABASE_URL}"
+export TEST_DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp_test}"
+export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379}"
 
-pnpm --filter @sdp/api db:postgres:bootstrap
+pnpm --filter @sdp/api db:migrate:test
 
 pnpm --filter @sdp/api-integration exec vitest run --no-file-parallelism --hookTimeout 240000 "$@"

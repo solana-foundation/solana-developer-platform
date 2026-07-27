@@ -52,7 +52,7 @@ In your Clerk development app:
 - Create a JWT template named `sdp-api`.
 - Expose your local API with the webhook tunnel: reserve a free stable domain
   at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains), set it
-  as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.dev.vars`, and run
+  as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.env.local`, and run
   `pnpm dev:webhooks`.
 - Create a webhook endpoint that points at
   `https://<your-domain>/webhooks/clerk/link-orgs` — Clerk delivers over the

@@ -1,5 +1,10 @@
 import { PERMISSIONS } from "@sdp/types";
 import { z } from "zod";
+import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
+
+const apiKeyAllowedIpSchema = z.string().refine(isValidIpAllowlistEntry, {
+  message: "Must be a valid IPv4 or IPv6 address or CIDR range",
+});
 
 const apiKeyWalletBindingSchema = z.object({
   walletId: z.string().min(1),
@@ -12,7 +17,7 @@ export const apiKeyCreateSchema = z.object({
   role: z.enum(["api_admin", "api_developer", "api_readonly"]).optional(),
   permissions: z.array(z.enum(PERMISSIONS)).optional(),
   walletScope: z.enum(["all", "selected"]),
-  allowedIps: z.array(z.string()).optional(),
+  allowedIps: z.array(apiKeyAllowedIpSchema).optional(),
   expiresAt: z.string().datetime().optional(),
   signingWalletId: z.string().min(1).optional(),
   signingWalletIds: z.array(z.string().min(1)).optional(),
@@ -28,7 +33,7 @@ export const apiKeyUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).nullable().optional(),
   walletScope: z.enum(["all", "selected"]).optional(),
-  allowedIps: z.array(z.string()).nullable().optional(),
+  allowedIps: z.array(apiKeyAllowedIpSchema).nullable().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
   permissions: z.array(z.enum(PERMISSIONS)).nullable().optional(),
   signingWalletId: z.string().min(1).nullable().optional(),

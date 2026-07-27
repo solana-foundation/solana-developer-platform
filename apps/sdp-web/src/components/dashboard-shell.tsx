@@ -4,23 +4,30 @@ import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
+  ArrowDownLeftIcon,
   ArrowLeftIcon,
   ArrowLeftRightIcon,
+  ArrowUpRightIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
   CircleCheckBigIcon,
   CoinsIcon,
+  FileTextIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
   LibraryIcon,
   LockIcon,
   PanelLeftIcon,
   PanelRightIcon,
+  ReceiptTextIcon,
+  RepeatIcon,
   Settings2Icon,
   ShieldCheckIcon,
   TrendingUpIcon,
+  UsersIcon,
   WalletIcon,
 } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiKeyAuthoringSkeleton,
@@ -68,9 +75,10 @@ import {
   WalletsOverviewSkeleton,
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
+import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
-import { NetworkDebugPanel } from "@/components/network-debug-panel";
+import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -88,11 +96,17 @@ import {
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
 import { isEarnUiEnabled } from "@/lib/earn-feature";
+import {
+  type OrganizationOnboardingStatus,
+  shouldRedirectToOrganizationOnboarding,
+} from "@/lib/onboarding-route-guard";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
   label: string;
   href: string;
+  /** Optional so nav groups that have not been given icons keep rendering unchanged. */
+  icon?: LucideIcon;
   disabled?: boolean;
 };
 
@@ -127,23 +141,32 @@ function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[]
     {
       label: t("Shared.dashboardShell.transactions"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.transactions,
+      icon: ReceiptTextIcon,
     },
     {
       label: t("Shared.dashboardShell.counterparty"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
+      icon: UsersIcon,
     },
-    { label: t("Shared.dashboardShell.pay"), href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay },
+    {
+      label: t("Shared.dashboardShell.pay"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay,
+      icon: ArrowUpRightIcon,
+    },
     {
       label: t("Shared.dashboardShell.deposit"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.deposit,
+      icon: ArrowDownLeftIcon,
     },
     {
       label: t("Shared.dashboardShell.requests"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.requests,
+      icon: FileTextIcon,
     },
     {
       label: t("Shared.dashboardShell.recurring"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
+      icon: RepeatIcon,
     },
   ];
 }
@@ -292,7 +315,7 @@ function SidebarToggle({
       aria-label={t("Shared.dashboardShell.openNavigation")}
       onClick={() => setMobileSidebarOpen(true)}
       className={[
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong lg:hidden",
+        "inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong xl:hidden",
         isMobileSidebarOpen ? "invisible" : "",
       ].join(" ")}
     >
@@ -341,7 +364,7 @@ export function StandardDashboardTopBar({
 }) {
   return (
     <div
-      className="grid min-h-[40px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] lg:grid-cols-[0_minmax(0,1fr)_auto] lg:gap-x-0"
+      className="grid min-h-[40px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] xl:grid-cols-[0_minmax(0,1fr)_auto] xl:gap-x-0"
       data-dashboard-standard-topbar
     >
       <div className="col-start-1 row-start-1 flex min-w-0 items-center">{leadingContent}</div>
@@ -350,7 +373,7 @@ export function StandardDashboardTopBar({
           {title}
         </h1>
       )}
-      <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-end gap-2 sm:col-start-3 lg:ml-3">
+      <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-end gap-2 sm:col-start-3 xl:ml-3">
         {trailingContent}
       </div>
     </div>
@@ -390,7 +413,7 @@ function DashboardTopBar({
         }
         trailingContent={
           <>
-            <div className="lg:hidden">
+            <div className="xl:hidden">
               <ThemeToggle variant="header" />
             </div>
             <LanguagePicker />
@@ -414,7 +437,7 @@ function DashboardTopBar({
       }
       trailingContent={
         <>
-          <div className="lg:hidden">
+          <div className="xl:hidden">
             <ThemeToggle variant="header" />
           </div>
           <LanguagePicker />
@@ -572,9 +595,54 @@ function getAccessControlPageConfig(
   return null;
 }
 
+function getIssuanceRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>,
+  assetProfilesEnabled: boolean
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/issuance") {
+    return {
+      title: t("Shared.dashboardShell.issuance"),
+      headerNav: <IssuanceHeaderTabs />,
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/issuance/create") {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.newAsset"),
+      backHref: "/dashboard/issuance",
+      backLabel: t("Shared.dashboardShell.backToOverview"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (!pathname.startsWith("/dashboard/issuance/")) {
+    return null;
+  }
+  // Gate the chrome on the same flag the page uses to pick the workspace. Flag
+  // on → the create flow's centered title + capped column; off → the legacy
+  // left-aligned, full-width layout, untouched.
+  if (assetProfilesEnabled) {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.assetManagement"),
+      backHref: "/dashboard/issuance",
+      backLabel: t("Shared.dashboardShell.backToOverview"),
+      contentWidthClass: "max-w-7xl",
+    });
+  }
+  return {
+    title: t("Shared.dashboardShell.issuance"),
+    contentWidthClass: "max-w-none",
+    backAction: {
+      href: "/dashboard/issuance",
+      label: t("Shared.dashboardShell.backToOverview"),
+    },
+  };
+}
+
 function getDashboardPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  assetProfilesEnabled: boolean
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -621,29 +689,12 @@ function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  if (pathname === "/dashboard/issuance") {
+  const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
+  if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
+  if (pathname === "/dashboard/payments/counterparty") {
     return {
-      title: t("Shared.dashboardShell.issuance"),
-      headerNav: <IssuanceHeaderTabs />,
+      title: t("Shared.dashboardShell.counterparty"),
       contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/issuance/create") {
-    return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.newAsset"),
-      backHref: "/dashboard/issuance",
-      backLabel: t("Shared.dashboardShell.backToOverview"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  if (pathname.startsWith("/dashboard/issuance/")) {
-    return {
-      title: t("Shared.dashboardShell.issuance"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/issuance",
-        label: t("Shared.dashboardShell.backToOverview"),
-      },
     };
   }
   const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname, t);
@@ -740,6 +791,7 @@ function AllowlistLoading() {
 }
 
 interface PageLoadingProps {
+  assetProfilesEnabled?: boolean;
   targetSearch?: string;
 }
 
@@ -972,7 +1024,10 @@ function SidebarGroup({
                           )}
                         />
                         {child.disabled ? (
-                          <span className="flex h-9 flex-1 cursor-not-allowed items-center rounded-lg px-3 text-sm text-tertiary">
+                          <span className="flex h-9 flex-1 cursor-not-allowed items-center gap-2.5 rounded-lg px-3 text-sm text-tertiary">
+                            {child.icon ? (
+                              <child.icon aria-hidden="true" className="size-4 shrink-0" />
+                            ) : null}
                             {child.label}
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
@@ -981,10 +1036,13 @@ function SidebarGroup({
                             href={child.href}
                             onClick={onNavigate}
                             className={cn(
-                              "flex h-9 flex-1 items-center rounded-lg px-3 text-sm transition-colors",
+                              "flex h-9 flex-1 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors",
                               childActive ? navItemActive : navItemInactive
                             )}
                           >
+                            {child.icon ? (
+                              <child.icon aria-hidden="true" className="size-4 shrink-0" />
+                            ) : null}
                             {child.label}
                           </DashboardNavigationLink>
                         )}
@@ -1028,7 +1086,7 @@ function DashboardSidebarContent({
   const showMobileClose = variant === "mobile";
   return (
     <>
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-3">
+      <div className="min-h-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto overscroll-contain p-3">
         <div className="py-3">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
@@ -1090,17 +1148,31 @@ function DashboardSidebarContent({
             </DashboardNavigationLink>
           );
         })}
-        {variant === "desktop" ? <ThemeToggle collapsed={isCollapsed} /> : null}
+        {variant === "desktop" ? (
+          <>
+            <ThemeToggle collapsed={isCollapsed} />
+            <NetworkDebugToggle collapsed={isCollapsed} />
+          </>
+        ) : null}
       </div>
     </>
   );
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
-export function DashboardShell({ children }: { children: ReactNode }) {
+export function DashboardShell({
+  assetProfilesEnabled,
+  children,
+  onboardingStatus,
+}: {
+  assetProfilesEnabled: boolean;
+  children: ReactNode;
+  onboardingStatus: OrganizationOnboardingStatus | null;
+}) {
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
+  const router = useRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -1126,7 +1198,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     Boolean(pendingNavigationPathname) || isProjectSwitching || isOrganizationSwitching;
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(shellPathname, t);
+  const pageConfig = getDashboardPageConfig(shellPathname, t, assetProfilesEnabled);
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     pendingApprovalCount,
@@ -1172,6 +1244,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       shellPathname !== "/dashboard/custody/switch");
   const isWalletSetupRoute =
     shellPathname === "/dashboard/wallets/setup" || shellPathname === "/dashboard/custody/setup";
+  const isOrganizationOnboardingRoute = shellPathname === "/dashboard/onboarding";
   const shouldUseWorkspaceViewport =
     shellPathname === "/dashboard/issuance" ||
     shellPathname === "/dashboard/issuance/create" ||
@@ -1183,10 +1256,21 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     shellPathname === "/dashboard/wallets" ||
     shellPathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
+    isOrganizationOnboardingRoute ||
     shellPathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
+  const shouldRedirectToOnboarding = shouldRedirectToOrganizationOnboarding(
+    onboardingStatus,
+    pathname
+  );
+
+  useEffect(() => {
+    if (shouldRedirectToOnboarding) {
+      router.replace("/dashboard/onboarding");
+    }
+  }, [router, shouldRedirectToOnboarding]);
 
   useEffect(() => {
     setOpenSubnavs((current) => {
@@ -1277,14 +1361,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     };
   }, [dashboardAccess.capabilities.canReadApprovals, selectedProjectId]);
 
-  if (!isLoaded) {
-    return (
-      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-        <div className="mx-auto max-w-5xl border border-border-subtle bg-surface-raised/70 p-6">
-          <p className="text-sm text-tertiary">{t("Shared.dashboardShell.loadingDashboard")}</p>
-        </div>
-      </main>
-    );
+  if (!isLoaded || shouldRedirectToOnboarding) {
+    return <FullscreenLoadingIndicator />;
   }
 
   if (!isSignedIn) {
@@ -1330,6 +1408,30 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     );
   }
 
+  if (isOrganizationOnboardingRoute) {
+    return (
+      <main className="h-screen overflow-hidden bg-[var(--sdp-shell-bg)] p-2 text-primary md:p-4">
+        <SentryUserContext />
+        <NetworkDebugPanel />
+        <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-border-subtle bg-surface-raised/90 shadow-sm">
+          <header className="relative flex h-16 shrink-0 items-center justify-between border-b border-border-subtle px-4 md:px-6">
+            <div className="min-w-0 max-w-[calc(100%-3rem)] sm:w-72">
+              <WorkspaceSwitcher
+                collapsed={false}
+                onOrganizationSwitchingChange={setOrganizationSwitching}
+              />
+            </div>
+            <span className="absolute left-1/2 hidden -translate-x-1/2 text-sm font-medium text-secondary sm:block">
+              {t("Shared.dashboardShell.workspace")}
+            </span>
+            <ThemeToggle variant="header" />
+          </header>
+          <section className="min-h-0 flex-1">{children}</section>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main
       aria-busy={isNavigationPending}
@@ -1344,12 +1446,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         className={[
           "mx-auto grid min-h-screen w-full max-w-none gap-0",
           shouldLockViewportScroll ? "h-full" : "",
-          "lg:grid-cols-[auto_1fr]",
+          "xl:grid-cols-[auto_1fr]",
         ].join(" ")}
       >
         <aside
           style={{ width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth }}
-          className="relative z-10 hidden bg-[var(--sdp-shell-bg)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between"
+          className="relative z-10 hidden bg-[var(--sdp-shell-bg)] xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col xl:justify-between"
         >
           <DashboardSidebarContent
             bottomNavItems={bottomNavItems}
@@ -1371,14 +1473,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 ? t("Shared.dashboardShell.collapseSidebar")
                 : t("Shared.dashboardShell.expandSidebar")
             }
-            className="group absolute top-1/2 right-0 z-10 flex h-24 w-5 -translate-y-1/2 translate-x-3/4 cursor-pointer items-center justify-center"
+            className="absolute top-1/2 right-0 z-20 flex size-6 -translate-y-1/2 translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border-default bg-surface-raised text-secondary shadow-sm transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:border-border-strong hover:text-primary"
           >
-            <span className="block h-8 w-0.5 rounded-full bg-border-strong group-hover:bg-tertiary" />
+            <ChevronLeftIcon
+              className={cn(
+                "size-3.5 transition-transform motion-reduce:transition-none",
+                !isSidebarOpen && "rotate-180"
+              )}
+            />
           </button>
         </aside>
 
         {isMobileSidebarOpen ? (
-          <div className="fixed inset-0 z-50 flex lg:hidden">
+          <div className="fixed inset-0 z-50 flex xl:hidden">
             <button
               type="button"
               aria-label={t("Shared.dashboardShell.closeNavigationOverlay")}
@@ -1404,7 +1511,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <section
           className={[
-            "relative min-w-0 rounded-2xl border border-border-subtle bg-surface-raised/80 lg:rounded-tl-[16px]",
+            "relative min-w-0 rounded-2xl border border-border-subtle bg-surface-raised/80 xl:rounded-tl-[16px]",
             shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
           ].join(" ")}
         >
@@ -1495,7 +1602,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   aria-live="polite"
                 >
                   <span className="sr-only">{t("Shared.dashboardShell.loadingDashboard")}</span>
-                  <PageLoadingComponent targetSearch={pendingNavigation?.toSearch} />
+                  <PageLoadingComponent
+                    assetProfilesEnabled={assetProfilesEnabled}
+                    targetSearch={pendingNavigation?.toSearch}
+                  />
                 </div>
               ) : (
                 children

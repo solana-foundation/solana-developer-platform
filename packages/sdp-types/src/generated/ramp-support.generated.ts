@@ -13,13 +13,13 @@ import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  "15487789a8d6a0c0bd3957391bbc54416947b417691839bcedd044aed38b81bb" as const;
+  "454c8d8c1c594289497fa7d285a1bc992ba1d8f7f4c23593d395847cee864f5c" as const;
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   moonpay: "1bae9f40aaee0402594dbe2d72babb8c38032e7300131dc3edee1fe543931d41",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  lightspark: "53a29135bd76f818d513f02097bc2ee3e2ad0d3eff1a6149fcd58a69ecbe5974",
+  lightspark: "0a65054262fee18de1322bc9f1c6b5bb0656e26d5ca458bd0344a9e01d437aa6",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   bvnk: "a81bc9617d867fd16e8fc9b91444ae968bddf32724be7a393a9b3c3a739b81f0",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
@@ -906,7 +906,7 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
         USD: { min: "1", max: "10000" },
       },
       countrySupport: { coverage: "unreported" },
-      entityTypes: ["individual"],
+      entityTypes: ["business", "individual"],
     },
     offramp: {
       currencies: {

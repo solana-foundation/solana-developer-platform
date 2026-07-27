@@ -69,7 +69,7 @@ ramps: {
 ```
 
 ### 4. Secrets — env vars on the `Env` type
-The keys you reference in step 3 (and in your config reader) must exist on the `Env` type (`apps/sdp-api/src/types/env.ts`) and be provided as environment variables — both prod and `*_SANDBOX_*` sets. (This repo injects the real values via Doppler in deploy, not `wrangler.toml` / `.dev.vars`; a fork can supply them however its environment does — a missing one just surfaces as a 503.)
+The keys you reference in step 3 (and in your config reader) must exist on the `Env` type (`apps/sdp-api/src/types/env.d.ts`) and be provided as environment variables — both prod and `*_SANDBOX_*` sets. Hosted and self-hosted deployments supply them through their runtime environment or secret manager; local development can use Doppler or `.env.local`. A missing value surfaces as a 503.
 
 ### 5. Dispatch — `routes/payments/handlers/ramps.ts`
 Add a `case "<id>"` to each switch the compiler flags — the quote paths and `advanceCounterpartyRequirements`, plus the `executeOnramp`/`executeOfframp` switches. (Execute isn't currently exercised, but those switches still end in a `never` default, so add a case to compile.) The handler resolves DB state (counterparty, wallet, customer) and passes pre-resolved inputs to your client — the client never touches the DB. Provider-specific DB resolution that's too big to inline goes in `routes/payments/handlers/ramps/<id>.ts` (see `ramps/lightspark.ts`).

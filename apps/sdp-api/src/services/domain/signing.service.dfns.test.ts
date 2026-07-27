@@ -86,6 +86,7 @@ function createRecord(params: {
     projectId: null,
     provider: "dfns",
     config: params.config,
+    encryptionVersion: "sdp-custody-encryption-v1",
     defaultWalletId: params.defaultWalletId,
     status: "active",
     createdAt: "2026-01-01T00:00:00.000Z",

@@ -4,11 +4,7 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#env-impl": {
-      "workerd": "./src/helpers/env.workers.ts",
-      "worker": "./src/helpers/env.workers.ts",
-      "default": "./src/helpers/env.node.ts"
-    }
+    "#env-impl": "./src/helpers/env.node.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -25,9 +21,8 @@
   },
   "devDependencies": {
     "@sdp/api": "workspace:*",
-    "@cloudflare/vitest-pool-workers": "^0.16.14",
-    "@cloudflare/workers-types": "^4.20260609.1",
     "@solana/surfpool": "^1.4.0",
+    "@types/node": "^25.9.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
   }

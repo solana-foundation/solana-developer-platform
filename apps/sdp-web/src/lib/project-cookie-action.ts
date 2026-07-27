@@ -2,6 +2,7 @@
 
 import type { ListProjectsResponse } from "@sdp/types";
 import { cookies } from "next/headers";
+import { retryProjectBootstrap } from "./project-bootstrap-retry";
 import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "./project-cookie";
 import { createOrgSdpApiClient } from "./sdp-api";
 
@@ -27,13 +28,19 @@ export async function selectProjectAction(projectId: string | null): Promise<voi
  * previous org's server-component output.
  */
 export async function reconcileProjectCookieAction(): Promise<boolean> {
-  let projects: ListProjectsResponse["projects"] = [];
+  let projects: ListProjectsResponse["projects"] | null;
   try {
-    const client = await createOrgSdpApiClient();
-    projects = (await client.fetch<ListProjectsResponse>("/v1/projects")).projects;
+    projects = await retryProjectBootstrap({
+      load: async () => {
+        const client = await createOrgSdpApiClient();
+        return (await client.fetch<ListProjectsResponse>("/v1/projects")).projects;
+      },
+      isReady: (value) => value.length > 0,
+    });
   } catch {
     return false;
   }
+  if (!projects) return false;
 
   const store = await cookies();
   const current = store.get(PROJECT_COOKIE_NAME)?.value ?? null;

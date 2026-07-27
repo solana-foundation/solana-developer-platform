@@ -101,50 +101,12 @@ function applyOverrides<T extends string>(
   return next;
 }
 
-const INDIVIDUAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
-  custody: createBooleanRecord(CUSTODY_PROVIDERS, ["privy", "coinbase_cdp", "turnkey"]),
-  rpc: createBooleanRecord(ORGANIZATION_RPC_PROVIDERS, ["default", "helius", "triton"]),
+export const GENERAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
+  custody: createBooleanRecord(CUSTODY_PROVIDERS, ["privy", "coinbase_cdp", "para", "turnkey"]),
+  rpc: createBooleanRecord(ORGANIZATION_RPC_PROVIDERS, ORGANIZATION_RPC_PROVIDERS),
   compliance: createBooleanRecord(COMPLIANCE_PROVIDERS, []),
-  ramps: createBooleanRecord(RAMP_PROVIDERS, ["moonpay", "moneygram", "stripe"]),
+  ramps: createBooleanRecord(RAMP_PROVIDERS, RAMP_PROVIDERS),
   earn: createBooleanRecord(EARN_PROVIDERS, []),
-};
-
-const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
-  custody: createBooleanRecord(CUSTODY_PROVIDERS, [
-    "fireblocks",
-    "privy",
-    "coinbase_cdp",
-    "para",
-    "turnkey",
-    "dfns",
-    "ibm_haven",
-    "anchorage",
-    "utila",
-  ]),
-  rpc: createBooleanRecord(ORGANIZATION_RPC_PROVIDERS, [
-    "default",
-    "alchemy",
-    "helius",
-    "quicknode",
-    "triton",
-    "validationcloud",
-  ]),
-  compliance: createBooleanRecord(COMPLIANCE_PROVIDERS, [
-    "range",
-    "elliptic",
-    "trm",
-    "chainalysis",
-  ]),
-  ramps: createBooleanRecord(RAMP_PROVIDERS, [
-    "moonpay",
-    "lightspark",
-    "bvnk",
-    "moneygram",
-    "coinbase",
-    "mural",
-    "stripe",
-  ]),
-  earn: createBooleanRecord(EARN_PROVIDERS, ["veda", "upshift", "perena", "ground"]),
 };
 
 export function resolveOrganizationProviderEntitlements(input: {
@@ -152,8 +114,10 @@ export function resolveOrganizationProviderEntitlements(input: {
   providerOverrides?: OrganizationProviderOverrides | null;
 }): { tier: OrganizationTier; providers: OrganizationProviderEntitlements } {
   const tier = normalizeOrganizationTier(input.tier);
-  const defaults =
-    tier === "enterprise" ? ENTERPRISE_PROVIDER_DEFAULTS : INDIVIDUAL_PROVIDER_DEFAULTS;
+  // `tier` is retained in the response for backwards compatibility, but provider
+  // access is organization-scoped: general providers are available to every org,
+  // while manual providers require an explicit provider override.
+  const defaults = GENERAL_PROVIDER_DEFAULTS;
 
   return {
     tier,
