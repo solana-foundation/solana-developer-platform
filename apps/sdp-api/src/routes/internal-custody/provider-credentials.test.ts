@@ -196,6 +196,33 @@ async function getDomainCounts(): Promise<{
   return counts ?? { credentials: 0, connections: 0, wallets: 0 };
 }
 
+type StoredConnection = {
+  id: string;
+  project_id: string;
+  provider: string;
+  provider_credential_id: string;
+  status: string;
+  last_check_status: string | null;
+  last_check_at: string | null;
+  last_check_failure_code: string | null;
+};
+
+async function getConnectionForCredential(credentialId: string): Promise<StoredConnection> {
+  const connection = await getDb(env)
+    .prepare(
+      `SELECT id, project_id, provider, provider_credential_id, status,
+              last_check_status, last_check_at, last_check_failure_code
+       FROM custody_connections
+       WHERE provider_credential_id = ?`
+    )
+    .bind(credentialId)
+    .first<StoredConnection>();
+  if (!connection) {
+    throw new Error(`Connection not found for credential ${credentialId}`);
+  }
+  return connection;
+}
+
 type InitialSetupIds = {
   credentialId: string;
   connectionId: string;
@@ -276,7 +303,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const body = (await response.json()) as {
       data: {
         providerCredential: { id: string };
-        custodyConnection: { id: string };
       };
       meta: { requestId: string; timestamp: string };
     };
@@ -292,18 +318,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
           createdAt: expect.any(String),
           displayMetadata: { appIdSuffix: "1234" },
         },
-        custodyConnection: {
-          id: expect.stringMatching(/^cconn_/),
-          projectId: PROJECT_ID,
-          provider: "privy",
-          providerCredentialId: body.data.providerCredential.id,
-          status: "pending",
-          defaultCustodyWalletId: null,
-          lastCheckStatus: null,
-          lastCheckAt: null,
-          lastCheckFailureCode: null,
-          createdAt: expect.any(String),
-        },
       },
       meta: {
         requestId: "req_provider_credential_submit",
@@ -317,6 +331,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       credentials: 1,
       connections: 1,
       wallets: 0,
+    });
+    const connection = await getConnectionForCredential(body.data.providerCredential.id);
+    expect(connection).toMatchObject({
+      project_id: PROJECT_ID,
+      provider: "privy",
+      provider_credential_id: body.data.providerCredential.id,
+      status: "pending",
     });
     const defaults = await getDb(env)
       .prepare("SELECT COUNT(*) AS count FROM custody_scope_defaults")
@@ -467,7 +488,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const firstBody = (await first.json()) as {
       data: {
         providerCredential: { id: string };
-        custodyConnection: { id: string };
       };
     };
 
@@ -641,11 +661,10 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const firstBody = (await first.json()) as {
       data: {
         providerCredential: { id: string };
-        custodyConnection: { id: string };
       };
     };
     const firstCredentialId = firstBody.data.providerCredential.id;
-    const connectionId = firstBody.data.custodyConnection.id;
+    const connectionId = (await getConnectionForCredential(firstCredentialId)).id;
     await markInitialValidationFailed(getDb(env), {
       credentialId: firstCredentialId,
       connectionId,
@@ -671,27 +690,21 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
           scope: string;
           projectId: string | null;
         };
-        custodyConnection: {
-          id: string;
-          providerCredentialId: string;
-          status: string;
-          lastCheckStatus: string | null;
-          lastCheckAt: string | null;
-          lastCheckFailureCode: string | null;
-        };
       };
     };
     expect(replacementBody.data.providerCredential).toMatchObject({
       scope: "organization",
       projectId: null,
     });
-    expect(replacementBody.data.custodyConnection).toMatchObject({
+    expect(
+      await getConnectionForCredential(replacementBody.data.providerCredential.id)
+    ).toMatchObject({
       id: connectionId,
-      providerCredentialId: replacementBody.data.providerCredential.id,
+      provider_credential_id: replacementBody.data.providerCredential.id,
       status: "pending",
-      lastCheckStatus: null,
-      lastCheckAt: null,
-      lastCheckFailureCode: null,
+      last_check_status: null,
+      last_check_at: null,
+      last_check_failure_code: null,
     });
 
     const credentials = await getDb(env)
@@ -731,17 +744,16 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "replacement-v1",
     });
     expect(oldReplay.status).toBe(201);
-    expect(await oldReplay.json()).toMatchObject({
+    expect(await oldReplay.json()).toEqual({
       data: {
-        providerCredential: {
+        providerCredential: expect.objectContaining({
           id: firstCredentialId,
           status: "failed_validation",
-        },
-        custodyConnection: {
-          id: connectionId,
-          providerCredentialId: replacementBody.data.providerCredential.id,
-          status: "pending",
-        },
+        }),
+      },
+      meta: {
+        requestId: "req_provider_credential_submit",
+        timestamp: expect.any(String),
       },
     });
   });
@@ -909,13 +921,15 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const initialBody = (await initial.json()) as {
       data: {
         providerCredential: { id: string };
-        custodyConnection: { id: string };
       };
     };
     const db = getDb(env);
+    const initialConnection = await getConnectionForCredential(
+      initialBody.data.providerCredential.id
+    );
     await arrange(db, {
       credentialId: initialBody.data.providerCredential.id,
-      connectionId: initialBody.data.custodyConnection.id,
+      connectionId: initialConnection.id,
     });
 
     const readSafeSetupState = async () => {
@@ -982,9 +996,9 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const firstBody = (await first.json()) as {
       data: {
         providerCredential: { id: string };
-        custodyConnection: { id: string };
       };
     };
+    const firstConnection = await getConnectionForCredential(firstBody.data.providerCredential.id);
 
     await getDb(env)
       .prepare(
@@ -993,7 +1007,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
              deactivated_at = sdp_iso_now()
          WHERE id = ?`
       )
-      .bind(firstBody.data.custodyConnection.id)
+      .bind(firstConnection.id)
       .run();
 
     const reinstall = await submit(app, token, {
@@ -1003,11 +1017,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const reinstallBody = (await reinstall.json()) as {
       data: {
         providerCredential: { id: string };
-        custodyConnection: { id: string };
       };
     };
+    const reinstallConnection = await getConnectionForCredential(
+      reinstallBody.data.providerCredential.id
+    );
     expect(reinstallBody.data.providerCredential.id).not.toBe(firstBody.data.providerCredential.id);
-    expect(reinstallBody.data.custodyConnection.id).not.toBe(firstBody.data.custodyConnection.id);
+    expect(reinstallConnection.id).not.toBe(firstConnection.id);
 
     const roots = await getDb(env)
       .prepare(
@@ -1037,13 +1053,15 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "deactivated-lineage-v1",
     });
     expect(oldReplay.status).toBe(201);
-    expect(await oldReplay.json()).toMatchObject({
+    expect(await oldReplay.json()).toEqual({
       data: {
-        providerCredential: { id: firstBody.data.providerCredential.id },
-        custodyConnection: {
-          id: firstBody.data.custodyConnection.id,
-          status: "deactivated",
-        },
+        providerCredential: expect.objectContaining({
+          id: firstBody.data.providerCredential.id,
+        }),
+      },
+      meta: {
+        requestId: "req_provider_credential_submit",
+        timestamp: expect.any(String),
       },
     });
     expect(await getDomainCounts()).toEqual({
@@ -1345,7 +1363,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const [leftBody, rightBody] = (await Promise.all([left.json(), right.json()])) as Array<{
       data: {
         providerCredential: { id: string };
-        custodyConnection: { id: string };
       };
     }>;
     expect(rightBody?.data).toEqual(leftBody?.data);
@@ -1433,14 +1450,12 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       | {
           data: {
             providerCredential: { id: string; projectId: string };
-            custodyConnection: { projectId: string };
           };
         }
       | undefined;
     const winnerId = successBody?.data.providerCredential.id;
     expect(winnerId).toMatch(/^pcred_/);
     const winnerProjectId = successBody?.data.providerCredential.projectId;
-    expect(successBody?.data.custodyConnection.projectId).toBe(winnerProjectId);
     expect([PROJECT_ID, otherProjectId]).toContain(winnerProjectId);
 
     const writtenIds = write.mock.calls.map(([params]) => params.providerCredentialId);
@@ -1450,6 +1465,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     if (!winnerId || !winnerProjectId || !loserId) {
       throw new Error("Concurrent submission did not produce distinct winner and loser IDs");
     }
+    expect((await getConnectionForCredential(winnerId)).project_id).toBe(winnerProjectId);
 
     expect(destroyVersion).toHaveBeenCalledOnce();
     expect(destroyVersion).toHaveBeenCalledWith({

@@ -16,8 +16,6 @@ import {
 } from "@/services/credential-secret-store";
 import { getProviderAvailability } from "@/services/provider-availability.service";
 import {
-  type CredentialReplay,
-  type CustodyConnectionRow,
   hasPinnedProviderAccountIdentity,
   type ProjectConnectionState,
   type ProviderCredentialRow,
@@ -50,22 +48,8 @@ interface SafeProviderCredential {
   displayMetadata: { appIdSuffix?: string };
 }
 
-interface SafeCustodyConnection {
-  id: string;
-  projectId: string;
-  provider: "privy";
-  providerCredentialId: string;
-  status: CustodyConnectionRow["status"];
-  defaultCustodyWalletId: string | null;
-  lastCheckStatus: string | null;
-  lastCheckAt: string | null;
-  lastCheckFailureCode: string | null;
-  createdAt: string;
-}
-
 interface ProviderCredentialSubmissionResult {
   providerCredential: SafeProviderCredential;
-  custodyConnection: SafeCustodyConnection;
 }
 
 type SetupPlan =
@@ -218,13 +202,9 @@ async function computeSubmissionFingerprint(context: SubmissionContext): Promise
   }
 }
 
-async function loadReplay(context: SubmissionContext): Promise<CredentialReplay | null> {
+async function loadReplay(context: SubmissionContext): Promise<ProviderCredentialRow | null> {
   try {
-    return await context.store.findReplayByKey(
-      context.organizationId,
-      context.projectId,
-      context.idempotencyKey
-    );
+    return await context.store.findReplayByKey(context.organizationId, context.idempotencyKey);
   } catch {
     await auditFailure(context.c, context.audit, context.auditBase, {
       reason: "database_failure",
@@ -430,7 +410,7 @@ async function auditSubmissionSuccess(
       scope: submission.input.fields.scope,
       storageBackend: submission.stored.storageBackend,
       credentialStatus: result.providerCredential.status,
-      connectionId: result.custodyConnection.id,
+      connectionId: submission.connectionId,
     },
   });
 }
@@ -444,7 +424,6 @@ async function runSubmissionTransaction(submission: StoredSubmission): Promise<T
 
     const concurrentReplay = await txStore.findReplayByKey(
       submission.organizationId,
-      submission.projectId,
       submission.idempotencyKey
     );
     if (concurrentReplay) {
@@ -487,16 +466,11 @@ async function runSubmissionTransaction(submission: StoredSubmission): Promise<T
       idempotencyFingerprint: submission.fingerprint,
       createdBy: submission.userId,
     });
-    const custodyConnection = await persistConnection(
-      txStore,
-      submission,
-      lockedPlan,
-      providerCredential
-    );
+    await persistConnection(txStore, submission, lockedPlan, providerCredential);
 
     return {
       kind: "committed",
-      result: mapSubmissionResult(providerCredential, custodyConnection),
+      result: mapSubmissionResult(providerCredential),
     };
   });
 }
@@ -506,9 +480,9 @@ async function persistConnection(
   submission: StoredSubmission,
   lockedPlan: SetupPlan,
   providerCredential: ProviderCredentialRow
-): Promise<CustodyConnectionRow> {
+): Promise<void> {
   if (lockedPlan.kind !== "replacement") {
-    return store.insertConnection({
+    await store.insertConnection({
       id: submission.connectionId,
       organizationId: submission.organizationId,
       projectId: submission.projectId,
@@ -516,6 +490,7 @@ async function persistConnection(
       providerCredentialScopeKey: providerCredential.scope_key,
       createdBy: submission.userId,
     });
+    return;
   }
 
   const updated = await store.resetFailedConnection({
@@ -527,7 +502,6 @@ async function persistConnection(
   if (!updated) {
     throw new SetupConflict(lockedPlan.connection.id);
   }
-  return updated;
 }
 
 async function recoverTransactionFailure(
@@ -536,7 +510,7 @@ async function recoverTransactionFailure(
 ): Promise<ProviderCredentialSubmissionResult> {
   const reconciliation = await reconcileTransactionOutcome(submission);
   if (reconciliation.kind === "found") {
-    if (reconciliation.replay.providerCredential.id === submission.providerCredentialId) {
+    if (reconciliation.replay.id === submission.providerCredentialId) {
       const committed = await resolveReplay(reconciliation.replay, submission.fingerprint);
       await auditSubmissionSuccess(submission, committed);
       return committed;
@@ -608,11 +582,12 @@ async function recoverTransactionFailure(
 
 async function reconcileTransactionOutcome(
   submission: StoredSubmission
-): Promise<{ kind: "found"; replay: CredentialReplay } | { kind: "absent" } | { kind: "unknown" }> {
+): Promise<
+  { kind: "found"; replay: ProviderCredentialRow } | { kind: "absent" } | { kind: "unknown" }
+> {
   try {
     const replay = await submission.store.findReplayByKey(
       submission.organizationId,
-      submission.projectId,
       submission.idempotencyKey
     );
     return replay ? { kind: "found", replay } : { kind: "absent" };
@@ -659,22 +634,16 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
 }
 
 async function resolveReplay(
-  replay: CredentialReplay,
+  replay: ProviderCredentialRow,
   fingerprint: string
 ): Promise<ProviderCredentialSubmissionResult> {
-  await resolveIdempotencyReplay(async () => replay.providerCredential, fingerprint);
-  if (replay.custodyConnections.length !== 1) {
-    throw internalError();
-  }
-  return mapSubmissionResult(
-    replay.providerCredential,
-    replay.custodyConnections[0] as CustodyConnectionRow
-  );
+  await resolveIdempotencyReplay(async () => replay, fingerprint);
+  return mapSubmissionResult(replay);
 }
 
 async function resolveReplayWithAudit(
   context: Pick<SubmissionContext, "c" | "audit" | "auditBase">,
-  replay: CredentialReplay,
+  replay: ProviderCredentialRow,
   fingerprint: string,
   failure?: {
     failureResourceId?: string;
@@ -706,17 +675,12 @@ async function resolveLateReplay(params: {
     scope: "organization" | "project";
   };
   organizationId: string;
-  projectId: string;
   idempotencyKey: string;
   fingerprint: string;
 }): Promise<ProviderCredentialSubmissionResult | null> {
-  let replay: CredentialReplay | null;
+  let replay: ProviderCredentialRow | null;
   try {
-    replay = await params.store.findReplayByKey(
-      params.organizationId,
-      params.projectId,
-      params.idempotencyKey
-    );
+    replay = await params.store.findReplayByKey(params.organizationId, params.idempotencyKey);
   } catch {
     await auditFailure(params.c, params.audit, params.auditBase, {
       reason: "database_failure",
@@ -793,12 +757,10 @@ function assertSameSetupPlan(preflight: SetupPlan, locked: SetupPlan): void {
 }
 
 function mapSubmissionResult(
-  providerCredential: ProviderCredentialRow,
-  custodyConnection: CustodyConnectionRow
+  providerCredential: ProviderCredentialRow
 ): ProviderCredentialSubmissionResult {
   return {
     providerCredential: mapProviderCredential(providerCredential),
-    custodyConnection: mapCustodyConnection(custodyConnection),
   };
 }
 
@@ -816,21 +778,6 @@ function mapProviderCredential(row: ProviderCredentialRow): SafeProviderCredenti
     status: row.status,
     createdAt: row.created_at,
     displayMetadata: appIdSuffix ? { appIdSuffix } : {},
-  };
-}
-
-function mapCustodyConnection(row: CustodyConnectionRow): SafeCustodyConnection {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    provider: row.provider,
-    providerCredentialId: row.provider_credential_id,
-    status: row.status,
-    defaultCustodyWalletId: row.default_custody_wallet_id,
-    lastCheckStatus: row.last_check_status,
-    lastCheckAt: row.last_check_at,
-    lastCheckFailureCode: row.last_check_failure_code,
-    createdAt: row.created_at,
   };
 }
 
