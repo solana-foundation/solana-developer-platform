@@ -1030,7 +1030,14 @@
       "updated": "Mis à jour",
       "viewOnExplorer": "Voir sur Solana Explorer",
       "unavailable": "Indisponible",
-      "loadingOptions": "Chargement des options…"
+      "loadingOptions": "Chargement des options…",
+      "includeObserved": "Inclure les dépôts on-chain",
+      "filterType": "Type",
+      "filterDirection": "Direction",
+      "filterWallet": "Portefeuille",
+      "filterCounterparty": "Contrepartie",
+      "filterProvider": "Fournisseur",
+      "filterAsset": "Actif"
     }
   }
 }
