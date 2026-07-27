@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
 import { togglePublicField } from "../../create/draft-mapping";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
@@ -87,12 +88,21 @@ export function AssetManagementWorkspace({
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
   const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
+  // Admins get the full compliance tab (policy editor + controls). Non-admins
+  // see it only for tokens that have a control list, and then only the allowlist
+  // controls — the policy editor stays admin-only (also enforced server-side).
+  const showControlList = hasAccessControlList(getTokenAccessControlMode(token));
+  const canViewComplianceTab = canManageTokenAdmin || showControlList;
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const requestedTabParam = searchParams.get("tab");
-  const activeTab = resolveTab(requestedTabParam);
+  const requestedTab = resolveTab(requestedTabParam);
+  // A direct ?tab=compliance deep link falls back to the overview when the tab
+  // isn't available to this user.
+  const activeTab: AssetManagementTab =
+    requestedTab === "compliance" && !canViewComplianceTab ? "overview" : requestedTab;
   const [pendingFundManagementModalAction, setPendingFundManagementModalAction] = useState<
     "deploy" | "mint" | "burn" | null
   >(null);
@@ -110,7 +120,10 @@ export function AssetManagementWorkspace({
     { id: "overview", label: t("DashboardIssuance.tabs.overview") },
     { id: "details", label: t("DashboardIssuance.tabs.details") },
     { id: "public-info", label: t("DashboardIssuance.tabs.publicInformation") },
-    { id: "compliance", label: t("DashboardIssuance.tabs.compliance") },
+    // Full tab for admins; allowlist-only for non-admins on control-list tokens.
+    ...(canViewComplianceTab
+      ? [{ id: "compliance" as const, label: t("DashboardIssuance.tabs.compliance") }]
+      : []),
     { id: "operations", label: t("DashboardIssuance.tabs.operations") },
     { id: "permissions", label: t("DashboardIssuance.tabs.permissions") },
     { id: "activity", label: t("DashboardIssuance.tabs.activity") },

@@ -145,7 +145,7 @@ describe("PoliciesOverviewSurface", () => {
     const markup = renderSurface({ inventory: inventory([wallet("active", "active")]) });
     expect(markup).toMatch(/data-desktop-inventory="true"[^>]*hidden lg:block/);
     expect(markup).toMatch(/data-mobile-inventory="true"[^>]*lg:hidden/);
-    expect(markup).toContain("lg:grid-cols-[minmax(0,1fr)_300px]");
+    expect(markup).toContain("lg:grid-cols-[minmax(0,1fr)_260px]");
   });
 });
 

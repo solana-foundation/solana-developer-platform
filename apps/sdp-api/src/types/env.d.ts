@@ -187,7 +187,7 @@ export interface Env {
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
-  // Asset Profiles production opt-in; development is always enabled.
+  // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
   ASSET_PROFILES_ENABLED?: string;
 
   // Compliance providers

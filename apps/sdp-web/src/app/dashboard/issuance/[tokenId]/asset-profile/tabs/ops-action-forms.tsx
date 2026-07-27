@@ -20,6 +20,7 @@ export function OpsActionForms({
   activeAction,
   submitAlignment = "start",
   formVariant = "flat",
+  hideAllowlistTitle = false,
   onMint,
   onBurn,
 }: {
@@ -31,6 +32,7 @@ export function OpsActionForms({
   // fund-management modal needs it); "bare" drops it for the compliance tab,
   // which wraps the whole controls column in one card.
   formVariant?: "flat" | "bare";
+  hideAllowlistTitle?: boolean;
   // Overridable for modal contexts that need to close before submitting.
   onMint?: () => void;
   onBurn?: () => void;
@@ -85,6 +87,7 @@ export function OpsActionForms({
       forceBurnValidationReason={ops.forceBurnValidationReason}
       submitAlignment={submitAlignment}
       variant={formVariant}
+      hideAllowlistTitle={hideAllowlistTitle}
       onSignerWalletIdChange={signerProps.onSignerWalletIdChange}
       onUpdateMetadata={() => {}}
       onMint={onMint ?? ops.handleMint}

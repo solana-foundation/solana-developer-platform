@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface TokenActionCardProps {
-  title: string;
+  title?: string;
   description?: string;
   children: ReactNode;
   // "card" (default): legacy DS-card chrome. "flat": 1px-border panel matching the
@@ -29,23 +29,27 @@ export function TokenActionCard({
             : undefined
         }
       >
-        <div>
-          <p className="text-base font-medium text-primary">{title}</p>
-          {description ? <p className="mt-1 text-sm text-tertiary">{description}</p> : null}
-        </div>
-        <div className="mt-4 space-y-4">{children}</div>
+        {title ? (
+          <div>
+            <p className="text-base font-medium text-primary">{title}</p>
+            {description ? <p className="mt-1 text-sm text-tertiary">{description}</p> : null}
+          </div>
+        ) : null}
+        <div className={title ? "mt-4 space-y-4" : "space-y-4"}>{children}</div>
       </div>
     );
   }
 
   return (
     <Card className="gap-4">
-      <CardHeader className="gap-1.5">
-        <CardTitle className="text-[17px] leading-6">{title}</CardTitle>
-        {description ? (
-          <CardDescription className="text-[13px] leading-5">{description}</CardDescription>
-        ) : null}
-      </CardHeader>
+      {title ? (
+        <CardHeader className="gap-1.5">
+          <CardTitle className="text-[17px] leading-6">{title}</CardTitle>
+          {description ? (
+            <CardDescription className="text-[13px] leading-5">{description}</CardDescription>
+          ) : null}
+        </CardHeader>
+      ) : null}
       <CardContent className="space-y-4">{children}</CardContent>
     </Card>
   );

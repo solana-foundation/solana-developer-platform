@@ -251,7 +251,7 @@ export const deployToken = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken({
+  let token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
     projectId,
@@ -311,13 +311,28 @@ export const deployToken = async (c: AppContext) => {
     return success(c, { token });
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
-    auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
+  // Claim the token for deployment before reading the snapshot we mint from.
+  // This flips pending → deploying under a guard, so a concurrent identity PATCH
+  // (symbol/decimals/requiresAllowlist) can't land while the on-chain mint is
+  // created — which would otherwise leave the DB identity permanently out of
+  // sync with the immutable mint. `beginTokenDeploy` re-reads post-claim, so we
+  // mint from the now-frozen values.
+  const claimedToken = await tokenService.beginTokenDeploy(tokenId);
+  if (!claimedToken) {
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: "Token is already being deployed or was deployed",
+    });
+    throw new AppError(
+      "CONFLICT",
+      "Token is already being deployed or was deployed; re-fetch and retry"
+    );
+  }
+  token = claimedToken;
 
-  // Deploy using Mosaic templates - handles ABL setup automatically
+  // Deploy using Mosaic templates - handles ABL setup automatically. Pure reads
+  // of the frozen snapshot, so computing them here (before the try) can't strand
+  // the claim, and `aclMode` stays available to the catch's recovery path.
   const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
 
@@ -326,6 +341,16 @@ export const deployToken = async (c: AppContext) => {
   let custodyAddress: Address | undefined;
 
   try {
+    // Resolve the signing wallet inside the try: it can throw, and now that we
+    // hold the deploy claim (status=deploying) any failure before the mint lands
+    // must release it (catch below) — otherwise the draft is stranded in
+    // `deploying`, uneditable and un-redeployable.
+    const signingWalletId = resolveApiKeySigningWalletId(
+      auth,
+      parsed.data.signingWalletId ?? token.signingWalletId,
+      ["tokens:write"]
+    );
+
     // Get custody signer (resolves via 3-tier: project → org → env fallback)
     const signer = await createOrgSigner(
       c.env,
@@ -445,6 +470,12 @@ export const deployToken = async (c: AppContext) => {
         { mintAddress: error.result.mint }
       );
     }
+
+    // The mint did not land on-chain (the only "mint exists" failure is the
+    // MintMetadataUpdateError handled above). Release the deploy claim so the
+    // draft returns to pending and stays editable / redeployable. Guarded, so
+    // it's a no-op if the token already advanced to active.
+    await tokenService.releaseTokenDeploy(tokenId);
 
     await tokenService.updateTransaction(tx.id, {
       status: "failed",

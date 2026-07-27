@@ -1,6 +1,10 @@
 "use client";
 
-import type { PaymentRampInstruction, PaymentTransferSummary } from "@sdp/types";
+import type {
+  PaymentOfframpQuoteRequest,
+  PaymentRampInstruction,
+  PaymentTransferSummary,
+} from "@sdp/types";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -77,15 +81,17 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     advanceRequirementsBeforeQuote: true,
     selectionSchema: withdrawSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/offramp/quote",
-    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken }) => ({
-      provider,
-      counterpartyId: fields.counterpartyId,
-      sourceWallet: fields.walletId,
-      cryptoToken,
-      fiatCurrency: selectedRampPair.fiatCurrency,
-      cryptoAmount: fields.amount.trim(),
-      redirectUrl: `${window.location.origin}/dashboard/payments`,
-    }),
+    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>
+      ({
+        provider,
+        counterpartyId: fields.counterpartyId,
+        sourceWallet: fields.walletId,
+        cryptoToken,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+        cryptoAmount: fields.amount.trim(),
+        redirectUrl: `${window.location.origin}/dashboard/payments`,
+        rampsMemo,
+      }) satisfies PaymentOfframpQuoteRequest,
     onQuoteCreated: () => {
       setOnchainSendLoading(false);
       setOnchainSendResult(null);

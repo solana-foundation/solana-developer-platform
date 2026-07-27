@@ -81,6 +81,7 @@ interface TokenActionAdminFormsProps {
   submitAlignment?: "start" | "end";
   // Forwarded to TokenActionCard; also gates the per-button icons (see there).
   variant?: "card" | "flat" | "bare";
+  hideAllowlistTitle?: boolean;
   tokenStatus: "pending" | "active" | "paused" | "revoked";
   onSignerWalletIdChange: (value: string) => void;
   onSeize: () => void;
@@ -123,6 +124,7 @@ export function TokenActionAdminForms({
   forceBurnValidationReason,
   submitAlignment = "start",
   variant = "card",
+  hideAllowlistTitle = false,
   tokenStatus,
   onSignerWalletIdChange,
   onSeize,
@@ -562,9 +564,11 @@ export function TokenActionAdminForms({
       {activeAction === "allowlist" && controlListLabel ? (
         <TokenActionCard
           variant={variant}
-          title={controlListLabel}
+          title={hideAllowlistTitle ? undefined : controlListLabel}
           description={
-            controlListDescription ?? t("DashboardIssuance.forms.controlListDescription")
+            hideAllowlistTitle
+              ? undefined
+              : (controlListDescription ?? t("DashboardIssuance.forms.controlListDescription"))
           }
         >
           <form

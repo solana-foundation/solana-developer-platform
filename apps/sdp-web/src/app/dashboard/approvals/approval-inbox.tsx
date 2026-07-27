@@ -7,10 +7,12 @@ import type {
 } from "@sdp/types";
 import { ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectItem } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -20,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import { ApprovalStatusBadge } from "./approval-request-shared";
 import {
   APPROVAL_HISTORY_STATUSES,
@@ -39,9 +42,6 @@ import {
   mergeApprovalRequests,
   shortApprovalIdentifier,
 } from "./approval-requests.data";
-
-const filterControlClassName =
-  "h-10 w-full rounded-md border border-border-default bg-surface-raised px-3 text-sm text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-primary focus:ring-2 focus:ring-primary/10";
 
 function approvalRequestHref(approvalRequestId: string): string {
   return `/dashboard/approvals/${encodeURIComponent(approvalRequestId)}`;
@@ -114,6 +114,11 @@ export function ApprovalInbox({
     value: ApprovalInboxFilters[TKey]
   ) {
     setFilters((current) => ({ ...current, [key]: value }));
+    setPage(1);
+  }
+
+  function patchFilters(patch: Partial<ApprovalInboxFilters>) {
+    setFilters((current) => ({ ...current, ...patch }));
     setPage(1);
   }
 
@@ -252,6 +257,7 @@ export function ApprovalInbox({
               walletOptions={walletOptions}
               apiKeyOptions={apiKeyOptions}
               updateFilter={updateFilter}
+              patchFilters={patchFilters}
               clear={() => {
                 setFilters(EMPTY_APPROVAL_FILTERS);
                 setPage(1);
@@ -347,6 +353,7 @@ function ApprovalFilters({
   walletOptions,
   apiKeyOptions,
   updateFilter,
+  patchFilters,
   clear,
 }: {
   tab: ApprovalInboxTab;
@@ -357,125 +364,219 @@ function ApprovalFilters({
     key: TKey,
     value: ApprovalInboxFilters[TKey]
   ) => void;
+  patchFilters: (patch: Partial<ApprovalInboxFilters>) => void;
   clear: () => void;
 }) {
   const t = useTranslations();
   return (
-    <div className="grid gap-3 border-b border-border-default py-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[repeat(4,minmax(140px,1fr))_minmax(135px,0.75fr)_minmax(135px,0.75fr)_auto]">
-      <FilterField label={t("DashboardApprovals.walletFilter")}>
-        <select
-          value={filters.walletId}
-          onChange={(event) => updateFilter("walletId", event.target.value)}
-          className={filterControlClassName}
-        >
-          <option value="">{t("DashboardApprovals.allWallets")}</option>
-          {walletOptions.map(([walletId, label]) => (
-            <option key={walletId} value={walletId}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </FilterField>
-
-      {tab === "history" ? (
-        <FilterField label={t("DashboardApprovals.statusFilter")}>
-          <select
-            value={filters.status}
-            onChange={(event) =>
-              updateFilter("status", event.target.value as "" | ApprovalRequestStatus)
+    <div className="space-y-4 border-b border-border-default py-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <FilterField label={t("DashboardApprovals.walletFilter")}>
+          <Select
+            ariaLabel={t("DashboardApprovals.walletFilter")}
+            value={filters.walletId || "all"}
+            onValueChange={(value) =>
+              updateFilter("walletId", value === "all" ? "" : (value ?? ""))
             }
-            className={filterControlClassName}
           >
-            <option value="">{t("DashboardApprovals.allStatuses")}</option>
-            {APPROVAL_HISTORY_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {formatApprovalLabel(status)}
-              </option>
+            <SelectItem value="all">{t("DashboardApprovals.allWallets")}</SelectItem>
+            {walletOptions.map(([walletId, label]) => (
+              <SelectItem key={walletId} value={walletId}>
+                {label}
+              </SelectItem>
             ))}
-          </select>
+          </Select>
         </FilterField>
-      ) : (
+
+        {tab === "history" ? (
+          <FilterField label={t("DashboardApprovals.statusFilter")}>
+            <Select
+              ariaLabel={t("DashboardApprovals.statusFilter")}
+              value={filters.status || "all"}
+              onValueChange={(value) =>
+                updateFilter("status", value === "all" ? "" : (value as ApprovalRequestStatus))
+              }
+            >
+              <SelectItem value="all">{t("DashboardApprovals.allStatuses")}</SelectItem>
+              {APPROVAL_HISTORY_STATUSES.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {formatApprovalLabel(status)}
+                </SelectItem>
+              ))}
+            </Select>
+          </FilterField>
+        ) : null}
+
         <FilterField label={t("DashboardApprovals.operationFilter")}>
-          <select
-            value={filters.operationFamily}
-            onChange={(event) =>
-              updateFilter("operationFamily", event.target.value as "" | WalletOperationFamily)
+          <Select
+            ariaLabel={t("DashboardApprovals.operationFilter")}
+            value={filters.operationFamily || "all"}
+            onValueChange={(value) =>
+              updateFilter(
+                "operationFamily",
+                value === "all" ? "" : (value as WalletOperationFamily)
+              )
             }
-            className={filterControlClassName}
           >
-            <option value="">{t("DashboardApprovals.allOperations")}</option>
+            <SelectItem value="all">{t("DashboardApprovals.allOperations")}</SelectItem>
             {APPROVAL_OPERATION_FAMILIES.map((family) => (
-              <option key={family} value={family}>
+              <SelectItem key={family} value={family}>
                 {formatApprovalLabel(family)}
-              </option>
+              </SelectItem>
             ))}
-          </select>
+          </Select>
         </FilterField>
-      )}
 
-      {tab === "history" ? (
-        <FilterField label={t("DashboardApprovals.operationFilter")}>
-          <select
-            value={filters.operationFamily}
-            onChange={(event) =>
-              updateFilter("operationFamily", event.target.value as "" | WalletOperationFamily)
+        <FilterField label={t("DashboardApprovals.apiKeyFilter")}>
+          <Select
+            ariaLabel={t("DashboardApprovals.apiKeyFilter")}
+            value={filters.apiKeyId || "all"}
+            onValueChange={(value) =>
+              updateFilter("apiKeyId", value === "all" ? "" : (value ?? ""))
             }
-            className={filterControlClassName}
           >
-            <option value="">{t("DashboardApprovals.allOperations")}</option>
-            {APPROVAL_OPERATION_FAMILIES.map((family) => (
-              <option key={family} value={family}>
-                {formatApprovalLabel(family)}
-              </option>
+            <SelectItem value="all">{t("DashboardApprovals.allApiKeys")}</SelectItem>
+            {apiKeyOptions.map(([apiKeyId, label]) => (
+              <SelectItem key={apiKeyId} value={apiKeyId}>
+                {label}
+              </SelectItem>
             ))}
-          </select>
+          </Select>
         </FilterField>
-      ) : null}
+      </div>
 
-      <FilterField label={t("DashboardApprovals.apiKeyFilter")}>
-        <select
-          value={filters.apiKeyId}
-          onChange={(event) => updateFilter("apiKeyId", event.target.value)}
-          className={filterControlClassName}
-        >
-          <option value="">{t("DashboardApprovals.allApiKeys")}</option>
-          {apiKeyOptions.map(([apiKeyId, label]) => (
-            <option key={apiKeyId} value={apiKeyId}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </FilterField>
-
-      <FilterField label={t("DashboardApprovals.fromFilter")}>
-        <input
-          type="date"
-          value={filters.from}
-          max={filters.to || undefined}
-          onChange={(event) => updateFilter("from", event.target.value)}
-          className={filterControlClassName}
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <DateRangeFilter
+          from={filters.from}
+          to={filters.to}
+          onChange={(from, to) => patchFilters({ from, to })}
         />
-      </FilterField>
-      <FilterField label={t("DashboardApprovals.toFilter")}>
-        <input
-          type="date"
-          value={filters.to}
-          min={filters.from || undefined}
-          onChange={(event) => updateFilter("to", event.target.value)}
-          className={filterControlClassName}
-        />
-      </FilterField>
-      <div className="flex items-end">
         <Button
           type="button"
           variant="ghost"
           size="sm"
+          className="shrink-0"
           onClick={clear}
           disabled={!hasApprovalFilters(filters)}
         >
           {t("DashboardApprovals.clearFilters")}
         </Button>
       </div>
+    </div>
+  );
+}
+
+const DATE_PRESETS = [7, 30, 90] as const;
+type DatePreset = "all" | "7" | "30" | "90" | "custom";
+
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function presetRange(days: number): { from: string; to: string } {
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(start.getDate() - (days - 1));
+  return { from: toDateInputValue(start), to: toDateInputValue(now) };
+}
+
+function activeDatePreset(from: string, to: string): DatePreset {
+  if (!from && !to) return "all";
+  for (const days of DATE_PRESETS) {
+    const range = presetRange(days);
+    if (range.from === from && range.to === to) return `${days}` as DatePreset;
+  }
+  return "custom";
+}
+
+function DateRangeFilter({
+  from,
+  to,
+  onChange,
+}: {
+  from: string;
+  to: string;
+  onChange: (from: string, to: string) => void;
+}) {
+  const t = useTranslations();
+  const derived = activeDatePreset(from, to);
+  const [customOpen, setCustomOpen] = useState(derived === "custom");
+  // An external reset (Clear filters, tab switch) collapses the custom fields.
+  useEffect(() => {
+    if (derived !== "custom") setCustomOpen(false);
+  }, [derived]);
+  const showCustom = customOpen || derived === "custom";
+  const active: DatePreset = showCustom ? "custom" : derived;
+
+  const chips: Array<{ id: DatePreset; label: string }> = [
+    { id: "all", label: t("DashboardApprovals.dateAllTime") },
+    { id: "7", label: t("DashboardApprovals.dateLast7") },
+    { id: "30", label: t("DashboardApprovals.dateLast30") },
+    { id: "90", label: t("DashboardApprovals.dateLast90") },
+    { id: "custom", label: t("DashboardApprovals.dateCustom") },
+  ];
+
+  function selectChip(id: DatePreset) {
+    if (id === "all") {
+      setCustomOpen(false);
+      onChange("", "");
+      return;
+    }
+    if (id === "custom") {
+      setCustomOpen(true);
+      return;
+    }
+    setCustomOpen(false);
+    const range = presetRange(Number(id));
+    onChange(range.from, range.to);
+  }
+
+  return (
+    <div className="min-w-0 space-y-2">
+      <p className="text-xs font-medium text-secondary">{t("DashboardApprovals.dateRangeLabel")}</p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {chips.map((chip) => (
+          <button
+            key={chip.id}
+            type="button"
+            aria-pressed={active === chip.id}
+            onClick={() => selectChip(chip.id)}
+            className={cn(
+              "h-8 rounded-full border px-3 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/30",
+              active === chip.id
+                ? "border-transparent bg-primary text-on-primary"
+                : "border-border-default bg-surface-raised text-secondary hover:border-border-strong hover:text-primary"
+            )}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+      {showCustom ? (
+        <div className="flex flex-wrap items-end gap-3 pt-1">
+          <FilterField label={t("DashboardApprovals.fromFilter")}>
+            <Input
+              type="date"
+              value={from}
+              max={to || undefined}
+              onChange={(event) => onChange(event.target.value, to)}
+              className="w-[168px]"
+            />
+          </FilterField>
+          <FilterField label={t("DashboardApprovals.toFilter")}>
+            <Input
+              type="date"
+              value={to}
+              min={from || undefined}
+              onChange={(event) => onChange(from, event.target.value)}
+              className="w-[168px]"
+            />
+          </FilterField>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -553,8 +654,8 @@ function ApprovalRequestRows({
         })}
       </div>
 
-      <div className="hidden overflow-x-auto 2xl:block">
-        <Table className="min-w-0 [&_table]:min-w-[1118px] [&_table]:table-fixed">
+      <div className="hidden 2xl:block">
+        <Table className="min-w-0 [&::after]:hidden [&::before]:hidden [&_table]:min-w-[1118px] [&_table]:table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[88px]">{t("DashboardApprovals.statusColumn")}</TableHead>

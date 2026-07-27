@@ -45,7 +45,7 @@ function TokenAvatar({ token, size = 40 }: { token: IssuanceTokenView; size?: nu
   const t = useTranslations();
   return (
     <div
-      className="shrink-0 overflow-hidden rounded-full border border-border-default bg-[white]"
+      className="shrink-0 overflow-hidden rounded-full border border-border-default bg-fill-subtle"
       style={{ height: size, width: size }}
     >
       {token.imageUrl ? (
@@ -167,7 +167,7 @@ function CollapsedStat({
   return (
     <div className={cn("hidden min-w-0 text-center lg:block", className)}>
       <p className="truncate text-xs text-tertiary">{label}</p>
-      <p className="truncate text-sm font-medium text-primary">{value}</p>
+      <p className="truncate text-sm font-normal text-primary">{value}</p>
     </div>
   );
 }
@@ -215,7 +215,7 @@ function IssuanceTokenListRow({ token }: { token: IssuanceTokenView }) {
         <TokenAvatar token={token} />
         <div className="min-w-0">
           <p className="text-xs font-medium tracking-wide text-tertiary">{token.symbol}</p>
-          <p className="truncate text-sm font-medium text-primary">{token.name}</p>
+          <p className="mt-0.5 truncate text-sm font-medium text-primary">{token.name}</p>
         </div>
         {/* Chips are stacked one-per-row so every row is the same height. */}
         <div className="hidden min-w-0 flex-col items-start gap-1 md:flex">

@@ -240,4 +240,111 @@ describe("TokenService", () => {
       ).rejects.not.toBeInstanceOf(AppError);
     });
   });
+
+  describe("deploy claim lifecycle (beginTokenDeploy / releaseTokenDeploy)", () => {
+    async function insertToken(
+      id: string,
+      overrides: { mintAddress?: string | null; status?: string }
+    ): Promise<void> {
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (
+            id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+            name, symbol, decimals, total_supply_cached, is_mintable, freeze_authority_enabled,
+            allowlist_enabled, status, created_by
+          ) VALUES (?, ?, ?, ?, NULL, NULL, 'Claimed Token', 'CLM', 9, '0', 1, 1, 0, ?, ?)`
+        )
+        .bind(
+          id,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          overrides.mintAddress ?? null,
+          overrides.status ?? "pending",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+    }
+
+    async function readStatus(id: string): Promise<string | undefined> {
+      const row = await db
+        .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+        .bind(id)
+        .first<{ status: string }>();
+      return row?.status;
+    }
+
+    it("claims a pending token, flipping it to deploying and returning the frozen snapshot", async () => {
+      await insertToken("tok_claim_ok", { status: "pending", mintAddress: null });
+
+      const claimed = await tokenService.beginTokenDeploy("tok_claim_ok");
+
+      expect(claimed).not.toBeNull();
+      expect(claimed?.symbol).toBe("CLM");
+      expect(await readStatus("tok_claim_ok")).toBe("deploying");
+    });
+
+    it("returns null when the token is already claimed for deploy", async () => {
+      await insertToken("tok_claim_twice", { status: "pending", mintAddress: null });
+
+      expect(await tokenService.beginTokenDeploy("tok_claim_twice")).not.toBeNull();
+      // A second, concurrent deploy must lose the claim rather than mint twice.
+      expect(await tokenService.beginTokenDeploy("tok_claim_twice")).toBeNull();
+    });
+
+    it("returns null for an already-deployed token", async () => {
+      await insertToken("tok_claim_deployed", {
+        status: "active",
+        mintAddress: "Dep1oyed11111111111111111111111111111111111",
+      });
+
+      expect(await tokenService.beginTokenDeploy("tok_claim_deployed")).toBeNull();
+      expect(await readStatus("tok_claim_deployed")).toBe("active");
+    });
+
+    it("blocks symbol/decimals PATCHes while the token is deploying (closes the stale-snapshot race)", async () => {
+      await insertToken("tok_claim_race", { status: "pending", mintAddress: null });
+      await tokenService.beginTokenDeploy("tok_claim_race");
+
+      // This is the exact race: a PATCH landing while the mint is being created
+      // from the claimed snapshot must lose, not corrupt the identity.
+      await expect(
+        tokenService.updateToken("tok_claim_race", { symbol: "RACED", decimals: 2 })
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+
+      const row = await db
+        .prepare("SELECT symbol, decimals FROM issued_tokens WHERE id = ?")
+        .bind("tok_claim_race")
+        .first<{ symbol: string; decimals: number }>();
+      expect(row?.symbol).toBe("CLM");
+      expect(row?.decimals).toBe(9);
+    });
+
+    it("releases a deploying claim back to pending so a failed deploy stays editable", async () => {
+      await insertToken("tok_claim_release", { status: "pending", mintAddress: null });
+      await tokenService.beginTokenDeploy("tok_claim_release");
+      expect(await readStatus("tok_claim_release")).toBe("deploying");
+
+      await tokenService.releaseTokenDeploy("tok_claim_release");
+      expect(await readStatus("tok_claim_release")).toBe("pending");
+
+      // Editable again after release.
+      const updated = await tokenService.updateToken("tok_claim_release", { symbol: "REDO" });
+      expect(updated.symbol).toBe("REDO");
+
+      // And re-claimable: a retried deploy after a failed one must not be stuck
+      // failing the pending-only claim.
+      expect(await tokenService.beginTokenDeploy("tok_claim_release")).not.toBeNull();
+    });
+
+    it("does not revert an already-deployed token when release is called", async () => {
+      await insertToken("tok_claim_release_noop", {
+        status: "active",
+        mintAddress: "Dep1oyed22222222222222222222222222222222222",
+      });
+
+      await tokenService.releaseTokenDeploy("tok_claim_release_noop");
+
+      expect(await readStatus("tok_claim_release_noop")).toBe("active");
+    });
+  });
 });

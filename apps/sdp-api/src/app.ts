@@ -41,6 +41,7 @@ import organizations from "@/routes/organizations";
 import pay from "@/routes/pay";
 import payments from "@/routes/payments";
 import places from "@/routes/places";
+import playgroundInternal from "@/routes/playground-internal";
 import policies from "@/routes/policies";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
@@ -357,6 +358,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   }
 
   app.route("/v1", v1);
+
+  // Dashboard-only helpers. These routes are intentionally excluded from the
+  // public OpenAPI and AI discovery surfaces.
+  app.route("/internal/playground", playgroundInternal);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);

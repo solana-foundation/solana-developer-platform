@@ -4,19 +4,26 @@ import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
+  ArrowDownLeftIcon,
   ArrowLeftIcon,
   ArrowLeftRightIcon,
+  ArrowUpRightIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
   CircleCheckBigIcon,
   CoinsIcon,
+  FileTextIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
   LibraryIcon,
   LockIcon,
   PanelLeftIcon,
   PanelRightIcon,
+  ReceiptTextIcon,
+  RepeatIcon,
   Settings2Icon,
   ShieldCheckIcon,
+  UsersIcon,
   WalletIcon,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
@@ -73,7 +80,6 @@ import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import {
   DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS,
   DASHBOARD_NAVIGATION_START_EVENT,
@@ -92,6 +98,8 @@ import { cn } from "@/lib/utils";
 type SubNavItem = {
   label: string;
   href: string;
+  /** Optional so nav groups that have not been given icons keep rendering unchanged. */
+  icon?: LucideIcon;
   disabled?: boolean;
 };
 
@@ -119,23 +127,32 @@ function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[]
     {
       label: t("Shared.dashboardShell.transactions"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.transactions,
+      icon: ReceiptTextIcon,
     },
     {
       label: t("Shared.dashboardShell.counterparty"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
+      icon: UsersIcon,
     },
-    { label: t("Shared.dashboardShell.pay"), href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay },
+    {
+      label: t("Shared.dashboardShell.pay"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay,
+      icon: ArrowUpRightIcon,
+    },
     {
       label: t("Shared.dashboardShell.deposit"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.deposit,
+      icon: ArrowDownLeftIcon,
     },
     {
       label: t("Shared.dashboardShell.requests"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.requests,
+      icon: FileTextIcon,
     },
     {
       label: t("Shared.dashboardShell.recurring"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
+      icon: RepeatIcon,
     },
   ];
 }
@@ -522,7 +539,8 @@ function getAccessControlPageConfig(
 
 function getIssuanceRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  assetProfilesEnabled: boolean
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/issuance") {
     return {
@@ -545,7 +563,7 @@ function getIssuanceRoutePageConfig(
   // Gate the chrome on the same flag the page uses to pick the workspace. Flag
   // on → the create flow's centered title + capped column; off → the legacy
   // left-aligned, full-width layout, untouched.
-  if (isAssetProfilesUiEnabled()) {
+  if (assetProfilesEnabled) {
     return actionPageConfig({
       centeredTitle: t("Shared.dashboardShell.assetManagement"),
       backHref: "/dashboard/issuance",
@@ -565,7 +583,8 @@ function getIssuanceRoutePageConfig(
 
 function getDashboardPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  assetProfilesEnabled: boolean
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -612,7 +631,7 @@ function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t);
+  const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   if (pathname === "/dashboard/payments/counterparty") {
     return {
@@ -710,6 +729,7 @@ function AllowlistLoading() {
 }
 
 interface PageLoadingProps {
+  assetProfilesEnabled?: boolean;
   targetSearch?: string;
 }
 
@@ -934,7 +954,10 @@ function SidebarGroup({
                           )}
                         />
                         {child.disabled ? (
-                          <span className="flex h-9 flex-1 cursor-not-allowed items-center rounded-lg px-3 text-sm text-tertiary">
+                          <span className="flex h-9 flex-1 cursor-not-allowed items-center gap-2.5 rounded-lg px-3 text-sm text-tertiary">
+                            {child.icon ? (
+                              <child.icon aria-hidden="true" className="size-4 shrink-0" />
+                            ) : null}
                             {child.label}
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
@@ -943,10 +966,13 @@ function SidebarGroup({
                             href={child.href}
                             onClick={onNavigate}
                             className={cn(
-                              "flex h-9 flex-1 items-center rounded-lg px-3 text-sm transition-colors",
+                              "flex h-9 flex-1 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors",
                               childActive ? navItemActive : navItemInactive
                             )}
                           >
+                            {child.icon ? (
+                              <child.icon aria-hidden="true" className="size-4 shrink-0" />
+                            ) : null}
                             {child.label}
                           </DashboardNavigationLink>
                         )}
@@ -990,7 +1016,7 @@ function DashboardSidebarContent({
   const showMobileClose = variant === "mobile";
   return (
     <>
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-3">
+      <div className="min-h-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto overscroll-contain p-3">
         <div className="py-3">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
@@ -1065,9 +1091,11 @@ function DashboardSidebarContent({
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
 export function DashboardShell({
+  assetProfilesEnabled,
   children,
   onboardingStatus,
 }: {
+  assetProfilesEnabled: boolean;
   children: ReactNode;
   onboardingStatus: OrganizationOnboardingStatus | null;
 }) {
@@ -1099,7 +1127,7 @@ export function DashboardShell({
     Boolean(pendingNavigationPathname) || isProjectSwitching || isOrganizationSwitching;
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(shellPathname, t);
+  const pageConfig = getDashboardPageConfig(shellPathname, t, assetProfilesEnabled);
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     pendingApprovalCount,
@@ -1367,9 +1395,14 @@ export function DashboardShell({
                 ? t("Shared.dashboardShell.collapseSidebar")
                 : t("Shared.dashboardShell.expandSidebar")
             }
-            className="group absolute top-1/2 right-0 z-10 flex h-24 w-5 -translate-y-1/2 translate-x-3/4 cursor-pointer items-center justify-center"
+            className="absolute top-1/2 right-0 z-20 flex size-6 -translate-y-1/2 translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border-default bg-surface-raised text-secondary shadow-sm transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:border-border-strong hover:text-primary"
           >
-            <span className="block h-8 w-0.5 rounded-full bg-border-strong group-hover:bg-tertiary" />
+            <ChevronLeftIcon
+              className={cn(
+                "size-3.5 transition-transform motion-reduce:transition-none",
+                !isSidebarOpen && "rotate-180"
+              )}
+            />
           </button>
         </aside>
 
@@ -1491,7 +1524,10 @@ export function DashboardShell({
                   aria-live="polite"
                 >
                   <span className="sr-only">{t("Shared.dashboardShell.loadingDashboard")}</span>
-                  <PageLoadingComponent targetSearch={pendingNavigation?.toSearch} />
+                  <PageLoadingComponent
+                    assetProfilesEnabled={assetProfilesEnabled}
+                    targetSearch={pendingNavigation?.toSearch}
+                  />
                 </div>
               ) : (
                 children

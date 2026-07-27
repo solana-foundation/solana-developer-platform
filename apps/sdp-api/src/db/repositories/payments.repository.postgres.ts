@@ -133,6 +133,7 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     delivery_mode: row.delivery_mode as PaymentTransferRow["delivery_mode"],
     fiat_currency: row.fiat_currency as string | null,
     fiat_amount: row.fiat_amount as string | null,
+    ramps_memo: row.ramps_memo as Record<string, string>,
     provider_data: row.provider_data as Record<string, unknown>,
     signature: (row.signature as string | null | undefined) ?? null,
     serialized_tx: (row.serialized_tx as string | null | undefined) ?? null,
@@ -230,6 +231,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
              delivery_mode,
              fiat_currency,
              fiat_amount,
+             ramps_memo,
              provider_data,
              serialized_tx,
              signature,
@@ -239,7 +241,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
              idempotency_fingerprint,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, sdp_iso_now(), sdp_iso_now())
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, sdp_iso_now(), sdp_iso_now())
            RETURNING *`
         )
         .bind(
@@ -261,6 +263,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
           input.deliveryMode,
           input.fiatCurrency,
           input.fiatAmount,
+          JSON.stringify(input.rampsMemo === undefined ? {} : input.rampsMemo),
           JSON.stringify(input.providerData),
           input.serializedTx,
           input.signature,
@@ -299,6 +302,10 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
       if (input.projectId !== undefined) {
         clauses.push("project_id IS NOT DISTINCT FROM ?");
         values.push(input.projectId);
+      }
+      if (input.expectedStatus !== undefined) {
+        clauses.push("status = ?");
+        values.push(input.expectedStatus);
       }
 
       const row = await db
@@ -405,6 +412,26 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
         .first<Record<string, unknown>>();
 
       return row ? mapTransferRow(row) : null;
+    },
+
+    async listTransfersByIds(params) {
+      if (params.transferIds.length === 0) {
+        return [];
+      }
+
+      const scope = buildTransferScopeWhere({
+        organizationId: params.organizationId,
+        projectId: params.projectId,
+        extraClauses: ["id = ANY(?)"],
+        extraValues: [params.transferIds],
+      });
+
+      const rows = await db
+        .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
+        .bind(...scope.values)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapTransferRow);
     },
 
     async getTransferByProviderReference(params) {

@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
@@ -5,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { parseConfigRecord } from "@/services/domain/signing/provider-config";
+import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -45,6 +48,8 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
 };
 
 let originalParaApiKey: string | undefined;
+let originalParaApiBaseUrl: string | undefined;
+let originalCustodyEncryptionKey: string | undefined;
 
 async function seedAuthAndActiveConfig(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -118,7 +123,11 @@ async function seedAuthAndActiveConfig(): Promise<void> {
 describe("Custody switch rollback", () => {
   beforeEach(async () => {
     originalParaApiKey = env.PARA_API_KEY;
+    originalParaApiBaseUrl = env.PARA_API_BASE_URL;
+    originalCustodyEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
     env.PARA_API_KEY = "para_test_api_key";
+    env.PARA_API_BASE_URL = "https://trusted.para.test";
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
     vi.clearAllMocks();
     provisionParaWalletMock.mockRejectedValue(
       new SigningError("Forced para provisioning failure for rollback test", "NETWORK_ERROR")
@@ -129,6 +138,8 @@ describe("Custody switch rollback", () => {
 
   afterEach(async () => {
     env.PARA_API_KEY = originalParaApiKey;
+    env.PARA_API_BASE_URL = originalParaApiBaseUrl;
+    env.CUSTODY_ENCRYPTION_KEY = originalCustodyEncryptionKey;
     await clearTestDatabase(env);
     await clearKVStores(env);
   });
@@ -193,5 +204,49 @@ describe("Custody switch rollback", () => {
       .first<{ default_custody_config_id: string }>();
 
     expect(scopeDefault?.default_custody_config_id).toBe(TEST_CONFIG_ID);
+  });
+
+  it("ignores client endpoints and does not persist them when switching providers", async () => {
+    provisionParaWalletMock.mockResolvedValue({
+      walletId: "wal_para_trusted",
+      address: "11111111111111111111111111111111",
+      userIdentifier: "sdp-org_custody_switch_test",
+      userIdentifierType: "CUSTOM_ID",
+    });
+
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "para",
+          apiBaseUrl: "https://untrusted.example",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
+    expect(provisionParaWalletMock).toHaveBeenCalledWith(
+      env,
+      expect.not.objectContaining({ apiBaseUrl: expect.anything() })
+    );
+
+    const record = await new CustodyConfigStore(getDb(env), env).findByProvider(
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      "para"
+    );
+    expect(record).not.toBeNull();
+    if (!record) {
+      throw new Error("Expected the Para config to be persisted");
+    }
+
+    const parsed = await parseConfigRecord(env, TEST_ORG.id, record);
+    expect(parsed).not.toHaveProperty("apiBaseUrl");
   });
 });
