@@ -75,7 +75,6 @@ import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -382,9 +381,6 @@ function DashboardTopBar({
         }
         trailingContent={
           <>
-            <div className="xl:hidden">
-              <ThemeToggle variant="header" />
-            </div>
             <LanguagePicker />
             <UserButton />
             {sandboxBadge}
@@ -406,9 +402,6 @@ function DashboardTopBar({
       }
       trailingContent={
         <>
-          <div className="xl:hidden">
-            <ThemeToggle variant="header" />
-          </div>
           <LanguagePicker />
           <UserButton />
           {sandboxBadge}
@@ -1069,12 +1062,7 @@ function DashboardSidebarContent({
             </DashboardNavigationLink>
           );
         })}
-        {variant === "desktop" ? (
-          <>
-            <ThemeToggle collapsed={isCollapsed} />
-            <NetworkDebugToggle collapsed={isCollapsed} />
-          </>
-        ) : null}
+        {variant === "desktop" ? <NetworkDebugToggle collapsed={isCollapsed} /> : null}
       </div>
     </>
   );
@@ -1337,7 +1325,6 @@ export function DashboardShell({
             <span className="absolute left-1/2 hidden -translate-x-1/2 text-sm font-medium text-secondary sm:block">
               {t("Shared.dashboardShell.workspace")}
             </span>
-            <ThemeToggle variant="header" />
           </header>
           <section className="min-h-0 flex-1">{children}</section>
         </div>

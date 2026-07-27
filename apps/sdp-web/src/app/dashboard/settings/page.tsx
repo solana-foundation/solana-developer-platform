@@ -8,6 +8,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
+import { AppearanceSection } from "./appearance-section";
 import { MembersSection } from "./members-section";
 import { OrganizationRpcSettingsForm } from "./organization-rpc-settings-form";
 
@@ -175,6 +176,10 @@ export default async function SettingsPage({
       {dashboardAccess.capabilities.canManageOrgSettings ? (
         <MembersSection page={membersPage} />
       ) : null}
+
+      {/* Not permission-gated: the colour theme is a per-device personal preference,
+          not organization state, so every role gets to set it. */}
+      <AppearanceSection />
     </div>
   );
 }

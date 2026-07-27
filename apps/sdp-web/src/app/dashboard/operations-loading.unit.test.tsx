@@ -129,6 +129,9 @@ describe("operations route loading states", () => {
     expect(markup).toContain("data-loading-metadata-rail");
     expect(markup).toContain("data-loading-api-key-table");
     expect(markup).toContain("data-loading-settings-form");
+    // The settings route renders three cards; a skeleton short of that jumps the layout.
+    expect(markup).toContain("data-loading-settings-members");
+    expect(markup).toContain("data-loading-settings-appearance");
     expect(markup.match(/data-loading-summary-rail/g)).toHaveLength(3);
     expect(markup.match(/data-loading-action-bar/g)).toHaveLength(3);
   });
