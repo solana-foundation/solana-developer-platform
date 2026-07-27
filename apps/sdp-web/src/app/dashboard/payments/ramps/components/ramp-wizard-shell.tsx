@@ -1,34 +1,13 @@
 "use client";
 
-import type { Counterparty, RampProviderId } from "@sdp/types";
+import type { Counterparty } from "@sdp/types";
 import { motion } from "motion/react";
-import Image from "next/image";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog";
 import { PaymentsWizardFrame } from "@/app/dashboard/payments/payments-wizard-frame";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
-import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { CancelTransactionDialog } from "./cancel-transaction-dialog";
-
-export function PoweredByRampProvider({ provider }: { provider: RampProviderId }) {
-  const t = useTranslations();
-  const providerLabel = getRampProviderLabel(provider);
-
-  return (
-    <div className="flex items-center justify-center gap-2 text-sm text-tertiary">
-      <span>{t("DashboardPayments.poweredBy")}</span>
-      <Image
-        src={RAMP_PROVIDER_LOGOS[provider]}
-        alt=""
-        width={24}
-        height={24}
-        className="size-6 rounded-md object-contain"
-      />
-      <span className="font-medium text-secondary">{providerLabel}</span>
-    </div>
-  );
-}
 
 interface RampWizardShellProps {
   steps: readonly { label: string; title: string }[];

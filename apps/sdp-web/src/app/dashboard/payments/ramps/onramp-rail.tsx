@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { OnrampStepContent } from "./components/onramp-step-content";
-import { PoweredByRampProvider, RampWizardShell } from "./components/ramp-wizard-shell";
+import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OnrampWizard, useOnrampWizard } from "./hooks/use-onramp-wizard";
 import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
 import type { RailProps } from "./ramp-action-page";
@@ -104,12 +104,6 @@ export function OnrampRail({
             ...wizard.summaryDetails,
           ]}
         />
-      }
-      header={
-        wizard.fields.provider &&
-        (wizard.currentStepId === "REQUIREMENTS" || wizard.currentStepId === "PROVIDER") ? (
-          <PoweredByRampProvider provider={wizard.fields.provider} />
-        ) : null
       }
       secondaryLabel={
         wizard.onTransactionStage ? t("DashboardPayments.counterparty.cancel") : undefined

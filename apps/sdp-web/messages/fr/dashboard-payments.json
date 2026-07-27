@@ -705,7 +705,6 @@
     "whoIsThisDepositFrom": "De qui provient ce dépôt ?",
     "howWouldYouLikeToPay": "Comment souhaiteriez-vous payer ?",
     "howWouldYouLikeToDeposit": "Comment souhaitez-vous effectuer un dépôt ?",
-    "poweredBy": "Alimenté par",
     "playgroundProductName": "Paiements",
     "recurring": {
       "emptyResponse": "{request} a renvoyé une réponse vide.",

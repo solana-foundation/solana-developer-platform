@@ -740,7 +740,6 @@
     "whoIsThisDepositFrom": "Who is this deposit from?",
     "howWouldYouLikeToPay": "How would you like to pay?",
     "howWouldYouLikeToDeposit": "How would you like to deposit?",
-    "poweredBy": "Powered by",
     "playgroundProductName": "Payments",
     "recurring": {
       "emptyResponse": "{request} returned an empty response.",
