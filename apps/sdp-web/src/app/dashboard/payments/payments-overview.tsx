@@ -29,6 +29,7 @@ import {
   resolveAggregateBalanceDisplayToken,
   resolveCounterparty,
   resolveTotalBalance,
+  resolveTransferTokenLabel,
   resolveUsdBalanceValue,
   selectTopAggregateBalanceRows,
 } from "./payments-overview.utils";
@@ -322,7 +323,7 @@ export function PaymentsOverview({
                       const counterparty = resolveCounterparty(transfer, t);
                       const assetLabel = formatDisplayAmount(
                         transfer.amount,
-                        transfer.token,
+                        resolveTransferTokenLabel(transfer.token),
                         locale
                       );
                       const directionLabel = formatDirection(transfer.direction, t);

@@ -6,6 +6,7 @@ import type {
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { parseErrorMessage, readTransactionParam, toTitleCase } from "./activity-format-utils";
+import { resolveTransferTokenLabel } from "./payments/payments-overview.utils";
 import type { FetchResult } from "./payments/payments-page.data";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -145,7 +146,9 @@ export function buildHomeActivityRows(
       id: `payment-${transfer.id}`,
       createdAt: transfer.createdAt,
       type: resolvePaymentsType(transfer, t),
-      token: transfer.token ?? "—",
+      // transfer.token is a mint address; without this the row renders the raw
+      // base58 while the Transactions table shows the symbol for the same row.
+      token: resolveTransferTokenLabel(transfer.token) ?? "—",
       amount: transfer.amount ?? "—",
       address: resolvePaymentsAddress(transfer),
       explorer: resolvePaymentsExplorer(transfer),

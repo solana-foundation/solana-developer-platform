@@ -10,7 +10,7 @@ import {
   updateWalletPolicySchema,
 } from "./schemas";
 
-const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"];
+const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
 const VALID_DESTINATION = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 
 const tokenSchema = createTransferSchema.shape.token;

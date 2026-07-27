@@ -980,7 +980,14 @@
       "updated": "Updated",
       "viewOnExplorer": "View on Solana Explorer",
       "unavailable": "Unavailable",
-      "loadingOptions": "Loading options…"
+      "loadingOptions": "Loading options…",
+      "includeObserved": "Include on-chain deposits",
+      "filterType": "Type",
+      "filterDirection": "Direction",
+      "filterWallet": "Wallet",
+      "filterCounterparty": "Counterparty",
+      "filterProvider": "Provider",
+      "filterAsset": "Asset"
     },
     "requests": {
       "loadFailed": "Unable to load payment requests",

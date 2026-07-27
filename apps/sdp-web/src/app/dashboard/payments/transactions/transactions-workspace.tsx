@@ -17,6 +17,7 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
+import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -56,6 +57,8 @@ interface TransactionFilterContextValue {
 
 const TransactionFilterContext = createContext<TransactionFilterContextValue | null>(null);
 
+const INCLUDE_OBSERVED_LABEL_ID = "transactions-include-observed-label";
+
 export function useTransactionFilters(): TransactionFilterContextValue {
   const value = useContext(TransactionFilterContext);
   if (!value) throw new Error("Transaction filter context is missing");
@@ -87,12 +90,46 @@ function AssetFilter({ value, onChange }: { value: string; onChange: (value: str
   const t = useTranslations();
 
   return (
-    <Input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={t("DashboardPayments.transactions.assetPlaceholder")}
-      aria-label={t("DashboardPayments.transactions.assetPlaceholder")}
-    />
+    <FieldWithLabel
+      htmlFor="transactions-asset"
+      label={t("DashboardPayments.transactions.filterAsset")}
+    >
+      <Input
+        id="transactions-asset"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t("DashboardPayments.transactions.assetPlaceholder")}
+      />
+    </FieldWithLabel>
+  );
+}
+
+/**
+ * Captions every control in the advanced grid. Labelling only some of them left
+ * the labelled ones taller than the rest, so the row no longer lined up.
+ * htmlFor is omitted for the design-system Select, which renders no native form
+ * control to point at — those carry the same text as an aria-label instead.
+ */
+function FieldWithLabel({
+  htmlFor,
+  label,
+  children,
+}: {
+  htmlFor?: string;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className="mb-1 block text-tertiary text-xs">
+          {label}
+        </label>
+      ) : (
+        <span className="mb-1 block text-tertiary text-xs">{label}</span>
+      )}
+      {children}
+    </div>
   );
 }
 
@@ -103,18 +140,21 @@ function buildTransactionsHref(filters: TransactionFilters): string {
 
 function SelectFilter({
   value,
+  label,
   allLabel,
   ariaLabel,
   onChange,
   children,
 }: {
   value?: string;
+  /** Omitted in the compact top bar, where captions would crowd the row. */
+  label?: string;
   allLabel: string;
   ariaLabel: string;
   onChange: (value: string | undefined) => void;
   children: ReactNode;
 }) {
-  return (
+  const select = (
     <Select
       value={value ?? "all"}
       ariaLabel={ariaLabel}
@@ -124,6 +164,8 @@ function SelectFilter({
       {children}
     </Select>
   );
+
+  return label ? <FieldWithLabel label={label}>{select}</FieldWithLabel> : select;
 }
 
 function AdvancedFilters({
@@ -160,6 +202,7 @@ function AdvancedFilters({
       data-transaction-advanced-filters
     >
       <SelectFilter
+        label={t("DashboardPayments.transactions.filterType")}
         value={filters.type}
         allLabel={t("DashboardPayments.transactions.allTypes")}
         ariaLabel={t("DashboardPayments.transactions.allTypes")}
@@ -172,6 +215,7 @@ function AdvancedFilters({
         ))}
       </SelectFilter>
       <SelectFilter
+        label={t("DashboardPayments.transactions.filterDirection")}
         value={filters.direction}
         allLabel={t("DashboardPayments.transactions.allDirections")}
         ariaLabel={t("DashboardPayments.transactions.allDirections")}
@@ -183,6 +227,7 @@ function AdvancedFilters({
         <SelectItem value="outbound">{t("DashboardPayments.transactions.outbound")}</SelectItem>
       </SelectFilter>
       <SelectFilter
+        label={t("DashboardPayments.transactions.filterWallet")}
         value={filters.walletId}
         allLabel={
           optionsLoading
@@ -199,6 +244,7 @@ function AdvancedFilters({
         ))}
       </SelectFilter>
       <SelectFilter
+        label={t("DashboardPayments.transactions.filterCounterparty")}
         value={filters.counterpartyId}
         allLabel={
           optionsLoading
@@ -215,6 +261,7 @@ function AdvancedFilters({
         ))}
       </SelectFilter>
       <SelectFilter
+        label={t("DashboardPayments.transactions.filterProvider")}
         value={filters.provider}
         allLabel={t("DashboardPayments.transactions.allProviders")}
         ariaLabel={t("DashboardPayments.transactions.allProviders")}
@@ -227,18 +274,44 @@ function AdvancedFilters({
         ))}
       </SelectFilter>
       <AssetFilter value={assetValue} onChange={onAssetChange} />
-      <Input
-        type="date"
-        value={filters.from ?? ""}
-        onChange={(event) => updateFilters({ from: event.target.value || undefined })}
-        aria-label={t("DashboardPayments.transactions.fromDate")}
-      />
-      <Input
-        type="date"
-        value={filters.to ?? ""}
-        onChange={(event) => updateFilters({ to: event.target.value || undefined })}
-        aria-label={t("DashboardPayments.transactions.toDate")}
-      />
+      {/* Every Select in this grid names itself through its "All …" option. The
+          date inputs only had an invisible aria-label, so they read as two
+          unexplained dd/mm/yyyy boxes. Visible captions put them on the same
+          footing without changing what they accept. */}
+      <FieldWithLabel
+        htmlFor="transactions-from"
+        label={t("DashboardPayments.transactions.fromDate")}
+      >
+        <Input
+          id="transactions-from"
+          type="date"
+          value={filters.from ?? ""}
+          onChange={(event) => updateFilters({ from: event.target.value || undefined })}
+          max={filters.to || undefined}
+        />
+      </FieldWithLabel>
+      <FieldWithLabel htmlFor="transactions-to" label={t("DashboardPayments.transactions.toDate")}>
+        <Input
+          id="transactions-to"
+          type="date"
+          value={filters.to ?? ""}
+          onChange={(event) => updateFilters({ to: event.target.value || undefined })}
+          min={filters.from || undefined}
+        />
+      </FieldWithLabel>
+      {/* Spans the row so the switch is not mistaken for another dropdown.
+          Not a <label>: ToggleSwitch renders a button[role=switch] rather than
+          a form control, so the caption is associated with aria-labelledby. */}
+      <div className="flex items-center gap-2.5 sm:col-span-2 xl:col-span-4">
+        <ToggleSwitch
+          checked={filters.includeObserved}
+          onChange={(checked) => updateFilters({ includeObserved: checked })}
+          aria-labelledby={INCLUDE_OBSERVED_LABEL_ID}
+        />
+        <span id={INCLUDE_OBSERVED_LABEL_ID} className="text-secondary text-sm">
+          {t("DashboardPayments.transactions.includeObserved")}
+        </span>
+      </div>
     </div>
   );
 }
@@ -271,7 +344,11 @@ export function TransactionsWorkspace({
       displayFilters.asset ||
       displayFilters.provider ||
       displayFilters.from ||
-      displayFilters.to
+      displayFilters.to ||
+      // Counted by countActiveTransactionFilters, so it has to open the panel
+      // too. Otherwise excluding observed deposits shows an active-filter badge
+      // over a collapsed panel with no visible cause.
+      !displayFilters.includeObserved
   );
   const [filtersOpen, setFiltersOpen] = useState(hasAdvancedFilter);
   const debouncedSearch = useDebounce(searchValue.trim(), 300);
@@ -283,6 +360,17 @@ export function TransactionsWorkspace({
     () => fetchTransactionFilterOptions(),
     { dedupingInterval: 60_000, revalidateOnFocus: false }
   );
+
+  // filtersOpen is seeded from hasAdvancedFilter once. Client-side navigation
+  // updates the filter props without remounting, so a URL that activates a
+  // filter would otherwise show the active-filter badge over a panel that is
+  // still collapsed — the badge with no visible cause this PR set out to fix.
+  // Only forced open: collapsing again is the reader's choice.
+  useEffect(() => {
+    if (hasAdvancedFilter) {
+      setFiltersOpen(true);
+    }
+  }, [hasAdvancedFilter]);
 
   useEffect(() => {
     const handleBrowserNavigation = () => {
@@ -383,6 +471,7 @@ export function TransactionsWorkspace({
       provider: undefined,
       from: undefined,
       to: undefined,
+      includeObserved: true,
       sortBy: "createdAt",
       sortDirection: "desc",
       page: 1,

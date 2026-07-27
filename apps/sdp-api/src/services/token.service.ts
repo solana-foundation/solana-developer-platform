@@ -22,6 +22,12 @@ import type {
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
 
+// Escapes LIKE/ILIKE wildcards so operator-supplied search text matches
+// literally (mirrors the payments/policy repositories' `ESCAPE '\'` idiom).
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Input Types
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1136,12 +1142,13 @@ export class TokenService {
     tokenId: string,
     options: {
       status?: TokenTransaction["status"];
+      type?: TokenTransaction["type"];
       organizationId?: string;
       limit?: number;
       offset?: number;
     } = {}
   ): Promise<{ transactions: TokenTransaction[]; total: number }> {
-    const { status, organizationId, limit = 50, offset = 0 } = options;
+    const { status, type, organizationId, limit = 50, offset = 0 } = options;
 
     let countQuery = "SELECT COUNT(*) as count FROM issuance_transactions WHERE token_id = ?";
     let selectQuery = `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
@@ -1162,7 +1169,15 @@ export class TokenService {
       params.push(status);
     }
 
-    selectQuery += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+    if (type) {
+      countQuery += " AND type = ?";
+      selectQuery += " AND type = ?";
+      params.push(type);
+    }
+
+    // id breaks ties so rows sharing a created_at can't shuffle between pages
+    // (same stable ordering as listAllowlistEntries and the org-wide list).
+    selectQuery += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?";
 
     const countResult = await this.db
       .prepare(countQuery)
@@ -1521,13 +1536,37 @@ export class TokenService {
    */
   async listAllowlistEntries(
     tokenId: string,
-    options: { status?: AllowlistEntryStatus; limit?: number; offset?: number } = {}
+    options: {
+      status?: AllowlistEntryStatus;
+      search?: string;
+      label?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
   ): Promise<{ entries: TokenAllowlistEntry[]; total: number }> {
-    const { status = "active", limit = 50, offset = 0 } = options;
+    const { status = "active", search, label, limit = 50, offset = 0 } = options;
+
+    // Shared WHERE for the data + count queries. Search is a contains-style
+    // ILIKE over address + label backed by idx_token_allowlist_search_trgm;
+    // label is an exact filter backed by idx_token_allowlist_token_status_label.
+    const clauses = ["token_id = ?", "status = ?"];
+    const filterValues: Array<string | number> = [tokenId, status];
+
+    if (label !== undefined) {
+      clauses.push("label = ?");
+      filterValues.push(label);
+    }
+
+    if (search) {
+      clauses.push("(address || ' ' || COALESCE(label, '')) ILIKE ? ESCAPE '\\'");
+      filterValues.push(`%${escapeLikePattern(search)}%`);
+    }
+
+    const whereClause = clauses.join(" AND ");
 
     const countResult = await this.db
-      .prepare("SELECT COUNT(*) as count FROM token_allowlists WHERE token_id = ? AND status = ?")
-      .bind(tokenId, status)
+      .prepare(`SELECT COUNT(*) as count FROM token_allowlists WHERE ${whereClause}`)
+      .bind(...filterValues)
       .first<{ count: number }>();
 
     const result = await this.db
@@ -1535,15 +1574,50 @@ export class TokenService {
         `SELECT id, token_id, address, label,
                 status, added_by, created_at, revoked_at
          FROM token_allowlists
-         WHERE token_id = ? AND status = ?
-         ORDER BY created_at DESC
+         WHERE ${whereClause}
+         ORDER BY created_at DESC, id DESC
          LIMIT ? OFFSET ?`
       )
-      .bind(tokenId, status, limit, offset)
+      .bind(...filterValues, limit, offset)
       .all<AllowlistRow>();
 
     return {
       entries: result.results.map((row) => this.mapRowToAllowlistEntry(row)),
+      total: countResult?.count ?? 0,
+    };
+  }
+
+  /**
+   * List the distinct non-empty labels used on a token's control-list entries,
+   * plus the unfiltered entry count. Feeds the compliance-tab label filter and
+   * its "N entries" summary card now that the list itself is server-paged and
+   * search-filtered (the list endpoint's total reflects the active filter, so
+   * the summary count comes from here instead).
+   */
+  async listAllowlistLabels(
+    tokenId: string,
+    options: { status?: AllowlistEntryStatus } = {}
+  ): Promise<{ labels: string[]; total: number }> {
+    const { status = "active" } = options;
+
+    const [labelsResult, countResult] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT DISTINCT label
+           FROM token_allowlists
+           WHERE token_id = ? AND status = ? AND label IS NOT NULL
+           ORDER BY label`
+        )
+        .bind(tokenId, status)
+        .all<{ label: string }>(),
+      this.db
+        .prepare("SELECT COUNT(*) as count FROM token_allowlists WHERE token_id = ? AND status = ?")
+        .bind(tokenId, status)
+        .first<{ count: number }>(),
+    ]);
+
+    return {
+      labels: labelsResult.results.map((row) => row.label),
       total: countResult?.count ?? 0,
     };
   }

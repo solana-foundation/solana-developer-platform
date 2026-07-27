@@ -347,4 +347,223 @@ describe("TokenService", () => {
       expect(await readStatus("tok_claim_release_noop")).toBe("active");
     });
   });
+
+  describe("allowlist search + label filtering", () => {
+    const TOKEN_ID = "tok_freeze_refreeze";
+    const ADDR_TREASURY_A = "Aaa1111111111111111111111111111111111111111";
+    const ADDR_MARKET_MAKER = "Bbb2222222222222222222222222222222222222222";
+    const ADDR_TREASURY_B = "Ccc3333333333333333333333333333333333333333";
+    const ADDR_NO_LABEL = "Ddd4444444444444444444444444444444444444444";
+    const ADDR_PERCENT = "Eee5555555555555555555555555555555555555555";
+
+    beforeEach(async () => {
+      await db.prepare("DELETE FROM token_allowlists WHERE token_id = ?").bind(TOKEN_ID).run();
+      for (const [address, label] of [
+        [ADDR_TREASURY_A, "Treasury"],
+        [ADDR_MARKET_MAKER, "Market maker"],
+        [ADDR_TREASURY_B, "Treasury"],
+        [ADDR_NO_LABEL, undefined],
+        [ADDR_PERCENT, "50%-off"],
+      ] as const) {
+        await tokenService.addAllowlistEntry({
+          tokenId: TOKEN_ID,
+          address,
+          addedBy: TEST_USER.id,
+          label,
+        });
+      }
+    });
+
+    it("matches search against the address", async () => {
+      const { entries, total } = await tokenService.listAllowlistEntries(TOKEN_ID, {
+        search: "Bbb222",
+      });
+      expect(total).toBe(1);
+      expect(entries.map((entry) => entry.address)).toEqual([ADDR_MARKET_MAKER]);
+    });
+
+    it("matches search against the label", async () => {
+      const { entries, total } = await tokenService.listAllowlistEntries(TOKEN_ID, {
+        search: "market",
+      });
+      expect(total).toBe(1);
+      expect(entries[0]?.address).toBe(ADDR_MARKET_MAKER);
+    });
+
+    it("treats LIKE wildcards in search as literal characters", async () => {
+      // The '%' must match the "50%-off" label literally, not as a wildcard.
+      const { entries, total } = await tokenService.listAllowlistEntries(TOKEN_ID, {
+        search: "50%",
+      });
+      expect(total).toBe(1);
+      expect(entries[0]?.address).toBe(ADDR_PERCENT);
+    });
+
+    it("filters by exact label", async () => {
+      const { entries, total } = await tokenService.listAllowlistEntries(TOKEN_ID, {
+        label: "Treasury",
+      });
+      expect(total).toBe(2);
+      expect(entries.map((entry) => entry.address).sort()).toEqual(
+        [ADDR_TREASURY_A, ADDR_TREASURY_B].sort()
+      );
+    });
+
+    it("combines search and label filters", async () => {
+      const { entries, total } = await tokenService.listAllowlistEntries(TOKEN_ID, {
+        label: "Treasury",
+        search: "Aaa",
+      });
+      expect(total).toBe(1);
+      expect(entries[0]?.address).toBe(ADDR_TREASURY_A);
+    });
+
+    it("paginates the filtered result with an accurate total", async () => {
+      const { entries, total } = await tokenService.listAllowlistEntries(TOKEN_ID, {
+        limit: 2,
+        offset: 0,
+      });
+      expect(total).toBe(5);
+      expect(entries).toHaveLength(2);
+    });
+
+    it("lists distinct non-null labels (sorted) plus the unfiltered total", async () => {
+      const { labels, total } = await tokenService.listAllowlistLabels(TOKEN_ID);
+      expect(labels).toEqual(["50%-off", "Market maker", "Treasury"]);
+      // 5 entries seeded (one has no label); total is unfiltered by label.
+      expect(total).toBe(5);
+    });
+
+    it("installs the search + label filter indexes", async () => {
+      const indexes = await db
+        .prepare(
+          `SELECT indexname, indexdef
+           FROM pg_indexes
+           WHERE indexname IN (
+             'idx_token_allowlist_search_trgm',
+             'idx_token_allowlist_token_status_label'
+           )`
+        )
+        .all<{ indexdef: string; indexname: string }>();
+
+      expect(indexes.results.map((index) => index.indexname).sort()).toEqual([
+        "idx_token_allowlist_search_trgm",
+        "idx_token_allowlist_token_status_label",
+      ]);
+      const trgmIndex = indexes.results.find(
+        (index) => index.indexname === "idx_token_allowlist_search_trgm"
+      );
+      expect(trgmIndex?.indexdef).toContain("gin_trgm_ops");
+    });
+  });
+
+  describe("listTokenTransactions type + status filtering", () => {
+    const TOKEN_ID = "tok_freeze_refreeze";
+
+    beforeEach(async () => {
+      await db.prepare("DELETE FROM issuance_transactions WHERE token_id = ?").bind(TOKEN_ID).run();
+      // [id, type, status, created_at] — created_at ascending so ORDER BY DESC is deterministic.
+      const rows = [
+        ["itx_mint_1", "mint", "confirmed", "2026-01-01T00:00:01.000Z"],
+        ["itx_mint_2", "mint", "confirmed", "2026-01-01T00:00:02.000Z"],
+        ["itx_mint_3", "mint", "confirmed", "2026-01-01T00:00:03.000Z"],
+        ["itx_mint_4", "mint", "confirmed", "2026-01-01T00:00:04.000Z"],
+        ["itx_mint_pending", "mint", "pending", "2026-01-01T00:00:05.000Z"],
+        ["itx_burn_1", "burn", "confirmed", "2026-01-01T00:00:06.000Z"],
+        ["itx_burn_2", "burn", "confirmed", "2026-01-01T00:00:07.000Z"],
+      ] as const;
+      for (const [id, type, status, createdAt] of rows) {
+        await db
+          .prepare(
+            `INSERT INTO issuance_transactions
+             (id, token_id, organization_id, type, status, operation_params, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, '{}', ?, ?)`
+          )
+          .bind(id, TOKEN_ID, TEST_ORG.id, type, status, createdAt, createdAt)
+          .run();
+      }
+    });
+
+    it("returns all transactions newest-first without filters", async () => {
+      const { transactions, total } = await tokenService.listTokenTransactions(TOKEN_ID, {
+        organizationId: TEST_ORG.id,
+      });
+      expect(total).toBe(7);
+      expect(transactions[0]?.id).toBe("itx_burn_2");
+    });
+
+    it("filters by type", async () => {
+      const { transactions, total } = await tokenService.listTokenTransactions(TOKEN_ID, {
+        organizationId: TEST_ORG.id,
+        type: "mint",
+      });
+      expect(total).toBe(5);
+      expect(transactions.every((tx) => tx.type === "mint")).toBe(true);
+    });
+
+    it("combines type and status filters", async () => {
+      const { transactions, total } = await tokenService.listTokenTransactions(TOKEN_ID, {
+        organizationId: TEST_ORG.id,
+        type: "mint",
+        status: "confirmed",
+      });
+      expect(total).toBe(4);
+      expect(transactions.every((tx) => tx.type === "mint" && tx.status === "confirmed")).toBe(
+        true
+      );
+    });
+
+    it("paginates the filtered result with an accurate total", async () => {
+      const { transactions, total } = await tokenService.listTokenTransactions(TOKEN_ID, {
+        organizationId: TEST_ORG.id,
+        type: "mint",
+        limit: 2,
+        offset: 0,
+      });
+      expect(total).toBe(5);
+      expect(transactions).toHaveLength(2);
+    });
+
+    it("orders same-timestamp rows stably across pages", async () => {
+      // All five share one created_at, so only the id tiebreaker keeps paging
+      // deterministic — without it a row can repeat or vanish between pages.
+      const sharedAt = "2026-03-01T00:00:00.000Z";
+      await db.prepare("DELETE FROM issuance_transactions WHERE token_id = ?").bind(TOKEN_ID).run();
+      for (const id of ["itx_tie_a", "itx_tie_b", "itx_tie_c", "itx_tie_d", "itx_tie_e"]) {
+        await db
+          .prepare(
+            `INSERT INTO issuance_transactions
+             (id, token_id, organization_id, type, status, operation_params, created_at, updated_at)
+             VALUES (?, ?, ?, 'mint', 'confirmed', '{}', ?, ?)`
+          )
+          .bind(id, TOKEN_ID, TEST_ORG.id, sharedAt, sharedAt)
+          .run();
+      }
+
+      const pageIds: string[] = [];
+      for (let offset = 0; offset < 5; offset += 2) {
+        const { transactions } = await tokenService.listTokenTransactions(TOKEN_ID, {
+          organizationId: TEST_ORG.id,
+          limit: 2,
+          offset,
+        });
+        pageIds.push(...transactions.map((tx) => tx.id));
+      }
+
+      // Every row appears exactly once, newest-id first within the tie.
+      expect(pageIds).toEqual(["itx_tie_e", "itx_tie_d", "itx_tie_c", "itx_tie_b", "itx_tie_a"]);
+      expect(new Set(pageIds).size).toBe(5);
+    });
+
+    it("installs the type filter index", async () => {
+      const indexes = await db
+        .prepare(
+          `SELECT indexname FROM pg_indexes WHERE indexname = 'idx_issuance_tx_token_type_created'`
+        )
+        .all<{ indexname: string }>();
+      expect(indexes.results.map((index) => index.indexname)).toContain(
+        "idx_issuance_tx_token_type_created"
+      );
+    });
+  });
 });

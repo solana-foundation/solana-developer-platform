@@ -120,7 +120,7 @@ const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
 const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
 const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
 const TEST_MAGICBLOCK_SPONSOR_FEE_PAYER = "CrankS2fXgMGvQJ3VBrZmRfGrfogDY6pq5YcgkPEpSNf";
-const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet;
+const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
 const MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID = "externalCustomerId";
 
