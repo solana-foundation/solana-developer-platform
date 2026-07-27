@@ -10,6 +10,7 @@ import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
+import { MemoField } from "./memo-field";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
@@ -46,6 +47,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     setCollectedField,
     requirementsBlocker,
     refreshQuote,
+    rampsMemo,
+    setRampsMemo,
   } = wizard;
 
   if (currentStepId === "DEPOSIT") {
@@ -76,6 +79,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           onPairChange={handlePairChange}
           onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
         />
+        <MemoField memo={rampsMemo} onChange={setRampsMemo} />
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
             {requirementsBlocker}
