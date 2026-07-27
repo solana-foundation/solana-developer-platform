@@ -9,7 +9,6 @@ import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { formatTokenAmount } from "@/app/dashboard/payments/payments-overview.utils";
 import {
   createTransfer,
   fetchTransferByProviderReference,
@@ -19,7 +18,12 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { OFFRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
-import { memoSummaryDetails, optionalDetail, providerSummaryDetail } from "../wizard-summary";
+import {
+  memoSummaryDetails,
+  optionalDetail,
+  providerSummaryDetail,
+  summaryAmount,
+} from "../wizard-summary";
 import {
   isTerminalRampTransferStatus,
   type RampWizardStep,
@@ -149,6 +153,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     return balance?.mint ?? null;
   }, [wizard.selectedWallet, offrampCryptoToken]);
 
+  const amount = summaryAmount(wizard.fields.amount, locale);
   const summaryDetails: WizardSummaryDetail[] = [
     ...optionalDetail(
       wizard.selectedWallet === null ? null : wizard.selectedWallet.label,
@@ -156,9 +161,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       WalletIcon
     ),
     ...optionalDetail(
-      wizard.fields.amount.length === 0
-        ? null
-        : `${formatTokenAmount(wizard.fields.amount, locale)} ${offrampCryptoToken}`,
+      amount === null ? null : `${amount} ${offrampCryptoToken}`,
       t("DashboardPayments.ramps.amount"),
       DollarSignIcon
     ),

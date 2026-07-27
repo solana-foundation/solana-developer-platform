@@ -320,8 +320,11 @@ export function useRampWizard<TId extends string>(
     } catch {}
   };
 
+  // Only auto-fire the quote while the user sits on the transaction stage —
+  // stepping back to edit selections must not create a quote from mid-edit state.
   useSWR(
     config.advanceRequirementsBeforeQuote &&
+      isLastStep &&
       requirements.onboarding?.status === "ready" &&
       quote === null
       ? ([requirementsConfig?.direction ?? "ramp", "ready-quote"] as const)

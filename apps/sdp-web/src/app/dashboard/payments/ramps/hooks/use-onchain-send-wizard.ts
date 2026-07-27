@@ -9,7 +9,6 @@ import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { formatTokenAmount } from "@/app/dashboard/payments/payments-overview.utils";
 import {
   createTransfer,
   fetchCounterpartyAccounts,
@@ -21,7 +20,7 @@ import { useZodForm } from "@/lib/use-zod-form";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
 import { walletBalanceAssetOptions } from "../wallet-options";
-import { optionalDetail } from "../wizard-summary";
+import { optionalDetail, summaryAmount } from "../wizard-summary";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
@@ -259,7 +258,7 @@ export function useOnchainSendWizard({
       CoinsIcon
     ),
     ...optionalDetail(
-      fields.amount.length === 0 ? null : formatTokenAmount(fields.amount, locale),
+      summaryAmount(fields.amount, locale),
       t("DashboardPayments.onchainSend.amount"),
       DollarSignIcon
     ),

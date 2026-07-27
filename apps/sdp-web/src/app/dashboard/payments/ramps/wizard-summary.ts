@@ -1,11 +1,29 @@
 import type { RampProviderId } from "@sdp/types";
 import { CreditCardIcon, FileTextIcon, type LucideIcon, UserRoundIcon } from "lucide-react";
+import { formatTokenAmount } from "@/app/dashboard/payments/payments-overview.utils";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../wizard-summary-list";
 import { isEmptyMemoRow, type MemoRow, memoRowsToRecord } from "./memo";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+const COMPLETE_AMOUNT_PATTERN = /^\d+(?:\.\d+)?$/;
+
+/**
+ * Formats a wizard amount for summary display, preserving partial input
+ * (e.g. a trailing decimal point) while the user is still typing.
+ *
+ * @param amount - Raw amount input from the wizard fields.
+ * @param locale - Active locale used for digit grouping.
+ * @returns The display amount, or null while the field is empty.
+ */
+export function summaryAmount(amount: string, locale: string): string | null {
+  if (amount.length === 0) {
+    return null;
+  }
+  return COMPLETE_AMOUNT_PATTERN.test(amount) ? formatTokenAmount(amount, locale) : amount;
+}
 
 /**
  * Wraps a selection into a labeled summary detail once it has a value.

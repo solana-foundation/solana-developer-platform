@@ -9,7 +9,6 @@ import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { formatTokenAmount } from "@/app/dashboard/payments/payments-overview.utils";
 import {
   fetchTransferByProviderReference,
   simulateSandboxTransfer,
@@ -19,7 +18,12 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
-import { memoSummaryDetails, optionalDetail, providerSummaryDetail } from "../wizard-summary";
+import {
+  memoSummaryDetails,
+  optionalDetail,
+  providerSummaryDetail,
+  summaryAmount,
+} from "../wizard-summary";
 import {
   isTerminalRampTransferStatus,
   type RampWizardStep,
@@ -97,6 +101,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     },
   });
 
+  const amount = summaryAmount(wizard.fields.amount, locale);
   const summaryDetails: WizardSummaryDetail[] = [
     ...optionalDetail(
       wizard.selectedWallet === null ? null : wizard.selectedWallet.label,
@@ -104,9 +109,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       WalletIcon
     ),
     ...optionalDetail(
-      wizard.fields.amount.length === 0
-        ? null
-        : `${formatTokenAmount(wizard.fields.amount, locale)} ${wizard.selectedRampPair.fiatCurrency}`,
+      amount === null ? null : `${amount} ${wizard.selectedRampPair.fiatCurrency}`,
       t("DashboardPayments.ramps.amount"),
       DollarSignIcon
     ),
