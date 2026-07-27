@@ -21,9 +21,11 @@ import {
   type Dispatch,
   type ReactNode,
   type SetStateAction,
+  useEffect,
   useId,
   useState,
 } from "react";
+import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
@@ -32,6 +34,7 @@ import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { useDebounce } from "@/lib/use-debounce";
 import { fetchTokenAllowlistLabels, fetchTokenAllowlistPage } from "./asset-profile/allowlist.data";
 import { TOKEN_ALLOWLIST_KEY, TOKEN_ALLOWLIST_LABELS_KEY } from "./asset-profile/allowlist-cache";
+import { getPageCount, getPageSummary } from "./pagination.utils";
 import { TokenActionCard } from "./token-action-card";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import type {
@@ -674,8 +677,8 @@ export function TokenActionAdminForms({
   );
 }
 
-// One "Load more" step; also the initial page size for the control list.
-const CONTROL_LIST_PAGE_STEP = 25;
+// Rows per page in the control list.
+const CONTROL_LIST_PAGE_SIZE = 25;
 // Sentinel value for the "All labels" Select option. A leading NUL byte can't be
 // typed into the label input and never comes back from the labels facet, so it
 // can never collide with a real label (e.g. one literally named "all").
@@ -774,13 +777,13 @@ function ControlListResults({
   errorMessage,
   entries,
   total,
-  hasMore,
+  page,
+  onPageChange,
   hasFilter,
   emptyState,
   removeIcon,
   isPending,
   onRemove,
-  onLoadMore,
 }: {
   t: ReturnType<typeof useTranslations>;
   isInitialLoading: boolean;
@@ -789,13 +792,13 @@ function ControlListResults({
   errorMessage: string | null;
   entries: TokenAllowlistEntry[];
   total: number;
-  hasMore: boolean;
+  page: number;
+  onPageChange: (page: number) => void;
   hasFilter: boolean;
   emptyState: string;
   removeIcon: ReactNode;
   isPending: boolean;
   onRemove: (entryId: string) => void;
-  onLoadMore: () => void;
 }) {
   if (isInitialLoading) {
     return (
@@ -818,6 +821,12 @@ function ControlListResults({
       </div>
     );
   }
+  const { pageCount, start, end } = getPageSummary({
+    page,
+    pageSize: CONTROL_LIST_PAGE_SIZE,
+    total,
+    shown: entries.length,
+  });
   return (
     <div
       aria-busy={isRefreshing}
@@ -832,23 +841,14 @@ function ControlListResults({
           onRemove={onRemove}
         />
       ))}
-      {hasMore ? (
-        <div className="flex items-center justify-between gap-2 pt-1">
-          <span className="text-xs text-tertiary">
-            {t("DashboardIssuance.controlLists.showingCount", { shown: entries.length, total })}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            iconLeft={busy ? <Loader2 className="animate-spin" /> : undefined}
-            onClick={onLoadMore}
-          >
-            {t("DashboardIssuance.controlLists.loadMore")}
-          </Button>
-        </div>
-      ) : null}
+      <ArrowPagination
+        className="pt-1"
+        page={page}
+        pageCount={pageCount}
+        onPageChange={onPageChange}
+        disabled={busy}
+        summary={t("DashboardIssuance.pagination.range", { start, end, total })}
+      />
     </div>
   );
 }
@@ -874,7 +874,7 @@ function ControlListEntries({
   const t = useTranslations();
   const [query, setQuery] = useState("");
   const [labelFilter, setLabelFilter] = useState(ALL_LABELS);
-  const [pageSize, setPageSize] = useState(CONTROL_LIST_PAGE_STEP);
+  const [page, setPage] = useState(1);
   const debouncedQuery = useDebounce(query.trim(), 300);
 
   // Distinct labels for the whole control list, fetched server-side so the
@@ -901,17 +901,17 @@ function ControlListEntries({
   const labelParam = activeLabel !== ALL_LABELS && activeLabel.length > 0 ? activeLabel : null;
 
   const { data, error, isLoading, isValidating } = usePersistedDashboardSWR(
-    [TOKEN_ALLOWLIST_KEY, tokenId, searchParam ?? "", labelParam ?? "", pageSize] as const,
+    [TOKEN_ALLOWLIST_KEY, tokenId, searchParam ?? "", labelParam ?? "", page] as const,
     () =>
       fetchTokenAllowlistPage(tokenId, {
-        page: 1,
-        pageSize,
+        page,
+        pageSize: CONTROL_LIST_PAGE_SIZE,
         search: searchParam,
         label: labelParam,
       }),
     { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true },
     {
-      key: `token.${tokenId}.allowlist.${searchParam ?? ""}.${labelParam ?? ""}.${pageSize}`,
+      key: `token.${tokenId}.allowlist.${searchParam ?? ""}.${labelParam ?? ""}.${page}`,
       ttlMs: 30_000,
     }
   );
@@ -920,12 +920,20 @@ function ControlListEntries({
   const total = data?.total ?? 0;
   const hasFilter = searchParam !== null || labelParam !== null;
   // `busy` = any in-flight fetch. With keepPreviousData, isLoading is only true on
-  // the first load, so isValidating is what catches search/label changes and
-  // "Load more". Filters + button are blocked while busy; a refetch over
-  // already-shown rows also dims them.
+  // the first load, so isValidating is what catches search/label/page changes.
+  // Filters + pager are blocked while busy; a refetch over already-shown rows
+  // also dims them.
   const busy = isValidating;
   const isInitialLoading = isLoading && entries.length === 0;
   const isRefreshing = busy && entries.length > 0;
+  // Removing entries can shrink the list past the current page; step back to the
+  // last real page instead of an empty list under a "Page 3 of 2" pager.
+  const pageCount = getPageCount(total, CONTROL_LIST_PAGE_SIZE);
+  useEffect(() => {
+    if (page > pageCount) {
+      setPage(pageCount);
+    }
+  }, [page, pageCount]);
   const errorMessage = error
     ? error instanceof Error
       ? error.message
@@ -939,13 +947,13 @@ function ControlListEntries({
         query={query}
         onQueryChange={(value) => {
           setQuery(value);
-          setPageSize(CONTROL_LIST_PAGE_STEP);
+          setPage(1);
         }}
         searchPlaceholder={searchPlaceholder}
         activeLabel={activeLabel}
         onLabelChange={(value) => {
           setLabelFilter(value);
-          setPageSize(CONTROL_LIST_PAGE_STEP);
+          setPage(1);
         }}
         labels={labels}
         busy={busy}
@@ -959,13 +967,13 @@ function ControlListEntries({
         errorMessage={errorMessage}
         entries={entries}
         total={total}
-        hasMore={data?.hasMore ?? false}
+        page={page}
+        onPageChange={setPage}
         hasFilter={hasFilter}
         emptyState={emptyState}
         removeIcon={removeIcon}
         isPending={isPending}
         onRemove={onRemove}
-        onLoadMore={() => setPageSize((size) => size + CONTROL_LIST_PAGE_STEP)}
       />
     </div>
   );

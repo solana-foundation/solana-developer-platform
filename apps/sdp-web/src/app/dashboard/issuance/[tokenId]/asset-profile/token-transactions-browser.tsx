@@ -6,8 +6,8 @@ import {
   type TokenTransaction,
 } from "@sdp/types";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import {
   Card,
   CardAction,
@@ -28,13 +28,14 @@ import {
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatDisplayLabel } from "@/lib/utils";
+import { getPageCount, getPageSummary } from "../pagination.utils";
 import { formatDateTime } from "../token-management-workspace.utils";
 import { transactionStatusBadgeClass } from "../token-transactions-section";
 import { auditActionIcon, auditActionLabel } from "./asset-audit-presentation";
 import { fetchTokenTransactionsPage } from "./transactions.data";
 import { TOKEN_TRANSACTIONS_KEY } from "./transactions-cache";
 
-const PAGE_STEP = 50;
+const PAGE_SIZE = 50;
 // Sentinel select value for the "no filter" option (Select treats null/"" as the
 // empty placeholder, so the reset option needs a real value).
 const ALL = "__all__";
@@ -141,9 +142,9 @@ function TransactionsResults({
   errorMessage,
   transactions,
   total,
-  hasMore,
+  page,
+  onPageChange,
   hasFilters,
-  onLoadMore,
 }: {
   t: ReturnType<typeof useTranslations>;
   locale: ReturnType<typeof useLocale>;
@@ -153,9 +154,9 @@ function TransactionsResults({
   errorMessage: string | null;
   transactions: TokenTransaction[];
   total: number;
-  hasMore: boolean;
+  page: number;
+  onPageChange: (page: number) => void;
   hasFilters: boolean;
-  onLoadMore: () => void;
 }) {
   if (isInitialLoading) {
     return (
@@ -179,6 +180,12 @@ function TransactionsResults({
       </p>
     );
   }
+  const { pageCount, start, end } = getPageSummary({
+    page,
+    pageSize: PAGE_SIZE,
+    total,
+    shown: transactions.length,
+  });
   return (
     <div
       aria-busy={isRefreshing}
@@ -201,26 +208,13 @@ function TransactionsResults({
           ))}
         </TableBody>
       </Table>
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-secondary">
-          {t("DashboardIssuance.transactions.showing", {
-            count: transactions.length,
-            total: total ? ` of ${total}` : "",
-          })}
-        </p>
-        {hasMore ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            iconLeft={busy ? <Loader2 className="animate-spin" /> : undefined}
-            onClick={onLoadMore}
-          >
-            {t("DashboardIssuance.transactions.loadMore")}
-          </Button>
-        ) : null}
-      </div>
+      <ArrowPagination
+        page={page}
+        pageCount={pageCount}
+        onPageChange={onPageChange}
+        disabled={busy}
+        summary={t("DashboardIssuance.pagination.range", { start, end, total })}
+      />
     </div>
   );
 }
@@ -230,21 +224,22 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
   const locale = useLocale();
   const [type, setType] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [pageSize, setPageSize] = useState(PAGE_STEP);
+  const [page, setPage] = useState(1);
 
   const { data, error, isLoading, isValidating } = usePersistedDashboardSWR(
-    [TOKEN_TRANSACTIONS_KEY, tokenId, type ?? "all", status ?? "all", pageSize] as const,
-    ([, id, ty, st, size]) =>
+    [TOKEN_TRANSACTIONS_KEY, tokenId, type ?? "all", status ?? "all", page] as const,
+    ([, id, ty, st, pageNumber]) =>
       fetchTokenTransactionsPage(id, {
         type: ty === "all" ? null : ty,
         status: st === "all" ? null : st,
-        pageSize: Number(size),
+        page: Number(pageNumber),
+        pageSize: PAGE_SIZE,
       }),
-    // keepPreviousData → changing a filter keeps the current rows on screen
-    // (dimmed) while the new page loads, instead of flashing the empty state.
+    // keepPreviousData → paging/filtering keeps the current rows on screen
+    // (dimmed) while the next page loads, instead of flashing the empty state.
     { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true },
     {
-      key: `token.${tokenId}.transactions.${type ?? "all"}.${status ?? "all"}.${pageSize}`,
+      key: `token.${tokenId}.transactions.${type ?? "all"}.${status ?? "all"}.${page}`,
       ttlMs: 30_000,
     }
   );
@@ -259,6 +254,15 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
   const busy = isValidating;
   const isInitialLoading = isLoading && transactions.length === 0;
   const isRefreshing = busy && transactions.length > 0;
+  // A shrinking result set (new filter, rows aged out) can leave the current
+  // page past the end; step back to the last real page instead of showing an
+  // empty list under a "Page 5 of 3" pager.
+  const pageCount = getPageCount(total, PAGE_SIZE);
+  useEffect(() => {
+    if (page > pageCount) {
+      setPage(pageCount);
+    }
+  }, [page, pageCount]);
   const errorMessage = error
     ? error instanceof Error
       ? error.message
@@ -277,11 +281,11 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
           busy={busy}
           onTypeChange={(value) => {
             setType(value);
-            setPageSize(PAGE_STEP);
+            setPage(1);
           }}
           onStatusChange={(value) => {
             setStatus(value);
-            setPageSize(PAGE_STEP);
+            setPage(1);
           }}
         />
       </CardHeader>
@@ -295,9 +299,9 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
           errorMessage={errorMessage}
           transactions={transactions}
           total={total}
-          hasMore={data?.hasMore ?? false}
+          page={page}
+          onPageChange={setPage}
           hasFilters={hasFilters}
-          onLoadMore={() => setPageSize((size) => size + PAGE_STEP)}
         />
       </CardContent>
     </Card>

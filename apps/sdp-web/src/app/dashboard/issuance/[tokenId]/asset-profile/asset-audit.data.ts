@@ -21,11 +21,15 @@ export async function fetchAssetAuditHistory(
     action?: string | null;
     status?: string | null;
     actorType?: string | null;
+    page?: number;
     pageSize?: number;
     signal?: AbortSignal;
   } = {}
 ): Promise<AssetAuditHistory> {
   const query = new URLSearchParams();
+  if (options.page) {
+    query.set("page", String(options.page));
+  }
   if (options.action) {
     query.set("action", options.action);
   }
