@@ -12,11 +12,13 @@
       "showing": "Affichage des {count} premières transactions{total}. Utilisez la pagination pour voir les anciennes.",
       "loadError": "Impossible de charger les transactions.",
       "noMatches": "Aucune transaction ne correspond à ces filtres.",
-      "loadMore": "Afficher plus",
       "filterByType": "Filtrer par type",
       "filterAllTypes": "Tous les types",
       "filterByStatus": "Filtrer par statut",
       "filterAllStatuses": "Tous les statuts"
+    },
+    "pagination": {
+      "range": "{start}–{end} sur {total}"
     },
     "errors": {
       "unknown": "Erreur inconnue",
@@ -83,9 +85,7 @@
       "noMatches": "Aucune entrée ne correspond à votre recherche.",
       "filterByLabel": "Filtrer par libellé",
       "loading": "Chargement des entrées…",
-      "loadError": "Impossible de charger les entrées.",
-      "loadMore": "Afficher plus",
-      "showingCount": "Affichage de {shown} sur {total}"
+      "loadError": "Impossible de charger les entrées."
     },
     "wallet": {
       "none": "Aucun",
@@ -225,7 +225,6 @@
       "empty": "Aucune activité enregistrée pour le moment.",
       "loading": "Chargement de l'activité…",
       "error": "Impossible de charger l'activité.",
-      "loadMore": "Afficher plus",
       "recentTitle": "Activité récente",
       "viewAll": "Tout afficher"
     },

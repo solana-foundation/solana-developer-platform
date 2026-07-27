@@ -12,11 +12,13 @@
       "showing": "Showing first {count} transactions{total}. Use pagination to view older records.",
       "loadError": "Unable to load transactions.",
       "noMatches": "No transactions match these filters.",
-      "loadMore": "Load more",
       "filterByType": "Filter by type",
       "filterAllTypes": "All types",
       "filterByStatus": "Filter by status",
       "filterAllStatuses": "All statuses"
+    },
+    "pagination": {
+      "range": "{start}–{end} of {total}"
     },
     "errors": {
       "unknown": "Unknown error",
@@ -83,9 +85,7 @@
       "noMatches": "No entries match your search.",
       "filterByLabel": "Filter by label",
       "loading": "Loading entries…",
-      "loadError": "Unable to load entries.",
-      "loadMore": "Load more",
-      "showingCount": "Showing {shown} of {total}"
+      "loadError": "Unable to load entries."
     },
     "wallet": {
       "none": "None",
@@ -225,7 +225,6 @@
       "empty": "No activity recorded yet.",
       "loading": "Loading activity…",
       "error": "Couldn't load activity.",
-      "loadMore": "Load more",
       "recentTitle": "Recent activity",
       "viewAll": "View all"
     },

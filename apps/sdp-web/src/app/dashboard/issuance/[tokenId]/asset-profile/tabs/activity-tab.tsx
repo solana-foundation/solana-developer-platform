@@ -7,8 +7,8 @@ import {
   type AssetAuditEvent,
 } from "@sdp/types";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import {
   Card,
   CardAction,
@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { getPageCount, getPageSummary } from "../../pagination.utils";
 import { formatDateTime } from "../../token-management-workspace.utils";
 import { fetchAssetAuditHistory } from "../asset-audit.data";
 import {
@@ -38,7 +39,7 @@ import {
   auditStatusBadgeClass,
 } from "../asset-audit-presentation";
 
-const PAGE_STEP = 50;
+const PAGE_SIZE = 50;
 // Sentinel select value for the "no filter" option (Select treats null/"" as the
 // empty placeholder, so the reset option needs a real value). Shared across the
 // action/status/type filters — each Select is independent.
@@ -178,8 +179,9 @@ function ActivityResults({
   busy,
   errorMessage,
   events,
-  hasMore,
-  onLoadMore,
+  total,
+  page,
+  onPageChange,
 }: {
   t: ReturnType<typeof useTranslations>;
   locale: ReturnType<typeof useLocale>;
@@ -188,8 +190,9 @@ function ActivityResults({
   busy: boolean;
   errorMessage: string | null;
   events: AssetAuditEvent[];
-  hasMore: boolean;
-  onLoadMore: () => void;
+  total: number;
+  page: number;
+  onPageChange: (page: number) => void;
 }) {
   if (isInitialLoading) {
     return (
@@ -207,6 +210,12 @@ function ActivityResults({
   if (events.length === 0) {
     return <p className="text-sm text-secondary">{t("DashboardIssuance.activity.empty")}</p>;
   }
+  const { pageCount, start, end } = getPageSummary({
+    page,
+    pageSize: PAGE_SIZE,
+    total,
+    shown: events.length,
+  });
   return (
     <div
       aria-busy={isRefreshing}
@@ -228,18 +237,13 @@ function ActivityResults({
           ))}
         </TableBody>
       </Table>
-      {hasMore ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={busy}
-          iconLeft={busy ? <Loader2 className="animate-spin" /> : undefined}
-          onClick={onLoadMore}
-        >
-          {t("DashboardIssuance.activity.loadMore")}
-        </Button>
-      ) : null}
+      <ArrowPagination
+        page={page}
+        pageCount={pageCount}
+        onPageChange={onPageChange}
+        disabled={busy}
+        summary={t("DashboardIssuance.pagination.range", { start, end, total })}
+      />
     </div>
   );
 }
@@ -250,41 +254,44 @@ export function ActivityTab({ tokenId }: { tokenId: string }) {
   const [action, setAction] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [actorType, setActorType] = useState<string | null>(null);
-  const [pageSize, setPageSize] = useState(PAGE_STEP);
+  const [page, setPage] = useState(1);
 
   const { data, error, isLoading, isValidating } = usePersistedDashboardSWR(
-    [
-      "asset-audit",
-      tokenId,
-      action ?? "all",
-      status ?? "all",
-      actorType ?? "all",
-      pageSize,
-    ] as const,
-    ([, id, act, st, ty, size]) =>
+    ["asset-audit", tokenId, action ?? "all", status ?? "all", actorType ?? "all", page] as const,
+    ([, id, act, st, ty, pageNumber]) =>
       fetchAssetAuditHistory(id, {
         action: act === "all" ? null : act,
         status: st === "all" ? null : st,
         actorType: ty === "all" ? null : ty,
-        pageSize: Number(size),
+        page: Number(pageNumber),
+        pageSize: PAGE_SIZE,
       }),
-    // keepPreviousData → changing a filter keeps the current rows on screen
-    // (dimmed) while the new page loads, instead of flashing the empty state.
+    // keepPreviousData → paging/filtering keeps the current rows on screen
+    // (dimmed) while the next page loads, instead of flashing the empty state.
     { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true },
     {
-      key: `token.${tokenId}.audit.${action ?? "all"}.${status ?? "all"}.${actorType ?? "all"}.${pageSize}`,
+      key: `token.${tokenId}.audit.${action ?? "all"}.${status ?? "all"}.${actorType ?? "all"}.${page}`,
       ttlMs: 30_000,
     }
   );
 
   const events = data?.events ?? [];
+  const total = data?.total ?? 0;
   // `busy` = any in-flight fetch. With keepPreviousData, isLoading is only true on
-  // the first load (no data yet), so isValidating is what catches filter changes
-  // and "Load more". The filters + button are blocked while busy; a refetch over
+  // the first load (no data yet), so isValidating is what catches filter and page
+  // changes. The filters + pager are blocked while busy; a refetch over
   // already-shown rows also dims them.
   const busy = isValidating;
   const isInitialLoading = isLoading && events.length === 0;
   const isRefreshing = busy && events.length > 0;
+  // A shrinking result set can leave the current page past the end; step back to
+  // the last real page instead of an empty list under a "Page 5 of 3" pager.
+  const pageCount = getPageCount(total, PAGE_SIZE);
+  useEffect(() => {
+    if (page > pageCount) {
+      setPage(pageCount);
+    }
+  }, [page, pageCount]);
   const errorMessage = error
     ? error instanceof Error
       ? error.message
@@ -304,15 +311,15 @@ export function ActivityTab({ tokenId }: { tokenId: string }) {
           busy={busy}
           onActionChange={(value) => {
             setAction(value);
-            setPageSize(PAGE_STEP);
+            setPage(1);
           }}
           onStatusChange={(value) => {
             setStatus(value);
-            setPageSize(PAGE_STEP);
+            setPage(1);
           }}
           onActorTypeChange={(value) => {
             setActorType(value);
-            setPageSize(PAGE_STEP);
+            setPage(1);
           }}
         />
       </CardHeader>
@@ -325,8 +332,9 @@ export function ActivityTab({ tokenId }: { tokenId: string }) {
           busy={busy}
           errorMessage={errorMessage}
           events={events}
-          hasMore={data?.hasMore ?? false}
-          onLoadMore={() => setPageSize((size) => size + PAGE_STEP)}
+          total={total}
+          page={page}
+          onPageChange={setPage}
         />
       </CardContent>
     </Card>

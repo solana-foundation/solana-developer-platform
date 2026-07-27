@@ -524,6 +524,37 @@ describe("TokenService", () => {
       expect(transactions).toHaveLength(2);
     });
 
+    it("orders same-timestamp rows stably across pages", async () => {
+      // All five share one created_at, so only the id tiebreaker keeps paging
+      // deterministic — without it a row can repeat or vanish between pages.
+      const sharedAt = "2026-03-01T00:00:00.000Z";
+      await db.prepare("DELETE FROM issuance_transactions WHERE token_id = ?").bind(TOKEN_ID).run();
+      for (const id of ["itx_tie_a", "itx_tie_b", "itx_tie_c", "itx_tie_d", "itx_tie_e"]) {
+        await db
+          .prepare(
+            `INSERT INTO issuance_transactions
+             (id, token_id, organization_id, type, status, operation_params, created_at, updated_at)
+             VALUES (?, ?, ?, 'mint', 'confirmed', '{}', ?, ?)`
+          )
+          .bind(id, TOKEN_ID, TEST_ORG.id, sharedAt, sharedAt)
+          .run();
+      }
+
+      const pageIds: string[] = [];
+      for (let offset = 0; offset < 5; offset += 2) {
+        const { transactions } = await tokenService.listTokenTransactions(TOKEN_ID, {
+          organizationId: TEST_ORG.id,
+          limit: 2,
+          offset,
+        });
+        pageIds.push(...transactions.map((tx) => tx.id));
+      }
+
+      // Every row appears exactly once, newest-id first within the tie.
+      expect(pageIds).toEqual(["itx_tie_e", "itx_tie_d", "itx_tie_c", "itx_tie_b", "itx_tie_a"]);
+      expect(new Set(pageIds).size).toBe(5);
+    });
+
     it("installs the type filter index", async () => {
       const indexes = await db
         .prepare(

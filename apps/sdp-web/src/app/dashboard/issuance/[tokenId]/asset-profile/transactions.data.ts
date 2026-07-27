@@ -18,6 +18,7 @@ interface TokenTransactionsPageEnvelope {
 export async function fetchTokenTransactionsPage(
   tokenId: string,
   options: {
+    page?: number;
     pageSize?: number;
     type?: string | null;
     status?: string | null;
@@ -25,6 +26,9 @@ export async function fetchTokenTransactionsPage(
   } = {}
 ): Promise<TokenTransactionsPage> {
   const query = new URLSearchParams();
+  if (options.page) {
+    query.set("page", String(options.page));
+  }
   if (options.pageSize) {
     query.set("pageSize", String(options.pageSize));
   }

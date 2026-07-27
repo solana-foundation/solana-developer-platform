@@ -1175,7 +1175,9 @@ export class TokenService {
       params.push(type);
     }
 
-    selectQuery += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+    // id breaks ties so rows sharing a created_at can't shuffle between pages
+    // (same stable ordering as listAllowlistEntries and the org-wide list).
+    selectQuery += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?";
 
     const countResult = await this.db
       .prepare(countQuery)
