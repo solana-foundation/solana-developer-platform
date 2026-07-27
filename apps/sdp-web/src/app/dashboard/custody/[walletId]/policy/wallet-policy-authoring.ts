@@ -1,10 +1,16 @@
-import type {
-  PaymentWalletPolicy,
-  PolicyDefaultAction,
-  PolicyProviderSyncStatus,
-  PolicyRule,
-  PolicyRuleAction,
-  WalletOperationFamily,
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type PaymentWalletPolicy,
+  type PolicyDefaultAction,
+  type PolicyProviderSyncStatus,
+  type PolicyRule,
+  type PolicyRuleAction,
+  type SdpEnvironment,
+  type WalletOperationFamily,
+  WELL_KNOWN_TOKENS,
+  type WellKnownTokenCategory,
+  type WellKnownTokenSymbol,
+  wellKnownMint,
 } from "@sdp/types";
 
 export type PolicyFlowStep = "intent" | "limits-assets" | "destinations-operations" | "review";
@@ -21,6 +27,52 @@ export type DestinationMode = "allowlist" | "blocklist";
 export interface OperationTypeRuleInput {
   value: string;
   action: AuthoringRuleAction;
+}
+
+export interface PolicyAssetOption {
+  token: string;
+  mint: string;
+  /** Full token name, shown under the symbol when the catalogue knows it. */
+  name?: string;
+  category?: WellKnownTokenCategory;
+  /** Only wallet holdings carry a balance; well-known mints are offered even when the wallet holds none. */
+  uiAmount?: string;
+  source: "wallet" | "well-known";
+}
+
+/**
+ * Wallet holdings first, then the well-known mints for the active cluster that the wallet
+ * does not already hold. Without this the picker only knows about tokens already in the
+ * wallet, so covering USDC on a fresh wallet meant pasting a mint address by hand.
+ */
+export function buildPolicyAssetOptions(
+  walletAssets: readonly { token: string; mint: string; uiAmount: string }[],
+  environment: SdpEnvironment
+): PolicyAssetOption[] {
+  const options = new Map<string, PolicyAssetOption>();
+
+  for (const asset of walletAssets) {
+    if (!options.has(asset.mint)) {
+      options.set(asset.mint, { ...asset, source: "wallet" });
+    }
+  }
+
+  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  for (const symbol of Object.keys(WELL_KNOWN_TOKENS) as WellKnownTokenSymbol[]) {
+    const token = WELL_KNOWN_TOKENS[symbol];
+    const mint = wellKnownMint(symbol, cluster);
+    // Tokens without a mint on this cluster (e.g. USDT on devnet) must not be offered.
+    if (!mint || options.has(mint)) continue;
+    options.set(mint, {
+      token: token.symbol,
+      name: token.name,
+      category: token.category,
+      mint,
+      source: "well-known",
+    });
+  }
+
+  return [...options.values()];
 }
 
 export interface PolicyAuthoringState {

@@ -71,11 +71,12 @@ interface HeliusGetAssetBatchResponse {
 async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetDefinition>> {
   const network = env.SOLANA_NETWORK ?? "devnet";
   const usdc = WELL_KNOWN_TOKENS.USDC;
+  const usdcMint = usdc.mints[network];
   const trackedAssets: TrackedAssetDefinition[] = [
     {
       token: usdc.symbol,
-      mint: usdc.mints[network],
-      decimals: usdc.decimals,
+      mint: usdcMint.address,
+      decimals: usdcMint.decimals,
       isUsdStable: usdc.isUsdStable,
     },
   ];
