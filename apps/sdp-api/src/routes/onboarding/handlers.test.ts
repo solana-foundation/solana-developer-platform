@@ -134,6 +134,16 @@ describe("organization onboarding handlers", () => {
 
     expect((await app.request("/complete", completeRequest("turnkey"), env)).status).toBe(400);
 
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "helius" }), ORGANIZATION_ID)
+      .run();
+    expect((await app.request("/complete", completeRequest(), env)).status).toBe(403);
+
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "default" }), ORGANIZATION_ID)
+      .run();
     const response = await app.request("/complete", completeRequest(), env);
     const body = (await response.json()) as {
       data: { setup: { status: string; currentStep: string; custodyProvider: string } };
