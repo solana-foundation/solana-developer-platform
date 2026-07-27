@@ -17,6 +17,29 @@ export interface WizardSummaryDetail {
 }
 
 /**
+ * Renders the memo payload as titled, pretty-printed JSON.
+ *
+ * @param props - The memo record shown in the JSON block.
+ * @returns The memo JSON view.
+ */
+export function MemoJsonView({ json }: { json: Record<string, string> }) {
+  const t = useTranslations();
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <p className="text-base font-medium text-primary">
+          {t("DashboardPayments.ramps.memoJsonTitle")}
+        </p>
+        <p className="text-sm text-tertiary">{t("DashboardPayments.ramps.memoJsonDescription")}</p>
+      </div>
+      <pre className="max-h-80 overflow-auto rounded-xl border border-border-default bg-surface-sunken p-4 font-mono text-sm text-primary">
+        <code>{JSON.stringify(json, null, 2)}</code>
+      </pre>
+    </div>
+  );
+}
+
+/**
  * Renders the selections a user has made so far in a payments wizard, with an
  * in-place JSON drill-in for rows that carry a payload.
  *
@@ -38,17 +61,7 @@ export function WizardSummaryList({ details }: { details: WizardSummaryDetail[] 
           <ChevronLeftIcon className="size-4" />
           {t("DashboardPayments.previous")}
         </button>
-        <div className="space-y-1">
-          <p className="text-base font-medium text-primary">
-            {t("DashboardPayments.ramps.memoJsonTitle")}
-          </p>
-          <p className="text-sm text-tertiary">
-            {t("DashboardPayments.ramps.memoJsonDescription")}
-          </p>
-        </div>
-        <pre className="max-h-80 overflow-auto rounded-xl border border-border-default bg-surface-sunken p-4 font-mono text-sm text-primary">
-          <code>{JSON.stringify(jsonDetail.json, null, 2)}</code>
-        </pre>
+        <MemoJsonView json={jsonDetail.json} />
       </div>
     );
   }
