@@ -100,7 +100,11 @@ function normalizeLightsparkCurrencyCode(value: string): string {
 function getLightsparkCurrencyDecimals(currencyCode: string): number {
   const normalized = currencyCode.trim().toUpperCase();
   if (normalized === "BTC") return 8;
-  if (isSolanaCryptoAsset(normalized)) return WELL_KNOWN_TOKENS[normalized].decimals;
+  // Mainnet scale: Lightspark is a fiat ramp and only ever settles real value,
+  // so there is no devnet deployment whose decimals could apply here.
+  if (isSolanaCryptoAsset(normalized)) {
+    return WELL_KNOWN_TOKENS[normalized].mints["mainnet-beta"].decimals;
+  }
   throw new SdpPaymentsError(
     "BAD_REQUEST",
     `Unsupported lightspark cryptoToken: ${currencyCode}. Supported values: BTC, ${Object.keys(WELL_KNOWN_TOKENS).join(", ")}`

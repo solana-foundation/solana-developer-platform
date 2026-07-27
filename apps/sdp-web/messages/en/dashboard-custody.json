@@ -318,7 +318,7 @@
     "policySelectedAssets": "Selected assets",
     "policySelectedAssetCount": "{count} selected",
     "policyCustomMint": "Custom mint",
-    "policyNoMatchingAssets": "No matching wallet assets.",
+    "policyNoMatchingAssets": "No matching assets.",
     "policyAddCustomMint": "Add custom mint",
     "policyInvalidMint": "Enter a valid Solana mint address.",
     "policyDuplicateAsset": "This asset is already selected.",
@@ -776,6 +776,8 @@
     "apiKeySaveFailed": "API key could not be saved: {error}",
     "apiKeyEditMissingId": "API key id is required to save changes.",
     "apiKeyReplaceBindingsConfirmationRequired": "Confirm Replace bindings before saving this binding change.",
-    "apiKeyClearBindingsConfirmationRequired": "Confirm Clear bindings before saving this binding change."
+    "apiKeyClearBindingsConfirmationRequired": "Confirm Clear bindings before saving this binding change.",
+    "policyAssetsInWallet": "In this wallet",
+    "policyAssetsCommon": "Common tokens"
   }
 }

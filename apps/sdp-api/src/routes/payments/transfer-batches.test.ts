@@ -922,7 +922,7 @@ describe("payment transfer batches", () => {
       label: "well-known symbol USDC",
       tokenProgram: SPL_TOKEN_PROGRAMS["spl-token"],
       requestToken: "USDC",
-      expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet,
+      expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
     },
   ])("creates a $label transfer batch", async ({
     label,
