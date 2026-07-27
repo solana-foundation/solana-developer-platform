@@ -1,6 +1,11 @@
 "use client";
 
-import { isMuralSandboxPayinCurrency, type PaymentTransferSummary } from "@sdp/types";
+import {
+  isMuralSandboxPayinCurrency,
+  type PaymentOnrampQuoteRequest,
+  type PaymentTransferSummary,
+} from "@sdp/types";
+import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -9,9 +14,16 @@ import {
   simulateSandboxTransfer,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
+import {
+  memoSummaryDetails,
+  optionalDetail,
+  providerSummaryDetail,
+  summaryAmount,
+} from "../wizard-summary";
 import {
   isTerminalRampTransferStatus,
   type RampWizardStep,
@@ -20,7 +32,7 @@ import {
 } from "./use-ramp-wizard";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-export type OnrampStepId = "DEPOSIT" | "PROVIDER" | "REQUIREMENTS";
+export type OnrampStepId = "DEPOSIT" | "MEMO" | "PROVIDER" | "REQUIREMENTS";
 
 export function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStepId>[] {
   return [
@@ -28,6 +40,11 @@ export function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStep
       id: "DEPOSIT",
       label: t("DashboardPayments.ramps.onrampDepositStep"),
       title: t("DashboardPayments.ramps.onrampDepositTitle"),
+    },
+    {
+      id: "MEMO",
+      label: t("DashboardPayments.ramps.rampMemoStep"),
+      title: t("DashboardPayments.ramps.rampMemoStepTitle"),
     },
     {
       id: "PROVIDER",
@@ -47,6 +64,7 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
 
 export function useOnrampWizard(props: UseRampWizardProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
@@ -54,32 +72,55 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     pairs: ONRAMP_PAIRS,
     steps: getOnrampSteps(t),
     stepSchemas: { DEPOSIT: depositAmountSchema },
-    quoteStepId: "DEPOSIT",
+    quoteStepId: "MEMO",
+    memoStepId: "MEMO",
     requirements: {
       step: getOnrampRequirementsStep(t),
-      insertAfter: "DEPOSIT",
+      insertAfter: "MEMO",
       direction: "onramp",
     },
     advanceRequirementsBeforeQuote: true,
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",
-    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, collectedData }) => ({
-      provider,
-      counterpartyId: fields.counterpartyId,
-      destinationWallet: fields.walletId,
-      cryptoToken,
-      fiatCurrency: selectedRampPair.fiatCurrency,
-      fiatAmount: fields.amount.trim(),
-      redirectUrl: `${window.location.origin}/dashboard/payments`,
-      // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
-      domain: window.location.hostname,
-      collectedData,
-    }),
+    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>
+      ({
+        provider,
+        counterpartyId: fields.counterpartyId,
+        destinationWallet: fields.walletId,
+        cryptoToken,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+        fiatAmount: fields.amount.trim(),
+        redirectUrl: `${window.location.origin}/dashboard/payments`,
+        // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
+        domain: window.location.hostname,
+        rampsMemo,
+      }) satisfies PaymentOnrampQuoteRequest,
     onQuoteCreated: () => {
       setQuoteSimulationLoading(false);
       setQuoteSimulationSucceeded(false);
     },
   });
+
+  const amount = summaryAmount(wizard.fields.amount, locale);
+  const summaryDetails: WizardSummaryDetail[] = [
+    ...optionalDetail(
+      wizard.selectedWallet === null ? null : wizard.selectedWallet.label,
+      t("DashboardPayments.ramps.destinationWallet"),
+      WalletIcon
+    ),
+    ...optionalDetail(
+      amount === null ? null : `${amount} ${wizard.selectedRampPair.fiatCurrency}`,
+      t("DashboardPayments.ramps.amount"),
+      DollarSignIcon
+    ),
+    {
+      icon: CoinsIcon,
+      label: t("DashboardPayments.onchainReceive.receive"),
+      value: toRampCryptoToken(wizard.selectedRampPair.assetRail),
+    },
+    ...providerSummaryDetail(t, wizard.fields.provider),
+    ...memoSummaryDetails(t, wizard.memoRows),
+  ];
 
   const transferStatusKey = wizard.quote
     ? (["onramp-transfer-status", wizard.quote.provider, wizard.quote.id] as const)
@@ -176,6 +217,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
   return {
     ...wizard,
+    summaryDetails,
     transferStatus,
     transferStatusLoading,
     quoteSimulationLoading,

@@ -36,6 +36,7 @@ export function mapTransferRow(row: TransferRow) {
       ? { counterpartyDisplayName: row.counterparty_display_name }
       : {}),
     ...(row.memo ? { memo: row.memo } : {}),
+    rampsMemo: row.ramps_memo,
     token: row.token,
     ...(row.amount ? { amount: row.amount } : {}),
     createdAt: row.created_at,
