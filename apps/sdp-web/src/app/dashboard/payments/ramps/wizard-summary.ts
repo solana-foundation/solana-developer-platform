@@ -1,6 +1,9 @@
+import type { RampProviderId } from "@sdp/types";
+import { CreditCardIcon, FileTextIcon, type LucideIcon, UserRoundIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../wizard-summary-list";
-import { isEmptyMemoRow, type MemoRow } from "./memo";
+import { isEmptyMemoRow, type MemoRow, memoRowsToRecord } from "./memo";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -9,10 +12,15 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
  *
  * @param value - The chosen value; null while the user has not made the selection.
  * @param label - The detail label naming the selection.
+ * @param icon - The icon rendered ahead of the label.
  * @returns A single detail, or none while the value is missing.
  */
-export function optionalDetail(value: string | null, label: string): WizardSummaryDetail[] {
-  return value === null ? [] : [{ label, value }];
+export function optionalDetail(
+  value: string | null,
+  label: string,
+  icon: LucideIcon
+): WizardSummaryDetail[] {
+  return value === null ? [] : [{ icon, label, value }];
 }
 
 /**
@@ -32,14 +40,39 @@ export function preStepSummaryDetails(
   return [
     ...optionalDetail(
       counterpartyName.length === 0 ? null : counterpartyName,
-      t("DashboardPayments.counterpartyLabel")
+      t("DashboardPayments.counterpartyLabel"),
+      UserRoundIcon
     ),
-    ...optionalDetail(methodLabel, t("DashboardPayments.method")),
+    ...optionalDetail(methodLabel, t("DashboardPayments.method"), CreditCardIcon),
   ];
 }
 
 /**
- * Builds the memo field-count summary detail from the wizard memo rows.
+ * Builds the chosen ramp provider's summary detail with its logo.
+ *
+ * @param t - Translator resolved from the i18n provider.
+ * @param provider - The chosen ramp provider; null until chosen.
+ * @returns A single provider detail, or none while unchosen.
+ */
+export function providerSummaryDetail(
+  t: Translate,
+  provider: RampProviderId | null
+): WizardSummaryDetail[] {
+  if (provider === null) {
+    return [];
+  }
+  return [
+    {
+      icon: RAMP_PROVIDER_LOGOS[provider],
+      label: t("DashboardPayments.ramps.provider"),
+      value: getRampProviderLabel(provider),
+    },
+  ];
+}
+
+/**
+ * Builds the memo field-count summary detail from the wizard memo rows,
+ * carrying the memo payload for the summary's JSON drill-in.
  *
  * @param t - Translator resolved from the i18n provider.
  * @param memoRows - Current memo rows from the ramp wizard.
@@ -52,11 +85,13 @@ export function memoSummaryDetails(t: Translate, memoRows: MemoRow[]): WizardSum
   }
   return [
     {
+      icon: FileTextIcon,
       label: t("DashboardPayments.ramps.rampMemoStep"),
       value:
         count === 1
           ? t("DashboardPayments.ramps.memoSummaryCountOne")
           : t("DashboardPayments.ramps.memoSummaryCountOther", { count }),
+      json: memoRowsToRecord(memoRows),
     },
   ];
 }

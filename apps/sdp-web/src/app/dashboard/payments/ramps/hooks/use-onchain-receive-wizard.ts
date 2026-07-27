@@ -1,6 +1,7 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
+import { WalletIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -68,7 +69,8 @@ export function useOnchainReceiveWizard({
 
   const summaryDetails: WizardSummaryDetail[] = optionalDetail(
     selectedWallet === null ? null : selectedWallet.label,
-    t("DashboardPayments.ramps.destinationWallet")
+    t("DashboardPayments.ramps.destinationWallet"),
+    WalletIcon
   );
 
   const handlePrimary = () => {

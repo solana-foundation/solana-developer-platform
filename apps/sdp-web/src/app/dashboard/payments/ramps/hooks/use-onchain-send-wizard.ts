@@ -5,6 +5,7 @@ import type {
   PaymentsDashboardWallet,
   PaymentTransferSummary,
 } from "@sdp/types";
+import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -249,15 +250,18 @@ export function useOnchainSendWizard({
   const summaryDetails: WizardSummaryDetail[] = [
     ...optionalDetail(
       selectedWallet === null ? null : selectedWallet.label,
-      t("DashboardPayments.onchainSend.sourceWallet")
+      t("DashboardPayments.onchainSend.sourceWallet"),
+      WalletIcon
     ),
     ...optionalDetail(
       selectedAsset === null ? null : selectedAsset.label,
-      t("DashboardPayments.onchainSend.asset")
+      t("DashboardPayments.onchainSend.asset"),
+      CoinsIcon
     ),
     ...optionalDetail(
       fields.amount.length === 0 ? null : formatTokenAmount(fields.amount, locale),
-      t("DashboardPayments.onchainSend.amount")
+      t("DashboardPayments.onchainSend.amount"),
+      DollarSignIcon
     ),
   ];
 

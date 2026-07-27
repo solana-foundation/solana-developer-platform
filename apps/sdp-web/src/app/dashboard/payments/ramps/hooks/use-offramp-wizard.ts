@@ -5,6 +5,7 @@ import type {
   PaymentRampInstruction,
   PaymentTransferSummary,
 } from "@sdp/types";
+import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -15,10 +16,10 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { getRampProviderLabel, OFFRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import { OFFRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
-import { memoSummaryDetails, optionalDetail } from "../wizard-summary";
+import { memoSummaryDetails, optionalDetail, providerSummaryDetail } from "../wizard-summary";
 import {
   isTerminalRampTransferStatus,
   type RampWizardStep,
@@ -151,22 +152,22 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   const summaryDetails: WizardSummaryDetail[] = [
     ...optionalDetail(
       wizard.selectedWallet === null ? null : wizard.selectedWallet.label,
-      t("DashboardPayments.ramps.sourceWallet")
+      t("DashboardPayments.ramps.sourceWallet"),
+      WalletIcon
     ),
     ...optionalDetail(
       wizard.fields.amount.length === 0
         ? null
         : `${formatTokenAmount(wizard.fields.amount, locale)} ${offrampCryptoToken}`,
-      t("DashboardPayments.ramps.amount")
+      t("DashboardPayments.ramps.amount"),
+      DollarSignIcon
     ),
     {
+      icon: BanknoteIcon,
       label: t("DashboardPayments.payoutCurrency"),
       value: wizard.selectedRampPair.fiatCurrency,
     },
-    ...optionalDetail(
-      wizard.fields.provider === null ? null : getRampProviderLabel(wizard.fields.provider),
-      t("DashboardPayments.ramps.provider")
-    ),
+    ...providerSummaryDetail(t, wizard.fields.provider),
     ...memoSummaryDetails(t, wizard.memoRows),
   ];
 

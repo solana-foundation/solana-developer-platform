@@ -99,6 +99,7 @@
       "amount": "Montant",
       "destinationWallet": "Wallet destination",
       "sourceWallet": "Wallet source",
+      "memoViewJson": "Voir le JSON",
       "memoJsonTitle": "JSON du mémo",
       "memoJsonDescription": "Les champs du mémo tels qu’ils seront inclus dans la requête.",
       "memoDescription": "Ajoutez des champs clé-valeur pour le rapprochement hors chaîne. Collez des lignes séparées par des tabulations ou des virgules n’importe où.",

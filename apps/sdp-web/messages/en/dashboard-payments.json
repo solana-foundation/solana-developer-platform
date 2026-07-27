@@ -99,6 +99,7 @@
       "amount": "Amount",
       "destinationWallet": "Destination wallet",
       "sourceWallet": "Source wallet",
+      "memoViewJson": "View JSON",
       "memoJsonTitle": "Memo JSON",
       "memoJsonDescription": "The memo fields as they will be included in the request.",
       "memoDescription": "Add key-value fields for offchain reconciliation. Paste tab- or comma-separated rows anywhere.",
