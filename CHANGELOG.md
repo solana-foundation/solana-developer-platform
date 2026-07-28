@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.49.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.48.0...v0.49.0) (2026-07-28)
+
+### Features
+
+* **issuance:** AlphaLedger provider scaffold ([#967](https://github.com/solana-foundation/solana-developer-platform/pull/967)) ([23ade96](https://github.com/solana-foundation/solana-developer-platform/commit/23ade964d3b2d6ce77cb6f6f7bfd8eb0f5f600f0))
+* HOO-769 Submit stored privy credentials ([#884](https://github.com/solana-foundation/solana-developer-platform/pull/884)) ([52e9ae3](https://github.com/solana-foundation/solana-developer-platform/commit/52e9ae328789eaf9aa5c6e6f93880415e979b599))
+* **web:** AlphaLedger integration for tokenization ([#965](https://github.com/solana-foundation/solana-developer-platform/pull/965)) ([42e731e](https://github.com/solana-foundation/solana-developer-platform/commit/42e731edb8cba9528f88dda4fb15fb8f37de8334))
+* **members:** members management on the settings page ([#946](https://github.com/solana-foundation/solana-developer-platform/pull/946)) ([e154244](https://github.com/solana-foundation/solana-developer-platform/commit/e154244a3e0d84c73b343b4a65dd0279be1078cd))
+* **api:** members pagination, invitation links, revoke, and removal guards ([#945](https://github.com/solana-foundation/solana-developer-platform/pull/945)) ([071fb63](https://github.com/solana-foundation/solana-developer-platform/commit/071fb6384c1e69ea31a77b8c422d397ba042dc58))
+* backend for allowlist filters/pagination and transactions filters/pagination ([#934](https://github.com/solana-foundation/solana-developer-platform/pull/934)) ([d944673](https://github.com/solana-foundation/solana-developer-platform/commit/d9446734f72b9bb4f0d48c1df22e5d585c6672b2))
+* **payments:** let the transactions table show observed on-chain deposits ([#943](https://github.com/solana-foundation/solana-developer-platform/pull/943)) ([b359673](https://github.com/solana-foundation/solana-developer-platform/commit/b3596734f961711a0b6b7af46040507086447ab6))
+* **types:** broaden the well-known token catalogue ([#939](https://github.com/solana-foundation/solana-developer-platform/pull/939)) ([4532cf7](https://github.com/solana-foundation/solana-developer-platform/commit/4532cf751d91a1fe45ea4da361b198868071432e))
+
+### Bug Fixes
+
+* **web:** break sign-in loop for sessions without an active organization ([#969](https://github.com/solana-foundation/solana-developer-platform/pull/969)) ([c62f44c](https://github.com/solana-foundation/solana-developer-platform/commit/c62f44c5d99b254e3cd61870e0c658d930a6edbf))
+* **web:** move the colour theme control into settings ([#961](https://github.com/solana-foundation/solana-developer-platform/pull/961)) ([4f92f79](https://github.com/solana-foundation/solana-developer-platform/commit/4f92f791e6dc9686bcc43e3499ec736d0b502c87))
+
+### Maintenance
+
+* **api:** guard batch transfer destination-allowlist enforcement ([#777](https://github.com/solana-foundation/solana-developer-platform/pull/777)) ([9bf8c66](https://github.com/solana-foundation/solana-developer-platform/commit/9bf8c669b0a79ddabdc4d3028bea46a4d923b5ac))
+
 ## [0.48.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.47.1...v0.48.0) (2026-07-27)
 
 ### Features
