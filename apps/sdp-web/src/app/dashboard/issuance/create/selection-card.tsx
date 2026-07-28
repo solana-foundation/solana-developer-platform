@@ -28,10 +28,10 @@ export function SelectionCard({
       // "advance" instead of skipping it like other buttons.
       data-enter-advance
       className={cn(
-        "flex flex-col rounded-2xl border p-3.5 text-left transition-colors",
+        "flex flex-col rounded-2xl border border-border-default p-3.5 text-left outline outline-2 -outline-offset-2 transition-colors",
         selected
-          ? "border-primary bg-fill-subtle"
-          : "border-border-default bg-surface-raised hover:bg-fill-subtle"
+          ? "bg-fill-subtle outline-border-strong ring-2 ring-tertiary ring-offset-2 ring-offset-white"
+          : "bg-surface-raised outline-transparent hover:bg-fill-subtle"
       )}
     >
       <div className="flex items-start justify-between gap-3">
