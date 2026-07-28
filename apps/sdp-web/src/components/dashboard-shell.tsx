@@ -4,19 +4,26 @@ import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
+  ArrowDownLeftIcon,
   ArrowLeftIcon,
   ArrowLeftRightIcon,
+  ArrowUpRightIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
   CircleCheckBigIcon,
   CoinsIcon,
+  FileTextIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
   LibraryIcon,
   LockIcon,
   PanelLeftIcon,
   PanelRightIcon,
+  ReceiptTextIcon,
+  RepeatIcon,
   Settings2Icon,
   ShieldCheckIcon,
+  UsersIcon,
   WalletIcon,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
@@ -68,7 +75,6 @@ import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -91,6 +97,8 @@ import { cn } from "@/lib/utils";
 type SubNavItem = {
   label: string;
   href: string;
+  /** Optional so nav groups that have not been given icons keep rendering unchanged. */
+  icon?: LucideIcon;
   disabled?: boolean;
 };
 
@@ -118,23 +126,32 @@ function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[]
     {
       label: t("Shared.dashboardShell.transactions"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.transactions,
+      icon: ReceiptTextIcon,
     },
     {
       label: t("Shared.dashboardShell.counterparty"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
+      icon: UsersIcon,
     },
-    { label: t("Shared.dashboardShell.pay"), href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay },
+    {
+      label: t("Shared.dashboardShell.pay"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay,
+      icon: ArrowUpRightIcon,
+    },
     {
       label: t("Shared.dashboardShell.deposit"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.deposit,
+      icon: ArrowDownLeftIcon,
     },
     {
       label: t("Shared.dashboardShell.requests"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.requests,
+      icon: FileTextIcon,
     },
     {
       label: t("Shared.dashboardShell.recurring"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
+      icon: RepeatIcon,
     },
   ];
 }
@@ -364,9 +381,6 @@ function DashboardTopBar({
         }
         trailingContent={
           <>
-            <div className="xl:hidden">
-              <ThemeToggle variant="header" />
-            </div>
             <LanguagePicker />
             <UserButton />
             {sandboxBadge}
@@ -388,9 +402,6 @@ function DashboardTopBar({
       }
       trailingContent={
         <>
-          <div className="xl:hidden">
-            <ThemeToggle variant="header" />
-          </div>
           <LanguagePicker />
           <UserButton />
           {sandboxBadge}
@@ -682,9 +693,6 @@ function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  if (pathname.startsWith("/dashboard/members")) {
-    return { title: t("Shared.dashboardShell.members") };
-  }
   if (pathname.startsWith("/dashboard/settings")) {
     return { title: t("Shared.dashboardShell.settings") };
   }
@@ -700,10 +708,6 @@ function ApiKeyNewLoading() {
 
 function ApiKeyEditLoading() {
   return <ApiKeyAuthoringSkeleton route="api-key-edit" />;
-}
-
-function MembersLoading() {
-  return <CompactOperationsCardSkeleton route="members" />;
 }
 
 function AllowlistLoading() {
@@ -783,8 +787,6 @@ function resolvePageLoadingComponent(
       return ApprovalInboxSkeleton;
     case "approval-detail":
       return ApprovalDetailSkeleton;
-    case "members":
-      return MembersLoading;
     case "settings":
       return SettingsPageSkeleton;
     case "allowlist":
@@ -936,7 +938,10 @@ function SidebarGroup({
                           )}
                         />
                         {child.disabled ? (
-                          <span className="flex h-9 flex-1 cursor-not-allowed items-center rounded-lg px-3 text-sm text-tertiary">
+                          <span className="flex h-9 flex-1 cursor-not-allowed items-center gap-2.5 rounded-lg px-3 text-sm text-tertiary">
+                            {child.icon ? (
+                              <child.icon aria-hidden="true" className="size-4 shrink-0" />
+                            ) : null}
                             {child.label}
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
@@ -945,10 +950,13 @@ function SidebarGroup({
                             href={child.href}
                             onClick={onNavigate}
                             className={cn(
-                              "flex h-9 flex-1 items-center rounded-lg px-3 text-sm transition-colors",
+                              "flex h-9 flex-1 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors",
                               childActive ? navItemActive : navItemInactive
                             )}
                           >
+                            {child.icon ? (
+                              <child.icon aria-hidden="true" className="size-4 shrink-0" />
+                            ) : null}
                             {child.label}
                           </DashboardNavigationLink>
                         )}
@@ -992,7 +1000,7 @@ function DashboardSidebarContent({
   const showMobileClose = variant === "mobile";
   return (
     <>
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-3">
+      <div className="min-h-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto overscroll-contain p-3">
         <div className="py-3">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
@@ -1054,12 +1062,7 @@ function DashboardSidebarContent({
             </DashboardNavigationLink>
           );
         })}
-        {variant === "desktop" ? (
-          <>
-            <ThemeToggle collapsed={isCollapsed} />
-            <NetworkDebugToggle collapsed={isCollapsed} />
-          </>
-        ) : null}
+        {variant === "desktop" ? <NetworkDebugToggle collapsed={isCollapsed} /> : null}
       </div>
     </>
   );
@@ -1322,7 +1325,6 @@ export function DashboardShell({
             <span className="absolute left-1/2 hidden -translate-x-1/2 text-sm font-medium text-secondary sm:block">
               {t("Shared.dashboardShell.workspace")}
             </span>
-            <ThemeToggle variant="header" />
           </header>
           <section className="min-h-0 flex-1">{children}</section>
         </div>
@@ -1371,9 +1373,14 @@ export function DashboardShell({
                 ? t("Shared.dashboardShell.collapseSidebar")
                 : t("Shared.dashboardShell.expandSidebar")
             }
-            className="group absolute top-1/2 right-0 z-10 flex h-24 w-5 -translate-y-1/2 translate-x-3/4 cursor-pointer items-center justify-center"
+            className="absolute top-1/2 right-0 z-20 flex size-6 -translate-y-1/2 translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border-default bg-surface-raised text-secondary shadow-sm transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:border-border-strong hover:text-primary"
           >
-            <span className="block h-8 w-0.5 rounded-full bg-border-strong group-hover:bg-tertiary" />
+            <ChevronLeftIcon
+              className={cn(
+                "size-3.5 transition-transform motion-reduce:transition-none",
+                !isSidebarOpen && "rotate-180"
+              )}
+            />
           </button>
         </aside>
 

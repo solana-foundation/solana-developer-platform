@@ -61,6 +61,8 @@ const fetchMaybeSubscriptionDelegationMock = vi.spyOn(
 const TEST_CONFIG_ID = "cust_cfg_payments_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_test";
 const TEST_WALLET_ID = "wal_payments_test";
+const TEST_ADDITIONAL_CUSTODY_WALLET_ID = "cwlt_payments_additional_test";
+const TEST_ADDITIONAL_WALLET_ID = "wal_payments_additional_test";
 const TEST_ORG = {
   id: "org_payments_policy_test",
   name: "Payments Policy Test Org",
@@ -118,7 +120,7 @@ const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
 const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
 const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
 const TEST_MAGICBLOCK_SPONSOR_FEE_PAYER = "CrankS2fXgMGvQJ3VBrZmRfGrfogDY6pq5YcgkPEpSNf";
-const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet;
+const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
 const MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID = "externalCustomerId";
 
@@ -286,10 +288,104 @@ function buildMagicBlockTestTransactionBase64(params?: {
   return getBase64EncodedWireTransaction(compileTransaction(message));
 }
 
+function mockMagicBlockAdditionalSignerResponse(
+  sourceAddress: string,
+  additionalSignerAddress: string
+) {
+  return vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        kind: "transfer",
+        version: "v0",
+        transactionBase64: buildMagicBlockTestTransactionBase64({
+          source: sourceAddress,
+          additionalSigner: additionalSignerAddress,
+        }),
+        sendTo: "base",
+        recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+        lastValidBlockHeight: 123456,
+        instructionCount: 4,
+        requiredSigners: [sourceAddress, additionalSignerAddress],
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }
+    )
+  );
+}
+
+async function requestMagicBlockPrivateTransfer(): Promise<Response> {
+  return app.request(
+    "/v1/payments/transfers",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        source: TEST_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: DEVNET_USDC_MINT,
+        amount: "1",
+        privateTransfer: {
+          provider: "magicblock",
+          magicBlock: {},
+        },
+      }),
+    },
+    env
+  );
+}
+
 async function updateSeededWalletPublicKey(publicKey: string): Promise<void> {
   await getDb(env)
     .prepare("UPDATE custody_wallets SET public_key = ? WHERE wallet_id = ?")
     .bind(publicKey, TEST_WALLET_ID)
+    .run();
+}
+
+async function seedAdditionalCustodyWallet(publicKey: string): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO custody_wallets
+         (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      TEST_ADDITIONAL_CUSTODY_WALLET_ID,
+      TEST_CONFIG_ID,
+      TEST_ADDITIONAL_WALLET_ID,
+      publicKey,
+      "Additional Payments Wallet",
+      "transfer",
+      "active"
+    )
+    .run();
+}
+
+async function seedAdditionalWalletDestinationPolicy(
+  destinationAllowlist: string[]
+): Promise<void> {
+  const now = new Date().toISOString();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO payment_wallet_policies
+         (id, custody_wallet_id, policy_type, policy, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      "pwp_additional_allowlist_test",
+      TEST_ADDITIONAL_CUSTODY_WALLET_ID,
+      "destination_allowlist",
+      JSON.stringify({
+        version: 1,
+        destinationAllowlist,
+      }),
+      now,
+      now
+    )
     .run();
 }
 
@@ -5512,6 +5608,7 @@ describe("Payments routes", () => {
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           redirectUrl: "https://example.com/onramp-done",
+          rampsMemo: { invoice: "INV-123", po: "PO-9" },
         }),
       },
       env
@@ -5546,6 +5643,73 @@ describe("Payments routes", () => {
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("moonpay_user_123");
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.quote.id);
     assertMoonPaySignature(hostedUrl);
+
+    const transfersRes = await app.request(
+      `/v1/payments/transfers?provider=moonpay&providerReference=${body.data.quote.id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+    expect(transfersRes.status).toBe(200);
+    const transfersBody = (await transfersRes.json()) as {
+      data: [{ id: string; rampsMemo: Record<string, string> }];
+    };
+    expect(transfersBody.data).toHaveLength(1);
+    expect(transfersBody.data[0].rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
+
+    const transferRes = await app.request(
+      `/v1/payments/transfers/${transfersBody.data[0].id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+    expect(transferRes.status).toBe(200);
+    const transferBody = (await transferRes.json()) as {
+      data: { transfer: { rampsMemo: Record<string, string> } };
+    };
+    expect(transferBody.data.transfer.rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
+  });
+
+  it("rejects a ramp quote memo with more than 20 fields", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "moonpay_memo_limit" });
+    const rampsMemo = Object.fromEntries(
+      Array.from({ length: 21 }, (_, index) => [`key_${index}`, `value_${index}`])
+    );
+
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "SOL",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+          rampsMemo,
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { details: { errors: { rampsMemo: string[] } } };
+    };
+    expect(body.error.details.errors.rampsMemo).toContain(
+      "rampsMemo must contain at most 20 key-value pairs"
+    );
   });
 
   it("rejects quotes for corridors the support matrix does not list the provider on", async () => {
@@ -5652,6 +5816,7 @@ describe("Payments routes", () => {
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
+          rampsMemo: { invoice: "INV-123", po: "PO-9" },
         }),
       },
       env
@@ -5705,6 +5870,21 @@ describe("Payments routes", () => {
     expect(channelPayload.displayCurrency).toBe("USD");
     expect(channelPayload.customerId).toBe("customer_456");
     expect(channelPayload.complianceDetails.partyDetails).toHaveLength(1);
+
+    const transfersRes = await app.request(
+      `/v1/payments/transfers?provider=bvnk&providerReference=${body.data.quote.id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+    expect(transfersRes.status).toBe(200);
+    const transfersBody = (await transfersRes.json()) as {
+      data: [{ rampsMemo: Record<string, string> }];
+    };
+    expect(transfersBody.data[0].rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
     fetchSpy.mockRestore();
   });
 
@@ -6222,6 +6402,9 @@ describe("Payments routes", () => {
       env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
+      await seedCachedKey({
+        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+      });
       createRpcMock.mockReturnValueOnce({
         getTokenSupply: () => ({
           send: async () => ({ value: { decimals: 6 } }),
@@ -6233,7 +6416,7 @@ describe("Payments routes", () => {
         .mockResolvedValue(
           "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
         );
-      createFeePaymentAdapterMock.mockReturnValueOnce({
+      createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
         signAsFeePayer: vi.fn(),
@@ -6337,7 +6520,7 @@ describe("Payments routes", () => {
         .mockResolvedValue(
           "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
         );
-      createFeePaymentAdapterMock.mockReturnValue({
+      createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
         signAsFeePayer: vi.fn(),
@@ -6492,6 +6675,9 @@ describe("Payments routes", () => {
       env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
+      await seedCachedKey({
+        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+      });
       createRpcMock.mockReturnValueOnce({
         getTokenSupply: () => ({
           send: async () => ({ value: { decimals: 6 } }),
@@ -6577,6 +6763,118 @@ describe("Payments routes", () => {
           toBalance: "base",
           gasless: true,
         });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("rejects an additional custody signer outside the API key wallet authorization boundary", async () => {
+      env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
+      const sourceSigner = await generateKeyPairSigner();
+      const additionalSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      await seedAdditionalCustodyWallet(additionalSigner.address);
+      await seedCachedKey({
+        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+      });
+      mockTokenSupplyDecimalsOnce();
+      createOrgSignerMock.mockImplementation(async (_env, _organizationId, _projectId, walletId) =>
+        walletId === TEST_ADDITIONAL_WALLET_ID ? additionalSigner : sourceSigner
+      );
+
+      const fetchSpy = mockMagicBlockAdditionalSignerResponse(
+        sourceSigner.address,
+        additionalSigner.address
+      );
+
+      try {
+        const res = await requestMagicBlockPrivateTransfer();
+
+        expect(res.status).toBe(403);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("FORBIDDEN");
+        expect(body.error.message).toContain("not authorized for the requested wallet");
+        expect(createOrgSignerMock).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("signs with every custody signer authorized for the API key and transfer policy", async () => {
+      env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
+      const sourceSigner = await generateKeyPairSigner();
+      const additionalSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      await seedAdditionalCustodyWallet(additionalSigner.address);
+      await seedAdditionalWalletDestinationPolicy([TEST_SOLANA_ADDRESSES.wallet2]);
+      await seedCachedKey({
+        walletBindings: [
+          { walletId: TEST_WALLET_ID, permissions: ["payments:write"] },
+          { walletId: TEST_ADDITIONAL_WALLET_ID, permissions: ["payments:write"] },
+        ],
+      });
+      mockTokenSupplyDecimalsOnce();
+      createOrgSignerMock.mockImplementation(async (_env, _organizationId, _projectId, walletId) =>
+        walletId === TEST_ADDITIONAL_WALLET_ID ? additionalSigner : sourceSigner
+      );
+      const signAndSendMock = vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+        );
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const fetchSpy = mockMagicBlockAdditionalSignerResponse(
+        sourceSigner.address,
+        additionalSigner.address
+      );
+
+      try {
+        const res = await requestMagicBlockPrivateTransfer();
+
+        expect(res.status).toBe(200);
+        expect(createOrgSignerMock.mock.calls.map((call) => call[3])).toEqual([
+          TEST_WALLET_ID,
+          TEST_ADDITIONAL_WALLET_ID,
+        ]);
+        expect(signAndSendMock).toHaveBeenCalledTimes(1);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("rejects an authorized additional custody signer denied by its wallet policy", async () => {
+      env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
+      const sourceSigner = await generateKeyPairSigner();
+      const additionalSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      await seedAdditionalCustodyWallet(additionalSigner.address);
+      await seedAdditionalWalletDestinationPolicy([TEST_SOLANA_ADDRESSES.wallet3]);
+      await seedCachedKey({
+        walletBindings: [
+          { walletId: TEST_WALLET_ID, permissions: ["payments:write"] },
+          { walletId: TEST_ADDITIONAL_WALLET_ID, permissions: ["payments:write"] },
+        ],
+      });
+      mockTokenSupplyDecimalsOnce();
+      const fetchSpy = mockMagicBlockAdditionalSignerResponse(
+        sourceSigner.address,
+        additionalSigner.address
+      );
+
+      try {
+        const res = await requestMagicBlockPrivateTransfer();
+
+        expect(res.status).toBe(403);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("FORBIDDEN");
+        expect(body.error.message).toBe("Destination address is not allowed by wallet policy");
+        expect(createOrgSignerMock).not.toHaveBeenCalled();
       } finally {
         fetchSpy.mockRestore();
       }

@@ -20,7 +20,15 @@ function renderFlow(currentStep: "rpc" | "custody" = "rpc") {
         organizationId="org_test"
         currentStep={currentStep}
         initialRpcProvider={currentStep === "custody" ? "helius" : null}
-        rpcProviders={["default", "alchemy", "helius", "quicknode", "triton", "validationcloud"]}
+        rpcProviders={[
+          "default",
+          "alchemy",
+          "helius",
+          "nodit",
+          "quicknode",
+          "triton",
+          "validationcloud",
+        ]}
         custodyProviders={["privy", "coinbase_cdp", "para", "turnkey"]}
       />
     </I18nProvider>
@@ -36,16 +44,21 @@ describe("OrganizationOnboardingFlow", () => {
     expect(markup).toContain("You can change providers at any time in Settings.");
     expect(markup).toContain("Alchemy");
     expect(markup).toContain("Helius");
+    expect(markup).toContain("Nodit");
+    expect(markup).toContain("Use Nodit for your Solana RPC traffic.");
     expect(markup).toContain("QuickNode");
     expect(markup).toContain("Triton");
     expect(markup).toContain("Validation Cloud");
     expect(markup).toContain("/provider-logos/alchemy.svg");
     expect(markup).toContain("/provider-logos/helius.svg");
+    expect(markup).toContain("/provider-logos/nodit.svg");
     expect(markup).toContain("/provider-logos/quicknode.svg");
     expect(markup).toContain("/provider-logos/triton.svg");
     expect(markup).toContain("/provider-logos/validation-cloud.svg");
+    expect(markup.indexOf("Helius")).toBeLessThan(markup.indexOf("Nodit"));
+    expect(markup.indexOf("Nodit")).toBeLessThan(markup.indexOf("QuickNode"));
     expect(markup).not.toContain("SDP RPC");
-    expect(markup.match(/aria-pressed="false"/g)).toHaveLength(5);
+    expect(markup.match(/aria-pressed="false"/g)).toHaveLength(6);
     expect(markup).toContain('data-organization-onboarding-actions="true"');
     expect(markup).toContain("bg-surface-raised/95");
     expect(markup).not.toContain("bg-white/95");

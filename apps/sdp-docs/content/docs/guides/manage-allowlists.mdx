@@ -94,7 +94,12 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-Supports `page` and `pageSize` query parameters for pagination.
+Supports `page` and `pageSize` query parameters for pagination (`pageSize` max 500), plus server-side filters:
+
+- `search` — contains-style match over the entry address and label (blank means no filter).
+- `label` — restrict to entries with this exact label.
+
+Fetch the distinct labels in use with `GET /v1/issuance/tokens/{tokenId}/allowlist/labels`. Like every SDP response it's wrapped in `data`, so the payload is `{ data: { labels: string[]; total: number } }` (`total` is the unfiltered entry count) — useful for building a label filter and summary count.
 
 ## Remove an address
 

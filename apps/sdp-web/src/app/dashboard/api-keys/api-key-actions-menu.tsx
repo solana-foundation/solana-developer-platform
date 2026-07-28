@@ -41,7 +41,7 @@ export function ApiKeyActionsMenu({
         <input type="hidden" name="grace" value={String(DEFAULT_ROTATION_GRACE_HOURS)} />
       </form>
 
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button
             type="button"

@@ -12,6 +12,8 @@ interface ArrowPaginationProps {
   className?: string;
   /** Optional summary of the items shown, e.g. "1–10 of 42". */
   summary?: string;
+  /** Block navigation while a page fetch is in flight. */
+  disabled?: boolean;
 }
 
 export function ArrowPagination({
@@ -20,6 +22,7 @@ export function ArrowPagination({
   onPageChange,
   className,
   summary,
+  disabled = false,
 }: ArrowPaginationProps) {
   const t = useTranslations();
   return (
@@ -33,7 +36,7 @@ export function ArrowPagination({
           variant="outline"
           size="icon-sm"
           aria-label={t("Shared.SharedComponents.previousPage")}
-          disabled={page <= 1}
+          disabled={disabled || page <= 1}
           onClick={() => onPageChange(page - 1)}
         >
           <ChevronLeftIcon />
@@ -43,7 +46,7 @@ export function ArrowPagination({
           variant="outline"
           size="icon-sm"
           aria-label={t("Shared.SharedComponents.nextPage")}
-          disabled={page >= pageCount}
+          disabled={disabled || page >= pageCount}
           onClick={() => onPageChange(page + 1)}
         >
           <ChevronRightIcon />

@@ -4,7 +4,9 @@ import { z } from "zod";
 import {
   acceptInvitationRequestSchema,
   errorResponseSchema,
+  invitationIdSchema,
   inviteMemberRequestSchema,
+  listMembersQuerySchema,
   memberIdParamSchema,
 } from "../schemas";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
@@ -17,10 +19,12 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     tags: ["Members"],
     summary: "List organization members",
     operationId: "listMembers",
-    description: "Lists members of the authenticated organization.",
+    description:
+      "Lists members of the authenticated organization, followed by any pending invitations the caller is permitted to see. The two page as one sequence. Invitations require `org:write`, because each carries a shareable acceptance link.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
+      query: listMembersQuerySchema,
     },
     responses: {
       200: {
@@ -76,6 +80,29 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
         content: jsonContent(actionSuccessResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "delete",
+    path: "/v1/members/invitations/{invitationId}",
+    tags: ["Members"],
+    summary: "Revoke invitation",
+    operationId: "revokeInvitation",
+    description:
+      "Withdraws a pending invitation, in Clerk as well as locally. Only a pending invitation can be revoked.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        invitationId: invitationIdSchema,
+      }),
+    },
+    responses: {
+      204: {
+        description: "Invitation revoked",
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 

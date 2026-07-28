@@ -210,6 +210,7 @@ interface PersistRampQuoteTransferInput {
   cryptoAmount: string | null;
   fiatCurrency: RampFiatCurrency | null;
   fiatAmount: string | null;
+  rampsMemo: Record<string, string> | undefined;
   providerData?: Record<string, unknown>;
 }
 
@@ -305,6 +306,7 @@ async function persistRampQuoteTransfer(
     deliveryMode: input.quote.deliveryMode,
     fiatCurrency: input.fiatCurrency,
     fiatAmount: input.fiatAmount,
+    rampsMemo: input.rampsMemo,
     providerData: input.providerData ?? {},
     serializedTx: null,
     signature: null,
@@ -656,6 +658,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     cryptoAmount: null,
     fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
     fiatAmount: input.fiatAmount,
+    rampsMemo: input.rampsMemo,
     providerData: transferProviderData,
   });
 
@@ -778,6 +781,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         cryptoToken: input.cryptoToken,
         cryptoAmount: input.cryptoAmount,
         fiatCurrency: input.fiatCurrency,
+        rampsMemo: input.rampsMemo,
       });
       try {
         quote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(rampRuntime(c), {
@@ -849,6 +853,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       cryptoAmount: input.cryptoAmount,
       fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
       fiatAmount: null,
+      rampsMemo: input.rampsMemo,
     });
   }
 
