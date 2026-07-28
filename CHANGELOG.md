@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.49.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.49.0...v0.49.1) (2026-07-28)
+
+### Bug Fixes
+
+* **api:** ignore and repair Clerk identity emails holding a template placeholder ([#977](https://github.com/solana-foundation/solana-developer-platform/pull/977)) ([af8d64f](https://github.com/solana-foundation/solana-developer-platform/commit/af8d64ffb8d0d58d7424ff5e91ec2cbff15baad6))
+
 ## [0.49.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.48.0...v0.49.0) (2026-07-28)
 
 ### Features
