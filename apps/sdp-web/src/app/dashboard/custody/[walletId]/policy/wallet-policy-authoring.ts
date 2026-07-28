@@ -37,17 +37,19 @@ export interface PolicyAssetOption {
   category?: WellKnownTokenCategory;
   /** Only wallet holdings carry a balance; well-known mints are offered even when the wallet holds none. */
   uiAmount?: string;
-  source: "wallet" | "well-known";
+  source: "wallet" | "well-known" | "issued";
 }
 
 /**
- * Wallet holdings first, then the well-known mints for the active cluster that the wallet
- * does not already hold. Without this the picker only knows about tokens already in the
- * wallet, so covering USDC on a fresh wallet meant pasting a mint address by hand.
+ * Wallet holdings first, then the tokens this project issued, then the well-known mints
+ * for the active cluster that neither of the first two already covered. Without this the
+ * picker only knows about tokens already in the wallet, so covering USDC on a fresh
+ * wallet, or any token the org minted itself, meant pasting a mint address by hand.
  */
 export function buildPolicyAssetOptions(
   walletAssets: readonly { token: string; mint: string; uiAmount: string }[],
-  environment: SdpEnvironment
+  environment: SdpEnvironment,
+  issuedTokens: readonly { token: string; mint: string; name?: string }[] = []
 ): PolicyAssetOption[] {
   const options = new Map<string, PolicyAssetOption>();
 
@@ -55,6 +57,24 @@ export function buildPolicyAssetOptions(
     if (!options.has(asset.mint)) {
       options.set(asset.mint, { ...asset, source: "wallet" });
     }
+  }
+
+  // Issued tokens sit between holdings and the catalogue. A token the wallet already
+  // holds keeps its holdings row so the balance stays visible, while an issued mint
+  // still wins over a catalogue entry. This ordering also keeps the existing
+  // "wallet holdings come first, well-known last" assertion true.
+  //
+  // Not filtered by `environment` on purpose: `issued_tokens` is scoped by project and
+  // the dashboard derives its environment from the selected project, so the API has
+  // already applied the cluster boundary.
+  for (const issued of issuedTokens) {
+    if (!issued.mint || options.has(issued.mint)) continue;
+    options.set(issued.mint, {
+      token: issued.token,
+      ...(issued.name ? { name: issued.name } : {}),
+      mint: issued.mint,
+      source: "issued",
+    });
   }
 
   const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
