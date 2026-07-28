@@ -51,60 +51,27 @@ export const initializeSigning = async (c: AppContext) => {
   const signingService = createSigningService(c.env);
 
   try {
-    let reusedActiveConfig = false;
-    let result: SigningInitializationResult;
-    if (parsed.data.provider === "privy") {
-      const existing = await findScopeConfigByProvider(c, actor.organizationId, projectId, "privy");
-      if (existing?.status === "active") {
-        await assertProviderAvailable(
-          c.env,
-          getDb(c.env),
-          actor.organizationId,
-          "custody",
-          "privy"
-        );
-        result = await getActiveConfigInitializationResult(
-          c,
-          existing.id,
-          existing.default_wallet_id
-        );
-        reusedActiveConfig = true;
-      } else {
-        result = await initializeProviderConnection(
-          c,
-          signingService,
-          c.env,
-          actor.organizationId,
-          await resolveOrganizationSlug(c, actor.organizationId),
-          projectId,
-          parsed.data
-        );
-      }
-    } else {
-      result = await initializeProviderConnection(
-        c,
-        signingService,
-        c.env,
-        actor.organizationId,
-        await resolveOrganizationSlug(c, actor.organizationId),
-        projectId,
-        parsed.data
-      );
-    }
+    const result = await initializeProviderConnection(
+      c,
+      signingService,
+      c.env,
+      actor.organizationId,
+      await resolveOrganizationSlug(c, actor.organizationId),
+      projectId,
+      parsed.data
+    );
 
-    if (!reusedActiveConfig) {
-      const auditService = new AuditService(getDb(c.env));
-      await auditService.log(c, {
-        action: "create",
-        resourceType: "custody_config",
-        resourceId: result.configId,
-        metadata: {
-          event: "provider_connected",
-          provider: parsed.data.provider,
-          projectId: projectId ?? null,
-        },
-      });
-    }
+    const auditService = new AuditService(getDb(c.env));
+    await auditService.log(c, {
+      action: "create",
+      resourceType: "custody_config",
+      resourceId: result.configId,
+      metadata: {
+        event: "provider_connected",
+        provider: parsed.data.provider,
+        projectId: projectId ?? null,
+      },
+    });
 
     clearWalletCaches();
 
@@ -386,6 +353,11 @@ async function assertFreshPrivyLegacySetupAllowed(
     .first<{ id: string }>();
   if (blockingConnection) {
     throw conflict("Privy custody setup already exists for this project");
+  }
+
+  const existingConfig = await findScopeConfigByProvider(c, organizationId, projectId, "privy");
+  if (existingConfig?.status === "active") {
+    return;
   }
 
   const availability = await getProviderAvailability(c.env, getDb(c.env), organizationId);

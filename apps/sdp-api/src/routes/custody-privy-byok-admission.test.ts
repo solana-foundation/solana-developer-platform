@@ -1,11 +1,14 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import * as custodyProvisioning from "@/services/custody/provisioning";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
 
 const ORGANIZATION_ID = "org_privy_byok_admission";
 const PROJECT_ID = "prj_privy_byok_admission";
@@ -131,9 +134,11 @@ describe("legacy Privy setup admission", () => {
     flag: env.PRIVY_BYOK_PROVISIONING_ENABLED,
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
+    encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
   };
 
   beforeEach(async () => {
+    vi.clearAllMocks();
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedActor();
@@ -146,6 +151,7 @@ describe("legacy Privy setup admission", () => {
     env.PRIVY_BYOK_PROVISIONING_ENABLED = original.flag;
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
+    env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     await clearTestDatabase(env);
     await clearKVStores(env);
   });
@@ -203,7 +209,31 @@ describe("legacy Privy setup admission", () => {
     });
   });
 
-  it("reuses an active exact-project Config through initialize", async () => {
+  it("preserves the initialize conflict for an active exact-project Config", async () => {
+    env.PRIVY_APP_ID = "legacy-app-id";
+    env.PRIVY_APP_SECRET = "legacy-app-secret";
+    await seedLegacyConfig("active");
+
+    const response = await request("initialize");
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
+        message: `Signing already initialized for org ${ORGANIZATION_ID} project ${PROJECT_ID}`,
+      },
+    });
+    const createAudits = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM audit_logs
+         WHERE resource_type = 'custody_config' AND action = 'create'`
+      )
+      .first<{ count: number }>();
+    expect(createAudits?.count).toBe(0);
+  });
+
+  it("keeps active Config selection through switch when stored setup is enabled", async () => {
     env.PRIVY_APP_ID = "legacy-app-id";
     env.PRIVY_APP_SECRET = "legacy-app-secret";
     await seedLegacyConfig("active");
@@ -221,7 +251,7 @@ describe("legacy Privy setup admission", () => {
       )
       .run();
 
-    const response = await request("initialize");
+    const response = await request("switch");
 
     expect(response.status).toBe(201);
     expect(await response.json()).toMatchObject({
@@ -231,13 +261,28 @@ describe("legacy Privy setup admission", () => {
         publicKey: "LegacyPublicKey",
       },
     });
-    const createAudits = await getDb(env)
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM audit_logs
-         WHERE resource_type = 'custody_config' AND action = 'create'`
-      )
-      .first<{ count: number }>();
-    expect(createAudits?.count).toBe(0);
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps fresh legacy initialization when stored setup is disabled", async () => {
+    env.PRIVY_BYOK_PROVISIONING_ENABLED = "false";
+    env.PRIVY_APP_ID = "legacy-app-id";
+    env.PRIVY_APP_SECRET = "legacy-app-secret";
+    env.CUSTODY_ENCRYPTION_KEY = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "wallet_admission",
+      address: "LegacyFreshPublicKey",
+    });
+
+    const response = await request("initialize");
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      data: {
+        walletId: "privy_wallet_admission",
+        publicKey: "LegacyFreshPublicKey",
+      },
+    });
+    expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
   });
 });
