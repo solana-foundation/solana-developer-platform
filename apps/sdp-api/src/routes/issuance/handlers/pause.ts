@@ -7,7 +7,7 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/mosaic";
+import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";

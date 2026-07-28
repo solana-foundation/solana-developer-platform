@@ -182,6 +182,9 @@ export interface Env {
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
 
+  // AlphaLedger Vulcan Forge tokenization engine
+  ALPHALEDGER_API_KEY?: string;
+
   // MagicBlock private payments configuration
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
   MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
