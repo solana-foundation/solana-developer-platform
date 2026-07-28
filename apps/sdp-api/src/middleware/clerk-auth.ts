@@ -16,6 +16,7 @@ import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import {
   type ClerkJwtPayload,
   extractBearerToken,
+  isPlausibleEmail,
   resolveClerkEmail,
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
@@ -30,16 +31,24 @@ import {
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 
+/**
+ * The stored identity for a Clerk user, with both copies of the email.
+ *
+ * They are read separately rather than COALESCEd in SQL because either copy can hold an
+ * unsubstituted JWT-template placeholder, and a plain COALESCE prefers whichever is
+ * non-null — including the corrupted one. Which copy is good depends on the code path
+ * that wrote the row, so the caller picks the first that is actually an address.
+ */
 async function resolveClerkUser(db: DatabaseClient, clerkUserId: string) {
   return db
     .prepare(
-      `SELECT aui.user_id, COALESCE(aui.email, u.email) AS email
+      `SELECT aui.user_id, aui.email AS identity_email, u.email AS user_email
        FROM auth_user_identities aui
        LEFT JOIN users u ON u.id = aui.user_id
        WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
     )
     .bind(clerkUserId)
-    .first<{ user_id: string; email: string | null }>();
+    .first<{ user_id: string; identity_email: string | null; user_email: string | null }>();
 }
 
 async function resolveClerkOrganization(db: DatabaseClient, clerkOrgId: string) {
@@ -136,7 +145,13 @@ async function ensureClerkUser(
 ): Promise<{ userId: string; email: string }> {
   const existing = await resolveClerkUser(db, clerkUserId);
   if (existing) {
-    return { userId: existing.user_id, email: existing.email ?? fallbackEmail };
+    // A stored placeholder is worse than no value: it is byte-identical for every
+    // affected user, so it identifies nobody, and it is matched literally against
+    // `invitations.email` below — which silently denies an invited role. Skip anything
+    // that is not an address and fall through to the other copy.
+    const email =
+      [existing.identity_email, existing.user_email].find(isPlausibleEmail) ?? fallbackEmail;
+    return { userId: existing.user_id, email };
   }
 
   const clerkUser = await new ClerkUsersService(env).getUser(clerkUserId);
