@@ -46,7 +46,7 @@ export function extractBearerToken(c: Context<{ Bindings: Env }>): string | null
  * Rejecting it here means a misconfigured template surfaces as a failed login
  * rather than as silent corruption that spreads and needs a data repair.
  */
-function isPlausibleEmail(value: string | undefined | null): value is string {
+export function isPlausibleEmail(value: string | undefined | null): value is string {
   const trimmed = value?.trim();
   return Boolean(trimmed) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed as string);
 }
