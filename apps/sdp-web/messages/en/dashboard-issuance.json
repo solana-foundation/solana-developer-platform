@@ -9,7 +9,16 @@
       "status": "Status",
       "signature": "Signature",
       "created": "Created",
-      "showing": "Showing first {count} transactions{total}. Use pagination to view older records."
+      "showing": "Showing first {count} transactions{total}. Use pagination to view older records.",
+      "loadError": "Unable to load transactions.",
+      "noMatches": "No transactions match these filters.",
+      "filterByType": "Filter by type",
+      "filterAllTypes": "All types",
+      "filterByStatus": "Filter by status",
+      "filterAllStatuses": "All statuses"
+    },
+    "pagination": {
+      "range": "{start}–{end} of {total}"
     },
     "errors": {
       "unknown": "Unknown error",
@@ -74,7 +83,9 @@
       "searchPlaceholder": "Search {label}…",
       "allLabels": "All labels",
       "noMatches": "No entries match your search.",
-      "filterByLabel": "Filter by label"
+      "filterByLabel": "Filter by label",
+      "loading": "Loading entries…",
+      "loadError": "Unable to load entries."
     },
     "wallet": {
       "none": "None",
@@ -214,7 +225,6 @@
       "empty": "No activity recorded yet.",
       "loading": "Loading activity…",
       "error": "Couldn't load activity.",
-      "loadMore": "Load more",
       "recentTitle": "Recent activity",
       "viewAll": "View all"
     },
@@ -1019,6 +1029,7 @@
       "unfreezeAccount": "Unfreeze Account",
       "listFrozenAccounts": "List Frozen Accounts",
       "listAllowlist": "List Allowlist",
+      "listAllowlistLabels": "List Allowlist Labels",
       "addAllowlistEntry": "Add Allowlist Entry",
       "removeAllowlistEntry": "Remove Allowlist Entry",
       "tokenIdPlaceholder": "Token ID (e.g. tok_abc123)",

@@ -1,4 +1,5 @@
-import type { TokenTransactionListItem } from "@sdp/types";
+import type { PaymentTransferSummary, TokenTransactionListItem } from "@sdp/types";
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { buildHomeActivityRows, fetchOrgIssuanceActivity } from "./home-page.data";
@@ -59,5 +60,35 @@ describe("home issuance activity", () => {
         address: "wallet_1",
       }),
     ]);
+  });
+
+  it("renders a well-known mint as its symbol rather than the raw address", () => {
+    const transfer = {
+      id: "xfr_1",
+      direction: "outbound",
+      token: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+      amount: "100",
+      destination: "wallet_2",
+      createdAt: "2026-07-17T15:00:00.000Z",
+    } as unknown as PaymentTransferSummary;
+
+    const [row] = buildHomeActivityRows([transfer], [], t);
+
+    expect(row?.token).toBe("USDC");
+  });
+
+  it("shortens an uncatalogued mint instead of printing all 44 characters", () => {
+    const transfer = {
+      id: "xfr_2",
+      direction: "outbound",
+      token: "9xQeWvG816bUx9EPfuxEzHh9VY5kvJkFqRk3nJvHnLpQ",
+      amount: "5",
+      destination: "wallet_3",
+      createdAt: "2026-07-17T15:00:00.000Z",
+    } as unknown as PaymentTransferSummary;
+
+    const [row] = buildHomeActivityRows([transfer], [], t);
+
+    expect(row?.token).toBe("9xQeWv…nLpQ");
   });
 });

@@ -98,6 +98,11 @@ export const organizationMemberSchema = z
       description: "Membership creation timestamp.",
       example: "2025-01-01T00:00:00.000Z",
     }),
+    isSelf: z.boolean().optional().openapi({
+      description:
+        "Whether this membership belongs to the authenticated caller. Absent for API key callers, which have no user of their own.",
+      example: false,
+    }),
     user: userSchema.openapi({ description: "User associated with the membership." }),
   })
   .openapi({ description: "Organization member record." });
@@ -119,9 +124,74 @@ export const invitationSchema = z
   })
   .openapi({ description: "Invitation summary." });
 
+export const listMembersQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().openapi({
+    description: "Page number (1-based).",
+    example: 1,
+  }),
+  pageSize: z.coerce.number().int().positive().max(100).optional().openapi({
+    description: "Records per page. Values above 100 are clamped to 100.",
+    example: 25,
+  }),
+});
+
+export const pendingInvitationSchema = z
+  .object({
+    id: invitationIdSchema,
+    email: z
+      .string()
+      .email()
+      .openapi({ description: "Invitee email.", example: "dev@example.com" }),
+    role: z
+      .enum(["admin", "member"])
+      .openapi({ description: "Role offered to the invitee.", example: "member" }),
+    status: z.literal("pending").openapi({ description: "Invitation status.", example: "pending" }),
+    createdAt: isoDateTimeSchema.openapi({
+      description: "Invitation creation timestamp.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+    expiresAt: isoDateTimeSchema.openapi({
+      description: "Invitation expiration timestamp.",
+      example: "2025-02-01T00:00:00.000Z",
+    }),
+    acceptUrl: z.string().url().nullable().openapi({
+      description:
+        "Clerk's shareable acceptance link, for an invitee whose email never arrived. Null when Clerk could not be reached.",
+      example: "https://accounts.example.com/accept?__clerk_ticket=example",
+    }),
+  })
+  .openapi({ description: "Pending invitation, returned only to callers holding `org:write`." });
+
+export const listMembersMetaSchema = z
+  .object({
+    total: z.number().int().nonnegative().openapi({
+      description:
+        "Size of the directory visible to this caller: active members plus any pending invitations they are permitted to see.",
+      example: 42,
+    }),
+    page: z.number().int().positive().openapi({ description: "Current page.", example: 1 }),
+    pageSize: z
+      .number()
+      .int()
+      .positive()
+      .openapi({ description: "Records per page (max 100).", example: 25 }),
+    hasMore: z.boolean().openapi({ description: "Whether a further page exists.", example: true }),
+    activeAdminCount: z.number().int().nonnegative().openapi({
+      description:
+        "Active administrators across the whole organization, not just this page, so the last-admin rule holds on any page.",
+      example: 2,
+    }),
+  })
+  .openapi({ description: "Pagination metadata for the member directory." });
+
 export const listMembersResponseSchema = z
   .object({
     members: z.array(organizationMemberSchema).openapi({ description: "Organization members." }),
+    invitations: z.array(pendingInvitationSchema).openapi({
+      description:
+        "Pending invitations, paged as a continuation of the member list. Always empty for callers without `org:write`, since the acceptance link is a shareable credential.",
+    }),
+    meta: listMembersMetaSchema,
   })
   .openapi({ description: "List of organization members." });
 

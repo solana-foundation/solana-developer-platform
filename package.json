@@ -38,6 +38,7 @@
     "check:env-contract": "node scripts/check-env-contract.mjs",
     "check:env-configurator-drift": "node scripts/check-env-configurator-drift.mjs",
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
+    "check:well-known-mints": "pnpm --filter @sdp/api exec tsx ../../scripts/check-well-known-mints.mjs",
     "generate:module-map": "node scripts/check-module-boundaries.mjs --write",
     "typecheck": "turbo run typecheck",
     "typecheck:all": "turbo run typecheck",

@@ -3,7 +3,7 @@ import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { getSdpDocsOrigin, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { getSdpDocsOrigin, SOL_DECIMALS } from "@sdp/types";
 import {
   type AccountMeta,
   AccountRole,
@@ -113,7 +113,7 @@ pay.post("/:token/tx", async (c) => {
 
   let instructions: Instruction[];
   if (request.token === SOL_MINT) {
-    const lamports = parseDecimalAmount(request.amount, WELL_KNOWN_TOKENS.SOL.decimals);
+    const lamports = parseDecimalAmount(request.amount, SOL_DECIMALS);
     if (lamports <= 0n) {
       throw badRequest("Transfer amount must be greater than zero");
     }

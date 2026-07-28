@@ -3,6 +3,7 @@ import type {
   CustodyWalletMetadataResponse,
   CustodyWalletTokenBalance,
   PaymentWalletPolicy,
+  PolicyRuleAction,
 } from "@sdp/types";
 import { SlidersHorizontal } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
@@ -27,6 +28,7 @@ import {
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -38,6 +40,8 @@ import {
   formatCurrencyAmount,
   formatDisplayAmount,
   resolveTotalBalance,
+  resolveTransferTokenLabel,
+  shortenAddress,
 } from "../../payments/payments-overview.utils";
 
 interface WalletBalancesResponse {
@@ -331,9 +335,42 @@ export default async function WalletDetailPage({
         />
       </Suspense>
 
-      <WalletActivityViewport walletId={resolvedWalletId} />
+      <Suspense fallback={<WalletActivityViewport walletId={resolvedWalletId} />}>
+        <WalletActivityWithBalanceSymbols
+          walletId={resolvedWalletId}
+          balancesPromise={trackedBalancesPromise}
+        />
+      </Suspense>
     </DashboardWorkspaceOverviewPanel>
   );
+}
+
+/**
+ * Hands the activity table the symbols the balances lookup already resolved, so
+ * a token the well-known catalogue has never seen still reads as its symbol
+ * rather than a shortened mint. The fallback renders the same viewport without
+ * the map, so activity is never gated on balances loading.
+ */
+async function WalletActivityWithBalanceSymbols({
+  walletId,
+  balancesPromise,
+}: {
+  walletId: string;
+  balancesPromise: Promise<WalletTrackedBalancesResult>;
+}) {
+  const { balances } = await balancesPromise;
+  const symbolsByMint: Record<string, string> = {};
+  for (const balance of balances) {
+    const mint = balance.mint?.trim();
+    const token = balance.token?.trim();
+    // Skip entries whose "symbol" is just the mint again — they carry no
+    // information and would defeat the shortened-address fallback.
+    if (mint && token && token !== mint) {
+      symbolsByMint[mint] = token;
+    }
+  }
+
+  return <WalletActivityViewport walletId={walletId} symbolsByMint={symbolsByMint} />;
 }
 
 export async function WalletBalanceSummary({
@@ -439,12 +476,96 @@ export async function WalletBalancesSection({
   );
 }
 
+/**
+ * Distinct mints named by the profile's asset rules. The rules array is the
+ * source of truth for allowed assets; destinationAllowlist and the amount caps
+ * are stored separately and say nothing about which tokens are permitted.
+ */
+/**
+ * Mints named by an allow-action asset rule — the only rules that express an
+ * allowlist, and so the only ones honest to render under "Allowed assets".
+ *
+ * An asset rule can equally carry `deny` or `approval_required`, and listing
+ * those mints as allowed would state the opposite of what the profile
+ * enforces — the worst kind of wrong on a custody screen.
+ *
+ * Other kinds are excluded because they say something different: `amount`
+ * rules only cap the mints they name, leaving other assets transferable, and
+ * `approval` rules gate rather than permit. A profile restricted solely by one
+ * of those still reads as restricted — see policyRuleRestricts, which
+ * classifies rules independently of this list.
+ */
+function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
+  const mints = new Set<string>();
+
+  for (const rule of policy?.rules ?? []) {
+    if (rule.kind !== "asset") continue;
+    if (rule.action && rule.action !== "allow") continue;
+
+    for (const mint of rule.assets ?? (rule.asset ? [rule.asset] : [])) {
+      mints.add(mint);
+    }
+  }
+
+  return [...mints];
+}
+
+/**
+ * Whether a rule can produce anything other than `allow`.
+ *
+ * This mirrors evaluatePolicyRule in the API's policy-evaluation service. Two
+ * details there drive the shape below:
+ *
+ * 1. An explicit `action` is authoritative for every kind — the evaluator
+ *    applies it verbatim and only falls back to a per-kind default when the
+ *    action is absent. So an `approval` rule pinned to `allow` permits, and a
+ *    `review` or `provider_approval_required` action restricts on any kind.
+ * 2. A rule with no criteria is not inert. `asset` with no assets, `amount`
+ *    with no bounds and `destination` with neither list all resolve to
+ *    `review`, which is a restriction rather than a no-op.
+ */
+const RESTRICTIVE_RULE_ACTIONS = new Set<PolicyRuleAction>([
+  "deny",
+  "approval_required",
+  "provider_approval_required",
+  "review",
+]);
+
+function policyRuleRestricts(rule: NonNullable<PaymentWalletPolicy["rules"]>[number]): boolean {
+  if (rule.action) {
+    return RESTRICTIVE_RULE_ACTIONS.has(rule.action);
+  }
+
+  switch (rule.kind) {
+    case "approval":
+      // Defaults to approval_required rather than allow.
+      return true;
+    case "amount":
+      // Denies outside its bounds, and reviews when it has none.
+      return true;
+    case "destination":
+      // Denies on a blocklist hit or outside an allowlist, reviews when empty.
+      return true;
+    case "asset":
+      // Allows on a match and abstains otherwise, so it only restricts when it
+      // names nothing and falls through to review.
+      return !(rule.assets?.length || rule.asset);
+    default:
+      // always / operation_family / operation_type permit on a match.
+      return false;
+  }
+}
+
 function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
   if (!policy) return false;
   return (
     policy.destinationAllowlist.length > 0 ||
     Boolean(policy.maxTransferAmount) ||
-    Boolean(policy.maxDailyAmount)
+    Boolean(policy.maxDailyAmount) ||
+    // Operations matching no rule fall through to the policy default, so a
+    // non-allow default is itself a restriction.
+    (policy.defaultAction !== undefined && policy.defaultAction !== "allow") ||
+    (policy.rules ?? []).some(policyRuleRestricts)
   );
 }
 
@@ -460,6 +581,7 @@ async function WalletControlsPanel({
   const { policy, error: policyError } = await policyPromise;
   const hasRestrictions = walletPolicyHasRestrictions(policy);
   const destinationCount = policy?.destinationAllowlist.length ?? 0;
+  const allowedAssets = walletPolicyAssets(policy);
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
 
   return (
@@ -479,19 +601,49 @@ async function WalletControlsPanel({
           {policyError ? (
             <p className="text-sm text-error">{policyError}</p>
           ) : (
-            <div className="grid gap-2 sm:grid-cols-3">
-              <WalletControlMetric
-                label={t("DashboardCustody.destinations")}
-                value={destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")}
-              />
-              <WalletControlMetric
-                label={t("DashboardCustody.perTransfer")}
-                value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
-              />
-              <WalletControlMetric
-                label={t("DashboardCustody.daily")}
-                value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
-              />
+            <div className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <WalletControlMetric
+                  label={t("DashboardCustody.policyAllowedAssets")}
+                  value={
+                    allowedAssets.length > 0
+                      ? String(allowedAssets.length)
+                      : t("DashboardCustody.open")
+                  }
+                />
+                <WalletControlMetric
+                  label={t("DashboardCustody.destinations")}
+                  value={
+                    destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")
+                  }
+                />
+                <WalletControlMetric
+                  label={t("DashboardCustody.perTransfer")}
+                  value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
+                />
+                <WalletControlMetric
+                  label={t("DashboardCustody.daily")}
+                  value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
+                />
+              </div>
+              {/* Named here rather than under Balances: these are the assets the
+                  wallet may move, which is not the same as what it holds. */}
+              {allowedAssets.length > 0 ? (
+                <ul className="flex flex-wrap gap-2">
+                  {allowedAssets.map((mint) => (
+                    <li
+                      key={mint}
+                      className="flex items-center gap-2 rounded-full border border-border-subtle bg-fill-subtle py-1 pr-3 pl-1"
+                      title={mint}
+                    >
+                      <TokenMark mint={mint} size="sm" />
+                      <span className="text-xs font-medium text-secondary">
+                        {resolveTransferTokenLabel(mint)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           )}
         </div>
@@ -571,11 +723,18 @@ function WalletBalanceRow({
         href ? "transition-colors hover:bg-fill-subtle" : "",
       ].join(" ")}
     >
-      <div>
-        <p className="text-[17px] font-medium text-primary">{label}</p>
-        <p className="font-mono text-xs text-tertiary">{mint}</p>
+      <div className="flex min-w-0 items-center gap-3">
+        <TokenMark mint={mint} symbol={label} size="md" />
+        <div className="min-w-0">
+          <p className="text-[17px] font-medium text-primary">{label}</p>
+          {/* The full mint is 44 characters; keep it reachable on hover rather
+              than letting it dominate the row. */}
+          <p className="font-mono text-xs text-tertiary" title={mint}>
+            {shortenAddress(mint)}
+          </p>
+        </div>
       </div>
-      <p className="text-[15px] text-primary">{value}</p>
+      <p className="text-[15px] text-primary tabular-nums">{value}</p>
     </div>
   );
 

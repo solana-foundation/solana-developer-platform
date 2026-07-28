@@ -51,6 +51,7 @@ import {
   prepareMintResponse,
   prepareSeizeResponse,
   prepareUpdateAuthorityResponse,
+  tokenAllowlistLabelsResponse,
   tokenAllowlistListResponse,
   tokenAllowlistResponse,
   tokenListResponse,
@@ -62,6 +63,17 @@ import {
 const tokenTransactionTypeQuerySchema = z
   .enum(TOKEN_TRANSACTION_TYPES)
   .openapi({ description: "Filter by token transaction type.", example: "burn" });
+
+const allowlistSearchQuerySchema = z.string().openapi({
+  description:
+    "Contains-style search over the entry address and label. A blank value is treated as no search filter.",
+  example: "So1",
+});
+
+const allowlistLabelQuerySchema = z.string().openapi({
+  description: "Filter to entries with this exact label (values come from the labels endpoint).",
+  example: "Treasury",
+});
 
 export function registerIssuancePaths(registry: OpenAPIRegistry) {
   // ═══════════════════════════════════════════════════════════════════════════
@@ -299,6 +311,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         tokenId: tokenIdParamSchema,
       }),
       query: z.object({
+        type: tokenTransactionTypeQuerySchema.optional(),
         status: tokenTransactionStatusQuerySchema.optional(),
         page: pageQuerySchema.optional(),
         pageSize: pageSizeQuerySchema.optional(),
@@ -309,7 +322,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token transactions",
         content: jsonContent(tokenTransactionsResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
@@ -889,12 +902,38 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       query: z.object({
         page: pageQuerySchema.optional(),
         pageSize: pageSizeQuerySchema.optional(),
+        search: allowlistSearchQuerySchema.optional(),
+        label: allowlistLabelQuerySchema.optional(),
       }),
     },
     responses: {
       200: {
         description: "Allowlist entries",
         content: jsonContent(tokenAllowlistListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+    tags: ["Issuance"],
+    summary: "List token allowlist labels",
+    operationId: "listTokenAllowlistLabels",
+    description:
+      "Lists the distinct labels used across a token's active control-list entries, for building a label filter.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Distinct allowlist labels",
+        content: jsonContent(tokenAllowlistLabelsResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },

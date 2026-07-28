@@ -715,6 +715,19 @@ export function buildIssuancePlaygroundEndpointConfigs({
       },
     },
     {
+      id: "list-allowlist-labels",
+      title: t("DashboardIssuance.playground.listAllowlistLabels"),
+      method: "GET",
+      path: "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+      pathFields: [tokenIdField],
+      bodyFields: [],
+      expectedResponse: {
+        data: {
+          labels: [t("DashboardIssuance.playground.treasuryExample")],
+        },
+      },
+    },
+    {
       id: "add-allowlist-entry",
       title: t("DashboardIssuance.playground.addAllowlistEntry"),
       method: "POST",
