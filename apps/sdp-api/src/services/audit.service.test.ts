@@ -123,10 +123,22 @@ describe("AuditService", () => {
       ]);
 
       const events = await new AuditService(db).getForAsset("org_1", "tok_1");
-      // No usable identity at all, so the generic label stands in.
-      expect(events[0]?.actorLabel).toBe("Team member");
+      // Something was recorded but is unusable, which is a data fault rather than an
+      // ordinary nameless user, so it must not read as one.
+      expect(events[0]?.actorLabel).toBe("Unknown user");
       // A corrupted name must not shadow an email that is still good.
       expect(events[1]?.actorLabel).toBe("jordan@example.com");
+    });
+
+    it("separates an unusable identity from one that was never recorded", async () => {
+      const { db } = mockDb([
+        { ...rows[0], user_name: null, user_email: null },
+        { ...rows[0], id: "aud_z", user_name: "  ", user_email: "{{user.primary_email_address}}" },
+      ]);
+
+      const events = await new AuditService(db).getForAsset("org_1", "tok_1");
+      expect(events[0]?.actorLabel).toBe("Team member");
+      expect(events[1]?.actorLabel).toBe("Unknown user");
     });
 
     it("applies the action filter and pagination bounds", async () => {
