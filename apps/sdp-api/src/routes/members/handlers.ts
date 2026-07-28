@@ -112,7 +112,7 @@ async function getClerkUserId(db: DatabaseClient, userId: string): Promise<strin
  *
  * Clerk requires a `requesting_user_id` to revoke an invitation, and the more
  * specific sources can all come up empty: an API key carries no Clerk user of
- * its own, `invited_by` may be the `"system"` sentinel with no identity row,
+ * its own, legacy rows may carry a `"system"` sentinel with no identity row,
  * and Clerk's own `inviter_id` is optional on its invitation object. An
  * administrator is entitled to revoke, so attributing it to one keeps the
  * revocation possible rather than failing it. The local audit trail still
@@ -466,6 +466,14 @@ export const inviteMember = async (c: AppContext) => {
 
   const inviterUserId = userId || inviterKey?.created_by || null;
 
+  // `invitations.invited_by` is a NOT NULL foreign key onto `users`
+  // (0001_initial_schema.sql:112,118), so there is no sentinel that can stand in for a
+  // missing inviter: writing one only trades this error for an opaque constraint
+  // violation at insert time. Fail here, where the cause is still legible.
+  if (!inviterUserId) {
+    throw new AppError("UNAUTHORIZED", "Inviter identity could not be resolved");
+  }
+
   const clerkService = new ClerkOrganizationsService(c.env);
   const redirectUrl = resolveInviteRedirectUrl(c.env);
   const clerkInvitation = await clerkService.createOrganizationInvitation({
@@ -500,7 +508,7 @@ export const inviteMember = async (c: AppContext) => {
       organizationId,
       normalizedEmail,
       role,
-      inviterUserId || "system",
+      inviterUserId,
       tokenHash,
       expiresAt,
       clerkInvitation.id
