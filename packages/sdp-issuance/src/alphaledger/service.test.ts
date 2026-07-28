@@ -22,7 +22,10 @@ describe("AlphaLedgerService.request", () => {
 
     assert.deepEqual(result, { id: "ALFNDPF000140932" });
     const [url, init] = fetchMock.mock.calls[0].arguments;
-    assert.equal(url, "https://vf-solana-api.qa.alphaledger.com/api/v1/financial-instruments");
+    assert.equal(
+      url,
+      "https://vf-solana-api.qa.alphaledger.com/api/v1/financial-instruments?svmCluster=SOLANA_DEVNET"
+    );
     assert.equal(init?.method, "POST");
     assert.deepEqual(init?.headers, {
       authorization: "Bearer test-key",

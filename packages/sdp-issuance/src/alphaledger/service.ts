@@ -1,24 +1,34 @@
 import type { SdpEnvironment } from "@sdp/types";
 import type { AlSvmCluster } from "./types";
 
-const ALPHALEDGER_API_BASES = {
-  sandbox: "https://vf-solana-api.qa.alphaledger.com",
-  production: "https://vf-solana-api.beta.alphaledger.com",
-} as const satisfies Record<SdpEnvironment, string>;
+const ALPHALEDGER_ENVIRONMENTS = {
+  sandbox: {
+    apiBase: "https://vf-solana-api.qa.alphaledger.com",
+    svmCluster: "SOLANA_DEVNET",
+  },
+  production: {
+    apiBase: "https://vf-solana-api.beta.alphaledger.com",
+    svmCluster: "SOLANA_MAINNET_TESTING",
+  },
+} as const satisfies Record<SdpEnvironment, { apiBase: string; svmCluster: AlSvmCluster }>;
 
 type AlphaLedgerMethod = "POST" | "PATCH";
 
 export class AlphaLedgerService {
   private apiKey: string;
   private apiBase: string;
+  private svmCluster: AlSvmCluster;
 
   /**
    * @param apiKey - Bearer API key scoped to one AlphaLedger organization
-   * @param environment - SDP environment; sandbox targets AlphaLedger QA, production targets beta
+   * @param environment - SDP environment; sandbox targets AlphaLedger QA on
+   * SOLANA_DEVNET, production targets beta on SOLANA_MAINNET_TESTING (their
+   * beta tenant does not expose SOLANA_MAINNET)
    */
   constructor(apiKey: string, environment: SdpEnvironment) {
     this.apiKey = apiKey;
-    this.apiBase = ALPHALEDGER_API_BASES[environment];
+    this.apiBase = ALPHALEDGER_ENVIRONMENTS[environment].apiBase;
+    this.svmCluster = ALPHALEDGER_ENVIRONMENTS[environment].svmCluster;
   }
 
   /**
@@ -26,25 +36,16 @@ export class AlphaLedgerService {
    *
    * Vulcan Forge uses POST for creates and lookups and PATCH for updates ONLY,
    * authenticated with a Bearer API key scoped to one organization in the
-   * tenant.
+   * tenant. Every request explicitly targets the environment's SVM cluster
+   * rather than relying on the tenant default.
    *
    * @param method - HTTP method, POST (creates/lookups) or PATCH (updates)
    * @param path - API path, e.g. "/api/v1/financial-instruments"
    * @param body - JSON request body
-   * @param svmCluster - Target SVM network, omitted to use the tenant default
    * @returns The parsed JSON response
    */
-  async request<T>(
-    method: AlphaLedgerMethod,
-    path: string,
-    body: unknown,
-    svmCluster?: AlSvmCluster
-  ): Promise<T> {
-    const url =
-      svmCluster === undefined
-        ? `${this.apiBase}${path}`
-        : `${this.apiBase}${path}?svmCluster=${svmCluster}`;
-    const response = await fetch(url, {
+  async request<T>(method: AlphaLedgerMethod, path: string, body: unknown): Promise<T> {
+    const response = await fetch(`${this.apiBase}${path}?svmCluster=${this.svmCluster}`, {
       method,
       headers: {
         authorization: `Bearer ${this.apiKey}`,

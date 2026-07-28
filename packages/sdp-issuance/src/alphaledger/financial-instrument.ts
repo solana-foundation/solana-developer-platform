@@ -7,7 +7,6 @@ import type {
   AlOffchainEntityType,
   AlOffchainFile,
   AlOffchainReferences,
-  AlSvmCluster,
   AlSvmEntityResult,
   AlSvmTransactionResult,
   AlSvmValueResult,
@@ -324,19 +323,16 @@ export interface AlCalculateTokenExtensionsResponse {
  *
  * @param service - Authenticated AlphaLedger service used to send the request.
  * @param body - Typed financial-instrument creation payload.
- * @param svmCluster - Target SVM network, omitted to use the tenant default.
  * @returns The created financial-instrument identifiers and optional SVM transaction result.
  */
 export async function createFinancialInstrument(
   service: AlphaLedgerService,
-  body: AlCreateFinancialInstrumentRequest,
-  svmCluster?: AlSvmCluster
+  body: AlCreateFinancialInstrumentRequest
 ): Promise<AlCreateFinancialInstrumentResponse> {
   return service.request<AlCreateFinancialInstrumentResponse>(
     "POST",
     "/api/v1/financial-instruments",
-    body,
-    svmCluster
+    body
   );
 }
 
@@ -345,19 +341,16 @@ export async function createFinancialInstrument(
  *
  * @param service - Authenticated AlphaLedger service used to send the request.
  * @param body - Typed lookup payload for the financial instrument.
- * @param svmCluster - Target SVM network, omitted to use the tenant default.
  * @returns The detailed financial-instrument representation.
  */
 export async function fetchFinancialInstrument(
   service: AlphaLedgerService,
-  body: AlFetchFinancialInstrumentRequest,
-  svmCluster?: AlSvmCluster
+  body: AlFetchFinancialInstrumentRequest
 ): Promise<AlFetchFinancialInstrumentResponse> {
   return service.request<AlFetchFinancialInstrumentResponse>(
     "POST",
     "/api/v1/financial-instruments/single",
-    body,
-    svmCluster
+    body
   );
 }
 
@@ -367,19 +360,16 @@ export async function fetchFinancialInstrument(
  *
  * @param service - Authenticated AlphaLedger service used to send the request.
  * @param body - Typed circulating-supply lookup payload.
- * @param svmCluster - Target SVM network, omitted to use the tenant default.
  * @returns The requested circulating-supply values and balance indicator.
  */
 export async function fetchFinancialInstrumentCirculatingSupply(
   service: AlphaLedgerService,
-  body: AlFetchFinancialInstrumentCirculatingSupplyRequest,
-  svmCluster?: AlSvmCluster
+  body: AlFetchFinancialInstrumentCirculatingSupplyRequest
 ): Promise<AlFetchFinancialInstrumentCirculatingSupplyResponse> {
   return service.request<AlFetchFinancialInstrumentCirculatingSupplyResponse>(
     "POST",
     "/api/v1/financial-instruments/single/circulating-supply",
-    body,
-    svmCluster
+    body
   );
 }
 
@@ -389,7 +379,6 @@ export async function fetchFinancialInstrumentCirculatingSupply(
  * @param service - Authenticated AlphaLedger service used to send the request.
  * @param detailLevel - Response detail level encoded in the endpoint path; narrows the item type of the response.
  * @param body - Typed bulk financial-instrument query.
- * @param svmCluster - Target SVM network, omitted to use the tenant default.
  * @returns The matching financial instruments at the requested detail level and total count.
  */
 export async function fetchFinancialInstruments<
@@ -397,14 +386,12 @@ export async function fetchFinancialInstruments<
 >(
   service: AlphaLedgerService,
   detailLevel: TDetailLevel,
-  body: AlFetchFinancialInstrumentsRequest,
-  svmCluster?: AlSvmCluster
+  body: AlFetchFinancialInstrumentsRequest
 ): Promise<AlFetchFinancialInstrumentsResponse<TDetailLevel>> {
   return service.request<AlFetchFinancialInstrumentsResponse<TDetailLevel>>(
     "POST",
     `/api/v1/financial-instruments/bulk/${detailLevel}`,
-    body,
-    svmCluster
+    body
   );
 }
 
@@ -413,19 +400,16 @@ export async function fetchFinancialInstruments<
  *
  * @param service - Authenticated AlphaLedger service used to send the request.
  * @param body - Typed financial-instrument update payload.
- * @param svmCluster - Target SVM network, omitted to use the tenant default.
  * @returns The updated entity identifiers and SVM transaction result.
  */
 export async function updateFinancialInstrument(
   service: AlphaLedgerService,
-  body: AlUpdateFinancialInstrumentRequest,
-  svmCluster?: AlSvmCluster
+  body: AlUpdateFinancialInstrumentRequest
 ): Promise<AlUpdateFinancialInstrumentResponse> {
   return service.request<AlUpdateFinancialInstrumentResponse>(
     "PATCH",
     "/api/v1/financial-instruments",
-    body,
-    svmCluster
+    body
   );
 }
 
@@ -435,19 +419,16 @@ export async function updateFinancialInstrument(
  *
  * @param service - Authenticated AlphaLedger service used to send the request.
  * @param body - Typed close payload with the instrument and optional authorities.
- * @param svmCluster - Target SVM network, omitted to use the tenant default.
  * @returns The closed entity identifiers and optional SVM transaction result.
  */
 export async function closeFinancialInstrument(
   service: AlphaLedgerService,
-  body: AlCloseFinancialInstrumentRequest,
-  svmCluster?: AlSvmCluster
+  body: AlCloseFinancialInstrumentRequest
 ): Promise<AlCloseFinancialInstrumentResponse> {
   return service.request<AlCloseFinancialInstrumentResponse>(
     "PATCH",
     "/api/v1/financial-instruments/close",
-    body,
-    svmCluster
+    body
   );
 }
 
@@ -456,19 +437,16 @@ export async function closeFinancialInstrument(
  *
  * @param service - Authenticated AlphaLedger service used to send the request.
  * @param body - Typed pause payload for the instrument and pausable authority.
- * @param svmCluster - Target SVM network, omitted to use the tenant default.
  * @returns The SVM transaction result that paused the instrument.
  */
 export async function pauseFinancialInstrument(
   service: AlphaLedgerService,
-  body: AlPauseFinancialInstrumentRequest,
-  svmCluster?: AlSvmCluster
+  body: AlPauseFinancialInstrumentRequest
 ): Promise<AlPauseFinancialInstrumentResponse> {
   return service.request<AlPauseFinancialInstrumentResponse>(
     "PATCH",
     "/api/v1/financial-instruments/pause",
-    body,
-    svmCluster
+    body
   );
 }
 
@@ -477,19 +455,16 @@ export async function pauseFinancialInstrument(
  *
  * @param service - Authenticated AlphaLedger service used to send the request.
  * @param body - Typed unpause payload for the instrument and pausable authority.
- * @param svmCluster - Target SVM network, omitted to use the tenant default.
  * @returns The SVM transaction result that unpaused the instrument.
  */
 export async function unpauseFinancialInstrument(
   service: AlphaLedgerService,
-  body: AlUnpauseFinancialInstrumentRequest,
-  svmCluster?: AlSvmCluster
+  body: AlUnpauseFinancialInstrumentRequest
 ): Promise<AlUnpauseFinancialInstrumentResponse> {
   return service.request<AlUnpauseFinancialInstrumentResponse>(
     "PATCH",
     "/api/v1/financial-instruments/unpause",
-    body,
-    svmCluster
+    body
   );
 }
 
@@ -499,18 +474,15 @@ export async function unpauseFinancialInstrument(
  *
  * @param service - Authenticated AlphaLedger service used to send the request.
  * @param body - Typed extension and metadata inputs for the calculation.
- * @param svmCluster - Target SVM network, omitted to use the tenant default.
  * @returns The required mint-account size and estimated rent.
  */
 export async function calculateTokenExtensions(
   service: AlphaLedgerService,
-  body: AlCalculateTokenExtensionsRequest,
-  svmCluster?: AlSvmCluster
+  body: AlCalculateTokenExtensionsRequest
 ): Promise<AlCalculateTokenExtensionsResponse> {
   return service.request<AlCalculateTokenExtensionsResponse>(
     "POST",
     "/api/v1/financial-instruments/token-extensions-calculator",
-    body,
-    svmCluster
+    body
   );
 }
