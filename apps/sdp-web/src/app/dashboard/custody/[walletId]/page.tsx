@@ -66,7 +66,11 @@ interface OwnedTokenRoute {
   id: string;
   mintAddress: string | null;
   name?: string | null;
+  symbol?: string | null;
 }
+
+/** Mint to issued-token detail, used for both deep links and naming assets. */
+type OwnedTokensByMint = Map<string, { id: string; name: string | null; symbol: string | null }>;
 
 async function getWalletDetail(
   request: SdpApiClient["request"],
@@ -156,9 +160,7 @@ async function getWalletPolicy(
   }
 }
 
-async function getOwnedTokenRoutes(
-  request: SdpApiClient["request"]
-): Promise<Map<string, { id: string; name: string | null }>> {
+async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<OwnedTokensByMint> {
   try {
     const response = await request("/v1/issuance/tokens?page=1&pageSize=100");
     if (!response.ok) {
@@ -172,12 +174,25 @@ async function getOwnedTokenRoutes(
     return new Map(
       (json.data ?? [])
         .filter(
-          (token): token is { id: string; mintAddress: string; name?: string | null } =>
+          (
+            token
+          ): token is {
+            id: string;
+            mintAddress: string;
+            name?: string | null;
+            symbol?: string | null;
+          } =>
             typeof token.id === "string" &&
             typeof token.mintAddress === "string" &&
             token.mintAddress.trim().length > 0
         )
-        .map((token) => [token.mintAddress, { id: token.id, name: token.name ?? null }] as const)
+        .map(
+          (token) =>
+            [
+              token.mintAddress,
+              { id: token.id, name: token.name ?? null, symbol: token.symbol?.trim() || null },
+            ] as const
+        )
     );
   } catch {
     return new Map();
@@ -323,6 +338,7 @@ export default async function WalletDetailPage({
         <WalletControlsPanel
           walletId={resolvedWalletId}
           policyPromise={walletPolicyPromise}
+          ownedTokensByMintPromise={ownedTokensByMintPromise}
           t={t}
         />
       </Suspense>
@@ -432,7 +448,7 @@ export async function WalletBalancesSection({
   t,
 }: {
   balancesPromise: Promise<WalletTrackedBalancesResult>;
-  ownedTokensByMintPromise: Promise<Map<string, { id: string; name: string | null }>>;
+  ownedTokensByMintPromise: Promise<OwnedTokensByMint>;
   t: Awaited<ReturnType<typeof getTranslations>>;
 }) {
   const [trackedBalancesResult, ownedTokensByMint] = await Promise.all([
@@ -572,16 +588,27 @@ function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolea
 async function WalletControlsPanel({
   walletId,
   policyPromise,
+  ownedTokensByMintPromise,
   t,
 }: {
   walletId: string;
   policyPromise: Promise<WalletPolicyResult>;
+  ownedTokensByMintPromise: Promise<OwnedTokensByMint>;
   t: Awaited<ReturnType<typeof getTranslations>>;
 }) {
-  const { policy, error: policyError } = await policyPromise;
+  const [{ policy, error: policyError }, ownedTokensByMint] = await Promise.all([
+    policyPromise,
+    ownedTokensByMintPromise,
+  ]);
   const hasRestrictions = walletPolicyHasRestrictions(policy);
   const destinationCount = policy?.destinationAllowlist.length ?? 0;
   const allowedAssets = walletPolicyAssets(policy);
+  // Names assets this org issued. Without it any mint outside the well-known
+  // catalogue renders as a shortened address.
+  const issuedSymbolsByMint: Record<string, string> = {};
+  for (const [mint, token] of ownedTokensByMint) {
+    if (token.symbol) issuedSymbolsByMint[mint] = token.symbol;
+  }
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
 
   return (
@@ -636,9 +663,13 @@ async function WalletControlsPanel({
                       className="flex items-center gap-2 rounded-full border border-border-subtle bg-fill-subtle py-1 pr-3 pl-1"
                       title={mint}
                     >
-                      <TokenMark mint={mint} size="sm" />
+                      {/* Only issued symbols are handed over: TokenMark already
+                          resolves well-known mints itself, and an unresolvable mint
+                          should keep its neutral placeholder rather than take a
+                          monogram cut from an address. */}
+                      <TokenMark mint={mint} symbol={issuedSymbolsByMint[mint]} size="sm" />
                       <span className="text-xs font-medium text-secondary">
-                        {resolveTransferTokenLabel(mint)}
+                        {resolveTransferTokenLabel(mint, issuedSymbolsByMint)}
                       </span>
                     </li>
                   ))}
