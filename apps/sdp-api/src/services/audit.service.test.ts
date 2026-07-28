@@ -115,6 +115,20 @@ describe("AuditService", () => {
       expect(events[1]?.actorLabel).toBe("Team member");
     });
 
+    it("does not print an unsubstituted Clerk placeholder as the actor", async () => {
+      const placeholder = "{{user.primary_email_address.email_address}}";
+      const { db } = mockDb([
+        { ...rows[0], user_name: null, user_email: placeholder },
+        { ...rows[0], id: "aud_y", user_name: placeholder, user_email: "jordan@example.com" },
+      ]);
+
+      const events = await new AuditService(db).getForAsset("org_1", "tok_1");
+      // No usable identity at all, so the generic label stands in.
+      expect(events[0]?.actorLabel).toBe("Team member");
+      // A corrupted name must not shadow an email that is still good.
+      expect(events[1]?.actorLabel).toBe("jordan@example.com");
+    });
+
     it("applies the action filter and pagination bounds", async () => {
       const { db, prepare, bind } = mockDb([]);
 

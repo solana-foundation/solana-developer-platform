@@ -90,6 +90,25 @@ export interface AuditLogEntry {
   status?: "success" | "failure";
 }
 
+/**
+ * An identity value fit to show a human, or null.
+ *
+ * A misconfigured Clerk JWT template passes unknown shortcodes through unsubstituted, so
+ * a user row can hold a literal `{{...}}` placeholder where its email or name belongs.
+ * Printed verbatim it reads as a rendering bug rather than the data problem it is, so it
+ * is treated as absent and the generic actor label stands in instead.
+ *
+ * Deliberately not an email-shape check: `name` is free-form, and the fault being guarded
+ * against is the unsubstituted placeholder, whichever field it landed in.
+ */
+export function displayableIdentity(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed || /\{\{.*\}\}/.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
 export class AuditService {
   constructor(private db: DatabaseClient) {}
 
@@ -305,7 +324,9 @@ export class AuditService {
           ? "api_key"
           : "system";
       const actorLabel = userId
-        ? (row.user_name as string | null) || (row.user_email as string | null) || "Team member"
+        ? (displayableIdentity(row.user_name as string | null) ??
+          displayableIdentity(row.user_email as string | null) ??
+          "Team member")
         : apiKeyId
           ? (row.api_key_name as string | null) || "API key"
           : "SDP";
