@@ -1,19 +1,10 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getTranslations } from "@/i18n/server";
+import { redirect } from "next/navigation";
 
-export default async function DashboardMembersPage() {
-  const t = await getTranslations();
-
-  return (
-    <div className="w-full max-w-5xl flex flex-col gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("Shared.members.comingSoon")}</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-secondary">
-          {t("Shared.members.description")}
-        </CardContent>
-      </Card>
-    </div>
-  );
+/**
+ * Members moved into the settings page. This route shipped in production, so
+ * it stays as a redirect rather than a deletion — bookmarks and shared links
+ * would otherwise 404.
+ */
+export default function DashboardMembersPage() {
+  redirect("/dashboard/settings#members");
 }

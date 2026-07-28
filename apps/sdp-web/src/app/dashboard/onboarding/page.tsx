@@ -3,9 +3,9 @@ import {
   type CustodyProvider,
   GENERAL_PROVIDER_DEFAULTS,
   ORGANIZATION_RPC_PROVIDERS,
-  type OrganizationRpcProvider,
 } from "@sdp/types";
 import { redirect } from "next/navigation";
+import { organizationOnboarding } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -23,10 +23,14 @@ const GENERAL_RPC_PROVIDERS = ORGANIZATION_RPC_PROVIDERS.filter(
 );
 
 export default async function OrganizationOnboardingPage() {
-  const t = await getTranslations();
-  const { getToken, userId, orgId } = await auth();
+  const [t, onboardingEnabled, { getToken, userId, orgId }] = await Promise.all([
+    getTranslations(),
+    organizationOnboarding(),
+    auth(),
+  ]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
+  if (!onboardingEnabled) redirect("/dashboard");
 
   const { organizationClient } = await createRequestScopedSdpApiClients({ getToken });
   const status = await organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
@@ -55,17 +59,32 @@ export default async function OrganizationOnboardingPage() {
     organizationClient.request,
     status.organization.id
   );
-  const custodyProviders = GENERAL_CUSTODY_PROVIDERS.filter(
-    (provider) => availability.providers.custody[provider]?.configured
+  const rpcProviders = GENERAL_RPC_PROVIDERS.filter(
+    (provider) => availability.providers.rpc[provider]?.enabled
   );
+  const custodyProviders = GENERAL_CUSTODY_PROVIDERS.filter(
+    (provider) => availability.providers.custody[provider]?.enabled
+  );
+  const useDefaultRpc =
+    rpcProviders.length === 0 &&
+    availability.providers.rpc.default?.enabled === true &&
+    (status.setup.rpcProvider === null || status.setup.rpcProvider === "default");
+  const storedRpcAvailable =
+    status.setup.rpcProvider !== null &&
+    availability.providers.rpc[status.setup.rpcProvider]?.enabled === true;
 
   return (
     <OrganizationOnboardingFlow
       organizationId={status.organization.id}
-      currentStep={status.setup.currentStep === "custody" ? "custody" : "rpc"}
+      currentStep={
+        useDefaultRpc || (storedRpcAvailable && status.setup.currentStep === "custody")
+          ? "custody"
+          : "rpc"
+      }
       initialRpcProvider={status.setup.rpcProvider}
-      rpcProviders={[...GENERAL_RPC_PROVIDERS] as OrganizationRpcProvider[]}
+      rpcProviders={rpcProviders}
       custodyProviders={[...custodyProviders]}
+      useDefaultRpc={useDefaultRpc}
     />
   );
 }

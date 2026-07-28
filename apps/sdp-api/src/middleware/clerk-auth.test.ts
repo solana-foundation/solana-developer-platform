@@ -5,7 +5,7 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { rateLimitMiddleware } from "@/middleware/rate-limit";
+import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -104,7 +104,7 @@ describe("Clerk auth request cache", () => {
       c.set("verifiedClerkJwt", { token, payload });
       await next();
     });
-    app.use("*", rateLimitMiddleware());
+    app.use("*", skipRateLimitPaths());
     app.use("*", unifiedAuthMiddleware({ allowClerk: true }));
     app.get("/protected", requirePermissions("org:read"), (c) => {
       return c.json({
@@ -302,6 +302,95 @@ describe("Clerk auth request cache", () => {
       "default-production",
       "default-sandbox",
     ]);
+  });
+
+  /**
+   * Clerk's acceptance link outlives a local revocation, so signing in through
+   * it is the other way a withdrawn invitation could still be redeemed.
+   */
+  async function seedInvitation(status: string, createdAt: string, expiresInDays = 7) {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO invitations
+           (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
+         VALUES (?, ?, 'clerk-cache@example.com', 'member', 'usr_clerk_cached', ?, ?, ?, ?)`
+      )
+      .bind(
+        `inv_${status}_${createdAt}`,
+        TEST_ORG.id,
+        `hash_${status}_${createdAt}`,
+        new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
+        status,
+        createdAt
+      )
+      .run();
+  }
+
+  function cachedUserPayload(): ClerkJwtPayload {
+    return {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_cached",
+      org_role: "org:admin",
+      org_slug: TEST_ORG.slug,
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+  }
+
+  it("refuses to provision a membership when the invitation was revoked", async () => {
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    const membership = await getDb(env)
+      .prepare("SELECT id FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ id: string }>();
+    expect(membership).toBeNull();
+  });
+
+  it("still provisions when a revoked invitation was superseded by a live one", async () => {
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z");
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    // Re-inviting a previously revoked address has to keep working.
+    expect(res.status).toBe(200);
+  });
+
+  it("does not lock out an existing member carrying a stale revoked invitation", async () => {
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    // The guard runs only where no membership exists, so it can decline a join
+    // but never strip access from somebody who already has it.
+    expect(res.status).toBe(200);
   });
 
   it("bootstraps an unlinked Clerk organization on the first authenticated request", async () => {

@@ -2,7 +2,12 @@ import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
-import { addAllowlistEntry, listAllowlist, removeAllowlistEntry } from "./handlers/allowlist";
+import {
+  addAllowlistEntry,
+  listAllowlist,
+  listAllowlistLabels,
+  removeAllowlistEntry,
+} from "./handlers/allowlist";
 import { getAssetAuditHistory } from "./handlers/audit";
 import { executeUpdateAuthority, prepareUpdateAuthority } from "./handlers/authority";
 import { executeBurn, prepareBurn } from "./handlers/burn";
@@ -114,6 +119,13 @@ issuance.post("/tokens/:tokenId/unfreeze", requirePermissions("tokens:admin"), u
 issuance.get("/tokens/:tokenId/frozen", requirePermissions("tokens:read"), listFrozenAccounts);
 
 // Allowlist
+// `/allowlist/labels` (GET) is registered before the `/allowlist/:entryId`
+// (DELETE) route; distinct methods mean there is no path collision either way.
+issuance.get(
+  "/tokens/:tokenId/allowlist/labels",
+  requirePermissions("tokens:read"),
+  listAllowlistLabels
+);
 issuance.get("/tokens/:tokenId/allowlist", requirePermissions("tokens:read"), listAllowlist);
 issuance.post("/tokens/:tokenId/allowlist", requirePermissions("tokens:write"), addAllowlistEntry);
 issuance.delete(

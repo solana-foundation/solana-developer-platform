@@ -1,4 +1,5 @@
 import { isDecimalString } from "@sdp/solana/amount";
+import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
 import { z } from "zod";
 import {
   assertAssetTypeSupported,
@@ -273,4 +274,22 @@ export const unfreezeSchema = z.object({
 export const addAllowlistSchema = z.object({
   address: z.string().min(32).max(44),
   label: z.string().max(100).optional(),
+});
+
+export const listAllowlistQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(500).default(50),
+  // Contains-style search over address + label (see listAllowlistEntries).
+  search: z.string().trim().min(1).max(100).optional(),
+  // Exact-match label filter (values come from the labels facet endpoint).
+  label: z.string().trim().min(1).max(100).optional(),
+});
+
+export const listTokenTransactionsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  // Capped at 500 so the dashboard's grow-window list can't blow up the client.
+  pageSize: z.coerce.number().int().min(1).max(500).default(50),
+  // Optional exact-match filters; ordering stays newest-first server-side.
+  status: z.enum(TOKEN_TRANSACTION_STATUSES).optional(),
+  type: z.enum(TOKEN_TRANSACTION_TYPES).optional(),
 });

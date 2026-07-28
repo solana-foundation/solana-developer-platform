@@ -81,7 +81,6 @@ const providerWalletLifecycleRegistry = {
           apiKey: parsed.apiKey,
           apiSecretPem,
           assetId: parsed.assetId,
-          apiBaseUrl: parsed.apiBaseUrl,
         })
       );
       const adapter = new KeychainFireblocksAdapter({
@@ -99,11 +98,8 @@ const providerWalletLifecycleRegistry = {
     },
   },
   privy: {
-    create: async ({ env, parsed }) => {
-      const apiBaseUrl = parsed.apiBaseUrl ?? env.PRIVY_API_BASE_URL;
-      const provisioned = await withProvisioningError("Privy", () =>
-        provisionPrivyWallet(env, { apiBaseUrl })
-      );
+    create: async ({ env }) => {
+      const provisioned = await withProvisioningError("Privy", () => provisionPrivyWallet(env, {}));
 
       return {
         walletId: normalizePrivyWalletId(provisioned.walletId),
@@ -117,7 +113,6 @@ const providerWalletLifecycleRegistry = {
         provisionCoinbaseCdpAccount(env, {
           orgId,
           orgSlug: orgId,
-          apiBaseUrl: parsed.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL,
           network: parsed.network ?? env.COINBASE_CDP_NETWORK,
           accountPolicy: parsed.accountPolicy,
         })
@@ -130,13 +125,12 @@ const providerWalletLifecycleRegistry = {
     },
   },
   para: {
-    create: async ({ env, orgId, projectId, parsed }) => {
+    create: async ({ env, orgId, projectId }) => {
       const provisioned = await withProvisioningError("Para", () =>
         provisionParaWallet(env, {
           orgId,
           projectId,
           orgSlug: orgId,
-          apiBaseUrl: parsed.apiBaseUrl ?? env.PARA_API_BASE_URL,
         })
       );
 
@@ -147,12 +141,11 @@ const providerWalletLifecycleRegistry = {
     },
   },
   turnkey: {
-    create: async ({ env, orgId, parsed }) => {
+    create: async ({ env, orgId }) => {
       const provisioned = await withProvisioningError("Turnkey", () =>
         provisionTurnkeyPrivateKey(env, {
           orgId,
           orgSlug: orgId,
-          apiBaseUrl: parsed.apiBaseUrl ?? env.TURNKEY_API_BASE_URL,
         })
       );
 
@@ -165,7 +158,7 @@ const providerWalletLifecycleRegistry = {
   dfns: {
     create: async ({ env, params, parsed }) => {
       const provisioned = await withProvisioningError("DFNS", async () => {
-        const client = await createDfnsApiClient(env, { apiBaseUrl: parsed.apiBaseUrl });
+        const client = await createDfnsApiClient(env);
         return client.wallets.createWallet({
           body: {
             network: resolveDfnsNetwork(parsed.network),
@@ -187,7 +180,7 @@ const providerWalletLifecycleRegistry = {
   ibm_haven: {
     create: async ({ env, params, parsed }) => {
       const provisioned = await withProvisioningError("IBM Digital Asset Haven", async () => {
-        const client = await createIbmHavenApiClient(env, { apiBaseUrl: parsed.apiBaseUrl });
+        const client = await createIbmHavenApiClient(env);
         return client.wallets.createWallet({
           body: {
             network: resolveDfnsNetwork(parsed.network, IBM_HAVEN_PROVIDER_LABEL),
@@ -213,7 +206,6 @@ const providerWalletLifecycleRegistry = {
     create: async ({ env, params, parsed }) => {
       const provisioned = await withProvisioningError("Anchorage", () =>
         provisionAnchorageWallet(env, {
-          apiBaseUrl: parsed.apiBaseUrl,
           walletLabel: params.label,
           network: parsed.network,
         })
@@ -224,9 +216,8 @@ const providerWalletLifecycleRegistry = {
         publicKey: provisioned.address,
       };
     },
-    delete: async ({ env, walletId, parsed }) => {
+    delete: async ({ env, walletId }) => {
       await deleteAnchorageWallet(env, {
-        apiBaseUrl: parsed.apiBaseUrl,
         walletId: denormalizeAnchorageWalletId(walletId),
       });
     },
@@ -238,7 +229,6 @@ const providerWalletLifecycleRegistry = {
         provisionUtilaWallet(env, {
           vaultId: parsed.vaultId,
           network: parsed.network,
-          apiBaseUrl: parsed.apiBaseUrl,
           displayName: params.label,
         })
       );

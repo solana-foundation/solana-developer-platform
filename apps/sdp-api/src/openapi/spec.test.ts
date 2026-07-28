@@ -25,6 +25,30 @@ describe("OpenAPI spec", () => {
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
   });
 
+  it("documents allowlist search/label filters and the labels endpoint", () => {
+    const doc = createOpenApiDocument();
+
+    const listPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist"]?.get;
+    const queryParamNames = listPath?.parameters
+      ?.filter((parameter) => "in" in parameter && parameter.in === "query")
+      .map((parameter) => ("name" in parameter ? parameter.name : undefined));
+    expect(queryParamNames).toEqual(expect.arrayContaining(["search", "label"]));
+
+    const labelsPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist/labels"]?.get;
+    expect(labelsPath).toBeDefined();
+    expect(labelsPath?.operationId).toBe("listTokenAllowlistLabels");
+  });
+
+  it("documents the transaction type filter", () => {
+    const doc = createOpenApiDocument();
+
+    const listPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/transactions"]?.get;
+    const queryParamNames = listPath?.parameters
+      ?.filter((parameter) => "in" in parameter && parameter.in === "query")
+      .map((parameter) => ("name" in parameter ? parameter.name : undefined));
+    expect(queryParamNames).toEqual(expect.arrayContaining(["type", "status", "page", "pageSize"]));
+  });
+
   it("documents the wallet metadata fast path and balance-on default", () => {
     const doc = createOpenApiDocument();
     const operation = doc.paths?.["/v1/wallets/{walletId}"]?.get;
@@ -79,6 +103,7 @@ describe("OpenAPI spec", () => {
 
   it("limits the public document to supported public API families", () => {
     const doc = createPublicOpenApiDocument();
+    const updateProject = JSON.stringify(doc.paths?.["/v1/projects/{projectId}"]?.patch);
 
     expect(doc.tags?.map((tag) => tag.name)).toEqual([
       "Health",
@@ -101,10 +126,21 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/onboarding/status"]).toBeUndefined();
     expect(doc.components?.securitySchemes?.sessionCookie).toBeUndefined();
     expect(doc.components?.securitySchemes?.adminKey).toBeUndefined();
+    expect(updateProject).toContain('"rpcProvider"');
+    expect(updateProject).toContain('"nodit"');
 
     expect(doc.paths?.["/health"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
     expect(doc.paths?.["/v1/policies"]?.get).toBeDefined();
+  });
+
+  it("documents the managed RPC round-robin order", () => {
+    const doc = createOpenApiDocument();
+    const rpcProviders = JSON.stringify(doc.paths?.["/v1/rpc/providers"]?.get);
+
+    expect(rpcProviders).toContain(
+      '"example":["triton","helius","alchemy","quicknode","validationcloud","nodit","default"]'
+    );
   });
 });

@@ -40,6 +40,8 @@ interface TokenActionFormsProps {
   setFreezeForm: Dispatch<SetStateAction<FreezeFormState>>;
   allowlistForm: AllowlistFormState;
   setAllowlistForm: Dispatch<SetStateAction<AllowlistFormState>>;
+  tokenId: string;
+  enableControlListSearch?: boolean;
   allowlistEntries: TokenAllowlistEntry[];
   allowlistError: string | null;
   controlListLabel: string | null;
@@ -63,6 +65,7 @@ interface TokenActionFormsProps {
   // Action-panel chrome for the whole form set; forwarded to TokenActionCard
   // (see there for variants) via the primary/admin form groups.
   variant?: "card" | "flat" | "bare";
+  hideAllowlistTitle?: boolean;
   onSignerWalletIdChange: (value: string) => void;
   onUpdateMetadata: () => void;
   onMint: () => void;
@@ -116,6 +119,8 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         setFreezeForm={props.setFreezeForm}
         allowlistForm={props.allowlistForm}
         setAllowlistForm={props.setAllowlistForm}
+        tokenId={props.tokenId}
+        enableControlListSearch={props.enableControlListSearch}
         allowlistEntries={props.allowlistEntries}
         allowlistError={props.allowlistError}
         controlListLabel={props.controlListLabel}
@@ -123,6 +128,7 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         controlListAddActionLabel={props.controlListAddActionLabel}
         controlListEmptyState={props.controlListEmptyState}
         freezeHint={props.freezeHint}
+        hideAllowlistTitle={props.hideAllowlistTitle}
         signerWallets={props.signerWallets}
         defaultSignerWalletId={props.defaultSignerWalletId}
         walletOptions={props.walletOptions}

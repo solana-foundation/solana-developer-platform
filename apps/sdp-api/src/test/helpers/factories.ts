@@ -182,6 +182,7 @@ export interface CachedApiKeyOverrides {
   signingWalletId?: string | null;
   status?: "active" | "revoked" | "expired" | "deactivated";
   expiresAt?: string | null;
+  rotationDeadline?: string | null;
 }
 
 export function createCachedApiKey(overrides: CachedApiKeyOverrides = {}): CachedApiKey {
@@ -198,6 +199,7 @@ export function createCachedApiKey(overrides: CachedApiKeyOverrides = {}): Cache
     signingWalletId: null,
     status: "active",
     expiresAt: null,
+    rotationDeadline: null,
     ...overrides,
   };
 }

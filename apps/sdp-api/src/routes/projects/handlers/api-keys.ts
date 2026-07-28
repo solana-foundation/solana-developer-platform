@@ -18,6 +18,7 @@ import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
+import { assertApiKeyProjectAccess } from "../project-access";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -26,11 +27,9 @@ async function assertProjectAccess(
   auth: ReturnType<typeof getAuth>,
   projectId: string
 ): Promise<void> {
-  // API key actors are bound to a single project; the path projectId must match.
-  if (auth.apiKeyId) {
-    if (auth.projectId !== projectId) {
-      throw notFound("Project");
-    }
+  assertApiKeyProjectAccess(auth, projectId);
+
+  if (auth.authType === "api_key") {
     return;
   }
 

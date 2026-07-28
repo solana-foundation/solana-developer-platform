@@ -54,13 +54,25 @@ export function ComplianceTab({
   );
 
   const hasControls = availableActions.length > 0;
+  // The advanced-settings / policy editor is admin-only. Non-admins reach this
+  // tab only for control-list tokens, where they get the allowlist controls but
+  // not the policy editor (also enforced server-side on the profile PATCH).
+  const showPolicyEditor = canManageTokenAdmin;
+  const twoColumn = showPolicyEditor && hasControls;
+  // A lone control (the allow/deny list, for non-admins) reads better as the
+  // card title than as a single always-on pill, so collapse the pill row and
+  // title the card with the list's name.
+  const singleAction = availableActions.length === 1 ? availableActions[0] : null;
+  const singleActionDisabledReason = singleAction
+    ? (ops.complianceActionDisabledReasons[singleAction.id] ?? null)
+    : null;
 
   return (
-    // Editor beside controls on widescreens; single column with no grid when
-    // there are no controls so the editor isn't stranded at half width.
+    // Editor beside controls on widescreens; single column when only one side is
+    // present (admin with no controls, or a non-admin allowlist-only view).
     <div
       className={
-        hasControls
+        twoColumn
           ? // Custom 1440px breakpoint (xl/1280 cramps the left column). Controls
             // hold a fixed width so their tab row never scrolls; the editor takes
             // minmax(0,1fr) and reflows to absorb the rest.
@@ -68,33 +80,35 @@ export function ComplianceTab({
           : undefined
       }
     >
-      <AdvancedSettingsEditor
-        // Collapse the inner grids on the editor's own width, not the viewport —
-        // it lives in a narrow half-column here.
-        containerResponsive
-        category={draft.assetCategory}
-        type={draft.assetType}
-        settings={draft.advancedSettings}
-        onSettingsChange={(advancedSettings) => updateDraft({ advancedSettings })}
-        capacities={draft.capacities}
-        onCapacitiesChange={(capacities) => updateDraft({ capacities })}
-        // Access control lives in the permanent (on-chain) section.
-        accessControl={draft.accessControl}
-        onAccessControlChange={(accessControl) => updateDraft({ accessControl })}
-        accessControlReadOnly={isDeployed}
-        accessControlDocsHref={ACCESS_CONTROL_DOCS_HREF}
-        // Deploy-payload preview is pre-deploy only; null hides the button.
-        deployConfig={isDeployed ? null : buildDeployConfigPreview(draft)}
-        // Scenario presets are creation-only.
-        showScenarios={false}
-        // The compliance tab is the config home; the wizard keeps capacities
-        // declaration-only.
-        allowCapacityConfig
-        showErrors={showErrors}
-        // Once deployed, on-chain extensions lock but off-chain capacities stay editable.
-        settingsReadOnly={isDeployed}
-        disabled={saving}
-      />
+      {showPolicyEditor ? (
+        <AdvancedSettingsEditor
+          // Collapse the inner grids on the editor's own width, not the viewport —
+          // it lives in a narrow half-column here.
+          containerResponsive
+          category={draft.assetCategory}
+          type={draft.assetType}
+          settings={draft.advancedSettings}
+          onSettingsChange={(advancedSettings) => updateDraft({ advancedSettings })}
+          capacities={draft.capacities}
+          onCapacitiesChange={(capacities) => updateDraft({ capacities })}
+          // Access control lives in the permanent (on-chain) section.
+          accessControl={draft.accessControl}
+          onAccessControlChange={(accessControl) => updateDraft({ accessControl })}
+          accessControlReadOnly={isDeployed}
+          accessControlDocsHref={ACCESS_CONTROL_DOCS_HREF}
+          // Deploy-payload preview is pre-deploy only; null hides the button.
+          deployConfig={isDeployed ? null : buildDeployConfigPreview(draft)}
+          // Scenario presets are creation-only.
+          showScenarios={false}
+          // The compliance tab is the config home; the wizard keeps capacities
+          // declaration-only.
+          allowCapacityConfig
+          showErrors={showErrors}
+          // Once deployed, on-chain extensions lock but off-chain capacities stay editable.
+          settingsReadOnly={isDeployed}
+          disabled={saving}
+        />
+      ) : null}
 
       {hasControls ? (
         // One card for the whole controls column; the form renders "bare" so it
@@ -103,11 +117,17 @@ export function ComplianceTab({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-base font-medium text-primary">
-                {t("DashboardIssuance.compliance.controls")}
+                {singleAction ? singleAction.label : t("DashboardIssuance.compliance.controls")}
               </p>
               <p className="mt-0.5 text-sm text-tertiary">
-                {t("DashboardIssuance.compliance.controlsDescription")}
+                {singleAction
+                  ? (ops.controlListCopy?.description ??
+                    t("DashboardIssuance.compliance.controlsDescription"))
+                  : t("DashboardIssuance.compliance.controlsDescription")}
               </p>
+              {singleActionDisabledReason ? (
+                <p className="mt-1 text-sm text-tertiary">{singleActionDisabledReason}</p>
+              ) : null}
             </div>
             {activeAction ? (
               <Button variant="outline" size="sm" className="shrink-0" asChild>
@@ -119,12 +139,14 @@ export function ComplianceTab({
             ) : null}
           </div>
           <div className="mt-4 space-y-3">
-            <ActionPills
-              actions={availableActions}
-              activeAction={activeAction}
-              disabledReasons={ops.complianceActionDisabledReasons}
-              onSelectAction={setActiveAction}
-            />
+            {singleAction ? null : (
+              <ActionPills
+                actions={availableActions}
+                activeAction={activeAction}
+                disabledReasons={ops.complianceActionDisabledReasons}
+                onSelectAction={setActiveAction}
+              />
+            )}
             <div className="flex flex-wrap gap-3">
               {ops.showControlList ? (
                 <CountCard
@@ -158,6 +180,7 @@ export function ComplianceTab({
               activeAction={activeAction}
               submitAlignment="end"
               formVariant="bare"
+              hideAllowlistTitle={Boolean(singleAction)}
             />
           </div>
         </div>
