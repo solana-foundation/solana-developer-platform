@@ -79,9 +79,37 @@ describe("transaction filter query", () => {
     );
     const query = toTransactionsApiQuery(filters);
 
-    expect(query.get("includeObserved")).toBe("false");
+    expect(query.get("includeObserved")).toBe("true");
     expect(query.get("counterpartyId")).toBe("counterparty_1");
     expect(query.get("from")).toBe("2026-07-01T00:00:00.000Z");
     expect(query.get("to")).toBe("2026-07-18T12:00:00.000Z");
+  });
+
+  it("includes observed deposits unless they are explicitly excluded", () => {
+    // Home shows observed rows, so this table defaults to matching it.
+    expect(parseTransactionFilters({}).includeObserved).toBe(true);
+    expect(parseTransactionFilters({ includeObserved: "false" }).includeObserved).toBe(false);
+    // Anything that is not exactly "false" leaves them on.
+    expect(parseTransactionFilters({ includeObserved: "no" }).includeObserved).toBe(true);
+  });
+
+  it("keeps the default out of the URL and round-trips the exclusion", () => {
+    const base = parseTransactionFilters({});
+    expect(serializeTransactionFilters(base).has("includeObserved")).toBe(false);
+
+    const excluded = serializeTransactionFilters({ ...base, includeObserved: false });
+    expect(excluded.get("includeObserved")).toBe("false");
+    expect(parseTransactionFilters(Object.fromEntries(excluded)).includeObserved).toBe(false);
+  });
+
+  it("counts the exclusion as an active filter only when switched off", () => {
+    const base = parseTransactionFilters({});
+    expect(countActiveTransactionFilters(base)).toBe(0);
+    expect(countActiveTransactionFilters({ ...base, includeObserved: false })).toBe(1);
+  });
+
+  it("sends the exclusion through to the API query", () => {
+    const filters = parseTransactionFilters({ includeObserved: "false" });
+    expect(toTransactionsApiQuery(filters).get("includeObserved")).toBe("false");
   });
 });

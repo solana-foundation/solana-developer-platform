@@ -8,6 +8,10 @@ export interface ClerkOrganizationInvitation {
   role: string;
   status: string;
   created_at?: number;
+  /** Shareable accept link Clerk mints; the only copy that exists. */
+  url?: string;
+  /** Clerk's own record of who sent it — a valid Clerk user by construction. */
+  inviter_id?: string;
 }
 
 export interface ClerkOrganization {
@@ -80,6 +84,61 @@ export class ClerkOrganizationsService {
         method: "POST",
         body: JSON.stringify(payload),
       }
+    );
+  }
+
+  /**
+   * Every pending invitation, following pagination.
+   *
+   * A single capped page is not safe here: revocation matches against this
+   * list, so an invitation beyond the cap would be reported as absent and its
+   * acceptance link would stay live.
+   */
+  async listPendingOrganizationInvitations(
+    organizationId: string
+  ): Promise<ClerkOrganizationInvitation[]> {
+    const pageSize = 100;
+    const all: ClerkOrganizationInvitation[] = [];
+
+    for (let offset = 0; ; offset += pageSize) {
+      const response = await this.request<
+        { data?: ClerkOrganizationInvitation[] } | ClerkOrganizationInvitation[]
+      >(
+        `/organizations/${organizationId}/invitations?status=pending&limit=${pageSize}&offset=${offset}`
+      );
+
+      // Clerk has returned both a bare array and a { data } envelope across
+      // versions, so accept either rather than depending on the current shape.
+      const page = Array.isArray(response) ? response : (response.data ?? []);
+      all.push(...page);
+
+      if (page.length < pageSize) {
+        return all;
+      }
+    }
+  }
+
+  async revokeOrganizationInvitation(params: {
+    organizationId: string;
+    invitationId: string;
+    requestingUserId: string;
+  }): Promise<ClerkOrganizationInvitation> {
+    return this.request<ClerkOrganizationInvitation>(
+      `/organizations/${params.organizationId}/invitations/${params.invitationId}/revoke`,
+      {
+        method: "POST",
+        body: JSON.stringify({ requesting_user_id: params.requestingUserId }),
+      }
+    );
+  }
+
+  async deleteOrganizationMembership(params: {
+    organizationId: string;
+    userId: string;
+  }): Promise<void> {
+    await this.request<unknown>(
+      `/organizations/${params.organizationId}/memberships/${params.userId}`,
+      { method: "DELETE" }
     );
   }
 

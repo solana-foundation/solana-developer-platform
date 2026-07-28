@@ -62,6 +62,8 @@ export function OpsActionForms({
       setFreezeForm={ops.setFreezeForm}
       allowlistForm={ops.allowlistForm}
       setAllowlistForm={ops.setAllowlistForm}
+      tokenId={token.id}
+      enableControlListSearch
       allowlistEntries={ops.allowlistEntries}
       allowlistError={ops.allowlistError}
       controlListLabel={ops.controlListCopy?.label ?? null}

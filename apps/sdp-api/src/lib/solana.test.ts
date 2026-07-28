@@ -35,6 +35,33 @@ describe("solana config resolution", () => {
     });
   });
 
+  it("resolves Nodit as the deployment default through URL-path authentication", () => {
+    const env = {
+      SOLANA_NETWORK: "devnet",
+      SOLANA_RPC_URL: "https://api.devnet.solana.com",
+      SOLANA_RPC_DEFAULT_PROVIDER: "nodit",
+      SOLANA_RPC_NODIT_URL: "https://rpc.proxy.test/nodit/{API_KEY}",
+      SOLANA_RPC_NODIT_API_KEY: "test+/= key",
+    } as Partial<Env> as Env;
+
+    expect(resolveDefaultSolanaRpcUrl(env)).toBe(
+      "https://rpc.proxy.test/nodit/test%2B%2F%3D%20key"
+    );
+    expect(getSolanaConfig(env)).toEqual({
+      network: "devnet",
+      rpcUrl: "https://rpc.proxy.test/nodit/test%2B%2F%3D%20key",
+    });
+  });
+
+  it("uses the Nodit URL as configured when no separate key is provided", () => {
+    const env = {
+      SOLANA_RPC_DEFAULT_PROVIDER: "nodit",
+      SOLANA_RPC_NODIT_URL: "https://rpc.proxy.test/nodit/{API_KEY}",
+    } as Partial<Env> as Env;
+
+    expect(resolveDefaultSolanaRpcUrl(env)).toBe("https://rpc.proxy.test/nodit/{API_KEY}");
+  });
+
   it("throws when no RPC endpoint is configured", () => {
     expect(() => getSolanaConfig({ SOLANA_NETWORK: "devnet" } as Partial<Env> as Env)).toThrow(
       "No Solana RPC endpoint is configured"
