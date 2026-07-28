@@ -1,6 +1,6 @@
 "use client";
 
-import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
+import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -73,6 +73,7 @@ import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indi
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
+import { SelectOrganizationPanel } from "@/components/select-organization-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
@@ -1292,21 +1293,7 @@ export function DashboardShell({
   }
 
   if (!orgId) {
-    return (
-      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-        <div className="mx-auto max-w-3xl border border-border-subtle bg-surface-raised/70 p-6">
-          <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
-            {t("Shared.dashboardShell.selectOrganization")}
-          </h1>
-          <p className="mt-3 text-sm text-tertiary">
-            {t("Shared.dashboardShell.selectOrganizationDescription")}
-          </p>
-          <div className="mt-6">
-            <OrganizationSwitcher hidePersonal />
-          </div>
-        </div>
-      </main>
-    );
+    return <SelectOrganizationPanel />;
   }
 
   if (isOrganizationOnboardingRoute) {
