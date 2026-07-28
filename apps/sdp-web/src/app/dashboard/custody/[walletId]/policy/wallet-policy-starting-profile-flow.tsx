@@ -897,14 +897,14 @@ function AssetEditor({
             items: matchingWalletAssets.filter((asset) => asset.source === "wallet"),
           },
           {
-            key: "well-known",
-            label: t("DashboardCustody.policyAssetsCommon"),
-            items: matchingWalletAssets.filter((asset) => asset.source === "well-known"),
-          },
-          {
             key: "issued",
             label: t("DashboardCustody.policyAssetsIssued"),
             items: matchingWalletAssets.filter((asset) => asset.source === "issued"),
+          },
+          {
+            key: "well-known",
+            label: t("DashboardCustody.policyAssetsCommon"),
+            items: matchingWalletAssets.filter((asset) => asset.source === "well-known"),
           },
         ] as const
       ).filter((group) => group.items.length > 0),
