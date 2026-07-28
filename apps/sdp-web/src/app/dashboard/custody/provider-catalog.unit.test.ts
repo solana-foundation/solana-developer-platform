@@ -86,14 +86,6 @@ describe("custody provider catalog", () => {
           required: true,
           valueHandling: "secret",
         },
-        {
-          key: "walletLabel",
-          labelKey: "DashboardCustody.providerInitialWalletLabel",
-          helpTextKey: "DashboardCustody.providerInitialWalletLabelDescription",
-          kind: "text",
-          required: false,
-          valueHandling: "plain",
-        },
       ],
     });
   });
