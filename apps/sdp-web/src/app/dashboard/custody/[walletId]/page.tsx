@@ -355,6 +355,7 @@ export default async function WalletDetailPage({
         <WalletActivityWithBalanceSymbols
           walletId={resolvedWalletId}
           balancesPromise={trackedBalancesPromise}
+          ownedTokensByMintPromise={ownedTokensByMintPromise}
         />
       </Suspense>
     </DashboardWorkspaceOverviewPanel>
@@ -362,20 +363,33 @@ export default async function WalletDetailPage({
 }
 
 /**
- * Hands the activity table the symbols the balances lookup already resolved, so
- * a token the well-known catalogue has never seen still reads as its symbol
- * rather than a shortened mint. The fallback renders the same viewport without
- * the map, so activity is never gated on balances loading.
+ * Hands the activity table the symbols the balances lookup already resolved, plus the
+ * ones this org issued, so a token the well-known catalogue has never seen still reads
+ * as its symbol rather than a shortened mint. The fallback renders the same viewport
+ * without the map, so activity is never gated on either lookup loading.
  */
 async function WalletActivityWithBalanceSymbols({
   walletId,
   balancesPromise,
+  ownedTokensByMintPromise,
 }: {
   walletId: string;
   balancesPromise: Promise<WalletTrackedBalancesResult>;
+  ownedTokensByMintPromise: Promise<OwnedTokensByMint>;
 }) {
-  const { balances } = await balancesPromise;
+  const [{ balances }, ownedTokensByMint] = await Promise.all([
+    balancesPromise,
+    ownedTokensByMintPromise,
+  ]);
   const symbolsByMint: Record<string, string> = {};
+  // Seeded first so balances can override: a token this org issued should still be
+  // named in activity even when the wallet holds none of it, which is exactly the
+  // case for an asset it has only ever sent away.
+  for (const [mint, token] of ownedTokensByMint) {
+    if (token.symbol) {
+      symbolsByMint[mint] = token.symbol;
+    }
+  }
   for (const balance of balances) {
     const mint = balance.mint?.trim();
     const token = balance.token?.trim();
