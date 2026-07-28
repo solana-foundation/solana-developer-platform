@@ -9,6 +9,7 @@ const providedEnv: Env = {
   DATABASE_URL: process.env.TEST_DATABASE_URL,
   REDIS_URL: process.env.REDIS_URL,
   API_KEY_PEPPER: "test-pepper-for-unit-tests",
+  CREDENTIAL_FINGERPRINT_PEPPER: "test-credential-fingerprint-pepper-for-unit-tests",
   SOLANA_MOCK: "true",
   RUN_INTEGRATION_TESTS: "false",
   SOLANA_NETWORK: "devnet",

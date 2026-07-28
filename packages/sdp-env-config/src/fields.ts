@@ -537,6 +537,14 @@ export const FIELDS: EnvField[] = [
     required: true,
   },
   {
+    key: "CREDENTIAL_FINGERPRINT_PEPPER",
+    section: "secrets",
+    kind: "secret",
+    label: "Credential fingerprint pepper",
+    required: true,
+    help: "HMAC key for stored-credential request fingerprints. Keep it stable so committed requests remain replayable.",
+  },
+  {
     key: "CUSTODY_ENCRYPTION_KEY",
     section: "secrets",
     kind: "secret",
@@ -635,6 +643,18 @@ export const FIELDS: EnvField[] = [
       { value: "true", label: "Enabled" },
     ],
     help: "Development is always enabled. This setting controls production only.",
+  },
+  {
+    key: "PRIVY_BYOK_PROVISIONING_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Privy stored-credential provisioning",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Allows eligible organizations to submit and provision customer-owned Privy credentials.",
   },
   {
     key: "PAYMENTS_RECURRING_COLLECTION_ENABLED",
