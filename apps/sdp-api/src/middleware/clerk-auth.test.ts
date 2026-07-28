@@ -109,6 +109,7 @@ describe("Clerk auth request cache", () => {
     app.get("/protected", requirePermissions("org:read"), (c) => {
       return c.json({
         organizationId: c.get("clerk")?.organizationId ?? null,
+        email: c.get("clerk")?.email ?? null,
       });
     });
     app.onError((error, c) => {
@@ -147,6 +148,7 @@ describe("Clerk auth request cache", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       organizationId: TEST_ORG.id,
+      email: "clerk-cache@example.com",
     });
 
     const projects = await getDb(env)
@@ -399,6 +401,31 @@ describe("Clerk auth request cache", () => {
       .bind(TEST_ORG.id)
       .first<{ status: string }>();
     expect(invitation?.status).toBe("accepted");
+  });
+
+  /**
+   * The established-user path returns before any provisioning runs, so it resolves the
+   * email straight out of storage. A placeholder is a non-null string, so it would win a
+   * COALESCE over the good copy sitting next to it.
+   */
+  it("skips a stored placeholder email for a user who is already a member", async () => {
+    await getDb(env)
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .bind("{{user.primary_email_address.email_address}}")
+      .run();
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      organizationId: TEST_ORG.id,
+      email: "clerk-cache@example.com",
+    });
   });
 
   it("still provisions when a revoked invitation was superseded by a live one", async () => {

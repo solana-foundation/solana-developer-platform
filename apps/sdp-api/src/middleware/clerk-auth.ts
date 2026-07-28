@@ -62,12 +62,17 @@ async function resolveClerkOrganization(db: DatabaseClient, clerkOrgId: string) 
     .first<{ organization_id: string; slug: string | null }>();
 }
 
+/**
+ * Both copies of the email are read separately here for the same reason as
+ * {@link resolveClerkUser}: a COALESCE prefers whichever copy is non-null, and the
+ * corrupted one is a placeholder string rather than a NULL. This is the path taken for an
+ * established user, so it is the one a repaired database still has to keep clean.
+ */
 async function resolveExistingClerkContext(
   db: DatabaseClient,
   params: {
     clerkUserId: string;
     clerkOrgId: string;
-    fallbackEmail: string;
     fallbackOrgSlug: string | null;
   }
 ) {
@@ -75,7 +80,8 @@ async function resolveExistingClerkContext(
     .prepare(
       `SELECT
          aui.user_id,
-         COALESCE(aui.email, u.email, ?) AS email,
+         aui.email AS identity_email,
+         u.email AS user_email,
          aoi.organization_id,
          COALESCE(aoi.slug, ?) AS org_slug,
          om.role,
@@ -109,15 +115,11 @@ async function resolveExistingClerkContext(
        WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?
        LIMIT 1`
     )
-    .bind(
-      params.fallbackEmail.toLowerCase(),
-      params.fallbackOrgSlug,
-      params.clerkUserId,
-      params.clerkOrgId
-    )
+    .bind(params.fallbackOrgSlug, params.clerkUserId, params.clerkOrgId)
     .first<{
       user_id: string | null;
-      email: string | null;
+      identity_email: string | null;
+      user_email: string | null;
       organization_id: string;
       org_slug: string | null;
       role: string | null;
@@ -346,7 +348,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {
     clerkUserId: payload.sub as string,
     clerkOrgId: payload.org_id as string,
-    fallbackEmail: email,
     fallbackOrgSlug: payload.org_slug ?? null,
   });
 
@@ -379,7 +380,9 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
       role,
       clerkUserId: payload.sub as string,
       clerkOrgId: payload.org_id as string,
-      email: existingContext.email ?? email,
+      email:
+        [existingContext.identity_email, existingContext.user_email].find(isPlausibleEmail) ??
+        email.toLowerCase(),
       orgSlug: payload.org_slug ?? existingContext.org_slug,
       orgRole: payload.org_role ?? null,
     };

@@ -13,12 +13,17 @@
 -- the row, so each is repaired from the other and only when the other is a plausible
 -- address. Rows where both copies are corrupt are left alone: there is nothing local to
 -- recover them from and they need a Clerk lookup.
+--
+-- Both statements are scoped to `provider = 'clerk'`, matching the reader. A user can hold
+-- an identity row per provider, and the second statement joins on `user_id` alone, so
+-- without the filter Postgres would be free to pick any of them as the repair source.
 
 UPDATE auth_user_identities AS aui
 SET email = u.email,
     updated_at = sdp_datetime_now()
 FROM users AS u
 WHERE u.id = aui.user_id
+  AND aui.provider = 'clerk'
   AND aui.email LIKE '%{{%'
   AND u.email NOT LIKE '%{{%'
   AND u.email LIKE '%@%.%';
@@ -30,6 +35,7 @@ UPDATE users AS u
 SET email = aui.email
 FROM auth_user_identities AS aui
 WHERE aui.user_id = u.id
+  AND aui.provider = 'clerk'
   AND u.email LIKE '%{{%'
   AND aui.email NOT LIKE '%{{%'
   AND aui.email LIKE '%@%.%'
