@@ -1359,6 +1359,7 @@ export function TokenManagementWorkspace({
         setFreezeForm={setFreezeForm}
         allowlistForm={allowlistForm}
         setAllowlistForm={setAllowlistForm}
+        tokenId={token.id}
         allowlistEntries={allowlistEntries}
         allowlistError={allowlistError}
         controlListLabel={controlListCopy?.label ?? null}
@@ -1673,6 +1674,7 @@ export function TokenManagementWorkspace({
             setFreezeForm={setFreezeForm}
             allowlistForm={allowlistForm}
             setAllowlistForm={setAllowlistForm}
+            tokenId={token.id}
             allowlistEntries={allowlistEntries}
             allowlistError={allowlistError}
             controlListLabel={controlListCopy?.label ?? null}

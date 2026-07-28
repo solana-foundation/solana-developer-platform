@@ -26,33 +26,27 @@ import {
 } from "@sdp/custody/provisioning";
 import type { Env } from "@/types/env";
 
+// Credential-bearing provider requests must resolve destinations from trusted
+// server configuration. Operation options intentionally cannot override URLs.
 export type ProvisionFireblocksOptions = CustodyProvisionFireblocksOptions & {
   assetId?: string;
-  apiBaseUrl?: string;
   apiKey?: string;
   apiSecretPem?: string;
 };
 export type { ProvisionFireblocksResult };
 
-export type ProvisionPrivyOptions = CustodyProvisionPrivyOptions & {
-  apiBaseUrl?: string;
-};
+export type ProvisionPrivyOptions = CustodyProvisionPrivyOptions;
 export type { ProvisionPrivyResult };
 
 export type ProvisionCoinbaseCdpOptions = CustodyProvisionCoinbaseCdpOptions & {
-  apiBaseUrl?: string;
   network?: "solana" | "solana-devnet";
 };
 export type { ProvisionCoinbaseCdpResult };
 
-export type ProvisionParaOptions = CustodyProvisionParaOptions & {
-  apiBaseUrl?: string;
-};
+export type ProvisionParaOptions = CustodyProvisionParaOptions;
 export type { ProvisionParaResult };
 
-export type ProvisionTurnkeyOptions = CustodyProvisionTurnkeyOptions & {
-  apiBaseUrl?: string;
-};
+export type ProvisionTurnkeyOptions = CustodyProvisionTurnkeyOptions;
 export type { ProvisionTurnkeyResult };
 
 export type ProvisionUtilaOptions = CustodyProvisionUtilaOptions & {
@@ -60,18 +54,13 @@ export type ProvisionUtilaOptions = CustodyProvisionUtilaOptions & {
   serviceAccountPrivateKeyPem?: string;
   vaultId?: string;
   network?: "networks/solana-mainnet" | "networks/solana-devnet";
-  apiBaseUrl?: string;
 };
 export type { ProvisionUtilaResult };
 
-export type ProvisionAnchorageOptions = CustodyProvisionAnchorageOptions & {
-  apiBaseUrl?: string;
-};
+export type ProvisionAnchorageOptions = CustodyProvisionAnchorageOptions;
 export type { ProvisionAnchorageResult };
 
-export type DeleteAnchorageOptions = CustodyDeleteAnchorageOptions & {
-  apiBaseUrl?: string;
-};
+export type DeleteAnchorageOptions = CustodyDeleteAnchorageOptions;
 
 export async function provisionFireblocksVaultAccount(
   env: Env,
@@ -82,7 +71,7 @@ export async function provisionFireblocksVaultAccount(
     {
       apiKey: options.apiKey ?? env.FIREBLOCKS_API_KEY,
       apiSecretPem: options.apiSecretPem ?? env.FIREBLOCKS_API_SECRET,
-      apiBaseUrl: options.apiBaseUrl ?? env.FIREBLOCKS_API_BASE_URL,
+      apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
       assetId: options.assetId ?? env.FIREBLOCKS_ASSET_ID,
     },
     options
@@ -98,7 +87,7 @@ export async function provisionPrivyWallet(
     {
       appId: env.PRIVY_APP_ID,
       appSecret: env.PRIVY_APP_SECRET,
-      apiBaseUrl: options.apiBaseUrl ?? env.PRIVY_API_BASE_URL,
+      apiBaseUrl: env.PRIVY_API_BASE_URL,
     },
     options
   );
@@ -114,7 +103,7 @@ export async function provisionCoinbaseCdpAccount(
       apiKeyId: env.COINBASE_CDP_API_KEY_ID,
       apiKeySecret: env.COINBASE_CDP_API_KEY_SECRET,
       walletSecret: env.COINBASE_CDP_WALLET_SECRET,
-      apiBaseUrl: options.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL,
+      apiBaseUrl: env.COINBASE_CDP_API_BASE_URL,
       network: options.network ?? env.COINBASE_CDP_NETWORK,
       accountScope: env.COINBASE_CDP_ACCOUNT_NAMESPACE?.trim() || env.ENVIRONMENT,
     },
@@ -130,7 +119,7 @@ export async function provisionParaWallet(
     createRuntime(),
     {
       apiKey: env.PARA_API_KEY,
-      apiBaseUrl: options.apiBaseUrl ?? env.PARA_API_BASE_URL,
+      apiBaseUrl: env.PARA_API_BASE_URL,
     },
     options
   );
@@ -146,7 +135,7 @@ export async function provisionTurnkeyPrivateKey(
       apiPublicKey: env.TURNKEY_API_PUBLIC_KEY,
       apiPrivateKey: env.TURNKEY_API_PRIVATE_KEY,
       organizationId: env.TURNKEY_ORGANIZATION_ID,
-      apiBaseUrl: options.apiBaseUrl ?? env.TURNKEY_API_BASE_URL,
+      apiBaseUrl: env.TURNKEY_API_BASE_URL,
     },
     options
   );
@@ -169,7 +158,7 @@ export async function provisionUtilaWallet(
         (env.SOLANA_NETWORK === "mainnet-beta"
           ? "networks/solana-mainnet"
           : "networks/solana-devnet"),
-      apiBaseUrl: options.apiBaseUrl ?? env.UTILA_API_BASE_URL,
+      apiBaseUrl: env.UTILA_API_BASE_URL,
     },
     options
   );
@@ -183,7 +172,7 @@ export async function provisionAnchorageWallet(
     createRuntime(),
     {
       apiKey: env.ANCHORAGE_API_KEY,
-      apiBaseUrl: options.apiBaseUrl ?? env.ANCHORAGE_API_BASE_URL,
+      apiBaseUrl: env.ANCHORAGE_API_BASE_URL,
     },
     options
   );
@@ -197,7 +186,7 @@ export async function deleteAnchorageWallet(
     createRuntime(),
     {
       apiKey: env.ANCHORAGE_API_KEY,
-      apiBaseUrl: options.apiBaseUrl ?? env.ANCHORAGE_API_BASE_URL,
+      apiBaseUrl: env.ANCHORAGE_API_BASE_URL,
     },
     options
   );

@@ -1,10 +1,13 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
+import { WalletIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
+import type { WizardSummaryDetail } from "../../wizard-summary-list";
+import { optionalDetail } from "../wizard-summary";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
@@ -64,6 +67,12 @@ export function useOnchainReceiveWizard({
   const isLastStep = stepIndex === steps.length - 1;
   const canProceed = currentStepId === "WALLET" ? !!walletId : true;
 
+  const summaryDetails: WizardSummaryDetail[] = optionalDetail(
+    selectedWallet === null ? null : selectedWallet.label,
+    t("DashboardPayments.ramps.destinationWallet"),
+    WalletIcon
+  );
+
   const handlePrimary = () => {
     if (!canProceed) {
       return;
@@ -85,6 +94,7 @@ export function useOnchainReceiveWizard({
 
   return {
     counterpartyId,
+    summaryDetails,
     stepIndex,
     steps,
     currentStepId,

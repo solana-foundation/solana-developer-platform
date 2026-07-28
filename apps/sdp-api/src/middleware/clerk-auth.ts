@@ -20,6 +20,7 @@ import {
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
+import { invitationWasRevoked } from "@/lib/invitations";
 import { ensureClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import {
@@ -220,17 +221,11 @@ async function ensureMembership(
     .bind(params.organizationId, params.email.toLowerCase())
     .first<{ id: string; role: string; expires_at: string }>();
 
-  let role: OrganizationRole | null = null;
+  let invitedRole: OrganizationRole | null = null;
 
   if (pendingInvite) {
     if (new Date(pendingInvite.expires_at) >= new Date()) {
-      role = normalizeOrganizationRole(pendingInvite.role);
-      if (role !== pendingInvite.role) {
-        await db
-          .prepare("UPDATE invitations SET role = ? WHERE id = ?")
-          .bind(role, pendingInvite.id)
-          .run();
-      }
+      invitedRole = normalizeOrganizationRole(pendingInvite.role);
     } else {
       await db
         .prepare("UPDATE invitations SET status = 'expired' WHERE id = ?")
@@ -239,20 +234,62 @@ async function ensureMembership(
     }
   }
 
-  if (!role) {
-    role = mapClerkRoleToOrgRole(params.clerkRole);
-  }
-
+  const role = invitedRole ?? mapClerkRoleToOrgRole(params.clerkRole);
   const memberId = `mem_${crypto.randomUUID()}`;
+
   try {
-    await db
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(memberId, params.organizationId, params.userId, role)
-      .run();
+    // The claim and the membership insert have to commit together. Claiming
+    // first alone would let a failing insert consume the invitation without
+    // granting access, and inserting first would let a concurrent revocation
+    // win the invitation transition after access was already persisted.
+    await db.transaction(async (tx) => {
+      // Reached only when the caller holds no membership row at all — an
+      // existing member returned above — so this declines a join and never
+      // revokes access someone already has.
+      //
+      // Without it, revoking an invitation stopped the local token while
+      // Clerk's acceptance link stayed live: signing in through that link fell
+      // through to the Clerk role and provisioned the membership anyway. Inside
+      // the transaction and holding the invitation locks, so a revocation
+      // cannot land between this check and the insert below.
+      if (
+        !invitedRole &&
+        (await invitationWasRevoked(tx, params.organizationId, params.email, { lock: true }))
+      ) {
+        throw unauthorized("Invitation to this organization was revoked");
+      }
+
+      if (pendingInvite && invitedRole) {
+        // Role normalization folds in here, so there is one transition rather
+        // than a read, a role fixup and a later accept.
+        const claimed = await tx
+          .prepare(
+            `UPDATE invitations
+                SET status = 'accepted', accepted_at = datetime('now'), role = ?
+              WHERE id = ? AND status = 'pending'`
+          )
+          .bind(invitedRole, pendingInvite.id)
+          .run();
+
+        // Zero rows means it stopped being pending between the read and here.
+        // Revocation is the case that matters, and granting access off a
+        // just-revoked invitation is the failure worth refusing.
+        if (claimed === 0) {
+          throw unauthorized("Invitation is no longer valid");
+        }
+      }
+
+      await tx
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+             VALUES (?, ?, ?, ?, 'active')`
+        )
+        .bind(memberId, params.organizationId, params.userId, role)
+        .run();
+    });
   } catch (error) {
+    // A concurrent sign-in may have created the membership first; the rollback
+    // released our claim, so deferring to the row that won is correct.
     const existingAfterInsert = await resolveOrgMembership(
       db,
       params.userId,
@@ -265,15 +302,6 @@ async function ensureMembership(
       throw unauthorized("Organization membership is inactive");
     }
     throw error;
-  }
-
-  if (pendingInvite && role === normalizeOrganizationRole(pendingInvite.role)) {
-    await db
-      .prepare(
-        "UPDATE invitations SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?"
-      )
-      .bind(pendingInvite.id)
-      .run();
   }
 
   return role;
@@ -294,7 +322,10 @@ async function ensureDefaultProjects(
 async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJwtPayload) {
   const email = resolveClerkEmail(payload);
   if (!email) {
-    throw new AppError("UNAUTHORIZED", "Clerk token missing email");
+    throw new AppError(
+      "UNAUTHORIZED",
+      "Clerk token has no usable email claim. Check the JWT template: an invalid shortcode is passed through unsubstituted rather than resolved."
+    );
   }
 
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {

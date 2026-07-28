@@ -1248,6 +1248,15 @@
           }
         },
         {
+          "name": "List token allowlist labels",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/allowlist/labels",
+            "description": "Lists the distinct labels used across a token's active control-list entries, for building a label filter."
+          }
+        },
+        {
           "name": "Remove token allowlist entry",
           "request": {
             "method": "DELETE",

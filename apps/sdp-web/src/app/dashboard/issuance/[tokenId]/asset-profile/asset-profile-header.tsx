@@ -75,10 +75,10 @@ export function AssetProfileHeader({
           <img
             src={token.imageUrl}
             alt={t("DashboardIssuance.header.tokenLogo", { name: token.name })}
-            className="h-16 w-16 shrink-0 rounded-full object-cover ring-1 ring-black/5"
+            className="h-16 w-16 shrink-0 rounded-full object-cover border border-border-default"
           />
         ) : (
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary text-2xl font-semibold text-on-primary ring-1 ring-black/5">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary text-2xl font-semibold text-on-primary border border-border-default">
             {token.symbol.slice(0, 1).toUpperCase() || "?"}
           </div>
         )}

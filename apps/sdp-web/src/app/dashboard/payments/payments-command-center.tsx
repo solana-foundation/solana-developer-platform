@@ -230,7 +230,9 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
   const transfers = result.data ?? [];
 
   return (
-    <section className={sectionClassName} data-payments-overview-section="activity">
+    // self-start keeps this card at its content height instead of stretching to match the
+    // taller Upcoming/Network column, which otherwise leaves dead space inside the card.
+    <section className={`${sectionClassName} self-start`} data-payments-overview-section="activity">
       <SectionHeading title={t("DashboardPayments.commandCenter.activity")} />
       <div className="mt-3 flex items-end gap-5 border-b border-border-default text-sm">
         <DashboardNavigationLink

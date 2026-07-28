@@ -1,6 +1,5 @@
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 
 const ISSUANCE_SKELETON_IDS = [
   "issuance-skeleton-1",
@@ -109,10 +108,14 @@ function LegacyIssuanceTokenCardSkeleton() {
   );
 }
 
-export function IssuancePageSkeleton() {
+export function IssuancePageSkeleton({
+  assetProfilesEnabled = false,
+}: {
+  assetProfilesEnabled?: boolean;
+}) {
   // Legacy list skeleton when the Asset Profiles UI flag is off, so the loading
   // state matches the old grid instead of flashing the new one.
-  if (!isAssetProfilesUiEnabled()) {
+  if (!assetProfilesEnabled) {
     return (
       <DashboardWorkspaceOverviewPanel
         className="space-y-6"

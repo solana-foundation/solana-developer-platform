@@ -19,9 +19,16 @@ export async function seedCachedApiKey(
   data: CachedApiKey
 ): Promise<void> {
   const kv = createKVStoreSet(env);
-  await kv.apiKeys.put(`key:${keyHash}`, JSON.stringify(data), {
-    expirationTtl: 3600,
-  });
+  await kv.apiKeys.put(
+    `key:${keyHash}`,
+    JSON.stringify({
+      ...data,
+      rotationDeadline: data.rotationDeadline ?? null,
+    }),
+    {
+      expirationTtl: 3600,
+    }
+  );
 }
 
 /**

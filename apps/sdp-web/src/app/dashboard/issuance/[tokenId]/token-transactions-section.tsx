@@ -26,7 +26,7 @@ interface TokenTransactionsSectionProps {
 
 // Transaction status → SDP design-system badge token (borderless tinted pill):
 // settled = .badge-green, in-flight = .badge-amber, failed = .badge-red.
-function transactionStatusBadgeClass(status: string): string {
+export function transactionStatusBadgeClass(status: string): string {
   switch (status) {
     case "confirmed":
     case "finalized":

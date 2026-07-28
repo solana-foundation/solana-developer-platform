@@ -3,15 +3,15 @@ import type { TokenAllowlistResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, badRequest, notFound } from "@/lib/errors";
-import { created, noContent, paginated } from "@/lib/response";
+import { AppError, badRequest, badRequestQuery, notFound } from "@/lib/errors";
+import { created, noContent, paginated, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
-import { addAllowlistSchema } from "../schemas";
+import { addAllowlistSchema, listAllowlistQuerySchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -164,6 +164,12 @@ export const listAllowlist = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
+  const parsed = listAllowlistQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
+  const { page, pageSize, search, label } = parsed.data;
+
   const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken({
     tokenId,
@@ -175,16 +181,36 @@ export const listAllowlist = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const page = Number.parseInt(c.req.query("page") ?? "1", 10);
-  const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 500);
   const offset = (page - 1) * pageSize;
 
   const { entries, total } = await tokenService.listAllowlistEntries(tokenId, {
+    search,
+    label,
     limit: pageSize,
     offset,
   });
 
   return paginated(c, entries, { total, page, pageSize });
+};
+
+export const listAllowlistLabels = async (c: AppContext) => {
+  const { tokenId } = c.req.param();
+  const { projectId, orgId } = requireProjectScope(c);
+
+  const tokenService = new TokenService(getDb(c.env));
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
+
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const { labels, total } = await tokenService.listAllowlistLabels(tokenId);
+
+  return success(c, { labels, total });
 };
 
 export const addAllowlistEntry = async (c: AppContext) => {

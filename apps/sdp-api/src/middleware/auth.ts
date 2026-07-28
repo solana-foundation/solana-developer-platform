@@ -21,7 +21,10 @@ import {
   parsePostgresJsonOr,
 } from "@/db/postgres-utils";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
+import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
 import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
@@ -74,7 +77,10 @@ function looksLikeJwt(token: string): boolean {
 /** Look up API key in KV cache */
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
   const cached = await kv.get<CachedApiKey>(`key:${keyHash}`, "json");
-  return cached;
+  // Payloads written before rotation-deadline enforcement do not contain this
+  // property. Treat them as misses so a deploy cannot extend an old key's
+  // validity until the legacy one-hour cache entry expires.
+  return cached && Object.hasOwn(cached, "rotationDeadline") ? cached : null;
 }
 
 async function isKnownInvalidKey(kv: KVStore, keyHash: string): Promise<boolean> {
@@ -102,7 +108,8 @@ async function getFromDatabaseAndCache(
     .prepare(
       `SELECT ak.id, ak.organization_id, ak.project_id, ak.role, ak.permissions,
               p.environment,
-              ak.rate_limit_tier, ak.allowed_ips, ak.signing_wallet_id, ak.status, ak.expires_at
+              ak.rate_limit_tier, ak.allowed_ips, ak.signing_wallet_id, ak.status, ak.expires_at,
+              ak.rotation_deadline
        FROM api_keys ak
        JOIN projects p ON p.id = ak.project_id
        WHERE ak.key_hash = ?`
@@ -120,6 +127,7 @@ async function getFromDatabaseAndCache(
       signing_wallet_id: string | null;
       status: string;
       expires_at: string | null;
+      rotation_deadline: string | null;
     }>();
 
   if (!result) {
@@ -163,6 +171,7 @@ async function getFromDatabaseAndCache(
     walletBindings,
     status: result.status as "active" | "revoked" | "expired" | "deactivated",
     expiresAt: result.expires_at,
+    rotationDeadline: result.rotation_deadline,
   };
 
   // Cache to KV
@@ -363,6 +372,14 @@ export function authMiddleware() {
     // Check expiration
     if (cachedKey.expiresAt && new Date(cachedKey.expiresAt) < new Date()) {
       throw new AppError("EXPIRED_API_KEY");
+    }
+
+    if (isRotationDeadlineReached(cachedKey.rotationDeadline)) {
+      throw new AppError("EXPIRED_API_KEY");
+    }
+
+    if (!isClientIpAllowed(getClientIp(c), cachedKey.allowedIps)) {
+      throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");
     }
 
     await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);

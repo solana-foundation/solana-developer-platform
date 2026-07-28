@@ -31,18 +31,23 @@ test("manual production redeploy always skips builds and migrations", () => {
   );
 });
 
-test("candidate is revision-specific and proven ready before promotion", () => {
+test("candidate is revision-specific and Cloud Run-ready before promotion", () => {
   assert.match(workflow, /echo "IMAGE=\$\{resolved_image\}" >> "\$\{GITHUB_ENV\}"/);
   assert.match(workflow, /--no-traffic --tag "\$\{candidate_tag\}"/);
   assert.match(workflow, /CANDIDATE_TAG=\$\{candidate_tag\}/);
   assert.match(workflow, /status\.imageDigest/);
-  assert.match(workflow, /"\$\{CANDIDATE_URL\}\/health\/ready"/);
+  assert.match(
+    workflow,
+    /gcloud run revisions describe "\$\{CANDIDATE_REVISION\}"[\s\S]*--format=json/
+  );
+  assert.match(workflow, /\.status\.conditions\[\]/);
+  assert.doesNotMatch(workflow, /CANDIDATE_URL/);
   assert.match(workflow, /\.revision == \$revision/);
   assert.match(workflow, /\.checks\.database == "ok"/);
   assert.match(workflow, /\.checks\.redis == "ok"/);
 
   const candidateDeploy = workflow.indexOf("- name: Deploy candidate without production traffic");
-  const candidateReadiness = workflow.indexOf("- name: Verify candidate readiness");
+  const candidateReadiness = workflow.indexOf("- name: Verify candidate revision readiness");
   const promotion = workflow.indexOf("- name: Promote service and cron with rollback");
   assert.ok(candidateDeploy !== -1 && candidateDeploy < candidateReadiness);
   assert.ok(candidateReadiness < promotion);

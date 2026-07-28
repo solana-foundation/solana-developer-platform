@@ -9,9 +9,10 @@ import {
 } from "@sdp/types";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { badRequest, notFound, walletNotFound } from "@/lib/errors";
+import { badRequest, badRequestQuery, notFound, walletNotFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
 import {
   assertApiKeyWalletAccess,
@@ -21,6 +22,7 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
+import { listTokenTransactionsQuerySchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -215,6 +217,12 @@ export const listTokenTransactions = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
+  const parsed = listTokenTransactionsQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
+  const { page, pageSize, status, type } = parsed.data;
+
   const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken({
     tokenId,
@@ -226,19 +234,11 @@ export const listTokenTransactions = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const status = c.req.query("status") as
-    | "pending"
-    | "processing"
-    | "confirmed"
-    | "finalized"
-    | "failed"
-    | undefined;
-  const page = Number.parseInt(c.req.query("page") ?? "1", 10);
-  const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 100);
   const offset = (page - 1) * pageSize;
 
   const { transactions, total } = await tokenService.listTokenTransactions(tokenId, {
     status,
+    type,
     organizationId: orgId,
     limit: pageSize,
     offset,

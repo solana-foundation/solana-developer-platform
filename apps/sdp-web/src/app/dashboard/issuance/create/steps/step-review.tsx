@@ -279,7 +279,7 @@ function FieldRow({ field }: { field: Field }) {
           <img
             src={field.preview ?? undefined}
             alt=""
-            className="h-10 w-10 shrink-0 rounded-lg bg-[white] object-cover ring-1 ring-black/5"
+            className="h-10 w-10 shrink-0 rounded-lg border border-border-default bg-fill-subtle object-cover"
           />
         ) : hasValue && field.href ? (
           <a

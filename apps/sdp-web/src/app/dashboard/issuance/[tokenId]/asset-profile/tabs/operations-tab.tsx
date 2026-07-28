@@ -6,7 +6,7 @@ import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
 import type { FundManagementModalAction } from "../../token-fund-management-section";
-import { TokenTransactionsSection } from "../../token-transactions-section";
+import { TokenTransactionsBrowser } from "../token-transactions-browser";
 import type { TokenOperations } from "../use-token-operations";
 
 interface OperationRow {
@@ -19,7 +19,7 @@ interface OperationRow {
   disabledReason: string | null;
 }
 
-export function OperationsTab({ ops }: { ops: TokenOperations }) {
+export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId: string }) {
   const t = useTranslations();
   const operationRows: OperationRow[] = ops.canDeployToken
     ? [
@@ -101,13 +101,7 @@ export function OperationsTab({ ops }: { ops: TokenOperations }) {
         </div>
       </div>
 
-      <TokenTransactionsSection
-        transactions={ops.transactions}
-        transactionsError={ops.transactionsError}
-        transactionsTotal={ops.transactionsTotal}
-        transactionsHasMore={ops.transactionsHasMore}
-        isLoading={ops.supportingDataLoading}
-      />
+      <TokenTransactionsBrowser tokenId={tokenId} />
     </div>
   );
 }
