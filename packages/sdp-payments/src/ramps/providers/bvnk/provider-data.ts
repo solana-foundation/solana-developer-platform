@@ -121,8 +121,12 @@ export async function buildBvnkWalletIdempotencyKey(walletName: string): Promise
 
 const BVNK_VERIFIED_STATUSES = new Set(["VERIFIED", "COMPLETED", "APPROVED"]);
 const BVNK_VERIFYING_STATUSES = new Set(["PENDING"]);
-const BVNK_VERIFICATION_REQUIRED_STATUSES = new Set(["ACTIONS_REQUIRED", "INFO_REQUIRED"]);
-const BVNK_VERIFICATION_FAILED_STATUSES = new Set(["REJECTED"]);
+const BVNK_VERIFICATION_REQUIRED_STATUSES = new Set([
+  "ACTIONS_REQUIRED",
+  "INFO_REQUIRED",
+  "NOT_STARTED",
+]);
+const BVNK_VERIFICATION_FAILED_STATUSES = new Set(["REJECTED", "TERMINATED"]);
 
 /**
  * Whether a cached BVNK customer status counts as fully verified. The customer
@@ -243,6 +247,7 @@ export interface BvnkCustomerResolution {
   status?: string;
   verificationStatus?: BvnkVerificationStatus;
   verificationUrl?: string;
+  apiVersion?: "v1" | "v2";
 }
 
 const SDP_COUNTERPARTY_ID_PATTERN =
@@ -751,6 +756,35 @@ export function buildBvnkOnrampInstruction(
   };
 }
 
+/**
+ * Resolves the requirements for a customer in the verification_required phase.
+ * A v2 customer's hosted onboarding link (`authenticatedLink`) is minted
+ * asynchronously after creation, so a missing URL means the link is still
+ * pending and the customer reads as verifying; a v1 customer without a URL
+ * violates the provisioning contract and throws.
+ *
+ * @param customer Stored BVNK customer resolution from provider_data.
+ * @param direction Ramp direction the requirements decision is for.
+ * @returns Verification-required requirements with the URL, or verifying while a v2 link is pending.
+ */
+function bvnkVerificationRequiredRequirements(
+  customer: BvnkCustomerResolution,
+  direction: RampDirection
+): CounterpartyRequirements {
+  if (!customer.verificationUrl) {
+    if (customer.apiVersion === "v2") {
+      return { provider: "bvnk", direction, status: "customer_verifying" };
+    }
+    throw internalError('BVNK reported "verification_required" without a verificationUrl.');
+  }
+  return {
+    provider: "bvnk",
+    direction,
+    status: "customer_verification_required",
+    verificationUrl: customer.verificationUrl,
+  };
+}
+
 export function bvnkOnboardingRequirements(
   resolution: BvnkPaymentRuleResolution,
   direction: RampDirection
@@ -758,18 +792,8 @@ export function bvnkOnboardingRequirements(
   switch (resolution.onboardingStatus) {
     case "ready":
       return readyCounterparty("bvnk", direction);
-    case "verification_required": {
-      const { verificationUrl } = resolution.customer;
-      if (!verificationUrl) {
-        throw internalError('BVNK reported "verification_required" without a verificationUrl.');
-      }
-      return {
-        provider: "bvnk",
-        direction,
-        status: "customer_verification_required",
-        verificationUrl,
-      };
-    }
+    case "verification_required":
+      return bvnkVerificationRequiredRequirements(resolution.customer, direction);
     case "verifying":
       return { provider: "bvnk", direction, status: "customer_verifying" };
     case "verification_failed":
@@ -799,17 +823,8 @@ export function bvnkOnrampStatusFromProviderData(
         return { provider: "bvnk", direction, status: "customer_verifying" };
       case "verification_failed":
         return { provider: "bvnk", direction, status: "customer_verification_failed" };
-      case "verification_required": {
-        if (!customer.verificationUrl) {
-          throw internalError('BVNK reported "verification_required" without a verificationUrl.');
-        }
-        return {
-          provider: "bvnk",
-          direction,
-          status: "customer_verification_required",
-          verificationUrl: customer.verificationUrl,
-        };
-      }
+      case "verification_required":
+        return bvnkVerificationRequiredRequirements(customer, direction);
       default: {
         const exhaustive: never = phase;
         throw internalError(`Unhandled BVNK verification phase: ${String(exhaustive)}`);

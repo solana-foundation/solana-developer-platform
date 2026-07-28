@@ -9,6 +9,8 @@ import type {
 import { z } from "zod";
 import { SdpPaymentsError } from "../errors";
 
+export const ISO_DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}$";
+
 export function readyCounterparty(
   provider: RampProviderId,
   direction: RampDirection

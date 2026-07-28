@@ -1,5 +1,6 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import {
+  buildBvnkCompanyPayload,
   buildBvnkIndividualPayload,
   validateBvnkCounterparty,
 } from "@sdp/payments/ramps/providers/bvnk/counterparty";
@@ -169,5 +170,219 @@ describe("buildBvnkIndividualPayload", () => {
     const payload = buildBvnkIndividualPayload(row, BVNK_CDD_COLLECTED_DATA, "USD");
 
     expect(payload.address).toMatchObject({ countryCode: "US", stateCode: "TX" });
+  });
+});
+
+type BusinessCounterparty = Extract<Counterparty, { entityType: "business" }>;
+type BusinessCounterpartyRow = Extract<CounterpartyRow, { entity_type: "business" }>;
+
+const BVNK_COMPANY_COLLECTED_DATA = {
+  "company.entityType": "CORPORATION",
+  "company.registrationNumber": "HRB 123456",
+  "company.taxIdentification.number": "DE123456789",
+  "company.taxIdentification.taxResidenceCountryCode": "DE",
+  "company.incorporationDate": "2019-01-15",
+  "company.businessOperationsStartDate": "2019-02-01",
+  "company.businessProfile.naicsCode": "5239",
+  "company.businessProfile.website": "https://krause-fintech.example.com",
+  "company.businessProfile.monthlyExpectedVolumes": "FROM_100K_TO_1M",
+  "company.businessProfile.sourceOfFunds": "COMMERCIAL_ACTIVITIES",
+  "company.businessProfile.intendedUseOfAccount": "SUPPLIER_VENDOR_PAYMENTS",
+  "company.businessProfile.isRegulated": "false",
+  "associate.firstName": "Freya",
+  "associate.lastName": "Krause",
+  "associate.dateOfBirth": "1982-03-24",
+  "associate.nationality": "DE",
+  "associate.birthCountryCode": "DE",
+  "associate.emailAddress": "freya@krause-fintech.example.com",
+  "associate.taxIdentification.number": "21/815/08150",
+  "associate.taxIdentification.taxResidenceCountryCode": "DE",
+  "associate.ownership.percentage": "100",
+} as const;
+
+function businessCounterparty(overrides?: Partial<BusinessCounterparty>): BusinessCounterparty {
+  return {
+    id: "cp_456",
+    organizationId: "org_123",
+    projectId: "proj_123",
+    externalId: null,
+    entityType: "business",
+    displayName: "Krause Fintech GmbH",
+    email: "ops@krause-fintech.example.com",
+    identity: {
+      address: {
+        line1: "Heidestrasse 19",
+        city: "Cologne",
+        postalCode: "51247",
+        countryCode: "DE",
+      },
+    },
+    status: "active",
+    createdBy: null,
+    createdAt: "2026-07-23T00:00:00.000Z",
+    updatedAt: "2026-07-23T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function businessCounterpartyRow(
+  overrides?: Partial<BusinessCounterpartyRow>
+): BusinessCounterpartyRow {
+  return {
+    id: "cp_456",
+    organization_id: "org_123",
+    project_id: "proj_123",
+    external_id: null,
+    entity_type: "business",
+    display_name: "Krause Fintech GmbH",
+    email: "ops@krause-fintech.example.com",
+    identity: businessCounterparty().identity,
+    provider_data: {},
+    status: "active",
+    created_by: null,
+    created_at: "2026-07-23T00:00:00.000Z",
+    updated_at: "2026-07-23T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("validateBvnkCounterparty (business)", () => {
+  it("collects the company + associate fields when no BVNK customer exists", () => {
+    const requirements = validateBvnkCounterparty(businessCounterparty(), {
+      direction: "onramp",
+      ...ONRAMP_REQUIREMENTS_OPTIONS,
+      providerData: {},
+    });
+
+    expect(requirements).toMatchObject({ provider: "bvnk", direction: "onramp" });
+    if (requirements.status !== "collect") throw new Error("Expected collect requirements");
+    expect(requirements.fields.map((field) => field.key)).toContain("company.entityType");
+    expect(requirements.fields.map((field) => field.key)).toContain(
+      "associate.ownership.percentage"
+    );
+  });
+
+  it("surfaces the authenticatedLink for an INFO_REQUIRED v2 customer", () => {
+    const requirements = validateBvnkCounterparty(businessCounterparty(), {
+      direction: "onramp",
+      ...ONRAMP_REQUIREMENTS_OPTIONS,
+      providerData: {
+        bvnk: {
+          customer: {
+            customerReference: "v2-uuid",
+            status: "INFO_REQUIRED",
+            verificationUrl: "https://onboarding.example.com/link",
+            apiVersion: "v2",
+          },
+        },
+      },
+    });
+
+    expect(requirements).toEqual({
+      provider: "bvnk",
+      direction: "onramp",
+      status: "customer_verification_required",
+      verificationUrl: "https://onboarding.example.com/link",
+    });
+  });
+
+  it("reports customer_verifying while the v2 authenticatedLink is still being minted", () => {
+    for (const status of ["INFO_REQUIRED", "NOT_STARTED"]) {
+      const requirements = validateBvnkCounterparty(businessCounterparty(), {
+        direction: "onramp",
+        ...ONRAMP_REQUIREMENTS_OPTIONS,
+        providerData: {
+          bvnk: { customer: { customerReference: "v2-uuid", status, apiVersion: "v2" } },
+        },
+      });
+
+      expect(requirements).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "customer_verifying",
+      });
+    }
+  });
+
+  it("proceeds to funding provisioning once the v2 customer is VERIFIED", () => {
+    const requirements = validateBvnkCounterparty(businessCounterparty(), {
+      direction: "onramp",
+      ...ONRAMP_REQUIREMENTS_OPTIONS,
+      providerData: {
+        bvnk: {
+          customer: { customerReference: "v2-uuid", status: "VERIFIED", apiVersion: "v2" },
+        },
+      },
+    });
+
+    expect(requirements).toEqual({
+      provider: "bvnk",
+      direction: "onramp",
+      status: "funding_account_provisioning",
+    });
+  });
+});
+
+describe("buildBvnkCompanyPayload", () => {
+  it("builds the full v2 company payload from stored identity and collected fields", () => {
+    const payload = buildBvnkCompanyPayload(businessCounterpartyRow(), BVNK_COMPANY_COLLECTED_DATA);
+
+    const companyAddress = {
+      addressLine1: "Heidestrasse 19",
+      city: "Cologne",
+      postalCode: "51247",
+      countryCode: "DE",
+    };
+    expect(payload).toEqual({
+      name: "Krause Fintech GmbH",
+      entityType: "CORPORATION",
+      taxIdentification: { number: "DE123456789", taxResidenceCountryCode: "DE" },
+      registrationNumber: "HRB 123456",
+      incorporationDate: "2019-01-15",
+      businessOperationsStartDate: "2019-02-01",
+      address: companyAddress,
+      isOperationalAddressDifferent: false,
+      businessProfile: {
+        naicsCode: "5239",
+        website: "https://krause-fintech.example.com",
+        monthlyExpectedVolumes: "FROM_100K_TO_1M",
+        intendedUseOfAccount: "SUPPLIER_VENDOR_PAYMENTS",
+        isRegulated: false,
+        sourceOfFunds: "COMMERCIAL_ACTIVITIES",
+      },
+      associates: [
+        {
+          person: {
+            firstName: "Freya",
+            lastName: "Krause",
+            dateOfBirth: "1982-03-24",
+            nationality: "DE",
+            birthCountryCode: "DE",
+            address: companyAddress,
+            contactInfo: { emailAddress: "freya@krause-fintech.example.com" },
+            taxIdentification: { number: "21/815/08150", taxResidenceCountryCode: "DE" },
+          },
+          titles: ["UBO", "DIRECTOR", "SIGNATORY", "ACCOUNT_REPRESENTATIVE"],
+          ownership: { percentage: "100", type: "DIRECT" },
+        },
+      ],
+    });
+  });
+
+  it("throws BAD_REQUEST when collected fields are missing or invalid", () => {
+    const { "company.entityType": _omitted, ...incomplete } = BVNK_COMPANY_COLLECTED_DATA;
+
+    expect(() => buildBvnkCompanyPayload(businessCounterpartyRow(), incomplete)).toThrowError(
+      SdpPaymentsError
+    );
+    expect(() => buildBvnkCompanyPayload(businessCounterpartyRow(), undefined)).toThrowError(
+      SdpPaymentsError
+    );
+  });
+
+  it("throws for an individual counterparty", () => {
+    expect(() =>
+      buildBvnkCompanyPayload(counterpartyRow(), BVNK_COMPANY_COLLECTED_DATA)
+    ).toThrowError(SdpPaymentsError);
   });
 });

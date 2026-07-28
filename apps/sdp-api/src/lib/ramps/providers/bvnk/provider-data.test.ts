@@ -43,6 +43,14 @@ describe("bvnkUnverifiedOnboardingStatus", () => {
     expect(bvnkUnverifiedOnboardingStatus("REJECTED")).toBe("verification_failed");
   });
 
+  it("maps the v2 NOT_STARTED status to verification_required", () => {
+    expect(bvnkUnverifiedOnboardingStatus("NOT_STARTED")).toBe("verification_required");
+  });
+
+  it("maps the terminal v2 TERMINATED status to verification_failed", () => {
+    expect(bvnkUnverifiedOnboardingStatus("TERMINATED")).toBe("verification_failed");
+  });
+
   it("is case-insensitive", () => {
     expect(bvnkUnverifiedOnboardingStatus("pending")).toBe("verifying");
   });
@@ -92,6 +100,27 @@ describe("bvnkOnrampStatusFromProviderData", () => {
       status: "customer_verification_required",
       verificationUrl: "https://in.sumsub.com/x",
     });
+  });
+
+  it("returns customer_verifying for a v2 customer whose authenticatedLink is not minted yet", () => {
+    const result = bvnkOnrampStatusFromProviderData(
+      providerData({ customerReference: "v2-uuid", status: "INFO_REQUIRED", apiVersion: "v2" }),
+      ONRAMP_PARAMS
+    );
+    expect(result).toEqual({
+      provider: "bvnk",
+      direction: "onramp",
+      status: "customer_verifying",
+    });
+  });
+
+  it("still throws for a v1 customer reporting verification_required without a URL", () => {
+    expect(() =>
+      bvnkOnrampStatusFromProviderData(
+        providerData({ customerReference: "cust_1", status: "INFO_REQUIRED" }),
+        ONRAMP_PARAMS
+      )
+    ).toThrow();
   });
 
   it("returns customer_verification_failed for a REJECTED customer instead of throwing", () => {
