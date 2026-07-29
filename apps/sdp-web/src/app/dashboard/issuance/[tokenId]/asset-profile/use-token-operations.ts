@@ -16,6 +16,7 @@ import {
 import type {
   ActionExecutionInput,
   AdminAction,
+  DeployFeePayment,
   PermissionControlStatus,
   PermissionRow,
   RunActionOptions,
@@ -521,21 +522,22 @@ export function useTokenOperations({
     }
   };
 
-  const handleDeploy = () => {
-    runAction(
+  // The deploy modal picks both the signer and who pays the fees, so the
+  // submitting button already carries the intent — it runs immediately rather
+  // than through the confirmation dialog the other actions use.
+  const deployToken = (feePayment: DeployFeePayment) => {
+    closeFundManagementModal();
+    void runActionImmediately(
       {
         label: t("DashboardIssuance.management.deployToken"),
         method: "POST",
         path: `${tokenBasePath}/deploy`,
         body: {
           signingWalletId: deploySignerWalletId || undefined,
+          feePayment,
         },
       },
       {
-        requiresConfirmation: true,
-        confirmationTitle: t("DashboardIssuance.management.deployConfirmationTitle"),
-        confirmationDescription: t("DashboardIssuance.management.deployConfirmationDescription"),
-        confirmButtonLabel: t("DashboardIssuance.management.deployNow"),
         submitToast: t("DashboardIssuance.management.submittingDeploy"),
         successToast: t("DashboardIssuance.management.deployFinalized"),
       }
@@ -1132,13 +1134,12 @@ export function useTokenOperations({
     setLockSupplyRevokeFailed(true);
   };
 
+  // Deploy is not routed here: its modal submits through `deployToken`, which
+  // also carries the fee-payment choice.
   const submitFundManagementAction = (action: FundManagementModalAction) => {
     closeFundManagementModal();
 
     switch (action) {
-      case "deploy":
-        handleDeploy();
-        return;
       case "mint":
         handleMint();
         return;
@@ -1306,7 +1307,7 @@ export function useTokenOperations({
     handleAuthorityModalConfirm,
     // handlers
     handleCopy,
-    handleDeploy,
+    deployToken,
     handleRefreshSupply,
     handleMint,
     handleBurn,
