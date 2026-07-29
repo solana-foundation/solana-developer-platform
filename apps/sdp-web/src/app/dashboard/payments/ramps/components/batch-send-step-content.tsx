@@ -210,14 +210,13 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 
       <div className="space-y-2">
         <div className="flex items-center gap-3">
-          <div className="relative flex-1">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-3.5 size-5 -translate-y-1/2 text-tertiary" />
+          <div className="flex-1">
             <Input
               value={search}
               onChange={(event) => setSearchQuery(event.currentTarget.value)}
               placeholder={t("DashboardPayments.batchSend.searchCounterparty")}
               size="xl"
-              className="h-[var(--input-height-xl)] pl-11 [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:bg-[var(--input-bg-idle)]"
+              iconLeft={<SearchIcon />}
             />
           </div>
           <ArrowPagination

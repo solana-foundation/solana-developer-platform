@@ -72,6 +72,7 @@ jobs:
 
           pepper="$(openssl rand -hex 32)"
           custody_key="$(openssl rand -base64 32)"
+          counterparty_pii_key="$(openssl rand -base64 32)"
           postgres_password="$(openssl rand -hex 16)"
 
           # local custody needs a base58-encoded 64-byte Solana keypair.
@@ -105,6 +106,7 @@ jobs:
 
           echo "::add-mask::$pepper"
           echo "::add-mask::$custody_key"
+          echo "::add-mask::$counterparty_pii_key"
           echo "::add-mask::$postgres_password"
           echo "::add-mask::$custody_private_key"
 
@@ -116,6 +118,7 @@ jobs:
           POSTGRES_PASSWORD=$postgres_password
           API_KEY_PEPPER=$pepper
           CUSTODY_ENCRYPTION_KEY=$custody_key
+          COUNTERPARTY_PII_ENCRYPTION_KEY=$counterparty_pii_key
           CUSTODY_PRIVATE_KEY=$custody_private_key
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=unused
           CLERK_SECRET_KEY=unused
