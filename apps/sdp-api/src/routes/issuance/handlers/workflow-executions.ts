@@ -1,8 +1,10 @@
 import type { Context } from "hono";
-import { createWorkflowExecutionsRepository } from "@/db/repositories";
+import { getDb } from "@/db";
+import { createWorkflowExecutionsRepository, type WorkflowExecutionRow } from "@/db/repositories";
 import { notFound } from "@/lib/errors";
 import { parsePagination } from "@/lib/query";
 import { success } from "@/lib/response";
+import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
 
@@ -31,8 +33,29 @@ export const listWorkflowExecutions = async (c: AppContext) => {
   return success(c, { executions: rows, total, page, pageSize });
 };
 
-// Safe manual retry: flips a failed / awaiting_review execution back to pending; the
-// cron engine picks it up. Idempotent action handlers make a re-run converge.
+// A human decision on a held/failed execution is audit-worthy in its own right: the
+// engine's terminal audit rows carry the "SDP" system actor, so without this there is
+// no record of WHO approved a destructive action or declined it.
+async function auditDecision(
+  c: AppContext,
+  decision: "workflow_execution_approved" | "workflow_execution_rejected",
+  execution: WorkflowExecutionRow
+): Promise<void> {
+  await new AuditService(getDb(c.env)).log(c, {
+    action: decision,
+    resourceType: "workflow_execution",
+    resourceId: execution.id,
+    metadata: {
+      tokenId: execution.token_id,
+      workflowId: execution.workflow_id,
+      triggerType: execution.trigger_type,
+      actionType: execution.action_type,
+    },
+  });
+}
+
+// Safe manual retry / approve: flips a failed / awaiting_review execution back to
+// pending; the cron engine picks it up. Idempotent action handlers make a re-run converge.
 export const retryWorkflowExecution = async (c: AppContext) => {
   const { executionId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
@@ -47,6 +70,7 @@ export const retryWorkflowExecution = async (c: AppContext) => {
     throw notFound("Retryable execution");
   }
 
+  await auditDecision(c, "workflow_execution_approved", execution);
   return success(c, { execution });
 };
 
@@ -65,5 +89,6 @@ export const cancelWorkflowExecution = async (c: AppContext) => {
     throw notFound("Execution awaiting review");
   }
 
+  await auditDecision(c, "workflow_execution_rejected", execution);
   return success(c, { execution });
 };

@@ -176,6 +176,22 @@ export const updateWorkflow = async (c: AppContext) => {
   return success(c, { workflow });
 };
 
+// Soft delete: the rule disappears from every read path (list, dispatch, engine
+// guard) but its execution history stays queryable.
+export const deleteWorkflow = async (c: AppContext) => {
+  const { tokenId, workflowId } = c.req.param();
+  const { projectId, orgId } = requireProjectScope(c);
+
+  const repo = createAssetWorkflowsRepository(c.env);
+  const existing = await repo.getWorkflowById({ workflowId, organizationId: orgId, projectId });
+  if (!existing || existing.token_id !== tokenId) {
+    throw notFound("Workflow");
+  }
+
+  await repo.deleteWorkflow({ workflowId, organizationId: orgId, projectId });
+  return success(c, { deleted: true });
+};
+
 // Catalog for the builder UI: which triggers exist and which actions this asset
 // supports (with a support verdict) — analogous to listSettingsForType.
 export const listWorkflowCatalog = async (c: AppContext) => {

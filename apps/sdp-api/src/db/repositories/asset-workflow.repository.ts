@@ -64,6 +64,13 @@ export interface AssetWorkflowsRepositoryContext {
 export interface AssetWorkflowsRepository {
   createWorkflow(input: CreateAssetWorkflowInput): Promise<AssetWorkflowRow | null>;
   updateWorkflow(input: UpdateAssetWorkflowInput): Promise<AssetWorkflowRow | null>;
+  // Soft delete (keeps the rule's execution history; hard DELETE would cascade).
+  // Returns false when the rule doesn't exist or is already deleted.
+  deleteWorkflow(params: {
+    workflowId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<boolean>;
   getWorkflowById(params: {
     workflowId: string;
     organizationId: string;
@@ -74,10 +81,12 @@ export interface AssetWorkflowsRepository {
     organizationId: string;
     projectId: string;
   }): Promise<AssetWorkflowRow[]>;
-  // Dispatcher hot path: enabled rules for a project + trigger type.
+  // Dispatcher hot path: enabled rules for a project + trigger type. Token-scoped
+  // events pass tokenId so the filter happens in SQL, not in JS over all rules.
   listEnabledWorkflowsForTrigger(params: {
     organizationId: string;
     projectId: string;
     triggerType: WorkflowTriggerType;
+    tokenId?: string;
   }): Promise<AssetWorkflowRow[]>;
 }

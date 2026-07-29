@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS asset_workflows (
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     review_mode TEXT NOT NULL DEFAULT 'auto',
     created_by TEXT,
+    -- Soft delete: a hard DELETE would cascade into workflow_executions and erase the
+    -- rule's run history. Deleted rules disappear from every read path but keep it.
+    deleted_at TEXT,
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,

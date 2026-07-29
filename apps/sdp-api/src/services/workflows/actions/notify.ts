@@ -116,6 +116,9 @@ export async function runNotify(
         actionType: execution.action_type,
         tokenId: execution.token_id,
         workflowId: execution.workflow_id,
+        // True when the rule author wrote their own title — the client then renders it
+        // verbatim instead of its localized template.
+        customTitle: Boolean(resolveParam(action, "title")),
       },
       dedupeKey: `${execution.id}:${recipient.userId}`,
     }))

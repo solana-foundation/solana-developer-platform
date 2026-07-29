@@ -35,6 +35,7 @@ import {
 } from "./handlers/workflow-executions";
 import {
   createWorkflow,
+  deleteWorkflow,
   listWorkflowCatalog,
   listWorkflows,
   updateWorkflow,
@@ -180,6 +181,11 @@ issuance.patch(
   "/tokens/:tokenId/workflows/:workflowId",
   requirePermissions("tokens:write"),
   updateWorkflow
+);
+issuance.delete(
+  "/tokens/:tokenId/workflows/:workflowId",
+  requirePermissions("tokens:write"),
+  deleteWorkflow
 );
 
 export default issuance;

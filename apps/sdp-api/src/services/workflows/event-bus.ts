@@ -56,18 +56,16 @@ export async function dispatchWorkflowEvent(env: Env, event: WorkflowEvent): Pro
   const workflowsRepo = createAssetWorkflowsRepository(env);
   const executionsRepo = createWorkflowExecutionsRepository(env);
 
+  // Token-scoped events only fire the matching asset's rules (filtered in SQL).
   const rules = await workflowsRepo.listEnabledWorkflowsForTrigger({
     organizationId: event.organizationId,
     projectId: event.projectId,
     triggerType: event.type,
+    tokenId: event.tokenId,
   });
 
   let enqueued = 0;
   for (const rule of rules) {
-    // Token-scoped events only fire the matching asset's rules.
-    if (event.tokenId && rule.token_id !== event.tokenId) {
-      continue;
-    }
     if (!evaluateCondition(rule.definition.condition, event.payload)) {
       continue;
     }

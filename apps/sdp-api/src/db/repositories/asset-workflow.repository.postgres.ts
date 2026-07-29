@@ -68,7 +68,7 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
                  review_mode = COALESCE(?, review_mode),
                  enabled = CASE WHEN ?::boolean THEN ? ELSE enabled END,
                  updated_at = sdp_iso_now()
-           WHERE id = ? AND organization_id = ? AND project_id = ?`
+           WHERE id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL`
         )
         .bind(
           input.definition ? JSON.stringify(input.definition) : null,
@@ -90,10 +90,23 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
       });
     },
 
+    async deleteWorkflow(params) {
+      const rowsAffected = await db
+        .prepare(
+          `UPDATE asset_workflows
+             SET deleted_at = sdp_iso_now(), enabled = FALSE, updated_at = sdp_iso_now()
+           WHERE id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL`
+        )
+        .bind(params.workflowId, params.organizationId, params.projectId)
+        .run();
+      return rowsAffected > 0;
+    },
+
     async getWorkflowById(params) {
       const row = await db
         .prepare(
-          `SELECT * FROM asset_workflows WHERE id = ? AND organization_id = ? AND project_id = ?`
+          `SELECT * FROM asset_workflows
+             WHERE id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL`
         )
         .bind(params.workflowId, params.organizationId, params.projectId)
         .first<Record<string, unknown>>();
@@ -104,7 +117,7 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
       const result = await db
         .prepare(
           `SELECT * FROM asset_workflows
-             WHERE token_id = ? AND organization_id = ? AND project_id = ?
+             WHERE token_id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL
              ORDER BY created_at DESC`
         )
         .bind(params.tokenId, params.organizationId, params.projectId)
@@ -116,10 +129,19 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
       const result = await db
         .prepare(
           `SELECT * FROM asset_workflows
-             WHERE organization_id = ? AND project_id = ? AND trigger_type = ? AND enabled = TRUE
-             ORDER BY created_at ASC`
+             WHERE organization_id = ? AND project_id = ? AND trigger_type = ?
+               AND enabled = TRUE AND deleted_at IS NULL
+               AND (?::text IS NULL OR token_id = ?)
+             ORDER BY created_at ASC
+             LIMIT 500`
         )
-        .bind(params.organizationId, params.projectId, params.triggerType)
+        .bind(
+          params.organizationId,
+          params.projectId,
+          params.triggerType,
+          params.tokenId ?? null,
+          params.tokenId ?? null
+        )
         .all<Record<string, unknown>>();
       return result.results.map(mapWorkflowRow);
     },
