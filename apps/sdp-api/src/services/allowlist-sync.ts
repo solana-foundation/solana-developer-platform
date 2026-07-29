@@ -1,7 +1,7 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
-import { createMosaicService } from "@/services/mosaic";
+import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";

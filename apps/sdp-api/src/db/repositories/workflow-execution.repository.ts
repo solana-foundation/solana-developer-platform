@@ -67,8 +67,16 @@ export interface WorkflowExecutionsRepository {
   ): Promise<{ rows: WorkflowExecutionRow[]; total: number }>;
 
   // ── Engine (cron) ──
-  // Reset stale 'processing' rows (a prior tick died mid-flight) back to 'pending'.
-  recoverStaleProcessing(params: { staleBefore: string; limit: number }): Promise<number>;
+  // Recover stale 'processing' rows (a prior tick died mid-flight). Rows whose action
+  // type is in `parkActionTypes` (approval-gated / non-idempotent) are NOT blindly
+  // re-dispatched — we cannot know whether the interrupted side effect landed — they
+  // park as 'failed' (STALE_RECOVERED_NEEDS_REVIEW) for a human to re-approve. All
+  // other rows go back to 'pending'. Both updates are bounded by `limit`.
+  recoverStaleProcessing(params: {
+    staleBefore: string;
+    limit: number;
+    parkActionTypes: readonly WorkflowActionType[];
+  }): Promise<{ recovered: number; parked: WorkflowExecutionRow[] }>;
   // Due + retryable 'pending' rows under the attempt cap.
   listDueExecutions(params: { dueBefore: string; limit: number }): Promise<WorkflowExecutionRow[]>;
   // Optimistic claim: pending → processing, attempt_count += 1. Returns the claimed row or null.
@@ -89,6 +97,7 @@ export interface WorkflowExecutionsRepository {
   }): Promise<void>;
 
   // Manual retry: failed | awaiting_review → pending (picked up next cron pass).
+  // Resets attempt_count so an attempts-exhausted execution is actually re-runnable.
   retryExecution(params: {
     executionId: string;
     organizationId: string;

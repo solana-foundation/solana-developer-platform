@@ -1,4 +1,5 @@
-import { validateActionSupported } from "@sdp/issuance/workflows";
+import { resolveWorkflowAction, validateActionSupported } from "@sdp/issuance/workflows";
+import { WORKFLOW_ACTION_TYPES } from "@sdp/types";
 import { getDb } from "@/db";
 import {
   type AssetWorkflowsRepository,
@@ -15,6 +16,12 @@ import type { Env } from "@/types/env";
 const BATCH_SIZE = 25;
 const STALE_AFTER_MS = 15 * 60 * 1000;
 const RETRY_AFTER_MINUTES = 5;
+
+// Approval-gated (destructive, non-idempotent) actions: never auto-re-dispatched after
+// a crash — a stale row parks as failed for a human to inspect and re-approve.
+const APPROVAL_GATED_ACTIONS = WORKFLOW_ACTION_TYPES.filter(
+  (type) => resolveWorkflowAction(type)?.execution === "requires_approval"
+);
 
 // Outcome of the execution-time guard: either the rule's action params to dispatch
 // with, or a permanent reason to fail the execution (rule gone / disabled / capability
@@ -127,8 +134,18 @@ export async function runDueWorkflowExecutions(
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS).toISOString();
   const nextAttemptAt = new Date(now.getTime() + RETRY_AFTER_MINUTES * 60 * 1000).toISOString();
 
-  // 1. A prior tick died mid-flight → reset stale 'processing' rows to 'pending'.
-  result.recovered = await repo.recoverStaleProcessing({ staleBefore, limit: BATCH_SIZE });
+  // 1. A prior tick died mid-flight → reset stale 'processing' rows to 'pending';
+  // approval-gated rows park as failed (their side effect may already have landed).
+  const stale = await repo.recoverStaleProcessing({
+    staleBefore,
+    limit: BATCH_SIZE,
+    parkActionTypes: APPROVAL_GATED_ACTIONS,
+  });
+  result.recovered = stale.recovered;
+  for (const parked of stale.parked) {
+    await auditTerminal(parked, "failure", { reason: "STALE_RECOVERED_NEEDS_REVIEW" });
+    result.failed += 1;
+  }
 
   // 2. Due + retryable rows, oldest first.
   const due = await repo.listDueExecutions({ dueBefore: nowIso, limit: BATCH_SIZE });
@@ -139,6 +156,12 @@ export async function runDueWorkflowExecutions(
     if (!claimed) {
       continue;
     }
+
+    // Single-shot for approval-gated (destructive) actions: each run was explicitly
+    // authorized by a human, so a failure must come back to a human — never re-enter
+    // the automatic retry loop.
+    const singleShot =
+      resolveWorkflowAction(claimed.action_type)?.execution === "requires_approval";
 
     try {
       // Re-validate against live state before acting (rule may have been disabled or
@@ -156,7 +179,11 @@ export async function runDueWorkflowExecutions(
         await repo.completeExecution({ executionId: claimed.id, result: outcome.result });
         await auditTerminal(claimed, "success", { result: outcome.result });
         result.succeeded += 1;
-      } else if (!outcome.retryable || claimed.attempt_count >= claimed.max_attempts) {
+      } else if (
+        singleShot ||
+        !outcome.retryable ||
+        claimed.attempt_count >= claimed.max_attempts
+      ) {
         await repo.failExecution({
           executionId: claimed.id,
           error: outcome.error ?? "action failed",
@@ -175,7 +202,7 @@ export async function runDueWorkflowExecutions(
     } catch (error) {
       logExecutionFailure(claimed, error);
       const message = error instanceof Error ? error.message : String(error);
-      if (claimed.attempt_count >= claimed.max_attempts) {
+      if (singleShot || claimed.attempt_count >= claimed.max_attempts) {
         await repo.failExecution({ executionId: claimed.id, error: message });
         await auditTerminal(claimed, "failure", { reason: message });
         result.failed += 1;

@@ -3,7 +3,7 @@ import { type Address, assertValidAddress } from "@sdp/solana/address";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
-import { createMosaicService } from "@/services/mosaic";
+import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";

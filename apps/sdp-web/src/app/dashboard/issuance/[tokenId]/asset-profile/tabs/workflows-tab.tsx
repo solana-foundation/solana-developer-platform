@@ -301,9 +301,12 @@ export function WorkflowsTab({ tokenId, canManage }: { tokenId: string; canManag
   };
 
   // Tier of an execution's action (from the catalog), to decide whether approving it
-  // needs the deliberate hold-to-confirm gate.
-  const tierForAction = (actionType: string): ExecutionTier | null =>
-    catalog?.actions.find((a) => a.type === actionType)?.action.execution ?? null;
+  // needs the deliberate hold-to-confirm gate. Fails CLOSED: an unknown tier (catalog
+  // failed to load / unknown action) is treated as requires_approval so a destructive
+  // action can never degrade to a one-click approve.
+  const tierForAction = (actionType: string): ExecutionTier =>
+    catalog?.actions.find((a) => a.type === actionType)?.action.execution ??
+    "requires_approval";
 
   const handleEnroll = async () => {
     if (!walletAddress.trim()) {
@@ -609,7 +612,7 @@ export function WorkflowsTab({ tokenId, canManage }: { tokenId: string; canManag
                         // Destructive/irreversible → require a deliberate 5s hold.
                         <HoldToConfirmButton
                           label={wf("holdApprove")}
-                          holdingLabel={wf("approving")}
+                          holdingLabel={wf("keepHolding")}
                           disabled={busy}
                           onConfirm={() => handleRetry(execution)}
                         />
@@ -635,15 +638,26 @@ export function WorkflowsTab({ tokenId, canManage }: { tokenId: string; canManag
                       </Button>
                     </div>
                   ) : canManage && execution.status === "failed" ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => handleRetry(execution)}
-                      disabled={busy}
-                    >
-                      {wf("retry")}
-                    </Button>
+                    // Retrying re-authorizes the run, so destructive actions keep the
+                    // deliberate hold gate here too.
+                    tierForAction(execution.action_type) === "requires_approval" ? (
+                      <HoldToConfirmButton
+                        label={wf("holdRetry")}
+                        holdingLabel={wf("keepHolding")}
+                        disabled={busy}
+                        onConfirm={() => handleRetry(execution)}
+                      />
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => handleRetry(execution)}
+                        disabled={busy}
+                      >
+                        {wf("retry")}
+                      </Button>
+                    )
                   ) : null}
                 </li>
               ))}

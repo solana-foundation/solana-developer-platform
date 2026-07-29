@@ -119,14 +119,42 @@ export function createPostgresWorkflowExecutionsRepository(
     },
 
     async recoverStaleProcessing(params) {
-      return db
+      // Non-idempotent (approval-gated) actions park as failed — the interrupted side
+      // effect may have landed, so a human must inspect and explicitly re-approve.
+      const parkTypes = [...params.parkActionTypes];
+      const parkedResult = await db
+        .prepare(
+          `UPDATE workflow_executions
+             SET status = 'failed', error = 'STALE_RECOVERED_NEEDS_REVIEW',
+                 locked_at = NULL, next_attempt_at = NULL, updated_at = sdp_iso_now()
+           WHERE id IN (
+             SELECT id FROM workflow_executions
+              WHERE status = 'processing' AND locked_at IS NOT NULL AND locked_at <= ?
+                AND action_type = ANY(?::text[])
+              ORDER BY locked_at ASC
+              LIMIT ?
+           )
+           RETURNING *`
+        )
+        .bind(params.staleBefore, parkTypes, params.limit)
+        .all<Record<string, unknown>>();
+
+      const recovered = await db
         .prepare(
           `UPDATE workflow_executions
              SET status = 'pending', locked_at = NULL, updated_at = sdp_iso_now()
-           WHERE status = 'processing' AND locked_at IS NOT NULL AND locked_at <= ?`
+           WHERE id IN (
+             SELECT id FROM workflow_executions
+              WHERE status = 'processing' AND locked_at IS NOT NULL AND locked_at <= ?
+                AND NOT (action_type = ANY(?::text[]))
+              ORDER BY locked_at ASC
+              LIMIT ?
+           )`
         )
-        .bind(params.staleBefore)
+        .bind(params.staleBefore, parkTypes, params.limit)
         .run();
+
+      return { recovered, parked: parkedResult.results.map(mapExecutionRow) };
     },
 
     async listDueExecutions(params) {
@@ -209,11 +237,14 @@ export function createPostgresWorkflowExecutionsRepository(
     },
 
     async retryExecution(params) {
+      // attempt_count resets to 0: a human explicitly re-authorized the run, and
+      // listDueExecutions skips rows at the attempt cap — without the reset an
+      // attempts-exhausted retry would sit in 'pending' forever.
       const rowsAffected = await db
         .prepare(
           `UPDATE workflow_executions
-             SET status = 'pending', next_attempt_at = NULL, locked_at = NULL, error = NULL,
-                 updated_at = sdp_iso_now()
+             SET status = 'pending', attempt_count = 0, next_attempt_at = NULL,
+                 locked_at = NULL, error = NULL, updated_at = sdp_iso_now()
            WHERE id = ? AND organization_id = ? AND project_id = ?
              AND status IN ('failed', 'awaiting_review')`
         )

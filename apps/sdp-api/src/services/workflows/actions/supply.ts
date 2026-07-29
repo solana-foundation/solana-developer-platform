@@ -13,9 +13,42 @@ import {
   resolveWalletTokenAccount,
   safeAddress,
   succeeded,
-  transientFail,
 } from "./onchain";
 import type { ActionContext, ActionExecutionResult } from "./types";
+
+// The DB supply mirror is best-effort AFTER the on-chain truth: a mirror write failure
+// (e.g. MAX_SUPPLY_EXCEEDED on a drifted counter) must never fail — let alone re-run —
+// an action whose chain effect already landed. Surfaced via `mirrorFailed` in the result.
+async function mirrorSupply(
+  env: Env,
+  tokenId: string,
+  amountStr: string,
+  op: "mint" | "burn"
+): Promise<boolean> {
+  try {
+    await new TokenService(getDb(env)).updateSupply(tokenId, amountStr, op);
+    return true;
+  } catch (error) {
+    console.error("workflow supply: DB mirror failed", {
+      tokenId,
+      op,
+      error: errorMessage(error),
+    });
+    return false;
+  }
+}
+
+// Success payload for a landed chain call, flagging a failed DB mirror when applicable.
+function supplySucceeded(
+  result: { signature: string; slot: number | bigint },
+  mirrored: boolean
+): ActionExecutionResult {
+  return succeeded({
+    signature: result.signature,
+    slot: String(result.slot),
+    ...(mirrored ? {} : { mirrorFailed: true }),
+  });
+}
 
 // Parse the rule's `amount` param into a base-unit (mosaic) amount for this token's
 // decimals. Returns null on a missing/invalid amount so the caller fails permanently.
@@ -61,19 +94,23 @@ export async function runMint(
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
   }
 
+  // Destructive + not idempotent: a blind retry could double-mint (we cannot know
+  // whether a failed submit landed). Any chain error is permanent — a human inspects
+  // and explicitly re-approves via Retry.
+  let result: Awaited<ReturnType<typeof mosaic.mintTo>>;
   try {
-    const result = await mosaic.mintTo({
+    result = await mosaic.mintTo({
       mint: mintAddress,
       destination,
       amount: amount.mosaicAmount,
       mintAuthority: signer.address,
       feePayer: signer.address,
     });
-    await new TokenService(getDb(env)).updateSupply(token.id, amount.amountStr, "mint");
-    return succeeded({ signature: result.signature, slot: String(result.slot) });
   } catch (error) {
-    return transientFail(errorMessage(error));
+    return permanentFail(errorMessage(error));
   }
+  const mirrored = await mirrorSupply(env, token.id, amount.amountStr, "mint");
+  return supplySucceeded(result, mirrored);
 }
 
 // burn → Token2022Service.burn from the org signer's own token account (self-burn).
@@ -94,20 +131,22 @@ export async function runBurn(
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
   }
 
+  // Destructive + not idempotent: any chain error is permanent (see runMint).
+  let result: Awaited<ReturnType<ReturnType<typeof createToken2022Service>["burn"]>>;
   try {
     const source = await resolveWalletTokenAccount(env, signer.address, mintAddress);
     const token2022 = createToken2022Service(env, signer);
-    const result = await token2022.burn({
+    result = await token2022.burn({
       mint: mintAddress,
       source,
       amount: amount.mosaicAmount,
       authority: signer,
     });
-    await new TokenService(getDb(env)).updateSupply(token.id, amount.amountStr, "burn");
-    return succeeded({ signature: result.signature, slot: String(result.slot) });
   } catch (error) {
-    return transientFail(errorMessage(error));
+    return permanentFail(errorMessage(error));
   }
+  const mirrored = await mirrorSupply(env, token.id, amount.amountStr, "burn");
+  return supplySucceeded(result, mirrored);
 }
 
 // force_burn → MosaicService.forceBurn from a holder's wallet via permanent delegate.
@@ -136,19 +175,21 @@ export async function runForceBurn(
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
   }
 
+  // Destructive + not idempotent: any chain error is permanent (see runMint).
+  let result: Awaited<ReturnType<typeof mosaic.forceBurn>>;
   try {
-    const result = await mosaic.forceBurn({
+    result = await mosaic.forceBurn({
       mint: mintAddress,
       source,
       amount: amount.mosaicAmount,
       permanentDelegate: signer,
       feePayer: signer,
     });
-    await new TokenService(getDb(env)).updateSupply(token.id, amount.amountStr, "burn");
-    return succeeded({ signature: result.signature, slot: String(result.slot) });
   } catch (error) {
-    return transientFail(errorMessage(error));
+    return permanentFail(errorMessage(error));
   }
+  const mirrored = await mirrorSupply(env, token.id, amount.amountStr, "burn");
+  return supplySucceeded(result, mirrored);
 }
 
 // seize → MosaicService.forceTransfer from a holder's wallet to a destination via the
@@ -183,6 +224,7 @@ export async function runSeize(
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
   }
 
+  // Destructive + not idempotent: any chain error is permanent (see runMint).
   try {
     const result = await mosaic.forceTransfer({
       mint: mintAddress,
@@ -194,6 +236,6 @@ export async function runSeize(
     });
     return succeeded({ signature: result.signature, slot: String(result.slot) });
   } catch (error) {
-    return transientFail(errorMessage(error));
+    return permanentFail(errorMessage(error));
   }
 }
