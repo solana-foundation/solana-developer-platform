@@ -208,7 +208,10 @@ export function StatTile({
       <div className="flex items-center gap-1.5 text-tertiary">
         <Icon className="h-3 w-3 shrink-0" />
         <span className="text-[11px]">{label}</span>
-        {action ? <span className="-my-1 ml-1">{action}</span> : null}
+        {/* No wrapper spacing: the row's own gap separates the action from the label,
+            and the action manages its own footprint (padding its hit area out with
+            canceled margins, the way StatHint does) so it can't inflate the row. */}
+        {action}
       </div>
       <div className={cn("flex items-center gap-1.5", framed ? "pt-2" : "pt-0.5")}>
         <span

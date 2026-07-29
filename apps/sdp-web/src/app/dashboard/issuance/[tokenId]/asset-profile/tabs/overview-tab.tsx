@@ -175,10 +175,13 @@ export function OverviewTab({
                     type="button"
                     onClick={ops.handleRefreshSupply}
                     disabled={ops.isPending}
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-md text-tertiary transition-colors hover:bg-fill hover:text-primary disabled:pointer-events-none disabled:opacity-50"
+                    // `p-1 -m-1` (the StatHint trick): only the 10px glyph takes room
+                    // in the label row, so it sits at the row's own gap from the text
+                    // and centers on the same line — while the hit target stays 18px.
+                    className="-m-1 inline-flex shrink-0 items-center justify-center rounded-full p-1 text-tertiary transition-colors hover:bg-fill hover:text-primary disabled:pointer-events-none disabled:opacity-50"
                     aria-label={t("DashboardIssuance.management.refreshSupply")}
                   >
-                    <RefreshCw className="h-3 w-3" />
+                    <RefreshCw className="h-2.5 w-2.5" />
                   </button>
                 ) : null
               }
