@@ -4,7 +4,8 @@ import type {
   CounterpartyAccountProviderData,
   CounterpartyAccountStatus,
 } from "@sdp/types";
-import type { AppDb } from "@/db";
+import type { AppDb, DatabaseExecutor } from "@/db";
+import type { PiiCipher, PiiCipherContext } from "@/services/pii-cipher/pii-cipher";
 import type {
   ArchiveCounterpartyAccountInput,
   CounterpartyAccountRow,
@@ -15,72 +16,182 @@ import type {
   UpdateCounterpartyAccountInput,
 } from "./counterparty-account.repository";
 import { generateCounterpartyAccountId } from "./counterparty-account.repository";
+import {
+  acquireCounterpartyPiiWriteLock,
+  cryptoAccountLookup,
+  getCounterpartyPiiMigrationPhase,
+  recordCounterpartyPiiFallbackRead,
+} from "./counterparty-pii.repository";
 
-function mapCounterpartyAccountRow(row: Record<string, unknown>): CounterpartyAccountRow {
+interface CounterpartyAccountPiiPayload {
+  label: string | null;
+  details: CounterpartyAccountDetails;
+  providerAccountData: CounterpartyAccountProviderData;
+}
+
+function assertString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`Counterparty account ${field} is missing`);
+  }
+  return value;
+}
+
+function accountContext(row: Record<string, unknown>): PiiCipherContext {
   return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    counterparty_id: row.counterparty_id as string,
-    account_kind: row.account_kind as CounterpartyAccountKind,
-    label: (row.label as string | null) ?? null,
-    details: row.details as CounterpartyAccountDetails,
-    provider_account_data: row.provider_account_data as CounterpartyAccountProviderData,
-    status: row.status as CounterpartyAccountStatus,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
+    organizationId: assertString(row.organization_id, "organization_id"),
+    projectId: assertString(row.project_id, "project_id"),
+    resourceType: "counterparty_account",
+    resourceId: assertString(row.id, "id"),
+    field: "account_data",
   };
 }
 
+function parsePayload(value: string): CounterpartyAccountPiiPayload {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("Counterparty account ciphertext contains invalid JSON");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Counterparty account ciphertext must contain a JSON object");
+  }
+  return parsed as CounterpartyAccountPiiPayload;
+}
+
+async function mapCounterpartyAccountRow(
+  db: DatabaseExecutor,
+  cipher: PiiCipher,
+  row: Record<string, unknown>
+): Promise<CounterpartyAccountRow> {
+  let payload: CounterpartyAccountPiiPayload;
+  if (typeof row.sensitive_data_encrypted === "string") {
+    payload = parsePayload(await cipher.decrypt(accountContext(row), row.sensitive_data_encrypted));
+  } else {
+    await recordCounterpartyPiiFallbackRead(db);
+    payload = {
+      label: (row.label as string | null) ?? null,
+      details: (row.details as CounterpartyAccountDetails | null) ?? {},
+      providerAccountData:
+        (row.provider_account_data as CounterpartyAccountProviderData | null) ?? {},
+    };
+  }
+
+  return {
+    id: assertString(row.id, "id"),
+    organization_id: assertString(row.organization_id, "organization_id"),
+    project_id: assertString(row.project_id, "project_id"),
+    counterparty_id: assertString(row.counterparty_id, "counterparty_id"),
+    account_kind: row.account_kind as CounterpartyAccountKind,
+    label: payload.label,
+    details: payload.details,
+    provider_account_data: payload.providerAccountData,
+    status: row.status as CounterpartyAccountStatus,
+    created_at: assertString(row.created_at, "created_at"),
+    updated_at: assertString(row.updated_at, "updated_at"),
+  };
+}
+
+function inputContext(input: {
+  organizationId: string;
+  projectId: string;
+  counterpartyAccountId: string;
+}): PiiCipherContext {
+  return {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    resourceType: "counterparty_account",
+    resourceId: input.counterpartyAccountId,
+    field: "account_data",
+  };
+}
+
+async function encryptAccountData(
+  cipher: PiiCipher,
+  input: {
+    counterpartyAccountId: string;
+    organizationId: string;
+    projectId: string;
+    label: string | null;
+    details: CounterpartyAccountDetails;
+    providerAccountData: CounterpartyAccountProviderData;
+  }
+): Promise<string> {
+  return cipher.encrypt(
+    inputContext(input),
+    JSON.stringify({
+      label: input.label,
+      details: input.details,
+      providerAccountData: input.providerAccountData,
+    })
+  );
+}
+
 async function getCounterpartyAccountByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
+  cipher: PiiCipher,
   params: { counterpartyAccountId: string; organizationId: string; projectId: string }
 ): Promise<CounterpartyAccountRow | null> {
   const row = await db
     .prepare(
       `SELECT * FROM counterparty_accounts
-         WHERE id = ?
-           AND organization_id = ?
-           AND project_id = ?`
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?`
     )
     .bind(params.counterpartyAccountId, params.organizationId, params.projectId)
     .first<Record<string, unknown>>();
-  return row ? mapCounterpartyAccountRow(row) : null;
+  return row ? mapCounterpartyAccountRow(db, cipher, row) : null;
 }
 
 export function createPostgresCounterpartyAccountsRepository(
-  db: AppDb
+  db: AppDb,
+  cipher: PiiCipher
 ): CounterpartyAccountsRepository {
   return {
     async createCounterpartyAccount(input: CreateCounterpartyAccountInput) {
       const id = generateCounterpartyAccountId();
+      const label = input.label ?? null;
+      const details = input.details ?? {};
+      const providerAccountData = input.providerAccountData ?? {};
+      const encrypted = await encryptAccountData(cipher, {
+        counterpartyAccountId: id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        label,
+        details,
+        providerAccountData,
+      });
+      const lookup = cryptoAccountLookup(details);
 
-      await db
-        .prepare(
-          `INSERT INTO counterparty_accounts (
-             id,
-             organization_id,
-             project_id,
-             counterparty_id,
-             account_kind,
-             label,
-             details,
-             provider_account_data
-           ) VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, '{}'::jsonb), COALESCE(?, '{}'::jsonb))`
-        )
-        .bind(
-          id,
-          input.organizationId,
-          input.projectId,
-          input.counterpartyId,
-          input.accountKind,
-          input.label ?? null,
-          input.details ?? null,
-          input.providerAccountData ?? null
-        )
-        .run();
+      await db.transaction(async (tx) => {
+        await acquireCounterpartyPiiWriteLock(tx);
+        const phase = await getCounterpartyPiiMigrationPhase(tx);
+        await tx
+          .prepare(
+            `INSERT INTO counterparty_accounts (
+               id, organization_id, project_id, counterparty_id, account_kind,
+               label, details, provider_account_data, sensitive_data_encrypted,
+               network, address
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .bind(
+            id,
+            input.organizationId,
+            input.projectId,
+            input.counterpartyId,
+            input.accountKind,
+            phase === "dual_write" ? label : null,
+            phase === "dual_write" ? details : null,
+            phase === "dual_write" ? providerAccountData : null,
+            encrypted,
+            lookup.network,
+            lookup.address
+          )
+          .run();
+      });
 
-      return getCounterpartyAccountByIdInternal(db, {
+      return getCounterpartyAccountByIdInternal(db, cipher, {
         counterpartyAccountId: id,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -88,39 +199,71 @@ export function createPostgresCounterpartyAccountsRepository(
     },
 
     async updateCounterpartyAccount(input: UpdateCounterpartyAccountInput) {
-      const rowsAffected = await db
-        .prepare(
-          `UPDATE counterparty_accounts
-             SET label = CASE WHEN ?::boolean THEN ? ELSE label END,
-                 details = COALESCE(?, details),
-                 provider_account_data = COALESCE(?, provider_account_data),
-                 updated_at = sdp_iso_now()
-           WHERE counterparty_id = ?
-             AND id = ?
-             AND organization_id = ?
-             AND project_id = ?
-             AND status = 'active'`
-        )
-        .bind(
-          input.label !== undefined,
-          input.label ?? null,
-          input.details ?? null,
-          input.providerAccountData ?? null,
-          input.counterpartyId,
-          input.counterpartyAccountId,
-          input.organizationId,
-          input.projectId
-        )
-        .run();
+      return db.transaction(async (tx) => {
+        await acquireCounterpartyPiiWriteLock(tx);
+        const phase = await getCounterpartyPiiMigrationPhase(tx);
+        const row = await tx
+          .prepare(
+            `SELECT * FROM counterparty_accounts
+              WHERE counterparty_id = ?
+                AND id = ?
+                AND organization_id = ?
+                AND project_id = ?
+                AND status = 'active'
+              FOR UPDATE`
+          )
+          .bind(
+            input.counterpartyId,
+            input.counterpartyAccountId,
+            input.organizationId,
+            input.projectId
+          )
+          .first<Record<string, unknown>>();
+        if (!row) {
+          return null;
+        }
+        const current = await mapCounterpartyAccountRow(tx, cipher, row);
+        const label = input.label !== undefined ? input.label : current.label;
+        const details = input.details ?? current.details;
+        const providerAccountData = input.providerAccountData ?? current.provider_account_data;
+        const encrypted = await encryptAccountData(cipher, {
+          counterpartyAccountId: current.id,
+          organizationId: current.organization_id,
+          projectId: current.project_id,
+          label,
+          details,
+          providerAccountData,
+        });
+        const lookup = cryptoAccountLookup(details);
 
-      if (rowsAffected === 0) {
-        return null;
-      }
+        await tx
+          .prepare(
+            `UPDATE counterparty_accounts
+                SET label = ?,
+                    details = ?,
+                    provider_account_data = ?,
+                    sensitive_data_encrypted = ?,
+                    network = ?,
+                    address = ?,
+                    updated_at = sdp_iso_now()
+              WHERE id = ?`
+          )
+          .bind(
+            phase === "dual_write" ? label : null,
+            phase === "dual_write" ? details : null,
+            phase === "dual_write" ? providerAccountData : null,
+            encrypted,
+            lookup.network,
+            lookup.address,
+            current.id
+          )
+          .run();
 
-      return getCounterpartyAccountByIdInternal(db, {
-        counterpartyAccountId: input.counterpartyAccountId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+        return getCounterpartyAccountByIdInternal(tx, cipher, {
+          counterpartyAccountId: current.id,
+          organizationId: current.organization_id,
+          projectId: current.project_id,
+        });
       });
     },
 
@@ -128,14 +271,14 @@ export function createPostgresCounterpartyAccountsRepository(
       const row = await db
         .prepare(
           `UPDATE counterparty_accounts
-             SET status = 'archived',
-                 updated_at = sdp_iso_now()
-           WHERE counterparty_id = ?
-             AND id = ?
-             AND organization_id = ?
-             AND project_id = ?
-             AND status = 'active'
-           RETURNING *`
+              SET status = 'archived',
+                  updated_at = sdp_iso_now()
+            WHERE counterparty_id = ?
+              AND id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'active'
+          RETURNING *`
         )
         .bind(
           input.counterpartyId,
@@ -144,19 +287,18 @@ export function createPostgresCounterpartyAccountsRepository(
           input.projectId
         )
         .first<Record<string, unknown>>();
-
-      return row ? mapCounterpartyAccountRow(row) : null;
+      return row ? mapCounterpartyAccountRow(db, cipher, row) : null;
     },
 
     async getCounterpartyAccountById(params) {
       const row = await db
         .prepare(
           `SELECT * FROM counterparty_accounts
-             WHERE counterparty_id = ?
-               AND id = ?
-               AND organization_id = ?
-               AND project_id = ?
-               AND status = 'active'`
+            WHERE counterparty_id = ?
+              AND id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'active'`
         )
         .bind(
           params.counterpartyId,
@@ -165,21 +307,21 @@ export function createPostgresCounterpartyAccountsRepository(
           params.projectId
         )
         .first<Record<string, unknown>>();
-      return row ? mapCounterpartyAccountRow(row) : null;
+      return row ? mapCounterpartyAccountRow(db, cipher, row) : null;
     },
 
     async getCounterpartyAccountByIdInProject(params) {
       const row = await db
         .prepare(
           `SELECT * FROM counterparty_accounts
-             WHERE id = ?
-               AND organization_id = ?
-               AND project_id = ?
-               AND status = 'active'`
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'active'`
         )
         .bind(params.counterpartyAccountId, params.organizationId, params.projectId)
         .first<Record<string, unknown>>();
-      return row ? mapCounterpartyAccountRow(row) : null;
+      return row ? mapCounterpartyAccountRow(db, cipher, row) : null;
     },
 
     async listCounterpartyAccountsByIdsInProject(params) {
@@ -190,14 +332,14 @@ export function createPostgresCounterpartyAccountsRepository(
       const result = await db
         .prepare(
           `SELECT * FROM counterparty_accounts
-             WHERE id IN (${placeholders})
-               AND organization_id = ?
-               AND project_id = ?
-               AND status = 'active'`
+            WHERE id IN (${placeholders})
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'active'`
         )
         .bind(...params.counterpartyAccountIds, params.organizationId, params.projectId)
         .all<Record<string, unknown>>();
-      return result.results.map(mapCounterpartyAccountRow);
+      return Promise.all(result.results.map((row) => mapCounterpartyAccountRow(db, cipher, row)));
     },
 
     async listCounterpartyAccountsByCounterparty(
@@ -249,7 +391,9 @@ export function createPostgresCounterpartyAccountsRepository(
       ]);
 
       return {
-        rows: rowsResult.results.map(mapCounterpartyAccountRow),
+        rows: await Promise.all(
+          rowsResult.results.map((row) => mapCounterpartyAccountRow(db, cipher, row))
+        ),
         total: countRow?.total ?? 0,
       };
     },
@@ -269,19 +413,15 @@ export function createPostgresCounterpartyAccountsRepository(
               AND a.status = 'active'
               AND a.account_kind = 'crypto_wallet'
               AND c.status = 'active'
-              AND a.details->>'network' = 'solana'
-              AND a.details->>'address' IS NOT NULL
+              AND COALESCE(a.network, a.details->>'network') = 'solana'
+              AND COALESCE(a.address, a.details->>'address') IS NOT NULL
               AND (?::text IS NULL OR c.display_name ILIKE ?)
               ${idClause}`;
 
       const [rowsResult, countRow] = await Promise.all([
         db
           .prepare(
-            `SELECT a.counterparty_id,
-                    c.display_name AS counterparty_display_name,
-                    a.id AS account_id,
-                    a.label AS account_label,
-                    a.details->>'address' AS address
+            `SELECT a.*, c.display_name AS counterparty_display_name
                ${filter}
             ORDER BY c.display_name ASC, a.created_at DESC
               LIMIT ? OFFSET ?`
@@ -308,16 +448,21 @@ export function createPostgresCounterpartyAccountsRepository(
           .first<{ total: number }>(),
       ]);
 
-      return {
-        rows: rowsResult.results.map((row) => ({
-          counterparty_id: row.counterparty_id as string,
-          counterparty_display_name: row.counterparty_display_name as string,
-          account_id: row.account_id as string,
-          account_label: (row.account_label as string | null) ?? null,
-          address: row.address as string,
-        })),
-        total: countRow?.total ?? 0,
-      };
+      const rows = await Promise.all(
+        rowsResult.results.map(async (row) => {
+          const account = await mapCounterpartyAccountRow(db, cipher, row);
+          const address =
+            typeof row.address === "string" ? row.address : (account.details.address as string);
+          return {
+            counterparty_id: account.counterparty_id,
+            counterparty_display_name: row.counterparty_display_name as string,
+            account_id: account.id,
+            account_label: account.label,
+            address,
+          };
+        })
+      );
+      return { rows, total: countRow?.total ?? 0 };
     },
   };
 }
