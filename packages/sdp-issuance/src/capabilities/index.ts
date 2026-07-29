@@ -30,7 +30,12 @@ export {
   resolveSettingsToExtensions,
   type SettingsResolution,
 } from "./resolver";
-export { findIncompatibleExtensionPair, INCOMPATIBLE_EXTENSION_PAIRS } from "./settings";
+export {
+  expandLegacySettingKeys,
+  findIncompatibleExtensionPair,
+  INCOMPATIBLE_EXTENSION_PAIRS,
+  LEGACY_SETTING_ALIASES,
+} from "./settings";
 export {
   buildSupportMatrix,
   renderSupportMatrixMarkdown,

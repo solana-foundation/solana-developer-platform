@@ -9,6 +9,7 @@ import {
   ADVANCED_SETTINGS,
   ADVANCED_SETTINGS_VERSION,
   ASSET_CAPABILITIES,
+  expandLegacySettingKeys,
   getConflictingSettingKeys,
   getLockedSettings,
   getRecommendedSettings,
@@ -48,7 +49,7 @@ describe("advanced settings capability registry", () => {
   });
 
   it("returns false for unknown pairs and unknown settings", () => {
-    assert.equal(isSettingAllowed("stablecoin", "not_a_type", "freezeTransfers"), false);
+    assert.equal(isSettingAllowed("stablecoin", "not_a_type", "pauseTransfers"), false);
     assert.equal(isSettingAllowed("stablecoin", "fiat_backed", "not_a_setting"), false);
     assert.equal(resolveAssetCapability("generic", "not_a_type"), undefined);
     assert.deepEqual(getRecommendedSettings("generic", "not_a_type"), []);
@@ -56,7 +57,10 @@ describe("advanced settings capability registry", () => {
 
   it("recommends the expected defaults per asset type", () => {
     const stablecoin = getRecommendedSettings("stablecoin", "fiat_backed");
-    assert.ok(stablecoin.includes("freezeTransfers"));
+    // Both halves of the former "freezeTransfers": the pausable extension and the
+    // base mint freeze authority are separate settings, both forced on here.
+    assert.ok(stablecoin.includes("pauseTransfers"));
+    assert.ok(stablecoin.includes("freezeAccounts"));
     assert.ok(stablecoin.includes("permanentDelegate"));
 
     // securities additionally recommend scaledUiAmount (in their template).
@@ -71,9 +75,11 @@ describe("advanced settings capability registry", () => {
     // are locked (on and non-deselectable), not merely recommended.
     const stablecoin = resolveAssetCapability("stablecoin", "fiat_backed");
     assert.equal(stablecoin?.settings.permanentDelegate, "locked");
-    assert.equal(stablecoin?.settings.freezeTransfers, "locked");
+    assert.equal(stablecoin?.settings.pauseTransfers, "locked");
+    assert.equal(stablecoin?.settings.freezeAccounts, "locked");
     assert.deepEqual(getLockedSettings("stablecoin", "fiat_backed").sort(), [
-      "freezeTransfers",
+      "freezeAccounts",
+      "pauseTransfers",
       "permanentDelegate",
     ]);
 
@@ -107,7 +113,8 @@ describe("advanced settings capability registry", () => {
     // all-allowed selection ⇒ no errors.
     assert.deepEqual(
       validateSelectedSettings("stablecoin", "fiat_backed", [
-        "freezeTransfers",
+        "pauseTransfers",
+        "freezeAccounts",
         "permanentDelegate",
       ]),
       []
@@ -121,8 +128,8 @@ describe("advanced settings capability registry", () => {
       ]
     );
     // an unknown asset type rejects every key as unsupported.
-    assert.deepEqual(validateSelectedSettings("stablecoin", "not_a_type", ["freezeTransfers"]), [
-      { settingKey: "freezeTransfers", reason: "unsupported" },
+    assert.deepEqual(validateSelectedSettings("stablecoin", "not_a_type", ["pauseTransfers"]), [
+      { settingKey: "pauseTransfers", reason: "unsupported" },
     ]);
   });
 
@@ -304,12 +311,54 @@ describe("advanced settings capability registry", () => {
     assert.equal(generic.extensions?.transferFee?.basisPoints, 50);
     assert.equal(generic.extensions?.transferFee?.maxFee, "100");
 
-    // stablecoin → guarded template: freeze enables the pausable extension.
+    // stablecoin → guarded template: pauseTransfers enables the pausable extension.
     const stablecoin = resolveSettingsToExtensions("stablecoin", "fiat_backed", {
-      freezeTransfers: {},
+      pauseTransfers: {},
     });
     assert.deepEqual(stablecoin.errors, []);
     assert.ok(stablecoin.extensions?.pausable, "pausable should be enabled");
+    // Locked for stablecoins, so a freeze authority is forced on regardless.
+    assert.equal(stablecoin.isFreezable, true);
+
+    // Where freezeAccounts is a real choice, pausing alone must NOT imply a
+    // freeze authority — they are separate mechanisms.
+    const pauseOnly = resolveSettingsToExtensions("generic", "generic", { pauseTransfers: {} });
+    assert.ok(pauseOnly.extensions?.pausable, "pausable should be enabled");
+    assert.equal(pauseOnly.isFreezable, false);
+  });
+
+  it("resolves freezeAccounts to isFreezable rather than an extension", () => {
+    // The base mint's freeze authority is not a Token-2022 extension, so this
+    // setting must surface as a token column (like requiresAllowlist) and add
+    // nothing to the extension config.
+    const withFreeze = resolveSettingsToExtensions("generic", "generic", { freezeAccounts: {} });
+    assert.equal(withFreeze.isFreezable, true);
+    assert.ok(!withFreeze.extensions?.pausable, "freezeAccounts must not enable pausable");
+
+    const withoutFreeze = resolveSettingsToExtensions("generic", "generic", {});
+    assert.equal(withoutFreeze.isFreezable, false);
+  });
+
+  it("expands a stored legacy freezeTransfers selection to both replacement keys", () => {
+    // Persisted selections predate the split; dropping the key would silently
+    // remove both the pausable extension and the freeze authority.
+    const legacy = resolveSettingsToExtensions("stablecoin", "fiat_backed", {
+      freezeTransfers: {},
+    });
+    assert.deepEqual(legacy.errors, []);
+    assert.ok(legacy.extensions?.pausable, "legacy key should still enable pausable");
+    assert.equal(legacy.isFreezable, true, "legacy key should still grant a freeze authority");
+  });
+
+  it("does not let a legacy key override an explicit modern selection", () => {
+    const both = expandLegacySettingKeys({
+      freezeTransfers: { params: { from: "legacy" } },
+      pauseTransfers: { params: { from: "explicit" } },
+    });
+    assert.deepEqual(both.pauseTransfers, { params: { from: "explicit" } });
+    // The other half still comes from the alias.
+    assert.deepEqual(both.freezeAccounts, { params: { from: "legacy" } });
+    assert.ok(!("freezeTransfers" in both), "the retired key must not survive expansion");
   });
 
   it("falls back to a safe default when a direct caller bypasses the validator with a non-finite param", () => {
@@ -401,7 +450,9 @@ describe("advanced settings capability registry", () => {
       "transferHook",
     ]);
     // A setting with no conflicts returns an empty list.
-    assert.deepEqual(getConflictingSettingKeys("freezeTransfers"), []);
+    assert.deepEqual(getConflictingSettingKeys("pauseTransfers"), []);
+    // freezeAccounts declares no extensions at all, so it can never conflict.
+    assert.deepEqual(getConflictingSettingKeys("freezeAccounts"), []);
 
     const result = resolveSettingsToExtensions("generic", "generic", {
       interestBearing: { params: { rate: 5 } },
@@ -428,8 +479,8 @@ describe("advanced settings capability registry", () => {
       "scaledUiAmount",
     ]);
     // Non-conflicting keys pass through; unknown keys are dropped.
-    assert.deepEqual(pruneIncompatibleSettings(["freezeTransfers", "made_up", "transferFee"]), [
-      "freezeTransfers",
+    assert.deepEqual(pruneIncompatibleSettings(["pauseTransfers", "made_up", "transferFee"]), [
+      "pauseTransfers",
       "transferFee",
     ]);
   });

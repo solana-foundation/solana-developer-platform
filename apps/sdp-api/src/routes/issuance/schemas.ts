@@ -293,3 +293,55 @@ export const listTokenTransactionsQuerySchema = z.object({
   status: z.enum(TOKEN_TRANSACTION_STATUSES).optional(),
   type: z.enum(TOKEN_TRANSACTION_TYPES).optional(),
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Token List Query
+// ═══════════════════════════════════════════════════════════════════════════
+
+const tokenListTimestampSchema = z
+  .string()
+  .datetime({ offset: true })
+  .transform((value) => new Date(value).toISOString());
+
+/**
+ * Lifecycle state as the dashboard presents it, which is *not* the raw `status`
+ * column: a token is a draft until it has a mint (or a deploy timestamp),
+ * paused once its on-chain pausable extension is engaged, and active otherwise.
+ * Kept as its own filter so `status` stays a faithful column filter for API
+ * consumers.
+ */
+export const tokenDeploymentStatusSchema = z.enum(["draft", "active", "paused"]);
+
+/**
+ * Whitelisted sort keys. The service maps these to physical columns — the raw
+ * value never reaches SQL — and every ordering carries an `id` tiebreaker so
+ * paging stays stable across equal keys.
+ */
+export const tokenListSortBySchema = z.enum(["createdAt", "name"]);
+
+export const listTokensQuerySchema = z.object({
+  // Bounded, not just positive: offset paging turns the page number into work the
+  // database has to walk past, and no project is a million pages deep. Keeps a
+  // crafted `?page=9007199254740991` from becoming a deep-offset scan (and its
+  // offset arithmetic from leaving safe-integer range).
+  page: z.coerce.number().int().positive().max(1_000_000).default(1),
+  // 100 keeps the extension-hydration fan-out and the response body bounded;
+  // the dashboard pages well under it.
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+  // Contains-style search over name + symbol + mint address + id. Blank is
+  // accepted (an empty input is not an error) and treated as "no filter", so a
+  // client can bind this straight to a text input. Needles under 3 characters
+  // can't use the trigram index and fall back to a filtered scan, which is fine
+  // at this table's per-project size.
+  search: z.string().trim().max(100).optional(),
+  status: z.enum(["pending", "active", "paused", "revoked"]).optional(),
+  deploymentStatus: tokenDeploymentStatusSchema.optional(),
+  // Exact match against the stored template id. Not an enum: rows predating the
+  // current catalog hold legacy ids (`rwa`, `tokenized_security`), and the
+  // facets endpoint hands the client the values actually present.
+  template: z.string().trim().min(1).max(64).optional(),
+  createdAfter: tokenListTimestampSchema.optional(),
+  createdBefore: tokenListTimestampSchema.optional(),
+  sortBy: tokenListSortBySchema.default("createdAt"),
+  sortDirection: z.enum(["asc", "desc"]).default("desc"),
+});

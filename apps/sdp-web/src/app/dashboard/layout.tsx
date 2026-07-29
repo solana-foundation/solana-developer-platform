@@ -14,6 +14,7 @@ import { resolveDashboardProjectSelection } from "@/lib/dashboard-project-select
 import type { OrganizationOnboardingStatus } from "@/lib/onboarding-route-guard";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
 import { createOrgSdpApiClient, getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
+import { ISSUANCE_TOKEN_VIEW_COOKIE, parseIssuanceTokenView } from "./issuance/issuance-token-view";
 import type { OnboardingStatusResponse } from "./onboarding-status";
 
 async function loadProjects(): Promise<Project[] | null> {
@@ -75,6 +76,11 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       projects={projects}
       initialSelectedProjectId={projectSelection.selectedProjectId}
       shouldRepairInitialProjectCookie={projectSelection.shouldRepairCookie}
+      // Read here rather than in the issuance page so the *loading* skeleton gets
+      // it too — a Suspense fallback takes no props and can't await cookies().
+      initialIssuanceTokenView={parseIssuanceTokenView(
+        cookieStore.get(ISSUANCE_TOKEN_VIEW_COOKIE)?.value
+      )}
     >
       <NetworkDebugProvider>
         <DashboardShell
