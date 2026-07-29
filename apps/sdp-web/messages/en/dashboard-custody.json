@@ -786,6 +786,7 @@
     "apiKeyReplaceBindingsConfirmationRequired": "Confirm Replace bindings before saving this binding change.",
     "apiKeyClearBindingsConfirmationRequired": "Confirm Clear bindings before saving this binding change.",
     "policyAssetsInWallet": "In this wallet",
-    "policyAssetsCommon": "Common tokens"
+    "policyAssetsCommon": "Common tokens",
+    "policyAssetsIssued": "Your tokens"
   }
 }

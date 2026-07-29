@@ -8,6 +8,7 @@ import { notFound, redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient, getSelectedProjectId, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
+import { getIssuedPolicyTokens } from "./policy-assets.data";
 import { WalletPolicyStartingProfileFlow } from "./wallet-policy-starting-profile-flow";
 
 interface WalletPolicyResult {
@@ -121,10 +122,11 @@ export default async function WalletPolicyPage({
     redirect("/dashboard");
   }
   const apiClient = await createSdpApiClient();
-  const [wallet, policyResult, walletAssets] = await Promise.all([
+  const [wallet, policyResult, walletAssets, issuedTokens] = await Promise.all([
     getWalletDetail(apiClient.request, resolvedWalletId),
     getWalletPolicy(apiClient.request, resolvedWalletId),
     getWalletAssets(apiClient.request, resolvedWalletId),
+    getIssuedPolicyTokens(apiClient.request),
   ]);
 
   return (
@@ -141,6 +143,7 @@ export default async function WalletPolicyPage({
         mint: asset.mint,
         uiAmount: asset.uiAmount,
       }))}
+      issuedTokens={issuedTokens}
       initialPolicy={policyResult.policy}
       policyError={policyResult.error}
     />

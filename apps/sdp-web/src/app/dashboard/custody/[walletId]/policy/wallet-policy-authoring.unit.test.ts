@@ -348,6 +348,58 @@ describe("buildPolicyAssetOptions", () => {
     expect(options.filter((option) => option.mint === SOL_HOLDING.mint)).toHaveLength(1);
   });
 
+  const ISSUED_ACME = { token: "ACME", name: "Acme Token", mint: "MintAcme" };
+
+  it("offers issued tokens as their own source", () => {
+    const options = buildPolicyAssetOptions([SOL_HOLDING], "sandbox", [ISSUED_ACME]);
+    const acme = options.find((option) => option.mint === ISSUED_ACME.mint);
+
+    expect(acme).toMatchObject({ token: "ACME", name: "Acme Token", source: "issued" });
+  });
+
+  it("keeps an issued token the wallet holds in the wallet group with its balance", () => {
+    const held = { token: "ACME", mint: "MintAcme", uiAmount: "5000" };
+    const options = buildPolicyAssetOptions([held], "sandbox", [ISSUED_ACME]);
+    const entries = options.filter((option) => option.mint === ISSUED_ACME.mint);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ source: "wallet", uiAmount: "5000" });
+  });
+
+  it("prefers the issued entry over a colliding well-known mint", () => {
+    const usdcMainnet = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+    const options = buildPolicyAssetOptions([], "production", [
+      { token: "ACME", name: "Acme Token", mint: usdcMainnet },
+    ]);
+    const entries = options.filter((option) => option.mint === usdcMainnet);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.source).toBe("issued");
+  });
+
+  it("does not filter issued tokens by cluster", () => {
+    // `issued_tokens` is scoped by project and the dashboard derives its environment
+    // from the selected project, so the API has already applied the cluster boundary.
+    // Re-filtering here would drop legitimate tokens; this pins that contract.
+    for (const environment of ["sandbox", "production"] as const) {
+      const options = buildPolicyAssetOptions([], environment, [ISSUED_ACME]);
+
+      expect(options.some((option) => option.mint === ISSUED_ACME.mint)).toBe(true);
+    }
+  });
+
+  it("produces the same options as before when no issued tokens are supplied", () => {
+    expect(buildPolicyAssetOptions([SOL_HOLDING], "sandbox", [])).toEqual(
+      buildPolicyAssetOptions([SOL_HOLDING], "sandbox")
+    );
+  });
+
+  it("skips issued tokens with a blank mint", () => {
+    const options = buildPolicyAssetOptions([], "sandbox", [{ token: "GHOST", mint: "" }]);
+
+    expect(options.some((option) => option.token === "GHOST")).toBe(false);
+  });
+
   it("offers the tokens that are genuinely deployed on devnet", () => {
     const symbols = buildPolicyAssetOptions([], "sandbox").map((option) => option.token);
 

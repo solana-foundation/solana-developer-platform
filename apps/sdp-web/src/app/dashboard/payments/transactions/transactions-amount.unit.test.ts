@@ -18,6 +18,30 @@ describe("transaction amount presentation", () => {
     });
   });
 
+  it("names a token this org issued instead of shortening its mint", () => {
+    const mint = "AcmeQA1111111111111111111111111111111111111";
+
+    expect(
+      getTransactionAmountPresentation({ amount: "1250", token: mint }, "en-US", {
+        [mint]: "ACME",
+      })
+    ).toEqual({
+      compacted: false,
+      display: "1,250 ACME",
+      full: "1,250 ACME",
+    });
+  });
+
+  it("still shortens an issued mint that is absent from the supplied symbols", () => {
+    const mint = "AcmeQA1111111111111111111111111111111111111";
+
+    expect(getTransactionAmountPresentation({ amount: "1250", token: mint }, "en-US", {})).toEqual({
+      compacted: true,
+      display: "1,250 AcmeQA…1111",
+      full: `1,250 ${mint}`,
+    });
+  });
+
   it("shortens an unknown mint while retaining the full accessible value", () => {
     const mint = "AbcdefghijkLmnoPqrstUvwxyz1234567890WXYZ";
 

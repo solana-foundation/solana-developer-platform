@@ -323,7 +323,7 @@ export function PaymentsOverview({
                       const counterparty = resolveCounterparty(transfer, t);
                       const assetLabel = formatDisplayAmount(
                         transfer.amount,
-                        resolveTransferTokenLabel(transfer.token),
+                        resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint),
                         locale
                       );
                       const directionLabel = formatDirection(transfer.direction, t);

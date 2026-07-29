@@ -12,13 +12,16 @@ export interface TransactionAmountPresentation {
 
 export function getTransactionAmountPresentation(
   transfer: TransactionAmountFields,
-  locale?: string
+  locale?: string,
+  /** Symbols for tokens this org issued, keyed by mint. The catalogue never knows them. */
+  issuedTokenSymbolsByMint?: Readonly<Record<string, string>>
 ): TransactionAmountPresentation {
   const token = transfer.token?.trim() || undefined;
   const knownSymbol = token ? WELL_KNOWN_TOKEN_BY_MINT.get(token)?.symbol : undefined;
-  const displayToken = resolveTransferTokenLabel(token);
+  const issuedSymbol = token ? issuedTokenSymbolsByMint?.[token] : undefined;
+  const displayToken = resolveTransferTokenLabel(token, issuedTokenSymbolsByMint);
   const display = formatDisplayAmount(transfer.amount, displayToken, locale);
-  const full = formatDisplayAmount(transfer.amount, knownSymbol ?? token, locale);
+  const full = formatDisplayAmount(transfer.amount, knownSymbol ?? issuedSymbol ?? token, locale);
 
   return { compacted: display !== full, display, full };
 }
@@ -26,13 +29,15 @@ export function getTransactionAmountPresentation(
 export function TransactionAmount({
   transfer,
   locale,
+  issuedTokenSymbolsByMint,
   className,
 }: {
   transfer: PaymentTransferSummary;
   locale: string;
+  issuedTokenSymbolsByMint?: Readonly<Record<string, string>>;
   className?: string;
 }) {
-  const amount = getTransactionAmountPresentation(transfer, locale);
+  const amount = getTransactionAmountPresentation(transfer, locale, issuedTokenSymbolsByMint);
 
   return (
     <span
