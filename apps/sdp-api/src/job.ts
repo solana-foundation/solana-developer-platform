@@ -2,10 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import * as Sentry from "@sentry/node";
 import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
-import {
-  WORKFLOW_EXECUTIONS_CRON,
-  WORKFLOW_EXECUTIONS_MONITOR,
-} from "@/cron/workflow-executions";
+import { WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import { closeDatabasePools } from "@/db/client";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";

@@ -1210,7 +1210,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     responses: {
       200: {
         description: "Workflow deleted",
-        content: jsonContent(envelope(z.object({ deleted: z.boolean() }), "DeleteWorkflowResponse")),
+        content: jsonContent(
+          envelope(z.object({ deleted: z.boolean() }), "DeleteWorkflowResponse")
+        ),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },

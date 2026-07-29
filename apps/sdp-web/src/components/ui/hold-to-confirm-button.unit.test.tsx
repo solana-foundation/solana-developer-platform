@@ -8,7 +8,12 @@ import { HoldToConfirmButton } from "./hold-to-confirm-button";
 describe("HoldToConfirmButton", () => {
   function render(disabled = false) {
     return renderToStaticMarkup(
-      <HoldToConfirmButton label="Hold to approve" holdingLabel="Keep holding…" disabled={disabled} onConfirm={() => {}} />
+      <HoldToConfirmButton
+        label="Hold to approve"
+        holdingLabel="Keep holding…"
+        disabled={disabled}
+        onConfirm={() => {}}
+      />
     );
   }
 

@@ -119,7 +119,8 @@ async function guardExecution(
   return {
     ok: true,
     params: rule.definition.action.params,
-    retryAfterMinutes: rule.definition.retryPolicy?.retryAfterMinutes ?? DEFAULT_RETRY_AFTER_MINUTES,
+    retryAfterMinutes:
+      rule.definition.retryPolicy?.retryAfterMinutes ?? DEFAULT_RETRY_AFTER_MINUTES,
   };
 }
 

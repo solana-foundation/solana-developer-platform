@@ -35,7 +35,11 @@ describe("runSendWebhook", () => {
 
   it("fails permanently when the url param is missing", async () => {
     const outcome = await runSendWebhook(env, executionFixture(), { params: {} });
-    expect(outcome).toMatchObject({ status: "failed", retryable: false, error: "MISSING_PARAM:url" });
+    expect(outcome).toMatchObject({
+      status: "failed",
+      retryable: false,
+      error: "MISSING_PARAM:url",
+    });
   });
 
   it("fails permanently on a malformed url", async () => {

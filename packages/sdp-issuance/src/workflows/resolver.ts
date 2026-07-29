@@ -5,7 +5,11 @@
 import type { AssetCategory, SelectedSetting, WorkflowActionType } from "@sdp/types";
 // Import the catalog directly (not ../capabilities/index) to avoid its dev-time assertion
 // side effects; ADVANCED_SETTINGS is the same `actions` data the settings resolver consumes.
-import { ADVANCED_SETTINGS, expandLegacySettingKeys, type SettingKey } from "../capabilities/settings";
+import {
+  ADVANCED_SETTINGS,
+  expandLegacySettingKeys,
+  type SettingKey,
+} from "../capabilities/settings";
 import { WORKFLOW_ACTIONS } from "./actions";
 
 export type ActionSupportReason = "unknown_action" | "no_allowlist" | "capability_disabled";

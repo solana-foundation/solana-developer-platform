@@ -41,7 +41,9 @@ function render(props: Partial<Parameters<typeof WorkflowFlowPreview>[0]>) {
 
 describe("WorkflowFlowPreview", () => {
   it("names the authority a base-requirement action uses (not 'no capability required')", () => {
-    const markup = render({ action: action({ kind: "base", action: "mint" }, "requires_approval") });
+    const markup = render({
+      action: action({ kind: "base", action: "mint" }, "requires_approval"),
+    });
     expect(markup).toContain("flowCapabilityBase");
     expect(markup).not.toContain("flowCapabilityNone");
   });
@@ -65,7 +67,9 @@ describe("WorkflowFlowPreview", () => {
   });
 
   it("always holds destructive tiers for review, with the hold-to-confirm note", () => {
-    const markup = render({ action: action({ kind: "base", action: "mint" }, "requires_approval") });
+    const markup = render({
+      action: action({ kind: "base", action: "mint" }, "requires_approval"),
+    });
     expect(markup).toContain("flowHeldForReview");
     expect(markup).toContain("flowHoldNote");
     expect(markup).not.toContain("flowAutoApplies");
