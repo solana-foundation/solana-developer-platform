@@ -16,12 +16,14 @@ import { FormSection } from "./wallet-policy-flow.shared";
 export function DestinationEditor({
   state,
   setPolicyState,
+  complianceScreeningEnabled,
 }: {
   state: PolicyAuthoringState;
   setPolicyState: (update: (current: PolicyAuthoringState) => PolicyAuthoringState) => void;
+  complianceScreeningEnabled: boolean;
 }) {
   const t = useTranslations();
-  const editor = useDestinationEditor(state, setPolicyState);
+  const editor = useDestinationEditor(state, setPolicyState, complianceScreeningEnabled);
 
   return (
     <FormSection

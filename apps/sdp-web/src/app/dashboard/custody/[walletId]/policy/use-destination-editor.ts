@@ -93,11 +93,13 @@ async function screenDestination(address: string): Promise<DestinationScreeningR
  *
  * @param state - The current policy authoring state.
  * @param setPolicyState - Updater for the authoring state.
+ * @param complianceScreeningEnabled - Whether the organization has a compliance provider enabled; without one, allowlist adds commit directly instead of screening.
  * @returns Editor state and the handlers the destination editor renders with.
  */
 export function useDestinationEditor(
   state: PolicyAuthoringState,
-  setPolicyState: (update: (current: PolicyAuthoringState) => PolicyAuthoringState) => void
+  setPolicyState: (update: (current: PolicyAuthoringState) => PolicyAuthoringState) => void,
+  complianceScreeningEnabled: boolean
 ) {
   const t = useTranslations();
   const [query, setQuery] = useState("");
@@ -203,6 +205,11 @@ export function useDestinationEditor(
       clearEntry();
       return;
     }
+    if (!complianceScreeningEnabled) {
+      commitMany([value], "destinationAllowText");
+      clearEntry();
+      return;
+    }
     setPendingAddress(value);
     setPhase("screening");
     const result = await screenDestination(value);
@@ -237,8 +244,8 @@ export function useDestinationEditor(
       toast.error(t("DashboardCustody.policyBulkNothingToAdd"), { position: "bottom-right" });
       return;
     }
-    if (state.destinationMode === "blocklist") {
-      commitMany(candidates, "destinationBlockText");
+    if (state.destinationMode === "blocklist" || !complianceScreeningEnabled) {
+      commitMany(candidates, destinationField(state.destinationMode));
       toast.success(
         t("DashboardCustody.policyBulkAddSummary", { added: candidates.length, flagged: 0 }),
         { position: "bottom-right" }

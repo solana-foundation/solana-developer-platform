@@ -58,6 +58,7 @@ interface WalletPolicyStartingProfileFlowProps {
   issuedTokens: IssuedPolicyToken[];
   initialPolicy: PaymentWalletPolicy;
   policyError: string | null;
+  complianceScreeningEnabled: boolean;
 }
 
 export function WalletPolicyStartingProfileFlow({
@@ -67,6 +68,7 @@ export function WalletPolicyStartingProfileFlow({
   issuedTokens,
   initialPolicy,
   policyError,
+  complianceScreeningEnabled,
 }: WalletPolicyStartingProfileFlowProps) {
   const t = useTranslations();
   const router = useDashboardRouter();
@@ -409,6 +411,7 @@ export function WalletPolicyStartingProfileFlow({
                 state={state}
                 setPolicyState={setState}
                 errors={visibleValidation}
+                complianceScreeningEnabled={complianceScreeningEnabled}
               />
             ) : null}
             {isLoaded && currentStep === "review" ? (

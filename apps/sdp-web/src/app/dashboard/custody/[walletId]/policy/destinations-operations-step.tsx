@@ -9,10 +9,12 @@ export function DestinationsAndOperationsStep({
   state,
   setPolicyState,
   errors,
+  complianceScreeningEnabled,
 }: {
   state: PolicyAuthoringState;
   setPolicyState: (update: (current: PolicyAuthoringState) => PolicyAuthoringState) => void;
   errors: ReturnType<typeof validatePolicyState>;
+  complianceScreeningEnabled: boolean;
 }) {
   const showDestinations = state.categories.includes("destinations");
   const showOperations = state.categories.includes("operations");
@@ -22,7 +24,11 @@ export function DestinationsAndOperationsStep({
   return (
     <div className="space-y-6">
       {showDestinations ? (
-        <DestinationEditor state={state} setPolicyState={setPolicyState} />
+        <DestinationEditor
+          state={state}
+          setPolicyState={setPolicyState}
+          complianceScreeningEnabled={complianceScreeningEnabled}
+        />
       ) : null}
       {showOperations ? (
         <OperationEditor state={state} error={errors.operations} setPolicyState={setPolicyState} />
