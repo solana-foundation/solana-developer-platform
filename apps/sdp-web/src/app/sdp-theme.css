@@ -72,6 +72,13 @@
   --color-fill-subtle: var(--t4);
   --color-fill: var(--t8);
   --color-fill-strong: var(--t12);
+  /* --fill, composited by hand so it is opaque. The tinted fills above are ink at 4/8/12%
+     alpha, so whatever sits behind an element painted in one of them shows through it.
+     Overlays that have to *occlude* what is behind them — a mark covering the edge of a
+     band, say — take this instead: sRGB is the space the browser composites in, so over a
+     raised card it is pixel-identical to --color-fill, and the only thing it changes is
+     what it lets through. Only correct on --surface-raised; it names its ground. */
+  --color-fill-opaque: color-mix(in srgb, var(--surface-raised) 92%, var(--emph-xh));
 
   --color-border-subtle: var(--border-xl);
   --color-border-default: var(--border-l);

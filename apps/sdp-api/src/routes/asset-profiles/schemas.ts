@@ -95,4 +95,21 @@ export const listAssetProfilesQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   includeArchived: queryBooleanSchema.default(false),
   category: assetCategorySchema.optional(),
+  // Comma-separated token ids, so a caller rendering one page of the asset list
+  // can hydrate exactly those tokens' profiles in a single request. Capped at
+  // the max page size, deduped, and blank entries dropped.
+  tokenIds: z
+    .string()
+    .transform((value) =>
+      Array.from(
+        new Set(
+          value
+            .split(",")
+            .map((entry) => entry.trim())
+            .filter(Boolean)
+        )
+      )
+    )
+    .pipe(z.array(z.string().min(1).max(64)).min(1).max(100))
+    .optional(),
 });

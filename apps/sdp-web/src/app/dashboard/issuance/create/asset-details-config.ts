@@ -1,4 +1,5 @@
 import type { AssetCategory } from "@sdp/types";
+import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type AccessControlMode,
@@ -55,13 +56,26 @@ export type DetailFieldKey =
   | "propertyType"
   | "propertyLocation";
 
+export interface FieldOption {
+  value: string;
+  labelKey: MessageKey;
+  /** Leading glyph for the option — jurisdictions carry their region's flag. */
+  flag?: string | null;
+}
+
 export interface FieldDescriptor {
   key: DetailFieldKey;
   labelKey: MessageKey;
   control: FieldControl;
   placeholderKey?: MessageKey;
   helpKey?: MessageKey;
-  options?: readonly { value: string; labelKey: MessageKey }[];
+  options?: readonly FieldOption[];
+}
+
+/** Option label led by its flag where the option has one, e.g. "🇺🇸 United States". */
+export function fieldOptionLabel(option: FieldOption, t: Translate): string {
+  const label = t(option.labelKey);
+  return option.flag ? `${option.flag} ${label}` : label;
 }
 
 export interface DetailSection {
@@ -70,11 +84,15 @@ export interface DetailSection {
   fields: readonly FieldDescriptor[];
 }
 
+// Jurisdictions lead with their region's flag so the select and every read-only
+// jurisdiction row are scannable at a glance. The stored option values are the
+// draft's own ("uk"), so the flag comes from the ISO region they stand for
+// ("GB"); "other" names no region and stays glyphless.
 const JURISDICTION_OPTIONS = [
-  { value: "us", labelKey: "DashboardIssuance.config.unitedStates" },
-  { value: "eu", labelKey: "DashboardIssuance.config.europeanUnion" },
-  { value: "uk", labelKey: "DashboardIssuance.config.unitedKingdom" },
-  { value: "sg", labelKey: "DashboardIssuance.config.singapore" },
+  { value: "us", labelKey: "DashboardIssuance.config.unitedStates", flag: regionFlagEmoji("US") },
+  { value: "eu", labelKey: "DashboardIssuance.config.europeanUnion", flag: regionFlagEmoji("EU") },
+  { value: "uk", labelKey: "DashboardIssuance.config.unitedKingdom", flag: regionFlagEmoji("GB") },
+  { value: "sg", labelKey: "DashboardIssuance.config.singapore", flag: regionFlagEmoji("SG") },
   { value: "other", labelKey: "DashboardIssuance.config.other" },
 ] as const;
 
@@ -464,18 +482,18 @@ export function getPegSummary(
   return draft.pegTarget.trim() || draft.pegCurrency.trim() || null;
 }
 
-// value -> label per select-backed field, derived from every (category, type)
+// value -> option per select-backed field, derived from every (category, type)
 // section. Later sections win on key collisions, but the shared option sets
 // (backing, jurisdiction, …) are identical wherever they appear, so a flat merge
 // is safe.
-const OPTION_LABELS_BY_KEY: Partial<Record<DetailFieldKey, Record<string, MessageKey>>> = {};
+const OPTIONS_BY_KEY: Partial<Record<DetailFieldKey, Record<string, FieldOption>>> = {};
 for (const byType of Object.values(TYPE_SECTIONS)) {
   for (const sections of Object.values(byType)) {
     for (const section of sections) {
       for (const field of section.fields) {
         if (field.options) {
-          OPTION_LABELS_BY_KEY[field.key] = Object.fromEntries(
-            field.options.map((option) => [option.value, option.labelKey])
+          OPTIONS_BY_KEY[field.key] = Object.fromEntries(
+            field.options.map((option) => [option.value, option])
           );
         }
       }
@@ -484,20 +502,21 @@ for (const byType of Object.values(TYPE_SECTIONS)) {
 }
 // The generic-stablecoin backing select only lives in DEFAULT_SECTIONS, so pick
 // it up explicitly for the value→label lookup (used by the public-info preview).
-OPTION_LABELS_BY_KEY.backingType = Object.fromEntries(
-  BACKING_OPTIONS.map((option) => [option.value, option.labelKey])
+OPTIONS_BY_KEY.backingType = Object.fromEntries(
+  BACKING_OPTIONS.map((option) => [option.value, option])
 );
 
 // Human label for a select-backed field's stored value (e.g. backingType
-// "fiat" -> "Fiat-backed"). Undefined for free-text fields or unknown values,
-// so callers can fall back to the raw value.
+// "fiat" -> "Fiat-backed", jurisdiction "us" -> "🇺🇸 United States"). Undefined
+// for free-text fields or unknown values, so callers can fall back to the raw
+// value.
 export function detailFieldOptionLabel(
   key: string,
   value: string,
   t: Translate
 ): string | undefined {
-  const labelKey = OPTION_LABELS_BY_KEY[key as DetailFieldKey]?.[value];
-  return labelKey ? t(labelKey) : undefined;
+  const option = OPTIONS_BY_KEY[key as DetailFieldKey]?.[value];
+  return option ? fieldOptionLabel(option, t) : undefined;
 }
 
 export const ACCESS_CONTROL_OPTIONS: readonly { value: AccessControlMode; labelKey: MessageKey }[] =

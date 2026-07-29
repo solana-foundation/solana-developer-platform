@@ -35,10 +35,10 @@ describe("CryptoAccountsPhase", () => {
   it("keeps the standalone optional phase inside the shared authoring frame", () => {
     const markup = renderToStaticMarkup(<CryptoAccountsPhase embedded={false} steps={steps} />);
 
-    expect(markup).toContain("data-payments-wizard-frame");
-    expect(markup).toContain("data-payments-wizard-stepper");
-    expect(markup).toContain("data-payments-wizard-scroll-region");
-    expect(markup).toContain("data-payments-wizard-actions");
+    expect(markup).toContain("data-wizard-frame");
+    expect(markup).toContain("data-wizard-stepper");
+    expect(markup).toContain("data-wizard-scroll-region");
+    expect(markup).toContain("data-wizard-actions");
     expect(markup).toContain("Step 5 of 5");
     expect(markup).toContain("data-crypto-account-form");
     expect(markup).not.toContain("h-[70vh]");
@@ -47,7 +47,7 @@ describe("CryptoAccountsPhase", () => {
   it("preserves the compact self-scrolling layout when embedded in a dialog", () => {
     const markup = renderToStaticMarkup(<CryptoAccountsPhase embedded steps={steps} />);
 
-    expect(markup).not.toContain("data-payments-wizard-frame");
+    expect(markup).not.toContain("data-wizard-frame");
     expect(markup).toContain("h-[70vh]");
     expect(markup).toContain("overflow-y-auto");
     expect(markup).toContain("data-crypto-account-form");

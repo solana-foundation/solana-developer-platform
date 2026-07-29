@@ -2,6 +2,7 @@
 
 import { DEFAULT_SDP_DOCS_URL, type PaymentsDashboardWallet } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
+import { Coins } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Label } from "@/components/ui/label";
@@ -205,6 +206,23 @@ export function StepAssetDetails({
                 placeholder={t("DashboardIssuance.assetDetails.logoPlaceholder")}
                 help={t("DashboardIssuance.assetDetails.logoHint")}
                 error={fieldError("imageUrl")}
+              />
+            </div>
+          </FormCard>
+
+          <FormCard
+            title={t("DashboardIssuance.assetDetails.supplyControls")}
+            description={t("DashboardIssuance.assetDetails.supplyControlsDescription")}
+            icon={Coins}
+          >
+            <div className="grid items-start gap-4 sm:grid-cols-2">
+              <TextField
+                label={t("DashboardIssuance.assetDetails.maxSupply")}
+                value={draft.maxSupply}
+                onChange={(value) => updateDraft({ maxSupply: value })}
+                placeholder={t("DashboardIssuance.assetDetails.maxSupplyPlaceholder")}
+                help={t("DashboardIssuance.assetDetails.maxSupplyHint")}
+                error={fieldError("maxSupply")}
               />
             </div>
           </FormCard>

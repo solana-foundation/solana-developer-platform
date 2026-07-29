@@ -16,8 +16,12 @@ function settings(
   return result;
 }
 
+// Both halves of the former "freezeTransfers" stay locked for the regulated
+// families, so splitting it changes no deployed behaviour: these mints still get
+// the pausable extension AND a base freeze authority.
 const STABLECOIN_SETTINGS = settings({
-  freezeTransfers: "locked",
+  pauseTransfers: "locked",
+  freezeAccounts: "locked",
   permanentDelegate: "locked",
   transferFee: "unsupported",
   interestBearing: "unsupported",
@@ -27,7 +31,8 @@ const STABLECOIN_SETTINGS = settings({
 });
 
 const SECURITY_SETTINGS = settings({
-  freezeTransfers: "locked",
+  pauseTransfers: "locked",
+  freezeAccounts: "locked",
   permanentDelegate: "locked",
   scaledUiAmount: "recommended",
   transferFee: "unsupported",

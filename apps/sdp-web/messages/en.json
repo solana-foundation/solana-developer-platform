@@ -25,6 +25,9 @@
   },
   "Error": {
     "tryAgain": "Try again",
-    "reportIssue": "Report this issue"
+    "reportIssue": "Report this issue",
+    "viewTitle": "This view couldn't load",
+    "viewDescription": "Something went wrong while loading this page. The rest of the dashboard still works, so you can retry or move on.",
+    "reference": "Reference {digest}"
   }
 }

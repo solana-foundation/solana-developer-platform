@@ -2,11 +2,11 @@ import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type PaymentWalletPolicy,
   type PolicyDefaultAction,
-  type PolicyProviderSyncStatus,
   type PolicyRule,
   type PolicyRuleAction,
   type SdpEnvironment,
   type WalletOperationFamily,
+  WELL_KNOWN_TOKEN_BY_MINT,
   WELL_KNOWN_TOKENS,
   type WellKnownTokenCategory,
   type WellKnownTokenSymbol,
@@ -45,6 +45,10 @@ export interface PolicyAssetOption {
  * for the active cluster that neither of the first two already covered. Without this the
  * picker only knows about tokens already in the wallet, so covering USDC on a fresh
  * wallet, or any token the org minted itself, meant pasting a mint address by hand.
+ *
+ * Holdings of a catalogued mint take their symbol/name from the well-known registry:
+ * the balances API labels native SOL with its mint address, and holdings win the
+ * per-mint dedupe, so without this the picker would show the raw address.
  */
 export function buildPolicyAssetOptions(
   walletAssets: readonly { token: string; mint: string; uiAmount: string }[],
@@ -54,9 +58,21 @@ export function buildPolicyAssetOptions(
   const options = new Map<string, PolicyAssetOption>();
 
   for (const asset of walletAssets) {
-    if (!options.has(asset.mint)) {
-      options.set(asset.mint, { ...asset, source: "wallet" });
-    }
+    if (options.has(asset.mint)) continue;
+    const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(asset.mint);
+    options.set(
+      asset.mint,
+      wellKnown
+        ? {
+            token: wellKnown.symbol,
+            name: wellKnown.name,
+            category: wellKnown.category,
+            mint: asset.mint,
+            uiAmount: asset.uiAmount,
+            source: "wallet",
+          }
+        : { ...asset, source: "wallet" }
+    );
   }
 
   // Issued tokens sit between holdings and the catalogue. A token the wallet already
@@ -102,7 +118,8 @@ export interface PolicyAuthoringState {
   maxDailyAmount: string;
   assets: string[];
   destinationMode: DestinationMode;
-  destinationText: string;
+  destinationAllowText: string;
+  destinationBlockText: string;
   familyActions: Partial<Record<WalletOperationFamily, AuthoringRuleAction>>;
   operationTypeRules: OperationTypeRuleInput[];
   passthroughRules: PolicyRule[];
@@ -121,9 +138,9 @@ export interface PolicyValidationErrors {
   intent?: "restriction_required";
   maxTransferAmount?: "invalid_decimal";
   maxDailyAmount?: "invalid_decimal" | "daily_below_transaction";
-  assets?: "asset_required" | "invalid_asset";
-  destinations?: "destination_required" | "invalid_destination";
-  operations?: "operation_required" | "invalid_operation_type";
+  assets?: "invalid_asset";
+  operations?: "invalid_operation_type";
+  review?: "no_restrictions";
 }
 
 export interface ParsedDestinationEntry {
@@ -150,16 +167,6 @@ export const WALLET_OPERATION_FAMILIES = [
   "program",
   "provider_admin",
 ] as const satisfies readonly WalletOperationFamily[];
-
-export const SUPPORTED_WALLET_OPERATION_TYPES = [
-  { value: "payment_transfer_execute", family: "payment" },
-  { value: "payment_transfer_batch_execute", family: "payment" },
-  { value: "ramp_onramp_quote", family: "ramp" },
-  { value: "ramp_offramp_quote", family: "ramp" },
-  { value: "issuance_mint_execute", family: "issuance" },
-  { value: "issuance_update_authority_execute", family: "issuance" },
-  { value: "custody_signer_check", family: "raw_sign" },
-] as const satisfies readonly { value: string; family: WalletOperationFamily }[];
 
 export const AUTHORING_RULE_ACTIONS = [
   "allow",
@@ -316,12 +323,13 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
   const rules = policy.rules ?? policy.controlProfile?.rules ?? [];
   const categories: RestrictionCategory[] = [];
   const assets: string[] = [];
-  const destinations: string[] = [];
+  const allowDestinations: string[] = [];
+  const blockDestinations: string[] = [];
   const familyActions: PolicyAuthoringState["familyActions"] = {};
   const operationTypeRules: OperationTypeRuleInput[] = [];
   const passthroughRules: PolicyRule[] = [];
-  let destinationMode: DestinationMode = "allowlist";
-  let editableDestinationMode: DestinationMode | null = null;
+  let hasEditableAllowRule = false;
+  let hasEditableBlockRule = false;
   let maxTransferAmount = policy.maxTransferAmount ?? "";
 
   for (const rule of rules) {
@@ -381,13 +389,15 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
         if (
           !ruleMode ||
           !hasEditableAction ||
-          (editableDestinationMode !== null && editableDestinationMode !== ruleMode)
+          (ruleMode === "allowlist" ? hasEditableAllowRule : hasEditableBlockRule)
         ) {
           passthroughRules.push(rule);
+        } else if (ruleMode === "allowlist") {
+          hasEditableAllowRule = true;
+          allowDestinations.push(...allowlist);
         } else {
-          editableDestinationMode = ruleMode;
-          destinationMode = ruleMode;
-          destinations.push(...(ruleMode === "allowlist" ? allowlist : blocklist));
+          hasEditableBlockRule = true;
+          blockDestinations.push(...blocklist);
         }
         addCategory(categories, "destinations");
         break;
@@ -429,11 +439,12 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
     }
   }
 
-  if (policy.destinationAllowlist.length > 0 && destinations.length === 0) {
-    destinations.push(...policy.destinationAllowlist);
-    destinationMode = "allowlist";
+  if (policy.destinationAllowlist.length > 0 && allowDestinations.length === 0) {
+    allowDestinations.push(...policy.destinationAllowlist);
   }
-  if (destinations.length > 0) addCategory(categories, "destinations");
+  if (allowDestinations.length > 0 || blockDestinations.length > 0) {
+    addCategory(categories, "destinations");
+  }
   if (policy.maxTransferAmount || policy.maxDailyAmount) addCategory(categories, "limits");
 
   return {
@@ -444,8 +455,10 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
     maxTransferAmount,
     maxDailyAmount: policy.maxDailyAmount ?? "",
     assets: uniqueValues(assets),
-    destinationMode,
-    destinationText: uniqueValues(destinations).join(", "),
+    destinationMode:
+      blockDestinations.length > 0 && allowDestinations.length === 0 ? "blocklist" : "allowlist",
+    destinationAllowText: uniqueValues(allowDestinations).join(", "),
+    destinationBlockText: uniqueValues(blockDestinations).join(", "),
     familyActions,
     operationTypeRules: operationTypeRules.filter(
       (entry, index, values) => values.findIndex((item) => item.value === entry.value) === index
@@ -467,9 +480,10 @@ function groupedValuesByAction<TValue extends string>(
 export function buildPolicyPayload(
   walletId: string,
   state: PolicyAuthoringState
-): PaymentWalletPolicy {
+): PaymentWalletPolicy & { rules: PolicyRule[] } {
   const categories = new Set(state.categories);
-  const destinations = parseDestinationText(state.destinationText).valid;
+  const allowDestinations = parseDestinationText(state.destinationAllowText).valid;
+  const blockDestinations = parseDestinationText(state.destinationBlockText).valid;
   const rules = state.passthroughRules.filter((rule) => {
     const category = categoryForRule(rule);
     return category === null || categories.has(category);
@@ -511,15 +525,25 @@ export function buildPolicyPayload(
     });
   }
 
-  if (categories.has("destinations") && destinations.length > 0) {
-    rules.push({
-      id: `${state.destinationMode}-destinations`,
-      kind: "destination",
-      ...(state.destinationMode === "allowlist"
-        ? { allowlist: destinations, action: "allow" as const }
-        : { blocklist: destinations, action: "deny" as const }),
-      name: state.destinationMode === "allowlist" ? "Allowed destinations" : "Blocked destinations",
-    });
+  if (categories.has("destinations")) {
+    if (allowDestinations.length > 0) {
+      rules.push({
+        id: "allowlist-destinations",
+        kind: "destination",
+        allowlist: allowDestinations,
+        action: "allow",
+        name: "Allowed destinations",
+      });
+    }
+    if (blockDestinations.length > 0) {
+      rules.push({
+        id: "blocklist-destinations",
+        kind: "destination",
+        blocklist: blockDestinations,
+        action: "deny",
+        name: "Blocked destinations",
+      });
+    }
   }
 
   const maxTransferAmount = state.maxTransferAmount.trim();
@@ -536,8 +560,7 @@ export function buildPolicyPayload(
 
   return {
     walletId,
-    destinationAllowlist:
-      categories.has("destinations") && state.destinationMode === "allowlist" ? destinations : [],
+    destinationAllowlist: categories.has("destinations") ? allowDestinations : [],
     ...(categories.has("limits") && maxTransferAmount ? { maxTransferAmount } : {}),
     ...(categories.has("limits") && maxDailyAmount ? { maxDailyAmount } : {}),
     defaultAction: state.defaultAction,
@@ -557,15 +580,18 @@ export function buildDisabledPolicyPayload(walletId: string): PaymentWalletPolic
 export function validatePolicyState(state: PolicyAuthoringState): PolicyValidationErrors {
   const errors: PolicyValidationErrors = {};
   const categories = new Set(state.categories);
-  const hasPreservedRule = (category: RestrictionCategory) =>
-    state.passthroughRules.some((rule) => categoryForRule(rule) === category);
 
+  const payload = buildPolicyPayload("validation", state);
   if (
-    state.defaultAction === "allow" &&
-    state.categories.length === 0 &&
-    state.passthroughRules.length === 0
+    payload.defaultAction === "allow" &&
+    payload.rules.length === 0 &&
+    !payload.maxTransferAmount &&
+    !payload.maxDailyAmount
   ) {
-    errors.intent = "restriction_required";
+    errors.review = "no_restrictions";
+    if (state.categories.length === 0 && state.passthroughRules.length === 0) {
+      errors.intent = "restriction_required";
+    }
   }
 
   if (!isValidDecimal(state.maxTransferAmount)) errors.maxTransferAmount = "invalid_decimal";
@@ -580,39 +606,17 @@ export function validatePolicyState(state: PolicyAuthoringState): PolicyValidati
     errors.maxDailyAmount = "daily_below_transaction";
   }
 
+  if (categories.has("assets") && state.assets.some((asset) => !isValidSolanaAddress(asset))) {
+    errors.assets = "invalid_asset";
+  }
+
   if (
-    categories.has("limits") &&
-    !state.maxTransferAmount.trim() &&
-    !state.maxDailyAmount.trim() &&
-    !hasPreservedRule("limits")
+    categories.has("operations") &&
+    state.operationTypeRules.some(
+      (entry) => !entry.value.trim() || entry.value.trim().length > OPERATION_TYPE_MAX_LENGTH
+    )
   ) {
-    errors.maxTransferAmount = "invalid_decimal";
-  }
-
-  if (categories.has("assets")) {
-    if (state.assets.length === 0 && !hasPreservedRule("assets")) errors.assets = "asset_required";
-    else if (state.assets.some((asset) => !isValidSolanaAddress(asset)))
-      errors.assets = "invalid_asset";
-  }
-
-  if (categories.has("destinations")) {
-    const parsed = parseDestinationText(state.destinationText);
-    if (parsed.valid.length === 0 && !hasPreservedRule("destinations")) {
-      errors.destinations = "destination_required";
-    } else if (parsed.invalid.length > 0) errors.destinations = "invalid_destination";
-  }
-
-  if (categories.has("operations")) {
-    const hasFamily = Object.values(state.familyActions).some(Boolean);
-    if (!hasFamily && state.operationTypeRules.length === 0 && !hasPreservedRule("operations")) {
-      errors.operations = "operation_required";
-    } else if (
-      state.operationTypeRules.some(
-        (entry) => !entry.value.trim() || entry.value.trim().length > OPERATION_TYPE_MAX_LENGTH
-      )
-    ) {
-      errors.operations = "invalid_operation_type";
-    }
+    errors.operations = "invalid_operation_type";
   }
 
   return errors;
@@ -651,7 +655,8 @@ function isStoredPolicyDraft(
     Array.isArray(state.assets) &&
     state.assets.every((asset) => typeof asset === "string") &&
     (state.destinationMode === "allowlist" || state.destinationMode === "blocklist") &&
-    typeof state.destinationText === "string" &&
+    typeof state.destinationAllowText === "string" &&
+    typeof state.destinationBlockText === "string" &&
     Boolean(state.familyActions) &&
     Array.isArray(state.operationTypeRules) &&
     Array.isArray(state.passthroughRules)
@@ -689,38 +694,4 @@ export function clearPolicyDraft(storage: StorageLike, projectId: string, wallet
 
 export function policyStateFingerprint(walletId: string, state: PolicyAuthoringState): string {
   return JSON.stringify(buildPolicyPayload(walletId, state));
-}
-
-export function countConfiguredRules(state: PolicyAuthoringState): number {
-  const payload = buildPolicyPayload("summary", state);
-  return payload.rules?.length ?? 0;
-}
-
-export function formatProviderMappingLabel(
-  status: PolicyProviderSyncStatus | null,
-  hasProvider: boolean
-):
-  | "SDP-enforced"
-  | "Provider sync pending"
-  | "Provider synced"
-  | "Provider partially mapped"
-  | "Provider mapping failed"
-  | "Not applicable" {
-  if (!hasProvider) return "Not applicable";
-  switch (status) {
-    case "pending":
-      return "Provider sync pending";
-    case "synced":
-      return "Provider synced";
-    case "partial":
-      return "Provider partially mapped";
-    case "failed":
-      return "Provider mapping failed";
-    default:
-      return "SDP-enforced";
-  }
-}
-
-export function isProviderMappingWarning(status: PolicyProviderSyncStatus | null): boolean {
-  return status === "partial" || status === "failed";
 }

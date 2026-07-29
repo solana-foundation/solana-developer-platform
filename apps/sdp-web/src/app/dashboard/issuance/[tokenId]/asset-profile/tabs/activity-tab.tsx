@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
-import { getPageCount, getPageSummary } from "../../pagination.utils";
+import { getPageCount, getPageSummary } from "../../../pagination.utils";
 import { formatDateTime } from "../../token-management-workspace.utils";
 import { fetchAssetAuditHistory } from "../asset-audit.data";
 import {

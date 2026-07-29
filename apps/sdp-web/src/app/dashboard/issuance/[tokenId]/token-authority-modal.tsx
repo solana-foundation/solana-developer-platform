@@ -7,12 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
+import { toWalletIdentity, WalletIdentityBadge } from "../wallet-identity";
 import type { PermissionRow } from "./token-management-workspace.types";
 import {
   getSignerWalletOptionLabel,
   SOLANA_ADDRESS_PATTERN,
 } from "./token-management-workspace.utils";
-import { TokenWalletIdentityCard } from "./token-wallet-identity-card";
 
 const NONE_AUTHORITY_VALUE = "__none_authority__";
 
@@ -64,8 +64,6 @@ export function TokenAuthorityModal({
     return null;
   }
 
-  const currentAuthority =
-    currentAuthorityValue ?? t("DashboardIssuance.authority.resolvedAutomatically");
   const isSettingNone = newAuthority.trim().length === 0;
   const isConfirmingNone = noneConfirmationRowId === row.id && isSettingNone;
   const noneConfirmationCopy = getNoneConfirmationCopy(row, t);
@@ -86,7 +84,6 @@ export function TokenAuthorityModal({
     >
       {isConfirmingNone ? (
         <NoneConfirmationPanel
-          currentAuthority={currentAuthority}
           currentAuthorityValue={currentAuthorityValue}
           currentAuthorityWallet={currentAuthorityWallet}
           copy={noneConfirmationCopy}
@@ -115,7 +112,6 @@ export function TokenAuthorityModal({
             }}
           >
             <CurrentAuthoritySection
-              currentAuthority={currentAuthority}
               currentAuthorityValue={currentAuthorityValue}
               currentAuthorityWallet={currentAuthorityWallet}
             />
@@ -218,11 +214,9 @@ function useAuthoritySelectionState({
 }
 
 function CurrentAuthoritySection({
-  currentAuthority,
   currentAuthorityValue,
   currentAuthorityWallet,
 }: {
-  currentAuthority: string;
   currentAuthorityValue: string | null;
   currentAuthorityWallet: PaymentsDashboardWallet | null;
 }) {
@@ -232,17 +226,21 @@ function CurrentAuthoritySection({
       <span className="text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary">
         {t("DashboardIssuance.authority.current")}
       </span>
-      <TokenWalletIdentityCard
-        wallet={currentAuthorityWallet}
-        publicKey={currentAuthorityWallet ? null : currentAuthorityValue}
-        emptyLabel={currentAuthority}
+      {/* Inside a modal: opening the wallet in place would tear down the reassign
+          flow mid-edit, so the name opens in a new tab. */}
+      <WalletIdentityBadge
+        variant="card"
+        walletLink="new-tab"
+        identity={toWalletIdentity(currentAuthorityWallet, currentAuthorityValue, {
+          unresolvedAs: "external",
+          unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+        })}
       />
     </div>
   );
 }
 
 function NoneConfirmationPanel({
-  currentAuthority,
   currentAuthorityValue,
   currentAuthorityWallet,
   copy,
@@ -251,7 +249,6 @@ function NoneConfirmationPanel({
   onBack,
   onConfirm,
 }: {
-  currentAuthority: string;
   currentAuthorityValue: string | null;
   currentAuthorityWallet: PaymentsDashboardWallet | null;
   copy: { title: string; description: string; impact: string };
@@ -276,7 +273,6 @@ function NoneConfirmationPanel({
       </div>
 
       <CurrentAuthoritySection
-        currentAuthority={currentAuthority}
         currentAuthorityValue={currentAuthorityValue}
         currentAuthorityWallet={currentAuthorityWallet}
       />
@@ -373,11 +369,19 @@ function AuthorityTargetSection({
           </p>
         ) : null}
 
-        <TokenWalletIdentityCard
-          wallet={selectedAuthorityWallet}
-          emptyLabel={t("DashboardIssuance.wallet.none")}
-          emptyDescription={t("DashboardIssuance.authority.noneDescription")}
+        <WalletIdentityBadge
+          variant="card"
+          walletLink="new-tab"
+          identity={toWalletIdentity(selectedAuthorityWallet, null, {
+            unresolvedAs: "custom",
+            unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+          })}
         />
+        {selectedAuthorityWallet ? null : (
+          <p className="text-sm leading-[1.45] text-secondary">
+            {t("DashboardIssuance.authority.noneDescription")}
+          </p>
+        )}
 
         <div className="flex items-center justify-between gap-3 text-sm">
           <p className="text-secondary">{t("DashboardIssuance.authority.controlledWalletHint")}</p>
@@ -423,12 +427,19 @@ function AuthorityTargetSection({
         </p>
       ) : null}
 
-      <TokenWalletIdentityCard
-        wallet={selectedAuthorityWallet}
-        publicKey={selectedAuthorityWallet ? null : newAuthority.trim() || null}
-        emptyLabel={t("DashboardIssuance.wallet.none")}
-        emptyDescription={t("DashboardIssuance.authority.noneDescription")}
+      <WalletIdentityBadge
+        variant="card"
+        walletLink="new-tab"
+        identity={toWalletIdentity(selectedAuthorityWallet, newAuthority, {
+          unresolvedAs: "custom",
+          unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+        })}
       />
+      {selectedAuthorityWallet || newAuthority.trim() ? null : (
+        <p className="text-sm leading-[1.45] text-secondary">
+          {t("DashboardIssuance.authority.noneDescription")}
+        </p>
+      )}
     </>
   );
 }

@@ -6,91 +6,22 @@ import type { ReactNode } from "react";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { getDeploymentStatus, type IssuanceTokenView } from "./issuance-token-fields";
+import {
+  countActiveIssuanceFilters,
+  DEFAULT_ISSUANCE_FILTERS,
+  type IssuanceDateFilter,
+  type IssuanceFilterState,
+  type IssuanceSortOption,
+  type IssuanceStatusFilter,
+} from "./issuance-list-query";
 
-// Filter + sort controls for the issuance token grid/list. Rendered as an
+// Filter + sort controls for the issuance asset grid/list. Rendered as an
 // icon-only trigger in the workspace toolbar; the popover holds three dropdown
-// filters (status, template, created date) plus a sort selector. Filtering is
-// client-side, matching the existing free-text search in issuance-workspace.tsx
-// — no server round-trip.
-
-export type IssuanceStatusFilter = "all" | "draft" | "active";
-export type IssuanceDateFilter = "all" | "7d" | "30d" | "12m";
-export type IssuanceSortOption = "newest" | "oldest" | "name-asc" | "name-desc";
-
-export interface IssuanceFilterState {
-  status: IssuanceStatusFilter;
-  template: string;
-  date: IssuanceDateFilter;
-  sort: IssuanceSortOption;
-}
-
-export const DEFAULT_ISSUANCE_FILTERS: IssuanceFilterState = {
-  status: "all",
-  template: "all",
-  date: "all",
-  sort: "newest",
-};
-
-const DATE_WINDOW_DAYS: Record<Exclude<IssuanceDateFilter, "all">, number> = {
-  "7d": 7,
-  "30d": 30,
-  "12m": 365,
-};
-
-// Count only the narrowing filters (status/template/date) — sort always has a
-// value, so it doesn't count toward "active filters".
-export function countActiveIssuanceFilters(filters: IssuanceFilterState): number {
-  let count = 0;
-  if (filters.status !== "all") count += 1;
-  if (filters.template !== "all") count += 1;
-  if (filters.date !== "all") count += 1;
-  return count;
-}
-
-function createdTime(value: string): number {
-  const time = new Date(value).getTime();
-  return Number.isNaN(time) ? 0 : time;
-}
-
-// Apply status/template/date filtering then sort. Search is applied separately
-// (upstream) so this stays a pure function of the filter state.
-export function filterAndSortTokens(
-  tokens: IssuanceTokenView[],
-  filters: IssuanceFilterState
-): IssuanceTokenView[] {
-  const dateCutoff =
-    filters.date === "all" ? null : Date.now() - DATE_WINDOW_DAYS[filters.date] * 86_400_000;
-
-  const filtered = tokens.filter((token) => {
-    if (filters.status !== "all" && getDeploymentStatus(token) !== filters.status) {
-      return false;
-    }
-    if (filters.template !== "all" && token.template !== filters.template) {
-      return false;
-    }
-    if (dateCutoff !== null && createdTime(token.createdAt) < dateCutoff) {
-      return false;
-    }
-    return true;
-  });
-
-  const sorted = [...filtered];
-  sorted.sort((a, b) => {
-    switch (filters.sort) {
-      case "oldest":
-        return createdTime(a.createdAt) - createdTime(b.createdAt);
-      case "name-asc":
-        return a.name.localeCompare(b.name);
-      case "name-desc":
-        return b.name.localeCompare(a.name);
-      default:
-        return createdTime(b.createdAt) - createdTime(a.createdAt);
-    }
-  });
-
-  return sorted;
-}
+// filters (status, template, created date) plus a sort selector.
+//
+// Selections are request state, not view state: the workspace folds them into the
+// list query the API answers (see issuance-list-query.ts), so filtering and
+// sorting cover every asset in the project, not just the loaded page.
 
 // Not a <label>: the DS Select renders a button trigger, not a native form
 // control, so a wrapping label wouldn't associate. Each Select carries its own
@@ -140,7 +71,11 @@ export function IssuanceFilterPopover({
         ) : null}
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Positioner side="bottom" align="end" sideOffset={8} className="z-50">
+        {/* Above the workspace's pinned header (z-20) — the trigger lives in that
+            header, so the panel drops across the rest of it — and below the DS popup
+            layer (z-50), so the Selects inside this panel open above it rather than
+            behind it. */}
+        <Popover.Positioner side="bottom" align="end" sideOffset={8} className="z-30">
           <Popover.Popup className="w-72 rounded-[var(--select-popup-radius)] border border-[var(--select-popup-border)] bg-[var(--select-popup-bg)] p-4 shadow-[var(--select-popup-shadow)] outline-none">
             <div className="mb-3 flex items-center justify-between">
               <span className="text-sm font-semibold text-primary">
@@ -167,8 +102,9 @@ export function IssuanceFilterPopover({
                   }
                 >
                   <SelectItem value="all">{t("DashboardIssuance.workspace.statusAll")}</SelectItem>
-                  <SelectItem value="draft">{t("DashboardIssuance.workspace.draft")}</SelectItem>
-                  <SelectItem value="active">{t("DashboardIssuance.workspace.active")}</SelectItem>
+                  <SelectItem value="draft">{t("DashboardIssuance.status.draft")}</SelectItem>
+                  <SelectItem value="active">{t("DashboardIssuance.status.active")}</SelectItem>
+                  <SelectItem value="paused">{t("DashboardIssuance.status.paused")}</SelectItem>
                 </Select>
               </FilterField>
 
