@@ -5,7 +5,7 @@
 import type { AssetCategory, SelectedSetting, WorkflowActionType } from "@sdp/types";
 // Import the catalog directly (not ../capabilities/index) to avoid its dev-time assertion
 // side effects; ADVANCED_SETTINGS is the same `actions` data the settings resolver consumes.
-import { ADVANCED_SETTINGS, type SettingKey } from "../capabilities/settings";
+import { ADVANCED_SETTINGS, expandLegacySettingKeys, type SettingKey } from "../capabilities/settings";
 import { WORKFLOW_ACTIONS } from "./actions";
 
 export type ActionSupportReason = "unknown_action" | "no_allowlist" | "capability_disabled";
@@ -22,12 +22,16 @@ export interface ValidateActionInput {
   hasAllowlist: boolean;
 }
 
-// True if any enabled setting unlocks the given Token-2022 action.
+// True if any enabled setting unlocks the given Token-2022 action. Stored selections
+// may still carry retired keys (e.g. "freezeTransfers"), so expand legacy aliases
+// before matching — otherwise an asset saved before a catalog rename would wrongly
+// fail the gate as capability_disabled.
 function selectedSettingsUnlock(
   selectedSettings: Record<string, SelectedSetting>,
   action: string
 ): boolean {
-  for (const key of Object.keys(selectedSettings)) {
+  const expanded = expandLegacySettingKeys(selectedSettings);
+  for (const key of Object.keys(expanded)) {
     if (!(key in ADVANCED_SETTINGS)) {
       continue;
     }

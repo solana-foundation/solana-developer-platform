@@ -185,7 +185,7 @@ const ERROR_CODE_KEYS: Record<string, string> = {
   ACTION_NOT_IMPLEMENTED: "errorCodes.unknown",
 };
 
-function failureLabel(error: string, wf: ReturnType<typeof makeWf>): string {
+export function failureLabel(error: string, wf: ReturnType<typeof makeWf>): string {
   const [code, detail] = error.split(":", 2);
   if (code?.startsWith("HTTP_")) {
     return wf("errorCodes.http", { status: code.slice(5) });
@@ -206,7 +206,7 @@ interface BuilderValidation {
   ok: boolean;
 }
 
-function validateBuilder(input: {
+export function validateBuilder(input: {
   triggerType: string | null;
   action: CatalogActionView | null;
   params: Record<string, string>;
@@ -255,7 +255,7 @@ function validateBuilder(input: {
 
 // Collect filled guard rows into a WorkflowCondition; `in` splits on commas.
 // (Validation guarantees no incomplete rows reach this point.)
-function guardsToCondition(guards: GuardDraft[]): { all: GuardClause[] } | undefined {
+export function guardsToCondition(guards: GuardDraft[]): { all: GuardClause[] } | undefined {
   const clauses: GuardClause[] = [];
   for (const guard of guards) {
     const value = guard.value.trim();

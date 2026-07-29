@@ -12,6 +12,21 @@ import {
 } from "./index";
 
 describe("workflow catalog", () => {
+  // Pins the Phase 5 locked decisions: the net catalog is exactly 13 actions and
+  // 6 triggers. The completeness loops below would pass trivially if a type AND its
+  // entry were both deleted — the counts make that a loud failure instead.
+  it("pins the net catalog size", () => {
+    assert.equal(WORKFLOW_ACTION_TYPES.length, 13);
+    assert.equal(WORKFLOW_TRIGGER_TYPES.length, 6);
+  });
+
+  it("keeps the dropped catalog entries dropped", () => {
+    // create_approval_task / approval_decided were removed in favor of the built-in
+    // review flow (re-introduced only with the deferred workflow-tasks system).
+    assert.equal(resolveWorkflowAction("create_approval_task"), undefined);
+    assert.equal(resolveWorkflowTrigger("approval_decided"), undefined);
+  });
+
   it("has an entry for every trigger type", () => {
     for (const type of WORKFLOW_TRIGGER_TYPES) {
       assert.ok(resolveWorkflowTrigger(type), `missing trigger entry: ${type}`);
