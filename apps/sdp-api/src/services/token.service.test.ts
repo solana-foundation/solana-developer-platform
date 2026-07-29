@@ -162,6 +162,66 @@ describe("TokenService", () => {
     expect(storedRows.results[0]?.unfrozen_at).toBeNull();
   });
 
+  describe("createToken maxSupply precision", () => {
+    const baseInput = {
+      projectId: TEST_PROJECT.id,
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_PROJECT_API_KEY.id,
+      name: "Capped Token",
+      symbol: "CAP",
+    };
+
+    it("stores a cap whose precision fits the token's decimals", async () => {
+      const token = await tokenService.createToken({
+        ...baseInput,
+        decimals: 2,
+        maxSupply: "1000.25",
+      });
+
+      expect(token.maxSupply).toBe("1000.25");
+    });
+
+    it("rejects a cap with more decimal places than the mint can represent", async () => {
+      // parseDecimalAmount throws AmountError on excess scale. Unguarded that
+      // escaped as a 500; it must surface as a 400 instead, because the effective
+      // decimals are only known here (a template may override what was requested).
+      await expect(
+        tokenService.createToken({ ...baseInput, decimals: 0, maxSupply: "1.5" })
+      ).rejects.toThrow(AppError);
+
+      await expect(
+        tokenService.createToken({ ...baseInput, decimals: 0, maxSupply: "1.5" })
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+
+    it("treats an absent cap as uncapped", async () => {
+      const token = await tokenService.createToken({ ...baseInput, decimals: 6 });
+
+      expect(token.maxSupply).toBeNull();
+      // Unchanged defaults — the mint stays mintable and freezable.
+      expect(token.isMintable).toBe(true);
+      expect(token.isFreezable).toBe(true);
+    });
+
+    it("persists isFreezable: false so deploy omits the freeze authority", async () => {
+      const token = await tokenService.createToken({
+        ...baseInput,
+        decimals: 6,
+        isFreezable: false,
+      });
+
+      expect(token.isFreezable).toBe(false);
+
+      // Round-trip through the DB: deploy reads the persisted row, not this object.
+      const reloaded = await tokenService.getToken({
+        tokenId: token.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+      expect(reloaded?.isFreezable).toBe(false);
+    });
+  });
+
   describe("updateToken undeployed guard", () => {
     async function insertToken(
       id: string,
@@ -564,6 +624,321 @@ describe("TokenService", () => {
       expect(indexes.results.map((index) => index.indexname)).toContain(
         "idx_issuance_tx_token_type_created"
       );
+    });
+  });
+
+  describe("listTokens search + filters + sorting", () => {
+    // [id, name, symbol, mint, template, status, deployedAt, createdAt]
+    const SEED_TOKENS = [
+      [
+        "tok_list_acme",
+        "Acme USD",
+        "AUSD",
+        "So11111111111111111111111111111111111111113",
+        "stablecoin",
+        "active",
+        "2026-01-02T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      ],
+      [
+        "tok_list_beta",
+        "Beta Points",
+        "BETA",
+        null,
+        "arcade",
+        "pending",
+        null,
+        "2026-02-01T00:00:00.000Z",
+      ],
+      [
+        "tok_list_zeta",
+        "zeta bond",
+        "ZETA",
+        "So11111111111111111111111111111111111111114",
+        "tokenized-security",
+        "paused",
+        "2026-03-02T00:00:00.000Z",
+        "2026-03-01T00:00:00.000Z",
+      ],
+      [
+        "tok_list_pct",
+        "100% Reserve",
+        "PCT",
+        null,
+        "custom",
+        "pending",
+        null,
+        "2026-04-01T00:00:00.000Z",
+      ],
+    ] as const;
+
+    async function insertToken([id, name, symbol, mint, template, status, deployedAt, createdAt]:
+      | (typeof SEED_TOKENS)[number]
+      | readonly [string, string, string, string | null, string, string, string | null, string]) {
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (
+             id, project_id, organization_id, mint_address, name, symbol, decimals,
+             total_supply_cached, is_mintable, freeze_authority_enabled, allowlist_enabled,
+             template, status, deployed_at, created_by, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, 6, '0', 1, 1, 0, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          id,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          mint,
+          name,
+          symbol,
+          template,
+          status,
+          deployedAt,
+          TEST_PROJECT_API_KEY.id,
+          createdAt,
+          createdAt
+        )
+        .run();
+    }
+
+    beforeEach(async () => {
+      // Drop the outer seed token so the assertions below own the whole project.
+      await db
+        .prepare("DELETE FROM issued_tokens WHERE project_id = ?")
+        .bind(TEST_PROJECT.id)
+        .run();
+      for (const token of SEED_TOKENS) {
+        await insertToken(token);
+      }
+    });
+
+    it("returns every token newest-first by default", async () => {
+      const { tokens, total } = await tokenService.listTokens(TEST_PROJECT.id);
+      expect(total).toBe(4);
+      expect(tokens.map((token) => token.id)).toEqual([
+        "tok_list_pct",
+        "tok_list_zeta",
+        "tok_list_beta",
+        "tok_list_acme",
+      ]);
+    });
+
+    it("matches search against name, symbol, mint address and id", async () => {
+      for (const [needle, expected] of [
+        ["acme", "tok_list_acme"],
+        ["BETA", "tok_list_beta"],
+        ["1111111111114", "tok_list_zeta"],
+        ["tok_list_pct", "tok_list_pct"],
+      ] as const) {
+        const { tokens, total } = await tokenService.listTokens(TEST_PROJECT.id, {
+          search: needle,
+        });
+        expect(total, `search=${needle}`).toBe(1);
+        expect(tokens[0]?.id, `search=${needle}`).toBe(expected);
+      }
+    });
+
+    it("treats LIKE wildcards in search as literal characters", async () => {
+      // The '%' must match "100% Reserve" literally, not as a wildcard.
+      const { tokens, total } = await tokenService.listTokens(TEST_PROJECT.id, { search: "100%" });
+      expect(total).toBe(1);
+      expect(tokens[0]?.id).toBe("tok_list_pct");
+
+      // "Beta Points" contains "ta " — it would match if `_` were still a
+      // single-character wildcard, and must not now that it is escaped.
+      const wildcardUnderscore = await tokenService.listTokens(TEST_PROJECT.id, {
+        search: "ta_",
+      });
+      expect(wildcardUnderscore.total).toBe(0);
+
+      // Escaping must not break matching a literal underscore either: every
+      // seeded id carries one.
+      const literalUnderscore = await tokenService.listTokens(TEST_PROJECT.id, {
+        search: "tok_list",
+      });
+      expect(literalUnderscore.total).toBe(4);
+    });
+
+    it("filters by the raw status column", async () => {
+      const { tokens, total } = await tokenService.listTokens(TEST_PROJECT.id, {
+        status: "pending",
+      });
+      expect(total).toBe(2);
+      expect(tokens.every((token) => token.status === "pending")).toBe(true);
+    });
+
+    it("filters by derived deployment status", async () => {
+      const draft = await tokenService.listTokens(TEST_PROJECT.id, { deploymentStatus: "draft" });
+      expect(draft.tokens.map((token) => token.id).sort()).toEqual([
+        "tok_list_beta",
+        "tok_list_pct",
+      ]);
+
+      const active = await tokenService.listTokens(TEST_PROJECT.id, { deploymentStatus: "active" });
+      expect(active.tokens.map((token) => token.id)).toEqual(["tok_list_acme"]);
+
+      const paused = await tokenService.listTokens(TEST_PROJECT.id, { deploymentStatus: "paused" });
+      expect(paused.tokens.map((token) => token.id)).toEqual(["tok_list_zeta"]);
+    });
+
+    it("filters by template", async () => {
+      const { tokens, total } = await tokenService.listTokens(TEST_PROJECT.id, {
+        template: "stablecoin",
+      });
+      expect(total).toBe(1);
+      expect(tokens[0]?.id).toBe("tok_list_acme");
+    });
+
+    it("filters by an inclusive created_at window", async () => {
+      const { tokens, total } = await tokenService.listTokens(TEST_PROJECT.id, {
+        createdAfter: "2026-02-01T00:00:00.000Z",
+        createdBefore: "2026-03-01T00:00:00.000Z",
+      });
+      expect(total).toBe(2);
+      expect(tokens.map((token) => token.id)).toEqual(["tok_list_zeta", "tok_list_beta"]);
+    });
+
+    it("combines search with filters and reports the filtered total", async () => {
+      const { tokens, total } = await tokenService.listTokens(TEST_PROJECT.id, {
+        search: "e",
+        deploymentStatus: "draft",
+        limit: 1,
+      });
+      // "Beta Points", "100% Reserve" (Reserve) both match; only one is returned.
+      expect(total).toBe(2);
+      expect(tokens).toHaveLength(1);
+    });
+
+    it("sorts by name case-insensitively in both directions", async () => {
+      const ascending = await tokenService.listTokens(TEST_PROJECT.id, {
+        sortBy: "name",
+        sortDirection: "asc",
+      });
+      expect(ascending.tokens.map((token) => token.name)).toEqual([
+        "100% Reserve",
+        "Acme USD",
+        "Beta Points",
+        // Lowercase 'z' sorts last only because the comparison is lowered.
+        "zeta bond",
+      ]);
+
+      const descending = await tokenService.listTokens(TEST_PROJECT.id, {
+        sortBy: "name",
+        sortDirection: "desc",
+      });
+      expect(descending.tokens.map((token) => token.name)).toEqual([
+        "zeta bond",
+        "Beta Points",
+        "Acme USD",
+        "100% Reserve",
+      ]);
+    });
+
+    it("sorts oldest-first when asked", async () => {
+      const { tokens } = await tokenService.listTokens(TEST_PROJECT.id, {
+        sortBy: "createdAt",
+        sortDirection: "asc",
+      });
+      expect(tokens.map((token) => token.id)).toEqual([
+        "tok_list_acme",
+        "tok_list_beta",
+        "tok_list_zeta",
+        "tok_list_pct",
+      ]);
+    });
+
+    it("falls back to the default ordering for an unknown sort key", async () => {
+      const { tokens } = await tokenService.listTokens(TEST_PROJECT.id, {
+        // Simulates an unvalidated caller: must not reach SQL as-is.
+        sortBy: "created_at; DROP TABLE issued_tokens" as never,
+      });
+      expect(tokens.map((token) => token.id)).toEqual([
+        "tok_list_pct",
+        "tok_list_zeta",
+        "tok_list_beta",
+        "tok_list_acme",
+      ]);
+    });
+
+    it("orders same-timestamp rows stably across pages", async () => {
+      // All five share one created_at, so only the id tiebreaker keeps paging
+      // deterministic — without it a row can repeat or vanish between pages.
+      const sharedAt = "2026-05-01T00:00:00.000Z";
+      await db
+        .prepare("DELETE FROM issued_tokens WHERE project_id = ?")
+        .bind(TEST_PROJECT.id)
+        .run();
+      for (const suffix of ["a", "b", "c", "d", "e"]) {
+        await insertToken([
+          `tok_tie_${suffix}`,
+          `Tie ${suffix}`,
+          "TIE",
+          null,
+          "custom",
+          "pending",
+          null,
+          sharedAt,
+        ]);
+      }
+
+      const pageIds: string[] = [];
+      for (let offset = 0; offset < 5; offset += 2) {
+        const { tokens } = await tokenService.listTokens(TEST_PROJECT.id, { limit: 2, offset });
+        pageIds.push(...tokens.map((token) => token.id));
+      }
+
+      expect(pageIds).toEqual(["tok_tie_e", "tok_tie_d", "tok_tie_c", "tok_tie_b", "tok_tie_a"]);
+      expect(new Set(pageIds).size).toBe(5);
+    });
+
+    it("reports facets unaffected by list filters", async () => {
+      const facets = await tokenService.listTokenFacets(TEST_PROJECT.id);
+      expect(facets.total).toBe(4);
+      expect(facets.templates).toEqual([
+        { template: "arcade", count: 1 },
+        { template: "custom", count: 1 },
+        { template: "stablecoin", count: 1 },
+        { template: "tokenized-security", count: 1 },
+      ]);
+      expect(facets.deploymentStatuses).toEqual({ draft: 2, active: 1, paused: 1 });
+    });
+
+    it("scopes the list and its facets to the project", async () => {
+      const { total } = await tokenService.listTokens("proj_does_not_exist");
+      expect(total).toBe(0);
+      const facets = await tokenService.listTokenFacets("proj_does_not_exist");
+      expect(facets).toEqual({
+        templates: [],
+        deploymentStatuses: { draft: 0, active: 0, paused: 0 },
+        total: 0,
+      });
+    });
+
+    it("installs the search, sort and filter indexes", async () => {
+      const indexes = await db
+        .prepare(
+          `SELECT indexname, indexdef
+             FROM pg_indexes
+            WHERE indexname IN (
+              'idx_issued_tokens_search_trgm',
+              'idx_issued_tokens_project_created_id',
+              'idx_issued_tokens_project_name',
+              'idx_issued_tokens_project_status_created_id',
+              'idx_issued_tokens_project_template_created_id'
+            )`
+        )
+        .all<{ indexdef: string; indexname: string }>();
+
+      expect(indexes.results.map((index) => index.indexname).sort()).toEqual([
+        "idx_issued_tokens_project_created_id",
+        "idx_issued_tokens_project_name",
+        "idx_issued_tokens_project_status_created_id",
+        "idx_issued_tokens_project_template_created_id",
+        "idx_issued_tokens_search_trgm",
+      ]);
+      const trgmIndex = indexes.results.find(
+        (index) => index.indexname === "idx_issued_tokens_search_trgm"
+      );
+      expect(trgmIndex?.indexdef).toContain("gin_trgm_ops");
     });
   });
 });

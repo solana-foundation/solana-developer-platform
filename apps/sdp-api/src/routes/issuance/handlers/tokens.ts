@@ -4,7 +4,7 @@ import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, badRequestQuery, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
@@ -13,7 +13,7 @@ import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
-import { createTokenSchema, updateTokenSchema } from "../schemas";
+import { createTokenSchema, listTokensQuerySchema, updateTokenSchema } from "../schemas";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -120,19 +120,55 @@ export const createToken = async (c: AppContext) => {
 export const listTokens = async (c: AppContext) => {
   const { projectId } = requireProjectScope(c);
 
-  const status = c.req.query("status") as "pending" | "active" | "paused" | "revoked" | undefined;
-  const page = Number.parseInt(c.req.query("page") ?? "1", 10);
-  const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 100);
-  const offset = (page - 1) * pageSize;
+  const parsed = listTokensQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
+  const {
+    page,
+    pageSize,
+    search,
+    status,
+    deploymentStatus,
+    template,
+    createdAfter,
+    createdBefore,
+    sortBy,
+    sortDirection,
+  } = parsed.data;
+
+  if (createdAfter && createdBefore && createdAfter > createdBefore) {
+    throw badRequestQuery({
+      errors: { createdBefore: ["createdBefore must be at or after createdAfter"] },
+    });
+  }
 
   const tokenService = new TokenService(getDb(c.env));
   const { tokens, total } = await tokenService.listTokens(projectId, {
+    // A blank search passes validation (an empty input isn't an error) but must
+    // not become an `ILIKE '%%'` filter.
+    search: search || undefined,
     status,
+    deploymentStatus,
+    template,
+    createdAfter,
+    createdBefore,
+    sortBy,
+    sortDirection,
     limit: pageSize,
-    offset,
+    offset: (page - 1) * pageSize,
   });
 
   return paginated(c, tokens, { total, page, pageSize });
+};
+
+export const listTokenFacets = async (c: AppContext) => {
+  const { projectId } = requireProjectScope(c);
+
+  const tokenService = new TokenService(getDb(c.env));
+  const facets = await tokenService.listTokenFacets(projectId);
+
+  return success(c, facets);
 };
 
 export const getToken = async (c: AppContext) => {

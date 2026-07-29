@@ -11,6 +11,7 @@ import {
   errorResponseSchema,
   forceBurnRequestSchema,
   freezeAccountRequestSchema,
+  listTokensQueryOpenApiSchema,
   mintRequestSchema,
   pageQuerySchema,
   pageSizeQuerySchema,
@@ -18,7 +19,6 @@ import {
   seizeRequestSchema,
   templateIdParamSchema,
   tokenIdParamSchema,
-  tokenStatusQuerySchema,
   tokenTransactionStatusQuerySchema,
   unfreezeAccountRequestSchema,
   updateAuthorityRequestSchema,
@@ -54,6 +54,7 @@ import {
   tokenAllowlistLabelsResponse,
   tokenAllowlistListResponse,
   tokenAllowlistResponse,
+  tokenListFacetsResponse,
   tokenListResponse,
   tokenResponse,
   tokenTemplateResponse,
@@ -159,20 +160,38 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "List tokens",
     operationId: "listTokens",
-    description: "Lists tokens for the current project or organization.",
+    description:
+      "Lists tokens for the current project or organization. Supports contains-style search, filtering and sorting; `meta.total` always reflects the active filters. Ordering carries an id tiebreaker, so paging is stable across tokens that share a timestamp or name.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
-      query: z.object({
-        status: tokenStatusQuerySchema.optional(),
-        page: pageQuerySchema.optional(),
-        pageSize: pageSizeQuerySchema.optional(),
-      }),
+      query: listTokensQueryOpenApiSchema,
     },
     responses: {
       200: {
         description: "Token list",
         content: jsonContent(tokenListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/facets",
+    tags: ["Issuance"],
+    summary: "List token filter facets",
+    operationId: "listTokenFacets",
+    description:
+      "Returns the filter choices available for the project's token list — template ids in use, counts per lifecycle state, and the unfiltered total. Deliberately unaffected by list filters, so a client can offer the full set of options while showing a filtered page.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+    },
+    responses: {
+      200: {
+        description: "Token filter facets",
+        content: jsonContent(tokenListFacetsResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 500]),
     },

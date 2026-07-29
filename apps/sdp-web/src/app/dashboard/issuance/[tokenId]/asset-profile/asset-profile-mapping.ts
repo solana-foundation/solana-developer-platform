@@ -170,6 +170,10 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     description: token.description ?? readString(asset, "description"),
     website: readString(asset, "website"),
     imageUrl: token.imageUrl ?? "",
+    // Lives on the token row, not in issuance_metadata. The mint's freeze
+    // authority is NOT mirrored here: it is the "freezeAccounts" advanced setting,
+    // hydrated with the rest of issuance_metadata.settings.
+    maxSupply: token.maxSupply ?? "",
     backingType: readString(asset, "backingType"),
     pegCurrency: readString(asset, "pegCurrency"),
     pegTarget: readString(asset, "pegTarget"),

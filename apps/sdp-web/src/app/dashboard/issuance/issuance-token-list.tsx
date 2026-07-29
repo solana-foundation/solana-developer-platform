@@ -1,5 +1,6 @@
 "use client";
 
+import { Popover } from "@base-ui/react/popover";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import {
   ArrowRight,
@@ -11,16 +12,25 @@ import {
   Copy,
   ExternalLink,
   Hash,
+  Info,
   type LucideIcon,
   MoreHorizontal,
   Plus,
   ShieldCheck,
   Signature,
   SlidersHorizontal,
-  Tag,
   Terminal,
+  UsersRound,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
@@ -33,21 +43,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import {
-  AssetOverviewHero,
-  AuthoritiesGlyph,
-  StatTile,
-  WalletIdentityBadge,
-} from "./asset-overview-hero";
+import { AccessBadge, AssetOverviewHero, AuthoritiesGlyph, StatTile } from "./asset-overview-hero";
 import {
   buildOverviewHeroData,
-  formatDate,
-  formatSmartSupply,
+  deploymentStatusBadge,
   getDeploymentStatus,
   getTokenChips,
   type IssuanceTokenView,
   tokenExplorerHref,
 } from "./issuance-token-fields";
+import { WalletIdentityBadge } from "./wallet-identity";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Composite-only reveal.
@@ -111,33 +116,31 @@ function TokenAvatar({ token, size = 40 }: { token: IssuanceTokenView; size?: nu
 
 function StatusBadge({ token }: { token: IssuanceTokenView }) {
   const t = useTranslations();
-  const status = getDeploymentStatus(token);
+  const { badge, label } = deploymentStatusBadge(getDeploymentStatus(token), t);
   return (
     <span
       data-testid={`token-row-status-${token.id}`}
       className={cn(
         "inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium capitalize",
-        status === "active" ? "bg-success-bg text-success" : "bg-fill text-secondary"
+        badge
       )}
     >
-      {status === "active"
-        ? t("DashboardIssuance.workspace.active")
-        : t("DashboardIssuance.workspace.draft")}
+      {label}
     </span>
   );
 }
 
 // Actions menu — Manage, playground deep-link, and quick actions. Copy uses the
-// clipboard API. Reused by the list row (default ghost ⋯ trigger) and the grid
-// tile, which passes a manage glyph via `icon` and `triggerVariant="outline"` so
-// the corner action reads as a defined button rather than a floating icon.
+// clipboard API. Reused by the list row and the grid tile, which differ only in the
+// trigger's frame: ghost in the row, where the ⋯ ends a line of content, and outline
+// in the tile's corner, where an unframed icon would float. The glyph itself is the
+// same in both, because the menu behind it is — it's about the asset's actions, not
+// about any one of them.
 export function ManageKebab({
   token,
-  icon: Icon = MoreHorizontal,
   triggerVariant = "ghost",
 }: {
   token: IssuanceTokenView;
-  icon?: LucideIcon;
   triggerVariant?: "ghost" | "outline";
 }) {
   const t = useTranslations();
@@ -164,7 +167,7 @@ export function ManageKebab({
           className="h-8 w-8 shrink-0"
           aria-label={t("DashboardIssuance.workspace.manage")}
         >
-          <Icon className="h-4 w-4" />
+          <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent>
@@ -204,11 +207,14 @@ function CollapsedStat({
   icon: Icon,
   label,
   value,
+  hint,
   className,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
+  /** Optional secondary fact revealed by an (i) affordance beside the label. */
+  hint?: { label: string; value: string };
   className?: string;
 }) {
   return (
@@ -216,9 +222,50 @@ function CollapsedStat({
       <p className="flex items-center justify-center gap-1 text-xs text-tertiary">
         <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
         <span className="truncate">{label}</span>
+        {hint ? <StatHint hint={hint} /> : null}
       </p>
       <p className="mt-0.5 truncate text-sm font-normal text-primary">{value}</p>
     </div>
+  );
+}
+
+// The (i) beside a collapsed-row stat. It needs `relative z-10` because the row's
+// full-bleed toggle button is an `absolute inset-0 z-0` sibling that otherwise paints
+// over the stats and swallows their pointer events — which is why a plain `title`
+// attribute here would never fire. Clicking the icon therefore does not toggle the
+// row; the rest of the row still does. Matches the AuthoritiesGlyph popover so the
+// two hover surfaces in this feature look the same.
+// Exported so the grid tile can carry the same (i) beside its date label — the
+// workspace already reaches in here for ManageKebab.
+export function StatHint({ hint }: { hint: { label: string; value: string } }) {
+  return (
+    <Popover.Root>
+      <Popover.Trigger
+        openOnHover
+        delay={100}
+        closeDelay={140}
+        aria-label={hint.label}
+        onClick={(event) => event.stopPropagation()}
+        // `p-0.5 -m-0.5` keeps the glyph subordinate to the label while giving the
+        // hit area back the pixels the padding adds — the negative margin cancels it
+        // out, so the icon takes exactly as much room in the label row as before.
+        className="relative z-10 -m-0.5 inline-flex shrink-0 cursor-default items-center justify-center rounded-full p-0.5 text-tertiary outline-none transition-colors hover:text-secondary focus-visible:text-secondary"
+      >
+        <Info className="h-2.5 w-2.5" />
+      </Popover.Trigger>
+      <Popover.Portal>
+        {/* Above the workspace's pinned header (z-20) — same reason as the authority
+            popover: it opens upward from a scrolling row. */}
+        <Popover.Positioner side="top" align="center" sideOffset={8} className="z-30">
+          <Popover.Popup className="overflow-hidden rounded-xl border border-border-default bg-surface-raised outline-none">
+            <div className="px-3 py-2 text-left text-[12px] leading-snug">
+              <p className="text-tertiary">{hint.label}</p>
+              <p className="mt-0.5 font-medium text-primary">{hint.value}</p>
+            </div>
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
@@ -261,6 +308,23 @@ function IssuanceTokenListRow({
       toast.error(t("DashboardIssuance.list.unableToCopy"));
     }
   };
+
+  // The second tile follows the token's own state. Before deploy the signer IS the
+  // decision — whichever custody wallet signs becomes the authorities on-chain — so it
+  // earns a tile, and access control stays a footnote pill in the Authorities row.
+  // After deploy the signer is determined rather than chosen (an operation is signed by
+  // whatever wallet holds the authority it exercises), so the tile goes to access
+  // control instead.
+  const deployed = getDeploymentStatus(token) !== "draft";
+  const signerBadge = heroData.signerWallet ? (
+    <WalletIdentityBadge
+      identity={heroData.signerWallet}
+      onCopy={(value) => void handleCopy(value)}
+    />
+  ) : null;
+  // Three type-specific fields: the card's other four tiles (Authorities, the
+  // state-dependent second slot, Issuer name, and the first of these) fill its grid.
+  const categoryTiles = heroData.categoryTiles.slice(0, 3);
 
   // Measure the (always-mounted) panel up front and keep it current, so the list
   // knows how far to push the rows below the instant a row is toggled.
@@ -378,7 +442,7 @@ function IssuanceTokenListRow({
             onClick={onToggle}
             tabIndex={-1}
             aria-hidden="true"
-            className="relative z-10 inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-tertiary outline-none transition-colors group-hover:text-secondary hover:bg-fill hover:text-primary"
+            className="relative z-10 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-tertiary outline-none transition-colors group-hover:text-secondary hover:bg-fill hover:text-primary"
           >
             <ChevronDown
               className={cn("h-4 w-4 transition-transform duration-200", open && "rotate-180")}
@@ -409,17 +473,26 @@ function IssuanceTokenListRow({
           <CollapsedStat
             icon={Coins}
             label={t("DashboardIssuance.workspace.supply")}
-            value={formatSmartSupply(token.totalSupply, token.maxSupply, locale)}
+            value={heroData.supply}
           />
+          {/* Decimals stays in the row on purpose: a column is scanned vertically, so
+              its cells have to be the same fact for every asset. A per-asset field
+              here would give each row a different label — informative once, unscannable
+              as a column. The grid tile has no column to keep, so that is where the
+              asset's own data goes. */}
           <CollapsedStat
             icon={Hash}
             label={t("DashboardIssuance.list.decimals")}
             value={String(token.decimals)}
           />
+          {/* Smart date: the deploy date once deployed, the created date while a
+              draft. A deployed token carries the draft-created date in the (i)
+              alongside, so the other date stays reachable without a second tile. */}
           <CollapsedStat
             icon={Clock}
-            label={t("DashboardIssuance.workspace.created")}
-            value={formatDate(token.createdAt, locale)}
+            label={heroData.date.label}
+            value={heroData.date.value}
+            hint={heroData.secondaryDate ?? undefined}
           />
           <div className="flex justify-end">
             <StatusBadge token={token} />
@@ -456,41 +529,61 @@ function IssuanceTokenListRow({
           onCopyMintAddress={(value) => void handleCopy(value)}
           tiles={
             <>
-              <StatTile
-                icon={Coins}
-                label={t("DashboardIssuance.overview.totalSupply")}
-                value={heroData.supply}
-              />
-              <StatTile
-                icon={Clock}
-                label={heroData.date.label}
-                value={<span title={heroData.date.tooltip}>{heroData.date.value}</span>}
-              />
+              {/* Supply, decimals, status and the primary date all live in the
+                  collapsed row — the card never repeats them. Its date slot instead
+                  carries the *other* date (when a deployed token was drafted), which
+                  only exists once deployed. */}
+              {/* `framed` on both: object values, side by side — see StatTile. */}
+              {/* "Control" while the policy pills are in here with the marks — the tile
+                  states who holds the authorities AND who may hold the asset, which is
+                  more than "Authorities" claims. Once deployed the pills move to their
+                  own tile and the label narrows back to what is left. */}
               <StatTile
                 icon={ShieldCheck}
-                label={t("DashboardIssuance.overview.authorities")}
+                label={t(
+                  deployed
+                    ? "DashboardIssuance.overview.authorities"
+                    : "DashboardIssuance.overview.control"
+                )}
+                framed
                 value={
                   <AuthoritiesGlyph
                     rows={heroData.authorityRows}
                     accessMode={heroData.accessMode}
+                    verifiedHolders={heroData.verifiedHolders}
+                    deployed={deployed}
                     onCopy={(value) => void handleCopy(value)}
                     // Cross-route from the list, so a real link.
                     permissionsHref={`${detailHref(token)}?tab=permissions`}
                   />
                 }
               />
-              <StatTile
-                icon={Signature}
-                label={t("DashboardIssuance.overview.signerWallet")}
-                value={
-                  heroData.signerWallet ? (
-                    <WalletIdentityBadge
-                      identity={heroData.signerWallet}
-                      onCopy={(value) => void handleCopy(value)}
+              {/* The second slot: who will sign for a draft, who may hold once
+                  deployed. See `deployed` above for why they trade places. */}
+              {deployed ? (
+                <StatTile
+                  // Who may hold the asset — neutral on purpose. A list glyph here
+                  // reads as "allowlist" before the value has said so, and the tile
+                  // also has to head "Blocklist" and "Unrestricted".
+                  icon={UsersRound}
+                  label={t("DashboardIssuance.summary.accessControl")}
+                  framed
+                  value={
+                    <AccessBadge
+                      mode={heroData.accessMode}
+                      verifiedHolders={heroData.verifiedHolders}
+                      standalone
                     />
-                  ) : null
-                }
-              />
+                  }
+                />
+              ) : (
+                <StatTile
+                  icon={Signature}
+                  label={t("DashboardIssuance.overview.signerWallet")}
+                  framed
+                  value={signerBadge}
+                />
+              )}
               {heroData.issuer ? (
                 <StatTile
                   icon={Building2}
@@ -499,29 +592,33 @@ function IssuanceTokenListRow({
                   clamp
                 />
               ) : null}
-              {heroData.category ? (
+              {categoryTiles.map((tile) => (
                 <StatTile
-                  icon={Tag}
-                  label={heroData.category.label}
-                  value={heroData.category.value}
+                  key={tile.label}
+                  icon={tile.icon}
+                  label={tile.label}
+                  value={tile.value}
+                  clamp
                 />
-              ) : null}
+              ))}
             </>
           }
           footer={
-            // Collapse sits opposite the primary action rather than floating over
-            // the card: framed by the footer row, labelled, and unambiguous — an
-            // unlabelled ✕ on a record reads as "remove this asset".
+            // Close sits opposite the primary action rather than floating over the
+            // card: framed by the footer row, labelled, and unambiguous — an
+            // unlabelled ✕ on a record reads as "remove this asset". It is styled to
+            // recede (muted, regular weight) so it never competes with "Manage this
+            // asset"; hover and keyboard focus bring it back up to full contrast.
             <div className="flex w-full items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={onToggle}
                 tabIndex={open ? undefined : -1}
-                aria-label={t("DashboardIssuance.list.collapseDetails", { name: token.name })}
-                className="-ml-2 inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-secondary outline-none transition-colors hover:bg-fill hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
+                aria-label={t("DashboardIssuance.list.closeDetails", { name: token.name })}
+                className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-normal text-muted outline-none transition-colors hover:bg-fill hover:text-secondary focus-visible:text-secondary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
               >
                 <ChevronUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                {t("DashboardIssuance.list.collapse")}
+                {t("DashboardIssuance.list.close")}
               </button>
               <Link
                 href={detailHref(token)}
@@ -544,6 +641,7 @@ export function IssuanceTokenList({
   openIds,
   onToggle,
   onCreate,
+  footer,
 }: {
   tokens: IssuanceTokenView[];
   signerWallets: PaymentsDashboardWallet[];
@@ -552,6 +650,11 @@ export function IssuanceTokenList({
   openIds: ReadonlySet<string>;
   onToggle: (id: string) => void;
   onCreate: () => void;
+  // Rendered below the add-row button and displaced with it. Anything that has to
+  // sit under the list belongs here rather than after it: because open panels are
+  // absolute and the rows below them only translate, this component's own box
+  // never grows, so an outside sibling would stay where the collapsed list left it.
+  footer?: ReactNode;
 }) {
   const t = useTranslations();
   const [heights, setHeights] = useState<Record<string, number>>({});
@@ -583,8 +686,12 @@ export function IssuanceTokenList({
     // Firefox's open — but forces a reflow Chrome/Safari don't need and measurably
     // regressed Safari, so we don't. Safari smoothness wins over Firefox's; the
     // residual Firefox jank is accepted.
-    <div className="relative flex flex-col gap-2.5">
-      {/* Static stacking ladder: each row sits one rung above the row before it, so
+    <div className="relative isolate flex flex-col gap-2.5">
+      {/* `isolate` keeps the ladder below a stacking context of its own, so its rungs
+          (0..tokens.length) can't compete with the workspace's pinned header or with
+          portalled popups — without it the header would need a z above the page size.
+
+          Static stacking ladder: each row sits one rung above the row before it, so
           a row's card ALWAYS occludes the panel hanging beneath the rows above it —
           the panel is revealed from behind the sliding rows. It's deliberately a
           function of position, not of `open`: the previous `open ? 0 : 1` flipped
@@ -619,6 +726,25 @@ export function IssuanceTokenList({
         <Plus className="h-4 w-4" />
         {t("DashboardIssuance.workspace.createDraft")}
       </button>
+      {/* Rides the same displacement as the add-row button above it, on the same
+          easing, so the list and its pager move as one piece. Shares the top rung
+          of the ladder for the same reason the button does: the last row's panel
+          has to slide out from under it, not over it.
+          The negative margin cancels the flex `gap-2.5`, leaving whatever spacing
+          the footer brings itself — the pager then sits exactly where it does in
+          grid view, where it's an ordinary sibling of the card grid. */}
+      {footer ? (
+        <div
+          style={{
+            marginTop: -ROW_GAP_PX,
+            transform: `translateY(${totalOffset}px)`,
+            transition: `transform ${ANIM_MS}ms ease-out`,
+            zIndex: tokens.length,
+          }}
+        >
+          {footer}
+        </div>
+      ) : null}
     </div>
   );
 }

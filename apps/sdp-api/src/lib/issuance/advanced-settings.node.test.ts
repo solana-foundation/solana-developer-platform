@@ -13,7 +13,7 @@ describe("advanced settings persistence helpers", () => {
   describe("validateAdvancedSettings", () => {
     it("accepts settings allowed for the asset type", () => {
       const metadata: IssuanceMetadata = {
-        settings: { selected: { freezeTransfers: {}, permanentDelegate: {} } },
+        settings: { selected: { pauseTransfers: {}, permanentDelegate: {} } },
       };
       expect(validateAdvancedSettings("stablecoin", "fiat_backed", metadata)).toEqual([]);
     });
@@ -32,6 +32,13 @@ describe("advanced settings persistence helpers", () => {
       expect(validateAdvancedSettings("generic", "generic", metadata)).toEqual([
         { settingKey: "made_up", reason: "unknown" },
       ]);
+    });
+
+    it("accepts a retired key rather than reporting it as unknown", () => {
+      // Clients and stored profiles predating the freezeTransfers split must not
+      // start failing validation.
+      const metadata: IssuanceMetadata = { settings: { selected: { freezeTransfers: {} } } };
+      expect(validateAdvancedSettings("stablecoin", "fiat_backed", metadata)).toEqual([]);
     });
 
     it("returns no errors when there is no settings namespace", () => {
@@ -84,7 +91,7 @@ describe("advanced settings persistence helpers", () => {
 
   describe("stampAdvancedSettingsVersion", () => {
     it("stamps the server version onto a selection", () => {
-      const metadata: IssuanceMetadata = { settings: { selected: { freezeTransfers: {} } } };
+      const metadata: IssuanceMetadata = { settings: { selected: { pauseTransfers: {} } } };
       const stamped = stampAdvancedSettingsVersion(metadata);
       expect((stamped.settings as { version: number }).version).toBe(ADVANCED_SETTINGS_VERSION);
       // input is not mutated
@@ -93,7 +100,7 @@ describe("advanced settings persistence helpers", () => {
 
     it("overwrites a client-supplied version with the server version", () => {
       const metadata: IssuanceMetadata = {
-        settings: { version: 999, selected: { freezeTransfers: {} } },
+        settings: { version: 999, selected: { pauseTransfers: {} } },
       };
       const stamped = stampAdvancedSettingsVersion(metadata);
       expect((stamped.settings as { version: number }).version).toBe(ADVANCED_SETTINGS_VERSION);
@@ -108,14 +115,25 @@ describe("advanced settings persistence helpers", () => {
   describe("getSelectedSettings", () => {
     it("returns the selected settings map", () => {
       const metadata: IssuanceMetadata = {
-        settings: { selected: { freezeTransfers: {}, permanentDelegate: {} } },
+        settings: { selected: { pauseTransfers: {}, permanentDelegate: {} } },
       };
-      expect(getSelectedSettings(metadata)).toEqual({ freezeTransfers: {}, permanentDelegate: {} });
+      expect(getSelectedSettings(metadata)).toEqual({ pauseTransfers: {}, permanentDelegate: {} });
     });
 
     it("returns an empty object when there is no selection", () => {
       expect(getSelectedSettings({ asset: { name: "X" } })).toEqual({});
       expect(getSelectedSettings({})).toEqual({});
+    });
+
+    it("rewrites a retired key stored before the catalog split", () => {
+      // Profiles persisted as "freezeTransfers" must keep working: it covered both
+      // the pausable extension and the base mint's freeze authority, which are now
+      // separate settings.
+      const metadata: IssuanceMetadata = { settings: { selected: { freezeTransfers: {} } } };
+      expect(getSelectedSettings(metadata)).toEqual({
+        pauseTransfers: {},
+        freezeAccounts: {},
+      });
     });
   });
 
@@ -124,7 +142,7 @@ describe("advanced settings persistence helpers", () => {
       // create.ts rejects this when no signer resolves, so the resolver never emits a
       // placeholder authority into an immutable extension.
       const metadata: IssuanceMetadata = {
-        settings: { selected: { freezeTransfers: {}, permanentDelegate: {} } },
+        settings: { selected: { pauseTransfers: {}, permanentDelegate: {} } },
       };
       expect(selectedAuthorityValuedSettings(metadata)).toEqual(["permanentDelegate"]);
     });
@@ -132,7 +150,7 @@ describe("advanced settings persistence helpers", () => {
     it("returns empty for selections with no authority-valued setting", () => {
       const metadata: IssuanceMetadata = {
         settings: {
-          selected: { freezeTransfers: {}, transferFee: { params: { basisPoints: 10 } } },
+          selected: { pauseTransfers: {}, transferFee: { params: { basisPoints: 10 } } },
         },
       };
       expect(selectedAuthorityValuedSettings(metadata)).toEqual([]);
@@ -146,7 +164,7 @@ describe("advanced settings persistence helpers", () => {
 
   describe("resolveAdvancedSettings", () => {
     it("returns no errors when the selection builds against the template", () => {
-      const metadata: IssuanceMetadata = { settings: { selected: { freezeTransfers: {} } } };
+      const metadata: IssuanceMetadata = { settings: { selected: { pauseTransfers: {} } } };
       expect(resolveAdvancedSettings("stablecoin", "fiat_backed", metadata)).toEqual([]);
     });
 

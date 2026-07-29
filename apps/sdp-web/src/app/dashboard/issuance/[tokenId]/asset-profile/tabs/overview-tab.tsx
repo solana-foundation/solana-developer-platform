@@ -2,8 +2,8 @@
 
 import type { AssetProfile, Token } from "@sdp/types";
 import {
-  Activity,
   ArrowUpRight,
+  Building2,
   Clock,
   Coins,
   Hash,
@@ -11,15 +11,16 @@ import {
   RefreshCw,
   ShieldCheck,
   Signature,
+  UsersRound,
 } from "lucide-react";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import {
+  AccessBadge,
   AssetOverviewHero,
   AuthoritiesGlyph,
   StatTile,
-  WalletIdentityBadge,
 } from "../../../asset-overview-hero";
 import { getCategoryPresentation, getSubTypePresentation } from "../../../create/asset-taxonomy";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
@@ -28,7 +29,9 @@ import {
   buildWalletIdentityForSigner,
   formatSmartSupply,
   resolveAccessMode,
+  resolveVerifiedHolders,
 } from "../../../issuance-token-fields";
+import { WalletIdentityBadge } from "../../../wallet-identity";
 import { formatDate, formatDateTime } from "../../token-management-workspace.utils";
 import { fetchAssetAuditHistory } from "../asset-audit.data";
 import {
@@ -59,13 +62,6 @@ export function OverviewTab({
   const category = getCategoryPresentation(assetProfile.assetCategory);
   const subType = getSubTypePresentation(assetProfile.assetCategory, assetProfile.assetType);
 
-  const statusLabels: Record<Token["status"], string> = {
-    pending: t("DashboardIssuance.status.draft"),
-    active: t("DashboardIssuance.status.active"),
-    paused: t("DashboardIssuance.status.paused"),
-    revoked: t("DashboardIssuance.status.revoked"),
-  };
-
   // Smart supply / date + authority glyph, composed identically to the issuance
   // list's expanded card (see buildOverviewHeroData) so the two surfaces match.
   const supply = formatSmartSupply(token.totalSupply, token.maxSupply, locale);
@@ -88,6 +84,11 @@ export function OverviewTab({
     t
   );
   const signerWallet = buildWalletIdentityForSigner(token.signingWalletId, ops.authorityWallets, t);
+  const accessMode = resolveAccessMode(token, draft);
+  const verifiedHolders = resolveVerifiedHolders(draft);
+  const signerBadge = signerWallet ? (
+    <WalletIdentityBadge identity={signerWallet} onCopy={(value) => void ops.handleCopy(value)} />
+  ) : null;
 
   return (
     <div className="space-y-4">
@@ -100,15 +101,73 @@ export function OverviewTab({
         mintAddress={token.mintAddress}
         onCopyMintAddress={(value) => void ops.handleCopy(value)}
         tiles={
+          // Authorities + signer wallet lead, matching the issuance list's expanded
+          // card: who controls the asset is the headline, and the plain facts
+          // (status, supply, decimals, date) read underneath it.
           <>
+            {/* Both `framed`: their values are objects, not text, and they sit side
+                by side — so they need the same optical gap under the label to stay
+                level with each other. */}
+            {/* "Control" while the policy pills sit in here with the marks — see the
+                issuance list's card, which labels the same tile the same way. */}
             <StatTile
-              icon={Activity}
-              label={t("DashboardIssuance.transactions.status")}
-              value={statusLabels[token.status]}
+              icon={ShieldCheck}
+              label={t(
+                deployed
+                  ? "DashboardIssuance.overview.authorities"
+                  : "DashboardIssuance.overview.control"
+              )}
+              framed
+              value={
+                <AuthoritiesGlyph
+                  rows={authorityRows}
+                  accessMode={accessMode}
+                  verifiedHolders={verifiedHolders}
+                  deployed={deployed}
+                  onCopy={(value) => void ops.handleCopy(value)}
+                  onViewPermissions={onViewPermissions}
+                />
+              }
+            />
+            {/* The second slot follows the token's own state, same as the issuance
+                list's card. Before deploy the signer IS the decision — whichever
+                custody wallet signs becomes the authorities on-chain — so it earns a
+                tile, and access control stays a footnote pill in the row beside it.
+                After deploy the signer is determined rather than chosen (an operation
+                is signed by whatever wallet holds the authority it exercises), so the
+                tile goes to access control instead. */}
+            {deployed ? (
+              <StatTile
+                // Who may hold the asset — neutral on purpose. A list glyph here reads
+                // as "allowlist" before the value has said so, and the tile also has
+                // to head "Blocklist" and "Unrestricted".
+                icon={UsersRound}
+                label={t("DashboardIssuance.summary.accessControl")}
+                framed
+                value={
+                  <AccessBadge mode={accessMode} verifiedHolders={verifiedHolders} standalone />
+                }
+              />
+            ) : (
+              <StatTile
+                icon={Signature}
+                label={t("DashboardIssuance.overview.signerWallet")}
+                framed
+                value={signerBadge}
+              />
+            )}
+            {/* No status tile: the page header already carries the status pill next
+                to the asset name. Issuer name takes the slot instead — the one
+                identifying fact from the list card that this tab was missing. */}
+            <StatTile
+              icon={Building2}
+              label={t("DashboardIssuance.config.issuerName")}
+              value={draft.issuerName.trim() || null}
+              clamp
             />
             <StatTile
               icon={Coins}
-              label={t("DashboardIssuance.overview.totalSupply")}
+              label={t("DashboardIssuance.workspace.supply")}
               value={supply}
               action={
                 token.status !== "pending" ? (
@@ -133,30 +192,6 @@ export function OverviewTab({
               icon={Clock}
               label={date.label}
               value={<span title={date.tooltip}>{date.value}</span>}
-            />
-            <StatTile
-              icon={ShieldCheck}
-              label={t("DashboardIssuance.overview.authorities")}
-              value={
-                <AuthoritiesGlyph
-                  rows={authorityRows}
-                  accessMode={resolveAccessMode(token, draft)}
-                  onCopy={(value) => void ops.handleCopy(value)}
-                  onViewPermissions={onViewPermissions}
-                />
-              }
-            />
-            <StatTile
-              icon={Signature}
-              label={t("DashboardIssuance.overview.signerWallet")}
-              value={
-                signerWallet ? (
-                  <WalletIdentityBadge
-                    identity={signerWallet}
-                    onCopy={(value) => void ops.handleCopy(value)}
-                  />
-                ) : null
-              }
             />
           </>
         }
@@ -203,7 +238,7 @@ function RecentActivityCard({ tokenId, onViewAll }: { tokenId: string; onViewAll
   return (
     <div className="@container flex h-full flex-col rounded-2xl border border-border-default bg-surface-raised px-4 pt-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[15px] font-semibold text-primary">
+        <p className="text-[15px] font-medium text-primary">
           {t("DashboardIssuance.activity.recentTitle")}
         </p>
         <button
@@ -302,7 +337,7 @@ function ClassificationCell({
         <Icon className="h-4.5 w-4.5" />
       </span>
       <div className="min-w-0">
-        <p className="text-[15px] font-semibold text-primary">{title}</p>
+        <p className="text-[15px] font-medium text-primary">{title}</p>
         <p className="mt-1 text-[13px] leading-relaxed text-secondary">{description}</p>
       </div>
     </div>

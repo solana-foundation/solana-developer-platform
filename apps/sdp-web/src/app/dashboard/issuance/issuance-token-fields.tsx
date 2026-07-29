@@ -7,7 +7,23 @@ import type {
   TokenStatus,
   TokenTemplate,
 } from "@sdp/types";
-import type { LucideIcon } from "lucide-react";
+import {
+  Banknote,
+  Calculator,
+  CalendarClock,
+  Compass,
+  FileText,
+  House,
+  Landmark,
+  Layers,
+  type LucideIcon,
+  MapPin,
+  Package,
+  Percent,
+  Receipt,
+  Target,
+  Vault,
+} from "lucide-react";
 import type { AppLocale } from "@/i18n/config";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { profileToDraftState } from "./[tokenId]/asset-profile/asset-profile-mapping";
@@ -19,11 +35,12 @@ import {
   getDisplayedAuthorityAddress,
 } from "./[tokenId]/token-management-workspace.utils";
 import { type AccessControlMode, getTokenAccessControlMode } from "./access-control.utils";
-import type { AuthorityControl, AuthorityGlyphRow, WalletIdentity } from "./asset-overview-hero";
+import type { AuthorityControl, AuthorityGlyphRow } from "./asset-overview-hero";
 import { type DetailFieldKey, detailFieldOptionLabel } from "./create/asset-details-config";
 import { getCategoryPresentation, getSubTypePresentation } from "./create/asset-taxonomy";
 import type { DraftState } from "./create/issuance-draft-wizard.types";
 import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-catalog";
+import type { WalletIdentity } from "./wallet-identity";
 
 // Shared model + derivations for the issuance asset list/grid. The list view
 // (`IssuanceTokenView`) is a lightweight projection of the full `Token`; adapters
@@ -32,8 +49,6 @@ import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-cat
 // (`buildOverviewHeroData`) without any list-specific field mapping.
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-export type TokenView = "grid" | "list";
 
 export interface IssuanceAssetProfileView {
   assetCategory: AssetCategory;
@@ -124,8 +139,37 @@ export function getTokenTypeLabel(template: IssuanceTokenView["template"], t: Tr
   return template;
 }
 
-export function getDeploymentStatus(token: IssuanceTokenView): "draft" | "active" {
-  return token.mintAddress || token.deployedAt ? "active" : "draft";
+export type DeploymentStatus = "draft" | "active" | "paused";
+
+/**
+ * The one status a token shows across the list row, the grid tile and the filter.
+ *
+ * Deployment comes first — a token with no mint is a draft whatever its row says.
+ * Past that, `status` is the operator's own state, and `paused` is the one value of
+ * it that changes what the token *does*: transfers have stopped. Reporting that as
+ * "Active" (which is what collapsing to deployed-or-not did) contradicts the action
+ * an operator just took. `revoked` still reads as Active here; it wants the same
+ * treatment, but it's a separate state with its own copy.
+ */
+export function getDeploymentStatus(token: IssuanceTokenView): DeploymentStatus {
+  if (!(token.mintAddress || token.deployedAt)) {
+    return "draft";
+  }
+  return token.status === "paused" ? "paused" : "active";
+}
+
+// Status is the one place colour carries meaning here: green for live, amber for
+// deliberately halted, neutral for not-yet-deployed. Borderless, per the badge rule.
+const DEPLOYMENT_STATUS_BADGE: Record<DeploymentStatus, { badge: string; labelKey: MessageKey }> = {
+  active: { badge: "bg-success-bg text-success", labelKey: "DashboardIssuance.status.active" },
+  paused: { badge: "bg-warning-bg text-warning", labelKey: "DashboardIssuance.status.paused" },
+  draft: { badge: "bg-fill text-secondary", labelKey: "DashboardIssuance.status.draft" },
+};
+
+/** Badge classes + label for a deployment status, shared by every surface. */
+export function deploymentStatusBadge(status: DeploymentStatus, t: Translate) {
+  const { badge, labelKey } = DEPLOYMENT_STATUS_BADGE[status];
+  return { badge, label: t(labelKey) };
 }
 
 // Mirrors getExplorerHref in the token-management utils; kept local so the list
@@ -257,7 +301,7 @@ export function buildAuthorityGlyphRows(
   });
 }
 
-function buildWalletIdentityForAuthority(
+export function buildWalletIdentityForAuthority(
   address: string | null,
   control: AuthorityControl,
   authorityWallets: PaymentsDashboardWallet[],
@@ -274,6 +318,7 @@ function buildWalletIdentityForAuthority(
         name: wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled"),
         provider: wallet.provider ?? null,
         publicKey: wallet.publicKey,
+        walletId: wallet.walletId,
       };
     }
   }
@@ -284,33 +329,110 @@ export function resolveAccessMode(token: Token, draft: DraftState | null): Acces
   return draft?.accessControl || getTokenAccessControlMode(token);
 }
 
-function buildCategoryTile(
+// The other half of an access decision: whether holders must be identity-verified as
+// well as listed. Off-chain policy, so it lives on the profile and nowhere on the
+// token — a token with no profile simply doesn't claim it.
+export function resolveVerifiedHolders(draft: DraftState | null): boolean {
+  return draft?.capacities.kyc.enabled ?? false;
+}
+
+export interface CategoryTile {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+}
+
+// The expanded card's type-aware slots: up to three category-specific fields, which
+// is what makes the card about *this* asset rather than a repeat of the collapsed
+// row. Candidates are listed most- to least-significant per category and blank draft
+// fields drop out, so a sparse profile simply yields fewer tiles (and a token with no
+// profile at all yields none). Sub-type fields are filtered by emptiness rather than
+// by branching on `assetType`, so an equity naturally surfaces its share class while
+// a fund surfaces its management fee.
+// Four, one more than the card has room for, and callers slice the tail off. The cap
+// lives above what is rendered on purpose: it keeps the *ordering* decision here, in
+// one place per category, so a surface with a spare slot can take the fourth field
+// without re-deciding which three come first.
+const MAX_CATEGORY_TILES = 4;
+
+function buildCategoryTiles(
   view: IssuanceTokenView,
   draft: DraftState,
   t: Translate
-): { label: string; value: string } | null {
+): CategoryTile[] {
   const profile = view.assetProfile;
   if (!profile) {
-    return null;
+    return [];
   }
-  const tile = (labelKey: MessageKey, raw: string, humanizeKey?: DetailFieldKey) => {
+  // Each field carries its own glyph rather than a shared generic tag, so a tile is
+  // recognisable before its label is read. Icons repeat only across categories that
+  // can never appear together (a stablecoin never shows a property location), so no
+  // two tiles on the same card share one.
+  const tile = (
+    icon: LucideIcon,
+    labelKey: MessageKey,
+    raw: string,
+    humanizeKey?: DetailFieldKey
+  ): CategoryTile | null => {
     const value = raw.trim();
     if (!value) {
       return null;
     }
     const display = humanizeKey ? (detailFieldOptionLabel(humanizeKey, value, t) ?? value) : value;
-    return { label: t(labelKey), value: display };
+    return { icon, label: t(labelKey), value: display };
   };
-  if (profile.assetCategory === "stablecoin") {
-    return tile("DashboardIssuance.config.currency", draft.pegCurrency);
-  }
-  if (profile.assetCategory === "tokenized_security") {
-    return tile("DashboardIssuance.config.jurisdiction", draft.jurisdiction, "jurisdiction");
-  }
-  if (profile.assetType === "real_estate") {
-    return tile("DashboardIssuance.config.propertyType", draft.propertyType, "propertyType");
-  }
-  return tile("DashboardIssuance.config.underlyingAsset", draft.underlyingAsset);
+
+  const candidates: Array<CategoryTile | null> =
+    profile.assetCategory === "stablecoin"
+      ? [
+          tile(Banknote, "DashboardIssuance.config.currency", draft.pegCurrency),
+          tile(Target, "DashboardIssuance.config.pegTarget", draft.pegTarget),
+          tile(Vault, "DashboardIssuance.config.reserveAsset", draft.reserveAsset),
+          tile(Landmark, "DashboardIssuance.config.reserveCustodian", draft.reserveCustodian),
+        ]
+      : profile.assetCategory === "tokenized_security"
+        ? [
+            tile(
+              MapPin,
+              "DashboardIssuance.config.jurisdiction",
+              draft.jurisdiction,
+              "jurisdiction"
+            ),
+            tile(
+              FileText,
+              "DashboardIssuance.config.offeringType",
+              draft.offeringType,
+              "offeringType"
+            ),
+            tile(Layers, "DashboardIssuance.config.shareClass", draft.shareClass),
+            tile(Percent, "DashboardIssuance.config.couponRate", draft.couponRate),
+            tile(Receipt, "DashboardIssuance.config.managementFee", draft.managementFee),
+            // Fund-shaped securities rarely fill share class or coupon rate, so
+            // without these a fund has only two fields to give and comes up short of
+            // the card's three slots.
+            tile(Compass, "DashboardIssuance.config.fundStrategy", draft.fundStrategy),
+            tile(Calculator, "DashboardIssuance.config.netAssetValue", draft.netAssetValue),
+            tile(CalendarClock, "DashboardIssuance.config.maturityDate", draft.maturityDate),
+          ]
+        : profile.assetType === "real_estate"
+          ? [
+              tile(
+                House,
+                "DashboardIssuance.config.propertyType",
+                draft.propertyType,
+                "propertyType"
+              ),
+              tile(MapPin, "DashboardIssuance.config.propertyLocation", draft.propertyLocation),
+              tile(Landmark, "DashboardIssuance.config.custodian", draft.custodian),
+            ]
+          : [
+              tile(Package, "DashboardIssuance.config.underlyingAsset", draft.underlyingAsset),
+              tile(Landmark, "DashboardIssuance.config.custodian", draft.custodian),
+            ];
+
+  return candidates
+    .filter((entry): entry is CategoryTile => entry !== null)
+    .slice(0, MAX_CATEGORY_TILES);
 }
 
 export function buildWalletIdentityForSigner(
@@ -333,6 +455,7 @@ export function buildWalletIdentityForSigner(
     name: wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled"),
     provider: wallet.provider ?? null,
     publicKey: wallet.publicKey,
+    walletId: wallet.walletId,
   };
 }
 
@@ -340,15 +463,63 @@ export interface ListCardHeroData {
   description: string | null;
   website: string | null;
   mintAddress: string | null;
-  /** Compact "supply / max" — e.g. "100K / 2B", or "100K / ∞" when uncapped. */
+  /** Compact "supply / max" — e.g. "100K / 2B", or "100K / ∞" when uncapped. Rendered
+   *  by the COLLAPSED ROW; the expanded card deliberately does not repeat it. */
   supply: string;
-  /** Smart date: deployed tokens show the deploy date, drafts the created date. */
-  date: { label: string; value: string; tooltip: string };
+  /** The primary, "smart" date for the collapsed row: the deploy date once deployed,
+   *  otherwise the created date. */
+  date: { label: string; value: string };
+  /** The complementary date, surfaced through the (i) beside the row's date rather
+   *  than as a tile of its own: when the draft was created, for a token that has since
+   *  been deployed. Null for drafts, whose created date the row already shows, so the
+   *  two dates never both occupy space. */
+  secondaryDate: { label: string; value: string } | null;
   authorityRows: AuthorityGlyphRow[];
   accessMode: AccessControlMode;
+  /** Whether the profile requires identity-verified holders — stated by the access
+   *  tile, which is otherwise silent about the other half of an access decision. */
+  verifiedHolders: boolean;
   signerWallet: WalletIdentity | null;
   issuer: string | null;
-  category: { label: string; value: string } | null;
+  /** Up to four type-aware fields (peg target, jurisdiction, …), most significant
+   *  first; the card renders the first three. See MAX_CATEGORY_TILES. */
+  categoryTiles: CategoryTile[];
+}
+
+export interface SmartDate {
+  label: string;
+  value: string;
+  /** The complementary date, for the (i) beside the label: when the draft was
+   *  created, for a token that has since been deployed. Null for drafts, whose
+   *  created date is already the primary value. */
+  hint: { label: string; value: string } | null;
+}
+
+/**
+ * One date instead of two: a deployed token leads with its deploy date and keeps
+ * the created date in the (i); a draft just shows created. Shared by the list row,
+ * the grid tile and the hero so a token reads the same in all three.
+ */
+export function buildSmartDate(
+  view: IssuanceTokenView,
+  t: Translate,
+  locale: AppLocale
+): SmartDate {
+  if (view.deployedAt) {
+    return {
+      label: t("DashboardIssuance.overview.deployed"),
+      value: formatDateLong(view.deployedAt, locale),
+      hint: {
+        label: t("DashboardIssuance.overview.draftCreated"),
+        value: formatDateLong(view.createdAt, locale),
+      },
+    };
+  }
+  return {
+    label: t("DashboardIssuance.list.created"),
+    value: formatDateLong(view.createdAt, locale),
+    hint: null,
+  };
 }
 
 export function buildOverviewHeroData(
@@ -362,28 +533,20 @@ export function buildOverviewHeroData(
   const draft = view.assetProfile
     ? profileToDraftState(viewToProfile(view.assetProfile, view), token)
     : null;
-  const deployed = Boolean(view.deployedAt);
+  const smartDate = buildSmartDate(view, t, locale);
   return {
     description: view.description,
     website: draft?.website ?? null,
     mintAddress: view.mintAddress,
     supply: formatSmartSupply(view.totalSupply, view.maxSupply, locale),
-    date: deployed
-      ? {
-          label: t("DashboardIssuance.overview.deployed"),
-          value: formatDateLong(view.deployedAt, locale),
-          tooltip: t("DashboardIssuance.overview.deployedTooltip"),
-        }
-      : {
-          label: t("DashboardIssuance.list.created"),
-          value: formatDateLong(view.createdAt, locale),
-          tooltip: t("DashboardIssuance.overview.createdTooltip"),
-        },
+    date: smartDate,
+    secondaryDate: smartDate.hint,
     authorityRows: buildAuthorityGlyphRows(token, authorityWallets, controlKnown, t),
     accessMode: resolveAccessMode(token, draft),
+    verifiedHolders: resolveVerifiedHolders(draft),
     signerWallet: buildWalletIdentityForSigner(view.signingWalletId, authorityWallets, t),
     issuer: draft?.issuerName.trim() || null,
-    category: draft ? buildCategoryTile(view, draft, t) : null,
+    categoryTiles: draft ? buildCategoryTiles(view, draft, t) : [],
   };
 }
 

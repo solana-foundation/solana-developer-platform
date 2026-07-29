@@ -7,10 +7,13 @@ import { I18nProvider } from "@/i18n/provider";
 import type { AuthorityRoleKey } from "./asset-overview-hero";
 import {
   buildOverviewHeroData,
+  deploymentStatusBadge,
+  getDeploymentStatus,
   getTokenChips,
   type IssuanceTokenView,
 } from "./issuance-token-fields";
 import { IssuanceTokenList } from "./issuance-token-list";
+import { toWalletIdentity } from "./wallet-identity";
 
 const messages = getMessages("en");
 const t = (key: MessageKey, values?: TranslationValues) => translate(messages, key, values);
@@ -154,6 +157,7 @@ describe("buildOverviewHeroData", () => {
       name: "Treasury",
       provider: null,
       publicKey: MANAGED,
+      walletId: `wid_${MANAGED}`,
     });
   });
 
@@ -211,6 +215,7 @@ describe("buildOverviewHeroData", () => {
       name: "Treasury",
       provider: null,
       publicKey: MANAGED,
+      walletId: `wid_${MANAGED}`,
     });
   });
 
@@ -245,14 +250,45 @@ describe("buildOverviewHeroData", () => {
     expect(data.signerWallet).toBeNull();
   });
 
-  it("derives issuer + category tiles from the asset profile", () => {
+  it("derives issuer + up to four type-aware category tiles from the asset profile", () => {
     const data = buildOverviewHeroData(baseToken({ assetProfile: stablecoinProfile }), [], t, "en");
 
     expect(data.issuer).toBe("Veritas Finance");
-    expect(data.category).toEqual({
-      label: t("DashboardIssuance.config.currency"),
-      value: "USD",
-    });
+    // Stablecoin candidates run currency → peg target → reserve asset → reserve
+    // custodian, in that order. Callers with room for only three slice the tail off,
+    // so the order matters more than the cap: it decides what a short card drops.
+    expect(data.categoryTiles.map(({ label, value }) => ({ label, value }))).toEqual([
+      { label: t("DashboardIssuance.config.currency"), value: "USD" },
+      { label: t("DashboardIssuance.config.pegTarget"), value: "1.00 USD" },
+      {
+        label: t("DashboardIssuance.config.reserveAsset"),
+        value: "Cash & short-dated US Treasury bills",
+      },
+      {
+        label: t("DashboardIssuance.config.reserveCustodian"),
+        value: "Meridian Trust Bank, N.A.",
+      },
+    ]);
+    // Each field carries its own glyph, so no two tiles on a card look alike.
+    expect(new Set(data.categoryTiles.map((tile) => tile.icon)).size).toBe(4);
+  });
+
+  it("yields no category tiles for a token without an asset profile", () => {
+    expect(buildOverviewHeroData(baseToken(), [], t, "en").categoryTiles).toEqual([]);
+  });
+
+  it("splits the two dates so only one of them ever takes up space", () => {
+    // Draft: the row shows Created, and there is no second date worth surfacing.
+    const draft = buildOverviewHeroData(baseToken(), [], t, "en");
+    expect(draft.date.label).toBe(t("DashboardIssuance.list.created"));
+    expect(draft.secondaryDate).toBeNull();
+
+    // Deployed: the row shows Deployed and the draft-created date moves into the
+    // (i) hint beside it.
+    const deployed = buildOverviewHeroData(baseToken({ deployedAt: "2026-07-22" }), [], t, "en");
+    expect(deployed.date.label).toBe(t("DashboardIssuance.overview.deployed"));
+    expect(deployed.secondaryDate?.label).toBe(t("DashboardIssuance.overview.draftCreated"));
+    expect(deployed.secondaryDate?.value).not.toBe(deployed.date.value);
   });
 
   it("derives the website from the asset profile, or null without one", () => {
@@ -260,6 +296,33 @@ describe("buildOverviewHeroData", () => {
       buildOverviewHeroData(baseToken({ assetProfile: stablecoinProfile }), [], t, "en").website
     ).toBe("https://veritas.finance");
     expect(buildOverviewHeroData(baseToken(), [], t, "en").website).toBeNull();
+  });
+});
+
+// Deployment first, then the operator's own state. Paused used to collapse into
+// "Active", which told an operator the opposite of what they had just done.
+describe("getDeploymentStatus", () => {
+  const deployed = { mintAddress: "MINT1111111111111111111111111111111111111111" };
+
+  it("reports a deployed token as active", () => {
+    expect(getDeploymentStatus(baseToken({ ...deployed, status: "active" }))).toBe("active");
+  });
+
+  it("reports a deployed token whose status is paused as paused", () => {
+    expect(getDeploymentStatus(baseToken({ ...deployed, status: "paused" }))).toBe("paused");
+  });
+
+  it("keeps an undeployed token a draft whatever its status says", () => {
+    expect(getDeploymentStatus(baseToken({ status: "paused" }))).toBe("draft");
+    expect(getDeploymentStatus(baseToken({ status: "active" }))).toBe("draft");
+  });
+
+  it("gives paused its own label and the warning tint, not the live one", () => {
+    const paused = deploymentStatusBadge("paused", t);
+    const active = deploymentStatusBadge("active", t);
+    expect(paused.label).toBe(t("DashboardIssuance.status.paused"));
+    expect(paused.badge).toContain("warning");
+    expect(active.badge).toContain("success");
   });
 });
 
@@ -275,6 +338,46 @@ describe("getTokenChips", () => {
     const chips = getTokenChips(baseToken(), t);
     expect(chips).toHaveLength(1);
     expect(chips[0].label).toBe(t("DashboardIssuance.templates.stablecoinName"));
+  });
+});
+
+// The same raw address means different things depending on who is asking, so the
+// caller — not the payload — decides the framing. Reporting existing on-chain
+// state is a warning ("Held externally"); previewing typed input is neutral
+// ("Custom address"). See the authority modal, which renders both at once.
+describe("toWalletIdentity", () => {
+  const ADDRESS = "EXTERNALpubkey222222222222222222222222222222";
+  const unlabeled = t("DashboardIssuance.wallet.unlabeled");
+
+  it("resolves a custody wallet to managed, carrying its walletId", () => {
+    const signer = wallet("MANAGEDpubkey1111111111111111111111111111111");
+    expect(toWalletIdentity(signer, null, { unresolvedAs: "external", unlabeled })).toEqual({
+      state: "managed",
+      name: "Treasury",
+      provider: null,
+      publicKey: signer.publicKey,
+      walletId: signer.walletId,
+    });
+  });
+
+  it("frames an unresolved address by the caller's intent", () => {
+    expect(toWalletIdentity(null, ADDRESS, { unresolvedAs: "external", unlabeled })).toEqual({
+      state: "external",
+      publicKey: ADDRESS,
+    });
+    expect(toWalletIdentity(null, ADDRESS, { unresolvedAs: "custom", unlabeled })).toEqual({
+      state: "custom",
+      publicKey: ADDRESS,
+    });
+  });
+
+  it("treats a blank address as none regardless of framing", () => {
+    expect(toWalletIdentity(null, "   ", { unresolvedAs: "custom", unlabeled })).toEqual({
+      state: "none",
+    });
+    expect(toWalletIdentity(null, null, { unresolvedAs: "external", unlabeled })).toEqual({
+      state: "none",
+    });
   });
 });
 
@@ -294,5 +397,29 @@ describe("IssuanceTokenList", () => {
     expect(markup).toContain(t("DashboardIssuance.workspace.manage"));
     // Collapsed row shows the taxonomy chip.
     expect(markup).toContain(t("DashboardIssuance.taxonomy.fiatBacked"));
+    // …and keeps Decimals: the row's stat cells are a column, so every row states the
+    // same fact there. Per-asset data belongs to the grid tile, which has no column.
+    expect(markup).toContain(t("DashboardIssuance.list.decimals"));
+  });
+
+  it("renders the footer inside the list so it can be displaced with the rows", () => {
+    const markup = renderWithI18n(
+      <IssuanceTokenList
+        tokens={[baseToken({ assetProfile: stablecoinProfile })]}
+        signerWallets={[]}
+        openIds={new Set()}
+        onToggle={() => undefined}
+        onCreate={() => undefined}
+        footer={<span data-testid="list-footer">pager</span>}
+      />
+    );
+    // Expanded panels are absolute and the rows below only translate, so the list's
+    // box never grows: a footer rendered *after* the list would be stranded
+    // mid-list once a row opened. It has to be inside, carrying the same translate
+    // as the rows — and on the ladder's top rung, so the last row's panel slides
+    // out from under it.
+    expect(markup).toMatch(
+      /<div style="margin-top:-10px;transform:translateY\(0px\);transition:transform \d+ms [^"]*;z-index:1"><span data-testid="list-footer"/
+    );
   });
 });
