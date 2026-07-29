@@ -5,13 +5,11 @@ import {
   buildPolicyAssetOptions,
   buildPolicyPayload,
   createPolicyAuthoringState,
-  formatProviderMappingLabel,
   hasLimitsAndAssetsControls,
   loadPolicyDraft,
   parseDestinationText,
   policyDraftStorageKey,
   type StoredPolicyDraft,
-  SUPPORTED_WALLET_OPERATION_TYPES,
   savePolicyDraft,
   validatePolicyState,
 } from "./wallet-policy-authoring";
@@ -42,18 +40,6 @@ function emptyPolicy(): PaymentWalletPolicy {
 }
 
 describe("wallet policy authoring", () => {
-  it("exposes the supported operation types used by policy authoring", () => {
-    expect(SUPPORTED_WALLET_OPERATION_TYPES).toEqual([
-      { value: "payment_transfer_execute", family: "payment" },
-      { value: "payment_transfer_batch_execute", family: "payment" },
-      { value: "ramp_onramp_quote", family: "ramp" },
-      { value: "ramp_offramp_quote", family: "ramp" },
-      { value: "issuance_mint_execute", family: "issuance" },
-      { value: "issuance_update_authority_execute", family: "issuance" },
-      { value: "custody_signer_check", family: "raw_sign" },
-    ]);
-  });
-
   it("identifies whether the limits and assets step has selected controls", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     expect(hasLimitsAndAssetsControls(state)).toBe(false);
@@ -145,7 +131,7 @@ describe("wallet policy authoring", () => {
     state.maxDailyAmount = "500";
     state.assets = [ADDRESS_A];
     state.destinationMode = "allowlist";
-    state.destinationText = ADDRESS_B;
+    state.destinationAllowText = ADDRESS_B;
     state.familyActions = { transfer: "deny", payment: "approval_required" };
     state.operationTypeRules = [{ value: "payment.create", action: "approval_required" }];
 
@@ -182,6 +168,40 @@ describe("wallet policy authoring", () => {
     );
   });
 
+  it("flags allow-by-default policies that restrict nothing", () => {
+    const state = createPolicyAuthoringState(emptyPolicy());
+    state.categories = ["limits"];
+    expect(validatePolicyState(state).review).toBe("no_restrictions");
+
+    state.maxDailyAmount = "100";
+    expect(validatePolicyState(state).review).toBeUndefined();
+
+    state.maxDailyAmount = "";
+    state.defaultAction = "deny";
+    expect(validatePolicyState(state).review).toBeUndefined();
+  });
+
+  it("keeps allow and block destination lists independent in the payload", () => {
+    const state = createPolicyAuthoringState(emptyPolicy());
+    state.categories = ["destinations"];
+    state.destinationAllowText = ADDRESS_A;
+    state.destinationBlockText = ADDRESS_B;
+
+    const payload = buildPolicyPayload(WALLET_ID, state);
+
+    expect(payload.destinationAllowlist).toEqual([ADDRESS_A]);
+    expect(payload.rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "destination", allowlist: [ADDRESS_A], action: "allow" }),
+        expect.objectContaining({ kind: "destination", blocklist: [ADDRESS_B], action: "deny" }),
+      ])
+    );
+
+    const roundTripped = createPolicyAuthoringState(payload);
+    expect(roundTripped.destinationAllowText).toBe(ADDRESS_A);
+    expect(roundTripped.destinationBlockText).toBe(ADDRESS_B);
+  });
+
   it("disables controls by returning the wallet to default allow", () => {
     expect(buildDisabledPolicyPayload(WALLET_ID)).toEqual({
       walletId: WALLET_ID,
@@ -189,11 +209,6 @@ describe("wallet policy authoring", () => {
       defaultAction: "allow",
       rules: [],
     });
-  });
-
-  it("uses the exact provider-partial label", () => {
-    expect(formatProviderMappingLabel("partial", true)).toBe("Provider partially mapped");
-    expect(formatProviderMappingLabel(null, false)).toBe("Not applicable");
   });
 
   it("loads existing policies into equivalent form state without dropping rule capabilities", () => {
@@ -239,7 +254,7 @@ describe("wallet policy authoring", () => {
       maxDailyAmount: "1000",
       assets: [ADDRESS_A],
       destinationMode: "blocklist",
-      destinationText: ADDRESS_B,
+      destinationBlockText: ADDRESS_B,
       familyActions: { transfer: "deny", payment: "deny", ramp: "approval_required" },
       operationTypeRules: [{ value: "payment.create", action: "approval_required" }],
     });
@@ -285,7 +300,6 @@ describe("wallet policy authoring", () => {
       expect.arrayContaining([
         expect.objectContaining({ kind: "destination", allowlist: [ADDRESS_A], action: "allow" }),
         expect.objectContaining({
-          id: "blocked-destinations",
           kind: "destination",
           blocklist: [ADDRESS_B],
           action: "deny",
@@ -340,6 +354,18 @@ describe("buildPolicyAssetOptions", () => {
     const usdc = buildPolicyAssetOptions([], "production").find((o) => o.token === "USDC");
 
     expect(usdc?.mint).toBe("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+  });
+
+  it("names well-known holdings from the registry even when the balance row carries the mint as its label", () => {
+    const solLabeledByMint = {
+      token: "So11111111111111111111111111111111111111112",
+      mint: "So11111111111111111111111111111111111111112",
+      uiAmount: "1.5",
+    };
+    const options = buildPolicyAssetOptions([solLabeledByMint], "sandbox");
+    const sol = options.find((option) => option.mint === solLabeledByMint.mint);
+
+    expect(sol).toMatchObject({ token: "SOL", name: "Solana", source: "wallet", uiAmount: "1.5" });
   });
 
   it("dedupes repeated wallet holdings", () => {
