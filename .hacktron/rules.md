@@ -32,3 +32,9 @@
 - Flag missing authorization, cross-tenant access, secret exposure, signature-verification gaps, replay/idempotency flaws, unsafe state transitions, and changes that can cause unauthorized signing or settlement.
 - Treat generated OpenAPI/API reference artifacts as derived output; review the owning source and regeneration path instead of reporting generated duplication by itself.
 - Keep false-positive decisions specific to the affected flow. Do not suppress a finding broadly when the same pattern could be exploitable in a public route, browser surface, custody path, webhook, or provider adapter.
+
+## Browser proxy and public-contract boundaries
+
+- The API Playground execution route is a browser-facing, authenticated proxy to the fixed SDP API client. It must require a signed-in user and active organization, allow only the intended HTTP methods and supported public API paths, and never become a generic outbound-request or internal-route proxy.
+- A user-supplied API key must be verified server-side as available to the selected project before forwarding. Never log, cache, reflect, or substitute it with a server credential, and do not let Playground access bypass the API's normal authorization and policy checks.
+- The public OpenAPI document, generated API reference, Playground catalog, and AI-discovery artifacts must expose only supported public API families. Internal `admin`, `auth`, `organizations`, `members`, `onboarding`, and `rpc` surfaces must not be disclosed or made reachable merely by generated documentation or browser UI changes.
