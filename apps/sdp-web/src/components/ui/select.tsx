@@ -73,11 +73,8 @@ function Select({
       >
         <span
           className={cn(
-            "pointer-events-none absolute inset-0 rounded-[inherit] border-[length:var(--input-border-width)]",
-            "border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] transition-colors duration-150",
-            "group-[:not([data-popup-open])]/select:group-hover/select:border-[var(--input-border-hover)]",
-            "group-[:not([data-popup-open])]/select:group-hover/select:bg-[var(--input-bg-hover)]",
-            "group-[[data-popup-open]]/select:border-[var(--input-border-focus)]"
+            "pointer-events-none absolute inset-0 rounded-[inherit] bg-fill-subtle",
+            "group-[[data-popup-open]]/select:shadow-[0_0_0_2px_var(--input-focus-ring)]"
           )}
         />
         {iconLeft && (

@@ -304,11 +304,11 @@ export function CenteredDashboardTopBar({
 }) {
   return (
     <div
-      className="grid min-h-[40px] min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[1fr_auto_1fr]"
+      className="grid min-h-[40px] min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[1fr_auto_1fr]"
       data-dashboard-centered-topbar
     >
       <div className="flex min-w-0 items-center gap-3">{leadingContent}</div>
-      <div className="col-span-2 row-start-2 flex min-w-0 items-start justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+      <div className="col-span-2 row-start-2 flex min-w-0 items-center justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
         <h1 className="min-w-0 max-w-full text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
           {title}
         </h1>
@@ -1412,7 +1412,7 @@ export function DashboardShell({
               {shouldRenderTopBarBorder ? (
                 <div
                   className={[
-                    "border-b border-border-default pb-4",
+                    "border-b border-border-default pb-5 md:pb-6",
                     shouldLockViewportScroll
                       ? "px-3 pt-5 md:px-6 md:pt-6"
                       : "-mx-3 px-3 md:-mx-6 md:px-6",

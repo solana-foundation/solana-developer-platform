@@ -3,8 +3,8 @@
 import type { CounterpartyAccount } from "@sdp/types";
 import { CheckCircle2Icon } from "lucide-react";
 import { useState } from "react";
-import { PaymentsWizardFrame } from "@/app/dashboard/payments/payments-wizard-frame";
 import { Button } from "@/components/ui/button";
+import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import { useCounterpartyCreate } from "./counterparty-create-context";
 import { CryptoAccountForm } from "./crypto-account-form";
@@ -60,7 +60,7 @@ export function CryptoAccountsPhase({ embedded, steps }: CryptoAccountsPhaseProp
     ];
 
     return (
-      <PaymentsWizardFrame
+      <WizardFrame
         steps={accountSteps}
         currentStep={steps.length}
         progressLabel={t("DashboardPayments.counterparty.stepProgress", {
@@ -91,7 +91,7 @@ export function CryptoAccountsPhase({ embedded, steps }: CryptoAccountsPhaseProp
           {accountList}
           {accountForm}
         </div>
-      </PaymentsWizardFrame>
+      </WizardFrame>
     );
   }
 
