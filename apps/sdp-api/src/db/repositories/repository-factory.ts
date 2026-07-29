@@ -11,6 +11,8 @@ import type { CounterpartyAccountsRepository } from "./counterparty-account.repo
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 import type { KycWalletsRepository } from "./kyc-wallet.repository";
 import { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
+import type { NotificationsRepository } from "./notification.repository";
+import { createPostgresNotificationsRepository } from "./notification.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
@@ -91,4 +93,8 @@ export function createAssetWorkflowsRepository(env: Env): AssetWorkflowsReposito
 
 export function createWorkflowExecutionsRepository(env: Env): WorkflowExecutionsRepository {
   return createPostgresWorkflowExecutionsRepository(getDb(env));
+}
+
+export function createNotificationsRepository(env: Env): NotificationsRepository {
+  return createPostgresNotificationsRepository(getDb(env));
 }

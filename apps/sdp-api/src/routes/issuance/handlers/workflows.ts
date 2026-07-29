@@ -6,53 +6,18 @@ import {
   validateActionSupported,
   WORKFLOW_RULE_VERSION,
 } from "@sdp/issuance/workflows";
-import type {
-  AssetCategory,
-  SelectedSetting,
-  StoredAdvancedSettings,
-  WorkflowActionType,
-  WorkflowCondition,
-  WorkflowTriggerType,
-} from "@sdp/types";
+import type { WorkflowActionType, WorkflowCondition, WorkflowTriggerType } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
 import type { AssetWorkflowDefinition } from "@/db/repositories";
-import { createAssetProfilesRepository, createAssetWorkflowsRepository } from "@/db/repositories";
+import { createAssetWorkflowsRepository } from "@/db/repositories";
 import { badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
-import { TokenService } from "@/services/token.service";
+import { resolveAssetGateContext } from "@/services/workflows/asset-gate";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
 
 type AppContext = Context<{ Bindings: Env }>;
-
-interface AssetGateContext {
-  category: AssetCategory;
-  type: string;
-  selectedSettings: Record<string, SelectedSetting>;
-  hasAllowlist: boolean;
-}
-
-// Resolve the capability-gate inputs for a token: its (category, type) + enabled
-// advanced settings (from the active asset profile) + whether it has an allowlist.
-async function resolveAssetGateContext(
-  c: AppContext,
-  params: { tokenId: string; organizationId: string; projectId: string }
-): Promise<AssetGateContext | null> {
-  const token = await new TokenService(getDb(c.env)).getToken(params);
-  if (!token) {
-    return null;
-  }
-  const profile = await createAssetProfilesRepository(c.env).getActiveAssetProfileByTokenId(params);
-  const stored = profile?.issuance_metadata?.settings as StoredAdvancedSettings | undefined;
-  return {
-    category: (profile?.asset_category ?? "generic") as AssetCategory,
-    type: profile?.asset_type ?? "generic",
-    selectedSettings: stored?.selected ?? {},
-    hasAllowlist: Boolean(token.ablListAddress),
-  };
-}
 
 const conditionSchema = z.object({
   all: z.array(
@@ -108,7 +73,7 @@ export const createWorkflow = async (c: AppContext) => {
     throw badRequest(`Unknown action type: ${parsed.data.actionType}`);
   }
 
-  const gate = await resolveAssetGateContext(c, {
+  const gate = await resolveAssetGateContext(c.env, {
     tokenId,
     organizationId: orgId,
     projectId,
@@ -217,7 +182,7 @@ export const listWorkflowCatalog = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
-  const gate = await resolveAssetGateContext(c, {
+  const gate = await resolveAssetGateContext(c.env, {
     tokenId,
     organizationId: orgId,
     projectId,

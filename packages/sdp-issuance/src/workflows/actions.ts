@@ -45,13 +45,6 @@ export const WORKFLOW_ACTIONS = {
     execution: "automated",
     idempotent: true,
   },
-  create_approval_task: {
-    labelKey: action("createApprovalTask"),
-    descriptionKey: desc("createApprovalTask"),
-    requires: { kind: "none" },
-    execution: "automated",
-    idempotent: false,
-  },
   // ── Sensitive: reversible but disruptive; default manual, issuer may opt into auto ──
   pause: {
     labelKey: action("pause"),

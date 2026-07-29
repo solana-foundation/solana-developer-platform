@@ -11,6 +11,7 @@ import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
+import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
 import { mintSchema } from "../schemas";
@@ -459,6 +460,15 @@ export const executeMint = async (c: AppContext) => {
         mode: "execute",
         addedToAllowlist,
       },
+    });
+
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "mint",
+      signature: result.signature,
+      slot: result.slot.toString(),
     });
 
     return success(c, {

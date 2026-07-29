@@ -94,4 +94,10 @@ export interface WorkflowExecutionsRepository {
     organizationId: string;
     projectId: string;
   }): Promise<WorkflowExecutionRow | null>;
+  // Reject a held execution: awaiting_review → cancelled (a human declined the action).
+  cancelExecution(params: {
+    executionId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<WorkflowExecutionRow | null>;
 }

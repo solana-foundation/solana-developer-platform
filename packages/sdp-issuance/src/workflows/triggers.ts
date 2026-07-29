@@ -40,12 +40,6 @@ export const WORKFLOW_TRIGGERS = {
     source: "internal_event",
     conditionFields: ["attempt"],
   },
-  approval_decided: {
-    labelKey: trigger("approvalDecided"),
-    descriptionKey: desc("approvalDecided"),
-    source: "internal_event",
-    conditionFields: ["decision"],
-  },
   token_operation_completed: {
     labelKey: trigger("tokenOperationCompleted"),
     descriptionKey: desc("tokenOperationCompleted"),

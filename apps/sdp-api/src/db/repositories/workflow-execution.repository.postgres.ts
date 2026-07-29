@@ -224,5 +224,22 @@ export function createPostgresWorkflowExecutionsRepository(
       }
       return getById(db, params);
     },
+
+    async cancelExecution(params) {
+      const rowsAffected = await db
+        .prepare(
+          `UPDATE workflow_executions
+             SET status = 'cancelled', next_attempt_at = NULL, locked_at = NULL,
+                 updated_at = sdp_iso_now()
+           WHERE id = ? AND organization_id = ? AND project_id = ?
+             AND status = 'awaiting_review'`
+        )
+        .bind(params.executionId, params.organizationId, params.projectId)
+        .run();
+      if (rowsAffected === 0) {
+        return null;
+      }
+      return getById(db, params);
+    },
   };
 }

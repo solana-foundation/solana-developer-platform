@@ -1,0 +1,183 @@
+import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
+import { getDb } from "@/db";
+import type { WorkflowExecutionRow } from "@/db/repositories";
+import { TokenService } from "@/services/token.service";
+import type { Env } from "@/types/env";
+import {
+  errorMessage,
+  permanentFail,
+  prepareOnchain,
+  resolveTargetWallet,
+  resolveWalletTokenAccount,
+  safeAddress,
+  succeeded,
+  transientFail,
+} from "./onchain";
+import type { ActionContext, ActionExecutionResult } from "./types";
+
+// pause → MosaicService.pauseToken. Idempotent: an already-paused mint is a converged
+// success (the DB status is reconciled either way).
+export async function runPause(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  _action: ActionContext
+): Promise<ActionExecutionResult> {
+  const prep = await prepareOnchain(env, execution);
+  if (!prep.ok) {
+    return prep.result;
+  }
+  const { token, mintAddress, signer, mosaic } = prep.ctx;
+  const tokenService = new TokenService(getDb(env));
+
+  try {
+    const result = await mosaic.pauseToken({
+      mint: mintAddress,
+      pauseAuthority: signer,
+      feePayer: signer,
+    });
+    await tokenService.updateToken(token.id, { status: "paused" });
+    return succeeded({ signature: result.signature, slot: String(result.slot) });
+  } catch (error) {
+    if (error instanceof Error && error.message === MINT_ALREADY_PAUSED_ERROR) {
+      await tokenService.updateToken(token.id, { status: "paused" });
+      return succeeded({ alreadyPaused: true });
+    }
+    return transientFail(errorMessage(error));
+  }
+}
+
+// unpause → MosaicService.unpauseToken. Idempotent: an already-active mint succeeds.
+export async function runUnpause(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  _action: ActionContext
+): Promise<ActionExecutionResult> {
+  const prep = await prepareOnchain(env, execution);
+  if (!prep.ok) {
+    return prep.result;
+  }
+  const { token, mintAddress, signer, mosaic } = prep.ctx;
+  const tokenService = new TokenService(getDb(env));
+
+  try {
+    const result = await mosaic.unpauseToken({
+      mint: mintAddress,
+      pauseAuthority: signer,
+      feePayer: signer,
+    });
+    await tokenService.updateToken(token.id, { status: "active" });
+    return succeeded({ signature: result.signature, slot: String(result.slot) });
+  } catch (error) {
+    if (error instanceof Error && error.message === MINT_NOT_PAUSED_ERROR) {
+      await tokenService.updateToken(token.id, { status: "active" });
+      return succeeded({ alreadyActive: true });
+    }
+    return transientFail(errorMessage(error));
+  }
+}
+
+// The DB frozen-account mirror is best-effort AFTER the on-chain truth: a mirror write
+// failure must not fail an action whose chain effect already landed (a retry would hit
+// ACCOUNT_ALREADY_FROZEN and converge anyway).
+async function mirrorFreeze(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  tokenAccount: string
+): Promise<void> {
+  try {
+    await new TokenService(getDb(env)).freezeAccount({
+      tokenId: execution.token_id,
+      accountAddress: tokenAccount,
+      frozenBy: `workflow:${execution.workflow_id}`,
+      reason: `Workflow: ${execution.trigger_type}`,
+    });
+  } catch (error) {
+    console.error("workflow freeze: DB mirror failed", { error: errorMessage(error) });
+  }
+}
+
+async function mirrorUnfreeze(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  tokenAccount: string
+): Promise<void> {
+  try {
+    await new TokenService(getDb(env)).unfreezeAccount(
+      execution.token_id,
+      tokenAccount,
+      `workflow:${execution.workflow_id}`
+    );
+  } catch (error) {
+    console.error("workflow unfreeze: DB mirror failed", { error: errorMessage(error) });
+  }
+}
+
+// freeze → MosaicService.freezeAccount on the target wallet's token account. Idempotent:
+// an already-frozen account is success.
+export async function runFreeze(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  action: ActionContext
+): Promise<ActionExecutionResult> {
+  const prep = await prepareOnchain(env, execution);
+  if (!prep.ok) {
+    return prep.result;
+  }
+  const { mintAddress, signer, mosaic } = prep.ctx;
+
+  const targetRaw = resolveTargetWallet(execution, action);
+  if (!targetRaw) {
+    return permanentFail("MISSING_PARAM:wallet");
+  }
+  const wallet = safeAddress(targetRaw, "wallet");
+  if (!wallet) {
+    return permanentFail("INVALID_ADDRESS:wallet");
+  }
+
+  try {
+    const tokenAccount = await resolveWalletTokenAccount(env, wallet, mintAddress);
+    const result = await mosaic.freezeAccount({ tokenAccount, feePayer: signer.address });
+    await mirrorFreeze(env, execution, tokenAccount);
+    return succeeded({ signature: result.signature, tokenAccount });
+  } catch (error) {
+    if (error instanceof Error && error.message === "ACCOUNT_ALREADY_FROZEN") {
+      return succeeded({ alreadyFrozen: true });
+    }
+    return transientFail(errorMessage(error));
+  }
+}
+
+// unfreeze → MosaicService.thawAccount on the target wallet's token account. Idempotent:
+// an already-thawed account is success.
+export async function runUnfreeze(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  action: ActionContext
+): Promise<ActionExecutionResult> {
+  const prep = await prepareOnchain(env, execution);
+  if (!prep.ok) {
+    return prep.result;
+  }
+  const { mintAddress, signer, mosaic } = prep.ctx;
+
+  const targetRaw = resolveTargetWallet(execution, action);
+  if (!targetRaw) {
+    return permanentFail("MISSING_PARAM:wallet");
+  }
+  const wallet = safeAddress(targetRaw, "wallet");
+  if (!wallet) {
+    return permanentFail("INVALID_ADDRESS:wallet");
+  }
+
+  try {
+    const tokenAccount = await resolveWalletTokenAccount(env, wallet, mintAddress);
+    const result = await mosaic.thawAccount({ tokenAccount, feePayer: signer.address });
+    await mirrorUnfreeze(env, execution, tokenAccount);
+    return succeeded({ signature: result.signature, tokenAccount });
+  } catch (error) {
+    if (error instanceof Error && error.message === "ACCOUNT_NOT_FROZEN") {
+      return succeeded({ alreadyThawed: true });
+    }
+    return transientFail(errorMessage(error));
+  }
+}

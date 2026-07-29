@@ -10,6 +10,7 @@ import { created, paginated, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { TokenService } from "@/services/token.service";
+import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
 import { freezeSchema, unfreezeSchema } from "../schemas";
@@ -274,6 +275,15 @@ export const freezeAccount = async (c: AppContext) => {
       },
     });
 
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "freeze",
+      signature: result.signature,
+      slot: result.slot.toString(),
+    });
+
     const response: FrozenAccountResponse = {
       frozenAccount: {
         ...frozenAccount,
@@ -462,6 +472,15 @@ export const unfreezeAccount = async (c: AppContext) => {
         signature: result.signature,
         slot: result.slot.toString(),
       },
+    });
+
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "unfreeze",
+      signature: result.signature,
+      slot: result.slot.toString(),
     });
 
     const response: FrozenAccountResponse = {

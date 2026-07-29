@@ -39,13 +39,48 @@ export interface ExecutionView {
 
 export interface CatalogTriggerView {
   type: string;
-  trigger: { labelKey: string; descriptionKey: string };
+  // `conditionFields` are the payload fields the trigger exposes for GUARD ("only if…")
+  // filters — the API already sends them; the builder reads them to offer field options.
+  trigger: { labelKey: string; descriptionKey: string; conditionFields: string[] };
 }
+
+// How an action is authorized against the asset (mirrors WorkflowActionRequirement in
+// @sdp/types). Drives the live preview's "capability gate" step. Sent by the API already.
+export type ActionRequirementView =
+  | { kind: "none" }
+  | { kind: "base"; action: string }
+  | { kind: "allowlist" }
+  | { kind: "token_transaction"; action: string };
 
 export interface CatalogActionView {
   type: string;
-  action: { labelKey: string; descriptionKey: string; execution: ExecutionTier };
+  action: {
+    labelKey: string;
+    descriptionKey: string;
+    execution: ExecutionTier;
+    requires: ActionRequirementView;
+  };
   support: { ok: true } | { ok: false; reason: string };
+}
+
+// GUARD leg: a flat AND of simple field comparisons over the trigger payload. Mirrors
+// WorkflowCondition in @sdp/types; the API's createWorkflowSchema already accepts it.
+export type GuardOperator = "eq" | "neq" | "in";
+export interface GuardClause {
+  field: string;
+  op: GuardOperator;
+  value: string | string[];
+}
+export interface GuardCondition {
+  all: GuardClause[];
+}
+
+// A single editable GUARD row in the builder. `value` stays a raw string while editing;
+// for the `in` operator it's comma-separated and split to string[] at submit time.
+export interface GuardDraft {
+  field: string;
+  op: GuardOperator;
+  value: string;
 }
 
 export interface WorkflowCatalog {
@@ -96,7 +131,15 @@ export async function fetchExecutions(tokenId: string): Promise<ExecutionView[]>
 
 export async function createWorkflow(
   tokenId: string,
-  input: { triggerType: string; actionType: string; reviewMode: "auto" | "manual" }
+  input: {
+    triggerType: string;
+    actionType: string;
+    reviewMode: "auto" | "manual";
+    actionParams?: Record<string, string | number>;
+    // Optional GUARD ("only if…"). Omit entirely when the user added no rows — the API
+    // treats an absent condition as "always match".
+    condition?: GuardCondition;
+  }
 ): Promise<WorkflowRuleView> {
   const data = await readEnvelope<{ workflow: WorkflowRuleView }>(
     await fetch(base(tokenId), {
@@ -106,6 +149,17 @@ export async function createWorkflow(
     })
   );
   return data.workflow;
+}
+
+// Whether the email channel is available. Exposes only a boolean — no provider details.
+export async function fetchNotificationConfig(): Promise<{ emailEnabled: boolean }> {
+  try {
+    return await readEnvelope<{ emailEnabled: boolean }>(
+      await fetch("/api/dashboard/notifications/config", { cache: "no-store" })
+    );
+  } catch {
+    return { emailEnabled: false };
+  }
 }
 
 export async function setWorkflowEnabled(
@@ -125,6 +179,15 @@ export async function setWorkflowEnabled(
 export async function retryExecution(tokenId: string, executionId: string): Promise<void> {
   await readEnvelope(
     await fetch(`${base(tokenId)}/executions/${encodeURIComponent(executionId)}/retry`, {
+      method: "POST",
+    })
+  );
+}
+
+// Reject a held (awaiting_review) execution → cancelled.
+export async function rejectExecution(tokenId: string, executionId: string): Promise<void> {
+  await readEnvelope(
+    await fetch(`${base(tokenId)}/executions/${encodeURIComponent(executionId)}/reject`, {
       method: "POST",
     })
   );

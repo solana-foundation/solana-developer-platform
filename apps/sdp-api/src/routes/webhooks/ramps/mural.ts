@@ -14,7 +14,11 @@ import {
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
-import { emitKycApprovedForClearedEnrollments } from "@/services/workflows/clearance";
+import {
+  emitKycApprovedForClearedEnrollments,
+  emitKycRejectedForEnrollments,
+} from "@/services/workflows/clearance";
+import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { AppContext, WebhookProcessor } from "./processor";
 
 // Map Mural's provider KYC status onto SDP's normalized status. Mural is the first
@@ -104,6 +108,22 @@ async function handleAccountCredited(
     return;
   }
   console.log(`[mural webhook] transfer ${transfer.id} completed (payin ${event.tokenAmount})`);
+
+  // Workflow trigger seam: this on-ramp settled (Mural credit path bypasses
+  // applyRampSettlementEvent, so it emits here directly).
+  if (transfer.project_id) {
+    emitRampSettled(c, {
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      direction: "onramp",
+      transferId: transfer.id,
+      provider: transfer.provider,
+      counterpartyId: transfer.counterparty_id,
+      amount: String(event.tokenAmount),
+      fiatCurrency: transfer.fiat_currency,
+      cryptoToken: transfer.token,
+    });
+  }
 }
 
 async function handleOrganizationLifecycleEvent(
@@ -136,6 +156,10 @@ async function handleOrganizationLifecycleEvent(
     if (status === "verified") {
       for (const wallet of wallets) {
         await emitKycApprovedForClearedEnrollments(c.env, { kycWallet: wallet, provider: "mural" });
+      }
+    } else if (status === "rejected") {
+      for (const wallet of wallets) {
+        await emitKycRejectedForEnrollments(c.env, { kycWallet: wallet, provider: "mural" });
       }
     }
   }

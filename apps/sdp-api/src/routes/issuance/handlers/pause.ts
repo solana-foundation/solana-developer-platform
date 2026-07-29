@@ -10,6 +10,7 @@ import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
+import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
 import { pauseTokenSchema } from "../schemas";
@@ -127,6 +128,15 @@ export const pauseToken = async (c: AppContext) => {
         signature: result.signature,
         slot: result.slot.toString(),
       },
+    });
+
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "pause",
+      signature: result.signature,
+      slot: result.slot.toString(),
     });
 
     return success(c, { transaction: confirmedTx });
@@ -248,6 +258,15 @@ export const unpauseToken = async (c: AppContext) => {
         signature: result.signature,
         slot: result.slot.toString(),
       },
+    });
+
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "unpause",
+      signature: result.signature,
+      slot: result.slot.toString(),
     });
 
     return success(c, { transaction: confirmedTx });

@@ -49,6 +49,13 @@ export type {
 } from "./kyc-wallet.repository";
 export { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
 export type {
+  CreateNotificationInput,
+  ListNotificationsInput,
+  NotificationRow,
+  NotificationsRepository,
+} from "./notification.repository";
+export { createPostgresNotificationsRepository } from "./notification.repository.postgres";
+export type {
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   CreatePaymentRecurringPaymentLifecycleAttemptInput,
@@ -189,6 +196,7 @@ export {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
   createKycWalletsRepository,
+  createNotificationsRepository,
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,

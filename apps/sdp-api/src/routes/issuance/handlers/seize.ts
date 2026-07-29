@@ -13,6 +13,7 @@ import {
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
+import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
 import { seizeSchema } from "../schemas";
@@ -256,6 +257,15 @@ export const executeSeize = async (c: AppContext) => {
         slot: result.slot.toString(),
         mode: "execute",
       },
+    });
+
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "seize",
+      signature: result.signature,
+      slot: result.slot.toString(),
     });
 
     return success(c, { transaction: updatedTx });

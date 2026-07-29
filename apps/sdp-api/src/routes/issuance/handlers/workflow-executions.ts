@@ -47,3 +47,21 @@ export const retryWorkflowExecution = async (c: AppContext) => {
 
   return success(c, { execution });
 };
+
+// Reject a held execution: awaiting_review → cancelled. The action never runs.
+export const cancelWorkflowExecution = async (c: AppContext) => {
+  const { executionId } = c.req.param();
+  const { projectId, orgId } = requireProjectScope(c);
+
+  const execution = await createWorkflowExecutionsRepository(c.env).cancelExecution({
+    executionId,
+    organizationId: orgId,
+    projectId,
+  });
+  if (!execution) {
+    // Not found, or not awaiting review.
+    throw notFound("Execution awaiting review");
+  }
+
+  return success(c, { execution });
+};

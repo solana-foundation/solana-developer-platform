@@ -1,10 +1,27 @@
 import {
+  createCounterpartiesRepository,
   createKycWalletsRepository,
   createWalletAssetEnrollmentsRepository,
   type KycWalletRow,
 } from "@/db/repositories";
 import type { Env } from "@/types/env";
 import { dispatchWorkflowEvent } from "./event-bus";
+
+// The counterparty's entity kind (individual/business) is a guard field on kyc_approved /
+// kyc_rejected. Resolve it once per emit — a wallet maps to at most one counterparty — so
+// rules can filter on it (e.g. "only if counterpartyKind is business"). null when the wallet
+// has no counterparty or it can't be loaded, which simply fails an `eq`/`in` guard.
+async function resolveCounterpartyKind(env: Env, kycWallet: KycWalletRow): Promise<string | null> {
+  if (!kycWallet.counterparty_id) {
+    return null;
+  }
+  const counterparty = await createCounterpartiesRepository(env).getCounterpartyById({
+    counterpartyId: kycWallet.counterparty_id,
+    organizationId: kycWallet.organization_id,
+    projectId: kycWallet.project_id,
+  });
+  return counterparty?.entity_type ?? null;
+}
 
 // "Cleared to hold this asset" = identity verified AND an active enrollment exists.
 // In v1 the enrollment stands in for eligibility; the fast-follow adds concrete
@@ -58,6 +75,8 @@ export async function emitKycApprovedForClearedEnrollments(
     env
   ).listActiveEnrollmentsForWallet({ kycWalletId: input.kycWallet.id });
 
+  const counterpartyKind = await resolveCounterpartyKind(env, input.kycWallet);
+
   let dispatched = 0;
   for (const enrollment of enrollments) {
     dispatched += await dispatchWorkflowEvent(env, {
@@ -69,6 +88,44 @@ export async function emitKycApprovedForClearedEnrollments(
       payload: {
         wallet: input.kycWallet.wallet_address,
         counterpartyId: input.kycWallet.counterparty_id,
+        counterpartyKind,
+        provider: input.provider ?? input.kycWallet.kyc_provider,
+      },
+    });
+  }
+  return dispatched;
+}
+
+/**
+ * Emit a `kyc_rejected` workflow event for each asset a wallet is enrolled for when its
+ * identity check is rejected. Mirrors the approved path (per-(wallet, token) idempotency).
+ */
+export async function emitKycRejectedForEnrollments(
+  env: Env,
+  input: { kycWallet: KycWalletRow; provider?: string | null }
+): Promise<number> {
+  if (input.kycWallet.kyc_status !== "rejected") {
+    return 0;
+  }
+
+  const enrollments = await createWalletAssetEnrollmentsRepository(
+    env
+  ).listActiveEnrollmentsForWallet({ kycWalletId: input.kycWallet.id });
+
+  const counterpartyKind = await resolveCounterpartyKind(env, input.kycWallet);
+
+  let dispatched = 0;
+  for (const enrollment of enrollments) {
+    dispatched += await dispatchWorkflowEvent(env, {
+      type: "kyc_rejected",
+      organizationId: input.kycWallet.organization_id,
+      projectId: input.kycWallet.project_id,
+      eventKey: `kyc_rejected:${input.kycWallet.id}:${enrollment.token_id}`,
+      tokenId: enrollment.token_id,
+      payload: {
+        wallet: input.kycWallet.wallet_address,
+        counterpartyId: input.kycWallet.counterparty_id,
+        counterpartyKind,
         provider: input.provider ?? input.kycWallet.kyc_provider,
       },
     });

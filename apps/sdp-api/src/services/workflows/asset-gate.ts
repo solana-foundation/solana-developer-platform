@@ -1,0 +1,34 @@
+import type { AssetCategory, SelectedSetting, StoredAdvancedSettings } from "@sdp/types";
+import { getDb } from "@/db";
+import { createAssetProfilesRepository } from "@/db/repositories";
+import { TokenService } from "@/services/token.service";
+import type { Env } from "@/types/env";
+
+export interface AssetGateContext {
+  category: AssetCategory;
+  type: string;
+  selectedSettings: Record<string, SelectedSetting>;
+  hasAllowlist: boolean;
+}
+
+// Resolve the capability-gate inputs for a token: its (category, type) + enabled
+// advanced settings (from the active asset profile) + whether it has an allowlist.
+// Env-based (no HTTP context) so it serves both the save-time route handler and the
+// execution-time cron engine (which has no request).
+export async function resolveAssetGateContext(
+  env: Env,
+  params: { tokenId: string; organizationId: string; projectId: string }
+): Promise<AssetGateContext | null> {
+  const token = await new TokenService(getDb(env)).getToken(params);
+  if (!token) {
+    return null;
+  }
+  const profile = await createAssetProfilesRepository(env).getActiveAssetProfileByTokenId(params);
+  const stored = profile?.issuance_metadata?.settings as StoredAdvancedSettings | undefined;
+  return {
+    category: (profile?.asset_category ?? "generic") as AssetCategory,
+    type: profile?.asset_type ?? "generic",
+    selectedSettings: stored?.selected ?? {},
+    hasAllowlist: Boolean(token.ablListAddress),
+  };
+}

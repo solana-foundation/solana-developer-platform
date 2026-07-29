@@ -129,3 +129,90 @@ export async function addAndSyncAllowlistEntry(input: {
     return { status: "failed", error: error instanceof Error ? error.message : String(error) };
   }
 }
+
+/**
+ * On-chain removal counterpart to `syncNewAllowlistEntryOnChain`, env-based. Idempotent:
+ * if `removeFromList` errors but the wallet is already off the list, the removal has
+ * converged and we return cleanly rather than surfacing a spurious failure.
+ */
+async function removeAllowlistEntryOnChain(opts: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  signingWalletId: string | null | undefined;
+  list: ReturnType<typeof assertValidAddress>;
+  wallet: ReturnType<typeof assertValidAddress>;
+}): Promise<void> {
+  const signer = await createOrgSigner(
+    opts.env,
+    opts.organizationId,
+    opts.projectId,
+    opts.signingWalletId ?? undefined
+  );
+  const mosaic = createMosaicService(opts.env, signer, "sponsored");
+
+  try {
+    await mosaic.removeFromList({ list: opts.list, wallet: opts.wallet });
+  } catch (error) {
+    if (!(await mosaic.isWalletOnList(opts.list, opts.wallet))) {
+      return;
+    }
+    throw error;
+  }
+}
+
+export type AllowlistRemoveStatus = "removed" | "already_absent" | "failed";
+
+export interface AllowlistRemoveResult {
+  status: AllowlistRemoveStatus;
+  error?: string;
+}
+
+/**
+ * Headless "remove a wallet from a token's allowlist" — the counterpart to
+ * `addAndSyncAllowlistEntry`, used by the workflow `allowlist_remove` action. Removes
+ * on-chain first (idempotent-tolerant), then revokes the DB row. A wallet with no active
+ * entry is treated as SUCCESS (`already_absent`) so a manual retry converges.
+ */
+export async function removeAndSyncAllowlistEntry(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  tokenId: string;
+  walletAddress: string;
+}): Promise<AllowlistRemoveResult> {
+  const tokenService = new TokenService(getDb(input.env));
+  const token = await tokenService.getToken({
+    tokenId: input.tokenId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  if (!token) {
+    return { status: "failed", error: "TOKEN_NOT_FOUND" };
+  }
+
+  try {
+    if (token.ablListAddress) {
+      await removeAllowlistEntryOnChain({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        signingWalletId: token.signingWalletId,
+        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
+        wallet: assertValidAddress(input.walletAddress, "address"),
+      });
+    }
+
+    const entryId = await tokenService.getActiveAllowlistEntryIdByAddress(
+      input.tokenId,
+      input.walletAddress
+    );
+    if (entryId) {
+      await tokenService.revokeAllowlistEntry(entryId);
+      return { status: "removed" };
+    }
+    return { status: "already_absent" };
+  } catch (error) {
+    return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+  }
+}

@@ -28,7 +28,11 @@ import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
 import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
-import { listWorkflowExecutions, retryWorkflowExecution } from "./handlers/workflow-executions";
+import {
+  cancelWorkflowExecution,
+  listWorkflowExecutions,
+  retryWorkflowExecution,
+} from "./handlers/workflow-executions";
 import {
   createWorkflow,
   listWorkflowCatalog,
@@ -164,6 +168,11 @@ issuance.post(
   "/tokens/:tokenId/workflows/executions/:executionId/retry",
   requirePermissions("tokens:write"),
   retryWorkflowExecution
+);
+issuance.post(
+  "/tokens/:tokenId/workflows/executions/:executionId/reject",
+  requirePermissions("tokens:write"),
+  cancelWorkflowExecution
 );
 issuance.get("/tokens/:tokenId/workflows", requirePermissions("tokens:read"), listWorkflows);
 issuance.post("/tokens/:tokenId/workflows", requirePermissions("tokens:write"), createWorkflow);

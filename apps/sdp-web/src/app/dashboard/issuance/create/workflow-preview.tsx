@@ -3,18 +3,19 @@
 import { listActionsForAsset } from "@sdp/issuance/workflows";
 import type { AssetCategory, SelectedSetting } from "@sdp/types";
 import { Badge } from "@/components/ui/badge";
+import { useTranslations } from "@/i18n/provider";
 import type { AccessControlMode, AdvancedSettingsDraft } from "./issuance-draft-wizard.types";
 
-const TIER: Record<
+const TIER_VARIANT: Record<
   "automated" | "sensitive" | "requires_approval",
-  { variant: "success" | "warning" | "danger"; label: string }
+  "success" | "warning" | "danger"
 > = {
-  automated: { variant: "success", label: "Automated" },
-  sensitive: { variant: "warning", label: "Sensitive" },
-  requires_approval: { variant: "danger", label: "Requires approval" },
+  automated: "success",
+  sensitive: "warning",
+  requires_approval: "danger",
 };
 
-// "kyc_approved" → "KYC approved".
+// "kyc_approved" → "KYC approved". Fallback when a catalog key lacks a translation.
 function humanize(type: string): string {
   const spaced = type.replace(/_/g, " ");
   return (spaced.charAt(0).toUpperCase() + spaced.slice(1)).replace(/\bkyc\b/gi, "KYC");
@@ -35,6 +36,16 @@ export function WorkflowPreview({
   settings: AdvancedSettingsDraft;
   accessControl: AccessControlMode | "";
 }) {
+  const t = useTranslations();
+  const wf = (k: string) => t(`DashboardIssuance.workflows.${k}` as Parameters<typeof t>[0]);
+  const actionLabel = (actionType: string): string => {
+    try {
+      return t(`DashboardIssuance.workflows.actionLabels.${actionType}` as Parameters<typeof t>[0]);
+    } catch {
+      return humanize(actionType);
+    }
+  };
+
   if (!category || !type) {
     return null;
   }
@@ -49,18 +60,11 @@ export function WorkflowPreview({
 
   return (
     <div className="rounded-2xl border border-border-default bg-white p-5">
-      <h3 className="text-sm font-semibold text-primary">Automations you’ll unlock</h3>
-      <p className="mt-1 text-sm text-secondary">
-        Once this asset is deployed, these become available in its Workflows tab (e.g. “when KYC is
-        approved, add the wallet to the allowlist”). Extensions can’t change after deploy, so this
-        reflects your current selections.
-      </p>
+      <h3 className="text-sm font-semibold text-primary">{wf("previewTitle")}</h3>
+      <p className="mt-1 text-sm text-secondary">{wf("previewIntro")}</p>
 
       {unlocked.length === 0 ? (
-        <p className="mt-4 text-sm text-secondary">
-          Turn on capabilities above — an allowlist, freeze, or a permanent delegate — to unlock
-          automations.
-        </p>
+        <p className="mt-4 text-sm text-secondary">{wf("previewEmpty")}</p>
       ) : (
         <ul className="mt-4 flex flex-wrap gap-2">
           {unlocked.map((entry) => (
@@ -68,9 +72,9 @@ export function WorkflowPreview({
               key={entry.type}
               className="inline-flex items-center gap-2 rounded-full border border-border-default bg-fill-subtle px-3 py-1.5 text-sm"
             >
-              <span className="font-medium text-primary">{humanize(entry.type)}</span>
-              <Badge variant={TIER[entry.action.execution].variant}>
-                {TIER[entry.action.execution].label}
+              <span className="font-medium text-primary">{actionLabel(entry.type)}</span>
+              <Badge variant={TIER_VARIANT[entry.action.execution]}>
+                {wf(`tierLabels.${entry.action.execution}`)}
               </Badge>
             </li>
           ))}

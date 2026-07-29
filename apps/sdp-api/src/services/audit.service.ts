@@ -46,6 +46,9 @@ export const AUDIT_ACTIONS = [
   "rollback",
   "deactivate",
   "blocked_deactivation",
+  // Workflow automation (system actor)
+  "workflow_action_executed",
+  "workflow_action_failed",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -77,7 +80,9 @@ export type ResourceType =
   | "counterparty_account"
   | "asset_profile"
   | "provider_credential"
-  | "custody_connection";
+  | "custody_connection"
+  | "workflow"
+  | "workflow_execution";
 
 export interface AuditLogEntry {
   organizationId?: string;
@@ -182,6 +187,43 @@ export class AuditService {
     } catch (err) {
       // Log but don't fail the request
       console.error("Failed to write audit log:", redactCredentialSecrets(err));
+    }
+  }
+
+  // Context-less audit write for system / automation actors (the cron workflow engine,
+  // background jobs) that run without an HTTP request. ip / user-agent / request-id are
+  // null and there is no user or api-key actor, so the row reads back as a `system` /
+  // "SDP" actor. Same swallow-on-error behavior as `log` — audit never breaks the job.
+  async logSystem(entry: AuditLogEntry): Promise<void> {
+    const id = `aud_${crypto.randomUUID()}`;
+    const metadata = entry.metadata ? redactCredentialSecrets(entry.metadata) : null;
+
+    try {
+      await this.db
+        .prepare(
+          `INSERT INTO audit_logs (
+            id, organization_id, user_id, api_key_id, action, resource_type,
+            resource_id, metadata, ip_address, user_agent, request_id, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          id,
+          entry.organizationId || null,
+          entry.userId || null,
+          entry.apiKeyId || null,
+          entry.action,
+          entry.resourceType,
+          entry.resourceId || null,
+          metadata ? JSON.stringify(metadata) : null,
+          null,
+          null,
+          null,
+          entry.status || "success"
+        )
+        .run();
+    } catch (err) {
+      // Log but don't fail the job
+      console.error("Failed to write system audit log:", redactCredentialSecrets(err));
     }
   }
 

@@ -73,6 +73,7 @@ import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indi
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
+import { NotificationBell } from "@/components/notification-bell";
 import { SelectOrganizationPanel } from "@/components/select-organization-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
@@ -383,6 +384,7 @@ function DashboardTopBar({
         trailingContent={
           <>
             <LanguagePicker />
+            <NotificationBell />
             <UserButton />
             {sandboxBadge}
           </>
@@ -404,6 +406,7 @@ function DashboardTopBar({
       trailingContent={
         <>
           <LanguagePicker />
+          <NotificationBell />
           <UserButton />
           {sandboxBadge}
         </>

@@ -15,7 +15,6 @@ export const WORKFLOW_TRIGGER_TYPES = [
   "onramp_settled",
   "offramp_settled",
   "recurring_payment_failed",
-  "approval_decided",
   "token_operation_completed",
 ] as const;
 export type WorkflowTriggerType = (typeof WORKFLOW_TRIGGER_TYPES)[number];
@@ -27,7 +26,6 @@ export const WORKFLOW_ACTION_TYPES = [
   "send_webhook",
   "notify",
   "record",
-  "create_approval_task",
   "pause",
   "unpause",
   "freeze",
