@@ -20,12 +20,14 @@ function flattenKeys(value: unknown, prefix = ""): string[] {
 describe("i18n messages", () => {
   it("only accepts configured locales", () => {
     expect(isAppLocale("en")).toBe(true);
+    expect(isAppLocale("es")).toBe(true);
     expect(isAppLocale("fr")).toBe(true);
     expect(isAppLocale("de")).toBe(false);
   });
 
   it("resolves typed catalog entries", () => {
     expect(translate(getMessages("en"), "Home.trySdp")).toBe("Try SDP");
+    expect(translate(getMessages("es"), "Home.contactUs")).toBe("Contáctenos");
     expect(translate(getMessages("fr"), "Home.contactUs")).toBe("Nous contacter");
   });
 

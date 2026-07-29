@@ -6,6 +6,13 @@ import dashboardPayments from "../../messages/en/dashboard-payments.json";
 import dashboardPolicies from "../../messages/en/dashboard-policies.json";
 import shared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
+import esDashboardApprovals from "../../messages/es/dashboard-approvals.json";
+import esDashboardCustody from "../../messages/es/dashboard-custody.json";
+import esDashboardIssuance from "../../messages/es/dashboard-issuance.json";
+import esDashboardPayments from "../../messages/es/dashboard-payments.json";
+import esDashboardPolicies from "../../messages/es/dashboard-policies.json";
+import esShared from "../../messages/es/shared.json";
+import es from "../../messages/es.json";
 import frDashboardApprovals from "../../messages/fr/dashboard-approvals.json";
 import frDashboardCustody from "../../messages/fr/dashboard-custody.json";
 import frDashboardIssuance from "../../messages/fr/dashboard-issuance.json";
@@ -25,6 +32,16 @@ const enMessages = {
 };
 
 export type Messages = typeof enMessages;
+
+const esMessages = {
+  ...es,
+  ...esDashboardApprovals,
+  ...esDashboardCustody,
+  ...esDashboardIssuance,
+  ...esDashboardPayments,
+  ...esDashboardPolicies,
+  Shared: esShared,
+} satisfies Messages;
 
 const frMessages = {
   ...fr,
@@ -49,6 +66,7 @@ export type TranslationValues = Record<string, string | number>;
 
 const messagesByLocale: Record<AppLocale, Messages> = {
   en: enMessages,
+  es: esMessages,
   fr: frMessages,
 };
 
