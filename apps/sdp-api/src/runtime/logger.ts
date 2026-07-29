@@ -23,14 +23,11 @@ export function applyLogContext(logger: Logger): Logger {
 }
 
 function resolveOptions(): LoggerOptions {
-  const format =
-    process.env.LOG_FORMAT ?? (process.env.ENVIRONMENT === "development" ? "pretty" : "json");
-
   return {
     level: process.env.LOG_LEVEL ?? "info",
     base: undefined,
     messageKey: "message",
-    ...(format === "pretty" ? { transport: { target: "pino-pretty" } } : {}),
+    ...(process.env.LOG_FORMAT === "pretty" ? { transport: { target: "pino-pretty" } } : {}),
   };
 }
 
