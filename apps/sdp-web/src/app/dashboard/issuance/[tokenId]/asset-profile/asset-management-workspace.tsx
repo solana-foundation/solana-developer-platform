@@ -15,6 +15,7 @@ import { TokenActionConfirmationDialog } from "../token-action-confirmation-dial
 import { TokenAuthorityModal } from "../token-authority-modal";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 import type { FundManagementModalAction } from "../token-fund-management-section";
+import { TokenLockSupplyModal } from "../token-lock-supply-modal";
 import { TokenManagementModalShell } from "../token-management-modal-shell";
 import { TokenSignerSelect } from "../token-signer-select";
 import { AssetProfileHeader } from "./asset-profile-header";
@@ -382,6 +383,38 @@ export function AssetManagementWorkspace({
             onMint={() => ops.submitFundManagementAction("mint")}
             onBurn={() => ops.submitFundManagementAction("burn")}
           />
+        ) : null}
+      </TokenManagementModalShell>
+
+      {/* Its own shell, not a fund-management branch: this flow stays open across
+          submission so a failed revoke can be retried after a successful mint. */}
+      <TokenManagementModalShell
+        isOpen={ops.lockSupplyModalOpen && ops.lockSupplyRemaining !== null}
+        isPending={ops.isPending}
+        onClose={ops.closeLockSupplyModal}
+      >
+        {ops.lockSupplyRemaining !== null ? (
+          <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
+            <TokenLockSupplyModal
+              token={token}
+              remaining={ops.lockSupplyRemaining}
+              alreadyMinted={ops.lockSupplyMinted}
+              revokeFailed={ops.lockSupplyRevokeFailed}
+              destination={ops.lockSupplyForm.destination}
+              onDestinationChange={(destination) =>
+                ops.setLockSupplyForm((previous) => ({ ...previous, destination }))
+              }
+              signerWallets={ops.lockSupplySignerSelection.wallets}
+              signerWalletId={ops.lockSupplyForm.signingWalletId}
+              signerUnavailableReason={ops.lockSupplySignerSelection.unavailableReason}
+              onSignerWalletIdChange={(signingWalletId) =>
+                ops.setLockSupplyForm((previous) => ({ ...previous, signingWalletId }))
+              }
+              isPending={ops.isPending}
+              onCancel={ops.closeLockSupplyModal}
+              onConfirm={() => void ops.handleLockSupply()}
+            />
+          </div>
         ) : null}
       </TokenManagementModalShell>
 

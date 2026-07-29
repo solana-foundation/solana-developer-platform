@@ -1,5 +1,10 @@
+"use client";
+
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { useIssuanceTokenView } from "@/contexts/dashboard-workspace-context";
+import { IssuanceListSkeleton } from "./issuance-list-skeleton";
+import type { TokenView } from "./issuance-token-view";
 
 const ISSUANCE_SKELETON_IDS = [
   "issuance-skeleton-1",
@@ -30,6 +35,16 @@ const ISSUANCE_DETAIL_TAB_IDS = [
   "issuance-detail-tab-4",
   "issuance-detail-tab-5",
   "issuance-detail-tab-6",
+  "issuance-detail-tab-7",
+];
+
+const ISSUANCE_HERO_TILE_IDS = [
+  "issuance-hero-tile-1",
+  "issuance-hero-tile-2",
+  "issuance-hero-tile-3",
+  "issuance-hero-tile-4",
+  "issuance-hero-tile-5",
+  "issuance-hero-tile-6",
 ];
 
 const ISSUANCE_WIZARD_CARD_IDS = [
@@ -40,50 +55,6 @@ const ISSUANCE_WIZARD_CARD_IDS = [
   "issuance-wizard-card-5",
   "issuance-wizard-card-6",
 ];
-
-function IssuanceTokenCardSkeleton() {
-  return (
-    <article
-      className="flex min-h-[240px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5"
-      data-loading-card="issuance-token"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <SkeletonBlock className="h-11 w-11 shrink-0 rounded-full" />
-          <div className="min-w-0 space-y-1.5">
-            <SkeletonBlock className="h-3 w-12" />
-            <SkeletonBlock className="h-5 w-32" />
-          </div>
-        </div>
-        <SkeletonBlock className="h-6 w-16 shrink-0 rounded-full" />
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <SkeletonBlock className="h-6 w-24 rounded-full" />
-        <SkeletonBlock className="h-6 w-20 rounded-full" />
-      </div>
-
-      <div className="mt-6 grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <SkeletonBlock className="h-3 w-14" />
-          <SkeletonBlock className="h-4 w-20" />
-        </div>
-        <div className="space-y-1.5">
-          <SkeletonBlock className="h-3 w-16" />
-          <SkeletonBlock className="h-4 w-12" />
-        </div>
-      </div>
-
-      <div className="mt-auto flex items-end justify-between pt-4">
-        <div className="space-y-1.5">
-          <SkeletonBlock className="h-3 w-14" />
-          <SkeletonBlock className="h-4 w-24" />
-        </div>
-        <SkeletonBlock className="size-9 shrink-0 rounded-[10px]" />
-      </div>
-    </article>
-  );
-}
 
 // Loading card for the legacy list (flag off): taller card with a Type/Supply/
 // Created stat box and a full-width Manage button, no chips or kebab.
@@ -110,11 +81,21 @@ function LegacyIssuanceTokenCardSkeleton() {
 
 export function IssuancePageSkeleton({
   assetProfilesEnabled = false,
+  view,
 }: {
   assetProfilesEnabled?: boolean;
+  /** Overrides the stored preference; for tests and Storybook-style callers. */
+  view?: TokenView;
 }) {
+  // Grid and list are different enough that one skeleton can only be right for
+  // half the users — hence two, picked by the same preference the workspace
+  // itself reads. It comes from a cookie, so this is correct on the server too.
+  const storedView = useIssuanceTokenView();
+  const resolvedView = view ?? storedView;
+
   // Legacy list skeleton when the Asset Profiles UI flag is off, so the loading
-  // state matches the old grid instead of flashing the new one.
+  // state matches the old grid instead of flashing the new one. The view toggle
+  // is part of the new overview only, so this branch is always a grid.
   if (!assetProfilesEnabled) {
     return (
       <DashboardWorkspaceOverviewPanel
@@ -138,25 +119,36 @@ export function IssuancePageSkeleton({
 
   return (
     <DashboardWorkspaceOverviewPanel
-      className="space-y-6"
       data-loading-layout="issuance-overview"
+      data-loading-view={resolvedView}
       aria-busy="true"
     >
-      {/* Mirrors IssuanceWorkspace's toolbar so the shell doesn't shift on load. */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-3 sm:flex-1">
-          <SkeletonBlock className="h-10 flex-1 rounded-[10px]" />
-          <SkeletonBlock className="h-10 w-10 shrink-0 rounded-[10px]" />
-          <SkeletonBlock className="h-10 w-10 shrink-0 rounded-[10px]" />
+      {/* Mirrors IssuanceWorkspace's pinned header — toolbar, then the asset-count
+          row — down to its spacing (`space-y-4` inside, `pb-3` below, matching the
+          header's fade band), so the content underneath starts on the same
+          baseline it will settle at. */}
+      <div className="space-y-4 pb-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-3 sm:flex-1">
+            <SkeletonBlock className="h-10 flex-1 rounded-[10px]" />
+            <SkeletonBlock className="h-10 w-10 shrink-0 rounded-[10px]" />
+            <SkeletonBlock className="h-10 w-10 shrink-0 rounded-[10px]" />
+          </div>
+          <SkeletonBlock className="h-10 w-full rounded-[10px] sm:w-32" />
         </div>
-        <SkeletonBlock className="h-10 w-full rounded-[10px] sm:w-32" />
+
+        {/* Asset count (same width the workspace's own count placeholder takes),
+            and — list view only, as in the workspace — the expand/collapse-all
+            control opposite it. */}
+        <div className="flex h-6 items-center justify-between px-1">
+          <SkeletonBlock className="h-3 w-28" />
+          {resolvedView === "list" ? <SkeletonBlock className="h-3 w-20" /> : null}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {ISSUANCE_SKELETON_IDS.map((id) => (
-          <IssuanceTokenCardSkeleton key={id} />
-        ))}
-      </div>
+      {/* The rows/tiles themselves live in issuance-list-skeleton.tsx, shared with
+          the workspace's in-place reload state so the two can't drift. */}
+      <IssuanceListSkeleton view={resolvedView} count={ISSUANCE_SKELETON_IDS.length} />
     </DashboardWorkspaceOverviewPanel>
   );
 }
@@ -260,6 +252,44 @@ export function IssuanceCreateSkeleton() {
   );
 }
 
+function HeroIdentityFieldSkeleton({ valueWidth }: { valueWidth: string }) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5">
+        <SkeletonBlock className="size-3 shrink-0 rounded-[3px]" />
+        <SkeletonBlock className="h-3 w-20" />
+      </div>
+      <SkeletonBlock className={`mt-1 h-4 ${valueWidth}`} />
+    </div>
+  );
+}
+
+function HeroStatTileSkeleton() {
+  return (
+    <div className="flex h-full flex-col py-2.5 md:px-3">
+      <div className="flex items-center gap-1.5">
+        <SkeletonBlock className="size-3 shrink-0 rounded-[3px]" />
+        <SkeletonBlock className="h-3 w-16" />
+      </div>
+      <div className="mt-auto pt-0.5">
+        <SkeletonBlock className="h-4 w-20" />
+      </div>
+    </div>
+  );
+}
+
+function ClassificationCellSkeleton() {
+  return (
+    <div className="flex flex-1 items-center gap-3 p-4">
+      <SkeletonBlock className="size-9 shrink-0 rounded-lg" />
+      <div className="min-w-0 flex-1">
+        <SkeletonBlock className="h-4 w-28" />
+        <SkeletonBlock className="mt-1.5 h-3 w-full max-w-64" />
+      </div>
+    </div>
+  );
+}
+
 export function IssuanceDetailSkeleton() {
   return (
     <div className="space-y-4 pb-8" data-loading-layout="issuance-detail" aria-busy="true">
@@ -268,11 +298,11 @@ export function IssuanceDetailSkeleton() {
           <SkeletonBlock className="size-16 shrink-0 rounded-full" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2.5">
-              <SkeletonBlock className="h-9 w-56 max-w-full" />
+              <SkeletonBlock className="h-8 w-56 max-w-full" />
               <SkeletonBlock className="h-6 w-16 rounded-full" />
               <SkeletonBlock className="h-6 w-20 rounded-full" />
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2.5 flex flex-wrap gap-2">
               <SkeletonBlock className="h-7 w-28 rounded-full" />
               <SkeletonBlock className="h-7 w-32 rounded-full" />
             </div>
@@ -295,8 +325,9 @@ export function IssuanceDetailSkeleton() {
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <SkeletonBlock className="h-10 w-24 rounded-[10px]" />
+        {/* API Playground + Explorer */}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <SkeletonBlock className="h-10 w-36 rounded-[10px]" />
           <SkeletonBlock className="h-10 w-28 rounded-[10px]" />
         </div>
       </header>
@@ -312,58 +343,46 @@ export function IssuanceDetailSkeleton() {
 
       <div className="space-y-4 pt-1">
         <section className="rounded-2xl border border-border-default bg-surface-raised p-5">
-          <div className="grid gap-5 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 md:gap-5">
             <div className="flex min-w-0 flex-col">
               <SkeletonBlock className="h-4 w-full" />
               <SkeletonBlock className="mt-2 h-4 w-4/5" />
-              <div className="mt-8 space-y-3 md:mt-auto">
-                <SkeletonBlock className="h-3 w-20" />
-                <SkeletonBlock className="h-4 w-full max-w-64" />
+              <div className="mt-6 flex flex-col gap-3 md:mt-auto md:pt-6">
+                <HeroIdentityFieldSkeleton valueWidth="w-40" />
+                <HeroIdentityFieldSkeleton valueWidth="w-full max-w-72" />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-x-5 gap-y-4 md:border-l md:border-border-subtle md:pl-5">
-              {ISSUANCE_WIZARD_CARD_IDS.map((id) => (
-                <div key={id} className="space-y-2 py-1">
-                  <SkeletonBlock className="h-3 w-20" />
-                  <SkeletonBlock className="h-4 w-24 max-w-full" />
-                </div>
+            <div className="grid grid-cols-2 gap-x-4 md:gap-0 md:border-l md:border-border-subtle md:pl-5">
+              {ISSUANCE_HERO_TILE_IDS.map((id) => (
+                <HeroStatTileSkeleton key={id} />
               ))}
             </div>
           </div>
         </section>
 
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <section className="grid overflow-hidden rounded-2xl border border-border-default bg-surface-raised sm:grid-cols-2 sm:divide-x sm:divide-border-subtle">
-            <div className="flex items-start gap-3 p-4">
-              <SkeletonBlock className="size-9 shrink-0 rounded-lg" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <SkeletonBlock className="h-4 w-28" />
-                <SkeletonBlock className="h-3 w-full" />
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-4">
-              <SkeletonBlock className="size-9 shrink-0 rounded-lg" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <SkeletonBlock className="h-4 w-28" />
-                <SkeletonBlock className="h-3 w-full" />
-              </div>
-            </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+          <section className="flex flex-col divide-y divide-border-subtle overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
+            <ClassificationCellSkeleton />
+            <ClassificationCellSkeleton />
           </section>
-          {/* Low-fidelity placeholder; the event-shaped skeleton lives in the
-              live card's own loading state, not this whole-page fallback. */}
-          <section className="flex h-full flex-col rounded-2xl border border-border-default bg-surface-raised p-4">
+          <section className="flex h-full flex-col rounded-2xl border border-border-default bg-surface-raised px-4 pt-4">
             <div className="flex items-center justify-between gap-2">
               <SkeletonBlock className="h-4 w-28" />
-              <SkeletonBlock className="h-3 w-16" />
+              <SkeletonBlock className="h-3.5 w-16" />
             </div>
-            <div className="mt-4 flex flex-col gap-4">
+            <ul className="mt-3 flex min-h-0 flex-1 flex-col">
               {RECENT_ACTIVITY_ROW_IDS.map((id) => (
-                <div key={id} className="flex items-center justify-between gap-3">
-                  <SkeletonBlock className="h-3.5 w-2/5" />
-                  <SkeletonBlock className="h-3.5 w-14" />
-                </div>
+                <li
+                  key={id}
+                  className="flex flex-1 items-center justify-between gap-3 border-t border-border-subtle py-3 first:border-t-0"
+                >
+                  <SkeletonBlock className="h-6 w-28 shrink-0 rounded-md" />
+                  <SkeletonBlock className="h-3.5 w-32" />
+                  <SkeletonBlock className="h-4 w-16 shrink-0 rounded-full" />
+                  <SkeletonBlock className="h-3.5 w-24 shrink-0" />
+                </li>
               ))}
-            </div>
+            </ul>
           </section>
         </div>
       </div>

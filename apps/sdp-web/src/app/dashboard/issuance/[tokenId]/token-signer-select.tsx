@@ -3,8 +3,8 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
+import { toWalletIdentity, WalletIdentityBadge } from "../wallet-identity";
 import { getSignerWalletOptionLabel } from "./token-management-workspace.utils";
-import { TokenWalletIdentityCard } from "./token-wallet-identity-card";
 
 interface TokenSignerSelectProps {
   signerWallets: PaymentsDashboardWallet[];
@@ -60,7 +60,16 @@ export function TokenSignerSelect({
         {label ?? t("DashboardIssuance.signer.label")}
       </span>
       {isLocked && selectedWallet ? (
-        <TokenWalletIdentityCard wallet={selectedWallet} />
+        // Locked signer: a read-only display, so leaving for the wallet page costs
+        // nothing and the link navigates in place.
+        <WalletIdentityBadge
+          variant="card"
+          walletLink="same-tab"
+          identity={toWalletIdentity(selectedWallet, null, {
+            unresolvedAs: "custom",
+            unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+          })}
+        />
       ) : (
         <Select
           value={signerWalletId}
@@ -84,7 +93,16 @@ export function TokenSignerSelect({
         {message}
       </p>
       {showSelectionSummary && !isUnavailable && selectedWallet && !isLocked ? (
-        <TokenWalletIdentityCard wallet={selectedWallet} />
+        // Summary of a live selection — the surrounding form holds unsaved state,
+        // so inspecting the wallet opens beside it rather than replacing it.
+        <WalletIdentityBadge
+          variant="card"
+          walletLink="new-tab"
+          identity={toWalletIdentity(selectedWallet, null, {
+            unresolvedAs: "custom",
+            unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+          })}
+        />
       ) : null}
     </div>
   );

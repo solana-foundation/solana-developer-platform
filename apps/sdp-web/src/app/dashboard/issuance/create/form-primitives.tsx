@@ -12,7 +12,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import type { FieldDescriptor } from "./asset-details-config";
+import { type FieldDescriptor, fieldOptionLabel } from "./asset-details-config";
 import type { CustomFieldRow, DraftState } from "./issuance-draft-wizard.types";
 
 type UpdateDraft = (patch: Partial<DraftState>) => void;
@@ -220,7 +220,7 @@ export function DetailField({
           >
             {field.options?.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {t(option.labelKey)}
+                {fieldOptionLabel(option, t)}
               </SelectItem>
             ))}
           </Select>

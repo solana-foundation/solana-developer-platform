@@ -168,15 +168,12 @@ async function updateBvnkOnrampPaymentRuleState(
   onrampPaymentRuleKey: string,
   paymentRule: Partial<BvnkOnrampPaymentRuleState>
 ): Promise<void> {
-  await repo.updateCounterparty({
+  await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
     projectId: counterparty.project_id,
-    providerData: withBvnkOnrampPaymentRuleState(
-      counterparty.provider_data,
-      onrampPaymentRuleKey,
-      paymentRule
-    ),
+    mutate: (providerData) =>
+      withBvnkOnrampPaymentRuleState(providerData, onrampPaymentRuleKey, paymentRule),
   });
 }
 
@@ -343,9 +340,7 @@ async function handleProviderOnrampCounterpartyRequirementWebhook(
     case "bvnk:customers:status-change":
     case "bvnk:platform:customer:update": {
       if (!event.customerReference) {
-        console.log(
-          `[bvnk webhook] "${event.kind}" has no customer reference: ${JSON.stringify(event)}`
-        );
+        console.log(`[bvnk webhook] "${event.kind}" has no customer reference`);
         return;
       }
       const counterparty = await repo.findActiveCounterpartyByBvnkCustomerReference(
@@ -363,7 +358,7 @@ async function handleProviderOnrampCounterpartyRequirementWebhook(
   }
 
   if (!event.walletName) {
-    console.log(`[bvnk webhook] "${event.kind}" has no wallet name: ${JSON.stringify(event)}`);
+    console.log(`[bvnk webhook] "${event.kind}" has no wallet name`);
     return;
   }
   const wallet = parseBvnkOnrampWalletName(event.walletName);
@@ -397,11 +392,10 @@ async function handleProviderOfframpCounterpartyRequirementWebhook(
   >
 ): Promise<void> {
   if (!event.walletName || !event.walletStatus) {
-    console.log(
-      `[bvnk webhook] merchant off-ramp wallet event is missing name or status: ${JSON.stringify(event)}`
-    );
+    console.log("[bvnk webhook] merchant off-ramp wallet event is missing name or status");
     return;
   }
+  const walletStatus = event.walletStatus;
 
   const repo = createCounterpartiesRepository(c.env);
   const wallet = parseBvnkOfframpWalletName(event.walletName);
@@ -411,15 +405,12 @@ async function handleProviderOfframpCounterpartyRequirementWebhook(
       `BVNK webhook counterparty ${wallet.counterpartyId} was not found or is not active`
     );
   }
-  await repo.updateCounterparty({
+  await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
     projectId: counterparty.project_id,
-    providerData: withBvnkOfframpWalletStatus(
-      counterparty.provider_data,
-      wallet.fiatCurrency,
-      event.walletStatus
-    ),
+    mutate: (providerData) =>
+      withBvnkOfframpWalletStatus(providerData, wallet.fiatCurrency, walletStatus),
   });
 }
 
@@ -437,9 +428,7 @@ async function handleProviderOfframpSettlementWebhook(
   event: BvnkChannelTransactionEvent
 ): Promise<void> {
   if (!event.transferId) {
-    console.log(
-      `[bvnk webhook] "${event.kind}" has no SDP off-ramp transfer reference: ${JSON.stringify(event)}`
-    );
+    console.log(`[bvnk webhook] "${event.kind}" has no SDP off-ramp transfer reference`);
     return;
   }
 

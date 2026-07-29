@@ -1,9 +1,10 @@
 "use client";
 
-import { Copy, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "@/i18n/provider";
-import { TokenSettingsSection } from "../../token-settings-section";
+import { toWalletIdentity, WalletIdentityBadge } from "../../../wallet-identity";
+import { PERMISSION_ROW_ICONS, TokenSettingsSection } from "../../token-settings-section";
 import type { TokenOperations } from "../use-token-operations";
 
 export function PermissionsTab({
@@ -27,6 +28,7 @@ export function PermissionsTab({
           mode="permissions"
           permissionRows={ops.permissionRows}
           extensionRows={ops.extensionRows}
+          authorityWallets={ops.authorityWallets}
           showTitle={false}
           canEditAuthorities={!ops.canDeployToken && canManageTokenAdmin}
           onCopy={ops.handleCopy}
@@ -42,6 +44,7 @@ export function PermissionsTab({
           mode="extensions"
           permissionRows={ops.permissionRows}
           extensionRows={ops.extensionRows}
+          authorityWallets={ops.authorityWallets}
           showTitle={false}
           canEditAuthorities={false}
           onCopy={ops.handleCopy}
@@ -61,7 +64,7 @@ export function PermissionsTab({
 function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
   const t = useTranslations();
   const externalRows = ops.permissionRows.filter((row) => row.controlStatus === "external");
-  const custodyTarget = ops.authorityWallets[0]?.publicKey ?? null;
+  const custodyWallet = ops.authorityWallets[0] ?? null;
 
   return (
     <div className="rounded-xl border border-warning-border bg-warning-bg px-4 py-3">
@@ -70,36 +73,41 @@ function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
         <p className="text-sm font-medium text-warning">
           {t("DashboardIssuance.permissions.externalWarningTitle")}
         </p>
-        {externalRows.map((row) => (
-          <span
-            key={row.id}
-            className="inline-flex items-center rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning ring-1 ring-warning-border ring-inset"
-          >
-            {row.title}
-          </span>
-        ))}
+        {externalRows.map((row) => {
+          const Icon = PERMISSION_ROW_ICONS[row.id];
+          return (
+            <span
+              key={row.id}
+              className="inline-flex items-center gap-1 rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning ring-1 ring-warning-border ring-inset"
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+              {row.title}
+            </span>
+          );
+        })}
       </div>
       <p className="mt-1 text-sm text-warning">
         {t("DashboardIssuance.permissions.externalWarningBody")}
       </p>
       <div className="mt-4">
-        {custodyTarget ? (
+        {custodyWallet ? (
           <>
             <p className="text-xs text-warning">
               {t("DashboardIssuance.permissions.externalRemediationTarget")}
             </p>
-            <div className="mt-1 flex w-fit max-w-full items-center gap-1.5">
-              <span className="min-w-0 truncate text-[13px] font-medium text-primary">
-                {custodyTarget}
-              </span>
-              <button
-                type="button"
-                onClick={() => void ops.handleCopy(custodyTarget)}
-                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-tertiary transition-colors hover:bg-fill hover:text-primary"
-                aria-label={t("DashboardIssuance.header.copyTokenAddress")}
-              >
-                <Copy className="h-3.5 w-3.5" />
-              </button>
+            {/* The transfer target is one of our custody wallets, so name it —
+                the compact badge, not the card, whose 48px mark and stacked key
+                rows would dominate the banner. The flex wrapper keeps the badge
+                (itself a block-level flex container) at content width instead of
+                letting it stretch across the banner. */}
+            <div className="mt-1.5 flex">
+              <WalletIdentityBadge
+                identity={toWalletIdentity(custodyWallet, null, {
+                  unresolvedAs: "custom",
+                  unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+                })}
+                onCopy={(value) => void ops.handleCopy(value)}
+              />
             </div>
           </>
         ) : (

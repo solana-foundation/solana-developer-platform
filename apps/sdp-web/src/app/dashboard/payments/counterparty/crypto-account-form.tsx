@@ -12,6 +12,7 @@ import { HoldButton } from "@/components/ui/hold-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
+import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getHighRiskProviders, runComplianceCheck } from "../payments-workspace.data";
 import type { ComplianceSnapshot } from "../payments-workspace.types";
@@ -44,6 +45,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
   const [phase, setPhase] = useState<AddPhase>("idle");
   const [snapshot, setSnapshot] = useState<ComplianceSnapshot | null>(null);
   const [screenUnavailable, setScreenUnavailable] = useState(false);
+  const [complianceNotEnabled, setComplianceNotEnabled] = useState(false);
   const submittingRef = useRef(false);
 
   const trimmedAddress = address.trim();
@@ -80,6 +82,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
   function resetScreening() {
     setSnapshot(null);
     setScreenUnavailable(false);
+    setComplianceNotEnabled(false);
     setPhase("idle");
   }
 
@@ -129,6 +132,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
     if (!trimmedAddress) return;
     setError(null);
     setScreenUnavailable(false);
+    setComplianceNotEnabled(false);
     setSnapshot(null);
     setPhase("screening");
 
@@ -141,8 +145,9 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
       }
       setSnapshot(result);
       setPhase("revealing");
-    } catch {
+    } catch (error) {
       setScreenUnavailable(true);
+      setComplianceNotEnabled(error instanceof ComplianceNotEnabledError);
       setPhase("ready");
     }
   }
@@ -213,9 +218,11 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
         {phase === "ready" && hasRisk && (
           <HeightReveal key="risk-warning" durationSeconds={0.25}>
             <p className="text-sm text-error">
-              {screenUnavailable
-                ? t("DashboardPayments.counterparty.screeningUnavailable")
-                : t("DashboardPayments.counterparty.screeningWarning")}
+              {complianceNotEnabled
+                ? t("DashboardPayments.workspace.complianceNotEnabled")
+                : screenUnavailable
+                  ? t("DashboardPayments.counterparty.screeningUnavailable")
+                  : t("DashboardPayments.counterparty.screeningWarning")}
             </p>
           </HeightReveal>
         )}
