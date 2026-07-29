@@ -192,10 +192,9 @@ export function NotificationBell() {
     );
     setUnread((prev) => Math.max(0, prev - 1));
     try {
-      const response = await fetch(
-        `/api/dashboard/notifications/${encodeURIComponent(id)}/read`,
-        { method: "POST" }
-      );
+      const response = await fetch(`/api/dashboard/notifications/${encodeURIComponent(id)}/read`, {
+        method: "POST",
+      });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }

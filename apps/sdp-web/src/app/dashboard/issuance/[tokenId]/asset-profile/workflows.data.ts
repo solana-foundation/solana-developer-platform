@@ -13,6 +13,11 @@ export interface WorkflowRuleView {
   action_type: string;
   enabled: boolean;
   review_mode: "auto" | "manual";
+  // Full rule definition — the builder reads condition + action.params when editing.
+  definition?: {
+    condition?: GuardCondition | null;
+    action?: { type: string; params?: Record<string, string | number> };
+  };
   created_at: string;
 }
 
@@ -35,6 +40,15 @@ export interface ExecutionView {
   error: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// An enrolled holder (kyc wallet ↔ asset), from GET /holders.
+export interface HolderView {
+  id: string;
+  wallet_address: string;
+  kyc_status: string;
+  status: string;
+  created_at: string;
 }
 
 export interface CatalogTriggerView {
@@ -69,15 +83,17 @@ export type GuardOperator = "eq" | "neq" | "in";
 export interface GuardClause {
   field: string;
   op: GuardOperator;
-  value: string | string[];
+  value: string | number | Array<string | number>;
 }
 export interface GuardCondition {
   all: GuardClause[];
 }
 
-// A single editable GUARD row in the builder. `value` stays a raw string while editing;
-// for the `in` operator it's comma-separated and split to string[] at submit time.
+// A single editable GUARD row in the builder. `id` is a stable draft identity (React
+// key survives row removal without caret/IME jumps); `value` stays a raw string while
+// editing; for the `in` operator it's comma-separated and split at submit time.
 export interface GuardDraft {
+  id: string;
   field: string;
   op: GuardOperator;
   value: string;
@@ -122,24 +138,40 @@ export async function fetchWorkflowCatalog(tokenId: string): Promise<WorkflowCat
   );
 }
 
-export async function fetchExecutions(tokenId: string): Promise<ExecutionView[]> {
-  const data = await readEnvelope<{ executions: ExecutionView[] }>(
-    await fetch(`${base(tokenId)}/executions`, { cache: "no-store" })
+export async function fetchExecutions(
+  tokenId: string,
+  pageSize = 50
+): Promise<{ executions: ExecutionView[]; total: number }> {
+  const data = await readEnvelope<{ executions: ExecutionView[]; total: number }>(
+    await fetch(`${base(tokenId)}/executions?pageSize=${pageSize}`, { cache: "no-store" })
   );
-  return data.executions ?? [];
+  return { executions: data.executions ?? [], total: data.total ?? 0 };
+}
+
+export async function fetchHolders(
+  tokenId: string
+): Promise<{ holders: HolderView[]; total: number }> {
+  const data = await readEnvelope<{ holders: HolderView[]; total: number }>(
+    await fetch(`/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/holders`, {
+      cache: "no-store",
+    })
+  );
+  return { holders: data.holders ?? [], total: data.total ?? 0 };
+}
+
+export interface WorkflowRuleInput {
+  triggerType: string;
+  actionType: string;
+  reviewMode: "auto" | "manual";
+  actionParams?: Record<string, string | number>;
+  // Optional GUARD ("only if…"). Omit entirely when the user added no rows — the API
+  // treats an absent condition as "always match".
+  condition?: GuardCondition;
 }
 
 export async function createWorkflow(
   tokenId: string,
-  input: {
-    triggerType: string;
-    actionType: string;
-    reviewMode: "auto" | "manual";
-    actionParams?: Record<string, string | number>;
-    // Optional GUARD ("only if…"). Omit entirely when the user added no rows — the API
-    // treats an absent condition as "always match".
-    condition?: GuardCondition;
-  }
+  input: WorkflowRuleInput
 ): Promise<WorkflowRuleView> {
   const data = await readEnvelope<{ workflow: WorkflowRuleView }>(
     await fetch(base(tokenId), {
@@ -151,14 +183,43 @@ export async function createWorkflow(
   return data.workflow;
 }
 
+// PATCH an existing rule's editable parts (trigger/action are immutable — build a new
+// rule for those). `condition: null` clears the guard.
+export async function updateWorkflow(
+  tokenId: string,
+  workflowId: string,
+  input: {
+    actionParams?: Record<string, string | number>;
+    condition?: GuardCondition | null;
+    reviewMode?: "auto" | "manual";
+  }
+): Promise<void> {
+  await readEnvelope(
+    await fetch(`${base(tokenId)}/${encodeURIComponent(workflowId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    })
+  );
+}
+
+// Soft delete server-side: the rule disappears; its execution history is retained.
+export async function deleteWorkflow(tokenId: string, workflowId: string): Promise<void> {
+  await readEnvelope(
+    await fetch(`${base(tokenId)}/${encodeURIComponent(workflowId)}`, { method: "DELETE" })
+  );
+}
+
 // Whether the email channel is available. Exposes only a boolean — no provider details.
-export async function fetchNotificationConfig(): Promise<{ emailEnabled: boolean }> {
+// Returns null when the config itself can't be loaded, so a transient failure is NOT
+// rendered as "email is deliberately unconfigured".
+export async function fetchNotificationConfig(): Promise<{ emailEnabled: boolean } | null> {
   try {
     return await readEnvelope<{ emailEnabled: boolean }>(
       await fetch("/api/dashboard/notifications/config", { cache: "no-store" })
     );
   } catch {
-    return { emailEnabled: false };
+    return null;
   }
 }
 
