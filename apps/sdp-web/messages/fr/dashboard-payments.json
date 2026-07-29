@@ -40,6 +40,7 @@
       "requirementsAdvanceFailed": "Échec de l'avancement des exigences ({status}).",
       "requirementsContextMissing": "Impossible de faire progresser les exigences sans provider et Counterparty.",
       "complianceCheckFailed": "Le contrôle de conformité a échoué.",
+      "complianceNotEnabled": "Le filtrage de conformité avec Range, Elliptic, TRM et Chainalysis est disponible avec l'offre entreprise. Contactez-nous pour l'activer pour votre organisation.",
       "destinationRequired": "L'adresse de destination est requise.",
       "transferBlocked": "Transfer bloqué.",
       "transferBlockedDescription": "Exécutez un contrôle de conformité ou utilisez une destination déjà présente dans la source Wallet Allowlist.",

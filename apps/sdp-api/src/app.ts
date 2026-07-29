@@ -32,6 +32,7 @@ import counterparties from "@/routes/counterparties";
 import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
 import health from "@/routes/health";
+import internalCustody from "@/routes/internal-custody";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -164,7 +165,11 @@ function mapFeePaymentError(err: FeePaymentError): {
           "The wallet used for this payment does not have enough funds. Add funds and try again.",
       };
     case "RATE_LIMITED":
-      return { status: 429, code: err.code, message: "The signing provider is busy. Try again." };
+      return {
+        status: 429,
+        code: err.code,
+        message: "The signing provider is busy. Try again.",
+      };
     case "PROVIDER_NOT_AVAILABLE":
     case "NETWORK_ERROR":
       return {
@@ -362,6 +367,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Dashboard-only helpers. These routes are intentionally excluded from the
   // public OpenAPI and AI discovery surfaces.
   app.route("/internal/playground", playgroundInternal);
+  app.route("/internal/dashboard/custody", internalCustody);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);

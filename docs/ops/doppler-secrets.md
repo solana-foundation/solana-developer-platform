@@ -37,7 +37,8 @@ pnpm test:integration
 At minimum, the configs used by local development and CI should contain the values needed by the exercised features:
 
 - API database and cache values such as `DATABASE_URL` and `REDIS_URL`
-- application secrets such as `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY`
+- application secrets such as `API_KEY_PEPPER`, `CUSTODY_ENCRYPTION_KEY`, and
+  `CREDENTIAL_FINGERPRINT_PEPPER` when stored-credential provisioning is enabled
 - authentication values under `CLERK_*`
 - Solana RPC URLs and API keys
 - Kora and custody-provider values used by integration tests

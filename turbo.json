@@ -4,6 +4,7 @@
   "globalDependencies": [".env", ".env.*"],
   "globalEnv": [
     "API_KEY_PEPPER",
+    "CREDENTIAL_FINGERPRINT_PEPPER",
     "CLERK_AUDIENCE",
     "CLERK_API_URL",
     "CLERK_ISSUER",
@@ -89,6 +90,7 @@
     "PRIVY_API_BASE_URL",
     "PRIVY_APP_ID",
     "PRIVY_APP_SECRET",
+    "PRIVY_BYOK_PROVISIONING_ENABLED",
     "PRIVY_REQUEST_DELAY_MS",
     "PRIVY_WALLET_ID",
     "REDIS_URL",

@@ -290,7 +290,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
         <div className="mx-auto w-full max-w-6xl">
           <WizardProgress currentStep={currentStep} />
         </div>
@@ -333,7 +333,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-border-default bg-surface-raised/80 px-4 py-4 md:px-6">
+      <div className="shrink-0 border-t border-border-default px-4 py-4 md:px-6">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
           <Button
             type="button"

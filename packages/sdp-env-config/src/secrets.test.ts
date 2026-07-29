@@ -21,12 +21,14 @@ test("generateSecret honors a field's secretEncoding", () => {
   assert.equal(Buffer.from(generateSecret("CUSTODY_ENCRYPTION_KEY"), "base64").length, 32);
   assert.equal(Buffer.from(generateSecret("COUNTERPARTY_PII_ENCRYPTION_KEY"), "base64").length, 32);
   assert.match(generateSecret("API_KEY_PEPPER"), /^[0-9a-f]{64}$/);
+  assert.match(generateSecret("CREDENTIAL_FINGERPRINT_PEPPER"), /^[0-9a-f]{64}$/);
 });
 
 test("autoSecretKeys without values lists only secret-kind fields", () => {
   assert.deepEqual([...autoSecretKeys()].sort(), [
     "API_KEY_PEPPER",
     "COUNTERPARTY_PII_ENCRYPTION_KEY",
+    "CREDENTIAL_FINGERPRINT_PEPPER",
     "CUSTODY_ENCRYPTION_KEY",
   ]);
 });
@@ -35,6 +37,7 @@ test("autoSecretKeys with default values includes the auto-mode Postgres passwor
   const keys = autoSecretKeys(defaultValues());
   assert.ok(keys.has("POSTGRES_PASSWORD"));
   assert.ok(keys.has("API_KEY_PEPPER"));
+  assert.ok(keys.has("CREDENTIAL_FINGERPRINT_PEPPER"));
 });
 
 test("autoSecretKeys excludes the Postgres password in manual mode", () => {
@@ -49,6 +52,7 @@ test("autoSecretKeys still generates POSTGRES_PASSWORD with an external database
   const keys = autoSecretKeys({ ...defaultValues(), DATABASE_MODE: "external" });
   assert.ok(keys.has("POSTGRES_PASSWORD"));
   assert.ok(keys.has("API_KEY_PEPPER"));
+  assert.ok(keys.has("CREDENTIAL_FINGERPRINT_PEPPER"));
 });
 
 test("autoSecretKeys generates POSTGRES_PASSWORD for external DB even in manual mode", () => {

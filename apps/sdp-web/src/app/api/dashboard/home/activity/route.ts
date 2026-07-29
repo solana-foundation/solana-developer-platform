@@ -4,7 +4,10 @@ import {
   computeTodaysVolume,
   fetchOrgIssuanceActivity,
 } from "@/app/dashboard/home-page.data";
-import { fetchDashboardPaymentTransfers } from "@/app/dashboard/payments/payments-page.data";
+import {
+  fetchDashboardPaymentTransfers,
+  fetchPaymentsIssuedTokenSymbols,
+} from "@/app/dashboard/payments/payments-page.data";
 import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
@@ -17,13 +20,14 @@ export async function GET(request: Request) {
     const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.home.activity.api")
     );
-    const [transfersResult, issuanceActivityResult] = await Promise.all([
+    const [transfersResult, issuanceActivityResult, issuedTokenSymbolsResult] = await Promise.all([
       trace.step("fetch_payment_transfers", () =>
         fetchDashboardPaymentTransfers(apiClient.request, 20)
       ),
       trace.step("fetch_issuance_activity", () =>
         fetchOrgIssuanceActivity(apiClient.request, t, 20)
       ),
+      fetchPaymentsIssuedTokenSymbols(apiClient.request),
     ]);
 
     const transfersError = transfersResult.ok
@@ -36,7 +40,10 @@ export async function GET(request: Request) {
     const activityRows = buildHomeActivityRows(
       transfersResult.data ?? [],
       issuanceActivityResult.data ?? [],
-      t
+      t,
+      Object.fromEntries(
+        (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
+      )
     );
     const activityError =
       activityRows.length === 0 ? (transfersError ?? issuanceActivityError) : null;

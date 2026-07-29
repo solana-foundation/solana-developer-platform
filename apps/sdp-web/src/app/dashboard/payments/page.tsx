@@ -6,7 +6,11 @@ import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
 import { PaymentsCommandCenter } from "./payments-command-center";
-import { fetchPaymentsWallets, fetchPaymentTransfers } from "./payments-page.data";
+import {
+  fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentsWallets,
+  fetchPaymentTransfers,
+} from "./payments-page.data";
 import { PaymentsWorkspace } from "./payments-workspace";
 import { PaymentsOverviewTabs } from "./payments-workspace-tabs";
 
@@ -51,13 +55,15 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
 
     const apiClient = await apiClientPromise;
     const apiBaseUrl = resolvePlaygroundApiBaseUrl();
-    const [apiKeysResult, walletsResult, transfersResult] = await Promise.all([
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-      trace.step("fetch_payments_wallet_summaries", () =>
-        fetchPaymentsWallets(apiClient.request, { view: "summary" })
-      ),
-      trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
-    ]);
+    const [apiKeysResult, walletsResult, transfersResult, issuedTokenSymbolsResult] =
+      await Promise.all([
+        trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+        trace.step("fetch_payments_wallet_summaries", () =>
+          fetchPaymentsWallets(apiClient.request, { view: "summary" })
+        ),
+        trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
+        fetchPaymentsIssuedTokenSymbols(apiClient.request),
+      ]);
     const apiKeys = apiKeysResult.data ?? [];
     const wallets = walletsResult.data ?? [];
     const transfers = transfersResult.data ?? [];
@@ -94,7 +100,12 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
             walletsError={walletsError}
             aggregate={null}
             aggregateError={null}
-            issuedTokenSymbolsByMint={{}}
+            issuedTokenSymbolsByMint={Object.fromEntries(
+              (issuedTokenSymbolsResult.data ?? []).map((token) => [
+                token.mintAddress,
+                token.symbol,
+              ])
+            )}
             transfers={transfers}
             transfersError={transfersError}
           />
