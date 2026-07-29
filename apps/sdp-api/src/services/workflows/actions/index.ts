@@ -21,7 +21,7 @@ export async function dispatchWorkflowAction(
 ): Promise<ActionExecutionResult> {
   switch (execution.action_type) {
     case "allowlist_add":
-      return runAllowlistAdd(env, execution);
+      return runAllowlistAdd(env, execution, ctx);
     case "allowlist_remove":
       return runAllowlistRemove(env, execution, ctx);
     case "pause":

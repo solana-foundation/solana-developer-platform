@@ -256,6 +256,8 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     recurringPaymentId: input.recurringPaymentId,
+    subscriptionId: input.attempt.subscription_id,
+    dueAt: input.attempt.due_at,
     attemptId: input.attempt.id,
     error: message,
   });

@@ -86,8 +86,12 @@ export function createPostgresKycWalletsRepository(db: AppDb): KycWalletsReposit
 
     async listKycWalletsByCounterparty(params) {
       const result = await db
-        .prepare(`SELECT * FROM kyc_wallets WHERE counterparty_id = ? ORDER BY created_at ASC`)
-        .bind(params.counterpartyId)
+        .prepare(
+          `SELECT * FROM kyc_wallets
+             WHERE counterparty_id = ? AND organization_id = ? AND project_id = ?
+             ORDER BY created_at ASC`
+        )
+        .bind(params.counterpartyId, params.organizationId, params.projectId)
         .all<Record<string, unknown>>();
       return result.results.map(mapKycWalletRow);
     },
@@ -132,17 +136,23 @@ export function createPostgresKycWalletsRepository(db: AppDb): KycWalletsReposit
                  provider_ref = COALESCE(?, provider_ref),
                  verified_at = ${VERIFIED_AT_EXPR},
                  updated_at = sdp_iso_now()
-           WHERE counterparty_id = ?`
+           WHERE counterparty_id = ? AND organization_id = ? AND project_id = ?`
         )
         .bind(
           input.status,
           input.provider ?? null,
           input.providerRef ?? null,
           input.status,
-          input.counterpartyId
+          input.counterpartyId,
+          input.organizationId,
+          input.projectId
         )
         .run();
-      return this.listKycWalletsByCounterparty({ counterpartyId: input.counterpartyId });
+      return this.listKycWalletsByCounterparty({
+        counterpartyId: input.counterpartyId,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
     },
   };
 }

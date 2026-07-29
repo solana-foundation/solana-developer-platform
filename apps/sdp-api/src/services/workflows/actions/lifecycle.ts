@@ -136,13 +136,16 @@ export async function runFreeze(
 
   try {
     const tokenAccount = await resolveWalletTokenAccount(env, wallet, mintAddress);
+    // Idempotent converge: the platform's frozen-accounts mirror is the authority on
+    // what it froze — a retry after a partial success (chain landed, tick died) must
+    // not re-submit and fail on the raw chain error.
+    if (await new TokenService(getDb(env)).isAccountFrozen(execution.token_id, tokenAccount)) {
+      return succeeded({ alreadyFrozen: true, tokenAccount });
+    }
     const result = await mosaic.freezeAccount({ tokenAccount, feePayer: signer.address });
     await mirrorFreeze(env, execution, tokenAccount);
     return succeeded({ signature: result.signature, tokenAccount });
   } catch (error) {
-    if (error instanceof Error && error.message === "ACCOUNT_ALREADY_FROZEN") {
-      return succeeded({ alreadyFrozen: true });
-    }
     return transientFail(errorMessage(error));
   }
 }
@@ -171,13 +174,14 @@ export async function runUnfreeze(
 
   try {
     const tokenAccount = await resolveWalletTokenAccount(env, wallet, mintAddress);
+    // Idempotent converge (see runFreeze): not frozen in the mirror → nothing to thaw.
+    if (!(await new TokenService(getDb(env)).isAccountFrozen(execution.token_id, tokenAccount))) {
+      return succeeded({ alreadyThawed: true, tokenAccount });
+    }
     const result = await mosaic.thawAccount({ tokenAccount, feePayer: signer.address });
     await mirrorUnfreeze(env, execution, tokenAccount);
     return succeeded({ signature: result.signature, tokenAccount });
   } catch (error) {
-    if (error instanceof Error && error.message === "ACCOUNT_NOT_FROZEN") {
-      return succeeded({ alreadyThawed: true });
-    }
     return transientFail(errorMessage(error));
   }
 }

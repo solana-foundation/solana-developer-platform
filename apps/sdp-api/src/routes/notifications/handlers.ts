@@ -1,5 +1,7 @@
 import type { Context } from "hono";
 import { createNotificationsRepository } from "@/db/repositories";
+import { notFound } from "@/lib/errors";
+import { parsePagination } from "@/lib/query";
 import { success } from "@/lib/response";
 import { isEmailConfigured } from "@/services/email";
 import type { Env } from "@/types/env";
@@ -26,8 +28,10 @@ export const listNotifications = async (c: AppContext) => {
     return success(c, { notifications: [], total: 0, page: 1, pageSize: 20 });
   }
 
-  const page = Math.max(Number.parseInt(c.req.query("page") ?? "1", 10), 1);
-  const pageSize = Math.min(Math.max(Number.parseInt(c.req.query("pageSize") ?? "20", 10), 1), 100);
+  const { page, pageSize, offset } = parsePagination(
+    { page: c.req.query("page"), pageSize: c.req.query("pageSize") },
+    { pageSize: 20, maxPageSize: 100 }
+  );
   const unreadOnly = c.req.query("unread") === "true";
 
   const { rows, total } = await createNotificationsRepository(c.env).listForUser({
@@ -35,7 +39,7 @@ export const listNotifications = async (c: AppContext) => {
     userId: user.userId,
     unreadOnly,
     limit: pageSize,
-    offset: (page - 1) * pageSize,
+    offset,
   });
 
   return success(c, { notifications: rows, total, page, pageSize });
@@ -59,11 +63,14 @@ export const markNotificationRead = async (c: AppContext) => {
   if (!user || !notificationId) {
     return success(c, { ok: true });
   }
-  await createNotificationsRepository(c.env).markRead({
+  const found = await createNotificationsRepository(c.env).markRead({
     notificationId,
     organizationId: user.organizationId,
     userId: user.userId,
   });
+  if (!found) {
+    throw notFound("Notification not found");
+  }
   return success(c, { ok: true });
 };
 

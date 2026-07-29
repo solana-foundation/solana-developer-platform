@@ -23,12 +23,14 @@ import type { AppContext, WebhookProcessor } from "./processor";
 
 // Map Mural's provider KYC status onto SDP's normalized status. Mural is the first
 // writer into the SDP-owned kyc_wallets.kyc_status; other providers plug in the same way.
+// 'errored' is a provider-side processing failure, NOT a compliance decision — mapping
+// it to 'rejected' would fire kyc_rejected rules (allowlist_remove / freeze) against a
+// holder whose verification was never actually declined.
 function mapMuralKycStatusToSdp(status: MuralKycStatus): KycStatus {
   switch (status) {
     case "approved":
       return "verified";
     case "rejected":
-    case "errored":
       return "rejected";
     case "pending":
       return "pending";
@@ -150,6 +152,8 @@ async function handleOrganizationLifecycleEvent(
     const status = mapMuralKycStatusToSdp(event.kycStatus);
     const wallets = await createKycWalletsRepository(c.env).setKycStatusByCounterparty({
       counterpartyId: counterparty.id,
+      organizationId: counterparty.organization_id,
+      projectId: counterparty.project_id,
       status,
       provider: "mural",
     });

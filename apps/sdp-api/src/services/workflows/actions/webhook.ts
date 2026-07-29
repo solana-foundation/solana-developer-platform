@@ -24,9 +24,9 @@ async function signPayload(secret: string, payload: string): Promise<string> {
 }
 
 // send_webhook (MVP): POST the trigger event to the issuer-configured URL carried on the
-// rule's action params. Optional `secret` HMAC-signs the body. A non-2xx response or a
-// network/timeout error is transient (the engine retries with backoff); a missing or
-// malformed URL is a permanent config error.
+// rule's action params. Optional `secret` HMAC-signs the body. 5xx/408/429 and
+// network/timeout errors are transient (the engine retries with backoff); other 4xx and
+// a missing/malformed URL are permanent config errors.
 export async function runSendWebhook(
   _env: Env,
   execution: WorkflowExecutionRow,
@@ -67,8 +67,13 @@ export async function runSendWebhook(
       signal: controller.signal,
     });
     if (!response.ok) {
-      // 4xx/5xx — retry; a persistently-broken endpoint fails at the attempt cap.
-      return transientFail(`HTTP_${response.status}`);
+      // 5xx / 408 / 429 may clear on their own — retry with backoff. Other 4xx are
+      // endpoint config errors (bad path, auth) that retrying can't fix.
+      const retryable =
+        response.status >= 500 || response.status === 408 || response.status === 429;
+      return retryable
+        ? transientFail(`HTTP_${response.status}`)
+        : permanentFail(`HTTP_${response.status}`);
     }
     return succeeded({ status: response.status });
   } catch (error) {

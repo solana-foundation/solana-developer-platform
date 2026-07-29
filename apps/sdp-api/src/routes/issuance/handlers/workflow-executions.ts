@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { createWorkflowExecutionsRepository } from "@/db/repositories";
 import { notFound } from "@/lib/errors";
+import { parsePagination } from "@/lib/query";
 import { success } from "@/lib/response";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
@@ -13,9 +14,10 @@ export const listWorkflowExecutions = async (c: AppContext) => {
   const { projectId, orgId } = requireProjectScope(c);
 
   const workflowId = c.req.query("workflowId") || undefined;
-  const page = Number.parseInt(c.req.query("page") ?? "1", 10);
-  const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 200);
-  const offset = (page - 1) * pageSize;
+  const { page, pageSize, offset } = parsePagination(
+    { page: c.req.query("page"), pageSize: c.req.query("pageSize") },
+    { pageSize: 50, maxPageSize: 200 }
+  );
 
   const { rows, total } = await createWorkflowExecutionsRepository(c.env).listExecutions({
     organizationId: orgId,

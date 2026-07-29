@@ -7,6 +7,7 @@ import {
   createWalletAssetEnrollmentsRepository,
 } from "@/db/repositories";
 import { badRequest, notFound } from "@/lib/errors";
+import { parsePagination } from "@/lib/query";
 import { created, success } from "@/lib/response";
 import { TokenService } from "@/services/token.service";
 import { emitKycApprovedForClearedEnrollments } from "@/services/workflows/clearance";
@@ -74,9 +75,10 @@ export const listHolders = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
-  const page = Number.parseInt(c.req.query("page") ?? "1", 10);
-  const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 200);
-  const offset = (page - 1) * pageSize;
+  const { page, pageSize, offset } = parsePagination(
+    { page: c.req.query("page"), pageSize: c.req.query("pageSize") },
+    { pageSize: 50, maxPageSize: 200 }
+  );
 
   const { rows, total } = await createWalletAssetEnrollmentsRepository(
     c.env

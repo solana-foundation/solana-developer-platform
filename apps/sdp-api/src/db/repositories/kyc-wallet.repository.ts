@@ -42,6 +42,10 @@ export interface SetKycStatusInput {
 
 export interface SetKycStatusByCounterpartyInput {
   counterpartyId: string;
+  // The counterparty's own scope — a defence-in-depth predicate on the webhook-driven
+  // mutation path (counterparty ids arrive via provider-supplied identity).
+  organizationId: string;
+  projectId: string;
   status: KycStatus;
   provider?: KycProvider | null;
   providerRef?: string | null;
@@ -65,7 +69,11 @@ export interface KycWalletsRepository {
     walletAddress: string;
   }): Promise<KycWalletRow | null>;
   // Provider webhooks resolve which wallets to verify through the counterparty link.
-  listKycWalletsByCounterparty(params: { counterpartyId: string }): Promise<KycWalletRow[]>;
+  listKycWalletsByCounterparty(params: {
+    counterpartyId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<KycWalletRow[]>;
   setKycStatus(input: SetKycStatusInput): Promise<KycWalletRow | null>;
   // Person-level verification: mark every wallet linked to a counterparty. Returns affected rows.
   setKycStatusByCounterparty(input: SetKycStatusByCounterpartyInput): Promise<KycWalletRow[]>;
