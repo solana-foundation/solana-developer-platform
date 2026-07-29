@@ -25,6 +25,9 @@
   },
   "Error": {
     "tryAgain": "Réessayer",
-    "reportIssue": "Signaler le problème"
+    "reportIssue": "Signaler le problème",
+    "viewTitle": "Cette vue n'a pas pu être chargée",
+    "viewDescription": "Une erreur s'est produite pendant le chargement de cette page. Le reste du dashboard fonctionne toujours : vous pouvez réessayer ou continuer.",
+    "reference": "Référence {digest}"
   }
 }

@@ -29,6 +29,38 @@
   max-height: min(var(--sdp-select-popover-max-height), var(--available-height));
 }
 
+/* Tailwind v3's preflight forced `cursor: pointer` onto buttons; v4 dropped that,
+   so the UA default (`cursor: default`) shows through and every control reads as
+   inert under the pointer unless it spells out `cursor-pointer` itself. Restore
+   the pointer once, here, for the elements that are genuinely clickable.
+
+   Deliberately in `@layer base`, not unlayered: utilities beat layered rules
+   regardless of specificity, so a component asking for a different cursor still
+   wins — `disabled:cursor-not-allowed` on inputs, the click-catcher overlay
+   behind a modal. Unlayered here would silently outrank all of them.
+
+   Disabled controls are excluded so they never advertise an action they can't
+   take; `[data-disabled]` covers the Radix / Base UI convention. */
+@layer base {
+  :is(
+    button,
+    summary,
+    select,
+    input:is([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"]),
+    [role="button"],
+    [role="tab"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="radio"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="option"]
+  ):not(:disabled, [aria-disabled="true"], [data-disabled]) {
+    cursor: pointer;
+  }
+}
+
 :root {
   color-scheme: light;
 }
@@ -44,6 +76,19 @@ body {
 
 html {
   scrollbar-gutter: stable;
+}
+
+/* Radix modal overlays (dropdown menus, dialogs, selects) mount react-remove-scroll,
+   which locks <body> and adds `margin-right` sized to the scrollbar it "removed". But
+   `scrollbar-gutter: stable` above reserves that track permanently, so nothing is ever
+   actually removed and the compensation is phantom width. It measures 0 on macOS/Chrome
+   overlay scrollbars (invisible) but equals the reserved gutter on Firefox's classic
+   scrollbars, shoving the whole page left on every menu open. Zero it; the scroll lock
+   (overflow: hidden) still applies. The library sets its margin with `!important`, so the
+   override must too — the extra `html` type selector outranks its `body[data-scroll-locked]`. */
+html body[data-scroll-locked] {
+  /* biome-ignore lint/complexity/noImportantStyles: must override react-remove-scroll's own !important compensation. */
+  margin-right: 0 !important;
 }
 
 * {

@@ -16,6 +16,10 @@ import type {
 } from "./asset-profile.repository";
 import { generateAssetProfileId } from "./asset-profile.repository";
 
+function buildInClause(length: number): string {
+  return Array.from({ length }, () => "?").join(", ");
+}
+
 function mapAssetProfileRow(row: Record<string, unknown>): AssetProfileRow {
   return {
     id: row.id as string,
@@ -208,44 +212,46 @@ export function createPostgresAssetProfilesRepository(db: AppDb): AssetProfilesR
     },
 
     async listAssetProfiles(params: ListAssetProfilesInput): Promise<ListAssetProfilesResult> {
+      // An explicit empty id list means "no tokens" — short-circuit rather than
+      // emit `IN ()`, which is a syntax error.
+      if (params.tokenIds && params.tokenIds.length === 0) {
+        return { rows: [], total: 0 };
+      }
+
+      const tokenFilter = params.tokenIds
+        ? ` AND token_id IN (${buildInClause(params.tokenIds.length)})`
+        : "";
+      const filterValues = [
+        params.organizationId,
+        params.projectId,
+        params.includeArchived ?? false,
+        params.category ?? null,
+        params.category ?? null,
+        ...(params.tokenIds ?? []),
+      ];
+      const whereClause = `WHERE organization_id = ?
+                AND project_id = ?
+                AND (?::boolean OR status = 'active')
+                AND (?::text IS NULL OR asset_category = ?)${tokenFilter}`;
+
       const [rowsResult, countRow] = await Promise.all([
         db
           .prepare(
             `SELECT *
                FROM asset_profiles
-              WHERE organization_id = ?
-                AND project_id = ?
-                AND (?::boolean OR status = 'active')
-                AND (?::text IS NULL OR asset_category = ?)
-              ORDER BY created_at DESC
+              ${whereClause}
+              ORDER BY created_at DESC, id DESC
               LIMIT ? OFFSET ?`
           )
-          .bind(
-            params.organizationId,
-            params.projectId,
-            params.includeArchived ?? false,
-            params.category ?? null,
-            params.category ?? null,
-            params.limit,
-            params.offset
-          )
+          .bind(...filterValues, params.limit, params.offset)
           .all<Record<string, unknown>>(),
         db
           .prepare(
             `SELECT COUNT(*)::int AS total
                FROM asset_profiles
-              WHERE organization_id = ?
-                AND project_id = ?
-                AND (?::boolean OR status = 'active')
-                AND (?::text IS NULL OR asset_category = ?)`
+              ${whereClause}`
           )
-          .bind(
-            params.organizationId,
-            params.projectId,
-            params.includeArchived ?? false,
-            params.category ?? null,
-            params.category ?? null
-          )
+          .bind(...filterValues)
           .first<{ total: number }>(),
       ]);
 

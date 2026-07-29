@@ -135,7 +135,9 @@ export function computeTodaysVolume(transfers: PaymentTransferSummary[]): number
 export function buildHomeActivityRows(
   transfers: PaymentTransferSummary[],
   issuanceTransactions: TokenTransactionListItem[],
-  t: Translate
+  t: Translate,
+  /** Symbols for tokens this org issued, keyed by mint. The catalogue never knows them. */
+  issuedTokenSymbolsByMint?: Readonly<Record<string, string>>
 ): HomeActivityRow[] {
   const paymentRows = transfers
     .filter(
@@ -148,7 +150,7 @@ export function buildHomeActivityRows(
       type: resolvePaymentsType(transfer, t),
       // transfer.token is a mint address; without this the row renders the raw
       // base58 while the Transactions table shows the symbol for the same row.
-      token: resolveTransferTokenLabel(transfer.token) ?? "—",
+      token: resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint) ?? "—",
       amount: transfer.amount ?? "—",
       address: resolvePaymentsAddress(transfer),
       explorer: resolvePaymentsExplorer(transfer),

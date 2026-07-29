@@ -1,6 +1,6 @@
 "use client";
 
-import { Coins, Flame, type LucideIcon, Rocket } from "lucide-react";
+import { Coins, Flame, Lock, type LucideIcon, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -9,8 +9,12 @@ import type { FundManagementModalAction } from "../../token-fund-management-sect
 import { TokenTransactionsBrowser } from "../token-transactions-browser";
 import type { TokenOperations } from "../use-token-operations";
 
+// "lock-supply" is local to this tab: it opens its own modal rather than the
+// shared fund-management one, so it stays out of FundManagementModalAction.
+type OperationRowId = FundManagementModalAction | "lock-supply";
+
 interface OperationRow {
-  id: FundManagementModalAction;
+  id: OperationRowId;
   icon: LucideIcon;
   title: string;
   helper: string;
@@ -54,6 +58,21 @@ export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId:
         },
       ];
 
+  // Only offered once a cap exists to enforce — without one the action has no
+  // target, and its disabled reason would just be noise on every uncapped token.
+  // lockSupplyRemaining is null precisely when there is no cap to aim at.
+  if (!ops.canDeployToken && ops.lockSupplyRemaining !== null) {
+    operationRows.push({
+      id: "lock-supply",
+      icon: Lock,
+      title: t("DashboardIssuance.management.lockSupplyTitle"),
+      helper: t("DashboardIssuance.management.lockSupplyHelper"),
+      actionLabel: t("DashboardIssuance.management.lockSupplyAction"),
+      disabled: Boolean(ops.lockSupplyDisabledReason),
+      disabledReason: ops.lockSupplyDisabledReason,
+    });
+  }
+
   return (
     <div className="space-y-5">
       <div className="space-y-3">
@@ -89,7 +108,11 @@ export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId:
                   <Button
                     type="button"
                     className="w-[96px]"
-                    onClick={() => ops.openFundManagementModal(row.id)}
+                    onClick={() =>
+                      row.id === "lock-supply"
+                        ? ops.openLockSupplyModal()
+                        : ops.openFundManagementModal(row.id)
+                    }
                     disabled={row.disabled}
                   >
                     {row.actionLabel}

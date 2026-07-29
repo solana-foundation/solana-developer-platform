@@ -15,6 +15,11 @@ import {
   useTransition,
 } from "react";
 import { SWRConfig } from "swr";
+import {
+  DEFAULT_ISSUANCE_TOKEN_VIEW,
+  persistIssuanceTokenView,
+  type TokenView,
+} from "@/app/dashboard/issuance/issuance-token-view";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
@@ -44,6 +49,8 @@ type DashboardWorkspaceContextValue = {
   sdpEnvironment: SdpEnvironment;
   isSidebarOpen: boolean;
   issuanceTab: IssuanceWorkspaceTab;
+  /** Grid ⇄ list preference for the issuance overview; see issuance-token-view.ts. */
+  issuanceTokenView: TokenView;
   counterpartyTab: CounterpartyWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
@@ -52,6 +59,7 @@ type DashboardWorkspaceContextValue = {
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
   setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
+  setIssuanceTokenView: (view: TokenView) => void;
   setCounterpartyTab: (tab: CounterpartyWorkspaceTab) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
@@ -69,6 +77,8 @@ type DashboardWorkspaceProviderProps = {
   initialSelectedProjectId: string | null;
   shouldRepairInitialProjectCookie: boolean;
   initialSidebarOpen?: boolean;
+  /** Read from the view cookie by the dashboard layout, so SSR paints it. */
+  initialIssuanceTokenView?: TokenView;
 };
 
 export function DashboardWorkspaceProvider({
@@ -79,12 +89,15 @@ export function DashboardWorkspaceProvider({
   initialSelectedProjectId,
   shouldRepairInitialProjectCookie,
   initialSidebarOpen = true,
+  initialIssuanceTokenView = DEFAULT_ISSUANCE_TOKEN_VIEW,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
+  const [issuanceTokenView, setIssuanceTokenViewState] =
+    useState<TokenView>(initialIssuanceTokenView);
   const sandboxProject = useMemo(
     () => projects.find((project) => project.slug === "default-sandbox") ?? null,
     [projects]
@@ -227,6 +240,13 @@ export function DashboardWorkspaceProvider({
     setSidebarOpenState((current) => !current);
   }, []);
 
+  // Mirrored into the cookie so the next server render — page and loading
+  // skeleton alike — starts in the view the user just chose.
+  const setIssuanceTokenView = useCallback((view: TokenView) => {
+    setIssuanceTokenViewState(view);
+    persistIssuanceTokenView(view);
+  }, []);
+
   const setIssuanceTab = useCallback(
     (tab: IssuanceWorkspaceTab) => {
       replaceSearchParams({
@@ -257,6 +277,7 @@ export function DashboardWorkspaceProvider({
       isSidebarOpen,
       isProjectSwitching,
       issuanceTab,
+      issuanceTokenView,
       counterpartyTab,
       playgroundApiKeys,
       selectedPlaygroundApiKeyId,
@@ -264,6 +285,7 @@ export function DashboardWorkspaceProvider({
       setPlaygroundApiKeys,
       setSelectedPlaygroundApiKeyId,
       setIssuanceTab,
+      setIssuanceTokenView,
       setCounterpartyTab,
       setSidebarOpen,
       toggleSidebar,
@@ -280,11 +302,13 @@ export function DashboardWorkspaceProvider({
       isProjectSwitching,
       playgroundApiKeys,
       issuanceTab,
+      issuanceTokenView,
       counterpartyTab,
       selectedPlaygroundApiKeyId,
       selectProject,
       setPlaygroundApiKeys,
       setIssuanceTab,
+      setIssuanceTokenView,
       setCounterpartyTab,
       setSidebarOpen,
       toggleSidebar,
@@ -312,4 +336,12 @@ export function useDashboardWorkspace() {
   }
 
   return context;
+}
+
+// Deliberately tolerant of a missing provider, unlike useDashboardWorkspace: the
+// issuance loading skeletons read the view, and a Suspense fallback is also
+// mounted standalone by the route-loading unit tests. Falling back to the default
+// view there beats making every one of those call sites stand up a provider.
+export function useIssuanceTokenView(): TokenView {
+  return useContext(DashboardWorkspaceContext)?.issuanceTokenView ?? DEFAULT_ISSUANCE_TOKEN_VIEW;
 }
