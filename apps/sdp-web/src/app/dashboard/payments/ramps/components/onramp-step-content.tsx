@@ -10,6 +10,7 @@ import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
+import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
@@ -21,6 +22,13 @@ import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
+/**
+ * Renders content for the active onramp wizard step.
+ *
+ * @param props - The active onramp wizard state.
+ * @returns The active onramp step content.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: step dispatch keeps every onramp stage in one component while each branch stays simple.
 export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const t = useTranslations();
   const {
@@ -46,7 +54,13 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     setCollectedField,
     requirementsBlocker,
     refreshQuote,
+    memoRows,
+    setMemoRows,
   } = wizard;
+
+  if (currentStepId === "MEMO") {
+    return <MemoStepContent rows={memoRows} onChange={setMemoRows} />;
+  }
 
   if (currentStepId === "DEPOSIT") {
     if (!hasEnabledRampProvider(rampProviderAccess)) {

@@ -72,27 +72,52 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
 
   try {
     const { tokenId } = await params;
+    // The asset-profile workspace owns the control list and transactions via its
+    // own endpoints and passes includeAllowlist=false / includeTransactions=false
+    // to skip those fetches. The legacy workspace keeps them to feed its static,
+    // unsearchable lists.
+    const requestUrl = new URL(request.url);
+    const includeAllowlist = requestUrl.searchParams.get("includeAllowlist") !== "false";
+    const includeTransactions = requestUrl.searchParams.get("includeTransactions") !== "false";
     const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.issuance.token.supporting_data.api")
     );
+
+    const emptyAllowlist = {
+      status: null,
+      data: [] as TokenAllowlistEntry[],
+      error: null,
+      total: null,
+      hasMore: false,
+    };
+
+    const emptyTransactions = {
+      status: null,
+      data: [] as TokenTransaction[],
+      error: null,
+      total: null,
+      hasMore: false,
+    };
 
     const [walletsResult, transactionsResult, allowlistResult, frozenResult] = await Promise.all([
       trace.step("fetch_authority_wallets", () =>
         fetchPaymentsWallets(apiClient.request, { view: "summary", includeBalances: false })
       ),
       trace.step("fetch_transactions", () =>
-        fetchList<TokenTransaction>(
-          apiClient.request,
-          `/v1/issuance/tokens/${tokenId}/transactions?page=1&pageSize=100`
-        )
+        includeTransactions
+          ? fetchList<TokenTransaction>(
+              apiClient.request,
+              `/v1/issuance/tokens/${tokenId}/transactions?page=1&pageSize=100`
+            )
+          : Promise.resolve(emptyTransactions)
       ),
       trace.step("fetch_allowlist", () =>
-        fetchList<TokenAllowlistEntry>(
-          apiClient.request,
-          // 500 so the compliance tab's client-side allowlist/denylist search
-          // covers the whole list without a dedicated server-search endpoint.
-          `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=500`
-        )
+        includeAllowlist
+          ? fetchList<TokenAllowlistEntry>(
+              apiClient.request,
+              `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=500`
+            )
+          : Promise.resolve(emptyAllowlist)
       ),
       trace.step("fetch_frozen_accounts", () =>
         fetchList<FrozenAccount>(

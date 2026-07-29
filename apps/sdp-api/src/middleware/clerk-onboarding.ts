@@ -35,7 +35,10 @@ export function clerkOnboardingMiddleware() {
 
     const email = resolveClerkEmail(payload);
     if (!email) {
-      throw new AppError("UNAUTHORIZED", "Clerk token missing email");
+      throw new AppError(
+        "UNAUTHORIZED",
+        "Clerk token has no usable email claim. Check the JWT template: an invalid shortcode is passed through unsubstituted rather than resolved."
+      );
     }
 
     c.set("clerkOnboarding", {

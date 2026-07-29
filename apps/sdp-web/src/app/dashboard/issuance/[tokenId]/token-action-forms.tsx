@@ -40,6 +40,8 @@ interface TokenActionFormsProps {
   setFreezeForm: Dispatch<SetStateAction<FreezeFormState>>;
   allowlistForm: AllowlistFormState;
   setAllowlistForm: Dispatch<SetStateAction<AllowlistFormState>>;
+  tokenId: string;
+  enableControlListSearch?: boolean;
   allowlistEntries: TokenAllowlistEntry[];
   allowlistError: string | null;
   controlListLabel: string | null;
@@ -117,6 +119,8 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         setFreezeForm={props.setFreezeForm}
         allowlistForm={props.allowlistForm}
         setAllowlistForm={props.setAllowlistForm}
+        tokenId={props.tokenId}
+        enableControlListSearch={props.enableControlListSearch}
         allowlistEntries={props.allowlistEntries}
         allowlistError={props.allowlistError}
         controlListLabel={props.controlListLabel}

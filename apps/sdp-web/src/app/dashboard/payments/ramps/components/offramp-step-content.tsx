@@ -11,6 +11,7 @@ import { toRampCryptoToken } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
+import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle } from "./providers";
@@ -115,6 +116,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     refreshQuote,
     onboarding,
     retryOnboarding,
+    memoRows,
+    setMemoRows,
   } = wizard;
 
   const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
@@ -172,6 +175,10 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
         ) : null}
       </div>
     );
+  }
+
+  if (currentStepId === "MEMO") {
+    return <MemoStepContent rows={memoRows} onChange={setMemoRows} />;
   }
 
   if (currentStepId === "REQUIREMENTS") {

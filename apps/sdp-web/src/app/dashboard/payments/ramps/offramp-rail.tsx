@@ -3,11 +3,13 @@
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { WizardSummaryList } from "../wizard-summary-list";
 import { OfframpStepContent } from "./components/offramp-step-content";
-import { PoweredByRampProvider, RampWizardShell } from "./components/ramp-wizard-shell";
+import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard";
 import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
 import type { RailProps } from "./ramp-action-page";
+import { preStepSummaryDetails } from "./wizard-summary";
 
 function offrampPrimaryLabel(wizard: OfframpWizard, t: ReturnType<typeof useTranslations>): string {
   switch (true) {
@@ -27,6 +29,8 @@ export function OfframpRail({
   counterpartiesResult,
   selectedCounterparty,
   counterpartyId,
+  counterpartyName,
+  methodLabel,
   preSteps,
   onExit,
 }: RailProps) {
@@ -44,7 +48,6 @@ export function OfframpRail({
   const transferTerminal = wizard.transferStatus
     ? isTerminalRampTransferStatus(wizard.transferStatus.status)
     : false;
-
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
@@ -61,11 +64,13 @@ export function OfframpRail({
       counterpartyDialogOpen={false}
       setCounterpartyDialogOpen={() => {}}
       onCounterpartyCreated={() => {}}
-      header={
-        wizard.fields.provider &&
-        (wizard.currentStepId === "REQUIREMENTS" || wizard.currentStepId === "COMPLETE") ? (
-          <PoweredByRampProvider provider={wizard.fields.provider} />
-        ) : null
+      summary={
+        <WizardSummaryList
+          details={[
+            ...preStepSummaryDetails(t, counterpartyName, methodLabel),
+            ...wizard.summaryDetails,
+          ]}
+        />
       }
       secondaryLabel={
         wizard.onTransactionStage ? t("DashboardPayments.counterparty.cancel") : undefined

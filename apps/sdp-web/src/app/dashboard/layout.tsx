@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { SelectOrganizationPanel } from "@/components/select-organization-panel";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
 import { assetProfiles, organizationOnboarding } from "@/flags";
@@ -41,8 +42,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     assetProfiles(),
   ]);
 
-  if (!userId || !orgId) {
+  if (!userId) {
     redirect(await getAuthEntryPath());
+  }
+
+  if (!orgId) {
+    return <SelectOrganizationPanel />;
   }
 
   const dashboardAccess = resolveDashboardAccess(orgRole);

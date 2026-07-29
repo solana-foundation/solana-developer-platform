@@ -35,6 +35,8 @@ type AddressScreeningEnvelope = {
   };
 };
 
+export class ComplianceNotEnabledError extends Error {}
+
 function toErrorMessage(payload: AddressScreeningEnvelope, fallback: string): string {
   if (typeof payload.error?.message === "string" && payload.error.message) {
     return payload.error.message;
@@ -61,7 +63,11 @@ export async function screenAddressCompliance(input: {
 
   const payload = (await response.json().catch(() => ({}))) as AddressScreeningEnvelope;
   if (!response.ok) {
-    throw new Error(toErrorMessage(payload, `Compliance request failed (${response.status}).`));
+    const message = toErrorMessage(payload, `Compliance request failed (${response.status}).`);
+    if (response.status === 403) {
+      throw new ComplianceNotEnabledError(message);
+    }
+    throw new Error(message);
   }
 
   return {

@@ -399,6 +399,92 @@ describe("Clerk webhooks", () => {
     expect(reconciledMembership).toEqual({ role: "admin", status: "active" });
   });
 
+  /**
+   * Seeds a Clerk-linked org plus an invitation in the given state, then has
+   * Clerk report the invitee joining. Returns the resulting membership row.
+   */
+  async function syncMembershipAfterInvitation(
+    invitationStatuses: string[]
+  ): Promise<{ status: string } | null> {
+    const clerkOrgId = `org_clerk_revoked_${invitationStatuses.join("_")}`;
+    const organizationId = `org_revoked_${invitationStatuses.join("_")}`;
+    const email = "withdrawn@example.com";
+    const db = getDb(env);
+
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Revoked Invite Org', ?, 'individual', 'active')"
+        )
+        .bind(organizationId, organizationId),
+      db
+        .prepare(
+          `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+           VALUES (?, 'clerk', ?, ?, ?)`
+        )
+        .bind(`aoi_${organizationId}`, clerkOrgId, organizationId, organizationId),
+      db
+        .prepare(
+          "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'revoked-inviter@example.com', 1, 'active')"
+        )
+        .bind(`usr_inviter_${organizationId}`),
+    ]);
+
+    // created_at is set explicitly so "most recent invitation" is deterministic
+    // rather than dependent on insert timing within the same second.
+    for (const [index, status] of invitationStatuses.entries()) {
+      await db
+        .prepare(
+          `INSERT INTO invitations
+             (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
+           VALUES (?, ?, ?, 'member', ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          `inv_${organizationId}_${index}`,
+          organizationId,
+          email,
+          `usr_inviter_${organizationId}`,
+          `hash_${organizationId}_${index}`,
+          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          status,
+          new Date(Date.UTC(2026, 0, index + 1)).toISOString()
+        )
+        .run();
+    }
+
+    mockClerkUserLookup(`user_revoked_${organizationId}`, email);
+    const response = await simulateClerkWebhook({
+      type: "organizationMembership.created",
+      data: {
+        organization: { id: clerkOrgId, name: "Revoked Invite Org", slug: organizationId },
+        role: "org:member",
+        public_user_data: { user_id: `user_revoked_${organizationId}`, identifier: email },
+      },
+    });
+    expect(response.status).toBe(200);
+
+    return db
+      .prepare(
+        `SELECT om.status
+           FROM organization_members om
+           JOIN users u ON u.id = om.user_id
+          WHERE om.organization_id = ? AND u.email = ?`
+      )
+      .bind(organizationId, email)
+      .first<{ status: string }>();
+  }
+
+  it("declines a Clerk membership when the invitation was revoked", async () => {
+    // Clerk mints the acceptance link and we cannot expire it, so this sync is
+    // the last point that can honour the revocation.
+    expect(await syncMembershipAfterInvitation(["revoked"])).toBeNull();
+  });
+
+  it("admits a Clerk membership when a revoked invitation was superseded by a new one", async () => {
+    const membership = await syncMembershipAfterInvitation(["revoked", "pending"]);
+    expect(membership?.status).toBe("active");
+  });
+
   it("syncs organization memberships without creating records on delete-only events", async () => {
     const deleteOnly = await simulateClerkWebhook({
       type: "organizationMembership.deleted",

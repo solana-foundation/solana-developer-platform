@@ -128,7 +128,7 @@ Use the search field to find a specific address by label or public key.
 <Tab value="API">
 
 ```bash
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist?search=So1&label=Treasury" \
   -H "Authorization: Bearer sk_test_..."
 ```
 
@@ -137,7 +137,26 @@ const { data, meta } = await res.json();
 // meta: { total, page, pageSize, hasMore }
 ```
 
-Supports `page` and `pageSize` query parameters.
+Query parameters:
+
+- `page`, `pageSize` — pagination (`pageSize` max 500, default 50).
+- `search` — contains-style match over the entry address **and** label. A blank value is treated as no filter.
+- `label` — restrict to entries with this exact label.
+
+Search and the label filter run server-side over the whole list, so results aren't limited to the current page.
+
+To populate a label filter, fetch the distinct labels in use (the response also
+includes `total`, the unfiltered entry count, for a summary display):
+
+```bash
+curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/labels \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+```typescript
+const { data } = await res.json();
+// data: { labels: ["Market maker", "Treasury"], total: 42 }
+```
 
 </Tab>
 </Tabs>

@@ -62,10 +62,23 @@ export async function fetchTokenManagementSupportingData(
   t: Translate,
   options: {
     signal?: AbortSignal;
+    // The asset-profile workspace owns the control list and transactions through
+    // its own endpoints, so it opts out of those fetches here to avoid redundant
+    // work. The legacy workspace keeps them (its static lists need them).
+    includeAllowlist?: boolean;
+    includeTransactions?: boolean;
   } = {}
 ): Promise<TokenManagementSupportingData> {
+  const query = new URLSearchParams();
+  if (options.includeAllowlist === false) {
+    query.set("includeAllowlist", "false");
+  }
+  if (options.includeTransactions === false) {
+    query.set("includeTransactions", "false");
+  }
+  const suffix = query.toString();
   const response = await fetch(
-    `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/supporting-data`,
+    `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/supporting-data${suffix ? `?${suffix}` : ""}`,
     {
       method: "GET",
       cache: "no-store",

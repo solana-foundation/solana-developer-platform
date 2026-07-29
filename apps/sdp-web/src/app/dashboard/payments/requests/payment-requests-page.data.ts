@@ -31,8 +31,8 @@ export type PaymentRequestsResult = PaginatedResponse<PaymentRequest> & {
  */
 export function deriveTokenOptions(cluster: SolanaCluster): PaymentRequestTokenOption[] {
   return Object.values(WELL_KNOWN_TOKENS).flatMap((token: WellKnownToken) => {
-    const mintAddress = token.mints[cluster];
-    return mintAddress ? [{ mintAddress, symbol: token.symbol }] : [];
+    const mint = token.mints[cluster];
+    return mint ? [{ mintAddress: mint.address, symbol: token.symbol }] : [];
   });
 }
 

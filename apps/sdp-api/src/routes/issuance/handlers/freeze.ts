@@ -8,7 +8,7 @@ import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/mosaic";
+import { createMosaicService } from "@/services/issuance/mosaic";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";

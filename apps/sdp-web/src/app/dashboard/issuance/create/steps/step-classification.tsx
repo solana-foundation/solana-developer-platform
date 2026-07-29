@@ -29,9 +29,9 @@ export function StepClassification() {
       className="space-y-6"
     >
       <div>
-        <h2 className="text-xl font-medium text-primary">
+        <h1 className="text-2xl font-medium tracking-tight text-primary">
           {t("DashboardIssuance.classification.title")}
-        </h2>
+        </h1>
         <p className="mt-1 text-sm text-secondary">
           {t("DashboardIssuance.classification.description")}
         </p>
@@ -48,9 +48,11 @@ export function StepClassification() {
         <p className="text-sm text-tertiary">{t("DashboardIssuance.classification.nameHint")}</p>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div className="flex items-center justify-between gap-3">
-          <Label>{t("DashboardIssuance.classification.chooseClassification")}</Label>
+          <Label className="text-base">
+            {t("DashboardIssuance.classification.chooseClassification")}
+          </Label>
           <a
             href="https://platform.solana.com/docs/reference/issuance-token-types#selecting-a-template"
             target="_blank"
@@ -93,15 +95,16 @@ export function StepClassification() {
       </div>
 
       {category ? (
-        // Keyed by category so switching classifications re-runs the reveal with
-        // the new category's sub types.
+        // Unkeyed on purpose: the reveal runs once when a category is first
+        // chosen, not on every classification swap.
         <motion.div
-          key={category.category}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="space-y-3"
+          className="space-y-4"
         >
-          <Label>{t("DashboardIssuance.classification.chooseAssetType")}</Label>
+          <Label className="text-base">
+            {t("DashboardIssuance.classification.chooseAssetType")}
+          </Label>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {category.subTypes.map((subType) => (
               <SelectionCard

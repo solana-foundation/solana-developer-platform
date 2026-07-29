@@ -11,12 +11,13 @@ import {
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/payments/counterparty/add-external-account-dialog";
 import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
-import { getDevnetExplorerUrl } from "@/app/dashboard/payments/payments-workspace.data";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
@@ -52,6 +53,7 @@ export function OnchainSendStepContent({
   counterpartyName: string;
 }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
   const {
     currentStepId,
     cryptoAccounts,
@@ -150,7 +152,6 @@ export function OnchainSendStepContent({
               onChange={(event) => setField("amount", event.currentTarget.value)}
               placeholder="1.0"
               size="xl"
-              className="h-[var(--input-height-xl)] shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
               action={
                 availableAmount !== null ? (
                   <AmountBalanceReadout
@@ -188,7 +189,6 @@ export function OnchainSendStepContent({
             onChange={(event) => setField("memo", event.currentTarget.value)}
             placeholder={t("DashboardPayments.onchainSend.memoPlaceholder")}
             size="xl"
-            className="shadow-none ring-0 [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
           />
         </div>
       </div>
@@ -264,7 +264,7 @@ export function OnchainSendStepContent({
             className="w-full"
             iconLeft={<ExternalLink />}
             onClick={() =>
-              window.open(getDevnetExplorerUrl(transferResult.signature ?? ""), "_blank")
+              window.open(explorerTxUrl(transferResult.signature ?? "", cluster), "_blank")
             }
           >
             {t("DashboardPayments.onchainSend.viewOnExplorer")}

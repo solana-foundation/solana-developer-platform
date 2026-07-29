@@ -9,13 +9,14 @@ import {
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
-import { getDevnetExplorerUrl } from "@/app/dashboard/payments/payments-workspace.data";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import type { BatchSendWizard } from "../hooks/use-batch-send-wizard";
 import { MAX_BATCH_RECIPIENTS } from "../schema";
@@ -209,14 +210,13 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 
       <div className="space-y-2">
         <div className="flex items-center gap-3">
-          <div className="relative flex-1">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-3.5 size-5 -translate-y-1/2 text-tertiary" />
+          <div className="flex-1">
             <Input
               value={search}
               onChange={(event) => setSearchQuery(event.currentTarget.value)}
               placeholder={t("DashboardPayments.batchSend.searchCounterparty")}
               size="xl"
-              className="h-[var(--input-height-xl)] pl-11 [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:bg-[var(--input-bg-idle)]"
+              iconLeft={<SearchIcon />}
             />
           </div>
           <ArrowPagination
@@ -468,6 +468,7 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
 
 function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
   const { batchResult, recipients, displayAsset } = wizard;
   const nameByAccount = useMemo(
     () => new Map(recipients.map((r) => [r.counterpartyAccountId, r.name])),
@@ -517,7 +518,7 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
                 {signature ? (
                   <button
                     type="button"
-                    onClick={() => window.open(getDevnetExplorerUrl(signature), "_blank")}
+                    onClick={() => window.open(explorerTxUrl(signature, cluster), "_blank")}
                     className="text-tertiary hover:text-primary"
                     aria-label={t("DashboardPayments.batchSend.viewOnExplorer")}
                   >
