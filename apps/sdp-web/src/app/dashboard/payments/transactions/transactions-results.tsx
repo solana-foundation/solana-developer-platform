@@ -26,6 +26,7 @@ import {
   formatDirection,
   formatDisplayAmount,
   formatTimestamp,
+  resolveTransferTokenLabel,
   resolveTransferTypeLabel,
   shortenAddress,
 } from "../payments-overview.utils";
@@ -99,10 +100,12 @@ function TransactionDetail({
   transfer,
   loading,
   error,
+  issuedTokenSymbolsByMint,
 }: {
   transfer: PaymentTransferSummary | null;
   loading: boolean;
   error: string | null;
+  issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -133,7 +136,11 @@ function TransactionDetail({
     [t("DashboardPayments.transactions.type"), resolveTransferTypeLabel(transfer.type, t)],
     [
       t("DashboardPayments.transactions.amount"),
-      formatDisplayAmount(transfer.amount, transfer.token, locale),
+      formatDisplayAmount(
+        transfer.amount,
+        resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint),
+        locale
+      ),
     ],
     [t("DashboardPayments.transactions.direction"), formatDirection(transfer.direction, t)],
     [t("DashboardPayments.transactions.wallet"), transfer.walletId],
@@ -261,9 +268,11 @@ function EmptyState({ filtered, onClear }: { filtered: boolean; onClear: () => v
 function DesktopTable({
   transfers,
   onSelect,
+  issuedTokenSymbolsByMint,
 }: {
   transfers: PaymentTransferSummary[];
   onSelect: (transfer: PaymentTransferSummary) => void;
+  issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -304,6 +313,7 @@ function DesktopTable({
                   <TransactionAmount
                     transfer={transfer}
                     locale={locale}
+                    issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
                     className="text-sm font-medium text-primary"
                   />
                 </TableCell>
@@ -311,9 +321,12 @@ function DesktopTable({
                   {formatDirection(transfer.direction, t)}
                 </TableCell>
                 <TableCell className="min-w-0">
+                  {/* primary is already shortened when there is no display
+                      name, so titling it with itself showed the truncated
+                      string again on hover. The reference is the full value. */}
                   <span
                     className="block truncate text-sm text-secondary"
-                    title={counterparty.primary}
+                    title={counterparty.reference ?? counterparty.primary}
                   >
                     {counterparty.primary}
                   </span>
@@ -349,9 +362,11 @@ function DesktopTable({
 function MobileRows({
   transfers,
   onSelect,
+  issuedTokenSymbolsByMint,
 }: {
   transfers: PaymentTransferSummary[];
   onSelect: (transfer: PaymentTransferSummary) => void;
+  issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -375,6 +390,7 @@ function MobileRows({
                 <TransactionAmount
                   transfer={transfer}
                   locale={locale}
+                  issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
                   className="mt-1 font-medium text-primary"
                 />
               </div>
@@ -388,7 +404,10 @@ function MobileRows({
                 <p className="text-xs text-tertiary">
                   {t("DashboardPayments.transactions.counterparty")}
                 </p>
-                <p className="mt-1 truncate text-secondary" title={counterparty.primary}>
+                <p
+                  className="mt-1 truncate text-secondary"
+                  title={counterparty.reference ?? counterparty.primary}
+                >
                   {counterparty.primary}
                 </p>
                 {counterparty.secondary ? (
@@ -419,9 +438,11 @@ function MobileRows({
 export function TransactionsResults({
   result,
   serverFilters,
+  issuedTokenSymbolsByMint,
 }: {
   result: TransactionsPageResult;
   serverFilters: TransactionFilters;
+  issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -443,7 +464,11 @@ export function TransactionsResults({
           serverFilters.asset ||
           serverFilters.provider ||
           serverFilters.from ||
-          serverFilters.to
+          serverFilters.to ||
+          // Excluding observed deposits can be the sole reason a wallet looks
+          // empty, so the empty state must offer to clear filters rather than
+          // claim there is nothing to show.
+          !serverFilters.includeObserved
       ),
     [serverFilters]
   );
@@ -469,8 +494,16 @@ export function TransactionsResults({
         <EmptyState filtered={filtered} onClear={clearFilters} />
       ) : (
         <>
-          <DesktopTable transfers={result.transfers} onSelect={setSelected} />
-          <MobileRows transfers={result.transfers} onSelect={setSelected} />
+          <DesktopTable
+            transfers={result.transfers}
+            onSelect={setSelected}
+            issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
+          />
+          <MobileRows
+            transfers={result.transfers}
+            onSelect={setSelected}
+            issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
+          />
           <div className="flex flex-col gap-4 border-t border-border-default p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
               <span className="text-xs text-secondary">
@@ -513,6 +546,7 @@ export function TransactionsResults({
           transfer={detailState.detail}
           loading={detailState.loading}
           error={detailState.error}
+          issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
         />
       </Modal>
     </section>

@@ -1,6 +1,6 @@
 "use client";
 
-import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
+import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -73,9 +73,9 @@ import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indi
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
+import { SelectOrganizationPanel } from "@/components/select-organization-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -382,9 +382,6 @@ function DashboardTopBar({
         }
         trailingContent={
           <>
-            <div className="xl:hidden">
-              <ThemeToggle variant="header" />
-            </div>
             <LanguagePicker />
             <UserButton />
             {sandboxBadge}
@@ -406,9 +403,6 @@ function DashboardTopBar({
       }
       trailingContent={
         <>
-          <div className="xl:hidden">
-            <ThemeToggle variant="header" />
-          </div>
           <LanguagePicker />
           <UserButton />
           {sandboxBadge}
@@ -700,9 +694,6 @@ function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  if (pathname.startsWith("/dashboard/members")) {
-    return { title: t("Shared.dashboardShell.members") };
-  }
   if (pathname.startsWith("/dashboard/settings")) {
     return { title: t("Shared.dashboardShell.settings") };
   }
@@ -718,10 +709,6 @@ function ApiKeyNewLoading() {
 
 function ApiKeyEditLoading() {
   return <ApiKeyAuthoringSkeleton route="api-key-edit" />;
-}
-
-function MembersLoading() {
-  return <CompactOperationsCardSkeleton route="members" />;
 }
 
 function AllowlistLoading() {
@@ -801,8 +788,6 @@ function resolvePageLoadingComponent(
       return ApprovalInboxSkeleton;
     case "approval-detail":
       return ApprovalDetailSkeleton;
-    case "members":
-      return MembersLoading;
     case "settings":
       return SettingsPageSkeleton;
     case "allowlist":
@@ -1078,12 +1063,7 @@ function DashboardSidebarContent({
             </DashboardNavigationLink>
           );
         })}
-        {variant === "desktop" ? (
-          <>
-            <ThemeToggle collapsed={isCollapsed} />
-            <NetworkDebugToggle collapsed={isCollapsed} />
-          </>
-        ) : null}
+        {variant === "desktop" ? <NetworkDebugToggle collapsed={isCollapsed} /> : null}
       </div>
     </>
   );
@@ -1313,21 +1293,7 @@ export function DashboardShell({
   }
 
   if (!orgId) {
-    return (
-      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-        <div className="mx-auto max-w-3xl border border-border-subtle bg-surface-raised/70 p-6">
-          <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
-            {t("Shared.dashboardShell.selectOrganization")}
-          </h1>
-          <p className="mt-3 text-sm text-tertiary">
-            {t("Shared.dashboardShell.selectOrganizationDescription")}
-          </p>
-          <div className="mt-6">
-            <OrganizationSwitcher hidePersonal />
-          </div>
-        </div>
-      </main>
-    );
+    return <SelectOrganizationPanel />;
   }
 
   if (isOrganizationOnboardingRoute) {
@@ -1346,7 +1312,6 @@ export function DashboardShell({
             <span className="absolute left-1/2 hidden -translate-x-1/2 text-sm font-medium text-secondary sm:block">
               {t("Shared.dashboardShell.workspace")}
             </span>
-            <ThemeToggle variant="header" />
           </header>
           <section className="min-h-0 flex-1">{children}</section>
         </div>

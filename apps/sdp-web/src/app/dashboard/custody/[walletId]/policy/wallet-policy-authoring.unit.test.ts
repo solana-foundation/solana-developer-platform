@@ -2,6 +2,7 @@ import type { PaymentWalletPolicy } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   buildDisabledPolicyPayload,
+  buildPolicyAssetOptions,
   buildPolicyPayload,
   createPolicyAuthoringState,
   formatProviderMappingLabel,
@@ -296,5 +297,141 @@ describe("wallet policy authoring", () => {
         expect.objectContaining({ kind: "destination", blocklist: [ADDRESS_A] }),
       ])
     );
+  });
+});
+
+describe("buildPolicyAssetOptions", () => {
+  const SOL_HOLDING = {
+    token: "SOL",
+    mint: "So11111111111111111111111111111111111111112",
+    uiAmount: "1.5",
+  };
+
+  it("offers well-known mints the wallet does not hold", () => {
+    const options = buildPolicyAssetOptions([SOL_HOLDING], "sandbox");
+    const symbols = options.map((option) => option.token);
+
+    expect(symbols).toContain("USDC");
+    expect(symbols).toContain("PYUSD");
+  });
+
+  it("keeps the wallet holding rather than duplicating its well-known entry", () => {
+    const options = buildPolicyAssetOptions([SOL_HOLDING], "sandbox");
+    const solEntries = options.filter((option) => option.mint === SOL_HOLDING.mint);
+
+    expect(solEntries).toHaveLength(1);
+    expect(solEntries[0]).toMatchObject({ source: "wallet", uiAmount: "1.5" });
+  });
+
+  it("lists wallet holdings before well-known suggestions", () => {
+    const options = buildPolicyAssetOptions([SOL_HOLDING], "sandbox");
+
+    expect(options[0]?.source).toBe("wallet");
+    expect(options.at(-1)?.source).toBe("well-known");
+  });
+
+  it("omits tokens that have no mint on the active cluster", () => {
+    // USDT ships a mainnet mint only, so sandbox must not offer it.
+    expect(buildPolicyAssetOptions([], "sandbox").map((o) => o.token)).not.toContain("USDT");
+    expect(buildPolicyAssetOptions([], "production").map((o) => o.token)).toContain("USDT");
+  });
+
+  it("resolves production mints for production projects", () => {
+    const usdc = buildPolicyAssetOptions([], "production").find((o) => o.token === "USDC");
+
+    expect(usdc?.mint).toBe("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+  });
+
+  it("dedupes repeated wallet holdings", () => {
+    const options = buildPolicyAssetOptions([SOL_HOLDING, SOL_HOLDING], "sandbox");
+
+    expect(options.filter((option) => option.mint === SOL_HOLDING.mint)).toHaveLength(1);
+  });
+
+  const ISSUED_ACME = { token: "ACME", name: "Acme Token", mint: "MintAcme" };
+
+  it("offers issued tokens as their own source", () => {
+    const options = buildPolicyAssetOptions([SOL_HOLDING], "sandbox", [ISSUED_ACME]);
+    const acme = options.find((option) => option.mint === ISSUED_ACME.mint);
+
+    expect(acme).toMatchObject({ token: "ACME", name: "Acme Token", source: "issued" });
+  });
+
+  it("keeps an issued token the wallet holds in the wallet group with its balance", () => {
+    const held = { token: "ACME", mint: "MintAcme", uiAmount: "5000" };
+    const options = buildPolicyAssetOptions([held], "sandbox", [ISSUED_ACME]);
+    const entries = options.filter((option) => option.mint === ISSUED_ACME.mint);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ source: "wallet", uiAmount: "5000" });
+  });
+
+  it("prefers the issued entry over a colliding well-known mint", () => {
+    const usdcMainnet = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+    const options = buildPolicyAssetOptions([], "production", [
+      { token: "ACME", name: "Acme Token", mint: usdcMainnet },
+    ]);
+    const entries = options.filter((option) => option.mint === usdcMainnet);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.source).toBe("issued");
+  });
+
+  it("does not filter issued tokens by cluster", () => {
+    // `issued_tokens` is scoped by project and the dashboard derives its environment
+    // from the selected project, so the API has already applied the cluster boundary.
+    // Re-filtering here would drop legitimate tokens; this pins that contract.
+    for (const environment of ["sandbox", "production"] as const) {
+      const options = buildPolicyAssetOptions([], environment, [ISSUED_ACME]);
+
+      expect(options.some((option) => option.mint === ISSUED_ACME.mint)).toBe(true);
+    }
+  });
+
+  it("produces the same options as before when no issued tokens are supplied", () => {
+    expect(buildPolicyAssetOptions([SOL_HOLDING], "sandbox", [])).toEqual(
+      buildPolicyAssetOptions([SOL_HOLDING], "sandbox")
+    );
+  });
+
+  it("skips issued tokens with a blank mint", () => {
+    const options = buildPolicyAssetOptions([], "sandbox", [{ token: "GHOST", mint: "" }]);
+
+    expect(options.some((option) => option.token === "GHOST")).toBe(false);
+  });
+
+  it("offers the tokens that are genuinely deployed on devnet", () => {
+    const symbols = buildPolicyAssetOptions([], "sandbox").map((option) => option.token);
+
+    expect(symbols).toContain("EURC");
+    expect(symbols).toContain("JitoSOL");
+    expect(symbols).toContain("mSOL");
+    expect(symbols).toContain("bSOL");
+  });
+
+  it("withholds tokens whose devnet address is not the same asset", () => {
+    const symbols = buildPolicyAssetOptions([], "sandbox").map((option) => option.token);
+
+    // An account exists at the USDS address on devnet, but it is a different
+    // mint with 9 decimals; offering it would misscale every amount.
+    expect(symbols).not.toContain("USDS");
+    // These resolve to System Program accounts on devnet rather than mints.
+    expect(symbols).not.toContain("cbBTC");
+    expect(symbols).not.toContain("INF");
+  });
+
+  it("carries the catalogue name and category through to the picker", () => {
+    const usdc = buildPolicyAssetOptions([], "production").find(
+      (option) => option.token === "USDC"
+    );
+
+    expect(usdc).toMatchObject({ name: "USD Coin", category: "stablecoin" });
+  });
+
+  it("labels staked SOL and wrapped assets by category on mainnet", () => {
+    const options = buildPolicyAssetOptions([], "production");
+
+    expect(options.find((o) => o.token === "JitoSOL")?.category).toBe("staked-sol");
+    expect(options.find((o) => o.token === "cbBTC")?.category).toBe("wrapped");
   });
 });

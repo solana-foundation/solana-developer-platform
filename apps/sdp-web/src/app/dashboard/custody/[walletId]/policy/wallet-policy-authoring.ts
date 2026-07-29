@@ -1,10 +1,16 @@
-import type {
-  PaymentWalletPolicy,
-  PolicyDefaultAction,
-  PolicyProviderSyncStatus,
-  PolicyRule,
-  PolicyRuleAction,
-  WalletOperationFamily,
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type PaymentWalletPolicy,
+  type PolicyDefaultAction,
+  type PolicyProviderSyncStatus,
+  type PolicyRule,
+  type PolicyRuleAction,
+  type SdpEnvironment,
+  type WalletOperationFamily,
+  WELL_KNOWN_TOKENS,
+  type WellKnownTokenCategory,
+  type WellKnownTokenSymbol,
+  wellKnownMint,
 } from "@sdp/types";
 
 export type PolicyFlowStep = "intent" | "limits-assets" | "destinations-operations" | "review";
@@ -21,6 +27,72 @@ export type DestinationMode = "allowlist" | "blocklist";
 export interface OperationTypeRuleInput {
   value: string;
   action: AuthoringRuleAction;
+}
+
+export interface PolicyAssetOption {
+  token: string;
+  mint: string;
+  /** Full token name, shown under the symbol when the catalogue knows it. */
+  name?: string;
+  category?: WellKnownTokenCategory;
+  /** Only wallet holdings carry a balance; well-known mints are offered even when the wallet holds none. */
+  uiAmount?: string;
+  source: "wallet" | "well-known" | "issued";
+}
+
+/**
+ * Wallet holdings first, then the tokens this project issued, then the well-known mints
+ * for the active cluster that neither of the first two already covered. Without this the
+ * picker only knows about tokens already in the wallet, so covering USDC on a fresh
+ * wallet, or any token the org minted itself, meant pasting a mint address by hand.
+ */
+export function buildPolicyAssetOptions(
+  walletAssets: readonly { token: string; mint: string; uiAmount: string }[],
+  environment: SdpEnvironment,
+  issuedTokens: readonly { token: string; mint: string; name?: string }[] = []
+): PolicyAssetOption[] {
+  const options = new Map<string, PolicyAssetOption>();
+
+  for (const asset of walletAssets) {
+    if (!options.has(asset.mint)) {
+      options.set(asset.mint, { ...asset, source: "wallet" });
+    }
+  }
+
+  // Issued tokens sit between holdings and the catalogue. A token the wallet already
+  // holds keeps its holdings row so the balance stays visible, while an issued mint
+  // still wins over a catalogue entry. This ordering also keeps the existing
+  // "wallet holdings come first, well-known last" assertion true.
+  //
+  // Not filtered by `environment` on purpose: `issued_tokens` is scoped by project and
+  // the dashboard derives its environment from the selected project, so the API has
+  // already applied the cluster boundary.
+  for (const issued of issuedTokens) {
+    if (!issued.mint || options.has(issued.mint)) continue;
+    options.set(issued.mint, {
+      token: issued.token,
+      ...(issued.name ? { name: issued.name } : {}),
+      mint: issued.mint,
+      source: "issued",
+    });
+  }
+
+  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  for (const symbol of Object.keys(WELL_KNOWN_TOKENS) as WellKnownTokenSymbol[]) {
+    const token = WELL_KNOWN_TOKENS[symbol];
+    const mint = wellKnownMint(symbol, cluster);
+    // Tokens without a mint on this cluster (e.g. USDT on devnet) must not be offered.
+    if (!mint || options.has(mint)) continue;
+    options.set(mint, {
+      token: token.symbol,
+      name: token.name,
+      category: token.category,
+      mint,
+      source: "well-known",
+    });
+  }
+
+  return [...options.values()];
 }
 
 export interface PolicyAuthoringState {

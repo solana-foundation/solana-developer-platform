@@ -14,19 +14,25 @@ interface WalletActivityViewportContentProps {
   isVisible: boolean;
   isNearViewport: boolean;
   walletId: string;
+  symbolsByMint?: Readonly<Record<string, string>>;
 }
 
 export function WalletActivityViewportContent({
   isVisible,
   isNearViewport,
   walletId,
+  symbolsByMint,
 }: WalletActivityViewportContentProps) {
   const t = useTranslations();
 
   if (isNearViewport) {
     return (
       <div data-wallet-activity-loader="mounted">
-        <WalletActivitySection walletId={walletId} isVisible={isVisible} />
+        <WalletActivitySection
+          walletId={walletId}
+          isVisible={isVisible}
+          symbolsByMint={symbolsByMint}
+        />
       </div>
     );
   }
@@ -40,7 +46,13 @@ export function WalletActivityViewportContent({
   );
 }
 
-export function WalletActivityViewport({ walletId }: { walletId: string }) {
+export function WalletActivityViewport({
+  walletId,
+  symbolsByMint,
+}: {
+  walletId: string;
+  symbolsByMint?: Readonly<Record<string, string>>;
+}) {
   const regionRef = useRef<HTMLElement>(null);
   const [isNearViewport, setIsNearViewport] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
@@ -91,6 +103,7 @@ export function WalletActivityViewport({ walletId }: { walletId: string }) {
         isNearViewport={isNearViewport}
         isVisible={isVisible}
         walletId={walletId}
+        symbolsByMint={symbolsByMint}
       />
     </section>
   );

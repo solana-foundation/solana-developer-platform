@@ -53,6 +53,18 @@ export const organizationOnboarding = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
+export const alphaledgerTokenizationEngine = flag<boolean, DashboardFlagEntities>({
+  key: "alphaledger-tokenization-engine",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: false,
+  description: "Offer the AlphaLedger tokenization engine as an issuance provider option.",
+  options: [
+    { value: false, label: "Mosaic only" },
+    { value: true, label: "AlphaLedger available" },
+  ],
+});
+
 export const assetProfiles = flag<boolean, DashboardFlagEntities>({
   key: "asset-profiles",
   adapter: vercelAdapter(),

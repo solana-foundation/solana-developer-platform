@@ -422,4 +422,25 @@ describe("IssuanceTokenList", () => {
       /<div style="margin-top:-10px;transform:translateY\(0px\);transition:transform \d+ms [^"]*;z-index:1"><span data-testid="list-footer"/
     );
   });
+
+  it("keeps closed detail panels out of the keyboard tab order", () => {
+    // Panels stay mounted for the compositor-only reveal, so each closed one must
+    // carry `inert`; opacity and pointer-events hide it visually but leave its
+    // explorer/Manage links tabbable. Asserted against the markup string because
+    // this suite runs in the `node` environment — there is no DOM to focus-test.
+    const markup = renderWithI18n(
+      <IssuanceTokenList
+        tokens={[baseToken(), baseToken({ id: "tok_2", symbol: "vEUR", name: "Veritas Euro" })]}
+        signerWallets={[]}
+        openIds={new Set()}
+        onToggle={() => undefined}
+        onCreate={() => undefined}
+      />
+    );
+    expect(markup.match(/inert=""/g) ?? []).toHaveLength(2);
+    // The Manage link lives inside the panel, i.e. after its inert attribute.
+    expect(markup.indexOf(t("DashboardIssuance.list.manageThisAsset"))).toBeGreaterThan(
+      markup.indexOf('inert=""')
+    );
+  });
 });

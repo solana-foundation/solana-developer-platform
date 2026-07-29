@@ -506,10 +506,17 @@ function IssuanceTokenListRow({
       {/* Pre-mounted, absolutely-positioned panel. Absolute → no layout impact;
           the rows below make room by translating. Fades with opacity (compositor)
           and never paints while closed. The shared Overview hero renders its own
-          card, so this wrapper is positioning-only. */}
+          card, so this wrapper is positioning-only.
+          `inert` while closed is load-bearing: the panel stays in the DOM, so its
+          explorer links and Manage link would otherwise stay tabbable and land
+          keyboard users on invisible controls (opacity/pointer-events suppress
+          neither). inert removes the subtree from sequential focus, hit testing,
+          and the accessibility tree in one go — which is also why it carries no
+          aria-hidden: that would hide the subtree from AT while leaving it
+          focusable. */}
       <div
         ref={panelRef}
-        aria-hidden={!open}
+        inert={!open}
         className="absolute inset-x-0"
         style={{
           top: `calc(100% + ${ROW_GAP_PX}px)`,
