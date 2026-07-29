@@ -30,6 +30,7 @@ export function ReviewStep({
   onEdit: (step: PolicyFlowStep, category?: RestrictionCategory) => void;
 }) {
   const t = useTranslations();
+  const assetByMint = new Map(assetOptions.map((option) => [option.mint, option]));
   const allowDestinations = parseDestinationText(state.destinationAllowText).valid;
   const blockDestinations = parseDestinationText(state.destinationBlockText).valid;
   const familyEntries = WALLET_OPERATION_FAMILIES.flatMap((family) => {
@@ -76,7 +77,7 @@ export function ReviewStep({
       value: state.assets.length ? (
         <span className="block space-y-0.5">
           {state.assets.map((mint) => {
-            const option = assetOptions.find((asset) => asset.mint === mint);
+            const option = assetByMint.get(mint);
             return (
               <span key={mint} className="block" title={mint}>
                 {option?.token ?? t("DashboardCustody.policyCustomMint")}

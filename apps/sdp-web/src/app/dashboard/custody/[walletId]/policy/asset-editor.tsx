@@ -64,6 +64,10 @@ export function AssetEditor({
       ).filter((group) => group.items.length > 0),
     [matchingWalletAssets, t]
   );
+  const assetByMint = useMemo(
+    () => new Map(assetOptions.map((asset) => [asset.mint, asset])),
+    [assetOptions]
+  );
   const canAddCustomMint =
     isValidSolanaAddress(query) &&
     !assets.includes(query.trim()) &&
@@ -231,7 +235,7 @@ export function AssetEditor({
           </p>
           <div className="mt-2 divide-y divide-border-default border-t border-border-default">
             {assets.map((mint) => {
-              const walletAsset = assetOptions.find((asset) => asset.mint === mint);
+              const walletAsset = assetByMint.get(mint);
               const label = walletAsset?.token ?? t("DashboardCustody.policyCustomMint");
               // Named tokens read better than a 44-character address; the full
               // mint stays available on hover and for anything uncatalogued.

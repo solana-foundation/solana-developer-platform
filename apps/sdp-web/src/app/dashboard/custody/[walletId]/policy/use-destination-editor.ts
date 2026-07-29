@@ -1,7 +1,7 @@
 "use client";
 
 import type { CounterpartyAccountSummary } from "@sdp/types";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import {
@@ -114,8 +114,16 @@ export function useDestinationEditor(
     { revalidateOnFocus: false }
   );
 
-  const accounts = accountsResult ? accountsResult.accounts : [];
-  const parsed = parseDestinationText(state[destinationField(state.destinationMode)]);
+  const accounts = useMemo(() => (accountsResult ? accountsResult.accounts : []), [accountsResult]);
+  const accountByAddress = useMemo(
+    () =>
+      new Map<string, CounterpartyAccountSummary>(
+        accounts.map((account) => [account.address, account])
+      ),
+    [accounts]
+  );
+  const activeText = state[destinationField(state.destinationMode)];
+  const parsed = useMemo(() => parseDestinationText(activeText), [activeText]);
   const trimmedQuery = query.trim();
   const normalizedQuery = trimmedQuery.toLowerCase();
   const matchingAccounts = accounts.filter(
@@ -303,9 +311,7 @@ export function useDestinationEditor(
    * @returns The counterparty name when the address is known, or the external-address label.
    */
   function destinationDisplay(entry: string): { name: string; known: boolean } {
-    const account = accounts.find(
-      (candidate: CounterpartyAccountSummary) => candidate.address === entry
-    );
+    const account = accountByAddress.get(entry);
     return account
       ? { name: account.name, known: true }
       : { name: t("DashboardCustody.policyDestinationExternal"), known: false };

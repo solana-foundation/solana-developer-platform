@@ -38,6 +38,7 @@ export function PolicySummaryRail({
 }) {
   const t = useTranslations();
   const status = policy.controlProfile?.status ?? null;
+  const assetByMint = new Map(assetOptions.map((option) => [option.mint, option]));
   const selectedCategories = CATEGORY_OPTIONS.filter((category) =>
     state.categories.includes(category.id)
   );
@@ -95,7 +96,7 @@ export function PolicySummaryRail({
         label: t("DashboardCustody.policySummaryAllowedAssets"),
         collapsedCount: state.assets.length,
         value: state.assets.map((mint) => {
-          const option = assetOptions.find((asset) => asset.mint === mint);
+          const option = assetByMint.get(mint);
           return (
             <span key={mint} className="flex items-center gap-2" title={mint}>
               <TokenMark mint={mint} symbol={option?.token} size="sm" />
