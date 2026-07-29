@@ -231,6 +231,8 @@
       "paramSecret": "Signing secret",
       "paramNotify": "Notify",
       "paramEmail": "Or a specific email address",
+      "paramEmailHelp": "Overrides the audience — only this address is emailed",
+      "emailUnavailableSpecific": "Email service unavailable at the moment. A specific-email rule will fail until email is configured.",
       "paramWalletHelp": "Defaults to the trigger's wallet",
       "audienceAdmins": "Admins",
       "audienceMembers": "All members",

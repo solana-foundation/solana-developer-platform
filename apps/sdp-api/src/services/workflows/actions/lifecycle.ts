@@ -83,7 +83,7 @@ async function mirrorFreeze(
   env: Env,
   execution: WorkflowExecutionRow,
   tokenAccount: string
-): Promise<void> {
+): Promise<boolean> {
   try {
     await new TokenService(getDb(env)).freezeAccount({
       tokenId: execution.token_id,
@@ -91,8 +91,10 @@ async function mirrorFreeze(
       frozenBy: `workflow:${execution.workflow_id}`,
       reason: `Workflow: ${execution.trigger_type}`,
     });
+    return true;
   } catch (error) {
     console.error("workflow freeze: DB mirror failed", { error: errorMessage(error) });
+    return false;
   }
 }
 
@@ -100,15 +102,17 @@ async function mirrorUnfreeze(
   env: Env,
   execution: WorkflowExecutionRow,
   tokenAccount: string
-): Promise<void> {
+): Promise<boolean> {
   try {
     await new TokenService(getDb(env)).unfreezeAccount(
       execution.token_id,
       tokenAccount,
       `workflow:${execution.workflow_id}`
     );
+    return true;
   } catch (error) {
     console.error("workflow unfreeze: DB mirror failed", { error: errorMessage(error) });
+    return false;
   }
 }
 
@@ -143,8 +147,12 @@ export async function runFreeze(
       return succeeded({ alreadyFrozen: true, tokenAccount });
     }
     const result = await mosaic.freezeAccount({ tokenAccount, feePayer: signer.address });
-    await mirrorFreeze(env, execution, tokenAccount);
-    return succeeded({ signature: result.signature, tokenAccount });
+    const mirrored = await mirrorFreeze(env, execution, tokenAccount);
+    return succeeded({
+      signature: result.signature,
+      tokenAccount,
+      ...(mirrored ? {} : { mirrorFailed: true }),
+    });
   } catch (error) {
     return transientFail(errorMessage(error));
   }
@@ -179,8 +187,12 @@ export async function runUnfreeze(
       return succeeded({ alreadyThawed: true, tokenAccount });
     }
     const result = await mosaic.thawAccount({ tokenAccount, feePayer: signer.address });
-    await mirrorUnfreeze(env, execution, tokenAccount);
-    return succeeded({ signature: result.signature, tokenAccount });
+    const mirrored = await mirrorUnfreeze(env, execution, tokenAccount);
+    return succeeded({
+      signature: result.signature,
+      tokenAccount,
+      ...(mirrored ? {} : { mirrorFailed: true }),
+    });
   } catch (error) {
     return transientFail(errorMessage(error));
   }

@@ -58,7 +58,7 @@ export function createPostgresWorkflowExecutionsRepository(
              status, idempotency_key, trigger_payload, max_attempts
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
            ON CONFLICT (workflow_id, idempotency_key) DO NOTHING
-           RETURNING id`
+           RETURNING *`
         )
         .bind(
           id,
@@ -73,16 +73,9 @@ export function createPostgresWorkflowExecutionsRepository(
           JSON.stringify(input.triggerPayload),
           input.maxAttempts
         )
-        .first<{ id: string }>();
+        .first<Record<string, unknown>>();
 
-      if (!inserted) {
-        return null;
-      }
-      return getById(db, {
-        executionId: inserted.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+      return inserted ? mapExecutionRow(inserted) : null;
     },
 
     getExecutionById(params) {
@@ -139,10 +132,13 @@ export function createPostgresWorkflowExecutionsRepository(
         .bind(params.staleBefore, parkTypes, params.limit)
         .all<Record<string, unknown>>();
 
+      // A crashed tick isn't the action's fault — refund the attempt the claim
+      // consumed so recovery doesn't eat into max_attempts.
       const recovered = await db
         .prepare(
           `UPDATE workflow_executions
-             SET status = 'pending', locked_at = NULL, updated_at = sdp_iso_now()
+             SET status = 'pending', locked_at = NULL,
+                 attempt_count = GREATEST(attempt_count - 1, 0), updated_at = sdp_iso_now()
            WHERE id IN (
              SELECT id FROM workflow_executions
               WHERE status = 'processing' AND locked_at IS NOT NULL AND locked_at <= ?
@@ -174,22 +170,16 @@ export function createPostgresWorkflowExecutionsRepository(
 
     async claimExecution(params) {
       // Guarded claim: only one worker wins pending → processing.
-      const rowsAffected = await db
+      const row = await db
         .prepare(
           `UPDATE workflow_executions
              SET status = 'processing',
                  locked_at = sdp_iso_now(),
                  attempt_count = attempt_count + 1,
                  updated_at = sdp_iso_now()
-           WHERE id = ? AND status = 'pending'`
+           WHERE id = ? AND status = 'pending'
+           RETURNING *`
         )
-        .bind(params.executionId)
-        .run();
-      if (rowsAffected === 0) {
-        return null;
-      }
-      const row = await db
-        .prepare(`SELECT * FROM workflow_executions WHERE id = ?`)
         .bind(params.executionId)
         .first<Record<string, unknown>>();
       return row ? mapExecutionRow(row) : null;

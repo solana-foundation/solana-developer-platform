@@ -31,12 +31,13 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
   return {
     async createWorkflow(input: CreateAssetWorkflowInput) {
       const id = generateAssetWorkflowId();
-      await db
+      const row = await db
         .prepare(
           `INSERT INTO asset_workflows (
              id, organization_id, project_id, token_id, trigger_type, action_type,
              definition, version, enabled, review_mode, created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, COALESCE(?, TRUE), ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, COALESCE(?, TRUE), ?, ?)
+           RETURNING *`
         )
         .bind(
           id,
@@ -51,13 +52,8 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
           input.reviewMode,
           input.createdBy ?? null
         )
-        .run();
-
-      return this.getWorkflowById({
-        workflowId: id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+        .first<Record<string, unknown>>();
+      return row ? mapWorkflowRow(row) : null;
     },
 
     async updateWorkflow(input: UpdateAssetWorkflowInput) {

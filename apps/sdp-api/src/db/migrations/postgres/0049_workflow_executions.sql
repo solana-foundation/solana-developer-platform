@@ -39,11 +39,15 @@ CREATE TABLE IF NOT EXISTS workflow_executions (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_executions_idempotency
     ON workflow_executions(workflow_id, idempotency_key);
 
--- Cron poll: due + retryable executions.
+-- Cron poll: due + retryable executions, oldest first (created_at covers the sort).
 CREATE INDEX IF NOT EXISTS idx_workflow_executions_due
-    ON workflow_executions(status, next_attempt_at)
+    ON workflow_executions(status, next_attempt_at, created_at)
     WHERE status IN ('pending', 'processing');
 
 -- Execution-log view per workflow.
 CREATE INDEX IF NOT EXISTS idx_workflow_executions_workflow_created
     ON workflow_executions(workflow_id, created_at DESC);
+
+-- The dashboard's execution-log query: newest executions for an asset (and its COUNT).
+CREATE INDEX IF NOT EXISTS idx_workflow_executions_token_created
+    ON workflow_executions(organization_id, project_id, token_id, created_at DESC);

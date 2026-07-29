@@ -94,7 +94,7 @@ const ACTION_PARAM_FIELDS: Record<string, ParamField[]> = {
         { value: "members", labelKey: "audienceMembers" },
       ],
     },
-    { key: "email", labelKey: "paramEmail" },
+    { key: "email", labelKey: "paramEmail", helpKey: "paramEmailHelp" },
   ],
   freeze: [{ key: "wallet", labelKey: "paramWallet", helpKey: WALLET_HELP }],
   unfreeze: [{ key: "wallet", labelKey: "paramWallet", helpKey: WALLET_HELP }],
@@ -997,10 +997,11 @@ function BuilderControls(props: {
       ) : null}
 
       {/* Generic, detail-free notice when the email channel isn't configured. Only an
-          explicit `false` warns — an unreachable config endpoint stays silent. */}
+          explicit `false` warns — an unreachable config endpoint stays silent. A
+          specific-email rule can't fall back to in-app, so its warning is stronger. */}
       {actionType === "notify" && emailEnabled === false ? (
         <div className="rounded-lg border border-warning-border bg-warning-bg px-3 py-2 text-xs text-warning">
-          {wf("emailUnavailable")}
+          {(params.email ?? "").trim() ? wf("emailUnavailableSpecific") : wf("emailUnavailable")}
         </div>
       ) : null}
 

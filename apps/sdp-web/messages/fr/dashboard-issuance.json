@@ -231,6 +231,8 @@
       "paramSecret": "Clé de signature",
       "paramNotify": "Notifier",
       "paramEmail": "Ou une adresse e-mail spécifique",
+      "paramEmailHelp": "Remplace l'audience — seule cette adresse est notifiée par e-mail",
+      "emailUnavailableSpecific": "Service e-mail indisponible pour le moment. Une règle avec adresse spécifique échouera tant que l'e-mail n'est pas configuré.",
       "paramWalletHelp": "Par défaut, le portefeuille du déclencheur",
       "audienceAdmins": "Administrateurs",
       "audienceMembers": "Tous les membres",

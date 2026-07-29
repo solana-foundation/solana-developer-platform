@@ -1195,6 +1195,28 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "delete",
+    path: "/v1/issuance/tokens/{tokenId}/workflows/{workflowId}",
+    tags: ["Issuance"],
+    summary: "Delete a workflow rule",
+    operationId: "deleteWorkflow",
+    description:
+      "Soft-deletes a rule: it stops matching and disappears from lists, while its execution history is retained.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema, workflowId: workflowIdParamSchema }),
+    },
+    responses: {
+      200: {
+        description: "Workflow deleted",
+        content: jsonContent(envelope(z.object({ deleted: z.boolean() }), "DeleteWorkflowResponse")),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
     method: "get",
     path: "/v1/issuance/tokens/{tokenId}/workflows/executions",
     tags: ["Issuance"],

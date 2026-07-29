@@ -157,14 +157,33 @@ async function handleOrganizationLifecycleEvent(
       status,
       provider: "mural",
     });
-    if (status === "verified") {
-      for (const wallet of wallets) {
-        await emitKycApprovedForClearedEnrollments(c.env, { kycWallet: wallet, provider: "mural" });
+    // Fire-and-forget off the webhook response path — the per-wallet enrollment,
+    // counterparty and rule lookups shouldn't add latency to the provider's delivery.
+    // Falls back to awaiting inline when no ExecutionContext is available.
+    const emitAll = async () => {
+      if (status === "verified") {
+        for (const wallet of wallets) {
+          await emitKycApprovedForClearedEnrollments(c.env, {
+            kycWallet: wallet,
+            provider: "mural",
+          });
+        }
+      } else if (status === "rejected") {
+        for (const wallet of wallets) {
+          await emitKycRejectedForEnrollments(c.env, { kycWallet: wallet, provider: "mural" });
+        }
       }
-    } else if (status === "rejected") {
-      for (const wallet of wallets) {
-        await emitKycRejectedForEnrollments(c.env, { kycWallet: wallet, provider: "mural" });
-      }
+    };
+    try {
+      c.executionCtx.waitUntil(
+        emitAll().catch((error) => {
+          console.error("mural webhook: KYC workflow emit failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        })
+      );
+    } catch {
+      await emitAll();
     }
   }
 }
