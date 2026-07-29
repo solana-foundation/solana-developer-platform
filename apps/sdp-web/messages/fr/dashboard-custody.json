@@ -786,6 +786,7 @@
     "apiKeyReplaceBindingsConfirmationRequired": "Confirmez Remplacer les liaisons avant d'enregistrer cette modification de liaison.",
     "apiKeyClearBindingsConfirmationRequired": "Confirmez Supprimer les liaisons avant d'enregistrer cette modification de liaison.",
     "policyAssetsInWallet": "Dans ce portefeuille",
-    "policyAssetsCommon": "Jetons courants"
+    "policyAssetsCommon": "Jetons courants",
+    "policyAssetsIssued": "Vos jetons"
   }
 }

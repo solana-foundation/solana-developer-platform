@@ -16,6 +16,7 @@ import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import {
   type ClerkJwtPayload,
   extractBearerToken,
+  isPlausibleEmail,
   resolveClerkEmail,
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
@@ -30,16 +31,24 @@ import {
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 
+/**
+ * The stored identity for a Clerk user, with both copies of the email.
+ *
+ * They are read separately rather than COALESCEd in SQL because either copy can hold an
+ * unsubstituted JWT-template placeholder, and a plain COALESCE prefers whichever is
+ * non-null — including the corrupted one. Which copy is good depends on the code path
+ * that wrote the row, so the caller picks the first that is actually an address.
+ */
 async function resolveClerkUser(db: DatabaseClient, clerkUserId: string) {
   return db
     .prepare(
-      `SELECT aui.user_id, COALESCE(aui.email, u.email) AS email
+      `SELECT aui.user_id, aui.email AS identity_email, u.email AS user_email
        FROM auth_user_identities aui
        LEFT JOIN users u ON u.id = aui.user_id
        WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
     )
     .bind(clerkUserId)
-    .first<{ user_id: string; email: string | null }>();
+    .first<{ user_id: string; identity_email: string | null; user_email: string | null }>();
 }
 
 async function resolveClerkOrganization(db: DatabaseClient, clerkOrgId: string) {
@@ -53,12 +62,17 @@ async function resolveClerkOrganization(db: DatabaseClient, clerkOrgId: string) 
     .first<{ organization_id: string; slug: string | null }>();
 }
 
+/**
+ * Both copies of the email are read separately here for the same reason as
+ * {@link resolveClerkUser}: a COALESCE prefers whichever copy is non-null, and the
+ * corrupted one is a placeholder string rather than a NULL. This is the path taken for an
+ * established user, so it is the one a repaired database still has to keep clean.
+ */
 async function resolveExistingClerkContext(
   db: DatabaseClient,
   params: {
     clerkUserId: string;
     clerkOrgId: string;
-    fallbackEmail: string;
     fallbackOrgSlug: string | null;
   }
 ) {
@@ -66,7 +80,8 @@ async function resolveExistingClerkContext(
     .prepare(
       `SELECT
          aui.user_id,
-         COALESCE(aui.email, u.email, ?) AS email,
+         aui.email AS identity_email,
+         u.email AS user_email,
          aoi.organization_id,
          COALESCE(aoi.slug, ?) AS org_slug,
          om.role,
@@ -100,15 +115,11 @@ async function resolveExistingClerkContext(
        WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?
        LIMIT 1`
     )
-    .bind(
-      params.fallbackEmail.toLowerCase(),
-      params.fallbackOrgSlug,
-      params.clerkUserId,
-      params.clerkOrgId
-    )
+    .bind(params.fallbackOrgSlug, params.clerkUserId, params.clerkOrgId)
     .first<{
       user_id: string | null;
-      email: string | null;
+      identity_email: string | null;
+      user_email: string | null;
       organization_id: string;
       org_slug: string | null;
       role: string | null;
@@ -136,7 +147,13 @@ async function ensureClerkUser(
 ): Promise<{ userId: string; email: string }> {
   const existing = await resolveClerkUser(db, clerkUserId);
   if (existing) {
-    return { userId: existing.user_id, email: existing.email ?? fallbackEmail };
+    // A stored placeholder is worse than no value: it is byte-identical for every
+    // affected user, so it identifies nobody, and it is matched literally against
+    // `invitations.email` below — which silently denies an invited role. Skip anything
+    // that is not an address and fall through to the other copy.
+    const email =
+      [existing.identity_email, existing.user_email].find(isPlausibleEmail) ?? fallbackEmail;
+    return { userId: existing.user_id, email };
   }
 
   const clerkUser = await new ClerkUsersService(env).getUser(clerkUserId);
@@ -331,7 +348,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {
     clerkUserId: payload.sub as string,
     clerkOrgId: payload.org_id as string,
-    fallbackEmail: email,
     fallbackOrgSlug: payload.org_slug ?? null,
   });
 
@@ -364,7 +380,9 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
       role,
       clerkUserId: payload.sub as string,
       clerkOrgId: payload.org_id as string,
-      email: existingContext.email ?? email,
+      email:
+        [existingContext.identity_email, existingContext.user_email].find(isPlausibleEmail) ??
+        email.toLowerCase(),
       orgSlug: payload.org_slug ?? existingContext.org_slug,
       orgRole: payload.org_role ?? null,
     };

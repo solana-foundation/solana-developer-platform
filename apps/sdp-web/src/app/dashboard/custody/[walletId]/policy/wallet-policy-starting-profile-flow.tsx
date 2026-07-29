@@ -39,6 +39,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { cn } from "@/lib/utils";
+import type { IssuedPolicyToken } from "./policy-assets.data";
 import {
   AUTHORING_RULE_ACTIONS,
   type AuthoringDefaultAction,
@@ -78,6 +79,7 @@ interface WalletPolicyStartingProfileFlowProps {
     provider: string | null;
   };
   walletAssets: WalletAssetOption[];
+  issuedTokens: IssuedPolicyToken[];
   initialPolicy: PaymentWalletPolicy;
   policyError: string | null;
 }
@@ -191,6 +193,7 @@ export function WalletPolicyStartingProfileFlow({
   projectId,
   wallet,
   walletAssets,
+  issuedTokens,
   initialPolicy,
   policyError,
 }: WalletPolicyStartingProfileFlowProps) {
@@ -454,6 +457,7 @@ export function WalletPolicyStartingProfileFlow({
                     state={state}
                     setPolicyState={setPolicyState}
                     walletAssets={walletAssets}
+                    issuedTokens={issuedTokens}
                     errors={visibleValidation}
                   />
                 ) : null}
@@ -752,11 +756,13 @@ function LimitsAndAssetsStep({
   state,
   setPolicyState,
   walletAssets,
+  issuedTokens,
   errors,
 }: {
   state: PolicyAuthoringState;
   setPolicyState: (update: (current: PolicyAuthoringState) => PolicyAuthoringState) => void;
   walletAssets: WalletAssetOption[];
+  issuedTokens: IssuedPolicyToken[];
   errors: ReturnType<typeof validatePolicyState>;
 }) {
   const t = useTranslations();
@@ -799,6 +805,7 @@ function LimitsAndAssetsStep({
         <AssetEditor
           assets={state.assets}
           walletAssets={walletAssets}
+          issuedTokens={issuedTokens}
           error={errors.assets}
           onChange={(assets) => setPolicyState((current) => ({ ...current, assets }))}
         />
@@ -846,11 +853,13 @@ function AmountField({
 function AssetEditor({
   assets,
   walletAssets,
+  issuedTokens,
   error,
   onChange,
 }: {
   assets: string[];
   walletAssets: WalletAssetOption[];
+  issuedTokens: IssuedPolicyToken[];
   error?: "asset_required" | "invalid_asset";
   onChange: (assets: string[]) => void;
 }) {
@@ -861,8 +870,8 @@ function AssetEditor({
   const [inputError, setInputError] = useState<"invalid" | "duplicate" | null>(null);
   const normalizedQuery = query.trim().toLowerCase();
   const uniqueWalletAssets = useMemo(
-    () => buildPolicyAssetOptions(walletAssets, sdpEnvironment),
-    [walletAssets, sdpEnvironment]
+    () => buildPolicyAssetOptions(walletAssets, sdpEnvironment, issuedTokens),
+    [walletAssets, sdpEnvironment, issuedTokens]
   );
   const matchingWalletAssets = useMemo(
     () =>
@@ -886,6 +895,11 @@ function AssetEditor({
             key: "wallet",
             label: t("DashboardCustody.policyAssetsInWallet"),
             items: matchingWalletAssets.filter((asset) => asset.source === "wallet"),
+          },
+          {
+            key: "issued",
+            label: t("DashboardCustody.policyAssetsIssued"),
+            items: matchingWalletAssets.filter((asset) => asset.source === "issued"),
           },
           {
             key: "well-known",
