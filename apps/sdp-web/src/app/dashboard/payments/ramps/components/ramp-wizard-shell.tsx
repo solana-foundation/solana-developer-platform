@@ -4,8 +4,8 @@ import type { Counterparty } from "@sdp/types";
 import { motion } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog";
-import { PaymentsWizardFrame } from "@/app/dashboard/payments/payments-wizard-frame";
 import { Button } from "@/components/ui/button";
+import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import { CancelTransactionDialog } from "./cancel-transaction-dialog";
 
@@ -59,7 +59,7 @@ export function RampWizardShell({
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   return (
     <>
-      <PaymentsWizardFrame
+      <WizardFrame
         steps={steps}
         currentStep={stepIndex}
         progressLabel={t("DashboardPayments.counterparty.stepProgress", {
@@ -113,7 +113,7 @@ export function RampWizardShell({
             {children}
           </motion.div>
         </div>
-      </PaymentsWizardFrame>
+      </WizardFrame>
 
       <CounterpartyCreateDialog
         open={counterpartyDialogOpen}

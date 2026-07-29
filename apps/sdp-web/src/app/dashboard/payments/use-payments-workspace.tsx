@@ -8,6 +8,7 @@ import type {
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
+import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -270,9 +271,11 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     } catch (error) {
       setAddCompliance(null);
       setAddError(
-        error instanceof Error
-          ? error.message
-          : t("DashboardPayments.workspace.complianceCheckFailed")
+        error instanceof ComplianceNotEnabledError
+          ? t("DashboardPayments.workspace.complianceNotEnabled")
+          : error instanceof Error
+            ? error.message
+            : t("DashboardPayments.workspace.complianceCheckFailed")
       );
     } finally {
       setAddComplianceLoading(false);
@@ -338,9 +341,11 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
       setTransferCompliance(null);
       toast.error(t("DashboardPayments.workspace.complianceCheckFailed"), {
         description:
-          error instanceof Error
-            ? error.message
-            : t("DashboardPayments.workspace.complianceCheckFailed"),
+          error instanceof ComplianceNotEnabledError
+            ? t("DashboardPayments.workspace.complianceNotEnabled")
+            : error instanceof Error
+              ? error.message
+              : t("DashboardPayments.workspace.complianceCheckFailed"),
         position: "bottom-right",
       });
     } finally {

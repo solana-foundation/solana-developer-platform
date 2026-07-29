@@ -77,6 +77,22 @@ describe("home issuance activity", () => {
     expect(row?.token).toBe("USDC");
   });
 
+  it("names a token this org issued rather than shortening its mint", () => {
+    const mint = "AcmeQA1111111111111111111111111111111111111";
+    const transfer = {
+      id: "xfr_issued",
+      direction: "outbound",
+      token: mint,
+      amount: "100",
+      destination: "wallet_2",
+      createdAt: "2026-07-17T15:00:00.000Z",
+    } as unknown as PaymentTransferSummary;
+
+    const [row] = buildHomeActivityRows([transfer], [], t, { [mint]: "ACME" });
+
+    expect(row?.token).toBe("ACME");
+  });
+
   it("shortens an uncatalogued mint instead of printing all 44 characters", () => {
     const transfer = {
       id: "xfr_2",

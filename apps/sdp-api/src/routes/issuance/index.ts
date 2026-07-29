@@ -25,7 +25,7 @@ import { pauseToken, unpauseToken } from "./handlers/pause";
 import { executeSeize, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
-import { createToken, getToken, listTokens, updateToken } from "./handlers/tokens";
+import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
 
 const issuance = new Hono<{ Bindings: Env }>();
@@ -47,6 +47,9 @@ issuance.get("/templates/:templateId", requirePermissions("tokens:read"), getTok
 issuance.post("/tokens", requirePermissions("tokens:write"), createToken);
 issuance.get("/tokens", requirePermissions("tokens:read"), listTokens);
 issuance.get("/transactions", requirePermissions("tokens:read"), listTransactions);
+// Filter facets for the token list. Registered BEFORE `/tokens/:tokenId` so the
+// literal path wins the match instead of being read as a token id.
+issuance.get("/tokens/facets", requirePermissions("tokens:read"), listTokenFacets);
 issuance.get("/tokens/:tokenId", requirePermissions("tokens:read"), getToken);
 issuance.get(
   "/tokens/:tokenId/transactions",

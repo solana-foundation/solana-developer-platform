@@ -657,7 +657,6 @@ export function RecurringPaymentCreateWorkspace({
                 onChange={(event) => setField("amount", event.currentTarget.value)}
                 placeholder="1.0"
                 size="xl"
-                className="h-[var(--input-height-xl)] shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
                 action={
                   availableAmount !== null ? (
                     <AmountBalanceReadout
@@ -731,7 +730,6 @@ export function RecurringPaymentCreateWorkspace({
                 onChange={(event) => setField("customPeriodHours", event.currentTarget.value)}
                 placeholder="24"
                 size="xl"
-                className="shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
               />
               {fields.customPeriodHours && !resolvePeriodHours(fields) ? (
                 <FieldHint tone="error">
@@ -755,7 +753,6 @@ export function RecurringPaymentCreateWorkspace({
                 value={fields.firstCollectionAt}
                 onChange={(event) => setField("firstCollectionAt", event.currentTarget.value)}
                 size="xl"
-                className="shadow-none ring-0 [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
               />
               {fields.firstCollectionAt && !firstCollectionAtIsValid(fields.firstCollectionAt) ? (
                 <FieldHint tone="error">
@@ -780,7 +777,6 @@ export function RecurringPaymentCreateWorkspace({
                 onChange={(event) => setField("metadataUri", event.currentTarget.value)}
                 placeholder={t("DashboardPayments.recurring.metadataUrlPlaceholder")}
                 size="xl"
-                className="shadow-none ring-0 [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
               />
               {fields.metadataUri && !metadataUriIsValid(fields.metadataUri) ? (
                 <FieldHint tone="error">

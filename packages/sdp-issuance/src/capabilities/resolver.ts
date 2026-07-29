@@ -12,7 +12,12 @@ import type {
 } from "@sdp/types";
 import { resolveTemplateConfig, type TemplateOverrideError } from "../templates/definitions";
 import { ASSET_CAPABILITIES } from "./capabilities";
-import { ADVANCED_SETTINGS, findIncompatibleExtensionPair, type SettingKey } from "./settings";
+import {
+  ADVANCED_SETTINGS,
+  expandLegacySettingKeys,
+  findIncompatibleExtensionPair,
+  type SettingKey,
+} from "./settings";
 
 export interface ExtensionAuthorities {
   permanentDelegate?: string;
@@ -31,6 +36,12 @@ export interface SettingsResolution {
   template: TokenTemplate;
   decimals: number;
   requiresAllowlist: boolean;
+  // Whether the mint should be initialized WITH a freeze authority. Derived from
+  // the "freezeAccounts" selection rather than taken as an input, because that
+  // setting is the control for it. A base-mint column rather than an extension,
+  // like requiresAllowlist — SPL forbids adding a freeze authority after
+  // InitializeMint, so `false` is irreversible once deployed.
+  isFreezable: boolean;
   extensions: TokenExtensionsConfig | null;
   errors: TemplateOverrideError[];
 }
@@ -62,8 +73,10 @@ function toOverride(
   authorities: ExtensionAuthorities
 ): Partial<ExtensionOverrides> {
   switch (key) {
-    case "freezeTransfers":
+    case "pauseTransfers":
       return { pausable: {} };
+    // "freezeAccounts" intentionally has no case: it maps to the base mint's
+    // freeze authority, not an extension, and is surfaced as `isFreezable`.
     case "permanentDelegate":
       // Authority-valued: emit only with real wallet; omit to avoid bricking.
       return authorities.permanentDelegate
@@ -100,12 +113,19 @@ export function resolveSettingsToExtensions(
   selected: Record<string, SelectedSetting>,
   options: ResolveSettingsOptions = {}
 ): SettingsResolution {
+  // Rewrite retired keys before anything reads the selection, so a stored
+  // "freezeTransfers" still resolves to the pausable extension and a freeze
+  // authority instead of being skipped as unknown below.
+  const resolvedSelection = expandLegacySettingKeys(selected);
+  const freezeAccountsSelected = "freezeAccounts" in resolvedSelection;
+
   const capability = ASSET_CAPABILITIES.find((c) => c.category === category && c.type === type);
   if (!capability) {
     return {
       template: "custom",
       decimals: options.decimals ?? 0,
       requiresAllowlist: options.requiresAllowlist ?? false,
+      isFreezable: freezeAccountsSelected,
       extensions: null,
       errors: [
         {
@@ -116,9 +136,16 @@ export function resolveSettingsToExtensions(
     };
   }
 
+  // "locked" means forced on for this asset family. For locked *extensions* the
+  // guarded template already forces them regardless of the selection, but
+  // freezeAccounts resolves to a token column with no template to enforce it — so
+  // a selection that omits it (a stale draft, or a direct API caller) must still
+  // come back freezable.
+  const isFreezable = freezeAccountsSelected || capability.settings.freezeAccounts === "locked";
+
   const authorities = options.authorities ?? {};
   const extensions: ExtensionOverrides = {};
-  for (const [key, selection] of Object.entries(selected)) {
+  for (const [key, selection] of Object.entries(resolvedSelection)) {
     if (!(key in ADVANCED_SETTINGS)) {
       continue;
     }
@@ -147,6 +174,7 @@ export function resolveSettingsToExtensions(
     template: result.template,
     decimals: result.decimals,
     requiresAllowlist: result.requiresAllowlist,
+    isFreezable,
     extensions: result.extensions,
     errors,
   };

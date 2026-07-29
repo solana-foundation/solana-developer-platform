@@ -1504,6 +1504,7 @@ export function TokenManagementWorkspace({
               mode="permissions"
               permissionRows={permissionRows}
               extensionRows={extensionRows}
+              authorityWallets={authorityWallets}
               showTitle={false}
               canEditAuthorities={!canDeployToken && canManageTokenAdmin}
               onCopy={handleCopy}
@@ -1519,6 +1520,7 @@ export function TokenManagementWorkspace({
             mode="extensions"
             permissionRows={permissionRows}
             extensionRows={extensionRows}
+            authorityWallets={authorityWallets}
             showTitle={false}
             canEditAuthorities={!canDeployToken && canManageTokenAdmin}
             onCopy={handleCopy}

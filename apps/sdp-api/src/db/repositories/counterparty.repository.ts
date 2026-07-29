@@ -63,6 +63,13 @@ export interface UpsertBvnkCustomerProviderDataInput {
   customer: Partial<BvnkCustomerResolution>;
 }
 
+export interface MutateCounterpartyProviderDataInput {
+  counterpartyId: string;
+  organizationId: string;
+  projectId: string;
+  mutate: (current: CounterpartyProviderData) => CounterpartyProviderData;
+}
+
 export interface CounterpartiesRepositoryContext {
   db: RepositoryDbClient;
 }
@@ -86,6 +93,7 @@ export interface CounterpartiesRepository {
     customerReference: string
   ): Promise<CounterpartyRow | null>;
   findCounterpartyByMuralOrganizationId(organizationId: string): Promise<CounterpartyRow | null>;
+  mutateProviderData(params: MutateCounterpartyProviderDataInput): Promise<CounterpartyRow | null>;
   upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput): Promise<void>;
   patchMuralOrganizationById(params: {
     organizationId: string;

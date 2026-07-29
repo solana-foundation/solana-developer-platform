@@ -88,7 +88,8 @@ const COMBO_ICONS: Record<string, LucideIcon> = {
 
 // Icons keep the list scannable (SDP reserves colour for status).
 const SETTING_ICONS: Record<string, LucideIcon> = {
-  freezeTransfers: Snowflake,
+  pauseTransfers: Pause,
+  freezeAccounts: Snowflake,
   permanentDelegate: Undo2,
   transferFee: Percent,
   interestBearing: TrendingUp,
@@ -194,6 +195,55 @@ function humanizeAction(action: string): string {
 
 function humanizeExtension(name: string): string {
   return name.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
+/**
+ * The two settings the basic view presents as one "Freeze transfers" control.
+ *
+ * They are genuinely separate on-chain mechanisms — `pauseTransfers` is the
+ * Token-2022 `pausable` extension, `freezeAccounts` is the base mint's freeze
+ * authority — so the technical view shows both and lets them be chosen
+ * independently. Managers who don't want that distinction get one row.
+ */
+const FREEZE_PAIR_KEYS = ["pauseTransfers", "freezeAccounts"] as const;
+
+function isFreezePairKey(key: string): boolean {
+  return FREEZE_PAIR_KEYS.includes(key as (typeof FREEZE_PAIR_KEYS)[number]);
+}
+
+function getCombinedFreezeState(
+  visible: readonly GroupedSetting[],
+  settings: AdvancedSettingsDraft
+): { entries: GroupedSetting[]; checked: boolean; locked: boolean } {
+  const entries = visible.filter((entry) => isFreezePairKey(entry.key));
+  return {
+    entries,
+    checked: entries.every(
+      (entry) => entry.availability === "locked" || settings[entry.key] !== undefined
+    ),
+    // Locked only when every half is forced. If just one were, the row stays
+    // interactive and the toggle simply can't move the locked half.
+    locked: entries.length > 0 && entries.every((entry) => entry.availability === "locked"),
+  };
+}
+
+function applyFreezePairToggle(
+  settings: AdvancedSettingsDraft,
+  entries: readonly GroupedSetting[],
+  enabled: boolean
+): AdvancedSettingsDraft {
+  const next = { ...settings };
+  for (const entry of entries) {
+    if (entry.availability === "locked") {
+      continue;
+    }
+    if (enabled) {
+      next[entry.key] = settings[entry.key] ?? {};
+    } else {
+      delete next[entry.key];
+    }
+  }
+  return next;
 }
 
 function extensionTitle(extensions: readonly string[]): string {
@@ -374,6 +424,12 @@ export function AdvancedSettingsEditor({
     onSettingsChange(next);
   };
 
+  const combinedFreeze = getCombinedFreezeState(visiblePermanent, settings);
+  const showCombinedFreeze = !showTechnical && combinedFreeze.entries.length > 0;
+  const rowEntries = showCombinedFreeze
+    ? visiblePermanent.filter((entry) => !isFreezePairKey(entry.key))
+    : visiblePermanent;
+
   const setParam = (key: string, paramKey: string, paramValue: string) => {
     const current = settings[key] ?? {};
     onSettingsChange({
@@ -529,7 +585,17 @@ export function AdvancedSettingsEditor({
               docsHref={accessControlDocsHref}
             />
           ) : null}
-          {visiblePermanent.map((entry) => (
+          {showCombinedFreeze ? (
+            <CombinedFreezeRow
+              state={combinedFreeze}
+              disabled={disabled}
+              readOnly={settingsReadOnly}
+              onToggle={(enabled) =>
+                onSettingsChange(applyFreezePairToggle(settings, combinedFreeze.entries, enabled))
+              }
+            />
+          ) : null}
+          {rowEntries.map((entry) => (
             <PermanentRow
               key={entry.key}
               entry={entry}
@@ -685,6 +751,37 @@ function AccessControlRow({
   );
 }
 
+/**
+ * The basic view's single "Freeze transfers" row, standing in for the
+ * pauseTransfers + freezeAccounts pair. Reuses the existing combined copy, since
+ * that is exactly what this control used to be before the settings were split.
+ */
+function CombinedFreezeRow({
+  state,
+  disabled,
+  readOnly,
+  onToggle,
+}: {
+  state: { checked: boolean; locked: boolean };
+  disabled?: boolean;
+  readOnly?: boolean;
+  onToggle: (enabled: boolean) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <SettingShell
+      icon={Snowflake}
+      checked={state.checked}
+      disabled={disabled || readOnly || state.locked}
+      locked={state.locked || Boolean(readOnly && state.checked)}
+      onToggle={onToggle}
+      label={t("DashboardIssuance.config.freezeTransfers")}
+      description={t("DashboardIssuance.config.freezeTransfersDescription")}
+      badges={state.locked ? <Pill>{t("DashboardIssuance.config.settingRequired")}</Pill> : null}
+    />
+  );
+}
+
 function PermanentRow({
   entry,
   selection,
@@ -726,7 +823,14 @@ function PermanentRow({
       dimmed={blocked}
       locked={locked}
       onToggle={onToggle}
-      label={showTechnical ? extensionTitle(setting.extensions) : t(setting.labelKey as MessageKey)}
+      // Technical mode names the row after its extension(s) — but a setting can
+      // map to a base-mint field instead (freezeAccounts), in which case there is
+      // no extension to name and the product label is the accurate one.
+      label={
+        showTechnical && setting.extensions.length > 0
+          ? extensionTitle(setting.extensions)
+          : t(setting.labelKey as MessageKey)
+      }
       description={t(setting.descriptionKey as MessageKey)}
       badges={
         isLocked ? (
