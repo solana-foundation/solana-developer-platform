@@ -81,6 +81,27 @@ describe("validateBuilder", () => {
     expect(result.fieldErrors.url).toBeTruthy();
   });
 
+  it("requires send_webhook to target exactly one of endpointId / url", () => {
+    const validate = (params: Record<string, string>) =>
+      validateBuilder({
+        triggerType: "kyc_approved",
+        action: action("send_webhook"),
+        params,
+        guards: [],
+        wf,
+      });
+
+    // Either shape alone is valid.
+    expect(validate({ endpointId: "webhook_endpoint_1" }).ok).toBe(true);
+    expect(validate({ url: "https://example.com/hook" }).ok).toBe(true);
+    // Neither, or both, is not.
+    expect(validate({}).fieldErrors.endpointId).toBeTruthy();
+    expect(
+      validate({ endpointId: "webhook_endpoint_1", url: "https://example.com/hook" }).fieldErrors
+        .endpointId
+    ).toBeTruthy();
+  });
+
   it("blocks submit while a guard row is incomplete (never silently dropped)", () => {
     const result = validateBuilder({
       triggerType: "kyc_approved",

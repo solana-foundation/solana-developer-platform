@@ -192,7 +192,9 @@
     "collapsePaymentsMenu": "Réduire le menu Paiements",
     "backToWallet": "Retour au portefeuille",
     "walletControls": "Contrôles du portefeuille",
-    "backToApprovals": "Retour aux approbations"
+    "backToApprovals": "Retour aux approbations",
+    "webhooks": "Webhooks",
+    "backToWebhooks": "Retour aux webhooks"
   },
   "validation": {
     "allowlistValueRequired": "La valeur Allowlist est requise",

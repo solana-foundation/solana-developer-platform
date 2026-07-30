@@ -4,6 +4,7 @@ import dashboardCustody from "../../messages/en/dashboard-custody.json";
 import dashboardIssuance from "../../messages/en/dashboard-issuance.json";
 import dashboardPayments from "../../messages/en/dashboard-payments.json";
 import dashboardPolicies from "../../messages/en/dashboard-policies.json";
+import dashboardWebhooks from "../../messages/en/dashboard-webhooks.json";
 import shared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
 import frDashboardApprovals from "../../messages/fr/dashboard-approvals.json";
@@ -11,6 +12,7 @@ import frDashboardCustody from "../../messages/fr/dashboard-custody.json";
 import frDashboardIssuance from "../../messages/fr/dashboard-issuance.json";
 import frDashboardPayments from "../../messages/fr/dashboard-payments.json";
 import frDashboardPolicies from "../../messages/fr/dashboard-policies.json";
+import frDashboardWebhooks from "../../messages/fr/dashboard-webhooks.json";
 import frShared from "../../messages/fr/shared.json";
 import fr from "../../messages/fr.json";
 
@@ -21,6 +23,7 @@ const enMessages = {
   ...dashboardIssuance,
   ...dashboardPayments,
   ...dashboardPolicies,
+  ...dashboardWebhooks,
   Shared: shared,
 };
 
@@ -33,6 +36,7 @@ const frMessages = {
   ...frDashboardIssuance,
   ...frDashboardPayments,
   ...frDashboardPolicies,
+  ...frDashboardWebhooks,
   Shared: frShared,
 } satisfies Messages;
 

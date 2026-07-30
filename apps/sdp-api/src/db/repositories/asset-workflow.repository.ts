@@ -94,4 +94,11 @@ export interface AssetWorkflowsRepository {
     triggerType: WorkflowTriggerType;
     tokenId?: string;
   }): Promise<AssetWorkflowRow[]>;
+  // Deleting a webhook endpoint doesn't cascade to rules; this count lets the
+  // DELETE response warn about send_webhook rules left pointing at it.
+  countEnabledWorkflowsReferencingEndpoint(params: {
+    endpointId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<number>;
 }

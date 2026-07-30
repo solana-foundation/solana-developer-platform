@@ -141,5 +141,18 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
         .all<Record<string, unknown>>();
       return result.results.map(mapWorkflowRow);
     },
+
+    async countEnabledWorkflowsReferencingEndpoint(params) {
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*)::int AS total FROM asset_workflows
+             WHERE organization_id = ? AND project_id = ?
+               AND action_type = 'send_webhook' AND enabled = TRUE AND deleted_at IS NULL
+               AND definition->'action'->'params'->>'endpointId' = ?`
+        )
+        .bind(params.organizationId, params.projectId, params.endpointId)
+        .first<{ total: number }>();
+      return Number(row?.total ?? 0);
+    },
   };
 }

@@ -18,6 +18,9 @@ export interface DashboardCapabilities {
   // the same split per action tier; this only decides what the builder offers.
   canManageTokenWrite: boolean;
   canUseWalletSignerCheck: boolean;
+  // The outbound-webhook endpoint registry (/dashboard/webhooks).
+  canReadWebhooks: boolean;
+  canManageWebhooks: boolean;
 }
 
 export interface DashboardAccess {
@@ -48,6 +51,8 @@ export function resolveDashboardAccess(role: string | null | undefined): Dashboa
       // Current dashboard implementation creates a short-lived API key before signer check.
       canUseWalletSignerCheck:
         hasPermission(permissions, "wallets:write") && hasPermission(permissions, "api-keys:write"),
+      canReadWebhooks: hasPermission(permissions, "webhooks:read"),
+      canManageWebhooks: hasPermission(permissions, "webhooks:write"),
     },
   };
 }

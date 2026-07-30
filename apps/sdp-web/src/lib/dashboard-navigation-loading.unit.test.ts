@@ -40,6 +40,8 @@ describe("dashboard loading route", () => {
     ["/dashboard/policies", "policies"],
     ["/dashboard/approvals", "approvals-list"],
     ["/dashboard/approvals/request-1", "approval-detail"],
+    ["/dashboard/webhooks", "webhooks-list"],
+    ["/dashboard/webhooks/webhook_endpoint_1", "webhook-detail"],
     ["/dashboard/settings", "settings"],
     ["/dashboard/allowlist", "allowlist"],
   ])("maps %s to its exact route skeleton", (pathname, route) => {

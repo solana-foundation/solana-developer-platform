@@ -47,6 +47,7 @@ import playgroundInternal from "@/routes/playground-internal";
 import policies from "@/routes/policies";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
+import webhookEndpoints from "@/routes/webhook-endpoints";
 import webhooks from "@/routes/webhooks";
 import { isSentryEnabled, type Observability } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
@@ -354,6 +355,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/places", places);
   v1.route("/policies", policies);
   v1.route("/compliance", compliance);
+  // Outbound-webhook endpoint registry (workflow send_webhook targets).
+  v1.route("/webhook-endpoints", webhookEndpoints);
 
   const registeredPluginNames = new Set<string>();
   for (const plugin of deps.plugins ?? []) {

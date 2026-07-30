@@ -1,5 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WorkflowExecutionRow } from "@/db/repositories";
+import { createHmac } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { WebhookEndpointRow, WorkflowExecutionRow } from "@/db/repositories";
+import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 import type { Env } from "@/types/env";
 
 // DNS is stubbed so the SSRF guard's behavior is asserted rather than the test host's
@@ -10,6 +12,40 @@ vi.mock("node:dns/promises", () => ({
       ? [{ address: "10.0.0.5", family: 4 }]
       : [{ address: "93.184.216.34", family: 4 }],
 }));
+
+const { getEndpointById, createDelivery } = vi.hoisted(() => ({
+  getEndpointById: vi.fn(),
+  createDelivery: vi.fn(),
+}));
+
+// The registry path resolves its endpoint + logs deliveries through the repo
+// factories; everything else in the module stays real.
+vi.mock("@/db/repositories", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db/repositories")>();
+  return {
+    ...actual,
+    createWebhookEndpointsRepository: () => ({ getEndpointById }),
+    createWebhookDeliveriesRepository: () => ({ createDelivery }),
+  };
+});
+
+// A fake secret store that "decrypts" by parsing the handle's payload, so
+// endpoint-secret.ts (including the grace-expiry logic) runs for real.
+vi.mock("@/services/credential-secret-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/credential-secret-store")>();
+  return {
+    ...actual,
+    createCredentialSecretStore: () => ({
+      storageBackend: "encrypted_db" as const,
+      write: async () => {
+        throw new Error("write not used in this test");
+      },
+      read: async ({ stored }: { stored: StoredCredentialSecret }) =>
+        JSON.parse(stored.encryptedSecretPayload ?? "{}") as Record<string, unknown>,
+      destroyVersion: async () => {},
+    }),
+  };
+});
 
 import { runSendWebhook } from "./webhook";
 
@@ -186,5 +222,223 @@ describe("runSendWebhook", () => {
       params: { url: "https://example.com/hook" },
     });
     expect(outcome).toMatchObject({ status: "failed", retryable: true, error: "socket hang up" });
+  });
+});
+
+const ENDPOINT_ID = "webhook_endpoint_5e60b7b0-9ff1-4f4c-a56b-6db5f9e0c001";
+
+// A handle the mocked store "decrypts" back into `{secret}` by parsing the payload.
+function storedSecret(secret: string): StoredCredentialSecret {
+  return { storageBackend: "encrypted_db", encryptedSecretPayload: JSON.stringify({ secret }) };
+}
+
+function endpointFixture(overrides: Partial<WebhookEndpointRow> = {}): WebhookEndpointRow {
+  return {
+    id: ENDPOINT_ID,
+    organization_id: "org_test",
+    project_id: "prj_test",
+    url: "https://example.com/hook",
+    label: "Test endpoint",
+    description: null,
+    status: "active",
+    secret_storage: storedSecret("whsec_current"),
+    previous_secret_storage: null,
+    previous_secret_expires_at: null,
+    secret_version: 1,
+    created_by: null,
+    deleted_at: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+// Independent HMAC so the tests catch a scheme change instead of mirroring one.
+function hmacHex(secret: string, payload: string): string {
+  return createHmac("sha256", secret).update(payload).digest("hex");
+}
+
+describe("runSendWebhook (registry endpoint)", () => {
+  beforeEach(() => {
+    getEndpointById.mockReset();
+    createDelivery.mockReset();
+    createDelivery.mockImplementation(async (input: Record<string, unknown>) => input);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const run = () =>
+    runSendWebhook(env, executionFixture(), { params: { endpointId: ENDPOINT_ID } });
+
+  it("sends v2 headers, signs timestamp-dot-body, and records a succeeded delivery", async () => {
+    getEndpointById.mockResolvedValue(endpointFixture());
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await run();
+
+    expect(outcome.status).toBe("succeeded");
+    expect(outcome.result).toMatchObject({ status: 200, endpointId: ENDPOINT_ID });
+    expect(String(outcome.result.deliveryId)).toMatch(/^webhook_delivery_/);
+
+    const [, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["x-sdp-signature-256"]).toBeUndefined();
+    expect(headers["x-sdp-event"]).toBe("kyc_approved");
+    expect(headers["x-sdp-delivery"]).toBe(outcome.result.deliveryId);
+    const body = String(init.body);
+    const expected = hmacHex("whsec_current", `${headers["x-sdp-timestamp"]}.${body}`);
+    expect(headers["x-sdp-signature"]).toBe(`t=${headers["x-sdp-timestamp"]},v1=${expected}`);
+
+    expect(createDelivery).toHaveBeenCalledTimes(1);
+    expect(createDelivery.mock.calls[0][0]).toMatchObject({
+      id: outcome.result.deliveryId,
+      endpointId: ENDPOINT_ID,
+      executionId: "workflow_execution_test",
+      triggerType: "kyc_approved",
+      attempt: 1,
+      status: "succeeded",
+      responseStatus: 200,
+      responseBody: "ok",
+      requestBody: body,
+      requestBodyTruncated: false,
+    });
+  });
+
+  it("signs with both keys while the rotation grace window is open, current first", async () => {
+    getEndpointById.mockResolvedValue(
+      endpointFixture({
+        previous_secret_storage: storedSecret("whsec_old"),
+        previous_secret_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      })
+    );
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await run();
+
+    const [, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    const signed = `${headers["x-sdp-timestamp"]}.${String(init.body)}`;
+    expect(headers["x-sdp-signature"]).toBe(
+      `t=${headers["x-sdp-timestamp"]},v1=${hmacHex("whsec_current", signed)},v1=${hmacHex("whsec_old", signed)}`
+    );
+  });
+
+  it("drops the previous key once its grace expiry has passed", async () => {
+    getEndpointById.mockResolvedValue(
+      endpointFixture({
+        previous_secret_storage: storedSecret("whsec_old"),
+        previous_secret_expires_at: new Date(Date.now() - 1_000).toISOString(),
+      })
+    );
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await run();
+
+    const headers = (fetchMock.mock.calls[0] as [URL, RequestInit])[1].headers as Record<
+      string,
+      string
+    >;
+    expect(headers["x-sdp-signature"].match(/v1=/g)).toHaveLength(1);
+  });
+
+  it("fails permanently when the endpoint does not exist (and logs nothing)", async () => {
+    getEndpointById.mockResolvedValue(null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await run();
+
+    expect(outcome).toMatchObject({
+      status: "failed",
+      retryable: false,
+      error: "ENDPOINT_NOT_FOUND",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(createDelivery).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["deleted", { deleted_at: "2026-01-02T00:00:00.000Z" }, "ENDPOINT_DELETED"],
+    ["disabled", { status: "disabled" as const }, "ENDPOINT_DISABLED"],
+  ])("fails permanently on a %s endpoint and records the misfire", async (_label, overrides, error) => {
+    getEndpointById.mockResolvedValue(endpointFixture(overrides));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await run();
+
+    expect(outcome).toMatchObject({ status: "failed", retryable: false, error });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(createDelivery.mock.calls[0][0]).toMatchObject({ status: "failed", error });
+  });
+
+  it("fails transiently (never unsigned) when the signing secret cannot be read", async () => {
+    getEndpointById.mockResolvedValue(
+      endpointFixture({ secret_storage: { storageBackend: "encrypted_db" } })
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await run();
+
+    expect(outcome).toMatchObject({
+      status: "failed",
+      retryable: true,
+      error: "SECRET_UNAVAILABLE",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(createDelivery.mock.calls[0][0]).toMatchObject({
+      status: "failed",
+      error: "SECRET_UNAVAILABLE",
+    });
+  });
+
+  it.each([
+    [500, true],
+    [404, false],
+  ])("records the delivery and maps HTTP %s retryability like the legacy path", async (status, retryable) => {
+    getEndpointById.mockResolvedValue(endpointFixture());
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status })));
+
+    const outcome = await run();
+
+    expect(outcome).toMatchObject({ status: "failed", retryable, error: `HTTP_${status}` });
+    expect(createDelivery.mock.calls[0][0]).toMatchObject({
+      status: "failed",
+      responseStatus: status,
+      responseBody: "nope",
+      error: `HTTP_${status}`,
+    });
+  });
+
+  it("records a blocked delivery when the endpoint URL is rejected by the SSRF guard", async () => {
+    getEndpointById.mockResolvedValue(endpointFixture({ url: "https://rebound.example.com/hook" }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await run();
+
+    expect(outcome).toMatchObject({
+      status: "failed",
+      retryable: false,
+      error: "BLOCKED_URL:PRIVATE_HOST",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(createDelivery.mock.calls[0][0]).toMatchObject({ error: "BLOCKED_URL:PRIVATE_HOST" });
+  });
+
+  it("never flips the action outcome when the delivery log insert fails", async () => {
+    getEndpointById.mockResolvedValue(endpointFixture());
+    createDelivery.mockRejectedValue(new Error("db down"));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
+
+    const outcome = await run();
+
+    expect(outcome.status).toBe("succeeded");
   });
 });

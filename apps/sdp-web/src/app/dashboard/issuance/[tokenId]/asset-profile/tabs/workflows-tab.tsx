@@ -4,6 +4,8 @@ import { Loader2, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { formatRelativeTime } from "@/app/dashboard/activity-format-utils";
+import { fetchWebhookEndpoints } from "@/app/dashboard/webhooks/webhook-endpoints.client";
+import type { WebhookEndpointView } from "@/app/dashboard/webhooks/webhook-endpoints.data";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,6 +51,7 @@ import {
   type WorkflowRuleView,
 } from "../workflows.data";
 import { GuardEditor } from "./guard-editor";
+import { SendWebhookParams } from "./send-webhook-params";
 import { WorkflowFlowPreview } from "./workflow-flow-preview";
 
 // ── Static catalog metadata ─────────────────────────────────────────────────────────
@@ -82,8 +85,11 @@ const ACTION_PARAM_FIELDS: Record<string, ParamField[]> = {
     { key: "destination", labelKey: "paramDestination", required: true },
     { key: "source", labelKey: "paramSource", helpKey: WALLET_HELP },
   ],
+  // Registry endpoint XOR inline url (+secret) — enforced in validateBuilder and by
+  // the SendWebhookParams mode toggle, so neither field is `required` here.
   send_webhook: [
-    { key: "url", labelKey: "paramWebhookUrl", required: true },
+    { key: "endpointId", labelKey: "paramWebhookEndpoint" },
+    { key: "url", labelKey: "paramWebhookUrl" },
     { key: "secret", labelKey: "paramSecret", secret: true },
   ],
   notify: [
@@ -248,6 +254,16 @@ export function validateBuilder(input: {
     }
     if (field.key === "url" && !/^https?:\/\/\S+$/i.test(value)) {
       fieldErrors[field.key] = wf("validationUrl");
+    }
+  }
+
+  // send_webhook targets exactly one of: a registry endpoint or an inline URL. (The
+  // loose url regex above stays so legacy http rules remain editable in custom mode.)
+  if (action?.type === "send_webhook") {
+    const endpointId = (params.endpointId ?? "").trim();
+    const url = (params.url ?? "").trim();
+    if ((!endpointId && !url) || (endpointId && url)) {
+      fieldErrors.endpointId = wf("validationEndpoint");
     }
   }
 
@@ -466,6 +482,15 @@ export function WorkflowsTab({
     loadFailed,
   } = useWorkflowsData(tokenId, executionsPageSize);
 
+  // Same key as the /dashboard/webhooks registry list, so the cache is shared.
+  const webhookEndpointsSwr = usePersistedDashboardSWR<WebhookEndpointView[]>(
+    ["webhook-endpoints"],
+    fetchWebhookEndpoints,
+    { revalidateOnFocus: false },
+    { key: "webhook-endpoints", ttlMs: 15_000 }
+  );
+  const webhookEndpoints = webhookEndpointsSwr.data;
+
   // ── Builder state ──
   const [triggerType, setTriggerType] = useState<string | null>(null);
   const [actionType, setActionType] = useState<string | null>(null);
@@ -522,6 +547,11 @@ export function WorkflowsTab({
       }
       if (field.secret) {
         return `${wf(field.labelKey)}: ••••`;
+      }
+      // A raw endpoint id says nothing in a preview — show the endpoint's label.
+      if (field.key === "endpointId") {
+        const endpoint = webhookEndpoints?.find((e) => e.id === value);
+        return `${wf(field.labelKey)}: ${endpoint?.label ?? value}`;
       }
       const option = field.options?.find((opt) => opt.value === value);
       return `${wf(field.labelKey)}: ${option ? wf(option.labelKey) : value}`;
@@ -806,6 +836,8 @@ export function WorkflowsTab({
                 selectedAction={selectedAction}
                 conditionFields={conditionFields}
                 guards={guards}
+                webhookEndpoints={webhookEndpoints}
+                editingRuleId={editingRule?.id ?? null}
                 emailEnabled={emailEnabled}
                 validation={validation}
                 showValidation={showValidation}
@@ -914,6 +946,8 @@ function BuilderControls(props: {
   selectedAction: CatalogActionView | null;
   conditionFields: string[];
   guards: GuardDraft[];
+  webhookEndpoints: WebhookEndpointView[] | undefined;
+  editingRuleId: string | null;
   emailEnabled: boolean | null;
   validation: BuilderValidation;
   showValidation: boolean;
@@ -1040,21 +1074,17 @@ function BuilderControls(props: {
         </div>
       ) : null}
 
-      {/* Per-action parameters (amount, destination, webhook URL, notify audience…). */}
-      {paramFields.length > 0 ? (
-        <div className="grid gap-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3 sm:grid-cols-2">
-          {paramFields.map((field) => (
-            <ParamFieldControl
-              key={field.key}
-              field={field}
-              wf={wf}
-              value={params[field.key] ?? ""}
-              error={showValidation ? validation.fieldErrors[field.key] : undefined}
-              onChange={(value) => props.onParamChange(field.key, value)}
-            />
-          ))}
-        </div>
-      ) : null}
+      {/* Per-action parameters (amount, destination, webhook target, notify audience…). */}
+      <BuilderParamsBlock
+        actionType={actionType}
+        editingRuleId={props.editingRuleId}
+        wf={wf}
+        params={params}
+        paramFields={paramFields}
+        webhookEndpoints={props.webhookEndpoints}
+        fieldErrors={showValidation ? validation.fieldErrors : {}}
+        onParamChange={props.onParamChange}
+      />
 
       {/* GUARD ("only if…") — optional filters over the trigger payload. */}
       {triggerType ? (
@@ -1102,6 +1132,58 @@ function BuilderControls(props: {
           {editing ? wf("saveChanges") : wf("create")}
         </Button>
       </div>
+    </div>
+  );
+}
+
+// The per-action parameter inputs. send_webhook gets its bespoke registry/custom
+// picker; every other action renders its ACTION_PARAM_FIELDS as plain controls.
+function BuilderParamsBlock({
+  actionType,
+  editingRuleId,
+  wf,
+  params,
+  paramFields,
+  webhookEndpoints,
+  fieldErrors,
+  onParamChange,
+}: {
+  actionType: string | null;
+  editingRuleId: string | null;
+  wf: ReturnType<typeof makeWf>;
+  params: Record<string, string>;
+  paramFields: ParamField[];
+  webhookEndpoints: WebhookEndpointView[] | undefined;
+  fieldErrors: Record<string, string>;
+  onParamChange: (key: string, value: string) => void;
+}) {
+  if (actionType === "send_webhook") {
+    return (
+      <SendWebhookParams
+        key={editingRuleId ?? "new"}
+        wf={wf}
+        params={params}
+        endpoints={webhookEndpoints}
+        errors={fieldErrors}
+        onParamChange={onParamChange}
+      />
+    );
+  }
+  if (paramFields.length === 0) {
+    return null;
+  }
+  return (
+    <div className="grid gap-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3 sm:grid-cols-2">
+      {paramFields.map((field) => (
+        <ParamFieldControl
+          key={field.key}
+          field={field}
+          wf={wf}
+          value={params[field.key] ?? ""}
+          error={fieldErrors[field.key]}
+          onChange={(value) => onParamChange(field.key, value)}
+        />
+      ))}
     </div>
   );
 }

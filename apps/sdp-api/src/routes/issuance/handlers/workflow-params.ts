@@ -62,9 +62,15 @@ const ACTION_PARAM_SCHEMAS = {
     .object({ wallet: address("wallet").optional(), label: z.string().max(120).optional() })
     .strict(),
   allowlist_remove: z.object({ wallet: address("wallet").optional() }).strict(),
-  send_webhook: z
-    .object({ url: asString.pipe(webhookUrl), secret: z.string().min(8).max(200).optional() })
-    .strict(),
+  // Two mutually exclusive shapes: a managed registry endpoint reference, or the
+  // legacy inline URL (+ optional HMAC secret). `.strict()` on both arms makes them
+  // XOR — `{url, endpointId}` together matches neither and is a 400.
+  send_webhook: z.union([
+    z
+      .object({ url: asString.pipe(webhookUrl), secret: z.string().min(8).max(200).optional() })
+      .strict(),
+    z.object({ endpointId: z.string().regex(/^webhook_endpoint_[0-9a-f-]{36}$/) }).strict(),
+  ]),
   notify: z
     .object({
       audience: z.enum(["admins", "members"]).optional(),

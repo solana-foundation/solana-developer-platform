@@ -192,7 +192,9 @@
     "backToPayments": "Back to payments",
     "backToApprovals": "Back to approvals",
     "members": "Members",
-    "allowlist": "Allowlist"
+    "allowlist": "Allowlist",
+    "webhooks": "Webhooks",
+    "backToWebhooks": "Back to webhooks"
   },
   "validation": {
     "allowlistValueRequired": "Allowlist value is required",

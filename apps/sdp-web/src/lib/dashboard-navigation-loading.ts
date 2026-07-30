@@ -6,6 +6,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   apiKeys: "/dashboard/api-keys",
   policies: "/dashboard/policies",
   approvals: "/dashboard/approvals",
+  webhooks: "/dashboard/webhooks",
   settings: "/dashboard/settings",
 } as const;
 
@@ -47,6 +48,8 @@ export type DashboardLoadingRoute =
   | "policies"
   | "approvals-list"
   | "approval-detail"
+  | "webhooks-list"
+  | "webhook-detail"
   | "settings"
   | "allowlist";
 
@@ -110,6 +113,9 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/policies") return "policies";
   if (pathname === "/dashboard/approvals") return "approvals-list";
   if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
+
+  if (pathname === "/dashboard/webhooks") return "webhooks-list";
+  if (/^\/dashboard\/webhooks\/[^/]+$/.test(pathname)) return "webhook-detail";
   if (pathname === "/dashboard/settings") return "settings";
   if (pathname === "/dashboard/allowlist") return "allowlist";
 

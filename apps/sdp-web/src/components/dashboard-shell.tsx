@@ -25,6 +25,7 @@ import {
   ShieldCheckIcon,
   UsersIcon,
   WalletIcon,
+  WebhookIcon,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -68,6 +69,10 @@ import {
   WalletSetupSkeleton,
   WalletsOverviewSkeleton,
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
+import {
+  WebhookEndpointDetailSkeleton,
+  WebhookEndpointsListSkeleton,
+} from "@/app/dashboard/webhooks/webhook-page-skeletons";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
@@ -160,7 +165,11 @@ function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[]
 
 function getNavSections(
   t: ReturnType<typeof useTranslations>,
-  options: { canReadApprovals: boolean; pendingApprovalCount: number | null }
+  options: {
+    canReadApprovals: boolean;
+    pendingApprovalCount: number | null;
+    canReadWebhooks: boolean;
+  }
 ): NavSection[] {
   return [
     {
@@ -197,6 +206,15 @@ function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
+        ...(options.canReadWebhooks
+          ? [
+              {
+                label: t("Shared.dashboardShell.webhooks"),
+                href: DASHBOARD_SIDE_NAV_HREFS.webhooks,
+                icon: WebhookIcon,
+              },
+            ]
+          : []),
         {
           label: t("Shared.dashboardShell.policies"),
           href: DASHBOARD_SIDE_NAV_HREFS.policies,
@@ -533,6 +551,20 @@ function getAccessControlPageConfig(
           }),
     };
   }
+  if (pathname.startsWith("/dashboard/webhooks")) {
+    return {
+      title: t("Shared.dashboardShell.webhooks"),
+      contentWidthClass: "max-w-none",
+      ...(pathname === "/dashboard/webhooks"
+        ? {}
+        : {
+            backAction: {
+              href: "/dashboard/webhooks",
+              label: t("Shared.dashboardShell.backToWebhooks"),
+            },
+          }),
+    };
+  }
 
   return null;
 }
@@ -794,6 +826,10 @@ function resolvePageLoadingComponent(
       return ApprovalInboxSkeleton;
     case "approval-detail":
       return ApprovalDetailSkeleton;
+    case "webhooks-list":
+      return WebhookEndpointsListSkeleton;
+    case "webhook-detail":
+      return WebhookEndpointDetailSkeleton;
     case "settings":
       return SettingsPageSkeleton;
     case "allowlist":
@@ -1117,6 +1153,7 @@ export function DashboardShell({
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     pendingApprovalCount,
+    canReadWebhooks: dashboardAccess.capabilities.canReadWebhooks,
   });
   const bottomNavItems: NavItem[] = [
     {
@@ -1172,6 +1209,7 @@ export function DashboardShell({
     isWalletSetupRoute ||
     isOrganizationOnboardingRoute ||
     shellPathname.startsWith("/dashboard/approvals") ||
+    shellPathname.startsWith("/dashboard/webhooks") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
