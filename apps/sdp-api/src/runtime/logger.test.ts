@@ -63,4 +63,24 @@ describe("logger context", () => {
 
     expect(records[0].error).toMatchObject({ type: "Error", message: "boom" });
   });
+
+  it("does not leak fields into later records in the same request", () => {
+    const { logger, records } = captureLogger();
+
+    runWithLogContext({ request_id: "req_1" }, () => {
+      logger.info({ transfer_id: "tr_1", error: "boom" }, "first");
+      logger.info({ event: "request_completed" }, "second");
+    });
+
+    expect(records[1]).not.toHaveProperty("transfer_id");
+    expect(records[1]).not.toHaveProperty("error");
+  });
+
+  it("emits a Cloud Logging severity alongside the numeric level", () => {
+    const { logger, records } = captureLogger();
+
+    logger.error("boom");
+
+    expect(records[0]).toMatchObject({ level: 50, severity: "ERROR" });
+  });
 });

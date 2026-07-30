@@ -23,13 +23,27 @@ function serializeError(value: unknown): unknown {
     : value;
 }
 
+const CLOUD_SEVERITY: Record<string, string> = {
+  trace: "DEBUG",
+  debug: "DEBUG",
+  info: "INFO",
+  warn: "WARNING",
+  error: "ERROR",
+  fatal: "CRITICAL",
+};
+
 export function baseLoggerOptions(): LoggerOptions {
   return {
     level: process.env.LOG_LEVEL ?? "info",
     base: undefined,
     messageKey: "message",
+    formatters: {
+      level(label, number) {
+        return { level: number, severity: CLOUD_SEVERITY[label] ?? "DEFAULT" };
+      },
+    },
     serializers: { error: serializeError, err: serializeError },
-    mixin: () => getLogContext(),
+    mixin: () => ({ ...getLogContext() }),
     ...(process.env.LOG_FORMAT === "pretty" ? { transport: { target: "pino-pretty" } } : {}),
   };
 }
