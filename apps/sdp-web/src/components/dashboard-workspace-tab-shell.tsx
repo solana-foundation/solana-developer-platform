@@ -3,10 +3,10 @@
 import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode } from "react";
 import { dashboardWorkspaceOverviewPanelClassName } from "@/components/dashboard-workspace-panel";
+import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { cn } from "@/lib/utils";
 
 interface DashboardWorkspaceTabShellProps {
-  isPlaygroundTab: boolean;
   overview: ReactNode;
   playground: ReactNode;
   disableOverviewInitialAnimation?: boolean;
@@ -14,13 +14,11 @@ interface DashboardWorkspaceTabShellProps {
   overviewKey?: string;
   playgroundClassName?: string;
   playgroundKey?: string;
-  tabNavigation?: ReactNode;
 }
 
 const tabTransition = { duration: 0.2, ease: "easeOut" } as const;
 
 export function DashboardWorkspaceTabShell({
-  isPlaygroundTab,
   overview,
   playground,
   disableOverviewInitialAnimation = false,
@@ -28,11 +26,10 @@ export function DashboardWorkspaceTabShell({
   overviewKey = "overview-tab",
   playgroundClassName,
   playgroundKey = "playground-tab",
-  tabNavigation,
 }: DashboardWorkspaceTabShellProps) {
+  const isPlaygroundTab = useDashboardTab() === "playground";
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      {tabNavigation}
       <div className="relative min-h-0 flex-1">
         <AnimatePresence mode="wait">
           {isPlaygroundTab ? (

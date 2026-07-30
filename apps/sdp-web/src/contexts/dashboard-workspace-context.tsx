@@ -29,7 +29,6 @@ import { reconcileProjectCookieAction, selectProjectAction } from "@/lib/project
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
-export type CounterpartyWorkspaceTab = "overview" | "playground";
 
 export interface DashboardPlaygroundApiKeyOption {
   id: string;
@@ -51,16 +50,13 @@ type DashboardWorkspaceContextValue = {
   issuanceTab: IssuanceWorkspaceTab;
   /** Grid ⇄ list preference for the issuance overview; see issuance-token-view.ts. */
   issuanceTokenView: TokenView;
-  counterpartyTab: CounterpartyWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
   isProjectSwitching: boolean;
   selectProject: (projectId: string | null) => void;
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
-  setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
   setIssuanceTokenView: (view: TokenView) => void;
-  setCounterpartyTab: (tab: CounterpartyWorkspaceTab) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
 };
@@ -214,11 +210,6 @@ export function DashboardWorkspaceProvider({
     return tab === "playground" ? "playground" : "tokens";
   }, [searchParams]);
 
-  const counterpartyTab: CounterpartyWorkspaceTab = useMemo(() => {
-    const tab = searchParams.get("tab");
-    return tab === "playground" ? "playground" : "overview";
-  }, [searchParams]);
-
   const setSidebarOpen = useCallback((open: boolean) => {
     setSidebarOpenState(open);
   }, []);
@@ -247,24 +238,6 @@ export function DashboardWorkspaceProvider({
     persistIssuanceTokenView(view);
   }, []);
 
-  const setIssuanceTab = useCallback(
-    (tab: IssuanceWorkspaceTab) => {
-      replaceSearchParams({
-        tab: tab === "playground" ? "playground" : "overview",
-      });
-    },
-    [replaceSearchParams]
-  );
-
-  const setCounterpartyTab = useCallback(
-    (tab: CounterpartyWorkspaceTab) => {
-      replaceSearchParams({
-        tab: tab === "playground" ? "playground" : "overview",
-      });
-    },
-    [replaceSearchParams]
-  );
-
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
       dashboardAccess,
@@ -278,15 +251,12 @@ export function DashboardWorkspaceProvider({
       isProjectSwitching,
       issuanceTab,
       issuanceTokenView,
-      counterpartyTab,
       playgroundApiKeys,
       selectedPlaygroundApiKeyId,
       selectProject,
       setPlaygroundApiKeys,
       setSelectedPlaygroundApiKeyId,
-      setIssuanceTab,
       setIssuanceTokenView,
-      setCounterpartyTab,
       setSidebarOpen,
       toggleSidebar,
     }),
@@ -303,13 +273,10 @@ export function DashboardWorkspaceProvider({
       playgroundApiKeys,
       issuanceTab,
       issuanceTokenView,
-      counterpartyTab,
       selectedPlaygroundApiKeyId,
       selectProject,
       setPlaygroundApiKeys,
-      setIssuanceTab,
       setIssuanceTokenView,
-      setCounterpartyTab,
       setSidebarOpen,
       toggleSidebar,
     ]
