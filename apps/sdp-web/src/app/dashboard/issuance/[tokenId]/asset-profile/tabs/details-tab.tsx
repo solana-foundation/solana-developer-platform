@@ -63,7 +63,7 @@ export function DetailsTab({
   ops: TokenOperations;
 }) {
   const t = useTranslations();
-  const { draft, updateDraft, saving, errors, showErrors } = form;
+  const { draft, updateDraft, saving, errors, showErrors, supplyLocked } = form;
   const [jsonOpen, setJsonOpen] = useState(false);
   const sections = getDetailSections(draft.assetCategory, draft.assetType);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
@@ -109,54 +109,81 @@ export function DetailsTab({
         description={t("DashboardIssuance.assetDetails.aboutDescription")}
         icon={Tag}
       >
-        <div className="grid items-start gap-4 sm:grid-cols-2">
-          <TextField
-            label={t("DashboardIssuance.forms.name")}
-            required
-            disabled={saving}
-            value={draft.name}
-            onChange={(value) => updateDraft({ name: value })}
-            placeholder={t("DashboardIssuance.assetDetails.namePlaceholder")}
-            error={nameError}
-          />
-          <div className="grid grid-cols-2 items-start gap-4">
-            {isDeployed ? (
-              <>
-                <ReadOnlyField
-                  label={t("DashboardIssuance.create.symbol")}
-                  value={token.symbol}
-                  lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
-                />
-                <ReadOnlyField
-                  label={t("DashboardIssuance.create.decimals")}
-                  value={String(token.decimals)}
-                  lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
-                />
-              </>
-            ) : (
-              <>
-                <TextField
-                  label={t("DashboardIssuance.create.symbol")}
-                  required
-                  disabled={saving}
-                  value={draft.symbol}
-                  onChange={(value) => updateDraft({ symbol: value })}
-                  placeholder={t("DashboardIssuance.assetDetails.symbolPlaceholder")}
-                  error={symbolError}
-                />
-                <TextField
-                  label={t("DashboardIssuance.create.decimals")}
-                  required
-                  type="number"
-                  disabled={saving}
-                  value={draft.decimals}
-                  onChange={(value) => updateDraft({ decimals: value })}
-                  placeholder={t("DashboardIssuance.create.decimalsPlaceholder")}
-                  error={decimalsError}
-                />
-              </>
-            )}
+        {/* Name plus the three mint parameters in one flat grid, so every cell is
+            filled at every width: stacked on mobile, 2×2 on tablet, and a single
+            row at lg where the name takes the double-width cell. A nested pair
+            for symbol/decimals would leave max supply orphaned on its own row. */}
+        <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="lg:col-span-2">
+            <TextField
+              label={t("DashboardIssuance.forms.name")}
+              required
+              disabled={saving}
+              value={draft.name}
+              onChange={(value) => updateDraft({ name: value })}
+              placeholder={t("DashboardIssuance.assetDetails.namePlaceholder")}
+              error={nameError}
+            />
           </div>
+          {isDeployed ? (
+            <>
+              <ReadOnlyField
+                label={t("DashboardIssuance.create.symbol")}
+                value={token.symbol}
+                lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
+              />
+              <ReadOnlyField
+                label={t("DashboardIssuance.create.decimals")}
+                value={String(token.decimals)}
+                lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
+              />
+            </>
+          ) : (
+            <>
+              <TextField
+                label={t("DashboardIssuance.create.symbol")}
+                required
+                disabled={saving}
+                value={draft.symbol}
+                onChange={(value) => updateDraft({ symbol: value })}
+                placeholder={t("DashboardIssuance.assetDetails.symbolPlaceholder")}
+                error={symbolError}
+              />
+              <TextField
+                label={t("DashboardIssuance.create.decimals")}
+                required
+                type="number"
+                disabled={saving}
+                value={draft.decimals}
+                onChange={(value) => updateDraft({ decimals: value })}
+                placeholder={t("DashboardIssuance.create.decimalsPlaceholder")}
+                error={decimalsError}
+              />
+            </>
+          )}
+          {/* The cap lives on the token row, not in issuance_metadata, and SDP
+              enforces it at mint time — so it stays editable for as long as SDP
+              can enforce it, i.e. until lock-supply revokes the mint authority.
+              The hint states both halves of that (who enforces it, and that it
+              can be made permanent); "blank = unlimited" is left to the
+              placeholder so the copy stays as short as its neighbours'. */}
+          {supplyLocked ? (
+            <ReadOnlyField
+              label={t("DashboardIssuance.assetDetails.maxSupply")}
+              value={token.maxSupply ?? t("DashboardIssuance.assetDetails.maxSupplyUnlimited")}
+              lockReason={t("DashboardIssuance.assetDetails.maxSupplyLockedReason")}
+            />
+          ) : (
+            <TextField
+              label={t("DashboardIssuance.assetDetails.maxSupply")}
+              disabled={saving}
+              value={draft.maxSupply}
+              onChange={(value) => updateDraft({ maxSupply: value })}
+              placeholder={t("DashboardIssuance.assetDetails.maxSupplyPlaceholder")}
+              help={t("DashboardIssuance.assetDetails.maxSupplyEnforcementHint")}
+              error={fieldError("maxSupply")}
+            />
+          )}
         </div>
         <div className="mt-4 grid gap-1.5">
           <Label htmlFor="asset-description">

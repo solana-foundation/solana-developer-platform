@@ -62,6 +62,9 @@ export interface UpdateAssetProfileActionInput {
     symbol?: string;
     decimals?: number;
     requiresAllowlist?: boolean;
+    // Only sent while the supply is not locked on-chain (the API rejects it after);
+    // null clears the cap.
+    maxSupply?: string | null;
   };
 }
 
@@ -307,6 +310,25 @@ export function mergeIssuanceMetadataForUpdate(
   return merged as IssuanceMetadata;
 }
 
+// The cap round-trips through base units, so the API returns it trimmed:
+// "1000.50" comes back as "1000.5", and "0100" as "100". Compare the normalized
+// value or a save would leave the form permanently "dirty" against its own
+// re-hydrated baseline. Values that aren't plain decimals compare literally —
+// the format validation owns those.
+function canonicalMaxSupply(value: string): string {
+  const trimmed = value.trim();
+  if (!/^\d*\.?\d*$/.test(trimmed)) {
+    return trimmed;
+  }
+  const [whole = "", fraction = ""] = trimmed.split(".");
+  const normalizedFraction = fraction.replace(/0+$/, "");
+  const normalizedWhole = whole.replace(/^0+(?=\d)/, "");
+  if (!normalizedWhole && !normalizedFraction) {
+    return normalizedWhole;
+  }
+  return normalizedFraction ? `${normalizedWhole || "0"}.${normalizedFraction}` : normalizedWhole;
+}
+
 function canonicalDraft(draft: DraftState): Record<string, unknown> {
   return {
     assetCategory: draft.assetCategory,
@@ -317,6 +339,7 @@ function canonicalDraft(draft: DraftState): Record<string, unknown> {
     description: draft.description.trim(),
     website: draft.website.trim(),
     imageUrl: draft.imageUrl.trim(),
+    maxSupply: canonicalMaxSupply(draft.maxSupply),
     backingType: draft.backingType,
     pegCurrency: draft.pegCurrency,
     pegTarget: draft.pegTarget.trim(),

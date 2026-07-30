@@ -1685,6 +1685,114 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.error.message).toContain("symbol and decimals");
     });
+
+    // The supply cap has no on-chain counterpart: SDP enforces it at mint time,
+    // so it stays editable for exactly as long as SDP holds the mint authority.
+    describe("maxSupply", () => {
+      // A deployed, still-mintable token with `supply` already minted.
+      const insertMintableToken = async (id: string, supplyBaseUnits: string) => {
+        await getDb(env)
+          .prepare(
+            `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+             name, symbol, decimals, total_supply_cached, max_supply, is_mintable, freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, 'Capped Token', 'CAP', 6, ?, '1000000000', 1, 1, 0, 'active', '2024-01-02T00:00:00.000Z', ?)`
+          )
+          .bind(
+            id,
+            TEST_PROJECT.id,
+            TEST_ORG.id,
+            TEST_ACTIVE_TOKEN.mintAddress,
+            TEST_ACTIVE_TOKEN.mintAuthority,
+            TEST_ACTIVE_TOKEN.freezeAuthority,
+            supplyBaseUnits,
+            TEST_PROJECT_API_KEY.id
+          )
+          .run();
+      };
+
+      const patchMaxSupply = (id: string, maxSupply: string | null) =>
+        app.request(
+          `/v1/issuance/tokens/${id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ maxSupply }),
+          },
+          env
+        );
+
+      it("updates the cap on an undeployed draft", async () => {
+        const res = await patchMaxSupply(tokenId, "2500.5");
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.token.maxSupply).toBe("2500.5");
+      });
+
+      it("clears the cap with null", async () => {
+        expect((await patchMaxSupply(tokenId, "2500")).status).toBe(200);
+
+        const res = await patchMaxSupply(tokenId, null);
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.token.maxSupply).toBeNull();
+      });
+
+      it("updates the cap on a deployed token that still has its mint authority", async () => {
+        const deployedTokenId = "tok_capmintable1";
+        await insertMintableToken(deployedTokenId, "500000000");
+
+        const res = await patchMaxSupply(deployedTokenId, "2000");
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.token.maxSupply).toBe("2000");
+      });
+
+      it("rejects a cap below the already-minted supply", async () => {
+        const deployedTokenId = "tok_capbelowsupply1";
+        // 1500 minted, so a 1000 cap could never be satisfied.
+        await insertMintableToken(deployedTokenId, "1500000000");
+
+        const res = await patchMaxSupply(deployedTokenId, "1000");
+
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error.message).toContain("already-minted supply");
+      });
+
+      it("rejects a cap with more precision than the token's decimals", async () => {
+        const deployedTokenId = "tok_capprecision1";
+        await insertMintableToken(deployedTokenId, "0");
+
+        const res = await patchMaxSupply(deployedTokenId, "1000.1234567");
+
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error.message).toContain("maxSupply");
+      });
+
+      it("rejects a cap change once the supply is locked on-chain", async () => {
+        const db = getDb(env);
+        const lockedTokenId = "tok_capsupplylocked1";
+        await insertMintableToken(lockedTokenId, "1000000000");
+        // What lock-supply leaves behind: no mint authority, minting disabled.
+        await db
+          .prepare("UPDATE issued_tokens SET mint_authority = NULL, is_mintable = 0 WHERE id = ?")
+          .bind(lockedTokenId)
+          .run();
+
+        const res = await patchMaxSupply(lockedTokenId, "2000");
+
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error.message).toContain("locked on-chain");
+      });
+    });
   });
 
   describe("POST /v1/issuance/tokens/:tokenId/supply/refresh", () => {

@@ -175,6 +175,11 @@ export interface UpdateTokenInput {
   signingWalletId?: string | null;
   /** Only accepted while the token is undeployed (enforced by the route handler). */
   requiresAllowlist?: boolean;
+  /**
+   * Whole-token decimal string, or null to uncap. Only accepted while the supply
+   * is not yet locked on-chain (enforced by the route handler).
+   */
+  maxSupply?: string | null;
 }
 
 export interface CreateTokenTransactionInput {
@@ -786,6 +791,11 @@ export class TokenService {
       values.push(input.requiresAllowlist ? 1 : 0);
     }
 
+    if (input.maxSupply !== undefined) {
+      updates.push("max_supply = ?");
+      values.push(this._resolveMaxSupplyBaseUnits(input, existing));
+    }
+
     if (updates.length === 0) {
       return existing;
     }
@@ -805,9 +815,22 @@ export class TokenService {
       input.decimals !== undefined ||
       input.requiresAllowlist !== undefined;
 
-    const whereClause = requiresUndeployedGuard
-      ? "WHERE id = ? AND status = 'pending' AND mint_address IS NULL"
-      : "WHERE id = ?";
+    // Same race, one step later in the lifecycle: the cap is only meaningful
+    // while the mint authority still exists, and a concurrent lock-supply can
+    // revoke it between the handler's read and this write.
+    const requiresUnlockedSupplyGuard =
+      input.maxSupply !== undefined && Boolean(existing.mintAddress);
+
+    const guards: string[] = [];
+    if (requiresUndeployedGuard) {
+      guards.push("status = 'pending'", "mint_address IS NULL");
+    }
+    if (requiresUnlockedSupplyGuard) {
+      guards.push("is_mintable = 1", "mint_authority IS NOT NULL");
+    }
+
+    const whereClause =
+      guards.length > 0 ? `WHERE id = ? AND ${guards.join(" AND ")}` : "WHERE id = ?";
 
     const rowsAffected = await this.db
       .prepare(`UPDATE issued_tokens SET ${updates.join(", ")} ${whereClause}`)
@@ -815,11 +838,13 @@ export class TokenService {
       .run();
 
     // The row existed at the top-of-method read, so a guarded 0-row result means
-    // it was deployed during the window — surface a 409 rather than a 404.
-    if (requiresUndeployedGuard && rowsAffected === 0) {
+    // the lifecycle moved on during the window — surface a 409 rather than a 404.
+    if (guards.length > 0 && rowsAffected === 0) {
       throw new AppError(
         "CONFLICT",
-        "Token was deployed while this update was in flight; re-fetch and retry"
+        requiresUndeployedGuard
+          ? "Token was deployed while this update was in flight; re-fetch and retry"
+          : "Token supply was locked on-chain while this update was in flight; re-fetch and retry"
       );
     }
 
@@ -829,6 +854,46 @@ export class TokenService {
     }
 
     return updated;
+  }
+
+  /**
+   * The `max_supply` column value for an update: base units, or null to uncap.
+   *
+   * Mirrors `createToken`'s parse — precision is checked against the effective
+   * decimals, which a pre-deploy update may be changing in the same request —
+   * and additionally refuses a cap the token has already outgrown, since minting
+   * can only ever push the total further past it.
+   */
+  private _resolveMaxSupplyBaseUnits(input: UpdateTokenInput, existing: Token): string | null {
+    if (!input.maxSupply) {
+      return null;
+    }
+
+    const decimals = input.decimals ?? existing.decimals;
+    let baseUnits: bigint;
+    try {
+      baseUnits = parseDecimalAmount(input.maxSupply, decimals);
+    } catch {
+      throw badRequest("Invalid maxSupply for this token's decimals", {
+        errors: {
+          maxSupply: [`Must be a number with at most ${decimals} decimal place(s)`],
+        },
+      });
+    }
+
+    // Only compared for deployed tokens: their decimals are immutable (so both
+    // sides share a scale) and a draft has no minted supply to undercut. The
+    // stored total is the last cached read of the mint, so this is best-effort —
+    // the on-chain supply is the authority.
+    if (existing.mintAddress && baseUnits < parseDecimalAmount(existing.totalSupply, decimals)) {
+      throw badRequest("maxSupply cannot be below the already-minted supply", {
+        errors: {
+          maxSupply: [`Must be at least the current supply of ${existing.totalSupply}`],
+        },
+      });
+    }
+
+    return baseUnits.toString();
   }
 
   /**

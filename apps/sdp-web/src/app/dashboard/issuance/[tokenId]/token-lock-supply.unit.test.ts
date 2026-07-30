@@ -4,6 +4,8 @@ import { getMessages, type MessageKey, type TranslationValues, translate } from 
 import {
   getLockSupplyDisabledReason,
   getRemainingMintableSupply,
+  isMaxSupplyBelowMintedSupply,
+  isSupplyLockedOnChain,
 } from "./token-management-workspace.utils";
 
 const t = (key: MessageKey, values?: TranslationValues) =>
@@ -125,5 +127,45 @@ describe("getLockSupplyDisabledReason", () => {
   ] as const)("blocks on a %s token via the mint lifecycle gate", (status) => {
     // Leg 1 is a real mint, so lock-supply inherits mint's lifecycle rules.
     expect(getLockSupplyDisabledReason(makeToken({ status }), t)).not.toBeNull();
+  });
+});
+
+// Gates whether the cap is still editable in the asset-management Details tab.
+describe("isSupplyLockedOnChain", () => {
+  it("is false while the mint authority is live", () => {
+    expect(isSupplyLockedOnChain(makeToken())).toBe(false);
+  });
+
+  it("is true once the mint authority is revoked", () => {
+    expect(isSupplyLockedOnChain(makeToken({ mintAuthority: null }))).toBe(true);
+    expect(isSupplyLockedOnChain(makeToken({ isMintable: false }))).toBe(true);
+  });
+
+  it("is false for an undeployed draft, which has no on-chain authority yet", () => {
+    // Authorities are assigned at deploy, so `isMintable: false` on a draft is a
+    // config choice — not a revoked authority — and its cap stays editable.
+    expect(
+      isSupplyLockedOnChain(
+        makeToken({ mintAddress: null, mintAuthority: null, status: "pending" })
+      )
+    ).toBe(false);
+  });
+});
+
+describe("isMaxSupplyBelowMintedSupply", () => {
+  it("flags a cap under the minted supply", () => {
+    expect(isMaxSupplyBelowMintedSupply("100000", "250000")).toBe(true);
+    expect(isMaxSupplyBelowMintedSupply("0.4", "0.5")).toBe(true);
+  });
+
+  it("accepts a cap at or above the minted supply", () => {
+    expect(isMaxSupplyBelowMintedSupply("250000", "250000")).toBe(false);
+    expect(isMaxSupplyBelowMintedSupply("250000.5", "250000")).toBe(false);
+    // Trailing zeros and whitespace are formatting, not a smaller cap.
+    expect(isMaxSupplyBelowMintedSupply(" 250000.00 ", "250000")).toBe(false);
+  });
+
+  it("leaves unparseable input to the format validation", () => {
+    expect(isMaxSupplyBelowMintedSupply("abc", "250000")).toBe(false);
   });
 });
