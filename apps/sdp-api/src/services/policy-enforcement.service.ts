@@ -15,6 +15,7 @@ import {
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, conflict, internalError } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import {
   type CustodyWalletWithProvider,
   createSigningService,
@@ -193,10 +194,13 @@ export async function recordLegacyWalletPolicyDenial(
 
     await repository.updateWalletOperationStatus(enforcement.operation.id, "failed");
   } catch (auditError) {
-    console.error("Failed to record legacy wallet policy denial", {
-      walletOperationId: enforcement.operation.id,
-      error: auditError instanceof Error ? auditError.message : String(auditError),
-    });
+    getLogger().error(
+      {
+        walletOperationId: enforcement.operation.id,
+        error: auditError instanceof Error ? auditError.message : String(auditError),
+      },
+      "Failed to record legacy wallet policy denial"
+    );
   }
 }
 
@@ -207,10 +211,13 @@ async function markWalletOperationFailed(
   try {
     await repository.updateWalletOperationStatus(walletOperationId, "failed");
   } catch (error) {
-    console.error("Failed to mark wallet operation failed", {
-      walletOperationId,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    getLogger().error(
+      {
+        walletOperationId,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "Failed to mark wallet operation failed"
+    );
   }
 }
 

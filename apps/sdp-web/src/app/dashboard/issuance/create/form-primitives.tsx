@@ -99,7 +99,11 @@ export function TextField({
         placeholder={placeholder}
         required={required}
         error={error}
-        description={help}
+        // Must stay truthy even without help text: the design-system TextInput
+        // renders a bare input unless label/description/error is set, so an
+        // error appearing (or clearing) mid-typing would otherwise swap the
+        // root element, remount the <input>, and drop focus.
+        description={help ?? " "}
       />
     </div>
   );

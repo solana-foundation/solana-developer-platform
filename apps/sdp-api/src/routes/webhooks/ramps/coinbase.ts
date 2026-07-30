@@ -4,6 +4,7 @@ import type { CoinbaseRampSettlement, SdpEnvironment } from "@sdp/types";
 import { z } from "zod";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
+import { getLogger } from "@/runtime/logger";
 import type { AppContext, WebhookProcessor } from "./processor";
 import { applyRampSettlementEvent } from "./settlements";
 
@@ -221,7 +222,7 @@ export class CoinbaseWebhookProcessor implements WebhookProcessor<unknown, RampS
 
   async process(c: AppContext, _environment: SdpEnvironment, event: RampSettlementEvent) {
     if (event.kind === "ignore") {
-      console.log(`[coinbase webhook] ignored event: ${event.reason}`);
+      getLogger().info(`[coinbase webhook] ignored event: ${event.reason}`);
       return;
     }
     await applyRampSettlementEvent(c, event);

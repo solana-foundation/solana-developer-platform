@@ -6,7 +6,6 @@ import {
   CounterpartyDirectorySkeleton,
   PaymentRequestsPageSkeleton,
 } from "./payments-route-skeletons";
-import { PaymentsWorkspaceTabsSkeleton } from "./payments-workspace-tabs";
 
 type CounterpartyMenuOverview = "counterparty-directory" | "payment-requests";
 
@@ -34,17 +33,14 @@ export function CounterpartyMenuLoading({
     targetSearch === undefined ? searchParams : new URLSearchParams(targetSearch);
   const isPlaygroundTab = activeSearchParams.get("tab") === "playground";
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
-      <PaymentsWorkspaceTabsSkeleton />
-      <div className="min-h-0 flex-1">
-        {isPlaygroundTab ? (
-          <CounterpartyPlaygroundLoading />
-        ) : overview === "payment-requests" ? (
-          <PaymentRequestsPageSkeleton />
-        ) : (
-          <CounterpartyDirectorySkeleton />
-        )}
-      </div>
+    <div className="h-full min-h-0 w-full">
+      {isPlaygroundTab ? (
+        <CounterpartyPlaygroundLoading />
+      ) : overview === "payment-requests" ? (
+        <PaymentRequestsPageSkeleton />
+      ) : (
+        <CounterpartyDirectorySkeleton />
+      )}
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { isPrivyByokEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
+import { getLogger } from "@/runtime/logger";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -91,24 +92,18 @@ function buildWalletBalanceCacheKey(c: AppContext, publicKey: string): string {
 }
 
 function logWalletStep(
-  c: AppContext,
   route: "list_wallets" | "aggregate_wallets",
   step: string,
   startedAt: number,
   extra: Record<string, unknown> = {}
 ) {
-  console.info(
-    JSON.stringify({
-      event: "sdp_api_wallets_step",
-      timestamp: new Date().toISOString(),
-      requestId: c.get("requestId"),
-      traceId: c.get("traceId") ?? null,
-      route,
-      step,
-      durationMs: Number((performance.now() - startedAt).toFixed(1)),
-      ...extra,
-    })
-  );
+  getLogger().info({
+    event: "sdp_api_wallets_step",
+    route,
+    step,
+    duration_ms: Number((performance.now() - startedAt).toFixed(1)),
+    ...extra,
+  });
 }
 
 async function queryWalletSummaries(
@@ -175,7 +170,7 @@ async function getCachedWalletSummaries(
   const cacheKey = buildWalletCacheKey(c, filters, "summary");
   const cached = readCache(walletSummaryCache, cacheKey);
   if (cached) {
-    logWalletStep(c, route, "wallet_summary_cache_hit", performance.now(), {
+    logWalletStep(route, "wallet_summary_cache_hit", performance.now(), {
       walletCount: cached.length,
     });
     return cached;
@@ -183,7 +178,7 @@ async function getCachedWalletSummaries(
 
   const startedAt = performance.now();
   const wallets = await queryWalletSummaries(c, filters);
-  logWalletStep(c, route, "query_wallet_summaries", startedAt, {
+  logWalletStep(route, "query_wallet_summaries", startedAt, {
     walletCount: wallets.length,
   });
 
@@ -247,27 +242,33 @@ async function getBalancesByWalletId(
       const splBalances = splBalancesResult.status === "fulfilled" ? splBalancesResult.value : [];
 
       if (solBalanceResult.status === "rejected") {
-        console.error("getBalancesByWalletId: failed to fetch SOL balance", {
-          requestId: c.get("requestId"),
-          walletId: wallet.walletId,
-          publicKey: wallet.publicKey,
-          error:
-            solBalanceResult.reason instanceof Error
-              ? solBalanceResult.reason.message
-              : String(solBalanceResult.reason),
-        });
+        getLogger().error(
+          {
+            requestId: c.get("requestId"),
+            walletId: wallet.walletId,
+            publicKey: wallet.publicKey,
+            error:
+              solBalanceResult.reason instanceof Error
+                ? solBalanceResult.reason.message
+                : String(solBalanceResult.reason),
+          },
+          "getBalancesByWalletId: failed to fetch SOL balance"
+        );
       }
 
       if (splBalancesResult.status === "rejected") {
-        console.error("getBalancesByWalletId: failed to fetch SPL balances", {
-          requestId: c.get("requestId"),
-          walletId: wallet.walletId,
-          publicKey: wallet.publicKey,
-          error:
-            splBalancesResult.reason instanceof Error
-              ? splBalancesResult.reason.message
-              : String(splBalancesResult.reason),
-        });
+        getLogger().error(
+          {
+            requestId: c.get("requestId"),
+            walletId: wallet.walletId,
+            publicKey: wallet.publicKey,
+            error:
+              splBalancesResult.reason instanceof Error
+                ? splBalancesResult.reason.message
+                : String(splBalancesResult.reason),
+          },
+          "getBalancesByWalletId: failed to fetch SPL balances"
+        );
       }
 
       const walletBalances = writeCache(
@@ -548,7 +549,7 @@ export const listWallets = async (c: AppContext) => {
     : new Map<string, CustodyWalletTokenBalance[]>();
 
   if (filters.includeBalances) {
-    logWalletStep(c, "list_wallets", "fetch_wallet_balances", balancesStartedAt, {
+    logWalletStep("list_wallets", "fetch_wallet_balances", balancesStartedAt, {
       walletCount: wallets.length,
     });
   }
@@ -581,7 +582,7 @@ export const getWalletAggregate = async (c: AppContext) => {
   const aggregateCacheKey = buildWalletCacheKey(c, filters, "aggregate");
   const cachedAggregate = readCache(walletAggregateCache, aggregateCacheKey);
   if (cachedAggregate) {
-    logWalletStep(c, "aggregate_wallets", "aggregate_cache_hit", performance.now(), {
+    logWalletStep("aggregate_wallets", "aggregate_cache_hit", performance.now(), {
       walletCount: cachedAggregate.walletCount,
     });
     return success(c, {
@@ -599,7 +600,7 @@ export const getWalletAggregate = async (c: AppContext) => {
     })),
     { includeUsdValues: false }
   );
-  logWalletStep(c, "aggregate_wallets", "fetch_wallet_balances", balancesStartedAt, {
+  logWalletStep("aggregate_wallets", "fetch_wallet_balances", balancesStartedAt, {
     walletCount: wallets.length,
   });
 
@@ -610,7 +611,7 @@ export const getWalletAggregate = async (c: AppContext) => {
       wallets.map((wallet) => balancesByWalletId.get(wallet.walletId) ?? [])
     )
   );
-  logWalletStep(c, "aggregate_wallets", "attach_usd_values", aggregateStartedAt, {
+  logWalletStep("aggregate_wallets", "attach_usd_values", aggregateStartedAt, {
     balanceCount: aggregatedBalances.length,
   });
 
@@ -686,13 +687,16 @@ export const getWalletById = async (c: AppContext) => {
     const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
     lamports = accountInfo?.lamports ?? 0n;
   } catch (error) {
-    // biome-ignore lint/security/noSecrets: Operational log message, not a secret.
-    console.error("getWalletById: failed to fetch wallet balance", {
-      requestId: c.get("requestId"),
-      walletId: wallet.walletId,
-      publicKey: wallet.publicKey,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    getLogger().error(
+      {
+        requestId: c.get("requestId"),
+        walletId: wallet.walletId,
+        publicKey: wallet.publicKey,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      // biome-ignore lint/security/noSecrets: Operational log message, not a secret.
+      "getWalletById: failed to fetch wallet balance"
+    );
   }
 
   const solBalance = {
