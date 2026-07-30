@@ -64,10 +64,6 @@ export interface PaymentWalletBalancesSnapshot {
 export type RiskTone = "green" | "yellow" | "red" | "neutral";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export function getDevnetExplorerUrl(signature: string): string {
-  return `https://explorer.solana.com/tx/${encodeURIComponent(signature)}?cluster=devnet`;
-}
-
 export function toProviderLabel(value: string): string {
   const labels: Record<string, string> = {
     range: "Range",
