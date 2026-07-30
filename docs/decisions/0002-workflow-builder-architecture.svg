@@ -10,8 +10,8 @@
   <rect x="0" y="0" width="1340" height="1040" fill="#ffffff"/>
 
   <!-- Title -->
-  <text x="670" y="44" text-anchor="middle" font-size="24" font-weight="700" fill="#0f172a">Workflow Builder architecture</text>
-  <text x="670" y="68" text-anchor="middle" font-size="13" fill="#64748b">WHEN a trigger fires → THEN run an action → only IF a guard passes  ·  durable, idempotent, crash-safe</text>
+  <text x="670" y="44" text-anchor="middle" font-size="24" font-weight="700" fill="#0f172a">Workflow Builder — system map</text>
+  <text x="670" y="68" text-anchor="middle" font-size="13" fill="#64748b">Components and data flow. For a plain-language, step-by-step tour see the companion walkthrough diagram.</text>
 
   <!-- Legend -->
   <rect x="60" y="86" width="14" height="14" rx="3" fill="#dcfce7" stroke="#16a34a"/><text x="80" y="98" font-size="12" fill="#334155">automated</text>

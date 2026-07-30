@@ -5,7 +5,7 @@
 - **Deciders:** Issuance team
 - **PRD:** [Issuance Asset PRD [Draft]](https://app.notion.com/p/solanafoundation/Issuance-Asset-PRD-Draft-379d36dad52d81e684ffd3634ba81486) — Phase 5, Workflow Builder
 - **Related:** [ADR 0001](0001-asset-profile-data-model.md); migrations `0048_asset_workflows.sql`, `0049_workflow_executions.sql`, `0050_notifications.sql`; catalog in `packages/sdp-issuance/src/workflows/`; engine in `apps/sdp-api/src/services/workflows/`
-- **Diagram:** [0002-workflow-builder-architecture.svg](0002-workflow-builder-architecture.svg)
+- **Diagrams:** [system map](0002-workflow-builder-architecture.svg) — components + data flow (for readers who know the codebase) · [walkthrough](0002-workflow-builder-walkthrough.svg) — plain-language, step-by-step tour with a running example (for newcomers to this area)
 
 ## Context
 
