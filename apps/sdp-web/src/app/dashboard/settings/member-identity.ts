@@ -22,8 +22,19 @@ function shortenUserId(userId: string): string {
 }
 
 export interface MemberIdentity {
-  /** Always non-empty: what the row and the remove confirmation both display. */
+  /** Always non-empty: the headline the row displays. */
   label: string;
+  /**
+   * What anything acting *on* the member says — the actions menu's accessible name,
+   * the remove confirmation and the success toast.
+   *
+   * Distinct from `label` only for unresolved rows. `label` is one shared string
+   * there, so using it for an action gave every unnamed member the same accessible
+   * name and the same "Remove …?" prompt, and an admin could not tell which account
+   * they were about to remove. This carries the id that the row shows on its second
+   * line, which is what makes each one identifiable.
+   */
+  actionLabel: string;
   /** Secondary line under the label — an email, or the id when there is no identity. */
   secondary: string | null;
   /** True when neither a name nor a usable email was available. */
@@ -43,11 +54,17 @@ export function resolveMemberIdentity(user: Member["user"], unnamedLabel: string
   const name = user.name?.trim();
   const email = usableEmail(user.email);
 
-  if (name) return { label: name, secondary: email, isUnresolved: false };
-  if (email) return { label: email, secondary: null, isUnresolved: false };
+  if (name) return { label: name, actionLabel: name, secondary: email, isUnresolved: false };
+  if (email) return { label: email, actionLabel: email, secondary: null, isUnresolved: false };
 
   // Nothing human exists for this row, so say that in words and keep the id as the
   // quiet second line — a bare `usr_…` as the headline reads like leaked plumbing,
   // and a bare dash identified nobody at all.
-  return { label: unnamedLabel, secondary: shortenUserId(user.id), isUnresolved: true };
+  const shortId = shortenUserId(user.id);
+  return {
+    label: unnamedLabel,
+    actionLabel: `${unnamedLabel} (${shortId})`,
+    secondary: shortId,
+    isUnresolved: true,
+  };
 }

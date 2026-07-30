@@ -432,6 +432,23 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
       );
     }
 
+    const resolvedEmail =
+      [existingContext.identity_email, existingContext.user_email].find(isPlausibleEmail) ??
+      email.toLowerCase();
+
+    // This is the branch an established member actually takes, and it returns before
+    // `ensureClerkUser` — so repairing only in there left the corrupted population the
+    // one population never repaired. It matters beyond the directory: the duplicate
+    // guard in `inviteMember` matches `users.email` literally, so a row still holding a
+    // placeholder lets an existing member be re-invited. A healthy row issues no writes.
+    await repairClerkEmails(getDb(c.env), {
+      userId: existingContext.user_id,
+      clerkUserId: payload.sub as string,
+      email: resolvedEmail,
+      identityEmail: existingContext.identity_email,
+      userEmail: existingContext.user_email,
+    });
+
     return {
       userId: existingContext.user_id,
       organizationId: existingContext.organization_id,
@@ -439,9 +456,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
       role,
       clerkUserId: payload.sub as string,
       clerkOrgId: payload.org_id as string,
-      email:
-        [existingContext.identity_email, existingContext.user_email].find(isPlausibleEmail) ??
-        email.toLowerCase(),
+      email: resolvedEmail,
       orgSlug: payload.org_slug ?? existingContext.org_slug,
       orgRole: payload.org_role ?? null,
     };

@@ -122,7 +122,7 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
                     <TableCell className="text-right">
                       <MemberActions
                         memberId={member.id}
-                        label={identity.label}
+                        label={identity.actionLabel}
                         isSelf={Boolean(member.isSelf)}
                         isLastAdmin={member.role === "admin" && meta.activeAdminCount <= 1}
                       />
