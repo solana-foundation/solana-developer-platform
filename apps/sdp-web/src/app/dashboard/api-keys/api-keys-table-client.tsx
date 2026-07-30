@@ -9,7 +9,11 @@ import type {
   ApiKeyWalletScope,
   PaymentsDashboardWallet,
 } from "@sdp/types";
+import { KeyRoundIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import { Button } from "@/components/ui/button";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import {
   Table,
   TableBody,
@@ -215,7 +219,19 @@ export function ApiKeysTableClient({
   }, [wallets]);
 
   if (sortedApiKeys.length === 0) {
-    return <p className="text-sm text-secondary">{t("DashboardCustody.noApiKeysFound")}</p>;
+    return (
+      <ListEmptyState
+        icon={<KeyRoundIcon className="size-5" />}
+        message={t("DashboardCustody.noApiKeysFound")}
+        action={
+          canManageApiKeys ? (
+            <Button asChild>
+              <Link href="/dashboard/api-keys/new">{t("DashboardCustody.newApiKey")}</Link>
+            </Button>
+          ) : null
+        }
+      />
+    );
   }
 
   return (

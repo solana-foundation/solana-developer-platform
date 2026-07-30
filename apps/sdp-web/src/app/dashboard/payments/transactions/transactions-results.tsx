@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { Modal } from "@/components/ui/modal";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
@@ -244,23 +245,21 @@ function useTransactionDetail(selected: PaymentTransferSummary | null) {
 function EmptyState({ filtered, onClear }: { filtered: boolean; onClear: () => void }) {
   const t = useTranslations();
   return (
-    <div className="flex min-h-72 flex-1 flex-col items-center justify-center px-6 text-center">
-      <span className="flex size-11 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
-        <ReceiptTextIcon className="size-5" />
-      </span>
-      <p className="mt-4 text-sm font-medium text-primary">
-        {t(
-          filtered
-            ? "DashboardPayments.transactions.noMatches"
-            : "DashboardPayments.transactions.emptyProject"
-        )}
-      </p>
-      {filtered ? (
-        <Button type="button" variant="secondary" className="mt-4" onClick={onClear}>
-          {t("DashboardPayments.transactions.clearFilters")}
-        </Button>
-      ) : null}
-    </div>
+    <ListEmptyState
+      icon={<ReceiptTextIcon className="size-5" />}
+      message={t(
+        filtered
+          ? "DashboardPayments.transactions.noMatches"
+          : "DashboardPayments.transactions.emptyProject"
+      )}
+      action={
+        filtered ? (
+          <Button type="button" variant="secondary" onClick={onClear}>
+            {t("DashboardPayments.transactions.clearFilters")}
+          </Button>
+        ) : null
+      }
+    />
   );
 }
 
@@ -473,14 +472,14 @@ export function TransactionsResults({
   );
   if (result.error) {
     return (
-      <div className="flex min-h-72 flex-1 flex-col items-center justify-center px-6 text-center">
-        <p className="text-sm font-medium text-primary">
-          {t("DashboardPayments.transactions.loadError")}
-        </p>
-        <Button type="button" variant="secondary" className="mt-4" onClick={() => router.refresh()}>
-          {t("DashboardPayments.transactions.retry")}
-        </Button>
-      </div>
+      <ListEmptyState
+        message={t("DashboardPayments.transactions.loadError")}
+        action={
+          <Button type="button" variant="secondary" onClick={() => router.refresh()}>
+            {t("DashboardPayments.transactions.retry")}
+          </Button>
+        }
+      />
     );
   }
 

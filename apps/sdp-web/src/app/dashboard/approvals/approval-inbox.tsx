@@ -550,7 +550,7 @@ function ApprovalRequestRows({
   const t = useTranslations();
   return (
     <>
-      <div className="divide-y divide-border-default 2xl:hidden">
+      <div className="divide-y divide-border-default lg:hidden">
         {requests.map((request) => {
           const reason = approvalReason(request, t("DashboardApprovals.approvalRequiredByPolicy"));
           const apiKeyLabel = approvalApiKeyLabel(
@@ -600,7 +600,7 @@ function ApprovalRequestRows({
         })}
       </div>
 
-      <div className="hidden 2xl:block">
+      <div className="hidden lg:block">
         <Table className="min-w-0 [&::after]:hidden [&::before]:hidden [&_table]:min-w-[1118px] [&_table]:table-fixed">
           <TableHeader>
             <TableRow>

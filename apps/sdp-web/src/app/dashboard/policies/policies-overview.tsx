@@ -29,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { Select, SelectItem } from "@/components/ui/select";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
@@ -315,23 +316,19 @@ function EmptyState({
 }) {
   const t = useTranslations();
   return (
-    <div className="flex h-full min-h-72 flex-col items-center justify-center px-6 text-center">
-      <span className="flex size-11 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
-        <ShieldCheckIcon className="size-5" />
-      </span>
-      <p className="mt-4 text-sm font-medium text-primary">
-        {filtered ? t("DashboardPolicies.noMatches") : t(emptyLabelKey)}
-      </p>
-      <div className="mt-4">
-        {filtered ? (
+    <ListEmptyState
+      icon={<ShieldCheckIcon className="size-5" />}
+      message={filtered ? t("DashboardPolicies.noMatches") : t(emptyLabelKey)}
+      action={
+        filtered ? (
           <Button type="button" variant="secondary" onClick={onClear}>
             {t("DashboardPolicies.clearFilters")}
           </Button>
         ) : (
           <ConfigureMenu />
-        )}
-      </div>
-    </div>
+        )
+      }
+    />
   );
 }
 
@@ -558,12 +555,14 @@ export function PoliciesOverviewSurface({
           aria-busy={loading}
         >
           {error ? (
-            <div className="flex min-h-72 flex-1 flex-col items-center justify-center px-6 text-center">
-              <p className="text-sm font-medium text-primary">{t("DashboardPolicies.loadError")}</p>
-              <Button type="button" variant="secondary" className="mt-4" onClick={onRetry}>
-                {t("DashboardPolicies.retry")}
-              </Button>
-            </div>
+            <ListEmptyState
+              message={t("DashboardPolicies.loadError")}
+              action={
+                <Button type="button" variant="secondary" onClick={onRetry}>
+                  {t("DashboardPolicies.retry")}
+                </Button>
+              }
+            />
           ) : (
             <>
               <InventoryTable
