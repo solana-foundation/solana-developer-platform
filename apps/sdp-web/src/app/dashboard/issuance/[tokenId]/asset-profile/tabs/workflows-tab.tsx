@@ -164,6 +164,22 @@ function makeLabel(t: TFunc) {
   };
 }
 
+// One-line explanation of what a trigger fires on / what an action does, rendered as
+// help text under the builder's selects. The catalog's `descriptionKey` pointed at a
+// namespace that never existed, which is why the builder explained nothing.
+function makeDescription(t: TFunc) {
+  return (kind: "trigger" | "action", type: string | null | undefined): string | null => {
+    if (!type) {
+      return null;
+    }
+    try {
+      return t(`DashboardIssuance.workflows.${kind}Descriptions.${type}` as MessageKey);
+    } catch {
+      return null;
+    }
+  };
+}
+
 // Human-readable failure reason for the machine codes the engine writes into
 // `execution.error` (CAPABILITY_REVOKED:…, HTTP_502, MISSING_PARAM:wallet, …).
 // Unknown codes fall back to the raw string (it may be a chain error message).
@@ -432,6 +448,7 @@ export function WorkflowsTab({
   const locale = useLocale();
   const wf = useMemo(() => makeWf(t), [t]);
   const label = useMemo(() => makeLabel(t), [t]);
+  const describe = useMemo(() => makeDescription(t), [t]);
 
   const [executionsPageSize, setExecutionsPageSize] = useState(EXECUTIONS_PAGE_SIZE);
   const {
@@ -778,6 +795,7 @@ export function WorkflowsTab({
                 t={t}
                 wf={wf}
                 label={label}
+                describe={describe}
                 catalog={catalog}
                 editing={Boolean(editingRule)}
                 triggerType={effectiveTrigger ?? null}
@@ -885,6 +903,7 @@ function BuilderControls(props: {
   t: TFunc;
   wf: ReturnType<typeof makeWf>;
   label: ReturnType<typeof makeLabel>;
+  describe: ReturnType<typeof makeDescription>;
   catalog: WorkflowCatalog | null;
   editing: boolean;
   triggerType: string | null;
@@ -915,6 +934,7 @@ function BuilderControls(props: {
     t,
     wf,
     label,
+    describe,
     catalog,
     editing,
     triggerType,
@@ -955,6 +975,9 @@ function BuilderControls(props: {
               </SelectItem>
             ))}
           </Select>
+          {describe("trigger", triggerType) ? (
+            <p className="text-secondary text-xs">{describe("trigger", triggerType)}</p>
+          ) : null}
         </div>
 
         <div className="space-y-1.5 text-sm">
@@ -980,6 +1003,9 @@ function BuilderControls(props: {
               );
             })}
           </Select>
+          {describe("action", actionType) ? (
+            <p className="text-secondary text-xs">{describe("action", actionType)}</p>
+          ) : null}
         </div>
 
         <div className="space-y-1.5 text-sm">

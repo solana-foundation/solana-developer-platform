@@ -333,6 +333,14 @@
         "recurring_payment_failed": "Paiement récurrent échoué",
         "token_operation_completed": "Opération de jeton terminée"
       },
+      "triggerDescriptions": {
+        "kyc_approved": "Un détenteur que vous avez inscrit réussit la vérification d'identité.",
+        "kyc_rejected": "La vérification d'identité d'un détenteur est refusée par le fournisseur.",
+        "onramp_settled": "Des fonds fiat ont été convertis en jetons et le règlement est finalisé.",
+        "offramp_settled": "Des jetons ont été convertis en fiat et le versement est finalisé.",
+        "recurring_payment_failed": "Un prélèvement planifié n'a pas pu être effectué.",
+        "token_operation_completed": "Une opération sur cet actif est confirmée sur la chaîne."
+      },
       "actionLabels": {
         "allowlist_add": "Ajouter à la liste d'autorisation",
         "allowlist_remove": "Retirer de la liste d'autorisation",
@@ -347,6 +355,21 @@
         "force_burn": "Brûlage forcé",
         "burn": "Brûler",
         "mint": "Émettre"
+      },
+      "actionDescriptions": {
+        "allowlist_add": "Ajouter le portefeuille à la liste d'autorisation pour qu'il puisse détenir et transférer.",
+        "allowlist_remove": "Retirer le portefeuille de la liste d'autorisation, bloquant les transferts.",
+        "send_webhook": "Envoyer l'événement à votre endpoint, signé si vous définissez un secret.",
+        "notify": "Prévenir votre équipe dans le tableau de bord, et par e-mail si configuré.",
+        "record": "Consigner l'événement dans le journal sans rien modifier.",
+        "pause": "Suspendre tous les transferts de cet actif.",
+        "unpause": "Reprendre les transferts de cet actif.",
+        "freeze": "Geler le compte de jetons du portefeuille pour empêcher tout transfert.",
+        "unfreeze": "Dégeler le compte de jetons du portefeuille.",
+        "seize": "Transférer de force le solde d'un détenteur vers un autre portefeuille. Irréversible.",
+        "force_burn": "Détruire des jetons depuis le portefeuille d'un détenteur. Irréversible.",
+        "burn": "Détruire des jetons depuis votre propre trésorerie. Irréversible.",
+        "mint": "Émettre de nouveaux jetons vers un portefeuille. Irréversible."
       },
       "statusLabels": {
         "awaiting_review": "En attente de validation",

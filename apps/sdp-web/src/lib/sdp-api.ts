@@ -287,7 +287,7 @@ export async function createOrgSdpApiClient(traceContext?: TraceContext): Promis
   return buildSdpApiClient(null, traceContext);
 }
 
-function proxyFailure(
+export function proxyFailure(
   trace: ReturnType<typeof createTimedTrace>,
   status: number,
   message: string

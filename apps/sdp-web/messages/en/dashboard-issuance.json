@@ -333,6 +333,14 @@
         "recurring_payment_failed": "Recurring payment failed",
         "token_operation_completed": "Token operation completed"
       },
+      "triggerDescriptions": {
+        "kyc_approved": "A holder you enrolled passes identity verification.",
+        "kyc_rejected": "A holder's identity verification is declined by the provider.",
+        "onramp_settled": "Fiat converted to tokens and the funds have settled.",
+        "offramp_settled": "Tokens converted to fiat and the payout has settled.",
+        "recurring_payment_failed": "A scheduled collection could not be taken.",
+        "token_operation_completed": "An operation on this asset confirms on-chain."
+      },
       "actionLabels": {
         "allowlist_add": "Add to allowlist",
         "allowlist_remove": "Remove from allowlist",
@@ -347,6 +355,21 @@
         "force_burn": "Force burn",
         "burn": "Burn",
         "mint": "Mint"
+      },
+      "actionDescriptions": {
+        "allowlist_add": "Add the wallet to this asset's allowlist so it can hold and transfer.",
+        "allowlist_remove": "Remove the wallet from the allowlist, blocking further transfers.",
+        "send_webhook": "POST the event to your endpoint, signed if you set a secret.",
+        "notify": "Notify your team in the dashboard, and by email when it's configured.",
+        "record": "Record the event in the log without changing anything.",
+        "pause": "Pause all transfers of this asset.",
+        "unpause": "Resume transfers of this asset.",
+        "freeze": "Freeze the wallet's token account so it cannot transfer.",
+        "unfreeze": "Unfreeze the wallet's token account.",
+        "seize": "Force-transfer a holder's balance to another wallet. Cannot be undone.",
+        "force_burn": "Destroy tokens from a holder's wallet. Cannot be undone.",
+        "burn": "Destroy tokens from your own treasury balance. Cannot be undone.",
+        "mint": "Issue new tokens to a wallet. Cannot be undone."
       },
       "statusLabels": {
         "awaiting_review": "Awaiting review",
