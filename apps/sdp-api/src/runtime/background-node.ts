@@ -13,6 +13,7 @@
 
 import type { ExecutionContext } from "hono";
 import type { BackgroundRunner } from "./background";
+import { getLogger } from "./logger";
 
 export function createNodeExecutionContext(
   runner: Pick<BackgroundRunner, "run">
@@ -53,11 +54,12 @@ export class NodeBackgroundRunner implements BackgroundRunner {
       // any rejection separately — `.catch()` here both attaches the handler
       // that logs and prevents an unhandledRejection.
       const state = this.drainCount > 0 ? "during awaitAll() drain" : "after awaitAll() completed";
-      console.warn(
-        `[NodeBackgroundRunner] run() called ${state} — task not tracked (side effects already in flight)`
+      getLogger().warn(
+        { state },
+        "[NodeBackgroundRunner] run() called — task not tracked (side effects already in flight)"
       );
       promise.catch((err) => {
-        console.warn("[NodeBackgroundRunner] untracked task rejected:", err);
+        getLogger().warn({ error: err }, "[NodeBackgroundRunner] untracked task rejected");
       });
       return;
     }

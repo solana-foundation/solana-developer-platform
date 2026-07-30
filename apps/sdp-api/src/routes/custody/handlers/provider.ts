@@ -35,11 +35,44 @@ type SigningInitializationResult = {
   walletId: string;
 };
 
+const EXISTING_PROVIDER_OBJECT_SELECTORS: Partial<Record<CustodyProvider, readonly string[]>> = {
+  coinbase_cdp: ["walletAddress"],
+  para: ["walletId"],
+  turnkey: ["privateKeyId"],
+  dfns: ["walletId", "signingKeyId"],
+  ibm_haven: ["walletId", "signingKeyId"],
+  anchorage: ["walletId"],
+};
+
+export function assertNoExistingProviderObjectSelector(body: unknown): void {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return;
+  }
+
+  const request = body as Record<string, unknown>;
+  if (typeof request.provider !== "string") {
+    return;
+  }
+
+  if (!Object.hasOwn(EXISTING_PROVIDER_OBJECT_SELECTORS, request.provider)) {
+    return;
+  }
+
+  const selectors = EXISTING_PROVIDER_OBJECT_SELECTORS[request.provider as CustodyProvider] ?? [];
+  const suppliedSelector = selectors.find((selector) => Object.hasOwn(request, selector));
+  if (suppliedSelector) {
+    throw badRequest(
+      `${suppliedSelector} cannot select an existing wallet when using platform-managed provider credentials`
+    );
+  }
+}
+
 export const initializeSigning = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
 
   const body = await c.req.json();
+  assertNoExistingProviderObjectSelector(body);
   const parsed = initializeSigningSchema.safeParse(body);
 
   if (!parsed.success) {
@@ -85,6 +118,7 @@ export const switchSigning = async (c: AppContext) => {
   const actor = resolveActor(c);
 
   const body = await c.req.json();
+  assertNoExistingProviderObjectSelector(body);
   const parsed = switchSigningSchema.safeParse(body);
 
   if (!parsed.success) {
@@ -285,39 +319,31 @@ async function initializeProviderConnection(
     case "coinbase_cdp":
       return signingService.initializeCoinbaseCdpSigning(organizationId, projectId, {
         network: request.network,
-        walletAddress: request.walletAddress,
         accountPolicy: request.accountPolicy,
         walletLabel: request.walletLabel,
       });
     case "para":
       return signingService.initializeParaSigning(organizationId, projectId, {
         requestDelayMs: request.requestDelayMs,
-        walletId: request.walletId,
         walletLabel: request.walletLabel,
       });
     case "turnkey":
       return signingService.initializeTurnkeySigning(organizationId, projectId, {
         requestDelayMs: request.requestDelayMs,
-        privateKeyId: request.privateKeyId,
         walletLabel: request.walletLabel,
       });
     case "dfns":
       return signingService.initializeDfnsSigning(organizationId, projectId, {
         network: request.network,
-        walletId: request.walletId,
-        signingKeyId: request.signingKeyId,
         walletLabel: request.walletLabel,
       });
     case "ibm_haven":
       return signingService.initializeIbmHavenSigning(organizationId, projectId, {
         network: request.network,
-        walletId: request.walletId,
-        signingKeyId: request.signingKeyId,
         walletLabel: request.walletLabel,
       });
     case "anchorage":
       return signingService.initializeAnchorageWalletLifecycle(organizationId, projectId, {
-        walletId: request.walletId,
         walletLabel: request.walletLabel,
         network: request.network,
       });

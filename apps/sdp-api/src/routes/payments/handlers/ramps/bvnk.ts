@@ -50,6 +50,7 @@ import type {
 import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, counterpartyNotProvisioned, internalError } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
+import { getLogger } from "@/runtime/logger";
 import {
   type AppContext,
   getPaymentsRepository,
@@ -508,8 +509,12 @@ export async function ensureBvnkPaymentRule(
       };
       await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, customer, entry);
     } catch (error) {
-      console.warn(
-        `[bvnk onramp] wallet ${entry.walletId} status refresh failed; relying on webhook: ${error instanceof Error ? error.message : String(error)}`
+      getLogger().warn(
+        {
+          wallet_id: entry.walletId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "[bvnk onramp] wallet status refresh failed; relying on webhook"
       );
     }
   }

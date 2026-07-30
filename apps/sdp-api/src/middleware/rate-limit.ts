@@ -4,6 +4,7 @@ import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
 import { rateLimited } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { matchesFreePath } from "./path-match";
 
@@ -196,7 +197,7 @@ export async function enforceRateLimit(
       expirationTtl: Math.ceil((RATE_LIMIT_WINDOW_MS * 2) / 1000),
     })
     .catch((err) => {
-      console.error("Failed to update rate limit:", err);
+      getLogger().error({ error: err }, "Failed to update rate limit");
       return null;
     });
 

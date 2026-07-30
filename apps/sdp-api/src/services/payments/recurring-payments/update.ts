@@ -36,6 +36,7 @@ import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
+import { getLogger } from "@/runtime/logger";
 import { parseU64String } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -1517,10 +1518,13 @@ export async function updateRecurringPayment(input: {
         resetToActive =
           !hasReplacementAuthorization && (!hasSubmittedMetadataUpdate || transactionFailed);
       } catch (latestAttemptError) {
-        console.error("Failed to fetch latest recurring payment update attempt after failure", {
-          error: activationErrorMessage(latestAttemptError),
-          recurringPaymentId: claimed.id,
-        });
+        getLogger().error(
+          {
+            error: activationErrorMessage(latestAttemptError),
+            recurring_payment_id: claimed.id,
+          },
+          "Failed to fetch latest recurring payment update attempt after failure"
+        );
       }
 
       await recordRecurringPaymentUpdateFailure({
@@ -1533,10 +1537,13 @@ export async function updateRecurringPayment(input: {
         resetToActive,
       });
     } catch (journalError) {
-      console.error("Failed to journal/reset recurring payment update after failure", {
-        error: activationErrorMessage(journalError),
-        recurringPaymentId: claimed.id,
-      });
+      getLogger().error(
+        {
+          error: activationErrorMessage(journalError),
+          recurring_payment_id: claimed.id,
+        },
+        "Failed to journal/reset recurring payment update after failure"
+      );
     }
 
     throw error;

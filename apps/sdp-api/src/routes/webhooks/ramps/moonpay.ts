@@ -3,6 +3,7 @@ import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/pay
 import type { MoonpayRampSettlement, SdpEnvironment } from "@sdp/types";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
+import { getLogger } from "@/runtime/logger";
 import type { AppContext, WebhookProcessor } from "./processor";
 import { applyRampSettlementEvent } from "./settlements";
 
@@ -226,7 +227,7 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, RampSe
 
   async process(c: AppContext, _environment: SdpEnvironment, event: RampSettlementEvent) {
     if (event.kind === "ignore") {
-      console.log(`[moonpay webhook] ignored event: ${event.reason}`);
+      getLogger().info(`[moonpay webhook] ignored event: ${event.reason}`);
       return;
     }
     await applyRampSettlementEvent(c, event);

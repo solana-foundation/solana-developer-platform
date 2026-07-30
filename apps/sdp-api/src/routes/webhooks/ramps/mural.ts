@@ -12,6 +12,7 @@ import {
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
+import { getLogger } from "@/runtime/logger";
 import type { AppContext, WebhookProcessor } from "./processor";
 
 function readMuralWebhookPublicKey(
@@ -53,20 +54,20 @@ async function handleAccountCredited(
   c: AppContext,
   event: { organizationId: string; accountId: string; tokenAmount: number }
 ): Promise<void> {
-  console.log(
+  getLogger().info(
     `[mural webhook] account_credited account=${event.accountId} amount=${event.tokenAmount} org=${event.organizationId}`
   );
   const counterparty = await createCounterpartiesRepository(
     c.env
   ).findCounterpartyByMuralOrganizationId(event.organizationId);
   if (!counterparty) {
-    console.warn(`[mural webhook] no counterparty for org ${event.organizationId}`);
+    getLogger().warn(`[mural webhook] no counterparty for org ${event.organizationId}`);
     return;
   }
   const payments = createPaymentsRepository(c.env);
   const transfer = await findMuralOnrampTransfer(payments, counterparty, ["awaiting_payment"]);
   if (!transfer) {
-    console.warn(
+    getLogger().warn(
       `[mural webhook] no awaiting on-ramp transfer for counterparty ${counterparty.id}`
     );
     return;
@@ -84,7 +85,9 @@ async function handleAccountCredited(
   if (!claimed) {
     return;
   }
-  console.log(`[mural webhook] transfer ${transfer.id} completed (payin ${event.tokenAmount})`);
+  getLogger().info(
+    `[mural webhook] transfer ${transfer.id} completed (payin ${event.tokenAmount})`
+  );
 }
 
 async function handleOrganizationLifecycleEvent(
@@ -94,7 +97,7 @@ async function handleOrganizationLifecycleEvent(
   const repo = createCounterpartiesRepository(c.env);
   const counterparty = await repo.findCounterpartyByMuralOrganizationId(event.organizationId);
   if (!counterparty) {
-    console.warn(`[mural webhook] no counterparty for organization ${event.organizationId}`);
+    getLogger().warn(`[mural webhook] no counterparty for organization ${event.organizationId}`);
     return;
   }
   const organization: Record<string, unknown> =
@@ -150,7 +153,7 @@ export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralWeb
   ): Promise<void> {
     switch (event.kind) {
       case "ignore":
-        console.log(`[mural webhook] ignored event: ${event.reason}`);
+        getLogger().info(`[mural webhook] ignored event: ${event.reason}`);
         return;
       case "kyc_status":
       case "tos_accepted":
@@ -159,7 +162,7 @@ export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralWeb
         return handleAccountCredited(c, event);
       case "payout_settled":
       case "payout_failed":
-        console.log(`[mural webhook] ignored unimplemented payout event: ${event.kind}`);
+        getLogger().info(`[mural webhook] ignored unimplemented payout event: ${event.kind}`);
         return;
     }
   }
