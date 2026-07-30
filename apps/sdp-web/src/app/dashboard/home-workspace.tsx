@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
+import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
 import { ExternalLink } from "lucide-react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
@@ -22,14 +22,21 @@ import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatRelativeTime } from "./activity-format-utils";
+import { buildHomeBalanceBreakdown, countHeldTokens } from "./home-balance-breakdown";
 import type { HomeActivityExplorerRef, HomeActivityRow } from "./home-page.data";
 import { fetchHomeActivity } from "./home-workspace.data";
-import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
+import {
+  formatCurrencyAmount,
+  formatDisplayAmount,
+  resolveTransferTokenLabel,
+} from "./payments/payments-overview.utils";
 
 interface HomeWorkspaceProps {
   totalBalance: number | null;
   totalBalanceError: string | null;
   wallets: PaymentsDashboardWallet[];
+  balances: CustodyWalletTokenBalance[];
+  walletCount: number;
 }
 
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
@@ -85,20 +92,28 @@ function MetricCard({
   value,
   error,
   hint,
+  /**
+   * Counts are plain integers, not money — `formatCurrencyAmount` would render a
+   * wallet count as "$3.00".
+   */
+  kind = "currency",
 }: {
   label: string;
   value: number | null;
   error: string | null;
   hint?: string | null;
+  kind?: "currency" | "count";
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const display =
+    kind === "count" ? (value ?? 0).toLocaleString(locale) : formatCurrencyAmount(value, locale);
   return (
     <Card className="gap-0 rounded-[18px] py-0 shadow-none">
       <CardContent className="space-y-2 px-6 py-6">
         <p className="text-[15px] text-tertiary">{label}</p>
         <p className="text-[24px] leading-none font-medium tracking-[-0.03em] text-primary sm:text-[30px]">
-          {error ? t("Shared.homeWorkspace.unavailable") : formatCurrencyAmount(value, locale)}
+          {error ? t("Shared.homeWorkspace.unavailable") : display}
         </p>
         {error ? <p className="text-sm text-destructive-strong">{error}</p> : null}
         {!error && hint ? <p className="text-sm text-tertiary">{hint}</p> : null}
@@ -107,8 +122,77 @@ function MetricCard({
   );
 }
 
+/**
+ * Holdings split by token. The aggregate already returns the per-token rows the
+ * total is summed from, so this needs no extra request.
+ */
+function BalanceBreakdownCard({
+  balances,
+  locale,
+}: {
+  balances: CustodyWalletTokenBalance[];
+  locale: string;
+}) {
+  const t = useTranslations();
+  const slices = buildHomeBalanceBreakdown(balances);
+  if (slices.length === 0) {
+    return null;
+  }
+
+  // Balances carry their own symbols, so tokens the catalogue has never heard of
+  // still get named rather than falling back to a shortened mint.
+  const symbolsByMint = Object.fromEntries(
+    balances.map((balance) => [balance.mint, balance.token])
+  );
+
+  return (
+    <Card className="min-w-0 gap-0 rounded-[18px] py-0 shadow-none">
+      <CardContent className="space-y-5 px-6 py-6">
+        <div className="space-y-1">
+          <p className="text-[15px] text-tertiary">{t("Shared.homeWorkspace.balanceByToken")}</p>
+        </div>
+        <ul className="space-y-4">
+          {slices.map((slice) => {
+            const symbol = resolveTransferTokenLabel(slice.mint, symbolsByMint) ?? slice.token;
+            return (
+              <li key={slice.mint} className="min-w-0 space-y-2">
+                <div className="flex min-w-0 items-baseline justify-between gap-3">
+                  <span className="min-w-0 truncate text-sm font-medium text-primary">
+                    {symbol}
+                  </span>
+                  <span className="shrink-0 text-sm text-secondary tabular-nums">
+                    {slice.usdValue === null
+                      ? formatDisplayAmount(slice.uiAmount, symbol)
+                      : formatCurrencyAmount(slice.usdValue, locale)}
+                  </span>
+                </div>
+                {/* Presentational: the value beside it is the accessible number. */}
+                <div
+                  aria-hidden="true"
+                  className="h-1 w-full overflow-hidden rounded-full bg-fill-subtle"
+                >
+                  <div
+                    className="h-full rounded-full bg-fill-strong"
+                    style={{ width: `${slice.sharePercent}%` }}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Dashboard orchestration keeps related loading, empty, and populated states together.
-export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: HomeWorkspaceProps) {
+export function HomeWorkspace({
+  totalBalance,
+  totalBalanceError,
+  wallets,
+  balances,
+  walletCount,
+}: HomeWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
   const cluster = useSolanaCluster();
@@ -126,6 +210,7 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
     }
   );
   const isWalletEmptyState = wallets.length === 0;
+  const heldTokenCount = countHeldTokens(balances);
   const totalBalanceHint = isWalletEmptyState
     ? t("Shared.homeWorkspace.createFirstWalletBalances")
     : totalBalance === null
@@ -179,7 +264,7 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
       </SectionEntry>
 
       <SectionEntry delay={0.04}>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             label={t("Shared.homeWorkspace.totalBalance")}
             value={totalBalance}
@@ -192,8 +277,34 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
             error={todaysVolumeError}
             hint={todaysVolumeHint}
           />
+          <MetricCard
+            label={t("Shared.homeWorkspace.walletsTracked")}
+            value={walletCount}
+            error={null}
+            kind="count"
+            // Deliberately not the balances copy the first tile uses — the same
+            // sentence twice in one row reads as a rendering bug.
+            hint={walletCount === 0 ? t("Shared.homeWorkspace.noWalletsYet") : null}
+          />
+          <MetricCard
+            label={t("Shared.homeWorkspace.tokensHeld")}
+            value={heldTokenCount}
+            error={totalBalanceError}
+            kind="count"
+            hint={
+              heldTokenCount === 0 && !totalBalanceError
+                ? t("Shared.homeWorkspace.noTrackedBalances")
+                : null
+            }
+          />
         </div>
       </SectionEntry>
+
+      {balances.length > 0 ? (
+        <SectionEntry delay={0.06}>
+          <BalanceBreakdownCard balances={balances} locale={locale} />
+        </SectionEntry>
+      ) : null}
 
       <SectionEntry delay={0.08}>
         <div className="space-y-4">

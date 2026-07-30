@@ -9,7 +9,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const METRIC_SKELETON_IDS = ["home-metric-skeleton-1", "home-metric-skeleton-2"];
+// Four, matching the home tile grid — a two-tile skeleton reflowed to four on load.
+const METRIC_SKELETON_IDS = [
+  "home-metric-skeleton-1",
+  "home-metric-skeleton-2",
+  "home-metric-skeleton-3",
+  "home-metric-skeleton-4",
+];
 const ACTIVITY_ROW_IDS = [
   "home-table-skeleton-1",
   "home-table-skeleton-2",
@@ -27,7 +33,7 @@ export default function DashboardLoading() {
         <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {METRIC_SKELETON_IDS.map((id) => (
           <div
             key={id}
