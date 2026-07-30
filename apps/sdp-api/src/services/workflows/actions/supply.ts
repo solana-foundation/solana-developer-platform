@@ -1,3 +1,4 @@
+import type { TokenTransactionType } from "@sdp/types";
 import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
 import { createToken2022Service } from "@/services/solana";
@@ -19,6 +20,7 @@ import {
   preflightMintAmount,
   preflightWalletPolicy,
 } from "./preflight";
+import { recordWorkflowTransaction } from "./record-transaction";
 import type { ActionContext, ActionExecutionResult } from "./types";
 
 // The DB supply mirror is best-effort AFTER the on-chain truth: a mirror write failure
@@ -43,15 +45,26 @@ async function mirrorSupply(
   }
 }
 
-// Success payload for a landed chain call, flagging a failed DB mirror when applicable.
-function supplySucceeded(
+// Success payload for a landed chain call. Also writes the token_transactions row that
+// puts a rule-driven op in the same Transactions/Activity view as a manual one.
+async function supplySucceeded(
+  env: Env,
+  execution: WorkflowExecutionRow,
   result: { signature: string; slot: number | bigint },
-  mirrored: boolean
-): ActionExecutionResult {
+  mirrored: boolean,
+  ledger: { type: TokenTransactionType; params: Record<string, unknown> }
+): Promise<ActionExecutionResult> {
+  const recorded = await recordWorkflowTransaction(env, execution, {
+    type: ledger.type,
+    params: ledger.params,
+    signature: result.signature,
+    slot: result.slot,
+  });
   return succeeded({
     signature: result.signature,
     slot: String(result.slot),
     ...(mirrored ? {} : { mirrorFailed: true }),
+    ...(recorded ? {} : { ledgerFailed: true }),
   });
 }
 
@@ -137,7 +150,10 @@ export async function runMint(
     return permanentFail(errorMessage(error));
   }
   const mirrored = await mirrorSupply(env, token.id, amount.amountStr, "mint");
-  return supplySucceeded(result, mirrored);
+  return supplySucceeded(env, execution, result, mirrored, {
+    type: "mint",
+    params: { destination, amount: amount.amountStr },
+  });
 }
 
 // burn → Token2022Service.burn from the org signer's own token account (self-burn).
@@ -173,7 +189,10 @@ export async function runBurn(
     return permanentFail(errorMessage(error));
   }
   const mirrored = await mirrorSupply(env, token.id, amount.amountStr, "burn");
-  return supplySucceeded(result, mirrored);
+  return supplySucceeded(env, execution, result, mirrored, {
+    type: "burn",
+    params: { amount: amount.amountStr },
+  });
 }
 
 // force_burn → MosaicService.forceBurn from a holder's wallet via permanent delegate.
@@ -216,7 +235,10 @@ export async function runForceBurn(
     return permanentFail(errorMessage(error));
   }
   const mirrored = await mirrorSupply(env, token.id, amount.amountStr, "burn");
-  return supplySucceeded(result, mirrored);
+  return supplySucceeded(env, execution, result, mirrored, {
+    type: "force_burn",
+    params: { source, amount: amount.amountStr },
+  });
 }
 
 // seize → MosaicService.forceTransfer from a holder's wallet to a destination via the
@@ -268,7 +290,17 @@ export async function runSeize(
       permanentDelegate: signer,
       feePayer: signer,
     });
-    return succeeded({ signature: result.signature, slot: String(result.slot) });
+    const recorded = await recordWorkflowTransaction(env, execution, {
+      type: "seize",
+      params: { source, destination, amount: amount.amountStr },
+      signature: result.signature,
+      slot: result.slot,
+    });
+    return succeeded({
+      signature: result.signature,
+      slot: String(result.slot),
+      ...(recorded ? {} : { ledgerFailed: true }),
+    });
   } catch (error) {
     return permanentFail(errorMessage(error));
   }

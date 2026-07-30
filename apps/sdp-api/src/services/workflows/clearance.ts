@@ -23,6 +23,15 @@ async function resolveCounterpartyKind(env: Env, kycWallet: KycWalletRow): Promi
   return counterparty?.entity_type ?? null;
 }
 
+// Identity status changes over a wallet's life: verified → rejected → verified again
+// after the holder re-submits. Keying idempotency on (wallet, token) alone made that
+// second verification permanently unique-constrained away, so a re-verified holder was
+// never re-allowlisted. Including the status transition lets each real transition fire
+// once while re-delivered webhooks for the same one stay no-ops.
+function transition(wallet: KycWalletRow): string {
+  return wallet.verified_at ?? wallet.updated_at;
+}
+
 // "Cleared to hold this asset" = identity verified AND an active enrollment exists.
 // In v1 the enrollment stands in for eligibility; the fast-follow adds concrete
 // jurisdiction/accreditation checks HERE — one function, no engine change.
@@ -83,7 +92,7 @@ export async function emitKycApprovedForClearedEnrollments(
       type: "kyc_approved",
       organizationId: input.kycWallet.organization_id,
       projectId: input.kycWallet.project_id,
-      eventKey: `kyc_approved:${input.kycWallet.id}:${enrollment.token_id}`,
+      eventKey: `kyc_approved:${input.kycWallet.id}:${enrollment.token_id}:${transition(input.kycWallet)}`,
       tokenId: enrollment.token_id,
       payload: {
         wallet: input.kycWallet.wallet_address,
@@ -120,7 +129,7 @@ export async function emitKycRejectedForEnrollments(
       type: "kyc_rejected",
       organizationId: input.kycWallet.organization_id,
       projectId: input.kycWallet.project_id,
-      eventKey: `kyc_rejected:${input.kycWallet.id}:${enrollment.token_id}`,
+      eventKey: `kyc_rejected:${input.kycWallet.id}:${enrollment.token_id}:${transition(input.kycWallet)}`,
       tokenId: enrollment.token_id,
       payload: {
         wallet: input.kycWallet.wallet_address,

@@ -29,6 +29,8 @@ We need an engine that:
 - is **crash-safe and idempotent** — a redelivered provider webhook must not double-mint,
 - can execute **irreversible on-chain operations** without becoming a way to bypass the
   authorization, policy, and safety checks the manual token routes already enforce,
+- keeps *who may hold an asset* (**eligibility**) on a code path **upstream** of the
+  builder, so a rule's guard can never weaken it,
 - lets us add new triggers/actions **without migrations** (matching the ADR 0001
   "registry in code, open TEXT in the DB" precedent),
 - reuses the existing on-chain service layer rather than reimplementing token operations,
@@ -52,7 +54,10 @@ token_id)` with `trigger_type` and `action_type` as top-level columns and everyt
 - **GUARD** = `definition.condition`, a flat **AND of scalar comparisons** over the event
   payload (`{ all: [{ field, op: eq|neq|in, value }] }`). Deliberately not a general
   expression language — guards are operational filters ("only if provider is mural"), and
-  a flat AND is enough while staying trivially serializable and safe to evaluate.
+  a flat AND is enough while staying trivially serializable and safe to evaluate. Guards
+  are also deliberately **not** where holder *eligibility* lives (§3): a rule author can
+  add or remove a guard, so the guard leg carries only operational filters — never
+  legally load-bearing eligibility.
 
 Top-level columns are what the dispatcher filters on (hot path); the flexible,
 per-action-shaped remainder is JSONB — the same split ADR 0001 used for
@@ -70,7 +75,7 @@ migration; the app layer validates the request body against `WORKFLOW_TRIGGER_TY
 through). The package is Mosaic-free (only `@sdp/types` + the settings catalog), so the
 API, the web app, and tests all import the same source of truth.
 
-### 3. A provider-agnostic event bus that only enqueues
+### 3. Emission: holder eligibility is gated upstream; the event bus only enqueues
 
 Every trigger *source* — the Mural KYC webhook today, native KYC or external API webhooks
 later — normalizes its occurrence into a single `WorkflowEvent` (`{ type, orgId,
@@ -85,6 +90,19 @@ projectId, eventKey, tokenId?, payload }`) and hands it to `dispatchWorkflowEven
 The bus **never runs actions.** This decouples the (latency-sensitive, fire-and-forget)
 event path from the (retryable, side-effecting) execution path: a slow mint can never
 delay a webhook response, and an action failure can never lose the event.
+
+**Eligibility is decided upstream of the bus, not in a guard.** For the canonical KYC flow,
+whether a holder is *cleared to hold an asset* is evaluated at the emit boundary
+(`clearance.ts` — `evaluateHolderClearance` / `emitKycApprovedForClearedEnrollments`): a
+`kyc_approved` event is dispatched **only** for cleared `(wallet, token)` pairs. In v1
+"cleared" = identity verified **and** an active enrollment for that asset; the enrollment
+deliberately *stands in* for full eligibility. This split matters because eligibility is
+legally load-bearing while a guard is issuer-editable: keeping the eligibility decision on
+a code path upstream of the builder means no rule author can widen who receives an
+automated `allowlist_add` (or any action) by loosening a guard. The consequence for
+evolution is that adding concrete **jurisdiction / accreditation / sanctions** checks is a
+change to the single `evaluateHolderClearance` predicate — no engine, catalog, or schema
+change — and every rule downstream tightens automatically.
 
 ### 4. A durable execution ledger that is also the retry state machine and the log
 
@@ -268,11 +286,20 @@ the trigger/action type itself, so the catalog and the message files can't drift
   revoked capability, a parked stale row, and a rejected approval are all inspectable rows.
 - The capability gate being pure and shared (§8) means the builder preview is a faithful
   predictor of runtime behavior, not a separate approximation.
+- Eligibility (who may hold the asset) is gated at emission (§3), so the guard leg stays
+  purely operational: a rule author can never relax eligibility with a guard edit, and
+  tightening eligibility later is a change to `evaluateHolderClearance` alone. The trade-off
+  is that eligibility is *invisible in the builder* — it is not a rule the issuer sees or
+  configures — so it must be documented where issuers reason about "who gets allowlisted".
 - Feature-flag gating spans the routes, the emitters, **and** the cron together, so a
   flag-off deployment can neither accept rules nor accumulate an undrained backlog.
 
 ## Follow-ups (tracked, not decided here)
 
+- **Concrete holder-eligibility checks** (jurisdiction, accreditation, sanctions) added to
+  `evaluateHolderClearance`. v1 uses "identity verified + active enrollment" as the stand-in
+  for eligibility (§3); the fast-follow tightens that one clearance predicate, with no
+  engine, catalog, or schema change, and every downstream rule inherits it.
 - Full outbound-webhook registry (endpoint CRUD, secret rotation, delivery log, redeliver).
 - Full notification center: per-user channel/category preferences, a dispatch/fan-out
   service, and wiring producers beyond the `notify` action.
