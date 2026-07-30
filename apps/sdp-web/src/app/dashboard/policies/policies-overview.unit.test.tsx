@@ -117,10 +117,9 @@ describe("PoliciesOverviewSurface", () => {
     expect(markup).toContain("No restrictions");
   });
 
-  it("renders five table rows and summary placeholders while loading", () => {
+  it("renders five table skeleton rows while loading", () => {
     const markup = renderSurface({ inventory: null, loading: true });
     expect(markup.match(/data-policy-skeleton-row/g)).toHaveLength(5);
-    expect(markup).toContain("data-summary-skeleton");
   });
 
   it("renders error, empty-project, and filtered-empty states without fake counts", () => {
@@ -145,7 +144,6 @@ describe("PoliciesOverviewSurface", () => {
     const markup = renderSurface({ inventory: inventory([wallet("active", "active")]) });
     expect(markup).toMatch(/data-desktop-inventory="true"[^>]*hidden lg:block/);
     expect(markup).toMatch(/data-mobile-inventory="true"[^>]*lg:hidden/);
-    expect(markup).toContain("lg:grid-cols-[minmax(0,1fr)_260px]");
   });
 });
 

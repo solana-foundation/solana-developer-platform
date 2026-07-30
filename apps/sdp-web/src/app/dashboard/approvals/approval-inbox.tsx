@@ -8,7 +8,6 @@ import type {
 import {
   ArrowLeftRightIcon,
   CalendarIcon,
-  ChevronLeft,
   ChevronRight,
   CircleDotIcon,
   KeyRoundIcon,
@@ -21,6 +20,7 @@ import { toast } from "sonner";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { Select, SelectItem } from "@/components/ui/select";
 import {
   Table,
@@ -271,7 +271,12 @@ export function ApprovalInbox({
         </motion.div>
       </AnimatePresence>
 
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border-default py-2">
+      <PaginatedFooter
+        className="shrink-0"
+        page={currentPage}
+        pageCount={pageCount}
+        onPageChange={setPage}
+      >
         <div className="flex items-center gap-2 text-xs text-secondary">
           <p>
             {t("DashboardApprovals.range", {
@@ -300,34 +305,7 @@ export function ApprovalInbox({
             </TooltipContent>
           </Tooltip>
         </div>
-        {pageCount > 1 ? (
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              disabled={currentPage <= 1}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              aria-label={t("DashboardApprovals.previousPage")}
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-            <span className="min-w-20 text-center text-xs text-secondary">
-              {t("DashboardApprovals.pageOf", { page: currentPage, pageCount })}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              disabled={currentPage >= pageCount}
-              onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
-              aria-label={t("DashboardApprovals.nextPage")}
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-          </div>
-        ) : null}
-      </div>
+      </PaginatedFooter>
     </div>
   );
 }

@@ -4,11 +4,10 @@ import type { PaymentTransferSummary } from "@sdp/types";
 import { ExternalLinkIcon, ReceiptTextIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
-import { Select, SelectItem } from "@/components/ui/select";
+import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
   Table,
@@ -245,7 +244,7 @@ function useTransactionDetail(selected: PaymentTransferSummary | null) {
 function EmptyState({ filtered, onClear }: { filtered: boolean; onClear: () => void }) {
   const t = useTranslations();
   return (
-    <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
+    <div className="flex min-h-72 flex-1 flex-col items-center justify-center px-6 text-center">
       <span className="flex size-11 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
         <ReceiptTextIcon className="size-5" />
       </span>
@@ -474,7 +473,7 @@ export function TransactionsResults({
   );
   if (result.error) {
     return (
-      <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
+      <div className="flex min-h-72 flex-1 flex-col items-center justify-center px-6 text-center">
         <p className="text-sm font-medium text-primary">
           {t("DashboardPayments.transactions.loadError")}
         </p>
@@ -487,7 +486,7 @@ export function TransactionsResults({
 
   return (
     <section
-      className={cn("min-w-0 transition-opacity", isPending && "opacity-60")}
+      className={cn("flex min-w-0 flex-1 flex-col transition-opacity", isPending && "opacity-60")}
       aria-busy={isPending}
     >
       {result.transfers.length === 0 ? (
@@ -504,36 +503,23 @@ export function TransactionsResults({
             onSelect={setSelected}
             issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
           />
-          <div className="flex flex-col gap-4 border-t border-border-default p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-secondary">
-                {t("DashboardPayments.transactions.rowsPerPage")}
-              </span>
-              <Select
-                value={String(filters.pageSize)}
-                onValueChange={(value) =>
-                  updateFilters({ pageSize: Number(value), page: 1 }, { preserveSnapshot: true })
-                }
-                className="w-20"
-              >
-                {[10, 25, 50, 100].map((size) => (
-                  <SelectItem key={size} value={String(size)}>
-                    {size}
-                  </SelectItem>
-                ))}
-              </Select>
-            </div>
-            <ArrowPagination
-              page={result.page}
-              pageCount={pageCount}
-              onPageChange={(page) => updateFilters({ page }, { preserveSnapshot: true })}
-              summary={t("DashboardPayments.transactions.range", {
-                start: rangeStart,
-                end: rangeEnd,
-                total: result.total,
-              })}
-            />
-          </div>
+          <PaginatedFooter
+            className="mt-auto"
+            page={result.page}
+            pageCount={pageCount}
+            disabled={isPending}
+            onPageChange={(page) => updateFilters({ page }, { preserveSnapshot: true })}
+            summary={t("DashboardPayments.transactions.range", {
+              start: rangeStart,
+              end: rangeEnd,
+              total: result.total,
+            })}
+            pageSizeControl={{
+              pageSize: filters.pageSize,
+              onPageSizeChange: (pageSize) =>
+                updateFilters({ pageSize, page: 1 }, { preserveSnapshot: true }),
+            }}
+          />
         </>
       )}
       <Modal

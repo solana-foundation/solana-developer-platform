@@ -1011,7 +1011,6 @@
       "wallet": "Portefeuille",
       "provider": "Fournisseur",
       "created": "Créé",
-      "rowsPerPage": "Lignes par page",
       "range": "{start}–{end} sur {total}",
       "noMatches": "Aucune transaction ne correspond à ces filtres.",
       "emptyProject": "Aucune transaction pour le moment.",

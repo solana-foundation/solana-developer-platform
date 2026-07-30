@@ -13,9 +13,6 @@
     "configureControls": "Configurer les contrôles",
     "walletControls": "Contrôles du portefeuille",
     "apiKeyControls": "Contrôles des clés API",
-    "policySummary": "Résumé de la politique",
-    "summaryDescription": "Les contrôles sont attachés aux portefeuilles et aux clés API.",
-    "apiKeyBindings": "Liaisons de clés API",
     "target": "Cible",
     "status": "Statut",
     "defaultAction": "Action par défaut",
@@ -43,9 +40,10 @@
     "noMatches": "Aucun contrôle ne correspond à ces filtres.",
     "clearFilters": "Effacer les filtres",
     "emptyProject": "Aucun contrôle de portefeuille ou de clé API n'est configuré.",
+    "emptyProjectWallets": "Aucun contrôle de portefeuille n'est configuré.",
+    "emptyProjectApiKeys": "Aucun contrôle de clé API n'est configuré.",
     "loadError": "Impossible de charger les contrôles de politique.",
     "retry": "Réessayer",
-    "rowsPerPage": "Lignes par page",
     "range": "{start}–{end} sur {total}"
   }
 }
