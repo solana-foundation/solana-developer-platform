@@ -2,9 +2,11 @@
 
 import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
 import { ExternalLink } from "lucide-react";
+import { useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -124,6 +126,7 @@ function BalanceAllocation({
   locale: string;
 }) {
   const t = useTranslations();
+  const [hovered, setHovered] = useState<string | null>(null);
   const breakdown = buildHomeBalanceBreakdown(balances);
   if (breakdown.priced.length === 0 && breakdown.unpriced.length === 0) {
     return null;
@@ -140,6 +143,7 @@ function BalanceAllocation({
   const segments = [
     ...breakdown.priced.map((slice, index) => ({
       key: slice.mint,
+      mint: slice.mint,
       label: symbolFor(slice),
       percent: slice.sharePercent,
       value: slice.usdValue ?? 0,
@@ -149,9 +153,8 @@ function BalanceAllocation({
       ? [
           {
             key: "__other__",
-            label: t("Shared.homeWorkspace.otherTokens", {
-              count: breakdown.otherPricedCount,
-            }),
+            mint: null,
+            label: t("Shared.homeWorkspace.otherTokens", { count: breakdown.otherPricedCount }),
             percent: breakdown.otherPricedSharePercent,
             value: breakdown.otherPricedUsd,
             fill: allocationFill(breakdown.priced.length),
@@ -173,35 +176,58 @@ function BalanceAllocation({
 
       {segments.length > 0 ? (
         <>
-          {/* One bar, segmented — the numbers beside each label are the accessible
-                values, so the bar itself is decoration. gap-0.5 is the 2px spacer
-                that keeps adjacent fills from reading as a single block. */}
-          <div aria-hidden="true" className="flex h-2 w-full gap-0.5 overflow-hidden">
+          {/* Hovering either the bar or its row lifts the same segment, so the two
+              read as one object. gap-0.5 is the 2px spacer that stops adjacent
+              fills merging into a single block. */}
+          <div className="flex h-2.5 w-full gap-0.5 overflow-hidden">
             {segments.map((segment) => (
-              <div
+              <button
                 key={segment.key}
-                className={cn("h-full rounded-full", segment.fill)}
+                type="button"
+                aria-label={`${segment.label} ${Math.round(segment.percent)}%`}
+                onMouseEnter={() => setHovered(segment.key)}
+                onMouseLeave={() => setHovered(null)}
+                onFocus={() => setHovered(segment.key)}
+                onBlur={() => setHovered(null)}
                 style={{ width: `${Math.max(segment.percent, 1.5)}%` }}
+                className={cn(
+                  "h-full rounded-full transition-opacity motion-reduce:transition-none",
+                  segment.fill,
+                  hovered && hovered !== segment.key ? "opacity-35" : "opacity-100"
+                )}
               />
             ))}
           </div>
 
-          <ul className="space-y-3">
+          <ul className="space-y-1">
             {segments.map((segment) => (
-              <li key={segment.key} className="flex min-w-0 items-center gap-3">
-                <span
-                  aria-hidden="true"
-                  className={cn("size-2.5 shrink-0 rounded-[3px]", segment.fill)}
-                />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
-                  {segment.label}
-                </span>
-                <span className="shrink-0 text-sm text-tertiary tabular-nums">
-                  {Math.round(segment.percent)}%
-                </span>
-                <span className="w-24 shrink-0 text-right text-sm text-secondary tabular-nums">
-                  {formatCurrencyAmount(segment.value, locale)}
-                </span>
+              <li key={segment.key}>
+                <div
+                  onMouseEnter={() => setHovered(segment.key)}
+                  onMouseLeave={() => setHovered(null)}
+                  className={cn(
+                    "flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors motion-reduce:transition-none",
+                    hovered === segment.key ? "bg-fill-subtle" : "bg-transparent"
+                  )}
+                >
+                  {segment.mint ? (
+                    <TokenMark mint={segment.mint} symbol={segment.label} size="sm" />
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className={cn("size-6 shrink-0 rounded-full", segment.fill)}
+                    />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-primary">
+                    {segment.label}
+                  </span>
+                  <span className="shrink-0 text-[15px] text-tertiary tabular-nums">
+                    {Math.round(segment.percent)}%
+                  </span>
+                  <span className="w-28 shrink-0 text-right text-[15px] font-medium text-primary tabular-nums">
+                    {formatCurrencyAmount(segment.value, locale)}
+                  </span>
+                </div>
               </li>
             ))}
           </ul>
@@ -209,23 +235,25 @@ function BalanceAllocation({
       ) : null}
 
       {breakdown.unpriced.length > 0 ? (
-        <div className="space-y-3 border-t border-border-default pt-4">
-          <p className="text-xs text-tertiary">{t("Shared.homeWorkspace.notPriced")}</p>
-          <ul className="space-y-3">
-            {breakdown.unpriced.map((slice) => {
-              const symbol = symbolFor(slice);
-              return (
-                <li key={slice.mint} className="flex min-w-0 items-center gap-3">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
-                    {symbol}
-                  </span>
-                  <span className="shrink-0 text-sm text-secondary tabular-nums">
-                    {formatDisplayAmount(slice.uiAmount, symbol)}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+        <div className="space-y-1 border-t border-border-default pt-4">
+          <p className="px-2 pb-1 text-xs text-tertiary">{t("Shared.homeWorkspace.notPriced")}</p>
+          {breakdown.unpriced.map((slice) => {
+            const symbol = symbolFor(slice);
+            return (
+              <div
+                key={slice.mint}
+                className="flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none"
+              >
+                <TokenMark mint={slice.mint} symbol={symbol} size="sm" />
+                <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-primary">
+                  {symbol}
+                </span>
+                <span className="shrink-0 text-[15px] text-secondary tabular-nums">
+                  {formatDisplayAmount(slice.uiAmount, symbol)}
+                </span>
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </div>
@@ -237,7 +265,9 @@ function HeroStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <dt className="truncate text-[13px] text-tertiary">{label}</dt>
-      <dd className="truncate text-[15px] font-medium text-primary tabular-nums">{value}</dd>
+      <dd className="truncate text-[22px] leading-tight font-medium tracking-[-0.02em] text-primary tabular-nums">
+        {value}
+      </dd>
     </div>
   );
 }
