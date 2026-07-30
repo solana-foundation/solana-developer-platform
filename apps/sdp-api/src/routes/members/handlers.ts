@@ -281,16 +281,28 @@ export const listMembers = async (c: AppContext) => {
       // Preferring a clean identity email makes a re-login enough on its own.
       // The subselect avoids multiplying rows when a user holds more than one
       // identity for the provider.
+      //
+      // "Usable" is migration 0040's own test, both halves of it: not a placeholder
+      // AND shaped like an address. Excluding only `{{` still let values like
+      // `unknown` or a bare id through, so the endpoint emitted something its own
+      // repair rule does not consider an email. The final `u.email` stays as a last
+      // resort — a row where nothing is usable has to return the stored value rather
+      // than NULL, and the caller decides how to render it.
       `SELECT om.id, om.role, om.status, om.created_at,
             u.id as user_id, u.name,
             COALESCE(
-              NULLIF(CASE WHEN u.email LIKE '%{{%' THEN '' ELSE u.email END, ''),
+              NULLIF(
+                CASE
+                  WHEN u.email NOT LIKE '%{{%' AND u.email LIKE '%@%.%' THEN u.email
+                  ELSE ''
+                END, ''),
               (SELECT aui.email
                  FROM auth_user_identities aui
                 WHERE aui.user_id = u.id
                   AND aui.provider = 'clerk'
                   AND aui.email IS NOT NULL
                   AND aui.email NOT LIKE '%{{%'
+                  AND aui.email LIKE '%@%.%'
                 ORDER BY aui.updated_at DESC NULLS LAST
                 LIMIT 1),
               u.email
