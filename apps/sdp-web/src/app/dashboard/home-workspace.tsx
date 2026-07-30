@@ -202,11 +202,12 @@ function BalanceAllocation({
           <ul className="space-y-1">
             {segments.map((segment) => (
               <li key={segment.key}>
+                {/* Row highlight is pure CSS. Driving it from mouse handlers on a
+                    plain element is a keyboard trap — the segment button above owns
+                    the interaction, and this only mirrors it. */}
                 <div
-                  onMouseEnter={() => setHovered(segment.key)}
-                  onMouseLeave={() => setHovered(null)}
                   className={cn(
-                    "flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors motion-reduce:transition-none",
+                    "flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none",
                     hovered === segment.key ? "bg-fill-subtle" : "bg-transparent"
                   )}
                 >
