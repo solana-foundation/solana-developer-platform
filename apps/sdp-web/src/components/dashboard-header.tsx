@@ -317,7 +317,6 @@ function getAccessControlPageConfig(
   if (pathname === "/dashboard/api-keys") {
     return {
       title: t("Shared.dashboardShell.apiKeys"),
-      hideTitle: true,
       contentWidthClass: "max-w-none",
     };
   }
@@ -340,7 +339,6 @@ function getAccessControlPageConfig(
   if (pathname === "/dashboard/approvals") {
     return {
       title: t("Shared.dashboardShell.approvals"),
-      hideTitle: true,
       headerTabs: {
         tabs: [
           { id: "pending", label: t("DashboardApprovals.pendingTab") },
@@ -354,7 +352,6 @@ function getAccessControlPageConfig(
   if (pathname.startsWith("/dashboard/approvals")) {
     return {
       title: t("Shared.dashboardShell.approvals"),
-      hideTitle: true,
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/approvals",
@@ -374,7 +371,6 @@ function getIssuanceRoutePageConfig(
   if (pathname === "/dashboard/issuance") {
     return {
       title: t("Shared.dashboardShell.issuance"),
-      hideTitle: true,
       headerTabs: playgroundHeaderTabs(t),
       contentWidthClass: "max-w-none",
     };
@@ -403,7 +399,6 @@ function getIssuanceRoutePageConfig(
   }
   return {
     title: t("Shared.dashboardShell.issuance"),
-    hideTitle: true,
     contentWidthClass: "max-w-none",
     backAction: {
       href: "/dashboard/issuance",
@@ -432,7 +427,6 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: t("Shared.dashboardShell.wallets"),
-      hideTitle: true,
       headerTabs: playgroundHeaderTabs(t),
       contentWidthClass: "max-w-none",
     };
@@ -462,7 +456,6 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/policies") {
     return {
       title: t("Shared.dashboardShell.policies"),
-      hideTitle: true,
       contentWidthClass: "max-w-none",
     };
   }

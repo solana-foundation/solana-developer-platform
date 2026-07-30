@@ -27,6 +27,23 @@ export interface HomeBalanceBreakdown {
   otherUnpricedCount: number;
 }
 
+/**
+ * A spent token account keeps its row in the aggregate with a zero amount, so "has a
+ * row" and "is held" are not the same question. Counting those inflated the "Tokens
+ * held" tile, and listing them put `$0.00` rows in an allocation they contribute
+ * nothing to — so the tile and the list have to agree on one definition or the card
+ * contradicts itself.
+ *
+ * Only a *definite* zero is excluded. An unparseable amount is unknown rather than
+ * empty, and the breakdown deliberately still lists such a holding as unpriced instead
+ * of hiding it, so dropping it here would make the tile disagree with the list again in
+ * the other direction.
+ */
+function isHeld(balance: CustodyWalletTokenBalance): boolean {
+  const amount = Number(balance.uiAmount);
+  return !Number.isFinite(amount) || amount > 0;
+}
+
 function usdValueOf(balance: CustodyWalletTokenBalance): number | null {
   if (typeof balance.usdValue === "number" && Number.isFinite(balance.usdValue)) {
     return balance.usdValue;
@@ -65,7 +82,7 @@ export function buildHomeBalanceBreakdown(
   const priced: HomeBalanceSlice[] = [];
   const unpriced: HomeBalanceSlice[] = [];
 
-  for (const balance of balances) {
+  for (const balance of balances.filter(isHeld)) {
     const usdValue = usdValueOf(balance);
     const slice: HomeBalanceSlice = {
       mint: balance.mint,
@@ -107,5 +124,5 @@ export function buildHomeBalanceBreakdown(
 
 /** Distinct tokens held, used for the "Tokens held" tile. */
 export function countHeldTokens(balances: CustodyWalletTokenBalance[]): number {
-  return new Set(balances.map((balance) => balance.mint)).size;
+  return new Set(balances.filter(isHeld).map((balance) => balance.mint)).size;
 }

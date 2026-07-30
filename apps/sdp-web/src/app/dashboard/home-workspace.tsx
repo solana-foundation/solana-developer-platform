@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "./activity-format-utils";
 import { buildHomeBalanceBreakdown, countHeldTokens } from "./home-balance-breakdown";
 import type { HomeActivityExplorerRef, HomeActivityRow } from "./home-page.data";
+import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { fetchHomeActivity } from "./home-workspace.data";
 import {
   formatCurrencyAmount,
@@ -434,12 +435,6 @@ export function HomeWorkspace({
   );
   const isWalletEmptyState = wallets.length === 0;
   const heldTokenCount = countHeldTokens(balances);
-  // Balances come back with a symbol per mint, including for tokens the shared
-  // catalogue has never heard of. The activity route cannot see them — it only
-  // knows issued-token symbols — so the naming happens here instead.
-  const symbolsByMint = Object.fromEntries(
-    balances.map((balance) => [balance.mint, balance.token])
-  );
   const totalBalanceHint = isWalletEmptyState
     ? t("Shared.homeWorkspace.createFirstWalletBalances")
     : totalBalance === null
@@ -452,6 +447,7 @@ export function HomeWorkspace({
       : t("Shared.homeWorkspace.activityUnavailable")
     : (activitySnapshot?.activityError ?? null);
   const activityRows = activitySnapshot?.activityRows ?? [];
+  const symbolsByMint = buildTokenSymbolsByMint(activityRows, balances);
   const activityError = activityRequestError
     ? activityRequestError instanceof Error
       ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")

@@ -112,6 +112,32 @@ describe("countHeldTokens", () => {
     ).toBe(2);
   });
 
+  it("does not count a mint whose balance is spent", () => {
+    // A spent token account keeps its aggregate row, so counting rows claimed
+    // holdings the organization no longer has.
+    expect(
+      countHeldTokens([
+        balance({ mint: "a", uiAmount: "1" }),
+        balance({ mint: "b", uiAmount: "0" }),
+        balance({ mint: "c", uiAmount: "0.0" }),
+      ])
+    ).toBe(1);
+  });
+
+  it("agrees with what the breakdown lists", () => {
+    const balances = [
+      balance({ mint: "sol", token: "SOL", uiAmount: "2", usdValue: 149.11 }),
+      balance({ mint: "spent", token: "SPENT", uiAmount: "0", usdValue: 0 }),
+      balance({ mint: "nwsol", token: "nwSOL", uiAmount: "132.5" }),
+    ];
+    const breakdown = buildHomeBalanceBreakdown(balances);
+    const listed = [...breakdown.priced, ...breakdown.unpriced].length;
+
+    expect(countHeldTokens(balances)).toBe(2);
+    expect(listed).toBe(2);
+    expect([...breakdown.priced, ...breakdown.unpriced].map((s) => s.token)).not.toContain("SPENT");
+  });
+
   it("is zero for no balances", () => {
     expect(countHeldTokens([])).toBe(0);
   });
