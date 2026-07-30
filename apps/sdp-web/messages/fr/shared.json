@@ -235,6 +235,8 @@
     "noWalletsYet": "Aucun portefeuille créé.",
     "tokensHeld": "Jetons détenus",
     "balanceByToken": "Solde par jeton",
+    "firstRunTitle": "Créez un portefeuille pour commencer",
+    "firstRunBody": "Les soldes, l'activité de paiement et les jetons détenus apparaîtront ici dès que cette organisation aura son premier portefeuille.",
     "notPriced": "Pas de cotation",
     "otherTokens": "{count, plural, one {# autre jeton} other {# autres jetons}}",
     "recentTransactions": "Transactions récentes",

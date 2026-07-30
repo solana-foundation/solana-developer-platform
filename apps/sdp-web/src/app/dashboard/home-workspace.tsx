@@ -88,41 +88,6 @@ function ActivityAddress({
   );
 }
 
-function MetricCard({
-  label,
-  value,
-  error,
-  hint,
-  /**
-   * Counts are plain integers, not money — `formatCurrencyAmount` would render a
-   * wallet count as "$3.00".
-   */
-  kind = "currency",
-}: {
-  label: string;
-  value: number | null;
-  error: string | null;
-  hint?: string | null;
-  kind?: "currency" | "count";
-}) {
-  const t = useTranslations();
-  const locale = useLocale();
-  const display =
-    kind === "count" ? (value ?? 0).toLocaleString(locale) : formatCurrencyAmount(value, locale);
-  return (
-    <Card className="gap-0 rounded-[18px] py-0 shadow-none">
-      <CardContent className="space-y-2 px-6 py-6">
-        <p className="text-[15px] text-tertiary">{label}</p>
-        <p className="text-[24px] leading-none font-medium tracking-[-0.03em] text-primary sm:text-[30px]">
-          {error ? t("Shared.homeWorkspace.unavailable") : display}
-        </p>
-        {error ? <p className="text-sm text-destructive-strong">{error}</p> : null}
-        {!error && hint ? <p className="text-sm text-tertiary">{hint}</p> : null}
-      </CardContent>
-    </Card>
-  );
-}
-
 /**
  * Descending emphasis for descending share. The design system ships no categorical
  * chart palette, and a stacked allocation bar is a magnitude encoding rather than an
@@ -151,7 +116,7 @@ function allocationFill(index: number): string {
  * full-width rules that read as dividers, and comparing a raw token count against a
  * dollar amount was meaningless anyway.
  */
-function BalanceBreakdownCard({
+function BalanceAllocation({
   balances,
   locale,
 }: {
@@ -196,73 +161,212 @@ function BalanceBreakdownCard({
   ];
 
   return (
-    <Card className="min-w-0 gap-0 rounded-[18px] py-0 shadow-none">
-      <CardContent className="space-y-5 px-6 py-6">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <p className="text-[15px] text-tertiary">{t("Shared.homeWorkspace.balanceByToken")}</p>
-          {breakdown.totalUsd !== null ? (
-            <p className="text-[15px] font-medium text-primary tabular-nums">
-              {formatCurrencyAmount(breakdown.totalUsd, locale)}
-            </p>
-          ) : null}
-        </div>
+    <div className="min-w-0 space-y-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="text-[15px] text-tertiary">{t("Shared.homeWorkspace.balanceByToken")}</p>
+        {breakdown.totalUsd !== null ? (
+          <p className="text-[15px] font-medium text-primary tabular-nums">
+            {formatCurrencyAmount(breakdown.totalUsd, locale)}
+          </p>
+        ) : null}
+      </div>
 
-        {segments.length > 0 ? (
-          <>
-            {/* One bar, segmented — the numbers beside each label are the accessible
+      {segments.length > 0 ? (
+        <>
+          {/* One bar, segmented — the numbers beside each label are the accessible
                 values, so the bar itself is decoration. gap-0.5 is the 2px spacer
                 that keeps adjacent fills from reading as a single block. */}
-            <div aria-hidden="true" className="flex h-2 w-full gap-0.5 overflow-hidden">
-              {segments.map((segment) => (
-                <div
-                  key={segment.key}
-                  className={cn("h-full rounded-full", segment.fill)}
-                  style={{ width: `${Math.max(segment.percent, 1.5)}%` }}
-                />
-              ))}
-            </div>
+          <div aria-hidden="true" className="flex h-2 w-full gap-0.5 overflow-hidden">
+            {segments.map((segment) => (
+              <div
+                key={segment.key}
+                className={cn("h-full rounded-full", segment.fill)}
+                style={{ width: `${Math.max(segment.percent, 1.5)}%` }}
+              />
+            ))}
+          </div>
 
-            <ul className="space-y-3">
-              {segments.map((segment) => (
-                <li key={segment.key} className="flex min-w-0 items-center gap-3">
-                  <span
-                    aria-hidden="true"
-                    className={cn("size-2.5 shrink-0 rounded-[3px]", segment.fill)}
-                  />
+          <ul className="space-y-3">
+            {segments.map((segment) => (
+              <li key={segment.key} className="flex min-w-0 items-center gap-3">
+                <span
+                  aria-hidden="true"
+                  className={cn("size-2.5 shrink-0 rounded-[3px]", segment.fill)}
+                />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
+                  {segment.label}
+                </span>
+                <span className="shrink-0 text-sm text-tertiary tabular-nums">
+                  {Math.round(segment.percent)}%
+                </span>
+                <span className="w-24 shrink-0 text-right text-sm text-secondary tabular-nums">
+                  {formatCurrencyAmount(segment.value, locale)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      {breakdown.unpriced.length > 0 ? (
+        <div className="space-y-3 border-t border-border-default pt-4">
+          <p className="text-xs text-tertiary">{t("Shared.homeWorkspace.notPriced")}</p>
+          <ul className="space-y-3">
+            {breakdown.unpriced.map((slice) => {
+              const symbol = symbolFor(slice);
+              return (
+                <li key={slice.mint} className="flex min-w-0 items-center gap-3">
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
-                    {segment.label}
+                    {symbol}
                   </span>
-                  <span className="shrink-0 text-sm text-tertiary tabular-nums">
-                    {Math.round(segment.percent)}%
-                  </span>
-                  <span className="w-24 shrink-0 text-right text-sm text-secondary tabular-nums">
-                    {formatCurrencyAmount(segment.value, locale)}
+                  <span className="shrink-0 text-sm text-secondary tabular-nums">
+                    {formatDisplayAmount(slice.uiAmount, symbol)}
                   </span>
                 </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
-        {breakdown.unpriced.length > 0 ? (
-          <div className="space-y-3 border-t border-border-default pt-4">
-            <p className="text-xs text-tertiary">{t("Shared.homeWorkspace.notPriced")}</p>
-            <ul className="space-y-3">
-              {breakdown.unpriced.map((slice) => {
-                const symbol = symbolFor(slice);
-                return (
-                  <li key={slice.mint} className="flex min-w-0 items-center gap-3">
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
-                      {symbol}
-                    </span>
-                    <span className="shrink-0 text-sm text-secondary tabular-nums">
-                      {formatDisplayAmount(slice.uiAmount, symbol)}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+/** A secondary figure beside the hero — deliberately far smaller than the balance. */
+function HeroStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="truncate text-[13px] text-tertiary">{label}</dt>
+      <dd className="truncate text-[15px] font-medium text-primary tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * One number, at the top, at maximum weight.
+ *
+ * Four equal tiles gave the balance, the day's volume, a wallet count and a token
+ * count identical visual weight, so the page answered no question first — the reader
+ * had to pick. Total balance is what someone opening a custody dashboard came for,
+ * so it leads; everything else is context beside it, and the primary action sits in
+ * the same block rather than floating above the page.
+ */
+function BalanceHero({
+  totalBalance,
+  totalBalanceError,
+  totalBalanceHint,
+  todaysVolume,
+  todaysVolumeError,
+  walletCount,
+  heldTokenCount,
+  balances,
+  locale,
+  canManageApiKeys,
+  canManageCustody,
+}: {
+  totalBalance: number | null;
+  totalBalanceError: string | null;
+  totalBalanceHint: string | null;
+  todaysVolume: number | null;
+  todaysVolumeError: string | null;
+  walletCount: number;
+  heldTokenCount: number;
+  balances: CustodyWalletTokenBalance[];
+  locale: string;
+  canManageApiKeys: boolean;
+  canManageCustody: boolean;
+}) {
+  const t = useTranslations();
+  return (
+    <Card className="min-w-0 gap-0 rounded-[18px] py-0 shadow-none">
+      <CardContent className="space-y-6 px-6 py-6">
+        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
+          <div className="min-w-0 space-y-2">
+            <p className="text-[15px] text-tertiary">{t("Shared.homeWorkspace.totalBalance")}</p>
+            <p className="text-[38px] leading-none font-medium tracking-[-0.03em] text-primary tabular-nums sm:text-[46px]">
+              {totalBalanceError
+                ? t("Shared.homeWorkspace.unavailable")
+                : formatCurrencyAmount(totalBalance, locale)}
+            </p>
+            {totalBalanceError ? (
+              <p className="text-sm text-destructive-strong">{totalBalanceError}</p>
+            ) : totalBalanceHint ? (
+              <p className="text-sm text-tertiary">{totalBalanceHint}</p>
+            ) : null}
           </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {canManageApiKeys ? (
+              <CreateApiKeyModal
+                triggerLabel={t("Shared.SharedComponents.createApiKey")}
+                triggerVariant="secondary"
+              />
+            ) : null}
+            {canManageCustody ? (
+              <Button
+                asChild
+                className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
+              >
+                <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border-default pt-5 sm:grid-cols-3">
+          <HeroStat
+            label={t("Shared.homeWorkspace.todaysVolume")}
+            value={
+              todaysVolumeError
+                ? t("Shared.homeWorkspace.unavailable")
+                : formatCurrencyAmount(todaysVolume, locale)
+            }
+          />
+          <HeroStat
+            label={t("Shared.homeWorkspace.walletsTracked")}
+            value={walletCount.toLocaleString(locale)}
+          />
+          <HeroStat
+            label={t("Shared.homeWorkspace.tokensHeld")}
+            value={heldTokenCount.toLocaleString(locale)}
+          />
+        </dl>
+
+        {balances.length > 0 ? (
+          <div className="border-t border-border-default pt-5">
+            <BalanceAllocation balances={balances} locale={locale} />
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * What to do when there is nothing yet.
+ *
+ * The populated layout rendered four zeroes and a hint under each, which reads as a
+ * broken dashboard rather than a new one. A first run gets one instruction and the
+ * action next to it instead.
+ */
+function FirstRunPanel({ canCreateWallet }: { canCreateWallet: boolean }) {
+  const t = useTranslations();
+  return (
+    <Card className="min-w-0 gap-0 rounded-[18px] py-0 shadow-none">
+      <CardContent className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 px-6 py-8">
+        <div className="min-w-0 max-w-xl space-y-2">
+          <h2 className="text-[22px] leading-tight font-medium tracking-[-0.02em] text-primary">
+            {t("Shared.homeWorkspace.firstRunTitle")}
+          </h2>
+          <p className="text-sm text-tertiary">{t("Shared.homeWorkspace.firstRunBody")}</p>
+        </div>
+        {canCreateWallet ? (
+          <Button
+            asChild
+            className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
+          >
+            <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
+          </Button>
         ) : null}
       </CardContent>
     </Card>
@@ -329,66 +433,24 @@ export function HomeWorkspace({
   return (
     <div className="w-full space-y-8 py-2">
       <SectionEntry>
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          {dashboardAccess.capabilities.canManageApiKeys ? (
-            <CreateApiKeyModal
-              triggerLabel={t("Shared.SharedComponents.createApiKey")}
-              triggerVariant="secondary"
-            />
-          ) : null}
-          {dashboardAccess.capabilities.canManageCustody ? (
-            <Button
-              asChild
-              className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
-            >
-              <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
-            </Button>
-          ) : null}
-        </div>
+        {isWalletEmptyState ? (
+          <FirstRunPanel canCreateWallet={dashboardAccess.capabilities.canManageCustody} />
+        ) : (
+          <BalanceHero
+            totalBalance={totalBalance}
+            totalBalanceError={totalBalanceError}
+            totalBalanceHint={totalBalanceHint}
+            todaysVolume={todaysVolume}
+            todaysVolumeError={todaysVolumeError}
+            walletCount={walletCount}
+            heldTokenCount={heldTokenCount}
+            balances={balances}
+            locale={locale}
+            canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
+            canManageCustody={dashboardAccess.capabilities.canManageCustody}
+          />
+        )}
       </SectionEntry>
-
-      <SectionEntry delay={0.04}>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            label={t("Shared.homeWorkspace.totalBalance")}
-            value={totalBalance}
-            error={totalBalanceError}
-            hint={totalBalanceHint}
-          />
-          <MetricCard
-            label={t("Shared.homeWorkspace.todaysVolume")}
-            value={todaysVolume}
-            error={todaysVolumeError}
-            hint={todaysVolumeHint}
-          />
-          <MetricCard
-            label={t("Shared.homeWorkspace.walletsTracked")}
-            value={walletCount}
-            error={null}
-            kind="count"
-            // Deliberately not the balances copy the first tile uses — the same
-            // sentence twice in one row reads as a rendering bug.
-            hint={walletCount === 0 ? t("Shared.homeWorkspace.noWalletsYet") : null}
-          />
-          <MetricCard
-            label={t("Shared.homeWorkspace.tokensHeld")}
-            value={heldTokenCount}
-            error={totalBalanceError}
-            kind="count"
-            hint={
-              heldTokenCount === 0 && !totalBalanceError
-                ? t("Shared.homeWorkspace.noTrackedBalances")
-                : null
-            }
-          />
-        </div>
-      </SectionEntry>
-
-      {balances.length > 0 ? (
-        <SectionEntry delay={0.06}>
-          <BalanceBreakdownCard balances={balances} locale={locale} />
-        </SectionEntry>
-      ) : null}
 
       <SectionEntry delay={0.08}>
         <div className="space-y-4">
