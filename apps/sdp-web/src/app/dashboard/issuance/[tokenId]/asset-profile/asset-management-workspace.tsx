@@ -2,7 +2,7 @@
 
 import type { AssetProfile, Token } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { Loader2, Play } from "lucide-react";
+import { Loader2, Play, SparklesIcon, WalletIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -342,8 +342,12 @@ export function AssetManagementWorkspace({
                 signerWalletId={ops.deploySignerWalletId}
                 signerUnavailableReason={ops.deploySignerSelection.unavailableReason}
                 onSignerWalletIdChange={ops.setDeploySignerWalletId}
+                helperText={t("DashboardIssuance.management.deploySignerHint")}
               />
-              <div className="flex items-center justify-end gap-2">
+              {/* Two signers, two buttons: the selected wallet pays the fees, or
+                  Kora sponsors them. Kora stays disabled until sponsorship is
+                  wired up, so the tooltip explains the gap. */}
+              <div className="flex items-center justify-between gap-2">
                 <button
                   type="button"
                   onClick={ops.closeFundManagementModal}
@@ -352,14 +356,29 @@ export function AssetManagementWorkspace({
                 >
                   {t("DashboardIssuance.workspace.cancel")}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => ops.submitFundManagementAction("deploy")}
-                  disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
-                  className="inline-flex h-10 items-center rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
-                >
-                  {t("DashboardIssuance.workspace.deployNow")}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => ops.deployToken("wallet")}
+                    disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
+                    className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <WalletIcon className="size-4" />
+                    {t("DashboardIssuance.management.deployWithWallet")}
+                  </button>
+                  <TokenDisabledActionTooltip
+                    reason={t("DashboardIssuance.management.koraUnavailable")}
+                  >
+                    <button
+                      type="button"
+                      disabled
+                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <SparklesIcon className="size-4" />
+                      {t("DashboardIssuance.management.deployWithKora")}
+                    </button>
+                  </TokenDisabledActionTooltip>
+                </div>
               </div>
             </div>
           </div>
