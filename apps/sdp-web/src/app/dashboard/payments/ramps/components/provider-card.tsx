@@ -145,7 +145,7 @@ export function ProviderCard({
       className={cn(
         "flex w-full items-center gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-left outline outline-2 -outline-offset-2 transition-colors",
         active
-          ? "outline-border-strong ring-2 ring-tertiary ring-offset-2 ring-offset-white"
+          ? "outline-border-strong ring-2 ring-tertiary ring-offset-2 ring-offset-surface-raised"
           : "outline-transparent hover:bg-fill-strong"
       )}
     >

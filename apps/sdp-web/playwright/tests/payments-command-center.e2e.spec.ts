@@ -68,13 +68,15 @@ test.describe("payments command center and transaction ledger", () => {
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true);
 
-    await page.getByRole("button", { name: /open navigation/i }).click();
+    // The payments sub-nav lives in the persistent sidebar, which only exists at xl
+    // and above — mobile navigation is the bottom bar now, and its More sheet does
+    // not repeat a menu the Payments page already carries.
+    await page.setViewportSize({ width: 1440, height: 900 });
     const paymentsToggle = page.getByRole("button", { name: /payments menu/i });
     await expect(paymentsToggle).toHaveAttribute("aria-expanded", "true");
     await paymentsToggle.click();
     await expect(paymentsToggle).toHaveAttribute("aria-expanded", "false");
     await page.reload();
-    await page.getByRole("button", { name: /open navigation/i }).click();
     await expect(page.getByRole("button", { name: /payments menu/i })).toHaveAttribute(
       "aria-expanded",
       "false"

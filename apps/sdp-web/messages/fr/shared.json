@@ -133,6 +133,9 @@
   "dashboardShell": {
     "workspace": "Espace de travail",
     "openNavigation": "Ouvrir la navigation",
+    "primaryNavigation": "Principal",
+    "more": "Plus",
+    "moreDescription": "Accéder au reste du dashboard.",
     "closeNavigation": "Fermer la navigation",
     "sandbox": "Sandbox",
     "loadingDashboard": "Chargement du dashboard...",
