@@ -1086,6 +1086,20 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     attempt_count: z.number(),
     max_attempts: z.number(),
     error: z.string().nullable(),
+    // Projected server-side to a fixed field list, so a held execution can be reviewed
+    // (which wallet, what amount) without exposing every key an emitter happens to add.
+    trigger_payload: z.record(z.string(), z.unknown()).openapi({
+      description:
+        "What the action will act on: wallet, source, destination, amount, operation, provider, counterpartyKind, fiatCurrency, cryptoToken, attempt.",
+    }),
+    result: z.record(z.string(), z.unknown()).openapi({
+      description:
+        "Outcome of the run: signature, status, notified, emailed, alreadyFrozen, alreadyThawed, mirrorFailed.",
+    }),
+    decided_by: z.string().nullable().openapi({
+      description: "User who approved or rejected this execution; null when auto-applied.",
+    }),
+    decided_at: z.string().nullable(),
     created_at: z.string(),
     updated_at: z.string(),
   });
@@ -1244,12 +1258,31 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve",
+    tags: ["Issuance"],
+    summary: "Approve a held execution",
+    operationId: "approveWorkflowExecution",
+    description:
+      "Authorizes an awaiting-review execution: status becomes pending and the engine runs it once. Requires the permission implied by the rule's action tier — tokens:admin for sensitive and irreversible actions. Records the approver on the execution and in the audit log.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema, executionId: executionIdParamSchema }),
+    },
+    responses: {
+      200: { description: "Execution approved", content: jsonContent(workflowExecutionResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
     path: "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry",
     tags: ["Issuance"],
-    summary: "Retry / approve an execution",
+    summary: "Retry a failed execution",
     operationId: "retryWorkflowExecution",
     description:
-      "Flips a failed or awaiting-review execution back to pending; the cron engine re-runs it.",
+      "Re-attempts a failed execution: status becomes pending and the attempt counter resets. Approving a held execution is a separate endpoint.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

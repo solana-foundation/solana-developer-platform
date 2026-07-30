@@ -11,6 +11,56 @@ import { assertWorkflowActionPermitted } from "./workflow-authz";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+// Payload/result keys the execution log is allowed to return.
+//
+// Two reasons for an allowlist rather than the raw JSONB. Approving a held mint or seize
+// without seeing its target wallet and amount is approving blind, so these fields have
+// to reach the UI. But returning the whole blob also ships every key an emitter ever
+// adds — none of it documented in the OpenAPI schema — to any `tokens:read` caller.
+const PAYLOAD_FIELDS = [
+  "wallet",
+  "source",
+  "destination",
+  "amount",
+  "operation",
+  "provider",
+  "counterpartyKind",
+  "fiatCurrency",
+  "cryptoToken",
+  "attempt",
+] as const;
+
+const RESULT_FIELDS = [
+  "signature",
+  "status",
+  "notified",
+  "emailed",
+  "alreadyFrozen",
+  "alreadyThawed",
+  "mirrorFailed",
+] as const;
+
+function project(
+  source: Record<string, unknown>,
+  fields: readonly string[]
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (source[field] !== undefined) {
+      projected[field] = source[field];
+    }
+  }
+  return projected;
+}
+
+function toExecutionResponse(row: WorkflowExecutionRow) {
+  return {
+    ...row,
+    trigger_payload: project(row.trigger_payload, PAYLOAD_FIELDS),
+    result: project(row.result, RESULT_FIELDS),
+  };
+}
+
 // Execution log (Ticket 3): recent executions for a token, optionally one workflow.
 export const listWorkflowExecutions = async (c: AppContext) => {
   const { tokenId } = c.req.param();
@@ -31,7 +81,7 @@ export const listWorkflowExecutions = async (c: AppContext) => {
     offset,
   });
 
-  return success(c, { executions: rows, total, page, pageSize });
+  return success(c, { executions: rows.map(toExecutionResponse), total, page, pageSize });
 };
 
 type Decision =
@@ -98,7 +148,7 @@ export const approveWorkflowExecution = async (c: AppContext) => {
   }
 
   await auditDecision(c, "workflow_execution_approved", execution);
-  return success(c, { execution });
+  return success(c, { execution: toExecutionResponse(execution) });
 };
 
 // Retry a failed execution: failed → pending. Distinct from approve — this one already
@@ -118,7 +168,7 @@ export const retryWorkflowExecution = async (c: AppContext) => {
   }
 
   await auditDecision(c, "workflow_execution_retried", execution);
-  return success(c, { execution });
+  return success(c, { execution: toExecutionResponse(execution) });
 };
 
 // Reject a held execution: awaiting_review → cancelled. The action never runs.
@@ -137,5 +187,5 @@ export const cancelWorkflowExecution = async (c: AppContext) => {
   }
 
   await auditDecision(c, "workflow_execution_rejected", execution);
-  return success(c, { execution });
+  return success(c, { execution: toExecutionResponse(execution) });
 };

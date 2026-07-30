@@ -38,6 +38,13 @@ export interface ExecutionView {
   attempt_count: number;
   max_attempts: number;
   error: string | null;
+  // What the action will do, projected server-side to a documented field list. Held
+  // executions render this before the approve control — approving a mint or seize
+  // without seeing its target wallet and amount is approving blind.
+  trigger_payload?: Record<string, string | number> | null;
+  result?: Record<string, string | number | boolean> | null;
+  decided_by?: string | null;
+  decided_at?: string | null;
   created_at: string;
   updated_at: string;
 }

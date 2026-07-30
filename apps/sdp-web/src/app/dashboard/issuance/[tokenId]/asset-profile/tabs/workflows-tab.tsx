@@ -1468,6 +1468,24 @@ function HoldersList({
 
 // ── Execution log row ───────────────────────────────────────────────────────────────
 
+// One line naming what an execution acts on: "1000 → <wallet>" for a mint, "<source> →
+// <destination>" for a seize, the subject wallet otherwise. Empty when the payload
+// carries nothing worth showing (a notify or webhook).
+export function executionTarget(execution: ExecutionView): string {
+  const payload = execution.trigger_payload ?? {};
+  const amount = payload.amount == null ? null : String(payload.amount);
+  const source = payload.source == null ? null : String(payload.source);
+  const destination =
+    payload.destination == null
+      ? payload.wallet == null
+        ? null
+        : String(payload.wallet)
+      : String(payload.destination);
+
+  const route = [source, destination].filter(Boolean).join(" → ");
+  return [amount, route].filter(Boolean).join(" · ");
+}
+
 function ExecutionRow({
   execution,
   wf,
@@ -1492,6 +1510,7 @@ function ExecutionRow({
   onReject: () => void;
 }) {
   const destructive = tier === "requires_approval";
+  const target = executionTarget(execution);
   return (
     <li className="flex items-center justify-between gap-4 py-3">
       <div className="flex min-w-0 items-center gap-2.5">
@@ -1506,6 +1525,13 @@ function ExecutionRow({
               · {label("status", execution.status)}
             </span>
           </p>
+          {/* What this execution will actually do. Shown before the approve control so a
+              held mint or seize is never authorized sight-unseen. */}
+          {target ? (
+            <p className="truncate font-mono text-xs text-primary" title={target}>
+              {target}
+            </p>
+          ) : null}
           <p className="truncate text-xs text-secondary" title={execution.error ?? undefined}>
             {label("trigger", execution.trigger_type)} ·{" "}
             {formatRelativeTime(execution.created_at, locale)} · {wf("attempt")}{" "}

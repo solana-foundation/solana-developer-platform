@@ -37,7 +37,9 @@ function sameValue(actual: unknown, expected: string | number): boolean {
 }
 
 // Flat AND of simple comparisons over the event payload (operational filters only).
-function evaluateCondition(
+// Exported for tests: a guard that silently never matches produces no execution row and
+// nothing to debug, so the comparison semantics are worth pinning directly.
+export function evaluateCondition(
   condition: WorkflowCondition | null | undefined,
   payload: Record<string, unknown>
 ): boolean {
