@@ -6,9 +6,23 @@ export interface HomeBalanceSlice {
   /** Raw token field from the aggregate; the renderer resolves the display symbol. */
   token: string;
   uiAmount: string;
+  /** Present only on priced holdings. */
   usdValue: number | null;
-  /** 0-100, relative to the largest holding rather than to the total. */
+  /** Share of the total priced value, 0-100. Zero for unpriced holdings. */
   sharePercent: number;
+}
+
+export interface HomeBalanceBreakdown {
+  /** Holdings with a USD value, largest first — these compose the allocation bar. */
+  priced: HomeBalanceSlice[];
+  /** Holdings with no price feed, largest amount first. Never charted. */
+  unpriced: HomeBalanceSlice[];
+  /** Sum of every priced holding, or null when nothing is priced. */
+  totalUsd: number | null;
+  /** Priced holdings dropped from `priced` after the cap, folded into one bucket. */
+  otherPricedCount: number;
+  otherPricedUsd: number;
+  otherPricedSharePercent: number;
 }
 
 function usdValueOf(balance: CustodyWalletTokenBalance): number | null {
@@ -25,46 +39,64 @@ function usdValueOf(balance: CustodyWalletTokenBalance): number | null {
 }
 
 /**
- * Orders holdings for the home breakdown, largest first.
+ * Splits holdings into what can be compared and what cannot.
  *
- * Bars are scaled against the **largest** holding, not the portfolio total: with one
- * dominant asset every other bar would round to an invisible sliver, which reads as
- * "no data" rather than "small position". Priced holdings sort above unpriced ones so
- * a token we cannot value never outranks one we can.
+ * An organization's own issued tokens have no price feed, so their balance is an
+ * amount and nothing more. Ranking `132.5 nwSOL` against `$149.11` on one scale is a
+ * category error — the earlier version drew a share bar for every row and the
+ * unpriced ones came out as empty full-width rules that read as dividers. Only
+ * priced holdings get a share; unpriced ones are returned separately so the caller
+ * can list them without pretending they are part of an allocation.
+ *
+ * Shares are of the **priced total**, so the segments of a stacked bar sum to 100.
  *
  * @param balances - Aggregate token balances, already summed across wallets.
- * @param limit - Maximum rows to return.
+ * @param limit - How many priced holdings to name before folding the rest into "Other".
  */
 export function buildHomeBalanceBreakdown(
   balances: CustodyWalletTokenBalance[],
-  limit = 5
-): HomeBalanceSlice[] {
-  const slices = balances.map((balance) => ({
-    mint: balance.mint,
-    token: balance.token,
-    uiAmount: balance.uiAmount,
-    usdValue: usdValueOf(balance),
-  }));
+  limit = 4
+): HomeBalanceBreakdown {
+  const priced: HomeBalanceSlice[] = [];
+  const unpriced: HomeBalanceSlice[] = [];
 
-  slices.sort((a, b) => {
-    if (a.usdValue === null && b.usdValue === null) return 0;
-    if (a.usdValue === null) return 1;
-    if (b.usdValue === null) return -1;
-    return b.usdValue - a.usdValue;
-  });
+  for (const balance of balances) {
+    const usdValue = usdValueOf(balance);
+    const slice: HomeBalanceSlice = {
+      mint: balance.mint,
+      token: balance.token,
+      uiAmount: balance.uiAmount,
+      usdValue,
+      sharePercent: 0,
+    };
+    if (usdValue === null) {
+      unpriced.push(slice);
+    } else {
+      priced.push(slice);
+    }
+  }
 
-  const largest = slices.reduce(
-    (max, slice) => (slice.usdValue !== null && slice.usdValue > max ? slice.usdValue : max),
-    0
-  );
+  priced.sort((a, b) => (b.usdValue ?? 0) - (a.usdValue ?? 0));
+  unpriced.sort((a, b) => Number(b.uiAmount) - Number(a.uiAmount));
 
-  return slices.slice(0, limit).map((slice) => ({
+  const totalUsd = priced.reduce((sum, slice) => sum + (slice.usdValue ?? 0), 0);
+  const share = (value: number) => (totalUsd > 0 ? (value / totalUsd) * 100 : 0);
+
+  const named = priced.slice(0, limit).map((slice) => ({
     ...slice,
-    sharePercent:
-      largest > 0 && slice.usdValue !== null
-        ? Math.max(2, Math.round((slice.usdValue / largest) * 100))
-        : 0,
+    sharePercent: share(slice.usdValue ?? 0),
   }));
+  const rest = priced.slice(limit);
+  const otherPricedUsd = rest.reduce((sum, slice) => sum + (slice.usdValue ?? 0), 0);
+
+  return {
+    priced: named,
+    unpriced,
+    totalUsd: priced.length > 0 ? totalUsd : null,
+    otherPricedCount: rest.length,
+    otherPricedUsd,
+    otherPricedSharePercent: share(otherPricedUsd),
+  };
 }
 
 /** Distinct tokens held, used for the "Tokens held" tile. */

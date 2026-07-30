@@ -21,6 +21,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "./activity-format-utils";
 import { buildHomeBalanceBreakdown, countHeldTokens } from "./home-balance-breakdown";
 import type { HomeActivityExplorerRef, HomeActivityRow } from "./home-page.data";
@@ -123,8 +124,32 @@ function MetricCard({
 }
 
 /**
- * Holdings split by token. The aggregate already returns the per-token rows the
- * total is summed from, so this needs no extra request.
+ * Descending emphasis for descending share. The design system ships no categorical
+ * chart palette, and a stacked allocation bar is a magnitude encoding rather than an
+ * identity one, so a single neutral ramp is the right job — and it re-steps itself
+ * per theme instead of needing a hand-picked dark variant.
+ */
+const ALLOCATION_FILLS = [
+  "bg-primary",
+  "bg-secondary",
+  "bg-tertiary",
+  "bg-muted",
+  "bg-fill-strong",
+] as const;
+
+function allocationFill(index: number): string {
+  return ALLOCATION_FILLS[Math.min(index, ALLOCATION_FILLS.length - 1)];
+}
+
+/**
+ * Holdings by token. The aggregate already returns the per-token rows the total is
+ * summed from, so this needs no extra request.
+ *
+ * Priced holdings compose one stacked allocation bar; unpriced ones are listed below
+ * it without a bar. An organization's own issued tokens have no price feed, and the
+ * first version drew a share bar for every row — the unpriced ones rendered as empty
+ * full-width rules that read as dividers, and comparing a raw token count against a
+ * dollar amount was meaningless anyway.
  */
 function BalanceBreakdownCard({
   balances,
@@ -134,8 +159,8 @@ function BalanceBreakdownCard({
   locale: string;
 }) {
   const t = useTranslations();
-  const slices = buildHomeBalanceBreakdown(balances);
-  if (slices.length === 0) {
+  const breakdown = buildHomeBalanceBreakdown(balances);
+  if (breakdown.priced.length === 0 && breakdown.unpriced.length === 0) {
     return null;
   }
 
@@ -144,42 +169,101 @@ function BalanceBreakdownCard({
   const symbolsByMint = Object.fromEntries(
     balances.map((balance) => [balance.mint, balance.token])
   );
+  const symbolFor = (slice: { mint: string; token: string }) =>
+    resolveTransferTokenLabel(slice.mint, symbolsByMint) ?? slice.token;
+
+  const segments = [
+    ...breakdown.priced.map((slice, index) => ({
+      key: slice.mint,
+      label: symbolFor(slice),
+      percent: slice.sharePercent,
+      value: slice.usdValue ?? 0,
+      fill: allocationFill(index),
+    })),
+    ...(breakdown.otherPricedCount > 0
+      ? [
+          {
+            key: "__other__",
+            label: t("Shared.homeWorkspace.otherTokens", {
+              count: breakdown.otherPricedCount,
+            }),
+            percent: breakdown.otherPricedSharePercent,
+            value: breakdown.otherPricedUsd,
+            fill: allocationFill(breakdown.priced.length),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <Card className="min-w-0 gap-0 rounded-[18px] py-0 shadow-none">
       <CardContent className="space-y-5 px-6 py-6">
-        <div className="space-y-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <p className="text-[15px] text-tertiary">{t("Shared.homeWorkspace.balanceByToken")}</p>
+          {breakdown.totalUsd !== null ? (
+            <p className="text-[15px] font-medium text-primary tabular-nums">
+              {formatCurrencyAmount(breakdown.totalUsd, locale)}
+            </p>
+          ) : null}
         </div>
-        <ul className="space-y-4">
-          {slices.map((slice) => {
-            const symbol = resolveTransferTokenLabel(slice.mint, symbolsByMint) ?? slice.token;
-            return (
-              <li key={slice.mint} className="min-w-0 space-y-2">
-                <div className="flex min-w-0 items-baseline justify-between gap-3">
-                  <span className="min-w-0 truncate text-sm font-medium text-primary">
-                    {symbol}
-                  </span>
-                  <span className="shrink-0 text-sm text-secondary tabular-nums">
-                    {slice.usdValue === null
-                      ? formatDisplayAmount(slice.uiAmount, symbol)
-                      : formatCurrencyAmount(slice.usdValue, locale)}
-                  </span>
-                </div>
-                {/* Presentational: the value beside it is the accessible number. */}
+
+        {segments.length > 0 ? (
+          <>
+            {/* One bar, segmented — the numbers beside each label are the accessible
+                values, so the bar itself is decoration. gap-0.5 is the 2px spacer
+                that keeps adjacent fills from reading as a single block. */}
+            <div aria-hidden="true" className="flex h-2 w-full gap-0.5 overflow-hidden">
+              {segments.map((segment) => (
                 <div
-                  aria-hidden="true"
-                  className="h-1 w-full overflow-hidden rounded-full bg-fill-subtle"
-                >
-                  <div
-                    className="h-full rounded-full bg-fill-strong"
-                    style={{ width: `${slice.sharePercent}%` }}
+                  key={segment.key}
+                  className={cn("h-full rounded-full", segment.fill)}
+                  style={{ width: `${Math.max(segment.percent, 1.5)}%` }}
+                />
+              ))}
+            </div>
+
+            <ul className="space-y-3">
+              {segments.map((segment) => (
+                <li key={segment.key} className="flex min-w-0 items-center gap-3">
+                  <span
+                    aria-hidden="true"
+                    className={cn("size-2.5 shrink-0 rounded-[3px]", segment.fill)}
                   />
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
+                    {segment.label}
+                  </span>
+                  <span className="shrink-0 text-sm text-tertiary tabular-nums">
+                    {Math.round(segment.percent)}%
+                  </span>
+                  <span className="w-24 shrink-0 text-right text-sm text-secondary tabular-nums">
+                    {formatCurrencyAmount(segment.value, locale)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+
+        {breakdown.unpriced.length > 0 ? (
+          <div className="space-y-3 border-t border-border-default pt-4">
+            <p className="text-xs text-tertiary">{t("Shared.homeWorkspace.notPriced")}</p>
+            <ul className="space-y-3">
+              {breakdown.unpriced.map((slice) => {
+                const symbol = symbolFor(slice);
+                return (
+                  <li key={slice.mint} className="flex min-w-0 items-center gap-3">
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
+                      {symbol}
+                    </span>
+                    <span className="shrink-0 text-sm text-secondary tabular-nums">
+                      {formatDisplayAmount(slice.uiAmount, symbol)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

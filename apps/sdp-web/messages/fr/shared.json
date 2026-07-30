@@ -238,6 +238,8 @@
     "noWalletsYet": "Aucun portefeuille créé.",
     "tokensHeld": "Jetons détenus",
     "balanceByToken": "Solde par jeton",
+    "notPriced": "Pas de cotation",
+    "otherTokens": "{count, plural, one {# autre jeton} other {# autres jetons}}",
     "recentTransactions": "Transactions récentes",
     "activityDescription": "Dernière activité Wallet et émission dans l’organisation.",
     "seeAllPayments": "Voir tous les paiements",

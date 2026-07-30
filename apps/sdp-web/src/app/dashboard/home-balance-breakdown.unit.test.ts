@@ -14,73 +14,94 @@ function balance(overrides: Partial<CustodyWalletTokenBalance>): CustodyWalletTo
 }
 
 describe("buildHomeBalanceBreakdown", () => {
-  it("orders holdings by value, largest first", () => {
-    const slices = buildHomeBalanceBreakdown([
-      balance({ mint: "a", token: "A", usdValue: 5 }),
-      balance({ mint: "b", token: "B", usdValue: 50 }),
-      balance({ mint: "c", token: "C", usdValue: 20 }),
+  it("keeps unpriced holdings out of the allocation entirely", () => {
+    // The real case behind the redesign: one priced token, two org-issued ones with
+    // no feed. Charting them together compares dollars against raw token counts.
+    const result = buildHomeBalanceBreakdown([
+      balance({ mint: "sol", token: "SOL", usdValue: 149.11 }),
+      balance({ mint: "nwsol", token: "nwSOL", uiAmount: "132.5" }),
+      balance({ mint: "atd", token: "ATD", uiAmount: "25000" }),
     ]);
 
-    expect(slices.map((s) => s.mint)).toEqual(["b", "c", "a"]);
+    expect(result.priced.map((s) => s.token)).toEqual(["SOL"]);
+    expect(result.unpriced.map((s) => s.token)).toEqual(["ATD", "nwSOL"]);
+    expect(result.unpriced.every((s) => s.sharePercent === 0)).toBe(true);
+    expect(result.totalUsd).toBeCloseTo(149.11);
   });
 
-  it("scales bars against the largest holding, not the total", () => {
-    const slices = buildHomeBalanceBreakdown([
-      balance({ mint: "big", usdValue: 100 }),
-      balance({ mint: "small", usdValue: 25 }),
+  it("makes priced shares sum to 100 so a stacked bar is whole", () => {
+    const result = buildHomeBalanceBreakdown([
+      balance({ mint: "a", usdValue: 75 }),
+      balance({ mint: "b", usdValue: 25 }),
     ]);
 
-    expect(slices[0].sharePercent).toBe(100);
-    // 25/100 of the largest, not 25/125 of the total.
-    expect(slices[1].sharePercent).toBe(25);
+    expect(result.priced.map((s) => s.sharePercent)).toEqual([75, 25]);
+    expect(result.priced.reduce((sum, s) => sum + s.sharePercent, 0)).toBeCloseTo(100);
   });
 
-  it("keeps a small holding visible instead of rounding it away", () => {
-    const slices = buildHomeBalanceBreakdown([
-      balance({ mint: "whale", usdValue: 1_000_000 }),
-      balance({ mint: "dust", usdValue: 1 }),
+  it("orders priced holdings largest first", () => {
+    const result = buildHomeBalanceBreakdown([
+      balance({ mint: "small", usdValue: 5 }),
+      balance({ mint: "big", usdValue: 50 }),
+      balance({ mint: "mid", usdValue: 20 }),
     ]);
 
-    expect(slices[1].sharePercent).toBeGreaterThanOrEqual(2);
+    expect(result.priced.map((s) => s.mint)).toEqual(["big", "mid", "small"]);
+  });
+
+  it("orders unpriced holdings by amount, largest first", () => {
+    const result = buildHomeBalanceBreakdown([
+      balance({ mint: "few", uiAmount: "10" }),
+      balance({ mint: "many", uiAmount: "9000" }),
+    ]);
+
+    expect(result.unpriced.map((s) => s.mint)).toEqual(["many", "few"]);
+  });
+
+  it("folds priced holdings past the cap into one Other bucket", () => {
+    const many = Array.from({ length: 7 }, (_, i) => balance({ mint: `m${i}`, usdValue: 10 }));
+    const result = buildHomeBalanceBreakdown(many, 4);
+
+    expect(result.priced).toHaveLength(4);
+    expect(result.otherPricedCount).toBe(3);
+    expect(result.otherPricedUsd).toBe(30);
+    // Named shares plus Other still account for the whole bar.
+    const total =
+      result.priced.reduce((sum, s) => sum + s.sharePercent, 0) + result.otherPricedSharePercent;
+    expect(total).toBeCloseTo(100);
   });
 
   it("derives value from price when usdValue is absent", () => {
-    const slices = buildHomeBalanceBreakdown([
+    const result = buildHomeBalanceBreakdown([
       balance({ mint: "priced", uiAmount: "3", usdPrice: 7 }),
     ]);
 
-    expect(slices[0].usdValue).toBe(21);
+    expect(result.priced[0].usdValue).toBe(21);
   });
 
-  it("sorts unpriced holdings last and gives them no bar", () => {
-    const slices = buildHomeBalanceBreakdown([
-      balance({ mint: "unpriced" }),
-      balance({ mint: "priced", usdValue: 10 }),
-    ]);
-
-    expect(slices.map((s) => s.mint)).toEqual(["priced", "unpriced"]);
-    expect(slices[1].usdValue).toBeNull();
-    expect(slices[1].sharePercent).toBe(0);
-  });
-
-  it("ignores a non-finite price rather than producing NaN", () => {
-    const slices = buildHomeBalanceBreakdown([
+  it("treats a non-finite amount as unpriced rather than producing NaN", () => {
+    const result = buildHomeBalanceBreakdown([
       balance({ mint: "bad", uiAmount: "not-a-number", usdPrice: 2 }),
     ]);
 
-    expect(slices[0].usdValue).toBeNull();
-    expect(slices[0].sharePercent).toBe(0);
+    expect(result.priced).toHaveLength(0);
+    expect(result.unpriced.map((s) => s.mint)).toEqual(["bad"]);
+    expect(result.totalUsd).toBeNull();
   });
 
-  it("caps the row count", () => {
-    const many = Array.from({ length: 9 }, (_, i) => balance({ mint: `m${i}`, usdValue: 9 - i }));
+  it("reports no total when nothing is priced", () => {
+    const result = buildHomeBalanceBreakdown([balance({ mint: "a" }), balance({ mint: "b" })]);
 
-    expect(buildHomeBalanceBreakdown(many)).toHaveLength(5);
-    expect(buildHomeBalanceBreakdown(many, 3)).toHaveLength(3);
+    expect(result.totalUsd).toBeNull();
+    expect(result.priced).toHaveLength(0);
+    expect(result.unpriced).toHaveLength(2);
   });
 
-  it("returns nothing for no balances", () => {
-    expect(buildHomeBalanceBreakdown([])).toEqual([]);
+  it("returns empty for no balances", () => {
+    const result = buildHomeBalanceBreakdown([]);
+    expect(result.priced).toEqual([]);
+    expect(result.unpriced).toEqual([]);
+    expect(result.totalUsd).toBeNull();
   });
 });
 
