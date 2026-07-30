@@ -11,20 +11,40 @@ describe("extractPolicyDenialReason", () => {
   it("prefers the human-written reason", () => {
     expect(
       extractPolicyDenialReason(
-        denial({ reason: "Destination is not on the allowlist", reasonCode: "destination_denied" })
+        denial({
+          reason: "Destination is not on the allowlist",
+          reasonCode: "wallet_policy_match",
+        })
       )
     ).toBe("Destination is not on the allowlist");
   });
 
-  it("falls back to a tidied reason code", () => {
-    expect(extractPolicyDenialReason(denial({ reasonCode: "destination_not_allowlisted" }))).toBe(
-      "Destination not allowlisted"
+  it("falls back to the label for the layer that decided", () => {
+    expect(extractPolicyDenialReason(denial({ reasonCode: "wallet_policy_match" }))).toBe(
+      "Matched a wallet policy rule"
+    );
+    expect(extractPolicyDenialReason(denial({ reasonCode: "api_key_policy_match" }))).toBe(
+      "Matched an API key policy rule"
     );
   });
 
   it("ignores a blank reason and uses the code", () => {
-    expect(extractPolicyDenialReason(denial({ reason: "   ", reasonCode: "asset_denied" }))).toBe(
-      "Asset denied"
+    expect(
+      extractPolicyDenialReason(denial({ reason: "   ", reasonCode: "provider_mapping_failed" }))
+    ).toBe("The custody provider mapping failed");
+  });
+
+  it("drops allow-only codes rather than claiming a control fired", () => {
+    // These three can only accompany an allow, so appending them to "denied by policy"
+    // would name a rule that never ran.
+    expect(extractPolicyDenialReason(denial({ reasonCode: "implicit_default_allow" }))).toBeNull();
+    expect(extractPolicyDenialReason(denial({ reasonCode: "wallet_policy_missing" }))).toBeNull();
+    expect(extractPolicyDenialReason(denial({ reasonCode: "api_key_policy_missing" }))).toBeNull();
+  });
+
+  it("tidies a code that is not in the union yet", () => {
+    expect(extractPolicyDenialReason(denial({ reasonCode: "legacy_wallet_policy_denied" }))).toBe(
+      "Legacy wallet policy denied"
     );
   });
 
