@@ -75,8 +75,12 @@ function SidebarToggle({
       type="button"
       aria-label={t("Shared.dashboardShell.openNavigation")}
       onClick={() => setMobileSidebarOpen(true)}
+      // Hidden below xl: the bottom bar and its More sheet own mobile navigation,
+      // and two entry points to the same destinations is worse than one. Kept for
+      // the narrow window between the sidebar collapsing and xl, where neither the
+      // persistent sidebar nor the bottom bar is present.
       className={[
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong xl:hidden",
+        "hidden h-8 w-8 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong",
         isMobileSidebarOpen ? "invisible" : "",
       ].join(" ")}
     >
@@ -535,7 +539,11 @@ export function getDashboardPageConfig(
     });
   }
   if (pathname.startsWith("/dashboard/settings")) {
-    return { title: t("Shared.dashboardShell.settings") };
+    // Settings was the only route left on the `max-w-5xl` default, which stranded a
+    // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
+    // the members table and the RPC form are label/value rows, and letting them span
+    // an ultrawide display pushes each value far from its label.
+    return { title: t("Shared.dashboardShell.settings"), contentWidthClass: "max-w-7xl" };
   }
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: t("Shared.dashboardShell.allowlist") };
