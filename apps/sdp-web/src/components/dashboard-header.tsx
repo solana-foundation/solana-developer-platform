@@ -519,7 +519,11 @@ export function getDashboardPageConfig(
     });
   }
   if (pathname.startsWith("/dashboard/settings")) {
-    return { title: t("Shared.dashboardShell.settings") };
+    // Settings was the only route left on the `max-w-5xl` default, which stranded a
+    // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
+    // the members table and the RPC form are label/value rows, and letting them span
+    // an ultrawide display pushes each value far from its label.
+    return { title: t("Shared.dashboardShell.settings"), contentWidthClass: "max-w-7xl" };
   }
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: t("Shared.dashboardShell.allowlist") };
