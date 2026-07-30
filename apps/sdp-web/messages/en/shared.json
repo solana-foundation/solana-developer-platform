@@ -136,6 +136,7 @@
     "openNavigation": "Open navigation",
     "primaryNavigation": "Primary",
     "more": "More",
+    "moreDescription": "Jump to the rest of the dashboard.",
     "closeNavigation": "Close navigation",
     "sandbox": "Sandbox",
     "loadingDashboard": "Loading dashboard...",

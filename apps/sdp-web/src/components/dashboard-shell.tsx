@@ -58,6 +58,7 @@ import {
   HeaderBackAction,
 } from "@/components/dashboard-header";
 import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
+import { DashboardMoreSheet } from "@/components/dashboard-more-sheet";
 import {
   docsHref,
   getNavSections,
@@ -459,6 +460,7 @@ export function DashboardShell({
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<{
     fromPathname: string;
@@ -750,12 +752,17 @@ export function DashboardShell({
 
         {/* Unmounted, not CSS-hidden, while the slide-over is open: a covered
             duplicate of every destination would otherwise sit behind the overlay. */}
-        {isMobileSidebarOpen ? null : (
-          <DashboardBottomNav
-            pathname={shellPathname}
-            onOpenMore={() => setMobileSidebarOpen(true)}
-          />
+        {isMobileSidebarOpen || isMoreSheetOpen ? null : (
+          <DashboardBottomNav pathname={shellPathname} onOpenMore={() => setMoreSheetOpen(true)} />
         )}
+
+        {isMoreSheetOpen ? (
+          <DashboardMoreSheet
+            pathname={shellPathname}
+            canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
+            onClose={() => setMoreSheetOpen(false)}
+          />
+        ) : null}
 
         {isMobileSidebarOpen ? (
           <div className="fixed inset-0 z-50 flex xl:hidden">
