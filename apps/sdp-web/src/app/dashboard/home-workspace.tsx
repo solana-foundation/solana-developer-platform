@@ -373,7 +373,6 @@ function FirstRunPanel({ canCreateWallet }: { canCreateWallet: boolean }) {
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Dashboard orchestration keeps related loading, empty, and populated states together.
 export function HomeWorkspace({
   totalBalance,
   totalBalanceError,
@@ -417,13 +416,6 @@ export function HomeWorkspace({
       : t("Shared.homeWorkspace.activityUnavailable")
     : (activitySnapshot?.activityError ?? null);
   const activityNotice = activitySnapshot?.activityNotice ?? null;
-  const todaysVolumeHint = isWalletEmptyState
-    ? t("Shared.homeWorkspace.paymentActivityAfterWallet")
-    : todaysVolume === null
-      ? activitySnapshot
-        ? t("Shared.homeWorkspace.noPaymentVolume")
-        : t("Shared.homeWorkspace.loadingPaymentActivity")
-      : null;
   const emptyActivityMessage = isWalletEmptyState
     ? t("Shared.homeWorkspace.createFirstWalletActivity")
     : activitySnapshot
