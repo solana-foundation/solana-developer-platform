@@ -82,6 +82,7 @@ export function ApprovalInbox({
   const [requests, setRequests] = useState(initialRequests);
   const [filters, setFilters] = useState<ApprovalInboxFilters>(EMPTY_APPROVAL_FILTERS);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(APPROVAL_INBOX_PAGE_SIZE);
   const [isReloading, setReloading] = useState(false);
   const [hasLoadError, setLoadError] = useState(loadError);
   const [relativeTimeBase, setRelativeTimeBase] = useState(renderedAt);
@@ -116,15 +117,14 @@ export function ApprovalInbox({
     () => filterApprovalRequests(requests, tab, filters),
     [filters, requests, tab]
   );
-  const pageCount = Math.max(1, Math.ceil(filteredRequests.length / APPROVAL_INBOX_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(filteredRequests.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visibleRequests = filteredRequests.slice(
-    (currentPage - 1) * APPROVAL_INBOX_PAGE_SIZE,
-    currentPage * APPROVAL_INBOX_PAGE_SIZE
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
   );
-  const rangeStart =
-    filteredRequests.length === 0 ? 0 : (currentPage - 1) * APPROVAL_INBOX_PAGE_SIZE + 1;
-  const rangeEnd = Math.min(currentPage * APPROVAL_INBOX_PAGE_SIZE, filteredRequests.length);
+  const rangeStart = filteredRequests.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(currentPage * pageSize, filteredRequests.length);
 
   function updateFilter<TKey extends keyof ApprovalInboxFilters>(
     key: TKey,
@@ -276,16 +276,20 @@ export function ApprovalInbox({
         page={currentPage}
         pageCount={pageCount}
         onPageChange={setPage}
+        summary={t("DashboardApprovals.range", {
+          from: rangeStart,
+          to: rangeEnd,
+          total: filteredRequests.length,
+        })}
+        pageSizeControl={{
+          pageSize,
+          onPageSizeChange: (size) => {
+            setPageSize(size);
+            setPage(1);
+          },
+        }}
       >
         <div className="flex items-center gap-2 text-xs text-secondary">
-          <p>
-            {t("DashboardApprovals.range", {
-              from: rangeStart,
-              to: rangeEnd,
-              total: filteredRequests.length,
-            })}
-          </p>
-          <span aria-hidden="true">·</span>
           <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
           <Tooltip>
             <TooltipTrigger asChild>
