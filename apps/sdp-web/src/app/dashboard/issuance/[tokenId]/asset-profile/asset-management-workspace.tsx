@@ -2,19 +2,21 @@
 
 import type { AssetProfile, Token } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { Loader2, Play } from "lucide-react";
+import { Loader2, Play, SparklesIcon, WalletIcon } from "lucide-react";
 import { motion } from "motion/react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
 import { togglePublicField } from "../../create/draft-mapping";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 import type { FundManagementModalAction } from "../token-fund-management-section";
+import { TokenLockSupplyModal } from "../token-lock-supply-modal";
 import { TokenManagementModalShell } from "../token-management-modal-shell";
 import { TokenSignerSelect } from "../token-signer-select";
 import { AssetProfileHeader } from "./asset-profile-header";
@@ -93,9 +95,8 @@ export function AssetManagementWorkspace({
   // controls — the policy editor stays admin-only (also enforced server-side).
   const showControlList = hasAccessControlList(getTokenAccessControlMode(token));
   const canViewComplianceTab = canManageTokenAdmin || showControlList;
-  const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const { pushSearchParams, replaceSearchParams } = useDashboardUrlState();
 
   const requestedTabParam = searchParams.get("tab");
   const requestedTab = resolveTab(requestedTabParam);
@@ -129,25 +130,14 @@ export function AssetManagementWorkspace({
     { id: "activity", label: t("DashboardIssuance.tabs.activity") },
   ];
 
+  // Shallow update: the tabs are fully client-rendered, so a router.push RSC
+  // refetch on every tab switch would only add latency.
   const syncActiveTabInUrl = useCallback(
     (nextTab: AssetManagementTab, mode: "push" | "replace" = "push") => {
-      const nextSearchParams = new URLSearchParams(searchParams.toString());
-      if (nextTab === "overview") {
-        nextSearchParams.delete("tab");
-      } else {
-        nextSearchParams.set("tab", nextTab);
-      }
-
-      const nextQuery = nextSearchParams.toString();
-      const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
-      if (mode === "replace") {
-        router.replace(nextUrl, { scroll: false });
-        return;
-      }
-
-      router.push(nextUrl, { scroll: false });
+      const sync = mode === "replace" ? replaceSearchParams : pushSearchParams;
+      sync({ tab: nextTab === "overview" ? null : nextTab });
     },
-    [pathname, router, searchParams]
+    [pushSearchParams, replaceSearchParams]
   );
 
   // Deploy from anywhere in the workspace: jump to Operations and open the
@@ -352,8 +342,12 @@ export function AssetManagementWorkspace({
                 signerWalletId={ops.deploySignerWalletId}
                 signerUnavailableReason={ops.deploySignerSelection.unavailableReason}
                 onSignerWalletIdChange={ops.setDeploySignerWalletId}
+                helperText={t("DashboardIssuance.management.deploySignerHint")}
               />
-              <div className="flex items-center justify-end gap-2">
+              {/* Two signers, two buttons: the selected wallet pays the fees, or
+                  Kora sponsors them. Kora stays disabled until sponsorship is
+                  wired up, so the tooltip explains the gap. */}
+              <div className="flex items-center justify-between gap-2">
                 <button
                   type="button"
                   onClick={ops.closeFundManagementModal}
@@ -362,14 +356,29 @@ export function AssetManagementWorkspace({
                 >
                   {t("DashboardIssuance.workspace.cancel")}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => ops.submitFundManagementAction("deploy")}
-                  disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
-                  className="inline-flex h-10 items-center rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
-                >
-                  {t("DashboardIssuance.workspace.deployNow")}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => ops.deployToken("wallet")}
+                    disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
+                    className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <WalletIcon className="size-4" />
+                    {t("DashboardIssuance.management.deployWithWallet")}
+                  </button>
+                  <TokenDisabledActionTooltip
+                    reason={t("DashboardIssuance.management.koraUnavailable")}
+                  >
+                    <button
+                      type="button"
+                      disabled
+                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <SparklesIcon className="size-4" />
+                      {t("DashboardIssuance.management.deployWithKora")}
+                    </button>
+                  </TokenDisabledActionTooltip>
+                </div>
               </div>
             </div>
           </div>
@@ -382,6 +391,38 @@ export function AssetManagementWorkspace({
             onMint={() => ops.submitFundManagementAction("mint")}
             onBurn={() => ops.submitFundManagementAction("burn")}
           />
+        ) : null}
+      </TokenManagementModalShell>
+
+      {/* Its own shell, not a fund-management branch: this flow stays open across
+          submission so a failed revoke can be retried after a successful mint. */}
+      <TokenManagementModalShell
+        isOpen={ops.lockSupplyModalOpen && ops.lockSupplyRemaining !== null}
+        isPending={ops.isPending}
+        onClose={ops.closeLockSupplyModal}
+      >
+        {ops.lockSupplyRemaining !== null ? (
+          <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
+            <TokenLockSupplyModal
+              token={token}
+              remaining={ops.lockSupplyRemaining}
+              alreadyMinted={ops.lockSupplyMinted}
+              revokeFailed={ops.lockSupplyRevokeFailed}
+              destination={ops.lockSupplyForm.destination}
+              onDestinationChange={(destination) =>
+                ops.setLockSupplyForm((previous) => ({ ...previous, destination }))
+              }
+              signerWallets={ops.lockSupplySignerSelection.wallets}
+              signerWalletId={ops.lockSupplyForm.signingWalletId}
+              signerUnavailableReason={ops.lockSupplySignerSelection.unavailableReason}
+              onSignerWalletIdChange={(signingWalletId) =>
+                ops.setLockSupplyForm((previous) => ({ ...previous, signingWalletId }))
+              }
+              isPending={ops.isPending}
+              onCancel={ops.closeLockSupplyModal}
+              onConfirm={() => void ops.handleLockSupply()}
+            />
+          </div>
         ) : null}
       </TokenManagementModalShell>
 

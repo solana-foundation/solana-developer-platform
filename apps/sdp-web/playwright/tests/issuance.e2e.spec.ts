@@ -15,8 +15,13 @@ const ASSOCIATED_TOKEN_PROGRAM_ID = address("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efT
 // biome-ignore lint/security/noSecrets: Solana Token-2022 program ID, not a secret.
 const TOKEN_2022_PROGRAM_ID = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
-function shortValue(value: string): string {
-  return value.length <= 16 ? value : `${value.slice(0, 6)}...${value.slice(-6)}`;
+// Permission rows render an authority through WalletIdentityBadge, which shortens
+// the address — and by a different amount per state: an org custody wallet spends
+// its detail line on "Provider · 5…4", while an address SDP doesn't hold gets the
+// line to itself (11…10). The tail is what every form keeps, so assert on that
+// rather than pinning one truncation the badge is free to retune.
+function addressTail(value: string): string {
+  return value.slice(-4);
 }
 
 async function deriveAssociatedTokenAccountAddress(owner: string, mint: string): Promise<string> {
@@ -519,7 +524,7 @@ test.describe
         await waitForPermissionRowValue(
           page,
           rowTestId,
-          shortValue(fixtures.wallets.delegated.publicKey)
+          addressTail(fixtures.wallets.delegated.publicKey)
         );
       }
 
@@ -541,7 +546,10 @@ test.describe
           await page.getByRole("button", { name: "Yes, set to None" }).click();
         }
       );
-      await waitForPermissionRowValue(page, rowTestId, "None");
+      // The action is worded "set to None", but the resulting row is not an
+      // address — it's the badge's unset state, which reads "Not set" under a
+      // warning mark (DashboardIssuance.overview.authorityNotSet).
+      await waitForPermissionRowValue(page, rowTestId, "Not set");
     });
 
     test("8. user sees denylist controls on the open stablecoin token", async ({ page }) => {

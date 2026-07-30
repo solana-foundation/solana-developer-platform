@@ -135,6 +135,14 @@ export interface DraftState {
   description: string;
   website: string;
   imageUrl: string;
+  // Step 2 — supply cap. SPL/Token-2022 have no supply-cap field, so this is an
+  // SDP policy limit enforced by our mint endpoint only. Empty = uncapped. A true
+  // on-chain cap requires minting to the cap and then revoking the mint authority
+  // (the asset workspace's "lock supply" action).
+  //
+  // The mint's freeze authority is NOT here: it is the "freezeAccounts" advanced
+  // setting, so it lives in `advancedSettings` alongside its pausable sibling.
+  maxSupply: string;
   // Step 2 — stablecoin financial details
   backingType: string;
   pegCurrency: string;
@@ -233,6 +241,7 @@ export function createInitialDraft(): DraftState {
     description: "",
     website: "",
     imageUrl: "",
+    maxSupply: "",
     backingType: "",
     pegCurrency: "",
     pegTarget: "",

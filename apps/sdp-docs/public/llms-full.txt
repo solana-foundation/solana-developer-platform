@@ -5259,6 +5259,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | List token transactions |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | Unfreeze account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | Unpause token transfers |
+| `GET` | `/v1/issuance/tokens/facets` | List token filter facets |
 | `GET` | `/v1/issuance/transactions` | List issuance transactions |
 
 ---

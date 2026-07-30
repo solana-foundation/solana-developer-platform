@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.50.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.49.1...v0.50.0) (2026-07-29)
+
+### Features
+
+* deploy with wallet for asset profiles ([#994](https://github.com/solana-foundation/solana-developer-platform/pull/994)) ([2062faa](https://github.com/solana-foundation/solana-developer-platform/commit/2062faae438240008c43f9e2e5d00af431628b91))
+* **api:** price wallet balances from Jupiter before falling back to Helius ([#978](https://github.com/solana-foundation/solana-developer-platform/pull/978)) ([3cd7ce5](https://github.com/solana-foundation/solana-developer-platform/commit/3cd7ce5e0ba51e529b422919ff0ce12b9726b21c))
+* **issuance:** server-driven asset list, shared overview hero, lock supply ([#983](https://github.com/solana-foundation/solana-developer-platform/pull/983)) ([9ef4a20](https://github.com/solana-foundation/solana-developer-platform/commit/9ef4a203ca8ffcdee94fe49a5fc898dc93fd7069))
+* **api:** encrypt counterparty PII at rest ([#932](https://github.com/solana-foundation/solana-developer-platform/pull/932)) ([7a74d8c](https://github.com/solana-foundation/solana-developer-platform/commit/7a74d8c0d47d529e6acf75a8819e42cbd0e17b8d))
+* **web:** wallet policy authoring rework + allow/blocklist storage fix ([#982](https://github.com/solana-foundation/solana-developer-platform/pull/982)) ([3e81e77](https://github.com/solana-foundation/solana-developer-platform/commit/3e81e770b6ba610e5d9040d8a17142033c779d48))
+* **web:** name org-issued tokens across the dashboard ([#974](https://github.com/solana-foundation/solana-developer-platform/pull/974)) ([7bd137c](https://github.com/solana-foundation/solana-developer-platform/commit/7bd137c8eae5ba1cd3ff9185287ec2c40aaa93ef))
+
+### Bug Fixes
+
+* **web:** shallow tab routing in issuance token workspaces ([#971](https://github.com/solana-foundation/solana-developer-platform/pull/971)) ([af4030f](https://github.com/solana-foundation/solana-developer-platform/commit/af4030f97eadadd9a2c9f4a6c04dc809fc7bc4ad))
+* **api:** stop unsubstituted Clerk placeholders rendering as the actor ([#976](https://github.com/solana-foundation/solana-developer-platform/pull/976)) ([60a5f66](https://github.com/solana-foundation/solana-developer-platform/commit/60a5f665da955d43e81794bbb9e2e33f4931f0da))
+* **web:** guard playground field mapping against prototype pollution ([#926](https://github.com/solana-foundation/solana-developer-platform/pull/926)) ([bfa6fe4](https://github.com/solana-foundation/solana-developer-platform/commit/bfa6fe4ca823f923ba5751628c3956bb5cfd90a7))
+
+### Documentation
+
+* **security:** tighten Hacktron Playground review context ([#987](https://github.com/solana-foundation/solana-developer-platform/pull/987)) ([3ca64ec](https://github.com/solana-foundation/solana-developer-platform/commit/3ca64ec75e0f63cb7b8e68d94f094db1c4b1970d))
+
 ## [0.49.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.49.0...v0.49.1) (2026-07-28)
 
 ### Bug Fixes

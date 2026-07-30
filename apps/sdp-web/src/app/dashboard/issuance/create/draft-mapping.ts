@@ -1,6 +1,7 @@
 import {
   ADVANCED_SETTINGS,
   AUTHORITY_VALUED_SETTINGS,
+  expandLegacySettingKeys,
   findIncompatibleExtensionPair,
   getRecommendedSettings,
   isSettingAllowed,
@@ -8,6 +9,7 @@ import {
   resolveSettingsToExtensions,
   type SettingKey,
 } from "@sdp/issuance/capabilities";
+import { decimalScale, isDecimalString } from "@sdp/solana/amount";
 import {
   type AdvancedSetting,
   type AssetCategory,
@@ -57,7 +59,11 @@ export function sanitizeAdvancedSettings(
   type: string | null,
   advancedSettings: AdvancedSettingsDraft
 ): AdvancedSettingsDraft {
-  const original = Object.keys(advancedSettings);
+  // Rewrite retired keys FIRST: the filters below drop anything not in the
+  // catalog, so a stored "freezeTransfers" would be pruned here and never reach
+  // the resolver's own alias handling.
+  const expanded = expandLegacySettingKeys(advancedSettings);
+  const original = Object.keys(expanded);
   // 1. Keep only keys valid for the type (or, before a type is chosen, only
   //    known catalog keys).
   const allowed =
@@ -69,7 +75,7 @@ export function sanitizeAdvancedSettings(
   const result: AdvancedSettingsDraft = {};
   for (const key of original) {
     if (kept.has(key)) {
-      result[key] = advancedSettings[key];
+      result[key] = expanded[key];
     }
   }
   return result;
@@ -122,6 +128,12 @@ export interface TokenInput {
   uri?: string;
   imageUrl?: string;
   signingWalletId?: string;
+  // Omitted when the issuer left the cap blank — the API treats absent as
+  // uncapped, and sending "" would fail its decimal-string refinement.
+  maxSupply?: string;
+  // Always sent: unlike maxSupply, `false` is a meaningful value the API would
+  // otherwise default back to `true`.
+  isFreezable: boolean;
 }
 
 // Input/result for the create-asset-draft server action. Kept here (not in the
@@ -150,6 +162,12 @@ export function buildTokenInput(draft: DraftState): TokenInput {
     uri: draft.metadataUri.trim() || undefined,
     imageUrl: draft.imageUrl.trim() || undefined,
     signingWalletId: draft.signingWalletId.trim() || undefined,
+    maxSupply: draft.maxSupply.trim() || undefined,
+    // Derived from the resolved settings, not stored separately: "freezeAccounts"
+    // is the single control for the mint's freeze authority, so there is no second
+    // source of truth to keep in sync (and locked-availability families get it
+    // forced on for free).
+    isFreezable: buildDeployConfigPreview(draft)?.isFreezable ?? false,
   };
 }
 
@@ -164,6 +182,9 @@ export interface DeployConfigPreview {
   template: TokenTemplate;
   decimals: number;
   requiresAllowlist: boolean;
+  // Whether the mint gets a freeze authority — a base-mint column rather than an
+  // extension, so it appears here and not in `extensions`.
+  isFreezable: boolean;
   extensions: TokenExtensionsConfig | null;
 }
 
@@ -183,6 +204,7 @@ export function buildDeployConfigPreview(draft: DraftState): DeployConfigPreview
     template: resolution.template,
     decimals: resolution.decimals,
     requiresAllowlist: resolution.requiresAllowlist,
+    isFreezable: resolution.isFreezable,
     extensions: resolution.extensions,
   };
 }
@@ -569,6 +591,27 @@ export function advancedSettingsHaveMissingParams(
   return false;
 }
 
+// Max supply is optional — blank means uncapped. When set it must be a positive
+// decimal the mint can actually represent: the API parses it against the token's
+// decimals and rejects excess precision. Scale is checked against the draft's
+// decimals because the resolver only substitutes a template default when decimals
+// is omitted (`decimalsOverride ?? definition.decimals`) and the wizard always
+// sends it. Returns undefined when there is nothing to report.
+function maxSupplyError(draft: DraftState, t: Translate): string | undefined {
+  const maxSupply = draft.maxSupply.trim();
+  if (!maxSupply) {
+    return undefined;
+  }
+  // isDecimalString already rejects signs, so this only has to rule out zero.
+  if (!isDecimalString(maxSupply) || !/[1-9]/.test(maxSupply)) {
+    return t("DashboardIssuance.errors.maxSupplyPositive");
+  }
+  if (isValidDecimals(draft.decimals) && decimalScale(maxSupply) > Number(draft.decimals.trim())) {
+    return t("DashboardIssuance.errors.maxSupplyPrecision", { decimals: draft.decimals.trim() });
+  }
+  return undefined;
+}
+
 // Per-field validation for the required Asset-details fields — empty or badly
 // formatted entries map to a user-facing message, keyed by draft field. Drives
 // the form's inline errors, the Continue gate, and the review blockers.
@@ -587,6 +630,11 @@ export function getAssetDetailsErrors(
 
   if (!isValidDecimals(draft.decimals)) {
     errors.decimals = t("DashboardIssuance.errors.decimalsWholeNumber");
+  }
+
+  const maxSupplyMessage = maxSupplyError(draft, t);
+  if (maxSupplyMessage) {
+    errors.maxSupply = maxSupplyMessage;
   }
 
   const description = draft.description.trim();
