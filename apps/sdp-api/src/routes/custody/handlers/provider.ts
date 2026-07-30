@@ -54,6 +54,10 @@ export function assertNoExistingProviderObjectSelector(body: unknown): void {
     return;
   }
 
+  if (!Object.hasOwn(EXISTING_PROVIDER_OBJECT_SELECTORS, request.provider)) {
+    return;
+  }
+
   const selectors = EXISTING_PROVIDER_OBJECT_SELECTORS[request.provider as CustodyProvider] ?? [];
   const suppliedSelector = selectors.find((selector) => Object.hasOwn(request, selector));
   if (suppliedSelector) {

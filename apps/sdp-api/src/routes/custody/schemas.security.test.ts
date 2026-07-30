@@ -67,4 +67,15 @@ describe("hosted custody provider object selection", () => {
       })
     ).not.toThrow();
   });
+
+  it.each([
+    "__proto__",
+    "constructor",
+  ])("defers the unknown provider %s to schema validation", (provider) => {
+    const request = { provider, walletId: "wallet_from_another_tenant" };
+
+    expect(() => assertNoExistingProviderObjectSelector(request)).not.toThrow();
+    expect(initializeSigningSchema.safeParse(request).success).toBe(false);
+    expect(switchSigningSchema.safeParse(request).success).toBe(false);
+  });
 });
