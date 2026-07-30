@@ -235,6 +235,8 @@
     "noWalletsYet": "No wallets created yet.",
     "tokensHeld": "Tokens held",
     "balanceByToken": "Balance by token",
+    "notPriced": "No price feed",
+    "otherTokens": "{count, plural, one {# other token} other {# other tokens}}",
     "recentTransactions": "Recent transactions",
     "activityDescription": "Latest wallet and issuance activity across the organization.",
     "seeAllPayments": "See all payments",
