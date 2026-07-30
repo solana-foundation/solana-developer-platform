@@ -30,7 +30,7 @@ import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
-import { isPrivyByokEnabled } from "@/lib/feature-flags";
+import { enabledCustodyConnectionProviders } from "@/lib/feature-flags";
 import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
@@ -326,13 +326,22 @@ export class SigningService {
 
   private getConnectionStore(): CustodyConnectionRuntimeStore {
     if (!this.connectionStore) {
-      this.connectionStore = new CustodyConnectionRuntimeStore(getDb(this.env));
+      this.connectionStore = new CustodyConnectionRuntimeStore(
+        getDb(this.env),
+        enabledCustodyConnectionProviders(this.env)
+      );
     }
     return this.connectionStore;
   }
 
   private connectionRuntimeEnabled(projectId: string | undefined): projectId is string {
-    return Boolean(projectId) && isPrivyByokEnabled(this.env);
+    return Boolean(projectId) && this.connectionProviderEnabled("privy");
+  }
+
+  private connectionProviderEnabled(provider: CustodyProvider): boolean {
+    return enabledCustodyConnectionProviders(this.env).some(
+      (enabledProvider) => enabledProvider === provider
+    );
   }
 
   /**
@@ -1541,14 +1550,8 @@ export class SigningService {
     projectId: string | undefined,
     walletId: string
   ): Promise<CustodyWalletWithProvider | null> {
-    const connectionEnabled = this.connectionRuntimeEnabled(projectId);
-    const owner = await this.getConnectionStore().findWalletOwner(
-      orgId,
-      projectId,
-      walletId,
-      connectionEnabled
-    );
-    return this.mapUsableWalletOwner(owner, connectionEnabled);
+    const owner = await this.getConnectionStore().findWalletOwner(orgId, projectId, walletId);
+    return this.mapUsableWalletOwner(owner);
   }
 
   async getWalletByPublicKey(
@@ -1556,14 +1559,12 @@ export class SigningService {
     projectId: string | undefined,
     publicKey: string
   ): Promise<CustodyWalletWithProvider | null> {
-    const connectionEnabled = this.connectionRuntimeEnabled(projectId);
     const owner = await this.getConnectionStore().findWalletOwnerByPublicKey(
       orgId,
       projectId,
-      publicKey,
-      connectionEnabled
+      publicKey
     );
-    return this.mapUsableWalletOwner(owner, connectionEnabled);
+    return this.mapUsableWalletOwner(owner);
   }
 
   async setDefaultWallet(
@@ -1572,14 +1573,11 @@ export class SigningService {
     walletId: string,
     provider?: SigningConfiguration["provider"]
   ): Promise<CustodyWalletWithProvider> {
-    const connectionEnabled = this.connectionRuntimeEnabled(projectId);
-    const owner = await this.getConnectionStore().findWalletOwner(
-      orgId,
-      projectId,
-      walletId,
-      connectionEnabled
-    );
-    if (owner?.ownerStatus !== "active") {
+    const owner = await this.getConnectionStore().findWalletOwner(orgId, projectId, walletId);
+    if (
+      owner?.ownerStatus !== "active" ||
+      (owner.kind === "connection" && !this.connectionProviderEnabled(owner.provider))
+    ) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
     if (provider !== undefined && owner.provider !== provider) {
@@ -2041,13 +2039,11 @@ export class SigningService {
       return { adapter: await this.getAdapter(orgId, projectId) };
     }
 
-    const owner = await this.getConnectionStore().findWalletOwner(
-      orgId,
-      projectId,
-      walletId,
-      this.connectionRuntimeEnabled(projectId)
-    );
-    if (owner?.ownerStatus !== "active") {
+    const owner = await this.getConnectionStore().findWalletOwner(orgId, projectId, walletId);
+    if (
+      owner?.ownerStatus !== "active" ||
+      (owner.kind === "connection" && !this.connectionProviderEnabled(owner.provider))
+    ) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
 
@@ -2164,14 +2160,12 @@ export class SigningService {
     };
   }
 
-  private mapUsableWalletOwner(
-    owner: CustodyWalletOwner | null,
-    connectionEnabled: boolean
-  ): CustodyWalletWithProvider | null {
+  private mapUsableWalletOwner(owner: CustodyWalletOwner | null): CustodyWalletWithProvider | null {
     if (
       owner?.ownerStatus !== "active" ||
       (owner.kind === "connection" &&
-        (!connectionEnabled || !isUsableCustodyConnection(owner.connection)))
+        (!this.connectionProviderEnabled(owner.provider) ||
+          !isUsableCustodyConnection(owner.connection)))
     ) {
       return null;
     }
@@ -2447,7 +2441,10 @@ export function createSigningService(env: Env): SigningService {
   const db = getDb(env);
   const configStore = new CustodyConfigStore(db, env);
   const signingStore = new SigningRequestStorePg(db);
-  const connectionStore = new CustodyConnectionRuntimeStore(db);
+  const connectionStore = new CustodyConnectionRuntimeStore(
+    db,
+    enabledCustodyConnectionProviders(env)
+  );
 
   return new SigningService(configStore, signingStore, env, connectionStore);
 }

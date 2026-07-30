@@ -188,9 +188,7 @@ export const createApiKey = async (c: AppContext) => {
       throw error;
     }
   } else {
-    await assertWalletBindingsInScope(getDb(c.env), orgId, projectId, resolvedWalletBindings, {
-      connectionEnabled: isPrivyByokEnabled(c.env),
-    });
+    await assertWalletBindingsInScope(c.env, orgId, projectId, resolvedWalletBindings);
   }
 
   const resolveCreatorFallback = async (): Promise<string | null> => {
@@ -364,13 +362,10 @@ export const updateApiKey = async (c: AppContext) => {
 
   if (walletSelection.touched) {
     await assertWalletBindingsInScope(
-      getDb(c.env),
+      c.env,
       actor.organizationId,
       existing.project_id,
-      walletSelection.bindings,
-      {
-        connectionEnabled: isPrivyByokEnabled(c.env),
-      }
+      walletSelection.bindings
     );
   }
 

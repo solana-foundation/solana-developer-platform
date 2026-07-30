@@ -125,7 +125,10 @@ interface WalletOwnerRow {
 }
 
 export class CustodyConnectionRuntimeStore {
-  constructor(private readonly db: DatabaseClient) {}
+  constructor(
+    private readonly db: DatabaseClient,
+    private readonly enabledConnectionProviders: readonly CustodyConnectionRuntimeRecord["provider"][] = []
+  ) {}
 
   async listProjectConnections(
     organizationId: string,
@@ -136,8 +139,9 @@ export class CustodyConnectionRuntimeStore {
        WHERE c.organization_id = ?
          AND c.project_id = ?
          AND c.provider = 'privy'
+         AND c.provider = ANY(?::text[])
        ORDER BY c.created_at, c.id`,
-      [organizationId, projectId]
+      [organizationId, projectId, this.enabledConnectionProviders]
     );
     return rows.map(mapConnection);
   }
@@ -154,8 +158,9 @@ export class CustodyConnectionRuntimeStore {
         AND d.project_id = c.project_id
        WHERE c.organization_id = ?
          AND c.project_id = ?
+         AND c.provider = ANY(?::text[])
        LIMIT 1`,
-      [organizationId, projectId]
+      [organizationId, projectId, this.enabledConnectionProviders]
     );
     return row ? mapConnection(row) : null;
   }
@@ -182,11 +187,14 @@ export class CustodyConnectionRuntimeStore {
        WHERE o.owner_kind = 'connection'
          AND o.organization_id = ?
          AND o.project_id = ?
+         AND o.provider = ANY(?::text[])
          AND o.owner_usable
          AND o.status = 'active'
          ${connectionId ? "AND o.owner_id = ?" : ""}
        ORDER BY o.created_at, o.id`,
-      connectionId ? [organizationId, projectId, connectionId] : [organizationId, projectId]
+      connectionId
+        ? [organizationId, projectId, this.enabledConnectionProviders, connectionId]
+        : [organizationId, projectId, this.enabledConnectionProviders]
     );
 
     return rows.map((row) => ({
@@ -198,15 +206,13 @@ export class CustodyConnectionRuntimeStore {
   async findWalletOwner(
     organizationId: string,
     projectId: string | undefined,
-    walletIdentifier: string,
-    connectionEnabled: boolean
+    walletIdentifier: string
   ): Promise<CustodyWalletOwner | null> {
     return this.findWalletOwnerMatching(
       organizationId,
       projectId,
       "(o.id = ? OR o.wallet_id = ?)",
       [walletIdentifier, walletIdentifier],
-      connectionEnabled,
       walletIdentifier
     );
   }
@@ -214,16 +220,9 @@ export class CustodyConnectionRuntimeStore {
   async findWalletOwnerByPublicKey(
     organizationId: string,
     projectId: string | undefined,
-    publicKey: string,
-    connectionEnabled: boolean
+    publicKey: string
   ): Promise<CustodyWalletOwner | null> {
-    return this.findWalletOwnerMatching(
-      organizationId,
-      projectId,
-      "o.public_key = ?",
-      [publicKey],
-      connectionEnabled
-    );
+    return this.findWalletOwnerMatching(organizationId, projectId, "o.public_key = ?", [publicKey]);
   }
 
   private async findWalletOwnerMatching(
@@ -231,17 +230,19 @@ export class CustodyConnectionRuntimeStore {
     projectId: string | undefined,
     ownerPredicate: "(o.id = ? OR o.wallet_id = ?)" | "o.public_key = ?",
     ownerParams: string[],
-    connectionEnabled: boolean,
     preferredCustodyWalletId?: string
   ): Promise<CustodyWalletOwner | null> {
     const rows = await this.db.queryMany<WalletOwnerRow>(
-      `WITH ${CUSTODY_WALLET_OWNER_CTE}
+      `WITH ${CUSTODY_WALLET_OWNER_CTE},
+       connection_policy AS (
+         SELECT ?::text[] AS enabled_providers
+       )
        SELECT
          o.*,
          CASE
            WHEN o.owner_kind = 'connection'
              THEN project_default.default_custody_connection_id = o.owner_id
-           WHEN ? = TRUE AND project_default.default_custody_connection_id IS NOT NULL
+           WHEN selected_connection.provider = ANY(policy.enabled_providers)
              THEN FALSE
            WHEN project_default.default_custody_config_id IS NOT NULL
              THEN project_default.default_custody_config_id = o.owner_id
@@ -258,12 +259,17 @@ export class CustodyConnectionRuntimeStore {
          pc.secret_version_ref,
          pc.encrypted_secret_payload
        FROM custody_wallet_owners o
+       CROSS JOIN connection_policy policy
        LEFT JOIN custody_scope_defaults project_default
          ON project_default.organization_id = o.organization_id
         AND project_default.project_id = ?
        LEFT JOIN custody_scope_defaults organization_default
          ON organization_default.organization_id = o.organization_id
         AND organization_default.project_id IS NULL
+       LEFT JOIN custody_connections selected_connection
+         ON selected_connection.id = project_default.default_custody_connection_id
+        AND selected_connection.organization_id = project_default.organization_id
+        AND selected_connection.project_id = project_default.project_id
        LEFT JOIN custody_connections c
          ON o.owner_kind = 'connection'
         AND c.id = o.owner_id
@@ -281,8 +287,8 @@ export class CustodyConnectionRuntimeStore {
              OR (?::text IS NULL AND o.project_id IS NULL)
            ))
            OR (
-             ? = TRUE
-             AND o.owner_kind = 'connection'
+             o.owner_kind = 'connection'
+             AND o.provider = ANY(policy.enabled_providers)
              AND ?::text IS NOT NULL
              AND o.project_id = ?
            )
@@ -295,14 +301,13 @@ export class CustodyConnectionRuntimeStore {
          o.id DESC
        LIMIT 1`,
       [
-        connectionEnabled,
+        this.enabledConnectionProviders,
         projectId ?? null,
         organizationId,
         ...ownerParams,
         projectId ?? null,
         projectId ?? null,
         projectId ?? null,
-        connectionEnabled,
         projectId ?? null,
         projectId ?? null,
         ...(preferredCustodyWalletId ? [preferredCustodyWalletId] : []),
@@ -331,7 +336,8 @@ export class CustodyConnectionRuntimeStore {
         tx,
         params.organizationId,
         params.projectId,
-        params.connectionId
+        params.connectionId,
+        this.enabledConnectionProviders
       );
       if (
         !connection ||
@@ -422,6 +428,7 @@ export class CustodyConnectionRuntimeStore {
        WHERE c.id = ?
          AND c.organization_id = ?
          AND c.project_id = ?
+         AND c.provider = ANY(?::text[])
          AND c.status = 'active'
          AND c.last_check_status = 'success'
          AND EXISTS (
@@ -437,7 +444,14 @@ export class CustodyConnectionRuntimeStore {
              AND w.custody_connection_id = c.id
              AND w.status = 'active'
          )`,
-      [custodyWalletId, connectionId, organizationId, projectId, custodyWalletId]
+      [
+        custodyWalletId,
+        connectionId,
+        organizationId,
+        projectId,
+        this.enabledConnectionProviders,
+        custodyWalletId,
+      ]
     );
     if (updated !== 1) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
@@ -451,7 +465,13 @@ export class CustodyConnectionRuntimeStore {
   ): Promise<ConnectionCustodyWallet> {
     return this.db.transaction(async (tx) => {
       await lockProject(tx, organizationId, projectId);
-      const connection = await findLockedConnection(tx, organizationId, projectId, connectionId);
+      const connection = await findLockedConnection(
+        tx,
+        organizationId,
+        projectId,
+        connectionId,
+        this.enabledConnectionProviders
+      );
       if (
         connection?.status !== "active" ||
         connection.last_check_status !== "success" ||
@@ -522,7 +542,11 @@ export class CustodyConnectionRuntimeStore {
         throw new SigningError("Custody configuration not found", "NOT_FOUND");
       }
 
-      if (options.clearConnection) {
+      const blockSameProviderConnection =
+        options.clearConnection &&
+        this.enabledConnectionProviders.some((provider) => provider === config.provider);
+
+      if (blockSameProviderConnection) {
         const connection = await tx.queryOne<{ id: string }>(
           `SELECT c.id
            FROM custody_connections c
@@ -566,10 +590,20 @@ export class CustodyConnectionRuntimeStore {
           `UPDATE custody_scope_defaults
            SET default_custody_config_id = ?,
                default_custody_connection_id =
-                 CASE WHEN ? THEN NULL ELSE default_custody_connection_id END,
+                 CASE
+                   WHEN ? AND EXISTS (
+                     SELECT 1
+                     FROM custody_connections selected_connection
+                     WHERE selected_connection.id =
+                           custody_scope_defaults.default_custody_connection_id
+                       AND selected_connection.provider = ANY(?::text[])
+                   )
+                     THEN NULL
+                   ELSE default_custody_connection_id
+                 END,
                updated_at = sdp_iso_now()
            WHERE id = ?`,
-          [configId, options.clearConnection, existing.id]
+          [configId, options.clearConnection, this.enabledConnectionProviders, existing.id]
         );
         return { walletId: wallet.wallet_id, publicKey: wallet.public_key };
       }
@@ -607,15 +641,17 @@ async function findLockedConnection(
   tx: DatabaseExecutor,
   organizationId: string,
   projectId: string,
-  connectionId: string
+  connectionId: string,
+  enabledConnectionProviders: readonly CustodyConnectionRuntimeRecord["provider"][]
 ): Promise<ConnectionRow | null> {
   return tx.queryOne<ConnectionRow>(
     `${connectionSelect()}
      WHERE c.id = ?
        AND c.organization_id = ?
        AND c.project_id = ?
+       AND c.provider = ANY(?::text[])
      FOR UPDATE OF c, pc`,
-    [connectionId, organizationId, projectId]
+    [connectionId, organizationId, projectId, enabledConnectionProviders]
   );
 }
 

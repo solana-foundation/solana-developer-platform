@@ -7,10 +7,13 @@ import {
   hasAnyPermission,
   type Permission,
 } from "@sdp/types";
+import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
+import { enabledCustodyConnectionProviders } from "@/lib/feature-flags";
 import { normalizeApiKeyWalletPermissions } from "@/services/api-key-wallets.service";
 import { CUSTODY_WALLET_OWNER_CTE } from "@/services/stores/custody-wallet-owner";
+import type { Env } from "@/types/env";
 
 type WalletBindingInput = {
   walletId: string;
@@ -287,16 +290,17 @@ export function resolveUpdateWalletScope(input: WalletScopeInput): {
 }
 
 export async function assertWalletBindingsInScope(
-  db: DatabaseClient,
+  env: Env,
   organizationId: string,
   keyProjectId: string,
-  bindings: ApiKeyWalletBinding[],
-  options: { connectionEnabled?: boolean } = {}
+  bindings: ApiKeyWalletBinding[]
 ): Promise<void> {
   if (bindings.length === 0) {
     return;
   }
 
+  const db = getDb(env);
+  const enabledConnectionProviders = enabledCustodyConnectionProviders(env);
   const walletIds = bindings.map((binding) => binding.walletId);
   const placeholders = walletIds.map(() => "?").join(", ");
 
@@ -312,13 +316,13 @@ export async function assertWalletBindingsInScope(
          AND (
            o.owner_kind = 'config'
            OR (
-             ? = TRUE
-             AND o.owner_kind = 'connection'
+             o.owner_kind = 'connection'
+             AND o.provider = ANY(?::text[])
              AND o.owner_usable
            )
          )`
     )
-    .bind(organizationId, ...walletIds, options.connectionEnabled === true)
+    .bind(organizationId, ...walletIds, enabledConnectionProviders)
     .all<{ wallet_id: string; project_id: string | null }>();
 
   const walletScope = new Map<string, string | null>();

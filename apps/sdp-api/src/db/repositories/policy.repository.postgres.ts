@@ -1,3 +1,4 @@
+import type { CustodyProvider } from "@sdp/types";
 import type { AppDb, DatabaseExecutor } from "@/db";
 import {
   asPostgresJsonArray,
@@ -60,7 +61,7 @@ const POLICY_CONTROL_INVENTORY_CTE = `
 WITH ${CUSTODY_WALLET_OWNER_CTE},
 scope AS (
   SELECT ?::text AS organization_id, ?::text AS project_id, ?::text[] AS wallet_ids,
-         ?::boolean AS connection_enabled
+         ?::text[] AS enabled_connection_providers
 ),
 wallet_targets AS (
   SELECT
@@ -80,8 +81,8 @@ wallet_targets AS (
     AND (
       w.owner_kind = 'config'
       OR (
-        s.connection_enabled
-        AND w.owner_kind = 'connection'
+        w.owner_kind = 'connection'
+        AND w.provider = ANY(s.enabled_connection_providers)
         AND w.owner_usable
       )
     )
@@ -931,8 +932,10 @@ function walletPolicyEvaluationAuditFilters(input: ListWalletPolicyEvaluationAud
 
 export function createPostgresPolicyRepository(
   db: AppDb,
-  options: { connectionEnabled?: boolean } = {}
+  options: { enabledConnectionProviders?: readonly CustodyProvider[] } = {}
 ): PolicyRepository {
+  const enabledConnectionProviders = options.enabledConnectionProviders ?? [];
+
   return {
     async listPolicyControlInventory(input: ListPolicyControlInventoryInput) {
       const page = Math.max(input.page ?? 1, 1);
@@ -960,7 +963,7 @@ export function createPostgresPolicyRepository(
           input.organizationId,
           input.projectId,
           input.walletIds ?? null,
-          options.connectionEnabled === true,
+          enabledConnectionProviders,
           ...(input.status ? [input.status] : []),
           ...summaryFilters.params
         )
@@ -982,7 +985,7 @@ export function createPostgresPolicyRepository(
           input.organizationId,
           input.projectId,
           input.walletIds ?? null,
-          options.connectionEnabled === true,
+          enabledConnectionProviders,
           ...rowFilters.params,
           pageSize,
           offset
@@ -1584,8 +1587,8 @@ export function createPostgresPolicyRepository(
             AND (
               w.owner_kind = 'config'
               OR (
-                ? = TRUE
-                AND w.owner_kind = 'connection'
+                w.owner_kind = 'connection'
+                AND w.provider = ANY(?::text[])
                 AND w.owner_usable
               )
             )
@@ -1602,7 +1605,7 @@ export function createPostgresPolicyRepository(
              w.created_at DESC
            LIMIT 1`
         )
-        .bind(apiKeyId, apiKeyId, walletId, options.connectionEnabled === true)
+        .bind(apiKeyId, apiKeyId, walletId, enabledConnectionProviders)
         .first<Record<string, unknown>>();
 
       return row ? mapApiKeyWalletPolicyTargetRow(row) : null;

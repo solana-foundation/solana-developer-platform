@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isAssetProfilesEnabled, isPrivyByokEnabled } from "./feature-flags";
+import {
+  enabledCustodyConnectionProviders,
+  isAssetProfilesEnabled,
+  isPrivyByokEnabled,
+} from "./feature-flags";
 
 describe("isAssetProfilesEnabled", () => {
   it.each([
@@ -72,5 +76,12 @@ describe("isPrivyByokEnabled", () => {
         PRIVY_BYOK_ENABLED: flag,
       })
     ).toBe(true);
+  });
+});
+
+describe("enabledCustodyConnectionProviders", () => {
+  it("enables only Privy Connections behind the Privy rollout flag", () => {
+    expect(enabledCustodyConnectionProviders({ PRIVY_BYOK_ENABLED: "true" })).toEqual(["privy"]);
+    expect(enabledCustodyConnectionProviders({ PRIVY_BYOK_ENABLED: "false" })).toEqual([]);
   });
 });

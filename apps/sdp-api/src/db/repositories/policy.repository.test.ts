@@ -1,4 +1,5 @@
 import type {
+  CustodyProvider,
   PolicyDefaultAction,
   PolicyEvaluationContext,
   PolicyRule,
@@ -7,7 +8,9 @@ import type {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { ApiKeyService } from "@/services/api-key.service";
+import { assertWalletBindingsInScope } from "@/services/api-key-scope.service";
 import { PolicyFoundationService } from "@/services/policy-foundation.service";
+import { CustodyConnectionRuntimeStore } from "@/services/stores/custody-connection-runtime.store";
 import { TEST_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_CUSTODY_CONFIG, TEST_CUSTODY_WALLET } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -80,6 +83,86 @@ describe("PolicyRepository (postgres)", () => {
       revision: null,
       defaultAction: "allow",
     });
+  });
+
+  it("exposes Connection-owned wallets only for enabled providers", async () => {
+    const privyWallet = await seedConnectionWallet("privy");
+    const turnkeyWallet = await seedConnectionWallet("turnkey");
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults (
+           id, organization_id, project_id,
+           default_custody_config_id, default_custody_connection_id
+         ) VALUES ('csd_policy_connection_provider', ?, ?, ?, ?)`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_CONFIG.id, turnkeyWallet.connectionId)
+      .run();
+    const previousFlag = env.PRIVY_BYOK_ENABLED;
+    env.PRIVY_BYOK_ENABLED = "true";
+
+    try {
+      const connectionStore = new CustodyConnectionRuntimeStore(getDb(env), ["privy"]);
+      await expect(
+        connectionStore.getSelectedProjectConnection(TEST_ORG.id, TEST_PROJECT.id)
+      ).resolves.toBeNull();
+      await expect(
+        connectionStore.listConnectionWallets(TEST_ORG.id, TEST_PROJECT.id)
+      ).resolves.toEqual([
+        expect.objectContaining({
+          walletId: privyWallet.walletId,
+        }),
+      ]);
+      await expect(
+        connectionStore.findWalletOwner(TEST_ORG.id, TEST_PROJECT.id, privyWallet.walletId)
+      ).resolves.toMatchObject({
+        kind: "connection",
+        provider: "privy",
+      });
+      await expect(
+        connectionStore.findWalletOwner(TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET.walletId)
+      ).resolves.toMatchObject({
+        kind: "config",
+        isSelected: true,
+      });
+      await expect(
+        connectionStore.findWalletOwner(TEST_ORG.id, TEST_PROJECT.id, turnkeyWallet.walletId)
+      ).resolves.toBeNull();
+
+      await expect(
+        assertWalletBindingsInScope(env, TEST_ORG.id, TEST_PROJECT.id, [
+          { walletId: privyWallet.walletId, permissions: ["*"] },
+        ])
+      ).resolves.toBeUndefined();
+      await expect(
+        assertWalletBindingsInScope(env, TEST_ORG.id, TEST_PROJECT.id, [
+          { walletId: turnkeyWallet.walletId, permissions: ["*"] },
+        ])
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: `Unknown signing wallet IDs: ${turnkeyWallet.walletId}`,
+      });
+
+      const providerAwareRepo = createPostgresPolicyRepository(getDb(env), {
+        enabledConnectionProviders: ["privy"],
+      });
+      const inventory = await providerAwareRepo.listPolicyControlInventory({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        pageSize: 100,
+      });
+      expect(inventory.rows.map((row) => row.target_id)).toContain(privyWallet.custodyWalletId);
+      expect(inventory.rows.map((row) => row.target_id)).not.toContain(
+        turnkeyWallet.custodyWalletId
+      );
+      await expect(
+        providerAwareRepo.getApiKeyWalletPolicyTarget(TEST_API_KEY.id, privyWallet.walletId)
+      ).resolves.not.toBeNull();
+      await expect(
+        providerAwareRepo.getApiKeyWalletPolicyTarget(TEST_API_KEY.id, turnkeyWallet.walletId)
+      ).resolves.toBeNull();
+    } finally {
+      env.PRIVY_BYOK_ENABLED = previousFlag;
+    }
   });
 
   it("stores wallet profile revisions as insert-only rows and changes active revision explicitly", async () => {
@@ -1137,6 +1220,77 @@ async function seedPolicyFoundationFixtures(): Promise<void> {
       TEST_CUSTODY_WALLET.purpose
     )
     .run();
+}
+
+async function seedConnectionWallet(provider: CustodyProvider): Promise<{
+  connectionId: string;
+  custodyWalletId: string;
+  walletId: string;
+}> {
+  const db = getDb(env);
+  const credentialId = `pcred_policy_${provider}`;
+  const connectionId = `cconn_policy_${provider}`;
+  const custodyWalletId = `cw_policy_${provider}`;
+  const walletId = `wallet_policy_${provider}`;
+
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO provider_credentials (
+           id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, encrypted_secret_payload, status, created_by
+         ) VALUES (?, ?, ?, ?, ?, 'project', 'stored',
+                   'encrypted_db', 'ciphertext', 'active', ?)`
+      )
+      .bind(
+        credentialId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        provider,
+        `${provider} policy credential`,
+        TEST_USER.id
+      ),
+    db
+      .prepare(
+        `INSERT INTO custody_connections (
+           id, organization_id, project_id, provider, scope,
+           provider_credential_id, provider_credential_scope_key, status,
+           last_check_status, last_check_at, activated_at, created_by
+         ) VALUES (?, ?, ?, ?, 'project', ?, ?, 'active',
+                   'success', sdp_iso_now(), sdp_iso_now(), ?)`
+      )
+      .bind(
+        connectionId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        provider,
+        credentialId,
+        TEST_PROJECT.id,
+        TEST_USER.id
+      ),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, label, purpose, status
+         ) VALUES (?, ?, ?, ?, ?, 'payments', 'active')`
+      )
+      .bind(
+        custodyWalletId,
+        connectionId,
+        walletId,
+        `${provider}PolicyPublicKey`,
+        `${provider} policy wallet`
+      ),
+    db
+      .prepare(
+        `UPDATE custody_connections
+         SET default_custody_wallet_id = ?
+         WHERE id = ?`
+      )
+      .bind(custodyWalletId, connectionId),
+  ]);
+
+  return { connectionId, custodyWalletId, walletId };
 }
 
 async function seedAdditionalCustodyWallet(): Promise<void> {

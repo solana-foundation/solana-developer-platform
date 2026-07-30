@@ -207,14 +207,17 @@ describe("SigningService stored-Credential Connection runtime", () => {
       execute,
     };
     const queryMany = vi.fn().mockResolvedValue([]);
-    const store = new CustodyConnectionRuntimeStore({
-      prepare: vi.fn(),
-      queryOne: vi.fn(),
-      queryMany,
-      execute: vi.fn(),
-      batch: vi.fn(),
-      transaction: vi.fn(async (callback) => callback(tx)),
-    } as never);
+    const store = new CustodyConnectionRuntimeStore(
+      {
+        prepare: vi.fn(),
+        queryOne: vi.fn(),
+        queryMany,
+        execute: vi.fn(),
+        batch: vi.fn(),
+        transaction: vi.fn(async (callback) => callback(tx)),
+      } as never,
+      ["privy"]
+    );
 
     expect(await store.listProjectConnections(ORG_ID, PROJECT_ID)).toEqual([]);
     await expect(
@@ -538,8 +541,7 @@ describe("SigningService stored-Credential Connection runtime", () => {
     expect(connectionStore.findWalletOwnerByPublicKey).toHaveBeenCalledWith(
       ORG_ID,
       PROJECT_ID,
-      "11111111111111111111111111111111",
-      flag === "true"
+      "11111111111111111111111111111111"
     );
   });
 });

@@ -12,7 +12,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, mapWalletCreationSigningError } from "@/lib/errors";
-import { isPrivyByokEnabled } from "@/lib/feature-flags";
+import { enabledCustodyConnectionProviders } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
@@ -158,7 +158,7 @@ function buildWalletCacheKey(
     authType: auth.authType,
     apiKeyId: auth.apiKeyId,
     allowedWalletIds: allowedWalletIds ? [...allowedWalletIds].sort() : null,
-    privyByokEnabled: isPrivyByokEnabled(c.env),
+    enabledConnectionProviders: enabledCustodyConnectionProviders(c.env),
   });
 }
 

@@ -5,7 +5,6 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, mapWalletCreationSigningError, notFound } from "@/lib/errors";
-import { isPrivyByokEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
@@ -158,13 +157,10 @@ export const createProjectApiKey = async (c: AppContext) => {
     }
   } else {
     await assertWalletBindingsInScope(
-      getDb(c.env),
+      c.env,
       auth.organizationId,
       projectId,
-      resolvedWalletBindings,
-      {
-        connectionEnabled: isPrivyByokEnabled(c.env),
-      }
+      resolvedWalletBindings
     );
   }
 

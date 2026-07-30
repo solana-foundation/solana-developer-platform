@@ -29,3 +29,9 @@ export function isAssetProfilesEnabled(
 export function isPrivyByokEnabled(env: Pick<Env, "PRIVY_BYOK_ENABLED">): boolean {
   return isTruthyFlag(env.PRIVY_BYOK_ENABLED);
 }
+
+export function enabledCustodyConnectionProviders(
+  env: Pick<Env, "PRIVY_BYOK_ENABLED">
+): readonly "privy"[] {
+  return isPrivyByokEnabled(env) ? ["privy"] : [];
+}

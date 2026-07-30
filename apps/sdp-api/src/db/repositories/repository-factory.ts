@@ -1,5 +1,5 @@
 import { getDb } from "@/db";
-import { isPrivyByokEnabled } from "@/lib/feature-flags";
+import { enabledCustodyConnectionProviders } from "@/lib/feature-flags";
 import { createPiiCipher, type PiiCipher } from "@/services/pii-cipher/pii-cipher";
 import type { Env } from "@/types/env";
 import type { AssetProfilesRepository } from "./asset-profile.repository";
@@ -64,7 +64,7 @@ export function createTokenRepository(env: Env): TokenRepository {
 
 export function createPolicyRepository(env: Env): PolicyRepository {
   return createPostgresPolicyRepository(getDb(env), {
-    connectionEnabled: isPrivyByokEnabled(env),
+    enabledConnectionProviders: enabledCustodyConnectionProviders(env),
   });
 }
 
