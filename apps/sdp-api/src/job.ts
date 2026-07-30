@@ -5,6 +5,7 @@ import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pendin
 import { closeDatabasePools } from "@/db/client";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
+import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
@@ -38,7 +39,7 @@ if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
   runCronJob()
     .then(() => process.exit(0))
     .catch((err: unknown) => {
-      console.error("Reconciliation job failed:", err);
+      getLogger().error({ error: err }, "Reconciliation job failed");
       process.exit(1);
     });
 }

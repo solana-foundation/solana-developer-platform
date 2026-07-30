@@ -20,7 +20,7 @@ import {
   WalletIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
   type KeyboardEvent,
@@ -61,6 +61,7 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
@@ -69,7 +70,6 @@ import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
-import { PaymentsRouteTabs } from "../payments-workspace-tabs";
 import {
   deriveTokenOptions,
   type PaymentRequestsLocalErrorCode,
@@ -467,12 +467,11 @@ export function PaymentRequestsWorkspace({
   const router = useRouter();
   const { sdpEnvironment, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
-  const searchParams = useSearchParams();
   const tokens = useMemo(
     () => deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]),
     [sdpEnvironment]
   );
-  const isPlaygroundTab = searchParams.get("tab") === "playground";
+  const isPlaygroundTab = useDashboardTab() === "playground";
   const [selected, setSelected] = useState<PaymentRequest | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const requests = initialPaymentRequests;
@@ -524,13 +523,6 @@ export function PaymentRequestsWorkspace({
   return (
     <>
       <DashboardWorkspaceTabShell
-        isPlaygroundTab={isPlaygroundTab}
-        tabNavigation={
-          <PaymentsRouteTabs
-            basePath="/dashboard/payments/requests"
-            value={isPlaygroundTab ? "playground" : "overview"}
-          />
-        }
         overviewClassName="flex min-h-0 flex-col overflow-hidden"
         overviewKey="payment-requests-overview-tab"
         playgroundKey="payment-requests-playground-tab"
