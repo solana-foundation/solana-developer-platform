@@ -84,6 +84,8 @@ export function ApprovalInbox({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(APPROVAL_INBOX_PAGE_SIZE);
   const [isReloading, setReloading] = useState(false);
+  const [spinning, setSpinning] = useState(false);
+  if (isReloading && !spinning) setSpinning(true);
   const [hasLoadError, setLoadError] = useState(loadError);
   const [relativeTimeBase, setRelativeTimeBase] = useState(renderedAt);
   const [previousTab, setPreviousTab] = useState(tab);
@@ -206,7 +208,14 @@ export function ApprovalInbox({
             variant="outline"
             onClick={() => reload({ silent: false })}
             disabled={isReloading}
-            iconLeft={<RotateCw className={isReloading ? "size-4 animate-spin" : "size-4"} />}
+            iconLeft={
+              <RotateCw
+                className={cn("size-4", spinning && "animate-spin")}
+                onAnimationIteration={() => {
+                  if (!isReloading) setSpinning(false);
+                }}
+              />
+            }
           >
             {t("DashboardApprovals.reload")}
           </Button>
@@ -301,7 +310,12 @@ export function ApprovalInbox({
                 disabled={isReloading}
                 aria-label={t("DashboardApprovals.reload")}
               >
-                <RotateCw className={isReloading ? "size-4 animate-spin" : "size-4"} />
+                <RotateCw
+                  className={cn("size-4", spinning && "animate-spin")}
+                  onAnimationIteration={() => {
+                    if (!isReloading) setSpinning(false);
+                  }}
+                />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="top" className="text-xs">
