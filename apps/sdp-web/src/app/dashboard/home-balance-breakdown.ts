@@ -23,6 +23,8 @@ export interface HomeBalanceBreakdown {
   otherPricedCount: number;
   otherPricedUsd: number;
   otherPricedSharePercent: number;
+  /** Unpriced holdings beyond the cap. Counted, not listed. */
+  otherUnpricedCount: number;
 }
 
 function usdValueOf(balance: CustodyWalletTokenBalance): number | null {
@@ -52,10 +54,13 @@ function usdValueOf(balance: CustodyWalletTokenBalance): number | null {
  *
  * @param balances - Aggregate token balances, already summed across wallets.
  * @param limit - How many priced holdings to name before folding the rest into "Other".
+ * @param unpricedLimit - How many unpriced holdings to list before counting the rest.
+ *   Uncapped, an organization issuing twenty tokens turned the card into a ledger.
  */
 export function buildHomeBalanceBreakdown(
   balances: CustodyWalletTokenBalance[],
-  limit = 4
+  limit = 4,
+  unpricedLimit = 4
 ): HomeBalanceBreakdown {
   const priced: HomeBalanceSlice[] = [];
   const unpriced: HomeBalanceSlice[] = [];
@@ -91,7 +96,8 @@ export function buildHomeBalanceBreakdown(
 
   return {
     priced: named,
-    unpriced,
+    unpriced: unpriced.slice(0, unpricedLimit),
+    otherUnpricedCount: Math.max(unpriced.length - unpricedLimit, 0),
     totalUsd: priced.length > 0 ? totalUsd : null,
     otherPricedCount: rest.length,
     otherPricedUsd,

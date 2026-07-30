@@ -116,3 +116,24 @@ describe("countHeldTokens", () => {
     expect(countHeldTokens([])).toBe(0);
   });
 });
+
+describe("unpriced cap", () => {
+  it("lists only the first few unpriced holdings and counts the rest", () => {
+    // An organization issuing a dozen of its own tokens turned the card into a
+    // ledger; only the largest few are listed and the remainder is a count.
+    const many = Array.from({ length: 11 }, (_, i) =>
+      balance({ mint: `u${i}`, token: `TKN${i}`, uiAmount: String(100 - i) })
+    );
+    const result = buildHomeBalanceBreakdown(many);
+
+    expect(result.unpriced).toHaveLength(4);
+    expect(result.otherUnpricedCount).toBe(7);
+    expect(result.unpriced[0].mint).toBe("u0");
+  });
+
+  it("counts nothing extra when the unpriced list fits", () => {
+    const result = buildHomeBalanceBreakdown([balance({ mint: "a" }), balance({ mint: "b" })]);
+    expect(result.unpriced).toHaveLength(2);
+    expect(result.otherUnpricedCount).toBe(0);
+  });
+});

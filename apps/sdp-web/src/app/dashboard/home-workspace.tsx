@@ -255,6 +255,11 @@ function BalanceAllocation({
               </div>
             );
           })}
+          {breakdown.otherUnpricedCount > 0 ? (
+            <p className="px-2 pt-1 text-[13px] text-tertiary">
+              {t("Shared.homeWorkspace.moreTokens", { count: breakdown.otherUnpricedCount })}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -455,6 +460,10 @@ export function HomeWorkspace({
 
   return (
     <div className="w-full space-y-8 py-2">
+      {/* The shell no longer paints a 36px "Home" above a page that says what it
+          is; the heading stays for assistive tech and for tests that look it up. */}
+      <h1 className="sr-only">{t("Shared.dashboardShell.home")}</h1>
+
       <SectionEntry>
         {isWalletEmptyState ? (
           <FirstRunPanel canCreateWallet={dashboardAccess.capabilities.canManageCustody} />
