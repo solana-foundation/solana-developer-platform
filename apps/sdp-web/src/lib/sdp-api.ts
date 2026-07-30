@@ -189,15 +189,12 @@ function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
 }
 
 /**
- * Builds the org- and project-scoped clients a server page needs from one
- * request-bound Clerk token. This avoids acquiring the same token twice while
- * preserving the absence of a project header on organization endpoints.
+ * Org- and project-scoped clients for one request, built from one request-bound Clerk
+ * token so the same token is not acquired twice, and without a project header on the
+ * organization client.
  *
- * A missing project is represented by a null project client so onboarding
- * pages can still query organization state before a project has been selected.
- */
-/**
- * Org- and project-scoped clients for one request.
+ * A missing project is represented by a null project client, so onboarding pages can
+ * still query organization state before a project has been selected.
  *
  * `getToken` is optional and should normally be omitted. Minting a Clerk token is a
  * network round trip, and passing `getToken` bypasses the request-scoped cache that
@@ -217,9 +214,12 @@ export async function createRequestScopedSdpApiClients({
   organizationClient: SdpApiClient;
   projectClient: SdpApiClient | null;
 }> {
+  // Only the token half ever duplicated work. `getSelectedProjectId` is a thin wrapper
+  // over `getRequestSelectedProjectId`, so branching on `getToken` here called the same
+  // function either way and read as though the project lookup were duplicated too.
   const [token, projectId] = await Promise.all([
     getToken ? acquireClerkToken(getToken) : getRequestClerkToken(),
-    getToken ? getSelectedProjectId() : getRequestSelectedProjectId(),
+    getRequestSelectedProjectId(),
   ]);
 
   return {
