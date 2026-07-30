@@ -201,10 +201,9 @@ function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
  *
  * `getToken` is optional and should normally be omitted. Minting a Clerk token is a
  * network round trip, and passing `getToken` bypasses the request-scoped cache that
- * the layout has usually already populated — so a page that supplied its own paid
- * for a second mint of the same token. Omitting it reuses the cached one. The
- * parameter stays for callers that hold a token source without a request-bound
- * `auth()` context.
+ * the layout has usually already populated — so a page that supplied its own paid for
+ * a second mint of the same token. Omitting it reuses the cached one. The parameter
+ * stays for callers that hold a token source without a request-bound `auth()` context.
  */
 export async function createRequestScopedSdpApiClients({
   getToken,
