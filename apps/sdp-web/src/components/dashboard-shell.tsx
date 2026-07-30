@@ -760,6 +760,7 @@ export function DashboardShell({
           <DashboardMoreSheet
             pathname={shellPathname}
             canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
+            canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
             onClose={() => setMoreSheetOpen(false)}
           />
         ) : null}

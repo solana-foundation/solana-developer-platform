@@ -3,13 +3,16 @@
 import {
   CircleCheckBigIcon,
   KeyRoundIcon,
+  LibraryIcon,
   type LucideIcon,
+  Settings2Icon,
   ShieldCheckIcon,
   XIcon,
 } from "lucide-react";
 import { useEffect } from "react";
-import { getPaymentsActions } from "@/components/dashboard-nav";
+import { docsHref } from "@/components/dashboard-nav";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useTranslations } from "@/i18n/provider";
 import {
   DASHBOARD_SIDE_NAV_HREFS,
@@ -17,19 +20,19 @@ import {
 } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 
-type MoreItem = { label: string; href: string; icon?: LucideIcon };
+type MoreItem = { label: string; href: string; icon?: LucideIcon; external?: boolean };
 type MoreGroup = { title: string; items: MoreItem[] };
 
 /**
  * The destinations that did not earn a slot in the bottom bar.
  *
- * Grouped rather than listed flat: the payments sub-actions alone are six entries,
- * and an undifferentiated list of eleven is harder to scan than the slide-over it
- * replaces on this surface.
+ * The payments sub-actions are deliberately absent: the Payments tab already opens
+ * a page carrying its own sub-navigation, so repeating Transactions, Pay, Deposit
+ * and the rest here would be a second copy of a menu the destination already has.
  */
 function getMoreGroups(
   t: ReturnType<typeof useTranslations>,
-  options: { canReadApprovals: boolean }
+  options: { canReadApprovals: boolean; canManageOrgSettings: boolean }
 ): MoreGroup[] {
   return [
     {
@@ -57,35 +60,80 @@ function getMoreGroups(
       ],
     },
     {
-      title: t("Shared.dashboardShell.payments"),
-      items: getPaymentsActions(t).map((action) => ({
-        label: action.label,
-        href: action.href,
-        icon: action.icon,
-      })),
+      title: t("Shared.dashboardShell.workspace"),
+      items: [
+        ...(options.canManageOrgSettings
+          ? [
+              {
+                label: t("Shared.dashboardShell.settings"),
+                href: DASHBOARD_SIDE_NAV_HREFS.settings,
+                icon: Settings2Icon,
+              },
+            ]
+          : []),
+        {
+          label: t("Shared.dashboardShell.apiDocs"),
+          href: docsHref,
+          icon: LibraryIcon,
+          external: true,
+        },
+      ],
     },
   ];
+}
+
+/** External destinations leave the app, so they must not be managed navigation links. */
+function TileLink({
+  href,
+  external,
+  onClick,
+  className,
+  children,
+  ...rest
+}: {
+  href: string;
+  external?: boolean;
+  onClick: () => void;
+  className: string;
+  children: React.ReactNode;
+} & Record<string, unknown>) {
+  if (external) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" onClick={onClick} className={className}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <DashboardNavigationLink href={href} onClick={onClick} className={className} {...rest}>
+      {children}
+    </DashboardNavigationLink>
+  );
 }
 
 /**
  * Bottom sheet for everything outside the four bar destinations.
  *
- * Deliberately separate from the top bar's slide-over, which is untouched: the
- * navigation-loading contract opens that one by accessible name and then clicks a
- * destination inside it, so replacing it would break a tested flow. Tiles use
- * `DashboardNavigationLink` to keep the same pre-commit loading feedback.
+ * This replaces the slide-over on mobile rather than sitting beside it — the top
+ * bar's drawer trigger is hidden below `xl`, because two entry points to the same
+ * destinations is worse than one. The workspace switcher rides along at the top,
+ * since project switching was the one thing the drawer offered that a tab bar
+ * cannot express. Internal tiles use `DashboardNavigationLink` so they keep the
+ * same pre-commit loading feedback as every other managed link.
  */
 export function DashboardMoreSheet({
   pathname,
   canReadApprovals,
+  canManageOrgSettings,
   onClose,
 }: {
   pathname: string;
   canReadApprovals: boolean;
+  canManageOrgSettings: boolean;
   onClose: () => void;
 }) {
   const t = useTranslations();
-  const groups = getMoreGroups(t, { canReadApprovals });
+  const groups = getMoreGroups(t, { canReadApprovals, canManageOrgSettings });
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -128,6 +176,10 @@ export function DashboardMoreSheet({
         </div>
 
         <div className="space-y-6 px-5 pt-2">
+          <div className="rounded-2xl border border-border-default p-2">
+            <WorkspaceSwitcher collapsed={false} onOrganizationSwitchingChange={() => {}} />
+          </div>
+
           {groups.map((group) => (
             <section key={group.title} className="space-y-3">
               <h3 className="text-xs font-medium uppercase tracking-wide text-muted">
@@ -139,8 +191,9 @@ export function DashboardMoreSheet({
                   const active = isDashboardNavItemActive(pathname, item.href);
                   return (
                     <li key={item.href} className="min-w-0">
-                      <DashboardNavigationLink
+                      <TileLink
                         href={item.href}
+                        external={item.external}
                         onClick={onClose}
                         aria-current={active ? "page" : undefined}
                         className={cn(
@@ -156,7 +209,7 @@ export function DashboardMoreSheet({
                           </span>
                         ) : null}
                         <span className="min-w-0 truncate text-sm font-medium">{item.label}</span>
-                      </DashboardNavigationLink>
+                      </TileLink>
                     </li>
                   );
                 })}
