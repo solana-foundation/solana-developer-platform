@@ -93,6 +93,7 @@ export function AssetManagementWorkspace({
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
   const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
+  const canManageTokenWrite = dashboardAccess.capabilities.canManageTokenWrite;
   // Admins get the full compliance tab (policy editor + controls). Non-admins
   // see it only for tokens that have a control list, and then only the allowlist
   // controls — the policy editor stays admin-only (also enforced server-side).
@@ -304,7 +305,11 @@ export function AssetManagementWorkspace({
           <PermissionsTab ops={ops} canManageTokenAdmin={canManageTokenAdmin} />
         ) : null}
         {activeTab === "workflows" ? (
-          <WorkflowsTab tokenId={token.id} canManage={canManageTokenAdmin} />
+          <WorkflowsTab
+            tokenId={token.id}
+            canManage={canManageTokenWrite}
+            canManagePrivileged={canManageTokenAdmin}
+          />
         ) : null}
         {activeTab === "activity" ? <ActivityTab tokenId={token.id} /> : null}
       </motion.div>

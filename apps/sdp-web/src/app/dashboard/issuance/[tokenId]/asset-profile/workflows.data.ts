@@ -237,6 +237,17 @@ export async function setWorkflowEnabled(
   );
 }
 
+// Approve a held (awaiting_review) execution → pending. Separate from retry so the
+// audit trail can distinguish authorizing an action from re-attempting a failed one.
+export async function approveExecution(tokenId: string, executionId: string): Promise<void> {
+  await readEnvelope(
+    await fetch(`${base(tokenId)}/executions/${encodeURIComponent(executionId)}/approve`, {
+      method: "POST",
+    })
+  );
+}
+
+// Re-attempt a failed execution → pending.
 export async function retryExecution(tokenId: string, executionId: string): Promise<void> {
   await readEnvelope(
     await fetch(`${base(tokenId)}/executions/${encodeURIComponent(executionId)}/retry`, {

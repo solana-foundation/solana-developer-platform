@@ -24,6 +24,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import {
+  approveExecution,
   type CatalogActionView,
   createWorkflow,
   deleteWorkflow,
@@ -415,7 +416,18 @@ function useWorkflowsData(tokenId: string, executionsPageSize: number) {
   };
 }
 
-export function WorkflowsTab({ tokenId, canManage }: { tokenId: string; canManage: boolean }) {
+export function WorkflowsTab({
+  tokenId,
+  canManage,
+  canManagePrivileged,
+}: {
+  tokenId: string;
+  // tokens:write — enough for `automated` rules.
+  canManage: boolean;
+  // tokens:admin — required for `sensitive` and `requires_approval` rules, mirroring the
+  // API's tier gate. Enforced there; here it just keeps the builder honest.
+  canManagePrivileged: boolean;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const wf = useMemo(() => makeWf(t), [t]);
@@ -465,8 +477,23 @@ export function WorkflowsTab({ tokenId, canManage }: { tokenId: string; canManag
     guards,
     wf,
   });
+  // Tier of an action from the catalog. Fails CLOSED: an unknown tier (catalog failed
+  // to load, or an action the client doesn't know) counts as requires_approval so a
+  // destructive action can never degrade into a one-click, member-authored rule.
+  const tierForAction = (type: string): ExecutionTier =>
+    catalog?.actions.find((a) => a.type === type)?.action.execution ?? "requires_approval";
+
+  // Mirrors the API's tier gate (workflow-authz.ts): `automated` needs tokens:write,
+  // everything else tokens:admin.
+  const canUseAction = (type: string): boolean =>
+    tierForAction(type) === "automated" ? canManage : canManagePrivileged;
+
+  const actionAllowed = effectiveAction ? canUseAction(effectiveAction) : true;
   const canSubmit =
-    canManage && Boolean(effectiveTrigger && selectedAction?.support.ok) && busyId === null;
+    canManage &&
+    actionAllowed &&
+    Boolean(effectiveTrigger && selectedAction?.support.ok) &&
+    busyId === null;
 
   // One-line "field: value · …" summary of the collected action params, for the
   // preview. Secrets are masked, option values localized.
@@ -647,16 +674,20 @@ export function WorkflowsTab({ tokenId, canManage }: { tokenId: string; canManag
       },
     });
 
-  const handleRetry = (execution: ExecutionView) =>
-    runMutation(
+  // Approving a held execution and retrying a failed one hit different endpoints: the
+  // first authorizes an action that has never run, and is audited as an authorization.
+  const handleRetry = (execution: ExecutionView) => {
+    const approving = execution.status === "awaiting_review";
+    return runMutation(
       execution.id,
       async () => {
-        await retryExecution(tokenId, execution.id);
+        await (approving ? approveExecution : retryExecution)(tokenId, execution.id);
         await executionsSwr.mutate();
       },
-      execution.status === "awaiting_review" ? wf("toastApproved") : wf("toastRetried"),
+      approving ? wf("toastApproved") : wf("toastRetried"),
       wf("errorRetry")
     );
+  };
 
   const handleReject = (execution: ExecutionView) =>
     setConfirm({
@@ -688,13 +719,6 @@ export function WorkflowsTab({ tokenId, canManage }: { tokenId: string; canManag
       wf("toastEnrolled"),
       wf("errorEnroll")
     );
-
-  // Tier of an execution's action (from the catalog), to decide whether approving it
-  // needs the deliberate hold-to-confirm gate. Fails CLOSED: an unknown tier (catalog
-  // failed to load / unknown action) is treated as requires_approval so a destructive
-  // action can never degrade to a one-click approve.
-  const tierForAction = (type: string): ExecutionTier =>
-    catalog?.actions.find((a) => a.type === type)?.action.execution ?? "requires_approval";
 
   if (initialLoading) {
     return (
@@ -769,6 +793,7 @@ export function WorkflowsTab({ tokenId, canManage }: { tokenId: string; canManag
                 showValidation={showValidation}
                 busy={busyId === "create"}
                 canSubmit={canSubmit}
+                canUseAction={canUseAction}
                 onTriggerChange={onTriggerChange}
                 onActionChange={onActionChange}
                 onReviewModeChange={setReviewMode}
@@ -800,6 +825,7 @@ export function WorkflowsTab({ tokenId, canManage }: { tokenId: string; canManag
         label={label}
         locale={locale}
         canManage={canManage}
+        canUseAction={canUseAction}
         busyId={busyId}
         editingRuleId={editingRule?.id ?? null}
         onToggle={(rule) => void handleToggle(rule)}
@@ -829,6 +855,7 @@ export function WorkflowsTab({ tokenId, canManage }: { tokenId: string; canManag
         label={label}
         locale={locale}
         canManage={canManage}
+        canUseAction={canUseAction}
         busyId={busyId}
         tierForAction={tierForAction}
         onRefresh={() => void executionsSwr.mutate()}
@@ -873,6 +900,7 @@ function BuilderControls(props: {
   showValidation: boolean;
   busy: boolean;
   canSubmit: boolean;
+  canUseAction: (type: string) => boolean;
   onTriggerChange: (value: string | null) => void;
   onActionChange: (value: string | null) => void;
   onReviewModeChange: (value: "auto" | "manual") => void;
@@ -902,7 +930,12 @@ function BuilderControls(props: {
     showValidation,
     busy,
     canSubmit,
+    canUseAction,
   } = props;
+
+  // `requires_approval` always holds for a human — the server forces it regardless of
+  // what's stored — so offering "auto apply" here would contradict the preview beside it.
+  const reviewLocked = selectedAction?.action.execution === "requires_approval";
 
   return (
     <div className="space-y-4">
@@ -933,11 +966,19 @@ function BuilderControls(props: {
             onValueChange={props.onActionChange}
             placeholder={wf("actionPlaceholder")}
           >
-            {(catalog?.actions ?? []).map((a) => (
-              <SelectItem key={a.type} value={a.type} disabled={!a.support.ok}>
-                {`${label("action", a.type)}${a.support.ok ? "" : wf("unavailableSuffix")}`}
-              </SelectItem>
-            ))}
+            {(catalog?.actions ?? []).map((a) => {
+              const permitted = canUseAction(a.type);
+              const suffix = !a.support.ok
+                ? wf("unavailableSuffix")
+                : permitted
+                  ? ""
+                  : wf("adminOnlySuffix");
+              return (
+                <SelectItem key={a.type} value={a.type} disabled={!a.support.ok || !permitted}>
+                  {`${label("action", a.type)}${suffix}`}
+                </SelectItem>
+              );
+            })}
           </Select>
         </div>
 
@@ -945,12 +986,16 @@ function BuilderControls(props: {
           <span className="font-medium text-secondary">{wf("review")}</span>
           <Select
             ariaLabel={wf("review")}
-            value={reviewMode}
+            value={reviewLocked ? "manual" : reviewMode}
+            disabled={reviewLocked}
             onValueChange={(v) => props.onReviewModeChange(v === "manual" ? "manual" : "auto")}
           >
-            <SelectItem value="auto">{wf("autoApply")}</SelectItem>
+            <SelectItem value="auto" disabled={reviewLocked}>
+              {wf("autoApply")}
+            </SelectItem>
             <SelectItem value="manual">{wf("manualReview")}</SelectItem>
           </Select>
+          {reviewLocked ? <p className="text-secondary text-xs">{wf("reviewLockedNote")}</p> : null}
         </div>
       </div>
 
@@ -1100,6 +1145,7 @@ function RulesCard({
   label,
   locale,
   canManage,
+  canUseAction,
   busyId,
   editingRuleId,
   onToggle,
@@ -1111,6 +1157,7 @@ function RulesCard({
   label: ReturnType<typeof makeLabel>;
   locale: string;
   canManage: boolean;
+  canUseAction: (type: string) => boolean;
   busyId: string | null;
   editingRuleId: string | null;
   onToggle: (rule: WorkflowRuleView) => void;
@@ -1135,7 +1182,8 @@ function RulesCard({
                 wf={wf}
                 label={label}
                 locale={locale}
-                canManage={canManage}
+                // Editing or deleting a seize rule is as privileged as authoring one.
+                canManage={canManage && canUseAction(rule.action_type)}
                 busy={busyId !== null}
                 rowBusy={busyId === rule.id}
                 editing={editingRuleId === rule.id}
@@ -1217,6 +1265,7 @@ function ExecutionLogCard({
   label,
   locale,
   canManage,
+  canUseAction,
   busyId,
   tierForAction,
   onRefresh,
@@ -1232,6 +1281,7 @@ function ExecutionLogCard({
   label: ReturnType<typeof makeLabel>;
   locale: string;
   canManage: boolean;
+  canUseAction: (type: string) => boolean;
   busyId: string | null;
   tierForAction: (type: string) => ExecutionTier;
   onRefresh: () => void;
@@ -1271,7 +1321,9 @@ function ExecutionLogCard({
                   wf={wf}
                   label={label}
                   locale={locale}
-                  canManage={canManage}
+                  // Approving a held mint IS a mint: the decision needs the same
+                  // permission the rule's tier required to author it.
+                  canManage={canManage && canUseAction(execution.action_type)}
                   busy={busyId !== null}
                   rowBusy={busyId === execution.id}
                   tier={tierForAction(execution.action_type)}

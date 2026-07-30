@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowExecutionRow } from "@/db/repositories";
 import type { Env } from "@/types/env";
+
+// DNS is stubbed so the SSRF guard's behavior is asserted rather than the test host's
+// resolver: `example.com` answers public, `rebound.example.com` answers private.
+vi.mock("node:dns/promises", () => ({
+  lookup: async (hostname: string) =>
+    hostname === "rebound.example.com"
+      ? [{ address: "10.0.0.5", family: 4 }]
+      : [{ address: "93.184.216.34", family: 4 }],
+}));
+
 import { runSendWebhook } from "./webhook";
 
 const env = {} as Env;
@@ -23,6 +33,8 @@ function executionFixture(): WorkflowExecutionRow {
     next_attempt_at: null,
     locked_at: null,
     error: null,
+    decided_by: null,
+    decided_at: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
   };
@@ -49,8 +61,60 @@ describe("runSendWebhook", () => {
     expect(outcome).toMatchObject({
       status: "failed",
       retryable: false,
-      error: "INVALID_PARAM:url",
+      error: "BLOCKED_URL:INVALID_URL",
     });
+  });
+
+  it.each([
+    ["http://example.com/hook", "INSECURE_SCHEME"],
+    ["https://127.0.0.1/hook", "PRIVATE_HOST"],
+    ["https://169.254.169.254/computeMetadata/v1/", "PRIVATE_HOST"],
+    ["https://10.1.2.3/hook", "PRIVATE_HOST"],
+    ["https://metadata.google.internal/token", "PRIVATE_HOST"],
+    ["https://localhost:8787/v1/tokens", "PRIVATE_HOST"],
+  ])("refuses to fetch %s and never opens a connection", async (url, reason) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await runSendWebhook(env, executionFixture(), { params: { url } });
+
+    expect(outcome).toMatchObject({
+      status: "failed",
+      retryable: false,
+      error: `BLOCKED_URL:${reason}`,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks a public hostname that resolves into private space", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await runSendWebhook(env, executionFixture(), {
+      params: { url: "https://rebound.example.com/hook" },
+    });
+
+    expect(outcome).toMatchObject({ status: "failed", error: "BLOCKED_URL:PRIVATE_HOST" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("re-validates the target of a redirect instead of following it blindly", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://169.254.169.254/latest/meta-data/" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await runSendWebhook(env, executionFixture(), {
+      params: { url: "https://example.com/hook" },
+    });
+
+    // The first hop happened; the redirect target is rejected before a second fetch.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({ status: "failed", retryable: false });
+    expect(String((outcome as { error: string }).error)).toContain("BLOCKED_URL");
   });
 
   it("POSTs the trigger event and signs the body when a secret is set", async () => {
@@ -63,8 +127,8 @@ describe("runSendWebhook", () => {
 
     expect(outcome.status).toBe("succeeded");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://example.com/hook");
+    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(String(url)).toBe("https://example.com/hook");
     expect(init.method).toBe("POST");
     const headers = init.headers as Record<string, string>;
     expect(headers["content-type"]).toBe("application/json");

@@ -59,6 +59,30 @@ function parseAudience(value: string | null): Audience {
   return value === "members" ? "members" : "admins";
 }
 
+// The `email` param addresses one mailbox directly, with an operator-controlled subject
+// and body, from the org's verified sending domain — i.e. exactly the shape of an open
+// relay. Restricting delivery to addresses that already belong to an active member of
+// this organization keeps the escape hatch (alerting a specific admin) without letting a
+// rule mail arbitrary third parties.
+async function isOrganizationMemberEmail(
+  env: Env,
+  organizationId: string,
+  email: string
+): Promise<boolean> {
+  const row = await getDb(env)
+    .prepare(
+      `SELECT 1 AS ok
+         FROM organization_members om
+         JOIN users u ON u.id = om.user_id
+        WHERE om.organization_id = ? AND om.status = 'active'
+          AND LOWER(u.email) = LOWER(?)
+        LIMIT 1`
+    )
+    .bind(organizationId, email)
+    .first<{ ok: number }>();
+  return Boolean(row);
+}
+
 // notify: deliver an in-app notification (and, when email is configured, an email) to a
 // per-rule audience. In-app is the durable channel and always works; email is a
 // best-effort add-on. A specific `email` param targets one external address (email only).
@@ -72,11 +96,14 @@ export async function runNotify(
     resolveParam(action, "message") ??
     `A "${execution.trigger_type}" event triggered an automation on this asset.`;
 
-  // Targeting a specific external email (no in-app row — there's no user to attach it to).
+  // Targeting one specific mailbox (no in-app row — there's no user to attach it to).
   const specificEmail = resolveParam(action, "email");
   if (specificEmail) {
     if (!isEmailConfigured(env)) {
       return permanentFail("EMAIL_NOT_CONFIGURED");
+    }
+    if (!(await isOrganizationMemberEmail(env, execution.organization_id, specificEmail))) {
+      return permanentFail("EMAIL_NOT_ORG_MEMBER");
     }
     try {
       await createTransactionalEmailService(env).send({
@@ -86,7 +113,12 @@ export async function runNotify(
       });
       return succeeded({ emailedTo: 1 });
     } catch (error) {
-      return { status: "failed", retryable: true, result: {}, error: errorMessage(error) };
+      // A rejected address or a malformed payload won't fix itself; only transport
+      // failures deserve the retry budget.
+      const message = errorMessage(error);
+      return /\b4\d\d\b|invalid|rejected/i.test(message)
+        ? permanentFail(message)
+        : { status: "failed", retryable: true, result: {}, error: message };
     }
   }
 

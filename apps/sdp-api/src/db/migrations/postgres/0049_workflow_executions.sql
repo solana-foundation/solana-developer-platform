@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS workflow_executions (
     next_attempt_at TEXT,
     locked_at TEXT,
     error TEXT,
+    -- Who approved/rejected a held execution. The engine's own audit rows carry the
+    -- system actor, so without these there is no record of which human authorized an
+    -- irreversible action (mint/burn/seize/force_burn).
+    decided_by TEXT,
+    decided_at TEXT,
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,

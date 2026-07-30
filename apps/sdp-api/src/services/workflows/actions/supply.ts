@@ -14,6 +14,11 @@ import {
   safeAddress,
   succeeded,
 } from "./onchain";
+import {
+  preflightDestinationAllowed,
+  preflightMintAmount,
+  preflightWalletPolicy,
+} from "./preflight";
 import type { ActionContext, ActionExecutionResult } from "./types";
 
 // The DB supply mirror is best-effort AFTER the on-chain truth: a mirror write failure
@@ -92,6 +97,28 @@ export async function runMint(
   const amount = parseAmount(action, decimals);
   if (!amount) {
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
+  }
+
+  // Everything the HTTP mint route checks, checked here too and BEFORE the chain call:
+  // mintability + max supply, the token's control list, and the wallet policy. Running
+  // the supply check after the mint is what allowed a rule to mint past `maxSupply`.
+  const supplyCheck = preflightMintAmount(prep.ctx, amount.amountStr);
+  if (!supplyCheck.ok) {
+    return supplyCheck.result;
+  }
+  const allowed = await preflightDestinationAllowed(env, prep.ctx, destination, {
+    skipWhenListSynced: true,
+  });
+  if (!allowed.ok) {
+    return allowed.result;
+  }
+  const policy = await preflightWalletPolicy(env, prep.ctx, {
+    operationType: "issuance_mint_execute",
+    amount: amount.amountStr,
+    destination,
+  });
+  if (!policy.ok) {
+    return policy.result;
   }
 
   // Destructive + not idempotent: a blind retry could double-mint (we cannot know
@@ -222,6 +249,13 @@ export async function runSeize(
   const amount = parseAmount(action, decimals);
   if (!amount) {
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
+  }
+
+  // The HTTP seize route checks the destination against the token's control list before
+  // moving anything; a rule that seizes into a blocklisted wallet must fail the same way.
+  const allowed = await preflightDestinationAllowed(env, prep.ctx, destination);
+  if (!allowed.ok) {
+    return allowed.result;
   }
 
   // Destructive + not idempotent: any chain error is permanent (see runMint).

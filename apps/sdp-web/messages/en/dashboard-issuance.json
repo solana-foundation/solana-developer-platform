@@ -218,6 +218,8 @@
       "triggerPlaceholder": "Trigger",
       "actionPlaceholder": "Action",
       "unavailableSuffix": " — unavailable",
+      "adminOnlySuffix": " — admin only",
+      "reviewLockedNote": "Irreversible actions always wait for a human decision.",
       "autoApply": "Auto apply",
       "manualReview": "Manual review",
       "notSupported": "Not supported by this asset ({reason}).",

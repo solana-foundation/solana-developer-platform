@@ -22,6 +22,9 @@ export interface WorkflowExecutionRow {
   next_attempt_at: string | null;
   locked_at: string | null;
   error: string | null;
+  // The human who approved or rejected a held execution (null for auto-applied rows).
+  decided_by: string | null;
+  decided_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -96,17 +99,27 @@ export interface WorkflowExecutionsRepository {
     nextAttemptAt: string;
   }): Promise<void>;
 
-  // Manual retry: failed | awaiting_review → pending (picked up next cron pass).
-  // Resets attempt_count so an attempts-exhausted execution is actually re-runnable.
-  retryExecution(params: {
-    executionId: string;
-    organizationId: string;
-    projectId: string;
-  }): Promise<WorkflowExecutionRow | null>;
+  // ── Human decisions ──
+  // Approve and retry are deliberately separate verbs. Approving authorizes an action
+  // that has never run; retrying re-attempts one that already failed. Only the first is
+  // an authorization event, and conflating them made the audit trail unable to say which
+  // happened. Both reset attempt_count so an attempts-exhausted row is actually runnable
+  // again, and both record who decided.
+  //
+  // Approve: awaiting_review → pending.
+  approveExecution(params: WorkflowDecisionInput): Promise<WorkflowExecutionRow | null>;
+  // Retry: failed → pending.
+  retryExecution(params: WorkflowDecisionInput): Promise<WorkflowExecutionRow | null>;
   // Reject a held execution: awaiting_review → cancelled (a human declined the action).
-  cancelExecution(params: {
-    executionId: string;
-    organizationId: string;
-    projectId: string;
-  }): Promise<WorkflowExecutionRow | null>;
+  cancelExecution(params: WorkflowDecisionInput): Promise<WorkflowExecutionRow | null>;
+}
+
+export interface WorkflowDecisionInput {
+  executionId: string;
+  organizationId: string;
+  projectId: string;
+  // Scopes the decision to the token in the request path, so a per-token audit trail
+  // can't be written against an execution belonging to a different asset.
+  tokenId: string;
+  decidedBy: string;
 }

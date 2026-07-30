@@ -7,6 +7,7 @@ import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
+import { assertWorkflowActionPermitted } from "./workflow-authz";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -33,12 +34,17 @@ export const listWorkflowExecutions = async (c: AppContext) => {
   return success(c, { executions: rows, total, page, pageSize });
 };
 
+type Decision =
+  | "workflow_execution_approved"
+  | "workflow_execution_rejected"
+  | "workflow_execution_retried";
+
 // A human decision on a held/failed execution is audit-worthy in its own right: the
 // engine's terminal audit rows carry the "SDP" system actor, so without this there is
 // no record of WHO approved a destructive action or declined it.
 async function auditDecision(
   c: AppContext,
-  decision: "workflow_execution_approved" | "workflow_execution_rejected",
+  decision: Decision,
   execution: WorkflowExecutionRow
 ): Promise<void> {
   await new AuditService(getDb(c.env)).log(c, {
@@ -54,38 +60,79 @@ async function auditDecision(
   });
 }
 
-// Safe manual retry / approve: flips a failed / awaiting_review execution back to
-// pending; the cron engine picks it up. Idempotent action handlers make a re-run converge.
-export const retryWorkflowExecution = async (c: AppContext) => {
+// Shared preamble for the three decision routes. The tier gate reads the STORED action
+// type: approving a held mint is authorizing a mint, so it must clear the same bar as
+// POST /tokens/:id/mint rather than the bar for "click a button in a list".
+async function loadDecidableExecution(c: AppContext): Promise<{
+  execution: WorkflowExecutionRow;
+  decidedBy: string;
+}> {
   const { executionId } = c.req.param();
-  const { projectId, orgId } = requireProjectScope(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const execution = await createWorkflowExecutionsRepository(c.env).retryExecution({
+  const execution = await createWorkflowExecutionsRepository(c.env).getExecutionById({
     executionId,
     organizationId: orgId,
     projectId,
   });
+  if (!execution || execution.token_id !== c.req.param("tokenId")) {
+    throw notFound("Execution");
+  }
+  assertWorkflowActionPermitted(c, execution.action_type);
+  return { execution, decidedBy: auth.id };
+}
+
+// Approve a held execution: awaiting_review → pending, and the engine runs it once.
+export const approveWorkflowExecution = async (c: AppContext) => {
+  const { execution: held, decidedBy } = await loadDecidableExecution(c);
+
+  const execution = await createWorkflowExecutionsRepository(c.env).approveExecution({
+    executionId: held.id,
+    organizationId: held.organization_id,
+    projectId: held.project_id,
+    tokenId: held.token_id,
+    decidedBy,
+  });
   if (!execution) {
-    // Not found, or not in a retryable state.
-    throw notFound("Retryable execution");
+    throw notFound("Execution awaiting review");
   }
 
   await auditDecision(c, "workflow_execution_approved", execution);
   return success(c, { execution });
 };
 
-// Reject a held execution: awaiting_review → cancelled. The action never runs.
-export const cancelWorkflowExecution = async (c: AppContext) => {
-  const { executionId } = c.req.param();
-  const { projectId, orgId } = requireProjectScope(c);
+// Retry a failed execution: failed → pending. Distinct from approve — this one already
+// ran, so the audit trail should not claim someone authorized it for the first time.
+export const retryWorkflowExecution = async (c: AppContext) => {
+  const { execution: failed, decidedBy } = await loadDecidableExecution(c);
 
-  const execution = await createWorkflowExecutionsRepository(c.env).cancelExecution({
-    executionId,
-    organizationId: orgId,
-    projectId,
+  const execution = await createWorkflowExecutionsRepository(c.env).retryExecution({
+    executionId: failed.id,
+    organizationId: failed.organization_id,
+    projectId: failed.project_id,
+    tokenId: failed.token_id,
+    decidedBy,
   });
   if (!execution) {
-    // Not found, or not awaiting review.
+    throw notFound("Retryable execution");
+  }
+
+  await auditDecision(c, "workflow_execution_retried", execution);
+  return success(c, { execution });
+};
+
+// Reject a held execution: awaiting_review → cancelled. The action never runs.
+export const cancelWorkflowExecution = async (c: AppContext) => {
+  const { execution: held, decidedBy } = await loadDecidableExecution(c);
+
+  const execution = await createWorkflowExecutionsRepository(c.env).cancelExecution({
+    executionId: held.id,
+    organizationId: held.organization_id,
+    projectId: held.project_id,
+    tokenId: held.token_id,
+    decidedBy,
+  });
+  if (!execution) {
     throw notFound("Execution awaiting review");
   }
 

@@ -4,6 +4,7 @@ import {
   type CreateWorkflowExecutionInput,
   generateWorkflowExecutionId,
   type ListWorkflowExecutionsInput,
+  type WorkflowDecisionInput,
   type WorkflowExecutionRow,
   type WorkflowExecutionsRepository,
 } from "./workflow-execution.repository";
@@ -26,6 +27,8 @@ function mapExecutionRow(row: Record<string, unknown>): WorkflowExecutionRow {
     next_attempt_at: (row.next_attempt_at as string | null) ?? null,
     locked_at: (row.locked_at as string | null) ?? null,
     error: (row.error as string | null) ?? null,
+    decided_by: (row.decided_by as string | null) ?? null,
+    decided_at: (row.decided_at as string | null) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -185,13 +188,16 @@ export function createPostgresWorkflowExecutionsRepository(
       return row ? mapExecutionRow(row) : null;
     },
 
+    // Terminal writes carry `AND status = 'processing'`. Without it, a tick that
+    // overran the stale-recovery window would write its verdict over a row another
+    // tick had already re-claimed — the second run's result silently lost.
     async completeExecution(params) {
       await db
         .prepare(
           `UPDATE workflow_executions
              SET status = 'succeeded', result = ?::jsonb, error = NULL,
                  locked_at = NULL, next_attempt_at = NULL, updated_at = sdp_iso_now()
-           WHERE id = ?`
+           WHERE id = ? AND status = 'processing'`
         )
         .bind(JSON.stringify(params.result), params.executionId)
         .run();
@@ -204,7 +210,7 @@ export function createPostgresWorkflowExecutionsRepository(
              SET status = 'failed', error = ?,
                  result = COALESCE(?::jsonb, result),
                  locked_at = NULL, next_attempt_at = NULL, updated_at = sdp_iso_now()
-           WHERE id = ?`
+           WHERE id = ? AND status = 'processing'`
         )
         .bind(
           params.error,
@@ -220,47 +226,54 @@ export function createPostgresWorkflowExecutionsRepository(
           `UPDATE workflow_executions
              SET status = 'pending', error = ?, next_attempt_at = ?,
                  locked_at = NULL, updated_at = sdp_iso_now()
-           WHERE id = ?`
+           WHERE id = ? AND status = 'processing'`
         )
         .bind(params.error, params.nextAttemptAt, params.executionId)
         .run();
     },
 
+    // attempt_count resets to 0 on both decisions: a human explicitly authorized the
+    // run, and listDueExecutions skips rows at the attempt cap — without the reset an
+    // attempts-exhausted execution would sit in 'pending' forever.
+    async approveExecution(params) {
+      return decide(db, params, "awaiting_review", "pending");
+    },
+
     async retryExecution(params) {
-      // attempt_count resets to 0: a human explicitly re-authorized the run, and
-      // listDueExecutions skips rows at the attempt cap — without the reset an
-      // attempts-exhausted retry would sit in 'pending' forever.
-      const rowsAffected = await db
-        .prepare(
-          `UPDATE workflow_executions
-             SET status = 'pending', attempt_count = 0, next_attempt_at = NULL,
-                 locked_at = NULL, error = NULL, updated_at = sdp_iso_now()
-           WHERE id = ? AND organization_id = ? AND project_id = ?
-             AND status IN ('failed', 'awaiting_review')`
-        )
-        .bind(params.executionId, params.organizationId, params.projectId)
-        .run();
-      if (rowsAffected === 0) {
-        return null;
-      }
-      return getById(db, params);
+      return decide(db, params, "failed", "pending");
     },
 
     async cancelExecution(params) {
-      const rowsAffected = await db
-        .prepare(
-          `UPDATE workflow_executions
-             SET status = 'cancelled', next_attempt_at = NULL, locked_at = NULL,
-                 updated_at = sdp_iso_now()
-           WHERE id = ? AND organization_id = ? AND project_id = ?
-             AND status = 'awaiting_review'`
-        )
-        .bind(params.executionId, params.organizationId, params.projectId)
-        .run();
-      if (rowsAffected === 0) {
-        return null;
-      }
-      return getById(db, params);
+      return decide(db, params, "awaiting_review", "cancelled");
     },
   };
+}
+
+async function decide(
+  db: AppDb,
+  params: WorkflowDecisionInput,
+  from: WorkflowExecutionStatus,
+  to: WorkflowExecutionStatus
+): Promise<WorkflowExecutionRow | null> {
+  const row = await db
+    .prepare(
+      `UPDATE workflow_executions
+         SET status = ?, attempt_count = 0, next_attempt_at = NULL, locked_at = NULL,
+             error = NULL, decided_by = ?, decided_at = sdp_iso_now(),
+             updated_at = sdp_iso_now()
+       WHERE id = ? AND organization_id = ? AND project_id = ? AND token_id = ?
+         AND status = ?
+       RETURNING *`
+    )
+    .bind(
+      to,
+      params.decidedBy,
+      params.executionId,
+      params.organizationId,
+      params.projectId,
+      params.tokenId,
+      from
+    )
+    .first<Record<string, unknown>>();
+  return row ? mapExecutionRow(row) : null;
 }

@@ -1,9 +1,13 @@
 import type { WorkflowExecutionRow } from "@/db/repositories";
 import type { Env } from "@/types/env";
+import { resolveWebhookUrl } from "../webhook-url";
 import { errorMessage, permanentFail, resolveParam, succeeded, transientFail } from "./onchain";
 import type { ActionContext, ActionExecutionResult } from "./types";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+// Deliveries are one-shot POSTs; a chain of redirects is far more likely to be an
+// SSRF pivot than a real endpoint move, so we follow at most one and re-validate it.
+const MAX_REDIRECTS = 1;
 const encoder = new TextEncoder();
 
 // HMAC-SHA256 hex signature over the payload — the outbound mirror of the inbound
@@ -23,10 +27,40 @@ async function signPayload(secret: string, payload: string): Promise<string> {
     .join("");
 }
 
+// One hop of the delivery, with redirects handled by hand so each target is re-checked
+// against the SSRF rules before we connect to it.
+async function deliver(
+  target: string,
+  init: RequestInit,
+  signal: AbortSignal
+): Promise<{ ok: true; response: Response } | { ok: false; result: ActionExecutionResult }> {
+  let current = target;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const checked = await resolveWebhookUrl(current);
+    if (!checked.ok) {
+      // An endpoint that resolves into private space is a config error (or an attempt);
+      // retrying re-runs the same lookup, so fail permanently.
+      return { ok: false, result: permanentFail(`BLOCKED_URL:${checked.reason}`) };
+    }
+    const response = await fetch(checked.url, { ...init, redirect: "manual", signal });
+    if (response.status < 300 || response.status >= 400) {
+      return { ok: true, response };
+    }
+    const location = response.headers.get("location");
+    // Drain before abandoning the connection.
+    await response.arrayBuffer().catch(() => undefined);
+    if (!location) {
+      return { ok: true, response };
+    }
+    current = new URL(location, checked.url).toString();
+  }
+  return { ok: false, result: permanentFail("TOO_MANY_REDIRECTS") };
+}
+
 // send_webhook (MVP): POST the trigger event to the issuer-configured URL carried on the
 // rule's action params. Optional `secret` HMAC-signs the body. 5xx/408/429 and
-// network/timeout errors are transient (the engine retries with backoff); other 4xx and
-// a missing/malformed URL are permanent config errors.
+// network/timeout errors are transient (the engine retries with backoff); other 4xx, a
+// missing/malformed URL and an SSRF-blocked target are permanent config errors.
 export async function runSendWebhook(
   _env: Env,
   execution: WorkflowExecutionRow,
@@ -35,9 +69,6 @@ export async function runSendWebhook(
   const url = resolveParam(action, "url");
   if (!url) {
     return permanentFail("MISSING_PARAM:url");
-  }
-  if (!/^https?:\/\//i.test(url)) {
-    return permanentFail("INVALID_PARAM:url");
   }
   const secret = resolveParam(action, "secret");
 
@@ -60,12 +91,13 @@ export async function runSendWebhook(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers,
-      body,
-      signal: controller.signal,
-    });
+    const delivery = await deliver(url, { method: "POST", headers, body }, controller.signal);
+    if (!delivery.ok) {
+      return delivery.result;
+    }
+    const { response } = delivery;
+    // The body is never used, but leaving it unread holds the socket open.
+    await response.arrayBuffer().catch(() => undefined);
     if (!response.ok) {
       // 5xx / 408 / 429 may clear on their own — retry with backoff. Other 4xx are
       // endpoint config errors (bad path, auth) that retrying can't fix.

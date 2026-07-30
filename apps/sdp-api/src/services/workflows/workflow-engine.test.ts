@@ -227,12 +227,15 @@ describe("workflow engine (postgres)", () => {
 
     // Human approves → pending → the run fails (token has no mint address) and must
     // land in failed after exactly one attempt — never back into the retry loop.
-    const approved = await repo.retryExecution({
+    const approved = await repo.approveExecution({
       executionId: rows[0].id,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      tokenId: TEST_TOKEN_ID,
+      decidedBy: TEST_USER.id,
     });
     expect(approved?.status).toBe("pending");
+    expect(approved?.decided_by).toBe(TEST_USER.id);
 
     const run = await runDueWorkflowExecutions(env);
     expect(run.failed).toBe(1);
@@ -269,6 +272,8 @@ describe("workflow engine (postgres)", () => {
       executionId: rows[0].id,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      tokenId: TEST_TOKEN_ID,
+      decidedBy: TEST_USER.id,
     });
     expect(retried?.status).toBe("pending");
     expect(retried?.attempt_count).toBe(0);
@@ -390,6 +395,8 @@ describe("workflow engine (postgres)", () => {
       executionId: rows[0].id,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      tokenId: TEST_TOKEN_ID,
+      decidedBy: TEST_USER.id,
     });
     const rerun = await runDueWorkflowExecutions(env);
     expect(rerun.succeeded).toBe(1);

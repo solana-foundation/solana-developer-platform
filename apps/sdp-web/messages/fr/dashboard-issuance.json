@@ -218,6 +218,8 @@
       "triggerPlaceholder": "Déclencheur",
       "actionPlaceholder": "Action",
       "unavailableSuffix": " — indisponible",
+      "adminOnlySuffix": " — réservé aux administrateurs",
+      "reviewLockedNote": "Les actions irréversibles attendent toujours une décision humaine.",
       "autoApply": "Application automatique",
       "manualReview": "Validation manuelle",
       "notSupported": "Non pris en charge par cet actif ({reason}).",

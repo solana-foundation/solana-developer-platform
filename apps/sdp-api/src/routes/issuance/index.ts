@@ -29,6 +29,7 @@ import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
 import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
 import {
+  approveWorkflowExecution,
   cancelWorkflowExecution,
   listWorkflowExecutions,
   retryWorkflowExecution,
@@ -164,6 +165,15 @@ issuance.get(
   "/tokens/:tokenId/workflows/executions",
   requirePermissions("tokens:read"),
   listWorkflowExecutions
+);
+// Decisions and rule writes carry `tokens:write` as the floor; the handler then raises
+// the bar to `tokens:admin` for any rule whose action tier is sensitive or irreversible
+// (see workflow-authz.ts). Without that second check, workflows would be a way around
+// the `tokens:admin` the direct seize/freeze/pause routes require.
+issuance.post(
+  "/tokens/:tokenId/workflows/executions/:executionId/approve",
+  requirePermissions("tokens:write"),
+  approveWorkflowExecution
 );
 issuance.post(
   "/tokens/:tokenId/workflows/executions/:executionId/retry",

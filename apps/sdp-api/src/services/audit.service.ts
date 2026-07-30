@@ -52,6 +52,7 @@ export const AUDIT_ACTIONS = [
   // Workflow human decisions (real actor — records WHO approved/declined a held action)
   "workflow_execution_approved",
   "workflow_execution_rejected",
+  "workflow_execution_retried",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
