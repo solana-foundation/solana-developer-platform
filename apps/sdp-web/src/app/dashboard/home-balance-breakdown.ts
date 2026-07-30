@@ -28,18 +28,30 @@ export interface HomeBalanceBreakdown {
 }
 
 /**
- * A spent token account keeps its row in the aggregate with a zero amount, so "has a
- * row" and "is held" are not the same question. Counting those inflated the "Tokens
- * held" tile, and listing them put `$0.00` rows in an allocation they contribute
- * nothing to — so the tile and the list have to agree on one definition or the card
- * contradicts itself.
+ * Whether a balance counts as a holding.
  *
- * Only a *definite* zero is excluded. An unparseable amount is unknown rather than
- * empty, and the breakdown deliberately still lists such a holding as unpriced instead
- * of hiding it, so dropping it here would make the tile disagree with the list again in
- * the other direction.
+ * Deliberately the same rule the wallet page already applies to this same data in
+ * `payments/ramps/components/wallet-asset-breakdown.tsx` — a spent token account keeps
+ * its aggregate row at zero, and counting those inflated the "Tokens held" tile. An
+ * amount that will not parse cannot be counted as a holding either, since nothing
+ * downstream can rank or sum it.
  */
-function isHeld(balance: CustodyWalletTokenBalance): boolean {
+function isHeldAmount(balance: CustodyWalletTokenBalance): boolean {
+  const amount = Number(balance.uiAmount);
+  return Number.isFinite(amount) && amount > 0;
+}
+
+/**
+ * Whether a balance belongs in the breakdown *list*, which is a looser question than
+ * whether it is held.
+ *
+ * A definite zero is dropped: it contributed a `$0.00` row and an empty segment to an
+ * allocation it makes up none of. An unparseable amount is kept, because the list's job
+ * is to show what the aggregate returned — hiding a row nobody can explain is worse
+ * than showing it as unpriced, which is what the non-finite case here already
+ * guarantees.
+ */
+function isListable(balance: CustodyWalletTokenBalance): boolean {
   const amount = Number(balance.uiAmount);
   return !Number.isFinite(amount) || amount > 0;
 }
@@ -82,7 +94,7 @@ export function buildHomeBalanceBreakdown(
   const priced: HomeBalanceSlice[] = [];
   const unpriced: HomeBalanceSlice[] = [];
 
-  for (const balance of balances.filter(isHeld)) {
+  for (const balance of balances.filter(isListable)) {
     const usdValue = usdValueOf(balance);
     const slice: HomeBalanceSlice = {
       mint: balance.mint,
@@ -124,5 +136,5 @@ export function buildHomeBalanceBreakdown(
 
 /** Distinct tokens held, used for the "Tokens held" tile. */
 export function countHeldTokens(balances: CustodyWalletTokenBalance[]): number {
-  return new Set(balances.filter(isHeld).map((balance) => balance.mint)).size;
+  return new Set(balances.filter(isHeldAmount).map((balance) => balance.mint)).size;
 }

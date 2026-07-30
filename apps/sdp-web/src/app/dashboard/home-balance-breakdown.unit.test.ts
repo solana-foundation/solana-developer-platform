@@ -124,6 +124,19 @@ describe("countHeldTokens", () => {
     ).toBe(1);
   });
 
+  it("does not count an amount it cannot parse", () => {
+    // Matches the rule wallet-asset-breakdown.tsx already applies to this data. The
+    // list still shows the row (as unpriced) — showing something unexplained beats
+    // hiding it — but nothing that cannot be ranked or summed is claimed as a holding.
+    const balances = [
+      balance({ mint: "ok", uiAmount: "3" }),
+      balance({ mint: "bad", uiAmount: "not-a-number" }),
+    ];
+
+    expect(countHeldTokens(balances)).toBe(1);
+    expect(buildHomeBalanceBreakdown(balances).unpriced.map((s) => s.mint)).toContain("bad");
+  });
+
   it("agrees with what the breakdown lists", () => {
     const balances = [
       balance({ mint: "sol", token: "SOL", uiAmount: "2", usdValue: 149.11 }),
