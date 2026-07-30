@@ -31,6 +31,7 @@ import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { enabledCustodyConnectionProviders } from "@/lib/feature-flags";
+import { getLogger } from "@/runtime/logger";
 import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
@@ -288,11 +289,6 @@ interface ListWalletsOptions {
   includeAllProviders?: boolean;
 }
 
-type PrivyConnectionClassification =
-  | { kind: "absent" }
-  | { kind: "pending"; connection: CustodyConnectionRuntimeRecord }
-  | { kind: "active"; connection: CustodyConnectionRuntimeRecord };
-
 interface PrivyCredentialAuthentication {
   appId: string;
   appSecret: string;
@@ -424,16 +420,16 @@ export class SigningService {
     return [...scopedConfigs, ...orgConfigs.filter((config) => !scopedConfigIds.has(config.id))];
   }
 
-  private async classifyPrivyConnection(
+  private async getUsablePrivyConnection(
     orgId: string,
     projectId: string
-  ): Promise<PrivyConnectionClassification> {
+  ): Promise<CustodyConnectionRuntimeRecord | null> {
     const connections = await this.getConnectionStore().listProjectConnections(orgId, projectId);
     const live = connections.filter((connection) => connection.status !== "deactivated");
 
     if (live.length === 0) {
       if (connections.length === 0) {
-        return { kind: "absent" };
+        return null;
       }
       throw new SigningError("Privy custody Connection is not usable", "CONFLICT");
     }
@@ -442,16 +438,8 @@ export class SigningService {
     }
 
     const connection = live[0] as CustodyConnectionRuntimeRecord;
-    if (
-      connection.status === "pending" &&
-      connection.lastCheckStatus === "success" &&
-      connection.credentialStatus === "active" &&
-      connection.defaultCustodyWalletId === null
-    ) {
-      return { kind: "pending", connection };
-    }
     if (isUsableCustodyConnection(connection)) {
-      return { kind: "active", connection };
+      return connection;
     }
 
     throw new SigningError("Privy custody Connection is not usable", "CONFLICT");
@@ -1618,37 +1606,21 @@ export class SigningService {
     projectId: string | undefined,
     params: {
       provider: SigningConfiguration["provider"];
-      walletLabel?: string;
-      requestId?: string;
     }
   ): Promise<ConnectionTargetSwitchResult | null> {
     if (!this.connectionRuntimeEnabled(projectId) || params.provider !== "privy") {
       return null;
     }
 
-    const target = await this.classifyPrivyConnection(orgId, projectId);
-    if (target.kind === "absent") {
+    const connection = await this.getUsablePrivyConnection(orgId, projectId);
+    if (!connection) {
       return null;
-    }
-    if (target.kind === "pending") {
-      return {
-        kind: "connection",
-        connectionId: target.connection.id,
-        wallet: await this.createPrivyConnectionWallet(target.connection, {
-          label: params.walletLabel,
-          requestId: params.requestId,
-        }),
-      };
     }
 
     return {
       kind: "connection",
-      connectionId: target.connection.id,
-      wallet: await this.getConnectionStore().selectConnection(
-        orgId,
-        projectId,
-        target.connection.id
-      ),
+      connectionId: connection.id,
+      wallet: await this.getConnectionStore().selectConnection(orgId, projectId, connection.id),
     };
   }
 
@@ -1678,7 +1650,6 @@ export class SigningService {
     }
 
     let provider = requestedProvider;
-    let target: PrivyConnectionClassification | null = null;
     if (!provider) {
       const selectedConnection = await this.getConnectionStore().getSelectedProjectConnection(
         orgId,
@@ -1688,19 +1659,12 @@ export class SigningService {
       if (!provider) {
         provider = (await this.configStore.findActive(orgId, projectId))?.provider;
       }
-      if (!provider) {
-        target = await this.classifyPrivyConnection(orgId, projectId);
-        if (target.kind === "active") {
-          throw new SigningError("No custody target is selected", "CONFLICT");
-        }
-      }
     }
 
-    if (provider !== "privy" && target?.kind !== "pending") {
+    if (provider !== "privy") {
       return null;
     }
-    target ??= await this.classifyPrivyConnection(orgId, projectId);
-    return target.kind === "absent" ? null : target.connection;
+    return this.getUsablePrivyConnection(orgId, projectId);
   }
 
   /**
@@ -2410,13 +2374,16 @@ function logWalletOrphanRisk(
     reason: "wallet_create_outcome_unknown" | "wallet_persist_failed";
   }
 ): void {
-  console.error("custody_wallet_orphan_risk", {
-    connectionId: connection.id,
-    provider: connection.provider,
-    ...(params.requestId ? { requestId: params.requestId } : {}),
-    ...(params.providerWalletId ? { providerWalletId: params.providerWalletId } : {}),
-    reason: params.reason,
-  });
+  getLogger().error(
+    {
+      connectionId: connection.id,
+      provider: connection.provider,
+      ...(params.requestId ? { requestId: params.requestId } : {}),
+      ...(params.providerWalletId ? { providerWalletId: params.providerWalletId } : {}),
+      reason: params.reason,
+    },
+    "custody_wallet_orphan_risk"
+  );
 }
 
 /**

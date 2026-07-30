@@ -1,5 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { rootLogger } from "@/runtime/logger";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { type SigningRequestStore, SigningService } from "@/services/domain/signing.service";
@@ -21,10 +22,11 @@ describe("SigningService stored-Credential Connection runtime", () => {
     vi.restoreAllMocks();
   });
 
-  it("creates the first Connection wallet ahead of a same-provider legacy Config", async () => {
+  it("rejects wallet creation until Install Check activates the Connection", async () => {
     const connection = createConnection({
       status: "pending",
       lastCheckStatus: "success",
+      credentialStatus: "active",
       defaultCustodyWalletId: null,
     });
     const connectionStore = createConnectionStore({
@@ -37,66 +39,22 @@ describe("SigningService stored-Credential Connection runtime", () => {
           lastCheckStatus: "success",
         }),
       ],
-      persistedWallet: {
-        id: "cwlt_connection_runtime",
-        walletId: "privy_wallet_created",
-        publicKey: "11111111111111111111111111111111",
-        label: "Treasury",
-        purpose: "root",
-        status: "active",
-        createdAt: "2026-07-30T00:00:00.000Z",
-      },
     });
     const configStore = createConfigStore();
     const service = createService(configStore, connectionStore);
+    const provision = mockSuccessfulConnectionProvisioning();
 
-    vi.spyOn(providerAvailability, "getProviderAvailability").mockResolvedValue({
-      tier: "enterprise",
-      providers: {
-        custody: { privy: { entitled: true, configured: false, enabled: false } },
-      },
-    } as never);
-    vi.spyOn(credentialSecretStore, "createCredentialSecretStore").mockReturnValue({
-      storageBackend: "encrypted_db",
-      write: vi.fn(),
-      read: vi.fn().mockResolvedValue({
-        appId: "stored-app-id",
-        appSecret: "stored-app-secret",
-      }),
-      destroyVersion: vi.fn(),
-    });
-    const provision = vi.spyOn(custodyProvisioning, "provisionPrivyWallet").mockResolvedValue({
-      walletId: "wallet_created",
-      address: "11111111111111111111111111111111",
-    });
-
-    const wallet = await service.createWallet(ORG_ID, PROJECT_ID, {
-      provider: "privy",
-      label: "Treasury",
-      purpose: "root",
-    });
-
-    expect(provision).toHaveBeenCalledWith(
-      expect.any(Object),
-      {},
-      {
-        appId: "stored-app-id",
-        appSecret: "stored-app-secret",
-      }
-    );
-    expect(connectionStore.persistCreatedWallet).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connectionId: CONNECTION_ID,
-        providerCredentialId: CREDENTIAL_ID,
-        setDefault: false,
-        walletId: "privy_wallet_created",
+    await expect(
+      service.createWallet(ORG_ID, PROJECT_ID, {
+        provider: "privy",
+        label: "Treasury",
+        purpose: "root",
       })
-    );
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(provision).not.toHaveBeenCalled();
+    expect(connectionStore.persistCreatedWallet).not.toHaveBeenCalled();
     expect(configStore.createWallet).not.toHaveBeenCalled();
-    expect(wallet).toMatchObject({
-      id: "cwlt_connection_runtime",
-      walletId: "privy_wallet_created",
-    });
   });
 
   it.each([
@@ -106,16 +64,18 @@ describe("SigningService stored-Credential Connection runtime", () => {
     const connectionStore = createConnectionStore({
       connections: [
         createConnection({
-          status: "pending",
+          status: "active",
           lastCheckStatus: "success",
-          defaultCustodyWalletId: null,
+          defaultCustodyWalletId: "cwlt_existing",
+          defaultWalletId: "privy_wallet_existing",
+          defaultWalletPublicKey: "11111111111111111111111111111111",
         }),
       ],
     });
     const service = createService(createConfigStore(), connectionStore);
     const provision = mockSuccessfulConnectionProvisioning();
     provision.mockRejectedValueOnce(new SigningError("provider failure", code));
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const logError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
 
     await expect(
       service.createWallet(ORG_ID, PROJECT_ID, {
@@ -124,14 +84,17 @@ describe("SigningService stored-Credential Connection runtime", () => {
       })
     ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
 
-    expect(consoleError).toHaveBeenCalledTimes(shouldLog ? 1 : 0);
+    expect(logError).toHaveBeenCalledTimes(shouldLog ? 1 : 0);
     if (shouldLog) {
-      expect(consoleError).toHaveBeenCalledWith("custody_wallet_orphan_risk", {
-        connectionId: CONNECTION_ID,
-        provider: "privy",
-        requestId: "req_connection_runtime",
-        reason: "wallet_create_outcome_unknown",
-      });
+      expect(logError).toHaveBeenCalledWith(
+        {
+          connectionId: CONNECTION_ID,
+          provider: "privy",
+          requestId: "req_connection_runtime",
+          reason: "wallet_create_outcome_unknown",
+        },
+        "custody_wallet_orphan_risk"
+      );
     }
   });
 
@@ -142,16 +105,18 @@ describe("SigningService stored-Credential Connection runtime", () => {
     const connectionStore = createConnectionStore({
       connections: [
         createConnection({
-          status: "pending",
+          status: "active",
           lastCheckStatus: "success",
-          defaultCustodyWalletId: null,
+          defaultCustodyWalletId: "cwlt_existing",
+          defaultWalletId: "privy_wallet_existing",
+          defaultWalletPublicKey: "11111111111111111111111111111111",
         }),
       ],
     });
     connectionStore.persistCreatedWallet.mockRejectedValueOnce(error);
     const service = createService(createConfigStore(), connectionStore);
     mockSuccessfulConnectionProvisioning();
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const logError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
 
     await expect(
       service.createWallet(ORG_ID, PROJECT_ID, {
@@ -160,13 +125,16 @@ describe("SigningService stored-Credential Connection runtime", () => {
       })
     ).rejects.toMatchObject({ code });
 
-    expect(consoleError).toHaveBeenCalledWith("custody_wallet_orphan_risk", {
-      connectionId: CONNECTION_ID,
-      provider: "privy",
-      requestId: "req_persist_failure",
-      providerWalletId: "wallet_created",
-      reason: "wallet_persist_failed",
-    });
+    expect(logError).toHaveBeenCalledWith(
+      {
+        connectionId: CONNECTION_ID,
+        provider: "privy",
+        requestId: "req_persist_failure",
+        providerWalletId: "wallet_created",
+        reason: "wallet_persist_failed",
+      },
+      "custody_wallet_orphan_risk"
+    );
   });
 
   it("does not inspect Connection state while the rollout flag is off", async () => {
@@ -394,10 +362,11 @@ describe("SigningService stored-Credential Connection runtime", () => {
     expect(connectionStore.setDefaultWallet).not.toHaveBeenCalled();
   });
 
-  it("uses the sole checked pending Connection when provider and target are omitted", async () => {
+  it("does not infer a pending Connection when provider and target are omitted", async () => {
     const connection = createConnection({
       status: "pending",
       lastCheckStatus: "success",
+      credentialStatus: "active",
       defaultCustodyWalletId: null,
     });
     const connectionStore = createConnectionStore({
@@ -406,13 +375,14 @@ describe("SigningService stored-Credential Connection runtime", () => {
     });
     const configStore = createConfigStore({ activeConfig: null });
     const service = createService(configStore, connectionStore);
-    mockSuccessfulConnectionProvisioning();
+    const provision = mockSuccessfulConnectionProvisioning();
 
-    await service.createWallet(ORG_ID, PROJECT_ID, {});
+    await expect(service.createWallet(ORG_ID, PROJECT_ID, {})).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
 
-    expect(connectionStore.persistCreatedWallet).toHaveBeenCalledWith(
-      expect.objectContaining({ connectionId: CONNECTION_ID })
-    );
+    expect(provision).not.toHaveBeenCalled();
+    expect(connectionStore.persistCreatedWallet).not.toHaveBeenCalled();
     expect(configStore.createWallet).not.toHaveBeenCalled();
   });
 

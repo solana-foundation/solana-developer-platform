@@ -46,6 +46,7 @@ export type { CustodyProvisioningRuntime } from "./runtime";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";
+const PRIVY_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_COINBASE_CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform";
 const DEFAULT_PARA_API_BASE_URL = "https://api.getpara.com";
 const DEFAULT_TURNKEY_API_BASE_URL = "https://api.turnkey.com";
@@ -61,7 +62,13 @@ interface FireblocksVaultAccountResponse {
 interface PrivyWalletResponse {
   id: string;
   address: string;
+  archived_at?: number | null;
   chain_type?: string;
+  external_id?: string;
+}
+
+interface PrivyWalletListResponse {
+  data?: PrivyWalletResponse[];
 }
 
 interface CoinbaseCdpSolanaAccountResponse {
@@ -107,6 +114,8 @@ export interface ProvisionFireblocksResult {
 
 export interface ProvisionPrivyOptions {
   walletId?: string;
+  externalId?: string;
+  idempotencyKey?: string;
 }
 
 export interface PrivyProvisioningConfig {
@@ -283,6 +292,7 @@ export async function provisionPrivyWallet(
 
   const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_PRIVY_API_BASE_URL;
   const authHeader = `Basic ${encodeBasicAuth(`${appId}:${appSecret}`)}`;
+  validatePrivyProvisionOptions(options);
 
   if (options.walletId) {
     const existing = await privyRequest<PrivyWalletResponse>(runtime, {
@@ -300,22 +310,66 @@ export async function provisionPrivyWallet(
     return { walletId: existing.id, address: existing.address };
   }
 
-  const created = await privyRequest<PrivyWalletResponse>(runtime, {
-    apiBaseUrl,
-    authHeader,
-    appId,
-    method: "POST",
-    path: "/wallets",
-    body: {
-      chain_type: "solana",
-    },
-  });
-
-  if (!created?.id || !created?.address) {
-    throw new SigningError("Privy wallet creation outcome is unknown", "NETWORK_ERROR");
+  const externalWalletLookup = options.externalId
+    ? { apiBaseUrl, authHeader, appId, externalId: options.externalId }
+    : undefined;
+  if (externalWalletLookup) {
+    const existing = await findPrivyWalletByExternalId(runtime, externalWalletLookup);
+    if (existing) return existing;
   }
 
-  return { walletId: created.id, address: created.address };
+  try {
+    const created = await privyRequest<PrivyWalletResponse>(runtime, {
+      apiBaseUrl,
+      authHeader,
+      appId,
+      idempotencyKey: options.idempotencyKey,
+      method: "POST",
+      path: "/wallets",
+      body: {
+        chain_type: "solana",
+        ...(options.externalId ? { external_id: options.externalId } : {}),
+      },
+    });
+
+    if (!created?.id || !created?.address) {
+      throw new SigningError("Privy wallet creation outcome is unknown", "NETWORK_ERROR");
+    }
+
+    return { walletId: created.id, address: created.address };
+  } catch (error) {
+    if (externalWalletLookup) {
+      try {
+        const reconciled = await findPrivyWalletByExternalId(runtime, externalWalletLookup);
+        if (reconciled) return reconciled;
+      } catch (reconciliationError) {
+        if (
+          reconciliationError instanceof SigningError &&
+          reconciliationError.code === "CONFLICT"
+        ) {
+          throw reconciliationError;
+        }
+      }
+    }
+    throw error;
+  }
+}
+
+function validatePrivyProvisionOptions(options: ProvisionPrivyOptions): void {
+  const hasExternalId = options.externalId !== undefined;
+  const hasIdempotencyKey = options.idempotencyKey !== undefined;
+  if (
+    hasExternalId !== hasIdempotencyKey ||
+    (options.walletId !== undefined && hasExternalId) ||
+    (options.externalId !== undefined && !/^[a-zA-Z0-9_-]{1,64}$/.test(options.externalId)) ||
+    (options.idempotencyKey !== undefined &&
+      (options.idempotencyKey.length === 0 || options.idempotencyKey.length > 256))
+  ) {
+    throw new SigningError(
+      "Privy wallet creation requires valid externalId and idempotencyKey options",
+      "INVALID_REQUEST"
+    );
+  }
 }
 
 export async function provisionCoinbaseCdpAccount(
@@ -748,6 +802,7 @@ interface PrivyRequestParams {
   apiBaseUrl: string;
   authHeader: string;
   appId: string;
+  idempotencyKey?: string;
   method: "GET" | "POST";
   path: string;
   body?: unknown;
@@ -763,9 +818,11 @@ async function privyRequest<T>(
       headers: {
         Authorization: params.authHeader,
         "privy-app-id": params.appId,
+        ...(params.idempotencyKey ? { "privy-idempotency-key": params.idempotencyKey } : {}),
         ...(params.body ? { "Content-Type": "application/json" } : {}),
       },
       body: params.body ? JSON.stringify(params.body) : undefined,
+      signal: AbortSignal.timeout(PRIVY_REQUEST_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -788,6 +845,40 @@ async function privyRequest<T>(
       error instanceof Error ? error : undefined
     );
   }
+}
+
+async function findPrivyWalletByExternalId(
+  runtime: CustodyProvisioningRuntime,
+  params: Pick<PrivyRequestParams, "apiBaseUrl" | "authHeader" | "appId"> & {
+    externalId: string;
+  }
+): Promise<ProvisionPrivyResult | undefined> {
+  const response = await privyRequest<PrivyWalletListResponse>(runtime, {
+    apiBaseUrl: params.apiBaseUrl,
+    authHeader: params.authHeader,
+    appId: params.appId,
+    method: "GET",
+    path: `/wallets?external_id=${encodeURIComponent(params.externalId)}&limit=1&include_archived=true`,
+  });
+  if (!Array.isArray(response?.data)) {
+    throw new SigningError("Privy wallet lookup outcome is unknown", "NETWORK_ERROR");
+  }
+
+  const wallet = response.data[0];
+  if (!wallet) return undefined;
+  if (!wallet.id || !wallet.address) {
+    throw new SigningError("Privy wallet lookup outcome is unknown", "NETWORK_ERROR");
+  }
+  if (wallet.archived_at != null) {
+    throw new SigningError("Privy external wallet is archived", "CONFLICT");
+  }
+  if (
+    wallet.chain_type !== "solana" ||
+    (wallet.external_id !== undefined && wallet.external_id !== params.externalId)
+  ) {
+    throw new SigningError("Privy external wallet identity does not match", "CONFLICT");
+  }
+  return { walletId: wallet.id, address: wallet.address };
 }
 
 async function turnkeyRequest<T>(

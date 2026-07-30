@@ -1,6 +1,8 @@
+import { normalizePrivyWalletId } from "@sdp/custody";
+import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
 import type { Context } from "hono";
-import { type DatabaseClient, getDb } from "@/db";
+import { asTransactionalClient, type DatabaseClient, getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
@@ -11,6 +13,7 @@ import {
   providerUnavailable,
 } from "@/lib/errors";
 import { isPrivyByokEnabled } from "@/lib/feature-flags";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
@@ -19,11 +22,13 @@ import {
   CredentialSecretStoreError,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
+import { type ProvisionPrivyResult, provisionPrivyWallet } from "@/services/custody/provisioning";
 import { getProviderAvailability } from "@/services/provider-availability.service";
 import {
   mapProviderCredential,
   type SafeProviderCredential,
 } from "@/services/provider-credential-submission.service";
+import { CustodyConnectionRuntimeStore } from "@/services/stores/custody-connection-runtime.store";
 import {
   type CustodyConnectionRow,
   type ProviderCredentialSecretRow,
@@ -75,23 +80,68 @@ export async function checkProviderCredential(
     providerCredentialId,
     "preflight"
   );
+
+  const replay = completedInstallCheckResult(target);
+  if (replay) {
+    return replay;
+  }
+
   await assertInstallCheckEnabled(c.env, db, auth.organizationId);
 
   const secretStore = createPersistedSecretStore(c.env, target.credential.storage_backend);
   const credential = await readPrivyCredential(secretStore, auth.organizationId, target.credential);
-  const outcome = await validatePrivyCredential(c.env, credential);
+  let outcome = await validatePrivyCredential(c.env, credential);
+  let wallet: ProvisionPrivyResult | undefined;
+  if (outcome === "success") {
+    try {
+      const provisioned = await provisionPrivyWallet(
+        c.env,
+        {
+          externalId: `sdp_${target.connection.id}`,
+          idempotencyKey: createPrivyInstallAttemptKey(target),
+        },
+        credential
+      );
+      wallet = {
+        walletId: normalizePrivyWalletId(provisioned.walletId),
+        address: provisioned.address,
+      };
+    } catch (error) {
+      if (error instanceof SigningError && error.code === "CONFLICT") {
+        throw conflict("Privy wallet cannot be reconciled");
+      }
+      outcome = "retry_unknown";
+    }
+  }
+
   const checkedAt = new Date().toISOString();
-  const providerCredential = await persistInstallCheckOutcome({
-    db,
-    organizationId: auth.organizationId,
-    projectId,
-    providerCredentialId,
-    expectedConnectionId: target.connection.id,
-    checkedAt,
-    outcome,
-    providerAccountFingerprint:
-      outcome === "success" ? `sha256:${await hashString(credential.appId)}` : undefined,
-  });
+  let providerCredential: ProviderCredentialSecretRow;
+  try {
+    providerCredential = await persistInstallCheckOutcome({
+      db,
+      organizationId: auth.organizationId,
+      projectId,
+      providerCredentialId,
+      expectedConnectionId: target.connection.id,
+      checkedAt,
+      outcome,
+      wallet,
+      providerAccountFingerprint:
+        outcome === "success" ? `sha256:${await hashString(credential.appId)}` : undefined,
+    });
+  } catch (error) {
+    const completed = await loadInstallCheckTarget(
+      store,
+      auth.organizationId,
+      projectId,
+      providerCredentialId,
+      "preflight"
+    ).then(completedInstallCheckResult, () => null);
+    if (completed) {
+      return completed;
+    }
+    throw error;
+  }
 
   if (outcome === "failed") {
     await destroyRejectedGcpVersionBestEffort(
@@ -119,6 +169,47 @@ export async function checkProviderCredential(
     providerCredential: mapProviderCredential(providerCredential),
     check: { status: outcome, checkedAt },
   };
+}
+
+function completedInstallCheckResult(
+  target: InstallCheckTarget
+): ProviderCredentialCheckResult | null {
+  const checkedAt = target.connection.last_check_at;
+  if (!checkedAt) {
+    return null;
+  }
+
+  if (
+    target.credential.status === "active" &&
+    target.connection.status === "active" &&
+    target.connection.last_check_status === "success" &&
+    target.connection.default_custody_wallet_id
+  ) {
+    return {
+      providerCredential: mapProviderCredential(target.credential),
+      check: { status: "success", checkedAt },
+    };
+  }
+
+  if (
+    target.credential.status === "failed_validation" &&
+    target.connection.status === "failed" &&
+    target.connection.last_check_status === "failed"
+  ) {
+    return {
+      providerCredential: mapProviderCredential(target.credential),
+      check: { status: "failed", checkedAt },
+    };
+  }
+
+  return null;
+}
+
+function createPrivyInstallAttemptKey(target: InstallCheckTarget): string {
+  // Privy caches failures per key; the stable external ID remains the operation identity.
+  const previousAttempt =
+    target.connection.last_check_at?.replace(/[^a-zA-Z0-9_-]/g, "") || "initial";
+  return `sdp_install_${target.connection.id}_${target.credential.id}_${previousAttempt}`;
 }
 
 async function loadInstallCheckTarget(
@@ -154,13 +245,24 @@ async function loadInstallCheckTarget(
     if (
       credential?.source !== "stored" ||
       credential.storage_backend === "runtime_env" ||
-      credential.status !== "pending" ||
-      connection.status !== "pending" ||
       connection.provider_credential_id !== providerCredentialId
     ) {
       throw conflict(INSTALL_CHECK_CONFLICT_MESSAGE);
     }
-    return { credential, connection };
+
+    const target = { credential, connection };
+    if (phase === "preflight" && completedInstallCheckResult(target)) {
+      return target;
+    }
+
+    if (
+      credential.status !== "pending" ||
+      connection.status !== "pending" ||
+      connection.default_custody_wallet_id !== null
+    ) {
+      throw conflict(INSTALL_CHECK_CONFLICT_MESSAGE);
+    }
+    return target;
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
@@ -284,6 +386,7 @@ async function persistInstallCheckOutcome(params: {
   expectedConnectionId: string;
   checkedAt: string;
   outcome: InstallCheckStatus;
+  wallet?: ProvisionPrivyResult;
   providerAccountFingerprint?: string;
 }): Promise<ProviderCredentialSecretRow> {
   try {
@@ -306,7 +409,7 @@ async function persistInstallCheckOutcome(params: {
       }
 
       if (params.outcome === "success") {
-        if (!params.providerAccountFingerprint) {
+        if (!params.providerAccountFingerprint || !params.wallet) {
           throw internalError();
         }
         const updated = await store.recordInstallCheckSuccess({
@@ -318,6 +421,17 @@ async function persistInstallCheckOutcome(params: {
         if (!updated) {
           throw conflict(INSTALL_CHECK_CONFLICT_MESSAGE);
         }
+        await new CustodyConnectionRuntimeStore(asTransactionalClient(tx), [
+          "privy",
+        ]).persistCreatedWallet({
+          organizationId: params.organizationId,
+          projectId: params.projectId,
+          connectionId: target.connection.id,
+          providerCredentialId: params.providerCredentialId,
+          walletId: params.wallet.walletId,
+          publicKey: params.wallet.address,
+          setDefault: false,
+        });
         return { ...target.credential, ...updated };
       }
 
@@ -373,15 +487,18 @@ async function destroyRejectedGcpVersionBestEffort(
     await store.destroyVersion({ secretVersionRef: credential.secret_version_ref });
   } catch {
     const version = credential.secret_version_ref.split("/").at(-1);
-    console.error("provider_credential_orphan_risk", {
-      providerCredentialId,
-      provider: "privy",
-      storageBackend: "gcp_secret_manager",
-      ...(version && /^[1-9][0-9]*$/.test(version)
-        ? { providerResourceVersion: Number(version) }
-        : {}),
-      requestId: c.get("requestId"),
-      reason: "secret_cleanup_failed",
-    });
+    getLogger().error(
+      {
+        providerCredentialId,
+        provider: "privy",
+        storageBackend: "gcp_secret_manager",
+        ...(version && /^[1-9][0-9]*$/.test(version)
+          ? { providerResourceVersion: Number(version) }
+          : {}),
+        requestId: c.get("requestId"),
+        reason: "secret_cleanup_failed",
+      },
+      "provider_credential_orphan_risk"
+    );
   }
 }

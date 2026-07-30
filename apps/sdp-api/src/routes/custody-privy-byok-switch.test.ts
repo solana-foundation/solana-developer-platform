@@ -403,31 +403,32 @@ describe("Privy BYOK custody target switch", () => {
     });
   });
 
-  it("creates and selects the first checked Connection wallet through switch", async () => {
+  it("does not create the first Connection wallet through switch", async () => {
     await prepareCheckedPendingConnection();
     const providerFetch = stubPrivyWalletCreation();
 
     const response = await switchToPrivy();
 
-    expect(response.status).toBe(201);
-    const body = (await response.json()) as { data: Record<string, unknown> };
-    expect(body).toMatchObject({
-      data: {
-        walletId: `privy_${CREATED_CONNECTION_WALLET_ID}`,
-        publicKey: "CreatedConnectionPublicKey",
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
       },
     });
-    expect(body.data).not.toHaveProperty("configId");
-    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(providerFetch).not.toHaveBeenCalled();
 
     expect(
       await getDb(env)
         .prepare(
-          `SELECT c.status, w.wallet_id,
-                  d.default_custody_config_id, d.default_custody_connection_id
+          `SELECT c.status, c.default_custody_wallet_id,
+                  d.default_custody_config_id, d.default_custody_connection_id,
+                  (
+                    SELECT COUNT(*)
+                    FROM custody_wallets w
+                    WHERE w.custody_connection_id = c.id
+                  ) AS connection_wallet_count
            FROM custody_connections c
-           JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
-           JOIN custody_scope_defaults d
+           LEFT JOIN custody_scope_defaults d
              ON d.organization_id = c.organization_id
             AND d.project_id = c.project_id
            WHERE c.id = ?`
@@ -435,19 +436,21 @@ describe("Privy BYOK custody target switch", () => {
         .bind(CONNECTION_ID)
         .first()
     ).toEqual({
-      status: "active",
-      wallet_id: `privy_${CREATED_CONNECTION_WALLET_ID}`,
+      status: "pending",
+      default_custody_wallet_id: null,
       default_custody_config_id: CONFIG_ID,
-      default_custody_connection_id: CONNECTION_ID,
+      default_custody_connection_id: null,
+      connection_wallet_count: 0,
     });
   });
 
   it.each([
     ["current-project API", "/v1/api-keys"],
     ["project-resource API", `/v1/projects/${PROJECT_ID}/api-keys`],
-  ])("provisions and binds the first Connection wallet through the %s", async (_name, path) => {
+  ])("does not bootstrap a pending Connection through the %s", async (_name, path) => {
     await prepareCheckedPendingConnection();
     const providerFetch = stubPrivyWalletCreation();
+    const keyName = `Connection key ${path}`;
 
     const response = await app.request(
       path,
@@ -458,7 +461,7 @@ describe("Privy BYOK custody target switch", () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          name: `Connection key ${path}`,
+          name: keyName,
           walletScope: "selected",
           provisionWallet: true,
         }),
@@ -466,28 +469,23 @@ describe("Privy BYOK custody target switch", () => {
       env
     );
 
-    expect(response.status).toBe(201);
-    const responseBody = (await response.json()) as { data: { apiKey: { id: string } } };
-    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
+      },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
     expect(
       await getDb(env)
         .prepare(
-          `SELECT p.wallet_id, c.status, d.default_custody_connection_id
-           FROM api_key_wallet_permissions p
-           JOIN custody_wallets w ON w.wallet_id = p.wallet_id
-           JOIN custody_connections c ON c.id = w.custody_connection_id
-           JOIN custody_scope_defaults d
-             ON d.organization_id = c.organization_id
-            AND d.project_id = c.project_id
-           WHERE p.api_key_id = ?`
+          `SELECT COUNT(*) AS count
+           FROM api_keys
+           WHERE organization_id = ? AND name = ?`
         )
-        .bind(responseBody.data.apiKey.id)
+        .bind(ORG_ID, keyName)
         .first()
-    ).toEqual({
-      wallet_id: `privy_${CREATED_CONNECTION_WALLET_ID}`,
-      status: "active",
-      default_custody_connection_id: CONNECTION_ID,
-    });
+    ).toEqual({ count: 0 });
   });
 
   it("keeps current-project API-key provisioning on the Organization Config when disabled", async () => {

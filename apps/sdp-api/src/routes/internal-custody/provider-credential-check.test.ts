@@ -18,6 +18,34 @@ const CREDENTIAL_ID = "pcred_provider_credential_check";
 const CONNECTION_ID = "cconn_provider_credential_check";
 const APP_ID = "privy-app-1234";
 const APP_SECRET = "exact secret";
+const PRIVY_WALLET_ID = "wallet-provider-credential-check";
+const PRIVY_WALLET_ADDRESS = "wallet-address-provider-credential-check";
+const PRIVY_EXTERNAL_ID = `sdp_${CONNECTION_ID}`;
+const PRIVY_IDEMPOTENCY_KEY = `sdp_install_${CONNECTION_ID}_${CREDENTIAL_ID}_initial`;
+
+function privyJson(body: unknown, status = 200): Response {
+  return Response.json(body, { status });
+}
+
+function privyWalletResponse(overrides: Record<string, unknown> = {}): Response {
+  return privyJson({
+    id: PRIVY_WALLET_ID,
+    address: PRIVY_WALLET_ADDRESS,
+    chain_type: "solana",
+    external_id: PRIVY_EXTERNAL_ID,
+    ...overrides,
+  });
+}
+
+function stubSuccessfulPrivyProvisioning() {
+  const providerFetch = vi
+    .fn()
+    .mockResolvedValueOnce(privyJson({ data: [], next_cursor: null }))
+    .mockResolvedValueOnce(privyJson({ data: [], next_cursor: null }))
+    .mockResolvedValueOnce(privyWalletResponse());
+  vi.stubGlobal("fetch", providerFetch);
+  return providerFetch;
+}
 
 function encodeJwtPart(value: Record<string, unknown>): string {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -273,14 +301,8 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     await clearKVStores(env);
   });
 
-  it("validates the exact stored credential without creating a wallet", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: [], next_cursor: null }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })
-    );
-    vi.stubGlobal("fetch", providerFetch);
+  it("validates the exact stored credential, provisions one wallet, and activates its Connection", async () => {
+    const providerFetch = stubSuccessfulPrivyProvisioning();
     const { app, token } = buildApp();
 
     const response = await check(app, token);
@@ -312,16 +334,33 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     expect(JSON.stringify(body)).not.toContain(APP_ID);
     expect(JSON.stringify(body)).not.toContain(APP_SECRET);
     expect(JSON.stringify(body)).not.toContain(CONNECTION_ID);
-    expect(providerFetch).toHaveBeenCalledOnce();
-    const [url, init] = providerFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://privy.example.test/v1/wallets?limit=1&chain_type=solana");
-    expect(init).toMatchObject({
+    expect(providerFetch).toHaveBeenCalledTimes(3);
+    expect(providerFetch.mock.calls[0]?.[0]).toBe(
+      "https://privy.example.test/v1/wallets?limit=1&chain_type=solana"
+    );
+    expect(providerFetch.mock.calls[0]?.[1]).toMatchObject({
       method: "GET",
       headers: {
         Authorization: `Basic ${Buffer.from(`${APP_ID}:${APP_SECRET}`).toString("base64")}`,
         "privy-app-id": APP_ID,
       },
     });
+    expect(providerFetch.mock.calls[1]?.[0]).toBe(
+      `https://privy.example.test/v1/wallets?external_id=${PRIVY_EXTERNAL_ID}&limit=1&include_archived=true`
+    );
+    expect(providerFetch.mock.calls[2]).toEqual([
+      "https://privy.example.test/v1/wallets",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "privy-idempotency-key": PRIVY_IDEMPOTENCY_KEY,
+        }),
+        body: JSON.stringify({
+          chain_type: "solana",
+          external_id: PRIVY_EXTERNAL_ID,
+        }),
+      }),
+    ]);
 
     const state = await getDb(env)
       .prepare(
@@ -329,10 +368,16 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
                 c.status AS connection_status, c.setup_metadata,
                 c.last_check_status, c.last_check_at, c.last_check_failure_code,
                 c.default_custody_wallet_id,
+                w.wallet_id, w.public_key, w.custody_connection_id,
+                d.default_custody_config_id, d.default_custody_connection_id,
                 (SELECT COUNT(*) FROM custody_wallets) AS wallet_count,
                 (SELECT COUNT(*) FROM custody_scope_defaults) AS default_count
          FROM provider_credentials pc
          JOIN custody_connections c ON c.provider_credential_id = pc.id
+         LEFT JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
+         LEFT JOIN custody_scope_defaults d
+           ON d.organization_id = c.organization_id
+          AND d.project_id = c.project_id
          WHERE pc.id = ?`
       )
       .bind(CREDENTIAL_ID)
@@ -345,13 +390,18 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
         last_check_at: string | null;
         last_check_failure_code: string | null;
         default_custody_wallet_id: string | null;
+        wallet_id: string | null;
+        public_key: string | null;
+        custody_connection_id: string | null;
+        default_custody_config_id: string | null;
+        default_custody_connection_id: string | null;
         wallet_count: number;
         default_count: number;
       }>();
     expect(state).toMatchObject({
       credential_status: "active",
       last_validated_at: expect.any(String),
-      connection_status: "pending",
+      connection_status: "active",
       setup_metadata: {
         providerAccountFingerprint:
           "sha256:227b73d3e3e9e6717d2c6f6500f88386b11130922ae7320de715a6ca237f3296",
@@ -359,19 +409,205 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       last_check_status: "success",
       last_check_at: expect.any(String),
       last_check_failure_code: null,
-      default_custody_wallet_id: null,
-      wallet_count: 0,
-      default_count: 0,
+      default_custody_wallet_id: expect.any(String),
+      wallet_id: `privy_${PRIVY_WALLET_ID}`,
+      public_key: PRIVY_WALLET_ADDRESS,
+      custody_connection_id: CONNECTION_ID,
+      default_custody_config_id: null,
+      default_custody_connection_id: CONNECTION_ID,
+      wallet_count: 1,
+      default_count: 1,
     });
   });
 
+  it("preserves the legacy Config default while selecting the checked Connection", async () => {
+    const legacyConfigId = "cust_provider_credential_check_legacy";
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO custody_configs (
+             id, organization_id, project_id, provider, config_encrypted,
+             encryption_version, status
+           ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'active')`
+        )
+        .bind(legacyConfigId, ORGANIZATION_ID, PROJECT_ID),
+      db
+        .prepare(
+          `INSERT INTO custody_scope_defaults (
+             id, organization_id, project_id, default_custody_config_id
+           ) VALUES ('csd_provider_credential_check_legacy', ?, ?, ?)`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID, legacyConfigId),
+    ]);
+    stubSuccessfulPrivyProvisioning();
+    const { app, token } = buildApp();
+
+    const response = await check(app, token);
+
+    expect(response.status).toBe(200);
+    expect(
+      await db
+        .prepare(
+          `SELECT default_custody_config_id, default_custody_connection_id
+           FROM custody_scope_defaults
+           WHERE organization_id = ? AND project_id = ?`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID)
+        .first()
+    ).toEqual({
+      default_custody_config_id: legacyConfigId,
+      default_custody_connection_id: CONNECTION_ID,
+    });
+  });
+
+  it("keeps setup pending when wallet creation fails and reconciliation finds nothing", async () => {
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(privyJson({ data: [] }))
+      .mockResolvedValueOnce(privyJson({ data: [] }))
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(privyJson({ data: [] }));
+    vi.stubGlobal("fetch", providerFetch);
+    const { app, token } = buildApp();
+
+    const response = await check(app, token);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        providerCredential: {
+          id: CREDENTIAL_ID,
+          status: "pending",
+        },
+        check: {
+          status: "retry_unknown",
+          checkedAt: expect.any(String),
+        },
+      },
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(4);
+    expect(providerFetch.mock.calls[2]?.[1]).toMatchObject({ method: "POST" });
+    expect(await getCheckState()).toMatchObject({
+      credential_status: "pending",
+      connection_status: "pending",
+      last_check_status: "retry_unknown",
+      last_check_failure_code: "provider_response_unknown",
+    });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM custody_wallets) AS wallets,
+             (SELECT COUNT(*) FROM custody_scope_defaults) AS defaults`
+        )
+        .first()
+    ).toEqual({ wallets: 0, defaults: 0 });
+  });
+
+  it("returns a safe conflict when the deterministic Privy wallet cannot be reused", async () => {
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(privyJson({ data: [] }))
+      .mockResolvedValueOnce(
+        privyJson({
+          data: [
+            {
+              id: PRIVY_WALLET_ID,
+              address: PRIVY_WALLET_ADDRESS,
+              chain_type: "solana",
+              external_id: PRIVY_EXTERNAL_ID,
+              archived_at: Date.now(),
+            },
+          ],
+        })
+      );
+    vi.stubGlobal("fetch", providerFetch);
+    const { app, token } = buildApp();
+
+    const response = await check(app, token);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
+        message: "Privy wallet cannot be reconciled",
+      },
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(await getCheckState()).toMatchObject({
+      credential_status: "pending",
+      connection_status: "pending",
+      last_check_status: null,
+    });
+  });
+
+  it("replays a completed Install Check after rollback without another Provider call or wallet", async () => {
+    const providerFetch = stubSuccessfulPrivyProvisioning();
+    const { app, token } = buildApp();
+
+    const first = await check(app, token);
+    const firstBody = (await first.json()) as {
+      data: { check: { checkedAt: string } };
+    };
+    env.PRIVY_BYOK_ENABLED = "false";
+    providerFetch.mockClear();
+
+    const replay = await check(app, token);
+
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      data: {
+        providerCredential: {
+          id: CREDENTIAL_ID,
+          status: "active",
+        },
+        check: {
+          status: "success",
+          checkedAt: firstBody.data.check.checkedAt,
+        },
+      },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(
+      await getDb(env).prepare("SELECT COUNT(*) AS count FROM custody_wallets").first()
+    ).toMatchObject({ count: 1 });
+  });
+
+  it("converges concurrent Checks on one provider wallet", async () => {
+    let createCalls = 0;
+    let releaseCreates: (() => void) | undefined;
+    const bothCreatesStarted = new Promise<void>((resolve) => {
+      releaseCreates = resolve;
+    });
+    const providerFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method !== "POST") {
+        return privyJson({ data: [] });
+      }
+
+      createCalls += 1;
+      if (createCalls === 2) {
+        releaseCreates?.();
+      }
+      await bothCreatesStarted;
+      return privyWalletResponse();
+    });
+    vi.stubGlobal("fetch", providerFetch);
+    const { app, token } = buildApp();
+
+    const responses = await Promise.all([check(app, token), check(app, token)]);
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(createCalls).toBe(2);
+    expect(
+      await getDb(env).prepare("SELECT COUNT(*) AS count FROM custody_wallets").first()
+    ).toEqual({ count: 1 });
+  });
+
   it("records a Privy 401 as a redacted failed check instead of caller authentication failure", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: "raw provider detail" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      })
-    );
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValue(privyJson({ error: "raw provider detail" }, 401));
     vi.stubGlobal("fetch", providerFetch);
     const { app, token } = buildApp();
 
@@ -406,16 +642,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     ["Privy 403", () => Promise.resolve(new Response(null, { status: 403 }))],
     ["Privy 429", () => Promise.resolve(new Response(null, { status: 429 }))],
     ["Privy 500", () => Promise.resolve(new Response(null, { status: 500 }))],
-    [
-      "malformed Privy 200",
-      () =>
-        Promise.resolve(
-          new Response(JSON.stringify({ wallets: [] }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          })
-        ),
-    ],
+    ["malformed Privy 200", () => Promise.resolve(privyJson({ wallets: [] }))],
     ["a network failure", () => Promise.reject(new Error("raw network detail"))],
   ])("keeps the setup retryable after %s", async (_label, providerResult) => {
     const providerFetch = vi.fn(providerResult);
@@ -640,10 +867,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
         )
         .bind(CONNECTION_ID)
         .run();
-      return new Response(JSON.stringify({ data: [] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return privyJson({ data: [] });
     });
     vi.stubGlobal("fetch", providerFetch);
     const { app, token } = buildApp();

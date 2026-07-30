@@ -178,27 +178,120 @@ describe("privy wallet provisioning", () => {
     vi.restoreAllMocks();
   });
 
+  it("reuses a wallet found by external ID before creating one", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(privyWalletList([PRIVY_WALLET]));
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).resolves.toEqual({
+      walletId: "wallet-existing",
+      address: EXISTING_ADDRESS,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(toUrlString(fetchMock.mock.calls[0]?.[0] as string | URL | Request)).toBe(
+      "https://privy.test/v1/wallets?external_id=sdp_connection_123&limit=1&include_archived=true"
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("creates a wallet with stable external and idempotency IDs", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(privyWalletList())
+      .mockResolvedValueOnce(jsonResponse({ id: "wallet-created", address: CREATED_ADDRESS }, 200));
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).resolves.toEqual({
+      walletId: "wallet-created",
+      address: CREATED_ADDRESS,
+    });
+
+    const createRequest = fetchMock.mock.calls[1]?.[1];
+    expect(JSON.parse(String(createRequest?.body))).toEqual({
+      chain_type: "solana",
+      external_id: "sdp_connection_123",
+    });
+    expect(new Headers(createRequest?.headers).get("privy-idempotency-key")).toBe("credential-456");
+  });
+
+  it("reconciles by external ID after an ambiguous create outcome", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(privyWalletList())
+      .mockRejectedValueOnce(new TypeError("connection reset"))
+      .mockResolvedValueOnce(privyWalletList([{ ...PRIVY_WALLET, id: "wallet-reconciled" }]));
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).resolves.toEqual({
+      walletId: "wallet-reconciled",
+      address: EXISTING_ADDRESS,
+    });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
+  });
+
+  it("surfaces a deterministic conflict found during reconciliation", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(privyWalletList())
+      .mockResolvedValueOnce(jsonResponse({ error: "rejected" }, 500))
+      .mockResolvedValueOnce(privyWalletList([{ ...PRIVY_WALLET, archived_at: Date.now() }]));
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+  });
+
+  it("requires external and idempotency IDs together", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      provisionTestPrivyWallet({ externalId: "sdp_connection_123" })
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a malformed list", {}, "NETWORK_ERROR"],
+    [
+      "an archived wallet",
+      { data: [{ ...PRIVY_WALLET, archived_at: 1_725_000_000_000 }] },
+      "CONFLICT",
+    ],
+    [
+      "another external ID",
+      { data: [{ ...PRIVY_WALLET, external_id: "sdp_connection_other" }] },
+      "CONFLICT",
+    ],
+    ["a non-Solana chain", { data: [{ ...PRIVY_WALLET, chain_type: "ethereum" }] }, "CONFLICT"],
+  ] as const)("fails closed when external-ID lookup returns %s", async (_case, body, code) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(body, 200));
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({ code });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
+  });
+
+  it.each([
+    ["wallet lookup", { walletId: "wallet-existing" }, "GET"],
+    ["legacy creation", {}, "POST"],
+  ] as const)("preserves %s", async (_case, options, method) => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse({ id: "wallet-existing", address: EXISTING_ADDRESS }, 200));
+
+    await expect(provisionTestPrivyWallet(options)).resolves.toEqual({
+      walletId: "wallet-existing",
+      address: EXISTING_ADDRESS,
+    });
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe(method);
+  });
+
   it.each([
     [400, "PROVIDER_NOT_CONFIGURED"],
     [503, "NETWORK_ERROR"],
   ] as const)("classifies HTTP %s create responses as %s", async (status, code) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "rejected" }, status));
 
-    await expect(
-      provisionPrivyWallet(
-        {
-          ENVIRONMENT: "development",
-          API_VERSION: "test",
-          DATABASE_URL: "postgresql://unused",
-          PRIVY_API_BASE_URL: "https://privy.test/v1",
-        } as Env,
-        {},
-        {
-          appId: "app-id",
-          appSecret: "app-secret",
-        }
-      )
-    ).rejects.toMatchObject({ code });
+    await expect(provisionTestPrivyWallet({})).rejects.toMatchObject({ code });
   });
 });
 
@@ -445,6 +538,39 @@ function createCoinbaseEnv(overrides: Partial<Env> = {}): Env {
     COINBASE_CDP_WALLET_SECRET: keyMaterial.privateKeyPkcs8Base64,
     ...overrides,
   } as Env;
+}
+
+const PRIVY_AUTHENTICATION = {
+  appId: "app-id",
+  appSecret: "app-secret",
+};
+const PRIVY_CREATE_OPTIONS = {
+  externalId: "sdp_connection_123",
+  idempotencyKey: "credential-456",
+};
+const PRIVY_WALLET = {
+  id: "wallet-existing",
+  address: EXISTING_ADDRESS,
+  chain_type: "solana",
+  external_id: PRIVY_CREATE_OPTIONS.externalId,
+};
+
+function createPrivyEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    ENVIRONMENT: "development",
+    API_VERSION: "test",
+    DATABASE_URL: "postgresql://unused",
+    PRIVY_API_BASE_URL: "https://privy.test/v1",
+    ...overrides,
+  } as Env;
+}
+
+function provisionTestPrivyWallet(options: Parameters<typeof provisionPrivyWallet>[1]) {
+  return provisionPrivyWallet(createPrivyEnv(), options, PRIVY_AUTHENTICATION);
+}
+
+function privyWalletList(wallets: unknown[] = []): Response {
+  return jsonResponse({ data: wallets }, 200);
 }
 
 function createParaEnv(overrides: Partial<Env> = {}): Env {

@@ -139,8 +139,6 @@ export const switchSigning = async (c: AppContext) => {
       projectId,
       {
         provider: targetProvider,
-        walletLabel: parsed.data.walletLabel,
-        requestId: c.get("requestId"),
       }
     );
     if (connectionTarget) {
