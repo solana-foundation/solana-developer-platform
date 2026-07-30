@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.51.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.50.1...v0.51.0) (2026-07-30)
+
+### Features
+
+* **web:** replace the mobile drawer with a bottom bar and More sheet ([#1008](https://github.com/solana-foundation/solana-developer-platform/pull/1008)) ([eeea224](https://github.com/solana-foundation/solana-developer-platform/commit/eeea2246e8e7d7b90f6db0f6623564a2b8cd45eb))
+* **sdp-web:** standardize header and tabbed headers title ([#1006](https://github.com/solana-foundation/solana-developer-platform/pull/1006)) ([9c9ad77](https://github.com/solana-foundation/solana-developer-platform/commit/9c9ad7759e6af2138c399ad81cead39c1ae5b497))
+* **api:** structured JSON logging for sdp-api + noConsole gate ([#993](https://github.com/solana-foundation/solana-developer-platform/pull/993)) ([ed427f1](https://github.com/solana-foundation/solana-developer-platform/commit/ed427f1106dd1abbd768403663da22723fa2aac0))
+
+### Bug Fixes
+
+* **web:** draw the dashboard shell while the session resolves ([#1010](https://github.com/solana-foundation/solana-developer-platform/pull/1010)) ([2b2bca2](https://github.com/solana-foundation/solana-developer-platform/commit/2b2bca22077f4f8c79b5cdfebfba83d16d3c7395))
+* prevent cross-tenant custody wallet binding ([#979](https://github.com/solana-foundation/solana-developer-platform/pull/979)) ([9372354](https://github.com/solana-foundation/solana-developer-platform/commit/93723543270a3ea14406866d171e7959d96b8ccd))
+
 ## [0.50.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.50.0...v0.50.1) (2026-07-30)
 
 ### Bug Fixes
