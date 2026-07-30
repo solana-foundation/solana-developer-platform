@@ -10,6 +10,7 @@ import {
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { normalizeApiKeyWalletPermissions } from "@/services/api-key-wallets.service";
+import { CUSTODY_WALLET_OWNER_CTE } from "@/services/stores/custody-wallet-owner";
 
 type WalletBindingInput = {
   walletId: string;
@@ -289,7 +290,8 @@ export async function assertWalletBindingsInScope(
   db: DatabaseClient,
   organizationId: string,
   keyProjectId: string,
-  bindings: ApiKeyWalletBinding[]
+  bindings: ApiKeyWalletBinding[],
+  options: { connectionEnabled?: boolean } = {}
 ): Promise<void> {
   if (bindings.length === 0) {
     return;
@@ -300,15 +302,23 @@ export async function assertWalletBindingsInScope(
 
   const rows = await db
     .prepare(
-      `SELECT w.wallet_id, c.project_id
-       FROM custody_wallets w
-       JOIN custody_configs c ON c.id = w.custody_config_id
-       WHERE c.organization_id = ?
-         AND c.status = 'active'
-         AND w.status = 'active'
-         AND w.wallet_id IN (${placeholders})`
+      `WITH ${CUSTODY_WALLET_OWNER_CTE}
+       SELECT o.wallet_id, o.project_id
+       FROM custody_wallet_owners o
+       WHERE o.organization_id = ?
+         AND o.owner_status = 'active'
+         AND o.status = 'active'
+         AND o.wallet_id IN (${placeholders})
+         AND (
+           o.owner_kind = 'config'
+           OR (
+             ? = TRUE
+             AND o.owner_kind = 'connection'
+             AND o.owner_usable
+           )
+         )`
     )
-    .bind(organizationId, ...walletIds)
+    .bind(organizationId, ...walletIds, options.connectionEnabled === true)
     .all<{ wallet_id: string; project_id: string | null }>();
 
   const walletScope = new Map<string, string | null>();

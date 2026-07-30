@@ -6,7 +6,6 @@ import type {
   WalletOperationPolicyEvaluation,
   WalletOperationStatus,
 } from "@sdp/types";
-import { getDb } from "@/db";
 import {
   type ApprovalRequestRow,
   type CreateApprovalRequestInput,
@@ -17,9 +16,9 @@ import {
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, conflict, internalError } from "@/lib/errors";
 import {
-  CustodyConfigStore,
-  type CustodyWalletLookup,
-} from "@/services/stores/custody-config.store";
+  type CustodyWalletWithProvider,
+  createSigningService,
+} from "@/services/domain/signing.service";
 import type { Env } from "@/types/env";
 import { createPolicyEvaluationInput } from "./policy-evaluation.service";
 import { PolicyFoundationService } from "./policy-foundation.service";
@@ -285,9 +284,8 @@ export async function resolvePolicyCustodyWallet(
   env: Env,
   auth: ApiKeyContext,
   walletId: string
-): Promise<CustodyWalletLookup | null> {
-  const store = new CustodyConfigStore(getDb(env), env);
-  return store.findActiveWalletByIdentifier(
+): Promise<CustodyWalletWithProvider | null> {
+  return createSigningService(env).getWalletById(
     auth.organizationId,
     auth.projectId ?? undefined,
     walletId

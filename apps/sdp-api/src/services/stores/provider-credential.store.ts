@@ -28,6 +28,14 @@ export interface ProviderCredentialRow {
   created_at: string;
 }
 
+export interface ProviderCredentialSecretRow extends ProviderCredentialRow {
+  source: "stored" | "runtime";
+  storage_backend: StoredCredentialSecret["storageBackend"];
+  secret_ref: string | null;
+  secret_version_ref: string | null;
+  encrypted_secret_payload: string | null;
+}
+
 export interface CustodyConnectionRow {
   id: string;
   organization_id: string;
@@ -122,18 +130,159 @@ export class ProviderCredentialStore {
     );
   }
 
-  async hasActiveProjectLegacyConfig(organizationId: string, projectId: string): Promise<boolean> {
-    const row = await this.db.queryOne<{ id: string }>(
-      `SELECT id
-       FROM custody_configs
+  async findCredentialForInstallCheck(
+    organizationId: string,
+    id: string,
+    options: { lock?: boolean } = {}
+  ): Promise<ProviderCredentialSecretRow | null> {
+    return this.db.queryOne<ProviderCredentialSecretRow>(
+      `SELECT id, organization_id, project_id, provider, label, scope, scope_key,
+              source, storage_backend, secret_ref, secret_version_ref,
+              encrypted_secret_payload, display_metadata, status, credential_version,
+              rotated_from_provider_credential_id, idempotency_key,
+              idempotency_fingerprint, created_at
+       FROM provider_credentials
+       WHERE id = ? AND organization_id = ? AND provider = 'privy'
+       ${options.lock ? "FOR UPDATE" : ""}`,
+      [id, organizationId]
+    );
+  }
+
+  async listInstallCheckConnections(
+    organizationId: string,
+    projectId: string,
+    providerCredentialId: string,
+    options: { lock?: boolean } = {}
+  ): Promise<CustodyConnectionRow[]> {
+    return this.db.queryMany<CustodyConnectionRow>(
+      `SELECT id, organization_id, project_id, provider, scope,
+              provider_credential_id, provider_credential_scope_key,
+              default_custody_wallet_id, status, setup_metadata,
+              last_check_status, last_check_at, last_check_failure_code,
+              activated_at, created_at
+       FROM custody_connections
        WHERE organization_id = ?
          AND project_id = ?
          AND provider = 'privy'
-         AND status = 'active'
-       LIMIT 1`,
-      [organizationId, projectId]
+         AND provider_credential_id = ?
+       ORDER BY created_at, id
+       ${options.lock ? "FOR UPDATE" : ""}`,
+      [organizationId, projectId, providerCredentialId]
     );
-    return row !== null;
+  }
+
+  async recordInstallCheckSuccess(params: {
+    providerCredentialId: string;
+    connectionId: string;
+    checkedAt: string;
+    providerAccountFingerprint: string;
+  }): Promise<ProviderCredentialRow | null> {
+    const credential = await this.db.queryOne<ProviderCredentialRow>(
+      `UPDATE provider_credentials
+       SET status = 'active',
+           last_validated_at = ?,
+           last_failure_code = NULL,
+           updated_at = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
+                 display_metadata, status, credential_version,
+                 rotated_from_provider_credential_id, idempotency_key,
+                 idempotency_fingerprint, created_at`,
+      [params.checkedAt, params.checkedAt, params.providerCredentialId]
+    );
+    if (!credential) {
+      return null;
+    }
+
+    const updated = await this.db.execute(
+      `UPDATE custody_connections
+       SET setup_metadata =
+             setup_metadata || CAST(? AS jsonb),
+           last_check_status = 'success',
+           last_check_at = ?,
+           last_check_failure_code = NULL,
+           updated_at = ?
+       WHERE id = ?
+         AND provider_credential_id = ?
+         AND status = 'pending'`,
+      [
+        JSON.stringify({
+          providerAccountFingerprint: params.providerAccountFingerprint,
+        }),
+        params.checkedAt,
+        params.checkedAt,
+        params.connectionId,
+        params.providerCredentialId,
+      ]
+    );
+    if (updated !== 1) {
+      throw new Error("Install Check connection changed during success persistence");
+    }
+    return credential;
+  }
+
+  async recordInstallCheckFailure(params: {
+    providerCredentialId: string;
+    connectionId: string;
+    checkedAt: string;
+  }): Promise<ProviderCredentialRow | null> {
+    const credential = await this.db.queryOne<ProviderCredentialRow>(
+      `UPDATE provider_credentials
+       SET status = 'failed_validation',
+           encrypted_secret_payload =
+             CASE
+               WHEN storage_backend = 'encrypted_db' THEN NULL
+               ELSE encrypted_secret_payload
+             END,
+           last_failed_at = ?,
+           last_failure_code = 'invalid_credentials',
+           updated_at = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
+                 display_metadata, status, credential_version,
+                 rotated_from_provider_credential_id, idempotency_key,
+                 idempotency_fingerprint, created_at`,
+      [params.checkedAt, params.checkedAt, params.providerCredentialId]
+    );
+    if (!credential) {
+      return null;
+    }
+
+    const updated = await this.db.execute(
+      `UPDATE custody_connections
+       SET status = 'failed',
+           last_check_status = 'failed',
+           last_check_at = ?,
+           last_check_failure_code = 'invalid_credentials',
+           updated_at = ?
+       WHERE id = ?
+         AND provider_credential_id = ?
+         AND status = 'pending'`,
+      [params.checkedAt, params.checkedAt, params.connectionId, params.providerCredentialId]
+    );
+    if (updated !== 1) {
+      throw new Error("Install Check connection changed during failure persistence");
+    }
+    return credential;
+  }
+
+  async recordInstallCheckRetryUnknown(params: {
+    providerCredentialId: string;
+    connectionId: string;
+    checkedAt: string;
+  }): Promise<boolean> {
+    const updated = await this.db.execute(
+      `UPDATE custody_connections
+       SET last_check_status = 'retry_unknown',
+           last_check_at = ?,
+           last_check_failure_code = 'provider_response_unknown',
+           updated_at = ?
+       WHERE id = ?
+         AND provider_credential_id = ?
+         AND status = 'pending'`,
+      [params.checkedAt, params.checkedAt, params.connectionId, params.providerCredentialId]
+    );
+    return updated === 1;
   }
 
   async insertCredential(params: {

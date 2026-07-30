@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAssetProfilesEnabled, isPrivyByokProvisioningEnabled } from "./feature-flags";
+import { isAssetProfilesEnabled, isPrivyByokEnabled } from "./feature-flags";
 
 describe("isAssetProfilesEnabled", () => {
   it.each([
@@ -57,19 +57,19 @@ describe("isAssetProfilesEnabled", () => {
   });
 });
 
-describe("isPrivyByokProvisioningEnabled", () => {
+describe("isPrivyByokEnabled", () => {
   it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
     expect(
-      isPrivyByokProvisioningEnabled({
-        PRIVY_BYOK_PROVISIONING_ENABLED: flag,
+      isPrivyByokEnabled({
+        PRIVY_BYOK_ENABLED: flag,
       })
     ).toBe(false);
   });
 
   it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
     expect(
-      isPrivyByokProvisioningEnabled({
-        PRIVY_BYOK_PROVISIONING_ENABLED: flag,
+      isPrivyByokEnabled({
+        PRIVY_BYOK_ENABLED: flag,
       })
     ).toBe(true);
   });

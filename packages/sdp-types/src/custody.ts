@@ -546,7 +546,6 @@ export interface CustodyWalletTokenBalance {
 }
 
 export interface CustodyWalletMetadata extends CustodyWalletSummary {
-  custodyConfigId: string;
   provider: CustodyProvider;
 }
 
@@ -611,6 +610,12 @@ export interface DeleteWalletResponse {
 
 export interface InitializeSigningResponse {
   configId: string;
+  publicKey: string;
+  walletId: string;
+}
+
+export interface SwitchSigningResponse {
+  configId?: string;
   publicKey: string;
   walletId: string;
 }

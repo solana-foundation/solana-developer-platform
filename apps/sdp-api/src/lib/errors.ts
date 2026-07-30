@@ -3,6 +3,7 @@
  */
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
+import type { SigningError } from "@sdp/custody/signing";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 
@@ -238,6 +239,24 @@ export function providerNotConfigured(message?: string): AppError {
 
 export function providerUnavailable(message?: string, details?: Record<string, unknown>): AppError {
   return new AppError("PROVIDER_UNAVAILABLE", message, details);
+}
+
+export function mapWalletCreationSigningError(
+  error: SigningError,
+  notFoundCode: "NOT_FOUND" | "CONFLICT"
+): AppError {
+  switch (error.code) {
+    case "NOT_FOUND":
+      return new AppError(notFoundCode, redactCredentialString(error.message));
+    case "CONFLICT":
+      return conflict(redactCredentialString(error.message));
+    case "PROVIDER_UNAVAILABLE":
+      return providerUnavailable("The custody provider is temporarily unavailable");
+    case "INTERNAL_ERROR":
+      return internalError("The wallet could not be created");
+    default:
+      return badRequest(redactCredentialString(error.message));
+  }
 }
 
 export function estimateNotAvailable(

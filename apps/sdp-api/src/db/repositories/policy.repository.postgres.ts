@@ -5,6 +5,7 @@ import {
   parseOptionalPostgresJson,
 } from "@/db/postgres-utils";
 import { badRequest } from "@/lib/errors";
+import { CUSTODY_WALLET_OWNER_CTE } from "@/services/stores/custody-wallet-owner";
 import type {
   ActivateApiKeyControlProfileRevisionInput,
   ActivateWalletControlProfileRevisionInput,
@@ -56,8 +57,10 @@ import {
 const WALLET_CONTROL_PROFILE_REVISION_HISTORY_LIMIT = 100;
 
 const POLICY_CONTROL_INVENTORY_CTE = `
-WITH scope AS (
-  SELECT ?::text AS organization_id, ?::text AS project_id, ?::text[] AS wallet_ids
+WITH ${CUSTODY_WALLET_OWNER_CTE},
+scope AS (
+  SELECT ?::text AS organization_id, ?::text AS project_id, ?::text[] AS wallet_ids,
+         ?::boolean AS connection_enabled
 ),
 wallet_targets AS (
   SELECT
@@ -65,16 +68,23 @@ wallet_targets AS (
     w.wallet_id,
     COALESCE(NULLIF(w.label, ''), w.wallet_id) AS display_name,
     w.public_key AS wallet_address,
-    c.provider,
+    w.provider,
     COALESCE(w.updated_at, w.created_at) AS target_updated_at
-  FROM custody_wallets w
-  INNER JOIN custody_configs c ON c.id = w.custody_config_id
+  FROM custody_wallet_owners w
   INNER JOIN scope s
-    ON c.organization_id = s.organization_id
-   AND c.project_id IS NOT DISTINCT FROM s.project_id
-  WHERE c.status = 'active'
+    ON w.organization_id = s.organization_id
+   AND w.project_id IS NOT DISTINCT FROM s.project_id
+  WHERE w.owner_status = 'active'
     AND w.status = 'active'
     AND (s.wallet_ids IS NULL OR w.wallet_id = ANY(s.wallet_ids))
+    AND (
+      w.owner_kind = 'config'
+      OR (
+        s.connection_enabled
+        AND w.owner_kind = 'connection'
+        AND w.owner_usable
+      )
+    )
 ),
 api_key_targets AS (
   SELECT
@@ -919,7 +929,10 @@ function walletPolicyEvaluationAuditFilters(input: ListWalletPolicyEvaluationAud
   return { conditions, params };
 }
 
-export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
+export function createPostgresPolicyRepository(
+  db: AppDb,
+  options: { connectionEnabled?: boolean } = {}
+): PolicyRepository {
   return {
     async listPolicyControlInventory(input: ListPolicyControlInventoryInput) {
       const page = Math.max(input.page ?? 1, 1);
@@ -947,6 +960,7 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
           input.organizationId,
           input.projectId,
           input.walletIds ?? null,
+          options.connectionEnabled === true,
           ...(input.status ? [input.status] : []),
           ...summaryFilters.params
         )
@@ -968,6 +982,7 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
           input.organizationId,
           input.projectId,
           input.walletIds ?? null,
+          options.connectionEnabled === true,
           ...rowFilters.params,
           pageSize,
           offset
@@ -1538,7 +1553,8 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     async getApiKeyWalletPolicyTarget(apiKeyId: string, walletId: string) {
       const row = await db
         .prepare(
-          `WITH target_api_key AS (
+          `WITH ${CUSTODY_WALLET_OWNER_CTE},
+           target_api_key AS (
              SELECT id, organization_id, project_id
              FROM api_keys
              WHERE id = ?
@@ -1556,31 +1572,37 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
              ak.project_id,
              w.wallet_id,
              w.id AS custody_wallet_id,
-             c.project_id AS wallet_project_id,
+             w.project_id AS wallet_project_id,
              COALESCE(es.binding_count, 0) AS endpoint_binding_count,
              perm.id AS endpoint_wallet_binding_id
            FROM target_api_key ak
-           JOIN custody_configs c
-             ON c.organization_id = ak.organization_id
-            AND c.status = 'active'
-           JOIN custody_wallets w
-             ON w.custody_config_id = c.id
+           JOIN custody_wallet_owners w
+             ON w.organization_id = ak.organization_id
+            AND w.owner_status = 'active'
             AND w.status = 'active'
             AND w.wallet_id = ?
+            AND (
+              w.owner_kind = 'config'
+              OR (
+                ? = TRUE
+                AND w.owner_kind = 'connection'
+                AND w.owner_usable
+              )
+            )
            LEFT JOIN endpoint_scope es ON es.api_key_id = ak.id
            LEFT JOIN api_key_wallet_permissions perm
              ON perm.api_key_id = ak.id
             AND perm.wallet_id = w.wallet_id
            ORDER BY
              CASE
-               WHEN c.project_id = ak.project_id THEN 0
-               WHEN c.project_id IS NULL THEN 1
+               WHEN w.project_id = ak.project_id THEN 0
+               WHEN w.project_id IS NULL THEN 1
                ELSE 2
              END,
              w.created_at DESC
            LIMIT 1`
         )
-        .bind(apiKeyId, apiKeyId, walletId)
+        .bind(apiKeyId, apiKeyId, walletId, options.connectionEnabled === true)
         .first<Record<string, unknown>>();
 
       return row ? mapApiKeyWalletPolicyTargetRow(row) : null;

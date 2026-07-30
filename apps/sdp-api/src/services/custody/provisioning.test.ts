@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   provisionCoinbaseCdpAccount,
   provisionParaWallet,
+  provisionPrivyWallet,
   provisionUtilaWallet,
 } from "@/services/custody/provisioning";
 import type { Env } from "@/types/env";
@@ -195,6 +196,35 @@ describe("coinbase account provisioning", () => {
     ).rejects.toThrowError(/could not be resolved by name/i);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("privy wallet provisioning", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    [400, "PROVIDER_NOT_CONFIGURED"],
+    [503, "NETWORK_ERROR"],
+  ] as const)("classifies HTTP %s create responses as %s", async (status, code) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "rejected" }, status));
+
+    await expect(
+      provisionPrivyWallet(
+        {
+          ENVIRONMENT: "development",
+          API_VERSION: "test",
+          DATABASE_URL: "postgresql://unused",
+          PRIVY_API_BASE_URL: "https://privy.test/v1",
+        } as Env,
+        {},
+        {
+          appId: "app-id",
+          appSecret: "app-secret",
+        }
+      )
+    ).rejects.toMatchObject({ code });
   });
 });
 

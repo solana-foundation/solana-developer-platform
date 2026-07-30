@@ -1,4 +1,4 @@
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/custody";
+import { CUSTODY_PROVIDERS, type CustodyProvider, redactCredentialString } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
@@ -11,7 +11,8 @@ import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, mapWalletCreationSigningError } from "@/lib/errors";
+import { isPrivyByokEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
@@ -28,7 +29,6 @@ import {
   attachUsdValuesToBalanceMap,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
-import { assertProviderAvailable } from "@/services/provider-availability.service";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
 import {
   type CustodyWalletAggregateResponse,
@@ -50,22 +50,6 @@ const WALLET_BALANCE_CACHE_TTL_MS = 10_000;
 interface CacheEntry<T> {
   expiresAt: number;
   value: T;
-}
-
-interface WalletSummaryConfigRow {
-  id: string;
-}
-
-interface WalletSummaryRow {
-  id: string;
-  custody_config_id: string;
-  wallet_id: string;
-  public_key: string;
-  label: string | null;
-  purpose: string | null;
-  status: string;
-  created_at: string;
-  provider: string;
 }
 
 const walletSummaryCache = new Map<string, CacheEntry<CustodyWalletSummary[]>>();
@@ -127,182 +111,38 @@ function logWalletStep(
   );
 }
 
-async function resolveDefaultConfigId(
-  db: DatabaseClient,
-  organizationId: string,
-  projectId?: string
-): Promise<string | null> {
-  if (projectId) {
-    const scopedDefault = await db
-      .prepare(
-        `SELECT default_custody_config_id
-         FROM custody_scope_defaults
-         WHERE organization_id = ? AND project_id = ?
-         LIMIT 1`
-      )
-      .bind(organizationId, projectId)
-      .first<{ default_custody_config_id: string }>();
-
-    if (scopedDefault?.default_custody_config_id) {
-      return scopedDefault.default_custody_config_id;
-    }
-  }
-
-  const orgDefault = await db
-    .prepare(
-      `SELECT default_custody_config_id
-       FROM custody_scope_defaults
-       WHERE organization_id = ? AND project_id IS NULL
-       LIMIT 1`
-    )
-    .bind(organizationId)
-    .first<{ default_custody_config_id: string }>();
-
-  return orgDefault?.default_custody_config_id ?? null;
-}
-
-async function resolveSummaryConfigIds(
-  c: AppContext,
-  filters: ReturnType<typeof resolveWalletFilters>
-): Promise<{ configIds: string[]; defaultConfigId: string | null }> {
-  const actor = resolveActor(c);
-  const defaultConfigId = await resolveDefaultConfigId(
-    getDb(c.env),
-    actor.organizationId,
-    filters.projectId
-  );
-
-  if (filters.includeAllProviders) {
-    const includeAllProvidersQuery = filters.projectId
-      ? `SELECT id
-         FROM custody_configs
-         WHERE organization_id = ?
-           AND status = 'active'
-           AND (project_id = ? OR project_id IS NULL)
-           ${filters.provider ? "AND provider = ?" : ""}
-         ORDER BY updated_at DESC, id DESC`
-      : `SELECT id
-         FROM custody_configs
-         WHERE organization_id = ?
-           AND status = 'active'
-           AND project_id IS NULL
-           ${filters.provider ? "AND provider = ?" : ""}
-         ORDER BY updated_at DESC, id DESC`;
-
-    const rows = await getDb(c.env)
-      .prepare(includeAllProvidersQuery)
-      .bind(
-        ...(filters.projectId
-          ? filters.provider
-            ? [actor.organizationId, filters.projectId, filters.provider]
-            : [actor.organizationId, filters.projectId]
-          : filters.provider
-            ? [actor.organizationId, filters.provider]
-            : [actor.organizationId])
-      )
-      .all<WalletSummaryConfigRow>();
-
-    return {
-      configIds: (rows.results ?? []).map((row) => row.id),
-      defaultConfigId,
-    };
-  }
-
-  if (filters.provider) {
-    const providerRow = filters.projectId
-      ? await getDb(c.env)
-          .prepare(
-            `SELECT id
-           FROM custody_configs
-           WHERE organization_id = ?
-             AND status = 'active'
-             AND provider = ?
-             AND (project_id = ? OR project_id IS NULL)
-           ORDER BY CASE WHEN project_id = ? THEN 0 ELSE 1 END, updated_at DESC, id DESC
-           LIMIT 1`
-          )
-          .bind(actor.organizationId, filters.provider, filters.projectId, filters.projectId)
-          .first<WalletSummaryConfigRow>()
-      : await getDb(c.env)
-          .prepare(
-            `SELECT id
-           FROM custody_configs
-           WHERE organization_id = ?
-             AND status = 'active'
-             AND provider = ?
-             AND project_id IS NULL
-           LIMIT 1`
-          )
-          .bind(actor.organizationId, filters.provider)
-          .first<WalletSummaryConfigRow>();
-
-    return {
-      configIds: providerRow?.id ? [providerRow.id] : [],
-      defaultConfigId,
-    };
-  }
-
-  return {
-    configIds: defaultConfigId ? [defaultConfigId] : [],
-    defaultConfigId,
-  };
-}
-
 async function queryWalletSummaries(
   c: AppContext,
   filters: ReturnType<typeof resolveWalletFilters>
 ): Promise<CustodyWalletSummary[]> {
+  const actor = resolveActor(c);
   const auth = getAuth(c);
-  const { configIds, defaultConfigId } = await resolveSummaryConfigIds(c, filters);
-  if (configIds.length === 0) {
-    return [];
-  }
-
   const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"]);
   if (allowedWalletIds !== null && allowedWalletIds.length === 0) {
     return [];
   }
-  const configPlaceholders = configIds.map(() => "?").join(", ");
-  const allowedWalletClause =
-    allowedWalletIds !== null && allowedWalletIds.length > 0
-      ? `AND w.wallet_id IN (${allowedWalletIds.map(() => "?").join(", ")})`
-      : "";
+  const allowed = allowedWalletIds ? new Set(allowedWalletIds) : null;
+  const wallets = await signingServiceModule
+    .createSigningService(c.env)
+    .getWalletsWithProviders(actor.organizationId, filters.projectId, {
+      provider: filters.provider,
+      includeAllProviders: filters.includeAllProviders,
+    });
 
-  const rows = await getDb(c.env)
-    .prepare(
-      `SELECT
-       w.id,
-       w.custody_config_id,
-       w.wallet_id,
-       w.public_key,
-       w.label,
-       w.purpose,
-       w.status,
-       w.created_at,
-       c.provider
-     FROM custody_wallets w
-     JOIN custody_configs c ON c.id = w.custody_config_id
-     WHERE w.status = 'active'
-       AND c.status = 'active'
-       AND c.id IN (${configPlaceholders})
-       ${allowedWalletClause}
-     ORDER BY CASE WHEN c.id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC, w.created_at ASC`
-    )
-    .bind(...configIds, ...(allowedWalletIds ?? []), defaultConfigId ?? "")
-    .all<WalletSummaryRow>();
-
-  return (rows.results ?? []).map((row) => ({
-    id: row.id,
-    custodyConfigId: row.custody_config_id,
-    provider: row.provider as CustodyWalletSummary["provider"],
-    isDefaultProvider: row.custody_config_id === defaultConfigId,
-    walletId: row.wallet_id,
-    publicKey: row.public_key,
-    label: row.label,
-    purpose: row.purpose,
-    status: row.status as CustodyWalletSummary["status"],
-    createdAt: row.created_at,
-  }));
+  return wallets
+    .filter((wallet) => !allowed || allowed.has(wallet.walletId))
+    .map((wallet) => ({
+      id: wallet.id,
+      custodyConfigId: wallet.custodyConfigId,
+      provider: wallet.provider,
+      isDefaultProvider: wallet.isDefaultProvider,
+      walletId: wallet.walletId,
+      publicKey: wallet.publicKey,
+      label: wallet.label,
+      purpose: wallet.purpose,
+      status: wallet.status,
+      createdAt: wallet.createdAt,
+    }));
 }
 
 function buildWalletCacheKey(
@@ -323,6 +163,7 @@ function buildWalletCacheKey(
     authType: auth.authType,
     apiKeyId: auth.apiKeyId,
     allowedWalletIds: allowedWalletIds ? [...allowedWalletIds].sort() : null,
+    privyByokEnabled: isPrivyByokEnabled(c.env),
   });
 }
 
@@ -479,6 +320,7 @@ export const createWallet = async (c: AppContext) => {
       label: parsed.data.label,
       purpose: parsed.data.purpose,
       setDefault: parsed.data.setDefault,
+      requestId: c.get("requestId"),
     });
 
     const response: CustodyWalletResponse = {
@@ -498,10 +340,7 @@ export const createWallet = async (c: AppContext) => {
     return created(c, response);
   } catch (error) {
     if (error instanceof SigningError) {
-      if (error.code === "NOT_FOUND") {
-        throw new AppError("NOT_FOUND", error.message);
-      }
-      throw badRequest(error.message);
+      throw mapWalletCreationSigningError(error, "NOT_FOUND");
     }
     throw error;
   }
@@ -574,57 +413,35 @@ export const setDefaultWallet = async (c: AppContext) => {
 
   const projectId = c.get("projectId");
   const signingService = signingServiceModule.createSigningService(c.env);
-  const config = parsed.data.provider
-    ? await signingService.getConfigurationByProvider(
-        actor.organizationId,
-        projectId,
-        parsed.data.provider
-      )
-    : await signingService.getConfiguration(actor.organizationId, projectId);
-
-  if (!config?.id) {
-    throw new AppError("CONFLICT", "Wallet signing is not initialized");
+  let wallet: signingServiceModule.CustodyWalletWithProvider;
+  try {
+    wallet = await signingService.setDefaultWallet(
+      actor.organizationId,
+      projectId,
+      parsed.data.walletId,
+      parsed.data.provider
+    );
+  } catch (error) {
+    if (error instanceof SigningError) {
+      if (error.code === "WALLET_NOT_FOUND") {
+        throw badRequest("Unknown walletId for this wallet signing configuration");
+      }
+      if (error.code === "CONFLICT") {
+        throw new AppError("CONFLICT", redactCredentialString(error.message));
+      }
+      throw badRequest(redactCredentialString(error.message));
+    }
+    throw error;
   }
-
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    actor.organizationId,
-    "custody",
-    config.provider
-  );
-
-  const wallet = await getDb(c.env)
-    .prepare(
-      `SELECT id
-     FROM custody_wallets
-     WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
-     LIMIT 1`
-    )
-    .bind(config.id, parsed.data.walletId)
-    .first<{ id: string }>();
-
-  if (!wallet) {
-    throw badRequest("Unknown walletId for this wallet signing configuration");
-  }
-
-  await getDb(c.env)
-    .prepare(
-      `UPDATE custody_configs
-     SET default_wallet_id = ?, updated_at = datetime('now')
-     WHERE id = ?`
-    )
-    .bind(parsed.data.walletId, config.id)
-    .run();
 
   const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "update",
-    resourceType: "custody_config",
-    resourceId: config.id,
+    resourceType: wallet.custodyConfigId ? "custody_config" : "custody_wallet",
+    resourceId: wallet.custodyConfigId ?? wallet.id,
     metadata: {
       event: "default_wallet_changed",
-      provider: config.provider,
+      provider: wallet.provider,
       walletId: parsed.data.walletId,
       projectId: projectId ?? null,
     },

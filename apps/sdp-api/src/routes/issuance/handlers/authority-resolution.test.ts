@@ -1,8 +1,8 @@
 import type { Token } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiKeyContext } from "@/lib/auth";
+import { SigningService } from "@/services/domain/signing.service";
 import * as solanaServices from "@/services/solana";
-import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env as testEnv } from "@/test/helpers/env";
 import {
   getInitialPermanentDelegateAuthority,
@@ -161,7 +161,7 @@ describe("authority-resolution", () => {
     });
   });
 
-  it("uses the current authority wallet when the preferred signing wallet is stale", async () => {
+  it("uses a Connection-owned current authority when the preferred wallet is stale", async () => {
     const auth: ApiKeyContext = {
       id: "user_test",
       organizationId: "org_test",
@@ -185,18 +185,19 @@ describe("authority-resolution", () => {
         address: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
       } as never);
 
-    vi.spyOn(CustodyConfigStore.prototype, "findActiveWalletByPublicKey").mockResolvedValue({
-      id: "cwlt_root",
-      custodyConfigId: "cust_cfg",
-      walletId: "wal_root",
-      publicKey: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
-      label: "Root",
-      purpose: "root",
-      status: "active",
-      createdAt: new Date().toISOString(),
-      provider: "privy",
-      projectId: "proj_test",
-    });
+    const findAuthorityWallet = vi
+      .spyOn(SigningService.prototype, "getWalletByPublicKey")
+      .mockResolvedValue({
+        id: "cwlt_root",
+        walletId: "wal_root",
+        publicKey: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
+        label: "Root",
+        purpose: "root",
+        status: "active",
+        createdAt: new Date().toISOString(),
+        provider: "privy",
+        isDefaultProvider: true,
+      });
 
     const result = await resolveAuthoritySigner({
       env: {
@@ -211,6 +212,11 @@ describe("authority-resolution", () => {
 
     expect(result.walletId).toBe("wal_root");
     expect(result.signer.address).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
+    expect(findAuthorityWallet).toHaveBeenCalledWith(
+      "org_test",
+      "proj_test",
+      "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9"
+    );
     expect(createOrgSignerMock).toHaveBeenCalledTimes(2);
   });
 

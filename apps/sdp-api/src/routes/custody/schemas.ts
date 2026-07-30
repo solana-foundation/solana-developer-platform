@@ -15,6 +15,7 @@ import type {
   InitializeSigningResponse,
   SignerCheckResponse,
   SwitchProviderOptionsResponse,
+  SwitchSigningResponse,
 } from "@sdp/types";
 import { z } from "zod";
 
@@ -224,4 +225,5 @@ export type {
   InitializeSigningResponse,
   SignerCheckResponse,
   SwitchProviderOptionsResponse,
+  SwitchSigningResponse,
 };

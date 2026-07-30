@@ -325,7 +325,7 @@ export async function provisionPrivyWallet(
   });
 
   if (!created?.id || !created?.address) {
-    throw new SigningError("Privy wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+    throw new SigningError("Privy wallet creation outcome is unknown", "NETWORK_ERROR");
   }
 
   return { walletId: created.id, address: created.address };
@@ -848,7 +848,7 @@ async function privyRequest<T>(
       const errorText = await readErrorResponseText(response);
       throw new SigningError(
         `Privy API error: ${response.status} - ${errorText}`,
-        "PROVIDER_NOT_CONFIGURED"
+        response.status >= 500 ? "NETWORK_ERROR" : "PROVIDER_NOT_CONFIGURED"
       );
     }
 

@@ -4,7 +4,8 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, badRequest, mapWalletCreationSigningError, notFound } from "@/lib/errors";
+import { isPrivyByokEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
@@ -145,15 +146,13 @@ export const createProjectApiKey = async (c: AppContext) => {
       const wallet = await signingService.createWallet(auth.organizationId, projectId, {
         label: walletLabel,
         purpose: walletPurpose as WalletPurpose | undefined,
+        requestId: c.get("requestId"),
       });
       resolvedSigningWalletId = wallet.walletId;
       resolvedWalletBindings = [{ walletId: wallet.walletId, permissions: ["*"] }];
     } catch (error) {
       if (error instanceof SigningError) {
-        if (error.code === "NOT_FOUND") {
-          throw new AppError("CONFLICT", error.message);
-        }
-        throw badRequest(error.message);
+        throw mapWalletCreationSigningError(error, "CONFLICT");
       }
       throw error;
     }
@@ -162,7 +161,10 @@ export const createProjectApiKey = async (c: AppContext) => {
       getDb(c.env),
       auth.organizationId,
       projectId,
-      resolvedWalletBindings
+      resolvedWalletBindings,
+      {
+        connectionEnabled: isPrivyByokEnabled(c.env),
+      }
     );
   }
 

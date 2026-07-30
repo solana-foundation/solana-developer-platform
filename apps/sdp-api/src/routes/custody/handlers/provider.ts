@@ -4,7 +4,7 @@ import { SigningError } from "@sdp/custody/signing";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";
-import { isPrivyByokProvisioningEnabled } from "@/lib/feature-flags";
+import { isPrivyByokEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
@@ -26,6 +26,7 @@ import {
   initializeSigningSchema,
   type SwitchProviderOptionsResponse,
   type SwitchSigningRequest,
+  type SwitchSigningResponse,
   switchSigningSchema,
 } from "../schemas";
 
@@ -98,14 +99,41 @@ export const switchSigning = async (c: AppContext) => {
   const projectId = c.get("projectId");
   const targetProvider = parsed.data.provider;
 
-  const existingScopeConfig = await findScopeConfigByProvider(
-    c,
-    actor.organizationId,
-    projectId,
-    targetProvider
-  );
-
   try {
+    const connectionTarget = await signingService.switchCustodyTarget(
+      actor.organizationId,
+      projectId,
+      {
+        provider: targetProvider,
+        walletLabel: parsed.data.walletLabel,
+        requestId: c.get("requestId"),
+      }
+    );
+    if (connectionTarget) {
+      await auditService.log(c, {
+        action: "update",
+        resourceType: "custody_connection",
+        resourceId: connectionTarget.connectionId,
+        metadata: {
+          event: "default_provider_changed",
+          provider: targetProvider,
+          projectId: projectId ?? null,
+        },
+      });
+
+      clearWalletCaches();
+      return created(c, {
+        publicKey: connectionTarget.wallet.publicKey,
+        walletId: connectionTarget.wallet.walletId,
+      } satisfies SwitchSigningResponse);
+    }
+
+    const existingScopeConfig = await findScopeConfigByProvider(
+      c,
+      actor.organizationId,
+      projectId,
+      targetProvider
+    );
     let result: SigningInitializationResult;
 
     if (existingScopeConfig?.status === "active") {
@@ -116,16 +144,18 @@ export const switchSigning = async (c: AppContext) => {
         "custody",
         targetProvider
       );
-      await signingService.setDefaultConfiguration(
+      const selectedWallet = await signingService.setDefaultConfiguration(
         actor.organizationId,
         projectId,
         existingScopeConfig.id
       );
-      result = await getActiveConfigInitializationResult(
-        c,
-        existingScopeConfig.id,
-        existingScopeConfig.default_wallet_id
-      );
+      result = selectedWallet
+        ? { configId: existingScopeConfig.id, ...selectedWallet }
+        : await getActiveConfigInitializationResult(
+            c,
+            existingScopeConfig.id,
+            existingScopeConfig.default_wallet_id
+          );
 
       await logDefaultProviderChanged(c, auditService, existingScopeConfig.id, {
         projectId,
@@ -142,11 +172,14 @@ export const switchSigning = async (c: AppContext) => {
         parsed.data
       );
 
-      await signingService.setDefaultConfiguration(
+      const selectedWallet = await signingService.setDefaultConfiguration(
         actor.organizationId,
         projectId,
         result.configId
       );
+      if (selectedWallet) {
+        result = { configId: result.configId, ...selectedWallet };
+      }
 
       const wasReactivated =
         existingScopeConfig?.status === "inactive" && existingScopeConfig.id === result.configId;
@@ -170,7 +203,7 @@ export const switchSigning = async (c: AppContext) => {
 
     clearWalletCaches();
 
-    return created(c, toInitializeSigningResponse(result));
+    return created(c, toSwitchSigningResponse(result));
   } catch (error) {
     handleSigningInitializationError(error);
   }
@@ -182,31 +215,36 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
   const signingService = createSigningService(c.env);
   const enabledProviders = (await getEnabledProviders(c.env, getDb(c.env), actor.organizationId))
     .custody;
-  const [reuseState, configurations] = await Promise.all([
+  const [reuseState, configurations, selectedConnection] = await Promise.all([
     signingService.getProviderReuseState(actor.organizationId, projectId),
     signingService.getConfigurations(actor.organizationId, projectId),
+    signingService.getSelectedConnectionProjection(actor.organizationId, projectId),
   ]);
 
   const activeProviders = new Set(configurations.configs.map((config) => config.provider));
-  const defaultProvider =
+  let defaultProvider =
     configurations.configs.find((config) => config.id === configurations.defaultConfigId)
       ?.provider ?? null;
+  if (selectedConnection) {
+    defaultProvider = selectedConnection.provider;
+    activeProviders.delete(selectedConnection.provider);
+    if (selectedConnection.usable) {
+      activeProviders.add(selectedConnection.provider);
+    }
+  }
+  const visibleProviders = new Set(enabledProviders);
+  if (selectedConnection) {
+    visibleProviders.add(selectedConnection.provider);
+  }
+  const reusableWallets: Partial<Record<CustodyProvider, boolean>> = reuseState;
 
   const response: SwitchProviderOptionsResponse = {
-    providers: CUSTODY_PROVIDERS.filter((provider) => enabledProviders.includes(provider)).map(
+    providers: CUSTODY_PROVIDERS.filter((provider) => visibleProviders.has(provider)).map(
       (provider) => {
         const hasReusableWallet =
-          provider === "privy"
-            ? reuseState.privy
-            : provider === "coinbase_cdp"
-              ? reuseState.coinbase_cdp
-              : provider === "para"
-                ? reuseState.para
-                : provider === "turnkey"
-                  ? reuseState.turnkey
-                  : provider === "utila"
-                    ? reuseState.utila
-                    : false;
+          provider === "privy" && selectedConnection
+            ? selectedConnection.usable
+            : (reusableWallets[provider] ?? false);
 
         const needsWalletLabel =
           provider === "fireblocks" ? false : provider === "local" ? true : !hasReusableWallet;
@@ -338,6 +376,9 @@ async function assertFreshPrivyLegacySetupAllowed(
   if (!projectId) {
     throw badRequest("Project scope is required");
   }
+  if (!isPrivyByokEnabled(c.env)) {
+    return;
+  }
 
   const blockingConnection = await getDb(c.env)
     .prepare(
@@ -361,7 +402,7 @@ async function assertFreshPrivyLegacySetupAllowed(
   }
 
   const availability = await getProviderAvailability(c.env, getDb(c.env), organizationId);
-  if (availability.providers.custody.privy.entitled && isPrivyByokProvisioningEnabled(c.env)) {
+  if (availability.providers.custody.privy.entitled && isPrivyByokEnabled(c.env)) {
     throw forbidden("New Privy setup must use stored credentials");
   }
 }
@@ -533,8 +574,25 @@ function toInitializeSigningResponse(
   };
 }
 
+function toSwitchSigningResponse(result: SigningInitializationResult): SwitchSigningResponse {
+  return {
+    configId: result.configId,
+    publicKey: result.publicKey,
+    walletId: result.walletId,
+  };
+}
+
 function handleSigningInitializationError(error: unknown): never {
   if (error instanceof SigningError) {
+    if (error.code === "CONFLICT") {
+      throw new AppError("CONFLICT", redactCredentialString(error.message));
+    }
+    if (error.code === "PROVIDER_UNAVAILABLE") {
+      throw new AppError("PROVIDER_UNAVAILABLE", "The custody provider is temporarily unavailable");
+    }
+    if (error.code === "INTERNAL_ERROR") {
+      throw new AppError("INTERNAL_ERROR", "The custody target could not be updated");
+    }
     if (error.code === "ALREADY_INITIALIZED") {
       throw new AppError("CONFLICT", redactCredentialString(error.message));
     }

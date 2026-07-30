@@ -30,11 +30,16 @@ import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
+import { isPrivyByokEnabled } from "@/lib/feature-flags";
 import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
+import {
+  CredentialSecretStoreError,
+  createCredentialSecretStore,
+} from "@/services/credential-secret-store";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
@@ -44,7 +49,10 @@ import {
   custodyProviderCanSign,
   shouldSetCustodyScopeDefault,
 } from "@/services/custody-provider-lifecycle.service";
-import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
+import {
+  createAdapterFromEncryptedConfig,
+  createPrivyAdapterFromCredential,
+} from "@/services/domain/signing/provider-adapter-factory";
 import {
   type AnchorageProviderConfig,
   type CoinbaseCdpProviderConfig,
@@ -62,14 +70,22 @@ import {
   createProviderWallet,
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
-import { assertProviderAvailable } from "@/services/provider-availability.service";
+import {
+  assertProviderAvailable,
+  getProviderAvailability,
+} from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
   type CustodyWallet,
-  type CustodyWalletLookup,
   SigningRequestStorePg,
   type WalletPurpose,
 } from "@/services/stores/custody-config.store";
+import {
+  type CustodyConnectionRuntimeRecord,
+  CustodyConnectionRuntimeStore,
+  type CustodyWalletOwner,
+  isUsableCustodyConnection,
+} from "@/services/stores/custody-connection-runtime.store";
 import type { Env } from "@/types/env";
 
 export { createAdapterFromEncryptedConfig };
@@ -264,6 +280,12 @@ export interface SigningConfigurationsResult {
   defaultConfigId: string | null;
 }
 
+export interface ConnectionTargetSwitchResult {
+  kind: "connection";
+  connectionId: string;
+  wallet: CustodyWallet;
+}
+
 export interface CustodyWalletWithProvider extends CustodyWallet {
   provider: SigningConfiguration["provider"];
   isDefaultProvider: boolean;
@@ -272,6 +294,16 @@ export interface CustodyWalletWithProvider extends CustodyWallet {
 interface ListWalletsOptions {
   provider?: SigningConfiguration["provider"];
   includeAllProviders?: boolean;
+}
+
+type PrivyConnectionClassification =
+  | { kind: "absent" }
+  | { kind: "pending"; connection: CustodyConnectionRuntimeRecord }
+  | { kind: "active"; connection: CustodyConnectionRuntimeRecord };
+
+interface PrivyCredentialAuthentication {
+  appId: string;
+  appSecret: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -291,14 +323,25 @@ export class SigningService {
       createWallet: CustodyConfigStore["createWallet"];
       getWallets: CustodyConfigStore["getWallets"];
       getWalletsForConfigs: CustodyConfigStore["getWalletsForConfigs"];
-      findActiveWalletByIdentifier: CustodyConfigStore["findActiveWalletByIdentifier"];
       deactivateWallet: CustodyConfigStore["deactivateWallet"];
       deactivateWalletIfNotLast: CustodyConfigStore["deactivateWalletIfNotLast"];
       reactivateWallet: CustodyConfigStore["reactivateWallet"];
     },
     private signingStore: SigningRequestStore,
-    private env: Env
+    private env: Env,
+    private connectionStore?: CustodyConnectionRuntimeStore
   ) {}
+
+  private getConnectionStore(): CustodyConnectionRuntimeStore {
+    if (!this.connectionStore) {
+      this.connectionStore = new CustodyConnectionRuntimeStore(getDb(this.env));
+    }
+    return this.connectionStore;
+  }
+
+  private connectionRuntimeEnabled(projectId: string | undefined): projectId is string {
+    return Boolean(projectId) && isPrivyByokEnabled(this.env);
+  }
 
   /**
    * Get the encryption service, lazily initialized.
@@ -380,6 +423,108 @@ export class SigningService {
     return [...scopedConfigs, ...orgConfigs.filter((config) => !scopedConfigIds.has(config.id))];
   }
 
+  private async classifyPrivyConnection(
+    orgId: string,
+    projectId: string
+  ): Promise<PrivyConnectionClassification> {
+    const connections = await this.getConnectionStore().listProjectConnections(orgId, projectId);
+    const live = connections.filter((connection) => connection.status !== "deactivated");
+
+    if (live.length === 0) {
+      if (connections.length === 0) {
+        return { kind: "absent" };
+      }
+      throw new SigningError("Privy custody Connection is not usable", "CONFLICT");
+    }
+    if (live.length !== 1) {
+      throw new SigningError("Privy custody Connection is ambiguous", "CONFLICT");
+    }
+
+    const connection = live[0] as CustodyConnectionRuntimeRecord;
+    if (
+      connection.status === "pending" &&
+      connection.lastCheckStatus === "success" &&
+      connection.credentialStatus === "active" &&
+      connection.defaultCustodyWalletId === null
+    ) {
+      return { kind: "pending", connection };
+    }
+    if (isUsableCustodyConnection(connection)) {
+      return { kind: "active", connection };
+    }
+
+    throw new SigningError("Privy custody Connection is not usable", "CONFLICT");
+  }
+
+  private async assertPrivyConnectionWalletCreationEntitled(orgId: string): Promise<void> {
+    const availability = await getProviderAvailability(this.env, getDb(this.env), orgId);
+    if (!availability.providers.custody.privy.entitled) {
+      throw new AppError(
+        "FORBIDDEN",
+        "Stored credential provisioning is disabled for this provider"
+      );
+    }
+  }
+
+  private async readPrivyCredential(
+    connection: CustodyConnectionRuntimeRecord
+  ): Promise<PrivyCredentialAuthentication> {
+    try {
+      const secretStore = createCredentialSecretStore(
+        this.env,
+        connection.credentialStorageBackend
+      );
+      const payload = await secretStore.read({
+        orgId: connection.organizationId,
+        stored: {
+          storageBackend: connection.credentialStorageBackend,
+          secretRef: connection.credentialSecretRef ?? undefined,
+          secretVersionRef: connection.credentialSecretVersionRef ?? undefined,
+          encryptedSecretPayload: connection.credentialEncryptedSecretPayload ?? undefined,
+        },
+      });
+      const appId = typeof payload.appId === "string" ? payload.appId.trim() : "";
+      const appSecret = typeof payload.appSecret === "string" ? payload.appSecret : "";
+      if (!appId || !appSecret) {
+        throw new CredentialSecretStoreError(
+          "Stored Privy credential payload is incomplete",
+          "MISSING_SECRET"
+        );
+      }
+      return { appId, appSecret };
+    } catch (error) {
+      throw new SigningError(
+        "Stored Privy credential is unavailable",
+        error instanceof CredentialSecretStoreError && error.code === "UPSTREAM_ERROR"
+          ? "PROVIDER_UNAVAILABLE"
+          : "INTERNAL_ERROR",
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  private async getAdapterForConnection(
+    connection: CustodyConnectionRuntimeRecord
+  ): Promise<SigningPort> {
+    if (!isUsableCustodyConnection(connection)) {
+      throw new SigningError("Selected custody Connection is unavailable", "CONFLICT");
+    }
+
+    const cacheKey = `connection:${connection.id}:${connection.providerCredentialId}`;
+    const cached = this.providerCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const credential = await this.readPrivyCredential(connection);
+    const adapter = createPrivyAdapterFromCredential(this.env, {
+      ...credential,
+      defaultWalletId: connection.defaultWalletId,
+    });
+    this.providerCache.set(cacheKey, adapter);
+    return adapter;
+  }
+
   async getConfigurationByProvider(
     orgId: string,
     projectId: string | undefined,
@@ -399,15 +544,24 @@ export class SigningService {
     orgId: string,
     projectId: string | undefined,
     configId: string
-  ): Promise<void> {
+  ): Promise<{ walletId: string; publicKey: string } | null> {
     const config = await this.configStore.getById(configId);
     if (!config || config.organizationId !== orgId || config.status !== "active") {
       throw new SigningError("Custody configuration not found", "NOT_FOUND");
     }
 
     await this.assertProviderEnabled(orgId, config.provider);
-    await this.configStore.setDefaultConfig(orgId, projectId, configId);
+    if (this.connectionRuntimeEnabled(projectId)) {
+      const wallet = await this.getConnectionStore().selectConfig(orgId, projectId, configId, {
+        clearConnection: true,
+      });
+      this.providerCache.clear();
+      return wallet;
+    } else {
+      await this.configStore.setDefaultConfig(orgId, projectId, configId);
+    }
     this.providerCache.clear();
+    return null;
   }
 
   async setDefaultProvider(
@@ -1317,6 +1471,23 @@ export class SigningService {
    * Get the wallets for an organization's custody config.
    */
   async getWallets(orgId: string, projectId?: string): Promise<CustodyWallet[]> {
+    if (this.connectionRuntimeEnabled(projectId)) {
+      const selectedConnection = await this.getConnectionStore().getSelectedProjectConnection(
+        orgId,
+        projectId
+      );
+      if (selectedConnection) {
+        if (!isUsableCustodyConnection(selectedConnection)) {
+          throw new SigningError("Selected custody Connection is unavailable", "CONFLICT");
+        }
+        return this.getConnectionStore().listConnectionWallets(
+          orgId,
+          projectId,
+          selectedConnection.id
+        );
+      }
+    }
+
     const config = await this.configStore.findActive(orgId, projectId);
     if (!config) {
       return [];
@@ -1331,7 +1502,12 @@ export class SigningService {
   ): Promise<CustodyWalletWithProvider[]> {
     const includeAllProviders = options?.includeAllProviders === true;
     const providerFilter = options?.provider;
-    const resolvedDefaultConfig = await this.configStore.findActive(orgId, projectId);
+    const selectedConnection = this.connectionRuntimeEnabled(projectId)
+      ? await this.getConnectionStore().getSelectedProjectConnection(orgId, projectId)
+      : null;
+    const resolvedDefaultConfig = selectedConnection
+      ? null
+      : await this.configStore.findActive(orgId, projectId);
     const defaultConfigId = resolvedDefaultConfig?.id ?? null;
 
     const configs = includeAllProviders
@@ -1344,21 +1520,44 @@ export class SigningService {
             : resolvedDefaultConfig,
         ].filter((config): config is SigningConfigRecord => Boolean(config));
 
-    if (configs.length === 0) {
-      return [];
-    }
+    const walletsByConfigId =
+      configs.length === 0
+        ? new Map<string, CustodyWallet[]>()
+        : await this.configStore.getWalletsForConfigs(configs.map((config) => config.id));
 
-    const walletsByConfigId = await this.configStore.getWalletsForConfigs(
-      configs.map((config) => config.id)
-    );
-
-    return configs.flatMap((config) =>
+    const configWallets = configs.flatMap((config) =>
       (walletsByConfigId.get(config.id) ?? []).map((wallet) => ({
         ...wallet,
         provider: config.provider,
         isDefaultProvider: defaultConfigId === config.id,
       }))
     );
+
+    if (
+      !this.connectionRuntimeEnabled(projectId) ||
+      (providerFilter && providerFilter !== "privy")
+    ) {
+      return configWallets;
+    }
+
+    const connectionWallets = includeAllProviders
+      ? await this.getConnectionStore().listConnectionWallets(orgId, projectId)
+      : selectedConnection
+        ? await this.getConnectionStore().listConnectionWallets(
+            orgId,
+            projectId,
+            selectedConnection.id
+          )
+        : [];
+
+    return [
+      ...configWallets,
+      ...connectionWallets.map(({ connectionId, ...wallet }) => ({
+        ...wallet,
+        provider: "privy" as const,
+        isDefaultProvider: selectedConnection !== null && selectedConnection.id === connectionId,
+      })),
+    ];
   }
 
   async getWalletById(
@@ -1366,13 +1565,168 @@ export class SigningService {
     projectId: string | undefined,
     walletId: string
   ): Promise<CustodyWalletWithProvider | null> {
-    const wallet = await this.configStore.findActiveWalletByIdentifier(orgId, projectId, walletId);
-    if (!wallet) {
+    const connectionEnabled = this.connectionRuntimeEnabled(projectId);
+    const owner = await this.getConnectionStore().findWalletOwner(
+      orgId,
+      projectId,
+      walletId,
+      connectionEnabled
+    );
+    return this.mapUsableWalletOwner(owner, connectionEnabled);
+  }
+
+  async getWalletByPublicKey(
+    orgId: string,
+    projectId: string | undefined,
+    publicKey: string
+  ): Promise<CustodyWalletWithProvider | null> {
+    const connectionEnabled = this.connectionRuntimeEnabled(projectId);
+    const owner = await this.getConnectionStore().findWalletOwnerByPublicKey(
+      orgId,
+      projectId,
+      publicKey,
+      connectionEnabled
+    );
+    return this.mapUsableWalletOwner(owner, connectionEnabled);
+  }
+
+  async setDefaultWallet(
+    orgId: string,
+    projectId: string | undefined,
+    walletId: string,
+    provider?: SigningConfiguration["provider"]
+  ): Promise<CustodyWalletWithProvider> {
+    const connectionEnabled = this.connectionRuntimeEnabled(projectId);
+    const owner = await this.getConnectionStore().findWalletOwner(
+      orgId,
+      projectId,
+      walletId,
+      connectionEnabled
+    );
+    if (owner?.ownerStatus !== "active") {
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+    if (provider !== undefined && owner.provider !== provider) {
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+
+    if (owner.kind === "connection") {
+      if (!isUsableCustodyConnection(owner.connection)) {
+        throw new SigningError("Custody Connection is not usable", "CONFLICT");
+      }
+      await this.getConnectionStore().setDefaultWallet(
+        orgId,
+        owner.projectId,
+        owner.ownerId,
+        owner.wallet.id
+      );
+      this.providerCache.delete(
+        `connection:${owner.ownerId}:${owner.connection.providerCredentialId}`
+      );
+    } else {
+      await this.assertProviderEnabled(orgId, owner.provider as SigningConfiguration["provider"]);
+      await getDb(this.env)
+        .prepare(
+          `UPDATE custody_configs
+           SET default_wallet_id = ?, updated_at = sdp_iso_now()
+           WHERE id = ?`
+        )
+        .bind(owner.wallet.walletId, owner.custodyConfigId)
+        .run();
+      this.providerCache.delete(owner.custodyConfigId);
+    }
+
+    return this.mapWalletOwner(owner);
+  }
+
+  async switchCustodyTarget(
+    orgId: string,
+    projectId: string | undefined,
+    params: {
+      provider: SigningConfiguration["provider"];
+      walletLabel?: string;
+      requestId?: string;
+    }
+  ): Promise<ConnectionTargetSwitchResult | null> {
+    if (!this.connectionRuntimeEnabled(projectId) || params.provider !== "privy") {
       return null;
     }
 
-    const defaultConfig = await this.configStore.findActive(orgId, projectId);
-    return this.mapWalletLookup(wallet, defaultConfig?.id ?? null);
+    const target = await this.classifyPrivyConnection(orgId, projectId);
+    if (target.kind === "absent") {
+      return null;
+    }
+    if (target.kind === "pending") {
+      return {
+        kind: "connection",
+        connectionId: target.connection.id,
+        wallet: await this.createPrivyConnectionWallet(target.connection, {
+          label: params.walletLabel,
+          requestId: params.requestId,
+        }),
+      };
+    }
+
+    return {
+      kind: "connection",
+      connectionId: target.connection.id,
+      wallet: await this.getConnectionStore().selectConnection(
+        orgId,
+        projectId,
+        target.connection.id
+      ),
+    };
+  }
+
+  async getSelectedConnectionProjection(
+    orgId: string,
+    projectId: string | undefined
+  ): Promise<{ provider: "privy"; usable: boolean } | null> {
+    if (!this.connectionRuntimeEnabled(projectId)) {
+      return null;
+    }
+    const connection = await this.getConnectionStore().getSelectedProjectConnection(
+      orgId,
+      projectId
+    );
+    return connection
+      ? { provider: connection.provider, usable: isUsableCustodyConnection(connection) }
+      : null;
+  }
+
+  private async resolvePrivyConnectionCreateTarget(
+    orgId: string,
+    projectId: string | undefined,
+    requestedProvider: SigningConfiguration["provider"] | undefined
+  ): Promise<CustodyConnectionRuntimeRecord | null> {
+    if (!this.connectionRuntimeEnabled(projectId)) {
+      return null;
+    }
+
+    let provider = requestedProvider;
+    let target: PrivyConnectionClassification | null = null;
+    if (!provider) {
+      const selectedConnection = await this.getConnectionStore().getSelectedProjectConnection(
+        orgId,
+        projectId
+      );
+      provider = selectedConnection?.provider;
+      if (!provider) {
+        provider = (await this.configStore.findActive(orgId, projectId))?.provider;
+      }
+      if (!provider) {
+        target = await this.classifyPrivyConnection(orgId, projectId);
+        if (target.kind === "active") {
+          throw new SigningError("No custody target is selected", "CONFLICT");
+        }
+      }
+    }
+
+    if (provider !== "privy" && target?.kind !== "pending") {
+      return null;
+    }
+    target ??= await this.classifyPrivyConnection(orgId, projectId);
+    return target.kind === "absent" ? null : target.connection;
   }
 
   /**
@@ -1388,8 +1742,18 @@ export class SigningService {
       purpose?: WalletPurpose;
       setDefault?: boolean;
       provider?: SigningConfiguration["provider"];
+      requestId?: string;
     }
   ): Promise<CustodyWallet> {
+    const connection = await this.resolvePrivyConnectionCreateTarget(
+      orgId,
+      projectId,
+      params.provider
+    );
+    if (connection) {
+      return this.createPrivyConnectionWallet(connection, params);
+    }
+
     const config = params.provider
       ? await this.getConfigurationByProvider(orgId, projectId, params.provider)
       : await this.configStore.findActive(orgId, projectId);
@@ -1453,6 +1817,66 @@ export class SigningService {
     }
 
     return wallet;
+  }
+
+  private async createPrivyConnectionWallet(
+    connection: CustodyConnectionRuntimeRecord,
+    params: {
+      label?: string;
+      purpose?: WalletPurpose;
+      setDefault?: boolean;
+      requestId?: string;
+    }
+  ): Promise<CustodyWallet> {
+    await this.assertPrivyConnectionWalletCreationEntitled(connection.organizationId);
+    const credential = await this.readPrivyCredential(connection);
+
+    let provisioned: custodyProvisioning.ProvisionPrivyResult;
+    try {
+      provisioned = await custodyProvisioning.provisionPrivyWallet(this.env, {}, credential);
+    } catch (error) {
+      if (error instanceof SigningError && error.code === "NETWORK_ERROR") {
+        logWalletOrphanRisk(connection, {
+          requestId: params.requestId,
+          reason: "wallet_create_outcome_unknown",
+        });
+      }
+      throw new SigningError(
+        "Privy wallet provider is unavailable",
+        "PROVIDER_UNAVAILABLE",
+        error instanceof Error ? error : undefined
+      );
+    }
+
+    try {
+      const persisted = await this.getConnectionStore().persistCreatedWallet({
+        organizationId: connection.organizationId,
+        projectId: connection.projectId,
+        connectionId: connection.id,
+        providerCredentialId: connection.providerCredentialId,
+        walletId: normalizePrivyWalletId(provisioned.walletId),
+        publicKey: provisioned.address,
+        label: params.label,
+        purpose: params.purpose,
+        setDefault: params.setDefault === true,
+      });
+      this.providerCache.delete(`connection:${connection.id}:${connection.providerCredentialId}`);
+      return persisted.wallet;
+    } catch (error) {
+      logWalletOrphanRisk(connection, {
+        requestId: params.requestId,
+        providerWalletId: provisioned.walletId,
+        reason: "wallet_persist_failed",
+      });
+      if (error instanceof SigningError && error.code === "CONFLICT") {
+        throw error;
+      }
+      throw new SigningError(
+        "Privy wallet was created but could not be persisted",
+        "INTERNAL_ERROR",
+        error instanceof Error ? error : undefined
+      );
+    }
   }
 
   /**
@@ -1590,6 +2014,16 @@ export class SigningService {
    * 2. Organization default config (fallback for project scope)
    */
   async getAdapter(orgId: string, projectId?: string): Promise<SigningPort> {
+    if (this.connectionRuntimeEnabled(projectId)) {
+      const connection = await this.getConnectionStore().getSelectedProjectConnection(
+        orgId,
+        projectId
+      );
+      if (connection) {
+        return this.getAdapterForConnection(connection);
+      }
+    }
+
     const config = await this.configStore.findActive(orgId, projectId);
     return this.getAdapterForConfig(orgId, config);
   }
@@ -1628,62 +2062,35 @@ export class SigningService {
     walletId?: string | null
   ): Promise<{ adapter: SigningPort; walletId?: string; walletPublicKey?: Address }> {
     if (!walletId) {
-      const config = await this.configStore.findActive(orgId, projectId);
-      const adapter = await this.getAdapterForConfig(orgId, config);
-      return { adapter };
+      return { adapter: await this.getAdapter(orgId, projectId) };
     }
 
-    const walletRow = projectId
-      ? await getDb(this.env)
-          .prepare(
-            `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
-             FROM custody_wallets w
-             JOIN custody_configs c ON c.id = w.custody_config_id
-             WHERE c.organization_id = ?
-               AND w.wallet_id = ?
-               AND c.status = 'active'
-               AND w.status = 'active'
-               AND (c.project_id = ? OR c.project_id IS NULL)
-             ORDER BY CASE WHEN c.project_id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC
-             LIMIT 1`
-          )
-          .bind(orgId, walletId, projectId, projectId)
-          .first<{
-            custody_config_id: string;
-            project_id: string | null;
-            wallet_public_key: string;
-          }>()
-      : await getDb(this.env)
-          .prepare(
-            `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
-             FROM custody_wallets w
-             JOIN custody_configs c ON c.id = w.custody_config_id
-             WHERE c.organization_id = ?
-               AND w.wallet_id = ?
-               AND c.status = 'active'
-               AND w.status = 'active'
-               AND c.project_id IS NULL
-             ORDER BY c.updated_at DESC, c.id DESC
-             LIMIT 1`
-          )
-          .bind(orgId, walletId)
-          .first<{
-            custody_config_id: string;
-            project_id: string | null;
-            wallet_public_key: string;
-          }>();
-
-    if (!walletRow) {
+    const owner = await this.getConnectionStore().findWalletOwner(
+      orgId,
+      projectId,
+      walletId,
+      this.connectionRuntimeEnabled(projectId)
+    );
+    if (owner?.ownerStatus !== "active") {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
 
-    const config = await this.configStore.getById(walletRow.custody_config_id);
-    if (!config || config.organizationId !== orgId || config.status !== "active") {
-      throw new SigningError("Custody configuration not found", "WALLET_NOT_FOUND");
+    let adapter: SigningPort;
+    if (owner.kind === "connection") {
+      adapter = await this.getAdapterForConnection(owner.connection);
+    } else {
+      const config = await this.configStore.getById(owner.custodyConfigId);
+      if (!config || config.organizationId !== orgId || config.status !== "active") {
+        throw new SigningError("Custody configuration not found", "WALLET_NOT_FOUND");
+      }
+      adapter = await this.getAdapterForConfig(orgId, config);
     }
 
-    const adapter = await this.getAdapterForConfig(orgId, config);
-    return { adapter, walletId, walletPublicKey: walletRow.wallet_public_key as Address };
+    return {
+      adapter,
+      walletId: owner.wallet.walletId,
+      walletPublicKey: owner.wallet.publicKey as Address,
+    };
   }
 
   /**
@@ -1691,6 +2098,19 @@ export class SigningService {
    */
   async getPublicKey(orgId: string, projectId?: string, walletId?: string): Promise<Address> {
     if (!walletId) {
+      if (this.connectionRuntimeEnabled(projectId)) {
+        const connection = await this.getConnectionStore().getSelectedProjectConnection(
+          orgId,
+          projectId
+        );
+        if (connection) {
+          if (!isUsableCustodyConnection(connection) || !connection.defaultWalletPublicKey) {
+            throw new SigningError("Selected custody Connection is unavailable", "CONFLICT");
+          }
+          return connection.defaultWalletPublicKey as Address;
+        }
+      }
+
       const config = await this.configStore.findActive(orgId, projectId);
       if (!config) {
         throw new SigningError("Custody not initialized", "NOT_FOUND");
@@ -1759,22 +2179,27 @@ export class SigningService {
     return adapter.getTransactionSigner(resolved.walletId, resolved.walletPublicKey);
   }
 
-  private mapWalletLookup(
-    wallet: CustodyWalletLookup,
-    defaultConfigId: string | null
-  ): CustodyWalletWithProvider {
+  private mapWalletOwner(owner: CustodyWalletOwner): CustodyWalletWithProvider {
     return {
-      id: wallet.id,
-      custodyConfigId: wallet.custodyConfigId,
-      walletId: wallet.walletId,
-      publicKey: wallet.publicKey,
-      label: wallet.label,
-      purpose: wallet.purpose,
-      status: wallet.status,
-      createdAt: wallet.createdAt,
-      provider: wallet.provider,
-      isDefaultProvider: defaultConfigId === wallet.custodyConfigId,
+      ...owner.wallet,
+      ...(owner.kind === "config" ? { custodyConfigId: owner.custodyConfigId } : {}),
+      provider: owner.provider as SigningConfiguration["provider"],
+      isDefaultProvider: owner.isSelected,
     };
+  }
+
+  private mapUsableWalletOwner(
+    owner: CustodyWalletOwner | null,
+    connectionEnabled: boolean
+  ): CustodyWalletWithProvider | null {
+    if (
+      owner?.ownerStatus !== "active" ||
+      (owner.kind === "connection" &&
+        (!connectionEnabled || !isUsableCustodyConnection(owner.connection)))
+    ) {
+      return null;
+    }
+    return this.mapWalletOwner(owner);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1790,6 +2215,17 @@ export class SigningService {
     projectId: string | undefined,
     request: SignRequest
   ): Promise<SignResult> {
+    if (this.connectionRuntimeEnabled(projectId)) {
+      const connection = await this.getConnectionStore().getSelectedProjectConnection(
+        orgId,
+        projectId
+      );
+      if (connection) {
+        assertCustodyProviderCanSign(connection.provider);
+        return (await this.getAdapterForConnection(connection)).sign(request);
+      }
+    }
+
     const config = await this.configStore.findActive(orgId, projectId);
     if (!config) {
       throw new SigningError("Custody not initialized", "NOT_FOUND");
@@ -1900,18 +2336,28 @@ export class SigningService {
    * Get the current signing configuration.
    */
   async getConfiguration(orgId: string, projectId?: string): Promise<SigningConfigRecord | null> {
+    if (
+      this.connectionRuntimeEnabled(projectId) &&
+      (await this.getConnectionStore().getSelectedProjectConnection(orgId, projectId))
+    ) {
+      return null;
+    }
     return this.configStore.findActive(orgId, projectId);
   }
 
   async getConfigurations(orgId: string, projectId?: string): Promise<SigningConfigurationsResult> {
-    const [configs, resolvedDefault] = await Promise.all([
+    const selectedConnectionPromise = this.connectionRuntimeEnabled(projectId)
+      ? this.getConnectionStore().getSelectedProjectConnection(orgId, projectId)
+      : Promise.resolve(null);
+    const [configs, resolvedDefault, selectedConnection] = await Promise.all([
       this.getScopeAndFallbackConfigs(orgId, projectId),
       this.configStore.findActive(orgId, projectId),
+      selectedConnectionPromise,
     ]);
 
     return {
       configs,
-      defaultConfigId: resolvedDefault?.id ?? null,
+      defaultConfigId: selectedConnection ? null : (resolvedDefault?.id ?? null),
     };
   }
 
@@ -1919,6 +2365,16 @@ export class SigningService {
    * Check if the current provider requires async approval.
    */
   async requiresApproval(orgId: string, projectId?: string): Promise<boolean> {
+    if (this.connectionRuntimeEnabled(projectId)) {
+      const connection = await this.getConnectionStore().getSelectedProjectConnection(
+        orgId,
+        projectId
+      );
+      if (connection) {
+        return (await this.getAdapterForConnection(connection)).requiresApproval();
+      }
+    }
+
     const config = await this.configStore.findActive(orgId, projectId);
     if (!config) {
       throw new SigningError("Custody not initialized", "NOT_FOUND");
@@ -1976,6 +2432,23 @@ function decodeBase64(base64: string): Uint8Array {
   return bytes;
 }
 
+function logWalletOrphanRisk(
+  connection: CustodyConnectionRuntimeRecord,
+  params: {
+    requestId?: string;
+    providerWalletId?: string;
+    reason: "wallet_create_outcome_unknown" | "wallet_persist_failed";
+  }
+): void {
+  console.error("custody_wallet_orphan_risk", {
+    connectionId: connection.id,
+    provider: connection.provider,
+    ...(params.requestId ? { requestId: params.requestId } : {}),
+    ...(params.providerWalletId ? { providerWalletId: params.providerWalletId } : {}),
+    reason: params.reason,
+  });
+}
+
 /**
  * Export the secret key bytes from a KeyPairSigner.
  * Returns the 64-byte secret key (32 private + 32 public).
@@ -1995,8 +2468,10 @@ function decodeBase64(base64: string): Uint8Array {
  * @returns Configured SigningService instance
  */
 export function createSigningService(env: Env): SigningService {
-  const configStore = new CustodyConfigStore(getDb(env), env);
-  const signingStore = new SigningRequestStorePg(getDb(env));
+  const db = getDb(env);
+  const configStore = new CustodyConfigStore(db, env);
+  const signingStore = new SigningRequestStorePg(db);
+  const connectionStore = new CustodyConnectionRuntimeStore(db);
 
-  return new SigningService(configStore, signingStore, env);
+  return new SigningService(configStore, signingStore, env, connectionStore);
 }

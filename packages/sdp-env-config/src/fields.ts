@@ -661,16 +661,16 @@ export const FIELDS: EnvField[] = [
     help: "Development is always enabled. This setting controls production only.",
   },
   {
-    key: "PRIVY_BYOK_PROVISIONING_ENABLED",
+    key: "PRIVY_BYOK_ENABLED",
     section: "advanced",
     kind: "select",
-    label: "Privy stored-credential provisioning",
+    label: "Privy stored-credential connections",
     defaultValue: "false",
     options: [
       { value: "false", label: "Disabled" },
       { value: "true", label: "Enabled" },
     ],
-    help: "Allows eligible organizations to submit and provision customer-owned Privy credentials.",
+    help: "Enables customer-owned Privy Connection setup and runtime. Disable to use legacy Configs.",
   },
   {
     key: "PAYMENTS_RECURRING_COLLECTION_ENABLED",

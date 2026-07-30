@@ -23,18 +23,13 @@ import type { Env } from "@/types/env";
 
 export interface CustodyWallet {
   id: string;
-  custodyConfigId: string;
+  custodyConfigId?: string;
   walletId: string;
   publicKey: string;
   label: string | null;
   purpose: WalletPurpose | null;
   status: "active" | "inactive";
   createdAt: string;
-}
-
-export interface CustodyWalletLookup extends CustodyWallet {
-  provider: SigningProviderType;
-  projectId: string | null;
 }
 
 export type WalletPurpose =
@@ -69,7 +64,7 @@ interface CustodyConfigRow {
 
 interface CustodyWalletRow {
   id: string;
-  custody_config_id: string;
+  custody_config_id: string | null;
   wallet_id: string;
   public_key: string;
   label: string | null;
@@ -77,11 +72,6 @@ interface CustodyWalletRow {
   status: string;
   created_at: string;
   updated_at: string | null;
-}
-
-interface CustodyWalletLookupRow extends CustodyWalletRow {
-  provider: string;
-  project_id: string | null;
 }
 
 interface SigningRequestRow {
@@ -102,7 +92,7 @@ interface CustodyScopeDefaultRow {
   id: string;
   organization_id: string;
   project_id: string | null;
-  default_custody_config_id: string;
+  default_custody_config_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -218,7 +208,7 @@ export class CustodyConfigStore implements SigningConfigStore {
    */
   async getDefaultConfig(orgId: string, projectId?: string): Promise<SigningConfigRecord | null> {
     const scopeDefault = await this.getScopeDefaultRow(orgId, projectId ?? null);
-    if (!scopeDefault) {
+    if (!scopeDefault?.default_custody_config_id) {
       return null;
     }
 
@@ -466,6 +456,9 @@ export class CustodyConfigStore implements SigningConfigStore {
     );
 
     for (const row of results) {
+      if (!row.custody_config_id) {
+        continue;
+      }
       const wallets = walletsByConfigId.get(row.custody_config_id);
       if (wallets) {
         wallets.push(this.mapWalletRow(row));
@@ -473,138 +466,6 @@ export class CustodyConfigStore implements SigningConfigStore {
     }
 
     return walletsByConfigId;
-  }
-
-  /**
-   * Find a single active wallet by identifier (wallet_id or custody_wallets.id)
-   * within the resolved scope (project-first, then org fallback).
-   */
-  async findActiveWalletByIdentifier(
-    orgId: string,
-    projectId: string | undefined,
-    walletIdentifier: string
-  ): Promise<CustodyWalletLookup | null> {
-    const row = projectId
-      ? await this.db
-          .prepare(
-            `SELECT
-               w.id,
-               w.custody_config_id,
-               w.wallet_id,
-               w.public_key,
-               w.label,
-               w.purpose,
-               w.status,
-               w.created_at,
-               w.updated_at,
-               c.provider,
-               c.project_id
-             FROM custody_wallets w
-             JOIN custody_configs c ON c.id = w.custody_config_id
-             WHERE c.organization_id = ?
-               AND c.status = 'active'
-               AND w.status = 'active'
-               AND (w.wallet_id = ? OR w.id = ?)
-               AND (c.project_id = ? OR c.project_id IS NULL)
-             ORDER BY CASE WHEN c.project_id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC
-             LIMIT 1`
-          )
-          .bind(orgId, walletIdentifier, walletIdentifier, projectId, projectId)
-          .first<CustodyWalletLookupRow>()
-      : await this.db
-          .prepare(
-            `SELECT
-               w.id,
-               w.custody_config_id,
-               w.wallet_id,
-               w.public_key,
-               w.label,
-               w.purpose,
-               w.status,
-               w.created_at,
-               w.updated_at,
-               c.provider,
-               c.project_id
-             FROM custody_wallets w
-             JOIN custody_configs c ON c.id = w.custody_config_id
-             WHERE c.organization_id = ?
-               AND c.project_id IS NULL
-               AND c.status = 'active'
-               AND w.status = 'active'
-               AND (w.wallet_id = ? OR w.id = ?)
-             ORDER BY c.updated_at DESC, c.id DESC
-             LIMIT 1`
-          )
-          .bind(orgId, walletIdentifier, walletIdentifier)
-          .first<CustodyWalletLookupRow>();
-
-    return row ? this.mapWalletLookupRow(row) : null;
-  }
-
-  /**
-   * Find a single active wallet by public key within the resolved scope
-   * (project-first, then organization fallback).
-   */
-  async findActiveWalletByPublicKey(
-    orgId: string,
-    projectId: string | undefined,
-    publicKey: string
-  ): Promise<CustodyWalletLookup | null> {
-    const row = projectId
-      ? await this.db
-          .prepare(
-            `SELECT
-               w.id,
-               w.custody_config_id,
-               w.wallet_id,
-               w.public_key,
-               w.label,
-               w.purpose,
-               w.status,
-               w.created_at,
-               w.updated_at,
-               c.provider,
-               c.project_id
-             FROM custody_wallets w
-             JOIN custody_configs c ON c.id = w.custody_config_id
-             WHERE c.organization_id = ?
-               AND c.status = 'active'
-               AND w.status = 'active'
-               AND w.public_key = ?
-               AND (c.project_id = ? OR c.project_id IS NULL)
-             ORDER BY CASE WHEN c.project_id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC
-             LIMIT 1`
-          )
-          .bind(orgId, publicKey, projectId, projectId)
-          .first<CustodyWalletLookupRow>()
-      : await this.db
-          .prepare(
-            `SELECT
-               w.id,
-               w.custody_config_id,
-               w.wallet_id,
-               w.public_key,
-               w.label,
-               w.purpose,
-               w.status,
-               w.created_at,
-               w.updated_at,
-               c.provider,
-               c.project_id
-             FROM custody_wallets w
-             JOIN custody_configs c ON c.id = w.custody_config_id
-             WHERE c.organization_id = ?
-               AND c.project_id IS NULL
-               AND c.status = 'active'
-               AND w.status = 'active'
-               AND w.public_key = ?
-             ORDER BY c.updated_at DESC, c.id DESC
-             LIMIT 1`
-          )
-          .bind(orgId, publicKey)
-          .first<CustodyWalletLookupRow>();
-
-    return row ? this.mapWalletLookupRow(row) : null;
   }
 
   /**
@@ -777,21 +638,13 @@ export class CustodyConfigStore implements SigningConfigStore {
   private mapWalletRow(row: CustodyWalletRow): CustodyWallet {
     return {
       id: row.id,
-      custodyConfigId: row.custody_config_id,
+      ...(row.custody_config_id ? { custodyConfigId: row.custody_config_id } : {}),
       walletId: row.wallet_id,
       publicKey: row.public_key,
       label: row.label,
       purpose: row.purpose as WalletPurpose | null,
       status: row.status as "active" | "inactive",
       createdAt: row.created_at,
-    };
-  }
-
-  private mapWalletLookupRow(row: CustodyWalletLookupRow): CustodyWalletLookup {
-    return {
-      ...this.mapWalletRow(row),
-      provider: row.provider as SigningProviderType,
-      projectId: row.project_id,
     };
   }
 }

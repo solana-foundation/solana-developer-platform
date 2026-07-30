@@ -13,6 +13,7 @@ import {
   setDefaultWalletResponseSchema,
   signerCheckRequestSchema,
   switchSigningRequestSchema,
+  switchSigningResponseSchema,
   updateCustodyWalletRequestSchema,
   walletIdParamSchema,
 } from "../schemas";
@@ -74,9 +75,9 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     responses: {
       201: {
         description: "Wallet signing provider switched",
-        content: jsonContent(initializeSigningResponseSchema),
+        content: jsonContent(switchSigningResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500, 503]),
     },
   });
 
@@ -100,7 +101,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet created",
         content: jsonContent(custodyWalletResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500, 503]),
     },
   });
 

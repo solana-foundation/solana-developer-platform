@@ -121,6 +121,15 @@ export const initializeSigningResponseSchema = z
   })
   .openapi({ description: "Wallet signing initialization result." });
 
+export const switchSigningResponseSchema = initializeSigningResponseSchema
+  .extend({
+    configId: initializeSigningResponseSchema.shape.configId.optional().openapi({
+      description: "Selected legacy Config ID. Omitted when a Connection is selected.",
+      example: "cfg_example",
+    }),
+  })
+  .openapi({ description: "Wallet signing target switch result." });
+
 const custodyWalletBaseSchema = z.object({
   id: z.string().openapi({ description: "Wallet record ID.", example: "cw_example" }),
   custodyConfigId: z.string().optional().openapi({
@@ -227,7 +236,7 @@ export const custodyWalletByIdResponseSchema = z
   .object({
     wallet: custodyWalletBaseSchema
       .extend({
-        custodyConfigId: z.string().openapi({
+        custodyConfigId: z.string().optional().openapi({
           description: "Owning custody configuration ID.",
           example: "cfg_example",
         }),

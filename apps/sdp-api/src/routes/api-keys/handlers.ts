@@ -15,7 +15,8 @@ import {
   type UpsertApiKeyWalletPolicyBindingInput,
 } from "@/db/repositories";
 import { requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, badRequest, mapWalletCreationSigningError, notFound } from "@/lib/errors";
+import { isPrivyByokEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
@@ -169,23 +170,27 @@ export const createApiKey = async (c: AppContext) => {
 
     const signingService = createSigningService(c.env);
     try {
-      const wallet = await signingService.createWallet(actor.organizationId, undefined, {
-        label: walletLabel,
-        purpose: walletPurpose as WalletPurpose | undefined,
-      });
+      const wallet = await signingService.createWallet(
+        actor.organizationId,
+        isPrivyByokEnabled(c.env) ? projectId : undefined,
+        {
+          label: walletLabel,
+          purpose: walletPurpose as WalletPurpose | undefined,
+          requestId: c.get("requestId"),
+        }
+      );
       resolvedSigningWalletId = wallet.walletId;
       resolvedWalletBindings = [{ walletId: wallet.walletId, permissions: ["*"] }];
     } catch (error) {
       if (error instanceof SigningError) {
-        if (error.code === "NOT_FOUND") {
-          throw new AppError("CONFLICT", error.message);
-        }
-        throw badRequest(error.message);
+        throw mapWalletCreationSigningError(error, "CONFLICT");
       }
       throw error;
     }
   } else {
-    await assertWalletBindingsInScope(getDb(c.env), orgId, projectId, resolvedWalletBindings);
+    await assertWalletBindingsInScope(getDb(c.env), orgId, projectId, resolvedWalletBindings, {
+      connectionEnabled: isPrivyByokEnabled(c.env),
+    });
   }
 
   const resolveCreatorFallback = async (): Promise<string | null> => {
@@ -362,7 +367,10 @@ export const updateApiKey = async (c: AppContext) => {
       getDb(c.env),
       actor.organizationId,
       existing.project_id,
-      walletSelection.bindings
+      walletSelection.bindings,
+      {
+        connectionEnabled: isPrivyByokEnabled(c.env),
+      }
     );
   }
 
