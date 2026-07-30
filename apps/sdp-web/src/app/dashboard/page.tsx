@@ -32,7 +32,8 @@ export default async function DashboardPage() {
 
     const wallets = walletsResult.data ?? [];
     const isWalletEmptyState = walletsResult.ok && wallets.length === 0;
-    const totalBalance = resolveTotalBalance(aggregateResult.data?.balances ?? []);
+    const balances = aggregateResult.data?.balances ?? [];
+    const totalBalance = resolveTotalBalance(balances);
 
     const aggregateError =
       aggregateResult.ok || isWalletEmptyState
@@ -50,6 +51,10 @@ export default async function DashboardPage() {
         totalBalance={totalBalance}
         totalBalanceError={aggregateError}
         wallets={wallets}
+        // Already on the wire for the total; the home page used to discard the
+        // per-token rows and the wallet count that came back with it.
+        balances={balances}
+        walletCount={aggregateResult.data?.walletCount ?? wallets.length}
       />
     );
   } catch (error) {
