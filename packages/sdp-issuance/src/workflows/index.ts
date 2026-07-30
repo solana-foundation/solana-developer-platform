@@ -66,6 +66,7 @@ export function listActionsForAsset(input: {
   type: string;
   selectedSettings: Record<string, SelectedSetting>;
   hasAllowlist: boolean;
+  isMintable?: boolean;
 }): AvailableAction[] {
   return WORKFLOW_ACTION_TYPES.map((type) => ({
     type,

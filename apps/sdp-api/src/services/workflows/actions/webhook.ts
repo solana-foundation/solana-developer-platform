@@ -1,5 +1,6 @@
 import type { WorkflowExecutionRow } from "@/db/repositories";
 import type { Env } from "@/types/env";
+import { readActionSecret } from "../action-secret";
 import { resolveWebhookUrl } from "../webhook-url";
 import { errorMessage, permanentFail, resolveParam, succeeded, transientFail } from "./onchain";
 import type { ActionContext, ActionExecutionResult } from "./types";
@@ -62,7 +63,7 @@ async function deliver(
 // network/timeout errors are transient (the engine retries with backoff); other 4xx, a
 // missing/malformed URL and an SSRF-blocked target are permanent config errors.
 export async function runSendWebhook(
-  _env: Env,
+  env: Env,
   execution: WorkflowExecutionRow,
   action: ActionContext
 ): Promise<ActionExecutionResult> {
@@ -70,7 +71,13 @@ export async function runSendWebhook(
   if (!url) {
     return permanentFail("MISSING_PARAM:url");
   }
-  const secret = resolveParam(action, "secret");
+  // The signing key lives in the credential store; `params.secret` is only a fallback
+  // for a rule saved before that (and for tests that pass one inline).
+  const secret =
+    (await readActionSecret(env, {
+      orgId: execution.organization_id,
+      stored: action.actionSecret,
+    })) ?? resolveParam(action, "secret");
 
   const body = JSON.stringify({
     type: execution.trigger_type,

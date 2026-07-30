@@ -246,6 +246,21 @@ export function createPostgresWorkflowExecutionsRepository(
     async cancelExecution(params) {
       return decide(db, params, "awaiting_review", "cancelled");
     },
+
+    async cancelOpenExecutionsForWorkflow(params) {
+      // 'processing' rows are deliberately left alone: they are mid-flight on a worker
+      // and the stale-recovery path already decides what happens to them.
+      return await db
+        .prepare(
+          `UPDATE workflow_executions
+             SET status = 'cancelled', next_attempt_at = NULL, locked_at = NULL,
+                 error = 'RULE_WITHDRAWN', updated_at = sdp_iso_now()
+           WHERE workflow_id = ? AND organization_id = ? AND project_id = ?
+             AND status IN ('awaiting_review', 'pending')`
+        )
+        .bind(params.workflowId, params.organizationId, params.projectId)
+        .run();
+    },
   };
 }
 

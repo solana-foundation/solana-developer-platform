@@ -16,9 +16,13 @@ import {
 import type { Context } from "hono";
 import { z } from "zod";
 import type { AssetWorkflowDefinition, AssetWorkflowRow } from "@/db/repositories";
-import { createAssetWorkflowsRepository } from "@/db/repositories";
+import {
+  createAssetWorkflowsRepository,
+  createWorkflowExecutionsRepository,
+} from "@/db/repositories";
 import { badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { storeActionSecret } from "@/services/workflows/action-secret";
 import { resolveAssetGateContext } from "@/services/workflows/asset-gate";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
@@ -101,35 +105,21 @@ function assertGuardFieldsKnown(
   }
 }
 
-// Rule reads are `tokens:read`; setting a webhook secret needs write. Returning the
-// stored value would hand the outbound HMAC key to every reader, so reads carry
-// `hasSecret` and the builder re-sends the secret only when changing it.
+// Rule reads are `tokens:read`; setting a webhook secret needs write. The secret itself
+// lives in the credential store, but params are still redacted defensively so a rule
+// written before that (or by any other path) can't leak one. `hasSecret` tells the
+// builder to show "configured" instead of an empty field.
 function toWorkflowResponse(row: AssetWorkflowRow) {
   const { params, hasSecret } = redactActionParams(row.definition.action.params);
+  const { actionSecret: _omitted, ...definition } = row.definition;
   return {
     ...row,
     definition: {
-      ...row.definition,
+      ...definition,
       action: { ...row.definition.action, params },
     },
-    hasSecret,
+    hasSecret: hasSecret || Boolean(row.definition.actionSecret),
   };
-}
-
-// Reads redact secrets, so an edit round-trip would otherwise erase one: params that
-// came back without a secret key keep whatever is already stored. Sending the key
-// explicitly (including as an empty string) still replaces it.
-function mergeStoredSecrets(
-  incoming: Record<string, string | number>,
-  stored: Record<string, string | number>
-): Record<string, string | number> {
-  const merged = { ...incoming };
-  for (const [key, value] of Object.entries(stored)) {
-    if (isSecretParamKey(key) && !(key in incoming)) {
-      merged[key] = value;
-    }
-  }
-  return merged;
 }
 
 // `automated` actions are reversible side effects; `sensitive` disrupts every holder and
@@ -187,18 +177,24 @@ export const createWorkflow = async (c: AppContext) => {
     type: gate.type,
     selectedSettings: gate.selectedSettings,
     hasAllowlist: gate.hasAllowlist,
+    isMintable: gate.isMintable,
   });
   if (!support.ok) {
     throw badRequest("Action not supported for this asset", { reason: support.reason });
   }
 
+  // The secret never reaches the stored params; it goes to the credential store and the
+  // definition keeps only a reference.
+  const { params: storableParams, secret } = splitOutSecret(actionParams);
+
+  const repo = createAssetWorkflowsRepository(c.env);
   const definition: AssetWorkflowDefinition = {
     condition: (parsed.data.condition ?? null) as WorkflowCondition | null,
-    action: { type: parsed.data.actionType, params: actionParams },
+    action: { type: parsed.data.actionType, params: storableParams },
     retryPolicy: parsed.data.retryPolicy ?? { maxAttempts: 5, retryAfterMinutes: 5 },
   };
 
-  const workflow = await createAssetWorkflowsRepository(c.env).createWorkflow({
+  const workflow = await repo.createWorkflow({
     organizationId: orgId,
     projectId,
     tokenId,
@@ -217,8 +213,64 @@ export const createWorkflow = async (c: AppContext) => {
   if (!workflow) {
     throw badRequest("Failed to create workflow");
   }
-  return created(c, { workflow: toWorkflowResponse(workflow) });
+  // Stored after the insert because the secret is keyed by the rule's own id.
+  const stored = secret
+    ? await persistActionSecret(c.env, { orgId, projectId, workflow, definition, secret })
+    : workflow;
+
+  return created(c, { workflow: toWorkflowResponse(stored) });
 };
+
+// Pull a credential param out of the storable set. Returns the params to persist and the
+// raw secret (if any) for the credential store.
+function splitOutSecret(params: Record<string, string | number>): {
+  params: Record<string, string | number>;
+  secret: string | null;
+} {
+  let secret: string | null = null;
+  const rest: Record<string, string | number> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (isSecretParamKey(key)) {
+      secret = String(value);
+      continue;
+    }
+    rest[key] = value;
+  }
+  return { params: rest, secret };
+}
+
+// Writes the secret to the credential store and records the reference on the rule. A
+// deployment with no store configured is refused outright rather than quietly persisting
+// the key in plaintext — the rest of the rule is already saved, so the operator can
+// re-save without the secret or configure the store.
+async function persistActionSecret(
+  env: Env,
+  input: {
+    orgId: string;
+    projectId: string;
+    workflow: AssetWorkflowRow;
+    definition: AssetWorkflowDefinition;
+    secret: string;
+  }
+): Promise<AssetWorkflowRow> {
+  const result = await storeActionSecret(env, {
+    orgId: input.orgId,
+    workflowId: input.workflow.id,
+    secret: input.secret,
+  });
+  if (!result.ok) {
+    throw badRequest(
+      "Signing secrets require a configured credential secret store on this deployment"
+    );
+  }
+  const updated = await createAssetWorkflowsRepository(env).updateWorkflow({
+    workflowId: input.workflow.id,
+    organizationId: input.orgId,
+    projectId: input.projectId,
+    definition: { ...input.definition, actionSecret: result.stored },
+  });
+  return updated ?? input.workflow;
+}
 
 export const listWorkflows = async (c: AppContext) => {
   const { tokenId } = c.req.param();
@@ -257,9 +309,10 @@ export const updateWorkflow = async (c: AppContext) => {
     parsed.data.retryPolicy !== undefined;
 
   let params = existing.definition.action.params;
+  let secret: string | null = null;
   if (parsed.data.actionParams !== undefined) {
-    params = mergeStoredSecrets(parsed.data.actionParams, existing.definition.action.params);
-    assertActionParamsValid(existing.action_type, params);
+    assertActionParamsValid(existing.action_type, parsed.data.actionParams);
+    ({ params, secret } = splitOutSecret(parsed.data.actionParams));
   }
   if (parsed.data.condition !== undefined) {
     assertGuardFieldsKnown(
@@ -268,6 +321,8 @@ export const updateWorkflow = async (c: AppContext) => {
     );
   }
 
+  // An edit that doesn't re-send the secret keeps the stored reference — reads redact
+  // it, so requiring it on every save would silently erase it.
   const definition: AssetWorkflowDefinition | undefined = definitionSupplied
     ? {
         condition:
@@ -276,6 +331,7 @@ export const updateWorkflow = async (c: AppContext) => {
             : existing.definition.condition,
         action: { type: existing.action_type, params },
         retryPolicy: parsed.data.retryPolicy ?? existing.definition.retryPolicy,
+        actionSecret: existing.definition.actionSecret ?? null,
       }
     : undefined;
 
@@ -291,7 +347,22 @@ export const updateWorkflow = async (c: AppContext) => {
     throw notFound("Workflow");
   }
 
-  return success(c, { workflow: toWorkflowResponse(workflow) });
+  // Turning a rule off withdraws what it already queued: an execution held for approval
+  // is a pending side effect of a rule the operator just decided they don't want.
+  if (parsed.data.enabled === false && existing.enabled) {
+    await createWorkflowExecutionsRepository(c.env).cancelOpenExecutionsForWorkflow({
+      workflowId,
+      organizationId: orgId,
+      projectId,
+    });
+  }
+
+  const stored =
+    secret && definition
+      ? await persistActionSecret(c.env, { orgId, projectId, workflow, definition, secret })
+      : workflow;
+
+  return success(c, { workflow: toWorkflowResponse(stored) });
 };
 
 // Soft delete: the rule disappears from every read path (list, dispatch, engine
@@ -308,7 +379,12 @@ export const deleteWorkflow = async (c: AppContext) => {
   assertWorkflowActionPermitted(c, existing.action_type);
 
   await repo.deleteWorkflow({ workflowId, organizationId: orgId, projectId });
-  return success(c, { deleted: true });
+  // Anything this rule had queued or held is withdrawn with it — otherwise a held mint
+  // from a deleted rule stays in the approval queue, approvable.
+  const cancelled = await createWorkflowExecutionsRepository(c.env).cancelOpenExecutionsForWorkflow(
+    { workflowId, organizationId: orgId, projectId }
+  );
+  return success(c, { deleted: true, cancelledExecutions: cancelled });
 };
 
 // Catalog for the builder UI: which triggers exist and which actions this asset
@@ -333,6 +409,7 @@ export const listWorkflowCatalog = async (c: AppContext) => {
       type: gate.type,
       selectedSettings: gate.selectedSettings,
       hasAllowlist: gate.hasAllowlist,
+      isMintable: gate.isMintable,
     }),
   });
 };

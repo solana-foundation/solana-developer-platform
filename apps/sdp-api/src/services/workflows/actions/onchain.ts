@@ -73,12 +73,29 @@ export async function prepareOnchain(
     return { ok: false, result: permanentFail("TOKEN_DECIMALS_UNKNOWN") };
   }
 
-  const signer = await createOrgSigner(
-    env,
-    execution.organization_id,
-    execution.project_id,
-    token.signingWalletId ?? undefined
-  );
+  // Signer construction reaches custody and can fail for reasons no retry fixes (the
+  // wallet was removed, the key is unavailable). Left to throw it would escape into the
+  // engine's generic catch and be rescheduled up to `max_attempts`.
+  let signer: OrgSigner;
+  try {
+    signer = await createOrgSigner(
+      env,
+      execution.organization_id,
+      execution.project_id,
+      token.signingWalletId ?? undefined
+    );
+  } catch (error) {
+    return { ok: false, result: permanentFail(`SIGNER_UNAVAILABLE:${errorMessage(error)}`) };
+  }
+
+  // The org signer is used as every authority. That is right only while the token's
+  // authorities all point at it; after a rotation or a split-authority deploy the chain
+  // call would fail with an opaque error, so say so up front instead.
+  const mismatch = authorityMismatch(token, signer.address);
+  if (mismatch) {
+    return { ok: false, result: permanentFail(`AUTHORITY_MISMATCH:${mismatch}`) };
+  }
+
   const mosaic = createMosaicService(env, signer, "sponsored");
 
   return {
@@ -93,6 +110,22 @@ export async function prepareOnchain(
       mosaic,
     },
   };
+}
+
+// Names the first recorded authority the signer does not control, or null when the
+// signer matches everything the token records. Authorities the token leaves null are
+// unknown rather than mismatched, so they don't block.
+function authorityMismatch(token: LoadedToken, signerAddress: string): string | null {
+  const authorities: Array<[string, string | null | undefined]> = [
+    ["mint", token.mintAuthority],
+    ["freeze", token.freezeAuthority],
+  ];
+  for (const [name, authority] of authorities) {
+    if (authority && authority !== signerAddress) {
+      return name;
+    }
+  }
+  return null;
 }
 
 // The wallet an action targets: an explicit `params.wallet` wins, otherwise the

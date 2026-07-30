@@ -112,6 +112,15 @@ export interface WorkflowExecutionsRepository {
   retryExecution(params: WorkflowDecisionInput): Promise<WorkflowExecutionRow | null>;
   // Reject a held execution: awaiting_review → cancelled (a human declined the action).
   cancelExecution(params: WorkflowDecisionInput): Promise<WorkflowExecutionRow | null>;
+
+  // Cancel everything a rule has in flight (awaiting_review + pending). Called when the
+  // rule is disabled or deleted: a held mint from a rule someone just turned off should
+  // not stay sitting in the approval queue waiting to be authorized.
+  cancelOpenExecutionsForWorkflow(params: {
+    workflowId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<number>;
 }
 
 export interface WorkflowDecisionInput {

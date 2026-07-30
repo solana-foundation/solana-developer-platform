@@ -12,7 +12,11 @@ import {
 } from "../capabilities/settings";
 import { WORKFLOW_ACTIONS } from "./actions";
 
-export type ActionSupportReason = "unknown_action" | "no_allowlist" | "capability_disabled";
+export type ActionSupportReason =
+  | "unknown_action"
+  | "no_allowlist"
+  | "capability_disabled"
+  | "not_mintable";
 
 export type ActionSupportResult = { ok: true } | { ok: false; reason: ActionSupportReason };
 
@@ -24,6 +28,10 @@ export interface ValidateActionInput {
   selectedSettings: Record<string, SelectedSetting>;
   // Whether the token has an allowlist (ablListAddress present).
   hasAllowlist: boolean;
+  // Whether the token still has a live mint authority. Optional so callers that only
+  // gate non-supply actions don't have to load it; when omitted the mint check is
+  // skipped rather than assumed false.
+  isMintable?: boolean;
 }
 
 // True if any enabled setting unlocks the given Token-2022 action. Stored selections
@@ -57,9 +65,14 @@ export function validateActionSupported(input: ValidateActionInput): ActionSuppo
   const requires = action.requires;
   switch (requires.kind) {
     case "none":
-    case "base":
-      // Side-effects and base ops need no advanced-setting gate here.
+      // Pure side effects (webhook, notify, record) need no asset capability.
       return { ok: true };
+    case "base":
+      // Base ops carry no advanced-setting gate, but minting still needs a live mint
+      // authority — without this the two most destructive actions get the weakest check.
+      return requires.action === "mint" && input.isMintable === false
+        ? { ok: false, reason: "not_mintable" }
+        : { ok: true };
     case "allowlist":
       return input.hasAllowlist ? { ok: true } : { ok: false, reason: "no_allowlist" };
     case "token_transaction":

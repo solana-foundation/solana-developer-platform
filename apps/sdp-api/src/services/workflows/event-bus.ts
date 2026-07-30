@@ -21,6 +21,21 @@ export interface WorkflowEvent {
   payload: Record<string, unknown>;
 }
 
+// Guard values are typed by hand in a text field while payload values come from the
+// emitters, so a strict comparison silently never matches on the two mismatches that
+// actually happen: a number typed as text (`attempt` 3 vs "3") and a difference in case
+// (`Mural` vs `mural`). Comparing on a normalized string covers both. Both sides are
+// scalars — the builder can't express object guards.
+function sameValue(actual: unknown, expected: string | number): boolean {
+  if (actual === expected) {
+    return true;
+  }
+  if (actual == null) {
+    return false;
+  }
+  return String(actual).trim().toLowerCase() === String(expected).trim().toLowerCase();
+}
+
 // Flat AND of simple comparisons over the event payload (operational filters only).
 function evaluateCondition(
   condition: WorkflowCondition | null | undefined,
@@ -33,11 +48,13 @@ function evaluateCondition(
     const actual = payload[clause.field];
     switch (clause.op) {
       case "eq":
-        return actual === clause.value;
+        return sameValue(actual, clause.value as string | number);
       case "neq":
-        return actual !== clause.value;
+        return !sameValue(actual, clause.value as string | number);
       case "in":
-        return Array.isArray(clause.value) && clause.value.includes(actual as string | number);
+        return (
+          Array.isArray(clause.value) && clause.value.some((option) => sameValue(actual, option))
+        );
       default:
         return false;
     }

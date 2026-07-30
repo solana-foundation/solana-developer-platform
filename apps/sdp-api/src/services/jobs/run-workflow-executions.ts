@@ -10,6 +10,7 @@ import {
   type WorkflowExecutionsRepository,
 } from "@/db/repositories";
 import { AuditService } from "@/services/audit.service";
+import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 import { dispatchWorkflowAction } from "@/services/workflows/actions";
 import { type AssetGateContext, resolveAssetGateContext } from "@/services/workflows/asset-gate";
 import type { Env } from "@/types/env";
@@ -35,7 +36,12 @@ const APPROVAL_GATED_ACTIONS = WORKFLOW_ACTION_TYPES.filter(
 // with, or a permanent reason to fail the execution (rule gone / disabled / capability
 // revoked after the event was enqueued). Never retried — these don't self-heal.
 type GuardResult =
-  | { ok: true; params: Record<string, string | number>; retryAfterMinutes: number }
+  | {
+      ok: true;
+      params: Record<string, string | number>;
+      actionSecret: StoredCredentialSecret | null;
+      retryAfterMinutes: number;
+    }
   | { ok: false; error: string };
 
 // Per-tick caches: a batch typically holds many executions of the same few rules on
@@ -111,6 +117,7 @@ async function guardExecution(
     type: gate.type,
     selectedSettings: gate.selectedSettings,
     hasAllowlist: gate.hasAllowlist,
+    isMintable: gate.isMintable,
   });
   if (!support.ok) {
     return { ok: false, error: `CAPABILITY_REVOKED:${support.reason}` };
@@ -119,6 +126,7 @@ async function guardExecution(
   return {
     ok: true,
     params: rule.definition.action.params,
+    actionSecret: rule.definition.actionSecret ?? null,
     retryAfterMinutes:
       rule.definition.retryPolicy?.retryAfterMinutes ?? DEFAULT_RETRY_AFTER_MINUTES,
   };
@@ -195,7 +203,10 @@ async function processDueExecution(deps: {
     }
     retryAfterMinutes = guard.retryAfterMinutes;
 
-    const outcome = await dispatchWorkflowAction(env, claimed, { params: guard.params });
+    const outcome = await dispatchWorkflowAction(env, claimed, {
+      params: guard.params,
+      actionSecret: guard.actionSecret,
+    });
     if (outcome.status === "succeeded") {
       await repo.completeExecution({ executionId: claimed.id, result: outcome.result });
       await auditTerminal(claimed, "success", { result: outcome.result });

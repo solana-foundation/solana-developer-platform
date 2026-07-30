@@ -6,6 +6,7 @@ import type {
   WorkflowRuleAction,
   WorkflowTriggerType,
 } from "@sdp/types";
+import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 import type { RepositoryDbClient } from "./base";
 
 export function generateAssetWorkflowId(): string {
@@ -17,6 +18,10 @@ export interface AssetWorkflowDefinition {
   condition: WorkflowCondition | null;
   action: WorkflowRuleAction;
   retryPolicy: WorkflowRetryPolicy;
+  // Credential params (today: the outbound webhook HMAC secret) live here as a
+  // secret-store reference rather than as a plaintext value in `action.params` —
+  // the definition JSONB is read by list endpoints and dumped by any DB export.
+  actionSecret?: StoredCredentialSecret | null;
 }
 
 export interface AssetWorkflowRow {

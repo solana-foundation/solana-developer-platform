@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
+  createCounterpartiesRepository,
   createKycWalletsRepository,
   createWalletAssetEnrollmentsRepository,
 } from "@/db/repositories";
@@ -44,11 +45,27 @@ export const enrollHolder = async (c: AppContext) => {
     throw notFound("Token");
   }
 
+  // The counterparty link is only constrained by a foreign key, which accepts any id in
+  // the table — including another org's. Resolving it in scope first turns a cross-tenant
+  // reference into a 404 instead of a successful link, and an unknown id into a 404
+  // instead of an FK violation surfacing as a 500.
+  const counterpartyId = parsed.data.counterpartyId ?? null;
+  if (counterpartyId) {
+    const counterparty = await createCounterpartiesRepository(c.env).getCounterpartyById({
+      counterpartyId,
+      organizationId: orgId,
+      projectId,
+    });
+    if (!counterparty) {
+      throw notFound("Counterparty");
+    }
+  }
+
   const wallet = await createKycWalletsRepository(c.env).upsertKycWallet({
     organizationId: orgId,
     projectId,
     walletAddress: parsed.data.walletAddress,
-    counterpartyId: parsed.data.counterpartyId ?? null,
+    counterpartyId,
     createdBy: auth.id,
   });
   if (!wallet) {

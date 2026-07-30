@@ -9,6 +9,10 @@ export interface AssetGateContext {
   type: string;
   selectedSettings: Record<string, SelectedSetting>;
   hasAllowlist: boolean;
+  // Whether the token can still be minted. `mint`/`burn` are `base`-kind actions with
+  // no advanced-setting gate, so without this a mint rule saves cleanly (and previews
+  // green) on a token whose mint authority was revoked.
+  isMintable: boolean;
 }
 
 // Resolve the capability-gate inputs for a token: its (category, type) + enabled
@@ -30,5 +34,6 @@ export async function resolveAssetGateContext(
     type: profile?.asset_type ?? "generic",
     selectedSettings: stored?.selected ?? {},
     hasAllowlist: Boolean(token.ablListAddress),
+    isMintable: Boolean(token.isMintable && token.mintAuthority),
   };
 }

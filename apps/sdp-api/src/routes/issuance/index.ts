@@ -1,4 +1,6 @@
-import { Hono } from "hono";
+import { Hono, type Next } from "hono";
+import { AppError } from "@/lib/errors";
+import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
@@ -41,6 +43,7 @@ import {
   listWorkflows,
   updateWorkflow,
 } from "./handlers/workflows";
+import type { AppContext } from "./helpers";
 
 const issuance = new Hono<{ Bindings: Env }>();
 
@@ -151,9 +154,33 @@ issuance.delete(
   removeAllowlistEntry
 );
 
+// Holders + workflows are the asset-profiles feature surface, and the cron that drains
+// workflow executions is itself flag-gated. Leaving the enqueue side open while the
+// drain side is off would let a flag-off deployment silently accumulate a backlog that
+// detonates against weeks-old payloads the moment the flag flips.
+async function requireAssetProfilesFeature(c: AppContext, next: Next) {
+  if (!isAssetProfilesEnabled(c.env)) {
+    throw new AppError("FORBIDDEN", "Asset Profiles are not enabled for this environment");
+  }
+  await next();
+}
+
 // Holders (KYC-wallet enrollment for an asset)
-issuance.get("/tokens/:tokenId/holders", requirePermissions("tokens:read"), listHolders);
-issuance.post("/tokens/:tokenId/holders", requirePermissions("tokens:write"), enrollHolder);
+issuance.get(
+  "/tokens/:tokenId/holders",
+  requireAssetProfilesFeature,
+  requirePermissions("tokens:read"),
+  listHolders
+);
+issuance.post(
+  "/tokens/:tokenId/holders",
+  requireAssetProfilesFeature,
+  requirePermissions("tokens:write"),
+  enrollHolder
+);
+
+issuance.use("/tokens/:tokenId/workflows", requireAssetProfilesFeature);
+issuance.use("/tokens/:tokenId/workflows/*", requireAssetProfilesFeature);
 
 // Workflow builder — catalog + rules (register static paths before :workflowId)
 issuance.get(
