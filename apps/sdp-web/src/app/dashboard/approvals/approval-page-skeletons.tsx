@@ -4,8 +4,7 @@ const APPROVAL_FILTER_IDS = [
   "approval-filter-wallet",
   "approval-filter-operation",
   "approval-filter-api-key",
-  "approval-filter-from",
-  "approval-filter-to",
+  "approval-filter-date",
 ];
 
 const APPROVAL_ROW_IDS = [
@@ -51,43 +50,21 @@ const APPROVAL_DETAIL_METADATA_IDS = [
 export function ApprovalInboxSkeleton() {
   return (
     <div
-      className="h-full overflow-y-auto px-3 pb-8 md:px-6"
+      className="flex h-full min-h-0 flex-col px-3 md:px-6"
       data-loading-layout="approvals-list"
       aria-busy="true"
     >
-      <div className="mx-auto w-full max-w-[1500px] py-6">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-2">
-            <SkeletonBlock className="h-8 w-64 max-w-full" />
-            <SkeletonBlock className="h-4 w-96 max-w-full" />
+      <div className="flex shrink-0 flex-wrap items-end gap-3 border-b border-border-default py-4">
+        {APPROVAL_FILTER_IDS.map((id) => (
+          <div key={id} className="min-w-44 flex-1 space-y-1.5">
+            <SkeletonBlock className="h-3 w-20" />
+            <SkeletonBlock className="h-12 w-full rounded-lg" />
           </div>
-          <div className="flex items-center gap-3">
-            <SkeletonBlock className="h-4 w-24" />
-            <SkeletonBlock className="size-8 rounded-[10px]" />
-          </div>
-        </header>
+        ))}
+      </div>
 
-        <div className="mt-6 flex h-10 items-end gap-8 border-b border-border-default">
-          <SkeletonBlock className="mb-3 h-4 w-20" />
-          <SkeletonBlock className="mb-3 h-4 w-16" />
-        </div>
-
-        <div className="grid gap-3 border-b border-border-default py-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[repeat(4,minmax(140px,1fr))_minmax(135px,0.75fr)_auto]">
-          {APPROVAL_FILTER_IDS.map((id) => (
-            <div key={id} className="space-y-1.5">
-              <SkeletonBlock className="h-3 w-20" />
-              <SkeletonBlock className="h-10 w-full rounded-lg" />
-            </div>
-          ))}
-          <div className="flex items-end">
-            <SkeletonBlock className="h-9 w-24 rounded-[10px]" />
-          </div>
-        </div>
-
-        <div
-          className="divide-y divide-border-default border-b border-border-default 2xl:hidden"
-          data-loading-mobile-rows
-        >
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="divide-y divide-border-default 2xl:hidden" data-loading-mobile-rows>
           {APPROVAL_ROW_IDS.map((id) => (
             <article key={id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 py-4">
               <div className="min-w-0">
@@ -107,10 +84,7 @@ export function ApprovalInboxSkeleton() {
           ))}
         </div>
 
-        <div
-          className="hidden overflow-hidden border-b border-border-default 2xl:block"
-          data-loading-desktop-table
-        >
+        <div className="hidden overflow-hidden 2xl:block" data-loading-desktop-table>
           <div className="grid grid-cols-[88px_145px_145px_120px_120px_145px_minmax(160px,1fr)_115px_48px] gap-3 border-b border-border-default px-4 py-3">
             {APPROVAL_TABLE_COLUMN_IDS.map((id) => (
               <SkeletonBlock key={id} className="h-3 w-16" />
@@ -137,14 +111,17 @@ export function ApprovalInboxSkeleton() {
             ))}
           </div>
         </div>
+      </div>
 
-        <div className="mt-4 flex items-center justify-between gap-3">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border-default py-2">
+        <div className="flex items-center gap-2">
           <SkeletonBlock className="h-3 w-36" />
-          <div className="flex gap-2">
-            <SkeletonBlock className="size-8 rounded-[10px]" />
-            <SkeletonBlock className="h-8 w-20" />
-            <SkeletonBlock className="size-8 rounded-[10px]" />
-          </div>
+          <SkeletonBlock className="size-8 rounded-[10px]" />
+        </div>
+        <div className="flex gap-2">
+          <SkeletonBlock className="size-8 rounded-[10px]" />
+          <SkeletonBlock className="h-8 w-20" />
+          <SkeletonBlock className="size-8 rounded-[10px]" />
         </div>
       </div>
     </div>

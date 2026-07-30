@@ -13,6 +13,7 @@ import {
 import { getDb } from "@/db";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { rootLogger } from "@/runtime/logger";
 import { SOL_MINT } from "@/services/payment-operation.service";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -183,7 +184,7 @@ describe("reconcilePaymentRequest", () => {
   });
 
   it("best-effort returns the stored row and logs when reconcile errors unexpectedly", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
     findReferenceSpy.mockRejectedValue(new Error("rpc exploded"));
     const request = await createRequest();
 

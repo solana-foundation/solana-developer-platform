@@ -91,32 +91,6 @@ describe("coinbase account provisioning", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("reads account.address when reusing an existing wallet address", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = toUrlString(input);
-
-        if (
-          url.endsWith(`/platform/v2/solana/accounts/${EXISTING_ADDRESS}`) &&
-          init?.method === "GET"
-        ) {
-          return jsonResponse({ account: { address: EXISTING_ADDRESS } }, 200);
-        }
-
-        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
-      });
-
-    const result = await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
-      orgId: "org_abc",
-      orgSlug: "Acme Labs",
-      walletAddress: EXISTING_ADDRESS,
-    });
-
-    expect(result.address).toBe(EXISTING_ADDRESS);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
   it("reads data.address when resolving an already-created account by name", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -396,76 +370,6 @@ describe("para wallet provisioning", () => {
         orgSlug: "Acme Labs",
       })
     ).rejects.toThrowError(/Para API error: 400/i);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects a reused wallet when it is not a Solana wallet", async () => {
-    const walletId = "wal_para_evm";
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = toUrlString(input);
-
-        if (url.endsWith(`/v1/wallets/${walletId}`) && init?.method === "GET") {
-          return jsonResponse(
-            {
-              data: {
-                id: walletId,
-                type: "EVM",
-                scheme: "ED25519",
-                address: CREATED_ADDRESS,
-              },
-            },
-            200
-          );
-        }
-
-        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
-      });
-
-    await expect(
-      provisionParaWallet(createParaEnv(), {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-        walletId,
-      })
-    ).rejects.toThrowError(/not a solana wallet/i);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects a reused wallet when it is not ED25519", async () => {
-    const walletId = "wal_para_wrong_scheme";
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = toUrlString(input);
-
-        if (url.endsWith(`/v1/wallets/${walletId}`) && init?.method === "GET") {
-          return jsonResponse(
-            {
-              data: {
-                id: walletId,
-                type: "SOLANA",
-                scheme: "DKLS",
-                address: CREATED_ADDRESS,
-              },
-            },
-            200
-          );
-        }
-
-        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
-      });
-
-    await expect(
-      provisionParaWallet(createParaEnv(), {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-        walletId,
-      })
-    ).rejects.toThrowError(/not ed25519/i);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

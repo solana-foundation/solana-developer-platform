@@ -86,16 +86,6 @@ interface TurnkeyActivityResponse {
   };
 }
 
-interface TurnkeyGetPrivateKeyResponse {
-  privateKey?: {
-    privateKeyId?: string;
-    addresses?: Array<{
-      format?: string;
-      address?: string;
-    }>;
-  };
-}
-
 export interface ProvisionFireblocksOptions {
   orgId: string;
   orgSlug: string;
@@ -133,7 +123,6 @@ export interface ProvisionPrivyResult {
 export interface ProvisionCoinbaseCdpOptions {
   orgId: string;
   orgSlug: string;
-  walletAddress?: string;
   accountPolicy?: string;
 }
 
@@ -154,7 +143,6 @@ export interface ProvisionCoinbaseCdpResult {
 export interface ProvisionTurnkeyOptions {
   orgId: string;
   orgSlug: string;
-  privateKeyId?: string;
 }
 
 export interface TurnkeyProvisioningConfig {
@@ -173,7 +161,6 @@ export interface ProvisionParaOptions {
   orgId: string;
   orgSlug: string;
   projectId?: string;
-  walletId?: string;
 }
 
 export interface ParaProvisioningConfig {
@@ -350,25 +337,6 @@ export async function provisionCoinbaseCdpAccount(
   const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_COINBASE_CDP_API_BASE_URL;
   const network = config.network ?? DEFAULT_COINBASE_CDP_NETWORK;
 
-  const existingAddress = options.walletAddress;
-  if (existingAddress) {
-    const existing = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>(runtime, {
-      method: "GET",
-      path: `/v2/solana/accounts/${existingAddress}`,
-      apiBaseUrl,
-      apiKeyId,
-      apiKeySecret,
-      walletSecret,
-    });
-
-    const resolvedAddress = extractCoinbaseCdpAccountAddress(existing);
-    if (!resolvedAddress) {
-      throw new SigningError("Coinbase CDP wallet lookup failed", "PROVIDER_NOT_CONFIGURED");
-    }
-
-    return { address: resolvedAddress, network };
-  }
-
   const name = buildCoinbaseCdpAccountName(
     runtime,
     options.orgSlug || options.orgId,
@@ -449,25 +417,6 @@ export async function provisionParaWallet(
 
   const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_PARA_API_BASE_URL;
 
-  if (options.walletId) {
-    const existing = await paraRequest<ParaWalletResponse>(runtime, {
-      apiBaseUrl,
-      apiKey,
-      method: "GET",
-      path: `/v1/wallets/${encodeURIComponent(options.walletId)}`,
-    });
-    const validated = validateParaWallet(existing, options.walletId);
-    return {
-      walletId: validated.id,
-      address: validated.address,
-      userIdentifier: buildParaUserIdentifier(runtime, {
-        orgId: options.orgId,
-        projectId: options.projectId,
-      }),
-      userIdentifierType: "CUSTOM_ID",
-    };
-  }
-
   const userIdentifier = buildParaUserIdentifier(runtime, {
     orgId: options.orgId,
     projectId: options.projectId,
@@ -521,31 +470,6 @@ export async function provisionTurnkeyPrivateKey(
   }
 
   const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_TURNKEY_API_BASE_URL;
-
-  if (options.privateKeyId) {
-    const privateKeyId = denormalizeTurnkeyPrivateKeyId(options.privateKeyId);
-    const existing = await turnkeyRequest<TurnkeyGetPrivateKeyResponse>(runtime, {
-      apiBaseUrl,
-      apiPublicKey,
-      apiPrivateKey,
-      method: "POST",
-      path: "/public/v1/query/get_private_key",
-      body: {
-        organizationId,
-        privateKeyId,
-      },
-    });
-
-    const address = findSolanaAddress(existing.privateKey?.addresses);
-    if (!existing?.privateKey?.privateKeyId || !address) {
-      throw new SigningError("Turnkey private key lookup failed", "PROVIDER_NOT_CONFIGURED");
-    }
-
-    return {
-      privateKeyId: existing.privateKey.privateKeyId,
-      address,
-    };
-  }
 
   const created = await turnkeyRequest<TurnkeyActivityResponse>(runtime, {
     apiBaseUrl,
@@ -945,8 +869,4 @@ function findSolanaAddress(
   }
 
   return addresses.find((entry) => Boolean(entry.address))?.address;
-}
-
-function denormalizeTurnkeyPrivateKeyId(privateKeyId: string): string {
-  return privateKeyId.startsWith("turnkey_") ? privateKeyId.slice("turnkey_".length) : privateKeyId;
 }
