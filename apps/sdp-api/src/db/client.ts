@@ -1,4 +1,5 @@
 import { Pool, type QueryResult, types } from "pg";
+import { getLogger } from "@/runtime/logger";
 
 types.setTypeParser(20, (value) => Number.parseInt(value, 10));
 
@@ -260,7 +261,7 @@ class PooledPostgresClient extends BasePostgresClient {
     // Idle pool errors are EventEmitter errors; without a listener Node treats
     // them as uncaught exceptions and terminates the process.
     this.pool.on("error", (error) => {
-      console.error("Idle PostgreSQL pool client error:", error);
+      getLogger().error({ error }, "Idle PostgreSQL pool client error");
     });
   }
 

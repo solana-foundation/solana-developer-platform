@@ -13,6 +13,7 @@ import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import {
   assertProviderAvailable,
@@ -240,7 +241,7 @@ export const deleteOrganization = async (c: AppContext) => {
   await sessionService
     .revokeOrganizationSessions(orgId)
     .catch((error) =>
-      console.error("Failed to revoke sessions after organization deletion:", error)
+      getLogger().error({ error }, "Failed to revoke sessions after organization deletion")
     );
 
   // Audit log

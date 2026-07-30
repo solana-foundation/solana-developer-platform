@@ -6,6 +6,7 @@ import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import type { KnownCustodyProvider } from "./provider-catalog";
@@ -50,9 +51,9 @@ export function WalletsWorkspace({
   walletsError,
 }: WalletsWorkspaceProps) {
   const router = useDashboardRouter();
-  const { dashboardAccess, issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
+  const { dashboardAccess, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
-  const isPlaygroundTab = issuanceTab === "playground";
+  const isPlaygroundTab = useDashboardTab() === "playground";
 
   useEffect(() => {
     setPlaygroundApiKeys(apiKeys);
@@ -108,7 +109,6 @@ export function WalletsWorkspace({
     <div className="h-full min-h-0 w-full" data-wallet-root>
       <DashboardWorkspaceTabShell
         disableOverviewInitialAnimation
-        isPlaygroundTab={isPlaygroundTab}
         overviewClassName="space-y-6"
         overview={
           <div className="contents" data-wallet-panel="overview">

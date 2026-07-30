@@ -8,6 +8,7 @@ import type { Context, Next } from "hono";
 import { getCookie } from "hono/cookie";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 
@@ -74,5 +75,5 @@ function updateLastActivity(db: DatabaseClient, sessionId: string) {
   db.prepare("UPDATE sessions SET last_activity_at = datetime('now') WHERE id = ?")
     .bind(sessionId)
     .run()
-    .catch((err) => console.error("Failed to update session activity:", err));
+    .catch((err) => getLogger().error({ error: err }, "Failed to update session activity"));
 }

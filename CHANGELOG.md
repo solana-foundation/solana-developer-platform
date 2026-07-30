@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.50.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.50.0...v0.50.1) (2026-07-30)
+
+### Bug Fixes
+
+* **release:** patch npm in runtime images ([#997](https://github.com/solana-foundation/solana-developer-platform/pull/997)) ([4f3ee87](https://github.com/solana-foundation/solana-developer-platform/commit/4f3ee876b153af70e18e8cab0f32cab76e29a0ae))
+
 ## [0.50.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.49.1...v0.50.0) (2026-07-29)
 
 ### Features
