@@ -196,21 +196,31 @@ function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
  * A missing project is represented by a null project client so onboarding
  * pages can still query organization state before a project has been selected.
  */
+/**
+ * Org- and project-scoped clients for one request.
+ *
+ * `getToken` is optional and should normally be omitted. Minting a Clerk token is a
+ * network round trip, and passing `getToken` bypasses the request-scoped cache that
+ * the layout has usually already populated — so a page that supplied its own paid
+ * for a second mint of the same token. Omitting it reuses the cached one. The
+ * parameter stays for callers that hold a token source without a request-bound
+ * `auth()` context.
+ */
 export async function createRequestScopedSdpApiClients({
   getToken,
   organizationTraceContext,
   projectTraceContext,
 }: {
-  getToken: ClerkGetToken;
+  getToken?: ClerkGetToken;
   organizationTraceContext?: TraceContext;
   projectTraceContext?: TraceContext;
-}): Promise<{
+} = {}): Promise<{
   organizationClient: SdpApiClient;
   projectClient: SdpApiClient | null;
 }> {
   const [token, projectId] = await Promise.all([
-    acquireClerkToken(getToken),
-    getSelectedProjectId(),
+    getToken ? acquireClerkToken(getToken) : getRequestClerkToken(),
+    getToken ? getSelectedProjectId() : getRequestSelectedProjectId(),
   ]);
 
   return {
