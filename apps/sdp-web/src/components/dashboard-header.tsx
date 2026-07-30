@@ -131,7 +131,12 @@ export function StandardDashboardTopBar({
       data-dashboard-standard-topbar
     >
       <div className="col-start-1 row-start-1 flex min-w-0 items-center">{leadingContent}</div>
-      {hideTitle ? null : (
+      {/* Hiding the title is a visual decision, not a structural one — every page
+          still needs exactly one h1 for assistive tech and for tests that look one
+          up by name. */}
+      {hideTitle ? (
+        <h1 className="sr-only">{title}</h1>
+      ) : (
         <h1
           className={cn(
             "col-span-2 row-start-2 min-w-0 max-w-full break-words text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary sm:col-span-1 sm:col-start-2 sm:row-start-1",
@@ -308,6 +313,7 @@ function getAccessControlPageConfig(
   if (pathname === "/dashboard/api-keys") {
     return {
       title: t("Shared.dashboardShell.apiKeys"),
+      hideTitle: true,
       contentWidthClass: "max-w-none",
     };
   }
@@ -330,6 +336,7 @@ function getAccessControlPageConfig(
   if (pathname === "/dashboard/approvals") {
     return {
       title: t("Shared.dashboardShell.approvals"),
+      hideTitle: true,
       headerTabs: {
         tabs: [
           { id: "pending", label: t("DashboardApprovals.pendingTab") },
@@ -343,6 +350,7 @@ function getAccessControlPageConfig(
   if (pathname.startsWith("/dashboard/approvals")) {
     return {
       title: t("Shared.dashboardShell.approvals"),
+      hideTitle: true,
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/approvals",
@@ -362,6 +370,7 @@ function getIssuanceRoutePageConfig(
   if (pathname === "/dashboard/issuance") {
     return {
       title: t("Shared.dashboardShell.issuance"),
+      hideTitle: true,
       headerTabs: playgroundHeaderTabs(t),
       contentWidthClass: "max-w-none",
     };
@@ -390,6 +399,7 @@ function getIssuanceRoutePageConfig(
   }
   return {
     title: t("Shared.dashboardShell.issuance"),
+    hideTitle: true,
     contentWidthClass: "max-w-none",
     backAction: {
       href: "/dashboard/issuance",
@@ -418,6 +428,7 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: t("Shared.dashboardShell.wallets"),
+      hideTitle: true,
       headerTabs: playgroundHeaderTabs(t),
       contentWidthClass: "max-w-none",
     };
@@ -447,6 +458,7 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/policies") {
     return {
       title: t("Shared.dashboardShell.policies"),
+      hideTitle: true,
       contentWidthClass: "max-w-none",
     };
   }

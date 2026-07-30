@@ -460,10 +460,6 @@ export function HomeWorkspace({
 
   return (
     <div className="w-full space-y-8 py-2">
-      {/* The shell no longer paints a 36px "Home" above a page that says what it
-          is; the heading stays for assistive tech and for tests that look it up. */}
-      <h1 className="sr-only">{t("Shared.dashboardShell.home")}</h1>
-
       <SectionEntry>
         {isWalletEmptyState ? (
           <FirstRunPanel canCreateWallet={dashboardAccess.capabilities.canManageCustody} />
@@ -510,19 +506,19 @@ export function HomeWorkspace({
                   <Table className="min-w-0 [&_table]:table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[8rem] pl-6">
+                        <TableHead className="w-[7rem] pl-6">
                           {t("Shared.homeWorkspace.time")}
                         </TableHead>
-                        <TableHead className="w-[calc(100%-8rem)] md:hidden">
+                        <TableHead className="w-[calc(100%-7rem)] md:hidden">
                           {t("Shared.homeWorkspace.activity")}
                         </TableHead>
-                        <TableHead className="hidden w-[10rem] md:table-cell">
+                        <TableHead className="hidden w-[6.5rem] md:table-cell">
                           {t("Shared.homeWorkspace.type")}
                         </TableHead>
                         <TableHead className="hidden w-[8rem] md:table-cell">
                           {t("Shared.homeWorkspace.token")}
                         </TableHead>
-                        <TableHead className="hidden w-[10rem] md:table-cell">
+                        <TableHead className="hidden w-[9rem] text-right md:table-cell">
                           {t("Shared.homeWorkspace.amount")}
                         </TableHead>
                         <TableHead className="hidden pr-6 md:table-cell">
@@ -533,10 +529,20 @@ export function HomeWorkspace({
                     <TableBody>
                       {activityRows.map((row) => {
                         const timeLabel = formatRelativeTime(row.createdAt, locale);
+                        // `row.token` is already a display label — home-page.data
+                        // resolves it against issued-token symbols before it gets here —
+                        // so it is a symbol, never a mint. Passing it to TokenMark as a
+                        // mint would never match; the symbol alone resolves a bundled
+                        // logo and falls back to a monogram.
+                        const tokenSymbol = row.token;
                         const amountLabel =
                           row.amount === "—"
                             ? "—"
-                            : formatDisplayAmount(row.amount, row.token, locale);
+                            : formatDisplayAmount(row.amount, "", locale).trim();
+                        const mobileAmountLabel =
+                          row.amount === "—"
+                            ? "—"
+                            : formatDisplayAmount(row.amount, tokenSymbol, locale);
 
                         return (
                           <TableRow key={row.id}>
@@ -545,7 +551,7 @@ export function HomeWorkspace({
                               <div className="min-w-0">
                                 <div className="truncate font-medium">{row.type}</div>
                                 <div className="mt-1 truncate text-xs text-tertiary">
-                                  {amountLabel}
+                                  {mobileAmountLabel}
                                 </div>
                                 <ActivityAddress
                                   row={row}
@@ -558,9 +564,12 @@ export function HomeWorkspace({
                               {row.type}
                             </TableCell>
                             <TableCell className="hidden text-secondary md:table-cell">
-                              <TruncatedTableText value={row.token} className="truncate" />
+                              <span className="flex min-w-0 items-center gap-2">
+                                <TokenMark symbol={tokenSymbol} size="xs" />
+                                <TruncatedTableText value={tokenSymbol} className="truncate" />
+                              </span>
                             </TableCell>
-                            <TableCell className="hidden text-secondary md:table-cell">
+                            <TableCell className="hidden text-right text-secondary tabular-nums md:table-cell">
                               <TruncatedTableText value={amountLabel} className="truncate" />
                             </TableCell>
                             <TableCell className="hidden pr-6 font-mono text-xs text-secondary md:table-cell">
