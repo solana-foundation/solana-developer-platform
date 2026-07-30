@@ -21,6 +21,7 @@ import {
   type PaymentSubscriptionRow,
 } from "@/db/repositories";
 import { AppError, badRequest, conflict } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -198,19 +199,25 @@ async function preserveRecoverableLifecycleAttempt(input: {
       updatedAt: input.failedAt,
     });
   } catch (journalError) {
-    console.error("Failed to preserve recoverable recurring payment lifecycle attempt", {
-      error: lifecycleErrorMessage(journalError),
-      operation: input.operation,
-      recurringPaymentId: input.recurringPaymentId,
-    });
+    getLogger().error(
+      {
+        error: lifecycleErrorMessage(journalError),
+        operation: input.operation,
+        recurring_payment_id: input.recurringPaymentId,
+      },
+      "Failed to preserve recoverable recurring payment lifecycle attempt"
+    );
   }
 
-  console.error("Recurring payment lifecycle left recoverable after submission", {
-    confirmedOnChain: input.confirmedOnChain,
-    error: lifecycleErrorMessage(input.error),
-    operation: input.operation,
-    recurringPaymentId: input.recurringPaymentId,
-  });
+  getLogger().error(
+    {
+      confirmed_on_chain: input.confirmedOnChain,
+      error: lifecycleErrorMessage(input.error),
+      operation: input.operation,
+      recurring_payment_id: input.recurringPaymentId,
+    },
+    "Recurring payment lifecycle left recoverable after submission"
+  );
 }
 
 async function finalizeRecurringPaymentLifecycle(input: {
@@ -484,11 +491,14 @@ async function runRecurringPaymentLifecycle(input: {
         resetClaim: true,
       });
     } catch (resetError) {
-      console.error("Failed to journal/reset recurring payment lifecycle after failure", {
-        error: resetError instanceof Error ? resetError.message : String(resetError),
-        operation: input.operation,
-        recurringPaymentId: claimed.id,
-      });
+      getLogger().error(
+        {
+          error: resetError instanceof Error ? resetError.message : String(resetError),
+          operation: input.operation,
+          recurring_payment_id: claimed.id,
+        },
+        "Failed to journal/reset recurring payment lifecycle after failure"
+      );
     }
 
     throw error;

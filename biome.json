@@ -60,6 +60,16 @@
   },
   "overrides": [
     {
+      "includes": ["**/apps/sdp-api/**/*.ts", "**/apps/sdp-api/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "error"
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/apps/sdp-web/src/**/*.ts", "**/apps/sdp-web/src/**/*.tsx"],
       "linter": {
         "rules": {
