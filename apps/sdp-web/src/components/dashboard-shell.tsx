@@ -56,6 +56,7 @@ import {
   getDashboardPageConfig,
   HeaderBackAction,
 } from "@/components/dashboard-header";
+import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
 import {
   docsHref,
   getNavSections,
@@ -520,14 +521,12 @@ export function DashboardShell({
       compactOnMobile
     />
   ) : null;
-  const headerNav = pageConfig.headerNav;
+  const headerTabs = pageConfig.headerTabs;
+  const hasHeaderTabs = Boolean(headerTabs);
   const centeredTitle = pageConfig.centeredTitle;
-  const showBackInTopBar = Boolean(backAction) && !headerNav;
+  const showBackInTopBar = Boolean(backAction) && !hasHeaderTabs;
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
-  const hasHeaderTabs = Boolean(headerNav);
-  const shouldRenderHeaderNavRow = pageConfig.showHeaderNavRow || hasHeaderTabs;
-  const shouldRenderTopBarBorder =
-    (Boolean(centeredTitle) || showBackInTopBar) && !shouldRenderHeaderNavRow;
+  const shouldRenderTopBarBorder = (Boolean(centeredTitle) || showBackInTopBar) && !hasHeaderTabs;
   const shouldClipHorizontalOverflow =
     shellPathname === "/dashboard/payments" ||
     shellPathname === "/dashboard/payments/transactions" ||
@@ -817,15 +816,15 @@ export function DashboardShell({
                 />
               </div>
 
-              {shouldRenderHeaderNavRow ? (
+              {headerTabs ? (
                 <div
                   className={cn(
                     "border-b border-border-default",
                     !shouldLockViewportScroll && "-mx-3 md:-mx-6"
                   )}
                 >
-                  <div className={cn("flex items-end px-3 md:px-6", !headerNav && "min-h-[56px]")}>
-                    {headerNav}
+                  <div className="flex items-end px-3 md:px-6">
+                    <DashboardHeaderTabs {...headerTabs} />
                   </div>
                 </div>
               ) : null}

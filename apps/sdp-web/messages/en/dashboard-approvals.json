@@ -1,7 +1,5 @@
 {
   "DashboardApprovals": {
-    "title": "Approval requests",
-    "description": "Review operations paused by wallet or API-key controls.",
     "pendingCount": "{count} pending",
     "pendingTab": "Pending",
     "historyTab": "History",
@@ -21,7 +19,6 @@
     "dateLast30": "30 days",
     "dateLast90": "90 days",
     "dateCustom": "Custom",
-    "clearFilters": "Clear",
     "statusColumn": "Status",
     "walletColumn": "Wallet",
     "operationColumn": "Operation",
@@ -44,6 +41,7 @@
     "unableToLoad": "Unable to load approval requests",
     "unableToLoadDescription": "The request list could not be retrieved. Try loading it again.",
     "reload": "Reload",
+    "autoRefresh": "Refreshing every 5 seconds",
     "refreshFailed": "Approval requests could not be refreshed. Showing the last loaded results.",
     "viewOnly": "You can review approval requests, but your role cannot decide them.",
     "noAccess": "Approval requests are not available for your role.",

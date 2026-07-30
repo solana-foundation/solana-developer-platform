@@ -3,9 +3,9 @@
 import { UserButton } from "@clerk/nextjs";
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
-import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { Badge } from "@/components/ui/badge";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -14,10 +14,9 @@ import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
   title: string;
-  headerNav?: ReactNode;
+  headerTabs?: DashboardHeaderTabsConfig;
   centeredTitle?: string;
   topBarLeadingContent?: ReactNode;
-  showHeaderNavRow?: boolean;
   contentWidthClass?: string;
   hideTitle?: boolean;
   backAction?: {
@@ -218,6 +217,16 @@ export function DashboardTopBar({
   );
 }
 
+function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardHeaderTabsConfig {
+  return {
+    tabs: [
+      { id: "overview", label: t("Shared.tabs.overview") },
+      { id: "playground", label: t("Shared.tabs.apiPlayground") },
+    ],
+    hideOnMobile: true,
+  };
+}
+
 function actionPageConfig(config: {
   centeredTitle: string;
   backHref: string;
@@ -299,7 +308,6 @@ function getAccessControlPageConfig(
   if (pathname === "/dashboard/api-keys") {
     return {
       title: t("Shared.dashboardShell.apiKeys"),
-      showHeaderNavRow: true,
       contentWidthClass: "max-w-none",
     };
   }
@@ -319,18 +327,27 @@ function getAccessControlPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
+  if (pathname === "/dashboard/approvals") {
+    return {
+      title: t("Shared.dashboardShell.approvals"),
+      headerTabs: {
+        tabs: [
+          { id: "pending", label: t("DashboardApprovals.pendingTab") },
+          { id: "history", label: t("DashboardApprovals.historyTab") },
+        ],
+        hideOnMobile: false,
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
   if (pathname.startsWith("/dashboard/approvals")) {
     return {
       title: t("Shared.dashboardShell.approvals"),
       contentWidthClass: "max-w-none",
-      ...(pathname === "/dashboard/approvals"
-        ? {}
-        : {
-            backAction: {
-              href: "/dashboard/approvals",
-              label: t("Shared.dashboardShell.backToApprovals"),
-            },
-          }),
+      backAction: {
+        href: "/dashboard/approvals",
+        label: t("Shared.dashboardShell.backToApprovals"),
+      },
     };
   }
 
@@ -345,7 +362,7 @@ function getIssuanceRoutePageConfig(
   if (pathname === "/dashboard/issuance") {
     return {
       title: t("Shared.dashboardShell.issuance"),
-      headerNav: <IssuanceHeaderTabs />,
+      headerTabs: playgroundHeaderTabs(t),
       contentWidthClass: "max-w-none",
     };
   }
@@ -397,7 +414,7 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: t("Shared.dashboardShell.wallets"),
-      headerNav: <IssuanceHeaderTabs />,
+      headerTabs: playgroundHeaderTabs(t),
       contentWidthClass: "max-w-none",
     };
   }
@@ -424,18 +441,17 @@ export function getDashboardPageConfig(
   const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
   if (pathname === "/dashboard/policies") {
-    return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.policies"),
-      backHref: "/dashboard",
-      backLabel: t("Shared.dashboardShell.backToOverview"),
+    return {
+      title: t("Shared.dashboardShell.policies"),
       contentWidthClass: "max-w-none",
-    });
+    };
   }
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   if (pathname === "/dashboard/payments/counterparty") {
     return {
       title: t("Shared.dashboardShell.counterparty"),
+      headerTabs: playgroundHeaderTabs(t),
       contentWidthClass: "max-w-none",
     };
   }
@@ -446,6 +462,7 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/payments") {
     return {
       title: t("Shared.dashboardShell.payments"),
+      headerTabs: playgroundHeaderTabs(t),
       contentWidthClass: "max-w-none",
     };
   }
@@ -458,6 +475,7 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/payments/requests") {
     return {
       title: t("Shared.dashboardShell.requests"),
+      headerTabs: playgroundHeaderTabs(t),
       contentWidthClass: "max-w-none",
     };
   }
