@@ -27,6 +27,7 @@ import type {
   UpdatePaymentTransferInput,
 } from "@/db/repositories/payments.repository";
 import { internalError } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
@@ -107,10 +108,13 @@ async function recoverStuckProcessingTransfers(
         updatedAt: nowIso,
       });
     } catch (err) {
-      console.error("trackPendingTransfers: failed to recover stuck processing transfer", {
-        transferId: transfer.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      getLogger().error(
+        {
+          transfer_id: transfer.id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        "trackPendingTransfers: failed to recover stuck processing transfer"
+      );
     }
   }
 }
@@ -145,9 +149,12 @@ async function syncProcessingTransfersOnChain(
     const rpc = solanaRpc.createRpc(env);
     statuses = await solanaRpc.getSignatureStatuses(rpc, signatures);
   } catch (err) {
-    console.error("trackPendingTransfers: getSignatureStatuses RPC call failed", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    getLogger().error(
+      {
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingTransfers: getSignatureStatuses RPC call failed"
+    );
     return;
   }
 
@@ -201,10 +208,13 @@ async function syncProcessingTransfersOnChain(
       }
       // "processed" confirmation is too weak to record as confirmed — skip.
     } catch (err) {
-      console.error("trackPendingTransfers: failed to update transfer", {
-        transferId: transfer.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      getLogger().error(
+        {
+          transfer_id: transfer.id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        "trackPendingTransfers: failed to update transfer"
+      );
     }
   }
 }

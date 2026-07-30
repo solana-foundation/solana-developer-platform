@@ -34,6 +34,7 @@ import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
+import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -433,20 +434,25 @@ async function journalRecurringPaymentCollectionError(input: {
       );
     }
     if (input.transfer && attemptJournaled !== transferJournaled) {
-      console.error("Partially journaled submitted recurring payment collection signature", {
-        attemptId: input.attempt.id,
-        attemptJournaled,
-        attemptJournalError:
-          attemptResult.status === "rejected" ? activationErrorMessage(attemptResult.reason) : null,
-        recurringPaymentId: input.recurringPaymentId,
-        submittedSignature: input.submittedSignature,
-        transferId: input.transfer.id,
-        transferJournaled,
-        transferJournalError:
-          transferResult.status === "rejected"
-            ? activationErrorMessage(transferResult.reason)
-            : null,
-      });
+      getLogger().error(
+        {
+          attempt_id: input.attempt.id,
+          attempt_journaled: attemptJournaled,
+          attempt_journal_error:
+            attemptResult.status === "rejected"
+              ? activationErrorMessage(attemptResult.reason)
+              : null,
+          recurring_payment_id: input.recurringPaymentId,
+          submitted_signature: input.submittedSignature,
+          transfer_id: input.transfer.id,
+          transfer_journaled: transferJournaled,
+          transfer_journal_error:
+            transferResult.status === "rejected"
+              ? activationErrorMessage(transferResult.reason)
+              : null,
+        },
+        "Partially journaled submitted recurring payment collection signature"
+      );
     }
     return;
   }
@@ -469,14 +475,17 @@ async function safeJournalRecurringPaymentCollectionError(input: {
   try {
     await journalRecurringPaymentCollectionError(input);
   } catch (journalError) {
-    console.error("Failed to journal recurring payment collection after failure", {
-      attemptId: input.attempt.id,
-      error: activationErrorMessage(journalError),
-      hasSubmittedSignature: input.submittedSignature !== null,
-      originalError: activationErrorMessage(input.error),
-      recurringPaymentId: input.recurringPaymentId,
-      transferId: input.transfer?.id ?? null,
-    });
+    getLogger().error(
+      {
+        attempt_id: input.attempt.id,
+        error: activationErrorMessage(journalError),
+        has_submitted_signature: input.submittedSignature !== null,
+        original_error: activationErrorMessage(input.error),
+        recurring_payment_id: input.recurringPaymentId,
+        transfer_id: input.transfer?.id ?? null,
+      },
+      "Failed to journal recurring payment collection after failure"
+    );
   }
 }
 
