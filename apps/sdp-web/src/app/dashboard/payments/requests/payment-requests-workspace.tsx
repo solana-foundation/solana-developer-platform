@@ -201,7 +201,11 @@ function CreateRequestModal({
   tokens: PaymentRequestTokenOption[];
   counterparties: Counterparty[];
   onClose: () => void;
-  onCreated: () => void;
+  /**
+   * Receives the created request so its details can be shown without a round trip,
+   * or `null` when the response carried no usable link.
+   */
+  onCreated: (request: PaymentRequest | null) => void;
 }) {
   const t = useTranslations();
   const form = useZodForm(createRequestSchema, {
@@ -251,7 +255,7 @@ function CreateRequestModal({
     const expiresAt = resolveExpiryDate(result.data.expiry);
 
     setSubmitting(true);
-    const res = await dashboardFetch("/api/dashboard/payments/requests", {
+    const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
       method: "POST",
       body: {
         walletId: result.data.wallet,
@@ -266,8 +270,16 @@ function CreateRequestModal({
       toast.error(res.error);
       return;
     }
+
     toast.success(t("DashboardPayments.requests.paymentLinkCreated"));
-    onCreated();
+
+    // The create response is the full request, so the details view can open straight
+    // away. Without this the link was only reachable by waiting for the table to
+    // repopulate and then reopening the row. A response without a `publicToken` still
+    // means the request was created, so fall back to closing rather than reporting a
+    // failure that did not happen — the row will arrive with the refresh.
+    const created = res.data?.data;
+    onCreated(created?.publicToken ? created : null);
   }
 
   return (
@@ -761,8 +773,11 @@ export function PaymentRequestsWorkspace({
           tokens={tokens}
           counterparties={counterparties}
           onClose={() => setCreateOpen(false)}
-          onCreated={() => {
+          onCreated={(request) => {
+            // Swap the create form for the details view and let the table repopulate
+            // behind it, rather than closing and making the user find the new row.
             setCreateOpen(false);
+            setSelected(request);
             router.refresh();
           }}
         />
