@@ -37,6 +37,7 @@
     "empty": "No members yet.",
     "loadFailed": "Members could not be loaded: {error}",
     "unnamed": "Unnamed",
+    "unnamedMember": "Unnamed member",
     "emailUnavailable": "Email unavailable",
     "statusPending": "Pending",
     "invitedOn": "Invited {date}",

@@ -24,8 +24,8 @@ function shortenUserId(userId: string): string {
 export interface MemberIdentity {
   /** Always non-empty: what the row and the remove confirmation both display. */
   label: string;
-  /** Secondary line, only when the label is already the name. */
-  email: string | null;
+  /** Secondary line under the label — an email, or the id when there is no identity. */
+  secondary: string | null;
   /** True when neither a name nor a usable email was available. */
   isUnresolved: boolean;
 }
@@ -39,11 +39,15 @@ export interface MemberIdentity {
  * remove dialog read "Remove —". The user id is the last resort: it is always present
  * and it is what support correlates on anyway.
  */
-export function resolveMemberIdentity(user: Member["user"]): MemberIdentity {
+export function resolveMemberIdentity(user: Member["user"], unnamedLabel: string): MemberIdentity {
   const name = user.name?.trim();
   const email = usableEmail(user.email);
 
-  if (name) return { label: name, email, isUnresolved: false };
-  if (email) return { label: email, email: null, isUnresolved: false };
-  return { label: shortenUserId(user.id), email: null, isUnresolved: true };
+  if (name) return { label: name, secondary: email, isUnresolved: false };
+  if (email) return { label: email, secondary: null, isUnresolved: false };
+
+  // Nothing human exists for this row, so say that in words and keep the id as the
+  // quiet second line — a bare `usr_…` as the headline reads like leaked plumbing,
+  // and a bare dash identified nobody at all.
+  return { label: unnamedLabel, secondary: shortenUserId(user.id), isUnresolved: true };
 }
