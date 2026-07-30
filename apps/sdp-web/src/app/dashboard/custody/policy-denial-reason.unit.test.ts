@@ -42,6 +42,22 @@ describe("extractPolicyDenialReason", () => {
     expect(extractPolicyDenialReason(denial({ reasonCode: "api_key_policy_missing" }))).toBeNull();
   });
 
+  // A lookup keyed by an untrusted string reaches Object.prototype unless it is asked
+  // for own keys only, so `reasonCode: "toString"` used to return a Function here. That
+  // value then reached `reason.toLowerCase()` below and took the page down with it.
+  it.each([
+    "toString",
+    "valueOf",
+    "constructor",
+    "hasOwnProperty",
+    "__proto__",
+  ])("does not return a prototype member for reasonCode %s", (inherited) => {
+    const reason = extractPolicyDenialReason(denial({ reasonCode: inherited }));
+
+    expect(typeof reason === "string" || reason === null).toBe(true);
+    expect(() => withPolicyDenialReason("Wallet operation denied by policy", reason)).not.toThrow();
+  });
+
   it("tidies a code that is not in the union yet", () => {
     expect(extractPolicyDenialReason(denial({ reasonCode: "legacy_wallet_policy_denied" }))).toBe(
       "Legacy wallet policy denied"

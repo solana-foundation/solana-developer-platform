@@ -63,7 +63,10 @@ export function extractPolicyDenialReason(body: string): string | null {
     return null;
   }
 
-  if (reasonCode in REASON_CODE_LABELS) {
+  // `in` walks the prototype chain, so an API-supplied "toString" matched and handed
+  // back `Object.prototype.toString` — a Function, which then blew up on the
+  // `.toLowerCase()` in `withPolicyDenialReason` and took the render with it.
+  if (Object.hasOwn(REASON_CODE_LABELS, reasonCode)) {
     return REASON_CODE_LABELS[reasonCode as PolicyEvaluationReasonCode];
   }
 
