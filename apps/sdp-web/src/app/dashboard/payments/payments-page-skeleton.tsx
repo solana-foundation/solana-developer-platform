@@ -22,31 +22,20 @@ function PaymentsActionsSkeleton() {
   );
 }
 
-function PaymentsTabsSkeleton() {
-  return (
-    <div className="flex h-14 shrink-0 items-end gap-6 border-b border-border-default px-3 pb-3 md:px-6">
-      <SkeletonBlock className="h-4 w-16" />
-      <SkeletonBlock className="h-4 w-28" />
-    </div>
-  );
-}
-
 export function PaymentsPageSkeleton() {
   return (
-    <div className="flex h-full min-h-0 w-full flex-col" aria-busy="true">
-      <PaymentsTabsSkeleton />
-      <DashboardWorkspaceOverviewPanel
-        className="grid content-start gap-4 xl:grid-cols-[minmax(0,1.63fr)_minmax(20rem,1fr)]"
-        data-loading-layout="payments-overview"
-      >
-        <PaymentsActionsSkeleton />
-        <PaymentsBalanceSkeleton />
-        <PaymentsActivitySkeleton />
-        <div className="grid min-w-0 content-start gap-4">
-          <PaymentsUpcomingSkeleton />
-          <PaymentsNetworkSkeleton />
-        </div>
-      </DashboardWorkspaceOverviewPanel>
-    </div>
+    <DashboardWorkspaceOverviewPanel
+      aria-busy="true"
+      className="grid content-start gap-4 xl:grid-cols-[minmax(0,1.63fr)_minmax(20rem,1fr)]"
+      data-loading-layout="payments-overview"
+    >
+      <PaymentsActionsSkeleton />
+      <PaymentsBalanceSkeleton />
+      <PaymentsActivitySkeleton />
+      <div className="grid min-w-0 content-start gap-4">
+        <PaymentsUpcomingSkeleton />
+        <PaymentsNetworkSkeleton />
+      </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }

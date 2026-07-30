@@ -17,7 +17,6 @@ interface AnchorageRequestParams {
 type AnchorageAuthStrategy = "api-key" | "bearer";
 
 export interface ProvisionAnchorageOptions {
-  walletId?: string;
   walletLabel?: string;
   network?: "solana" | "solana-devnet";
 }
@@ -42,16 +41,6 @@ export async function provisionAnchorageWallet(
   options: ProvisionAnchorageOptions
 ): Promise<ProvisionAnchorageResult> {
   const { apiBaseUrl, apiKey } = resolveAnchorageConfig(config);
-
-  if (options.walletId) {
-    const existing = await anchorageRequest<unknown>(runtime, {
-      method: "GET",
-      apiBaseUrl,
-      apiKey,
-      path: `/v1/wallets/${encodeURIComponent(options.walletId)}`,
-    });
-    return extractAnchorageWallet(existing);
-  }
 
   const created = await anchorageRequest<unknown>(runtime, {
     method: "POST",
