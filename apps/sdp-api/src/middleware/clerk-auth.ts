@@ -139,6 +139,48 @@ async function resolveOrgMembership(db: DatabaseClient, userId: string, organiza
     .first<{ role: string; status: string }>();
 }
 
+/**
+ * Writes a known-good email over a stored placeholder.
+ *
+ * Each copy is repaired only when it is actually broken, so a healthy row does no
+ * writes. `users.email` is UNIQUE, so the update is skipped when another row already
+ * holds the address — that is a merge decision, not a repair, and matches how
+ * migration 0040 leaves colliding rows alone.
+ */
+async function repairClerkEmails(
+  db: DatabaseClient,
+  params: {
+    userId: string;
+    clerkUserId: string;
+    email: string;
+    identityEmail: string | null;
+    userEmail: string | null;
+  }
+): Promise<void> {
+  const { userId, clerkUserId, email, identityEmail, userEmail } = params;
+
+  if (!isPlausibleEmail(userEmail)) {
+    await db
+      .prepare(
+        `UPDATE users SET email = ?
+         WHERE id = ?
+           AND NOT EXISTS (SELECT 1 FROM users other WHERE other.email = ? AND other.id <> ?)`
+      )
+      .bind(email, userId, email, userId)
+      .run();
+  }
+
+  if (!isPlausibleEmail(identityEmail)) {
+    await db
+      .prepare(
+        `UPDATE auth_user_identities SET email = ?, updated_at = sdp_datetime_now()
+         WHERE provider = 'clerk' AND provider_user_id = ?`
+      )
+      .bind(email, clerkUserId)
+      .run();
+  }
+}
+
 async function ensureClerkUser(
   env: Env,
   db: DatabaseClient,
@@ -153,6 +195,23 @@ async function ensureClerkUser(
     // that is not an address and fall through to the other copy.
     const email =
       [existing.identity_email, existing.user_email].find(isPlausibleEmail) ?? fallbackEmail;
+
+    // Repair the corrupted copy from the good one while we are holding both.
+    // Clerk's own guidance is that webhook delivery is not guaranteed and a synced
+    // table should carry an on-demand fallback, and `user.updated` only fires when
+    // something changes in Clerk — so an account corrupted once would otherwise stay
+    // corrupted through every future sign-in, and every surface reading `users.email`
+    // stays wrong with it. Migration 0040 does the same repair, but only on deploy.
+    if (isPlausibleEmail(email)) {
+      await repairClerkEmails(db, {
+        userId: existing.user_id,
+        clerkUserId,
+        email,
+        identityEmail: existing.identity_email,
+        userEmail: existing.user_email,
+      });
+    }
+
     return { userId: existing.user_id, email };
   }
 
