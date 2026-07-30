@@ -1242,6 +1242,110 @@ describe("Issuance Routes", () => {
       expect(body.meta.page).toBe(1);
       expect(body.meta.pageSize).toBe(10);
     });
+
+    it("filters by search, reporting the filtered total", async () => {
+      const match = await app.request(
+        "/v1/issuance/tokens?search=Listed",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      expect(match.status).toBe(200);
+      const matchBody = await match.json();
+      expect(matchBody.data.length).toBe(matchBody.meta.total);
+      expect(matchBody.data.every((token: { name: string }) => token.name === "Listed Token")).toBe(
+        true
+      );
+
+      const miss = await app.request(
+        "/v1/issuance/tokens?search=NoSuchTokenAnywhere",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      const missBody = await miss.json();
+      expect(missBody.data).toEqual([]);
+      expect(missBody.meta.total).toBe(0);
+      expect(missBody.meta.hasMore).toBe(false);
+    });
+
+    it("accepts a blank search as no filter", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens?search=",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBeGreaterThan(0);
+    });
+
+    it.each([
+      ["page=0", "non-positive page"],
+      ["page=9007199254740991", "page beyond the offset bound"],
+      ["pageSize=101", "page size above the cap"],
+      ["pageSize=abc", "non-numeric page size"],
+      ["status=bogus", "unknown status"],
+      ["deploymentStatus=bogus", "unknown deployment status"],
+      ["sortBy=created_at%3B+DROP+TABLE+issued_tokens", "unwhitelisted sort key"],
+      ["sortDirection=sideways", "unknown sort direction"],
+      ["createdAfter=yesterday", "unparseable timestamp"],
+    ])("rejects %s (%s) with 400", async (query) => {
+      const res = await app.request(
+        `/v1/issuance/tokens?${query}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("BAD_REQUEST");
+    });
+
+    it("rejects an inverted created_at window with 400", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens?createdAfter=2026-06-01T00:00:00.000Z&createdBefore=2026-01-01T00:00:00.000Z",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("GET /v1/issuance/tokens/facets", () => {
+    beforeEach(async () => {
+      await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Facet Token", symbol: "FCT", template: "stablecoin" }),
+        },
+        env
+      );
+    });
+
+    // "facets" is a literal path registered before /tokens/:tokenId — if the
+    // parameterised route ever wins the match, this 404s as a missing token.
+    it("returns facets rather than resolving 'facets' as a token id", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens/facets",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.total).toBeGreaterThan(0);
+      expect(body.data.templates).toEqual(
+        expect.arrayContaining([{ template: "stablecoin", count: expect.any(Number) }])
+      );
+      // Undeployed drafts, so the derived state counts land on draft.
+      expect(body.data.deploymentStatuses.draft).toBeGreaterThan(0);
+    });
   });
 
   describe("GET /v1/issuance/tokens/:tokenId", () => {

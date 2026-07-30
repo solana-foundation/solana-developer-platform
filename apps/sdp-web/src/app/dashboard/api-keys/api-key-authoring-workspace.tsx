@@ -1241,7 +1241,7 @@ export function ApiKeyAuthoringWorkspace({
           />
         </div>
       </div>
-      <div className="shrink-0 border-t border-border-default bg-surface-raised/90 px-4 py-4 md:px-6">
+      <div className="shrink-0 border-t border-border-default px-4 py-4 md:px-6">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
           <Button type="button" variant="secondary" onClick={handleBack} disabled={isPending}>
             {currentStepIndex === 0 ? t("DashboardCustody.cancel") : t("DashboardCustody.back")}

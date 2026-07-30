@@ -28,7 +28,7 @@ import {
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatDisplayLabel } from "@/lib/utils";
-import { getPageCount, getPageSummary } from "../pagination.utils";
+import { getPageCount, getPageSummary } from "../../pagination.utils";
 import { formatDateTime } from "../token-management-workspace.utils";
 import { transactionStatusBadgeClass } from "../token-transactions-section";
 import { auditActionIcon, auditActionLabel } from "./asset-audit-presentation";

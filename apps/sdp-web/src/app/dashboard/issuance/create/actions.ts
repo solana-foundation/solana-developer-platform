@@ -24,6 +24,10 @@ export async function createAssetDraftAction(
     symbol: token.symbol,
     template: token.template,
     requiresAllowlist: token.requiresAllowlist,
+    // Unconditional: `false` is meaningful here, and omitting it would let the
+    // API default back to `true` and grant the mint a freeze authority the
+    // issuer explicitly declined.
+    isFreezable: token.isFreezable,
     assetCategory: input.assetCategory,
     assetType: input.assetType,
     issuanceMetadata: input.issuanceMetadata,
@@ -44,6 +48,11 @@ export async function createAssetDraftAction(
   }
   if (token.signingWalletId) {
     payload.signingWalletId = token.signingWalletId;
+  }
+  // Absent = uncapped. buildTokenInput already drops a blank cap, and the API's
+  // decimal-string refinement would reject "".
+  if (token.maxSupply) {
+    payload.maxSupply = token.maxSupply;
   }
 
   try {

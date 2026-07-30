@@ -52,13 +52,15 @@ async function persistLightsparkData(
   patch: Record<string, unknown>
 ): Promise<void> {
   const repo = getCounterpartiesRepository(c);
-  await repo.updateCounterparty({
+  await repo.mutateProviderData({
     counterpartyId: row.id,
     organizationId: row.organization_id,
     projectId,
-    providerData: {
-      ...row.provider_data,
-      lightspark: { ...readLightsparkData(row.provider_data), ...patch },
+    mutate(providerData) {
+      return {
+        ...providerData,
+        lightspark: { ...readLightsparkData(providerData), ...patch },
+      };
     },
   });
 }

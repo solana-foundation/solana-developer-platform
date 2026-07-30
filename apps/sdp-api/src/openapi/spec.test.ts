@@ -39,6 +39,35 @@ describe("OpenAPI spec", () => {
     expect(labelsPath?.operationId).toBe("listTokenAllowlistLabels");
   });
 
+  it("documents the token list search/filter/sort params and the facets endpoint", () => {
+    const doc = createOpenApiDocument();
+
+    const listPath = doc.paths?.["/v1/issuance/tokens"]?.get;
+    const queryParamNames = listPath?.parameters
+      ?.filter((parameter) => "in" in parameter && parameter.in === "query")
+      .map((parameter) => ("name" in parameter ? parameter.name : undefined));
+    expect(queryParamNames).toEqual(
+      expect.arrayContaining([
+        "search",
+        "status",
+        "deploymentStatus",
+        "template",
+        "createdAfter",
+        "createdBefore",
+        "sortBy",
+        "sortDirection",
+        "page",
+        "pageSize",
+      ])
+    );
+    // Invalid query params are rejected, so 400 has to be a documented outcome.
+    expect(listPath?.responses?.["400"]).toBeDefined();
+
+    const facetsPath = doc.paths?.["/v1/issuance/tokens/facets"]?.get;
+    expect(facetsPath).toBeDefined();
+    expect(facetsPath?.operationId).toBe("listTokenFacets");
+  });
+
   it("documents the transaction type filter", () => {
     const doc = createOpenApiDocument();
 

@@ -12,7 +12,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import type { FieldDescriptor } from "./asset-details-config";
+import { type FieldDescriptor, fieldOptionLabel } from "./asset-details-config";
 import type { CustomFieldRow, DraftState } from "./issuance-draft-wizard.types";
 
 type UpdateDraft = (patch: Partial<DraftState>) => void;
@@ -99,7 +99,11 @@ export function TextField({
         placeholder={placeholder}
         required={required}
         error={error}
-        description={help}
+        // Must stay truthy even without help text: the design-system TextInput
+        // renders a bare input unless label/description/error is set, so an
+        // error appearing (or clearing) mid-typing would otherwise swap the
+        // root element, remount the <input>, and drop focus.
+        description={help ?? " "}
       />
     </div>
   );
@@ -220,7 +224,7 @@ export function DetailField({
           >
             {field.options?.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {t(option.labelKey)}
+                {fieldOptionLabel(option, t)}
               </SelectItem>
             ))}
           </Select>

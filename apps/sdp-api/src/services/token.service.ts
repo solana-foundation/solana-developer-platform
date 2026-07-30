@@ -29,6 +29,117 @@ function escapeLikePattern(value: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Token List Filtering
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type TokenListSortBy = "createdAt" | "name";
+export type TokenDeploymentStatusFilter = "draft" | "active" | "paused";
+
+/**
+ * A token counts as deployed once it has a mint address or a deploy timestamp —
+ * the same test the dashboard applies client-side, so server-side filtering and
+ * the rendered badge can't disagree.
+ */
+const TOKEN_DEPLOYED_PREDICATE = "(mint_address IS NOT NULL OR deployed_at IS NOT NULL)";
+
+/** Lifecycle state as presented, derived from deployed-ness + the raw status. */
+const TOKEN_DEPLOYMENT_STATUS_PREDICATES: Record<TokenDeploymentStatusFilter, string> = {
+  draft: `NOT ${TOKEN_DEPLOYED_PREDICATE}`,
+  active: `${TOKEN_DEPLOYED_PREDICATE} AND status <> 'paused'`,
+  paused: `${TOKEN_DEPLOYED_PREDICATE} AND status = 'paused'`,
+};
+
+/**
+ * Contains-style search haystack. Must stay character-for-character in step with
+ * `idx_issued_tokens_search_trgm` — a mismatched expression silently drops the
+ * trigram index and turns every search into a sequential scan.
+ */
+const TOKEN_SEARCH_EXPRESSION =
+  "(name || ' ' || symbol || ' ' || COALESCE(mint_address, '') || ' ' || id)";
+
+/**
+ * Whitelist of sortable keys → physical SQL. Callers only ever supply a key, so
+ * no caller-controlled text reaches the ORDER BY clause.
+ */
+const TOKEN_LIST_SORT_COLUMNS: Record<TokenListSortBy, string> = {
+  createdAt: "created_at",
+  // LOWER() matches the dashboard's case-insensitive name ordering and the
+  // expression indexed by idx_issued_tokens_project_name.
+  name: "LOWER(name)",
+};
+
+export interface ListTokensFilters {
+  status?: TokenStatus;
+  deploymentStatus?: TokenDeploymentStatusFilter;
+  template?: string;
+  /** Contains-style, case-insensitive; wildcards are matched literally. */
+  search?: string;
+  /** Inclusive ISO-8601 lower bound on `created_at`. */
+  createdAfter?: string;
+  /** Inclusive ISO-8601 upper bound on `created_at`. */
+  createdBefore?: string;
+}
+
+export interface ListTokensOptions extends ListTokensFilters {
+  sortBy?: TokenListSortBy;
+  sortDirection?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+export interface TokenListFacets {
+  /** Template ids actually present in the project, with row counts. */
+  templates: Array<{ template: string; count: number }>;
+  /** Row counts per derived lifecycle state. */
+  deploymentStatuses: Record<TokenDeploymentStatusFilter, number>;
+  /** Unfiltered project total — lets the client tell "no assets" from "no matches". */
+  total: number;
+}
+
+/**
+ * Builds the WHERE clause shared by the list query, its count query and the
+ * facet counts, so a filtered page and its total can never diverge.
+ */
+function buildTokenListFilter(
+  projectId: string,
+  filters: ListTokensFilters
+): { whereClause: string; values: Array<string | number> } {
+  const clauses = ["project_id = ?"];
+  const values: Array<string | number> = [projectId];
+
+  if (filters.status) {
+    clauses.push("status = ?");
+    values.push(filters.status);
+  }
+
+  if (filters.deploymentStatus) {
+    clauses.push(`(${TOKEN_DEPLOYMENT_STATUS_PREDICATES[filters.deploymentStatus]})`);
+  }
+
+  if (filters.template) {
+    clauses.push("template = ?");
+    values.push(filters.template);
+  }
+
+  if (filters.search) {
+    clauses.push(`${TOKEN_SEARCH_EXPRESSION} ILIKE ? ESCAPE '\\'`);
+    values.push(`%${escapeLikePattern(filters.search)}%`);
+  }
+
+  if (filters.createdAfter) {
+    clauses.push("created_at >= ?");
+    values.push(filters.createdAfter);
+  }
+
+  if (filters.createdBefore) {
+    clauses.push("created_at <= ?");
+    values.push(filters.createdBefore);
+  }
+
+  return { whereClause: clauses.join(" AND "), values };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Input Types
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -291,16 +402,27 @@ export class TokenService {
   // Token CRUD
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Create a new token
-   */
   async createToken(input: CreateTokenInput): Promise<Token> {
     const id = `tok_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const decimals = input.decimals ?? 9;
-    const maxSupplyBaseUnits = input.maxSupply
-      ? parseDecimalAmount(input.maxSupply, decimals).toString()
-      : null;
+    // parseDecimalAmount throws when the cap carries more decimal places than the
+    // mint supports. It can't be caught in the request schema: callers resolve
+    // template settings first, and a template may pin `decimals` to something
+    // other than what the caller asked for — so the effective precision is only
+    // known here. Surface it as a 400 rather than letting AmountError escape.
+    let maxSupplyBaseUnits: string | null = null;
+    if (input.maxSupply) {
+      try {
+        maxSupplyBaseUnits = parseDecimalAmount(input.maxSupply, decimals).toString();
+      } catch {
+        throw badRequest("Invalid maxSupply for this token's decimals", {
+          errors: {
+            maxSupply: [`Must be a number with at most ${decimals} decimal place(s)`],
+          },
+        });
+      }
+    }
 
     const token: Token = {
       id,
@@ -482,9 +604,6 @@ export class TokenService {
     };
   }
 
-  /**
-   * Get a token by mint address
-   */
   async getTokenByMint(mintAddress: string): Promise<Token | null> {
     const row = await this.db
       .prepare(
@@ -508,43 +627,45 @@ export class TokenService {
   }
 
   /**
-   * List tokens for a project
+   * Page a project's tokens with server-side search, filtering and sorting.
+   *
+   * `total` reflects the active filters, so it is the count the caller should
+   * page against. Ordering always ends in an `id` tiebreaker in the same
+   * direction as the sort key, so rows sharing a `created_at` (or a name) can't
+   * repeat or vanish between pages, and the composite indexes can serve the
+   * whole ordering without a separate sort step.
    */
   async listTokens(
     projectId: string,
-    options: { status?: TokenStatus; limit?: number; offset?: number } = {}
+    options: ListTokensOptions = {}
   ): Promise<{ tokens: Token[]; total: number }> {
-    const { status, limit = 50, offset = 0 } = options;
+    const { limit = 50, offset = 0, sortBy = "createdAt", sortDirection = "desc" } = options;
 
-    let countQuery = "SELECT COUNT(*) as count FROM issued_tokens WHERE project_id = ?";
-    let selectQuery = `
-      SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
-             signing_wallet_id,
-             abl_list_address, name, symbol, decimals, description, uri, image_url, template,
-             total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
-             freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
-             created_at, updated_at
-      FROM issued_tokens WHERE project_id = ?
-    `;
-    const params: (string | number)[] = [projectId];
+    const { whereClause, values } = buildTokenListFilter(projectId, options);
+    const sortColumn = TOKEN_LIST_SORT_COLUMNS[sortBy] ?? TOKEN_LIST_SORT_COLUMNS.createdAt;
+    const direction = sortDirection === "asc" ? "ASC" : "DESC";
 
-    if (status) {
-      countQuery += " AND status = ?";
-      selectQuery += " AND status = ?";
-      params.push(status);
-    }
-
-    selectQuery += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
-
-    const countResult = await this.db
-      .prepare(countQuery)
-      .bind(...params)
-      .first<{ count: number }>();
-
-    const result = await this.db
-      .prepare(selectQuery)
-      .bind(...params, limit, offset)
-      .all<TokenRow>();
+    const [countResult, result] = await Promise.all([
+      this.db
+        .prepare(`SELECT COUNT(*)::int as count FROM issued_tokens WHERE ${whereClause}`)
+        .bind(...values)
+        .first<{ count: number }>(),
+      this.db
+        .prepare(
+          `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
+                  signing_wallet_id,
+                  abl_list_address, name, symbol, decimals, description, uri, image_url, template,
+                  total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
+                  freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
+                  created_at, updated_at
+           FROM issued_tokens
+           WHERE ${whereClause}
+           ORDER BY ${sortColumn} ${direction}, id ${direction}
+           LIMIT ? OFFSET ?`
+        )
+        .bind(...values, limit, offset)
+        .all<TokenRow>(),
+    ]);
 
     const extensionMap = await this.getExtensionStatesForTokens(
       result.results.map((row) => row.id)
@@ -562,8 +683,54 @@ export class TokenService {
   }
 
   /**
-   * Update a token
+   * Filter facets for a project's token list: which templates exist (so the
+   * dashboard's filter options aren't limited to the rows on the current page),
+   * how many tokens sit in each lifecycle state, and the unfiltered total.
+   *
+   * Deliberately unfiltered — these are the choices offered *before* filtering,
+   * and the unfiltered total is what separates an empty project from an
+   * over-filtered one.
    */
+  async listTokenFacets(projectId: string): Promise<TokenListFacets> {
+    const [templateRows, counts] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT template, COUNT(*)::int as count
+           FROM issued_tokens
+           WHERE project_id = ?
+           GROUP BY template
+           ORDER BY template ASC`
+        )
+        .bind(projectId)
+        .all<{ template: string | null; count: number }>(),
+      this.db
+        .prepare(
+          `SELECT COUNT(*)::int as total,
+                  COUNT(*) FILTER (WHERE ${TOKEN_DEPLOYMENT_STATUS_PREDICATES.draft})::int as draft,
+                  COUNT(*) FILTER (WHERE ${TOKEN_DEPLOYMENT_STATUS_PREDICATES.active})::int as active,
+                  COUNT(*) FILTER (WHERE ${TOKEN_DEPLOYMENT_STATUS_PREDICATES.paused})::int as paused
+           FROM issued_tokens
+           WHERE project_id = ?`
+        )
+        .bind(projectId)
+        .first<{ total: number; draft: number; active: number; paused: number }>(),
+    ]);
+
+    return {
+      // `template` is NOT NULL in practice but defensive: a null would otherwise
+      // surface as an unselectable blank option.
+      templates: templateRows.results
+        .filter((row): row is { template: string; count: number } => Boolean(row.template))
+        .map((row) => ({ template: row.template, count: row.count })),
+      deploymentStatuses: {
+        draft: counts?.draft ?? 0,
+        active: counts?.active ?? 0,
+        paused: counts?.paused ?? 0,
+      },
+      total: counts?.total ?? 0,
+    };
+  }
+
   async updateToken(tokenId: string, input: UpdateTokenInput): Promise<Token> {
     const existing = await this._getTokenById(tokenId);
     if (!existing) {
@@ -794,9 +961,6 @@ export class TokenService {
       .run();
   }
 
-  /**
-   * Set token as deployed with mint address and optional ABL list
-   */
   async setTokenDeployed(
     tokenId: string,
     mintAddress: string,
@@ -839,9 +1003,6 @@ export class TokenService {
     return updated;
   }
 
-  /**
-   * Update token supply after mint/burn
-   */
   async updateSupply(tokenId: string, delta: string, operation: "mint" | "burn"): Promise<void> {
     const token = await this._getTokenById(tokenId);
     if (!token) {
@@ -878,9 +1039,6 @@ export class TokenService {
       .run();
   }
 
-  /**
-   * Set token supply directly from a base-units on-chain value.
-   */
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
       throw new Error("INVALID_SUPPLY");
@@ -906,9 +1064,6 @@ export class TokenService {
   // Token Transactions
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Create a token transaction record
-   */
   async createTransaction(input: CreateTokenTransactionInput): Promise<CreateTransactionResult> {
     if (input.idempotencyKey && !input.idempotencyFingerprint) {
       throw badRequest("Missing idempotency fingerprint for idempotency key");
@@ -1110,9 +1265,6 @@ export class TokenService {
     return this.mapRowToTransaction(row);
   }
 
-  /**
-   * Find a token transaction by organization + idempotency key
-   */
   async findTransactionByIdempotency(
     organizationId: string,
     idempotencyKey: string
@@ -1135,9 +1287,6 @@ export class TokenService {
     return this.mapRowToTransaction(row);
   }
 
-  /**
-   * List transactions for a token
-   */
   async listTokenTransactions(
     tokenId: string,
     options: {
@@ -1511,9 +1660,6 @@ export class TokenService {
     return entry;
   }
 
-  /**
-   * Get an allowlist entry by ID
-   */
   async getAllowlistEntry(entryId: string): Promise<TokenAllowlistEntry | null> {
     const row = await this.db
       .prepare(
@@ -1531,9 +1677,6 @@ export class TokenService {
     return this.mapRowToAllowlistEntry(row);
   }
 
-  /**
-   * List allowlist entries for a token
-   */
   async listAllowlistEntries(
     tokenId: string,
     options: {
@@ -1622,9 +1765,6 @@ export class TokenService {
     };
   }
 
-  /**
-   * Check if an address is on the allowlist
-   */
   async isAddressAllowed(tokenId: string, address: string): Promise<boolean> {
     const row = await this.db
       .prepare(
@@ -1656,9 +1796,6 @@ export class TokenService {
     return row?.status ?? null;
   }
 
-  /**
-   * Revoke an allowlist entry
-   */
   async revokeAllowlistEntry(entryId: string): Promise<void> {
     const now = new Date().toISOString();
     await this.db
@@ -1687,9 +1824,6 @@ export class TokenService {
   // Freeze Management
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Freeze an account
-   */
   async freezeAccount(input: FreezeAccountInput): Promise<FrozenAccount> {
     const existing = await this.db
       .prepare(

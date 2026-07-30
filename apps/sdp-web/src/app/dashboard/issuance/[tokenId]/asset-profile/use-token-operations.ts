@@ -16,12 +16,14 @@ import {
 import type {
   ActionExecutionInput,
   AdminAction,
+  DeployFeePayment,
   PermissionControlStatus,
   PermissionRow,
   RunActionOptions,
 } from "../token-management-workspace.types";
 import {
   asOptionalString,
+  classifyAuthorityControl,
   createInitialAllowlistForm,
   createInitialAuthorityForm,
   createInitialBurnForm,
@@ -29,7 +31,6 @@ import {
   createInitialFreezeForm,
   createInitialMintForm,
   createInitialSeizeForm,
-  findWalletByPublicKey,
   findWalletByWalletId,
   getBurnValidationErrors,
   getBurnValidationReason,
@@ -39,15 +40,18 @@ import {
   getExtensionRows,
   getForceBurnValidationErrors,
   getForceBurnValidationReason,
+  getLockSupplyDisabledReason,
   getMintValidationErrors,
   getMintValidationReason,
   getPermissionRows,
+  getRemainingMintableSupply,
   getSeizeValidationErrors,
   getSeizeValidationReason,
   getSignerSelectionForAction,
   getTokenActionDisabledReasons,
   isPositiveAmount,
   resolveAuthorityAddressForRole,
+  summarizeAuthorityControl,
 } from "../token-management-workspace.utils";
 import { useTokenActionRunner } from "../use-token-action-runner";
 import { fetchTokenAllowlistLabels } from "./allowlist.data";
@@ -154,6 +158,20 @@ export function useTokenOperations({
   const [authorityForm, setAuthorityForm] = useState(createInitialAuthorityForm);
   const [freezeForm, setFreezeForm] = useState(createInitialFreezeForm);
   const [allowlistForm, setAllowlistForm] = useState(createInitialAllowlistForm);
+  // Lock-supply has its own modal state rather than joining FundManagementModalAction:
+  // it composes two endpoint calls instead of mapping to one, it must keep the modal
+  // open across submission to offer a retry, and it exists only on this workspace —
+  // widening the shared union would force dead entries into the legacy workspace and
+  // the playground deep-links.
+  const [lockSupplyModalOpen, setLockSupplyModalOpen] = useState(false);
+  const [lockSupplyForm, setLockSupplyForm] = useState({
+    destination: "",
+    signingWalletId: "",
+  });
+  // Records that lock-supply's mint leg already landed, so a failed revoke can be
+  // retried without minting twice. Cleared when the modal closes cleanly.
+  const [lockSupplyMinted, setLockSupplyMinted] = useState(false);
+  const [lockSupplyRevokeFailed, setLockSupplyRevokeFailed] = useState(false);
 
   const accessControlMode = getTokenAccessControlMode(token);
   const controlListCopy = getControlListCopy(accessControlMode, t);
@@ -339,13 +357,11 @@ export function useTokenOperations({
       authorityWallets,
     });
     const rowWithDisplayedValue = { ...row, value: displayedAuthorityAddress };
-    const controlStatus: PermissionControlStatus = !displayedAuthorityAddress
-      ? "none"
-      : !authorityControlKnown
-        ? "unknown"
-        : findWalletByPublicKey(authorityWallets, displayedAuthorityAddress)
-          ? "sdp"
-          : "external";
+    const controlStatus: PermissionControlStatus = classifyAuthorityControl(
+      displayedAuthorityAddress,
+      authorityWallets,
+      authorityControlKnown
+    );
 
     return {
       ...rowWithDisplayedValue,
@@ -365,21 +381,15 @@ export function useTokenOperations({
     };
   });
 
-  // Roll-up for the overview "Authorities SDP-controlled: N of M" tile and the
-  // permissions-tab external-authority warning. Counts only authorities that are
-  // actually set (control status other than none/unknown).
-  const authoritySummary = (() => {
-    const known = permissionRows.filter(
-      (row) => row.controlStatus === "sdp" || row.controlStatus === "external"
-    );
-    const controlled = known.filter((row) => row.controlStatus === "sdp").length;
-    return {
-      controlled,
-      total: known.length,
-      hasExternal: known.some((row) => row.controlStatus === "external"),
-      known: authorityControlKnown,
-    };
-  })();
+  // Roll-up for the overview "Managed authorities: N of M" tile and the
+  // permissions-tab external-authority warning. Shared with the issuance list's
+  // expanded card so both surfaces count identically.
+  const authoritySummary = summarizeAuthorityControl({
+    token,
+    authorityWallets,
+    controlKnown: authorityControlKnown,
+    t,
+  });
   const displayedMintAuthority = getDisplayedAuthorityAddress({
     token,
     role: "mint",
@@ -398,6 +408,13 @@ export function useTokenOperations({
     freezeDisabledReason ?? freezeSignerSelection.unavailableReason;
   const effectivePauseDisabledReason =
     pauseDisabledReason ?? pauseSignerSelection.unavailableReason;
+
+  // Lock supply = mint the remainder, then revoke the mint authority. Both legs
+  // are signed by the current mint authority, so mintSignerSelection covers the
+  // whole flow and the modal needs only one signer picker.
+  const lockSupplyRemaining = getRemainingMintableSupply(token);
+  const effectiveLockSupplyDisabledReason =
+    getLockSupplyDisabledReason(token, t) ?? mintSignerSelection.unavailableReason;
 
   const selectedBurnSignerWallet =
     findWalletByWalletId(
@@ -505,21 +522,22 @@ export function useTokenOperations({
     }
   };
 
-  const handleDeploy = () => {
-    runAction(
+  // The deploy modal picks both the signer and who pays the fees, so the
+  // submitting button already carries the intent — it runs immediately rather
+  // than through the confirmation dialog the other actions use.
+  const deployToken = (feePayment: DeployFeePayment) => {
+    closeFundManagementModal();
+    void runActionImmediately(
       {
         label: t("DashboardIssuance.management.deployToken"),
         method: "POST",
         path: `${tokenBasePath}/deploy`,
         body: {
           signingWalletId: deploySignerWalletId || undefined,
+          feePayment,
         },
       },
       {
-        requiresConfirmation: true,
-        confirmationTitle: t("DashboardIssuance.management.deployConfirmationTitle"),
-        confirmationDescription: t("DashboardIssuance.management.deployConfirmationDescription"),
-        confirmButtonLabel: t("DashboardIssuance.management.deployNow"),
         submitToast: t("DashboardIssuance.management.submittingDeploy"),
         successToast: t("DashboardIssuance.management.deployFinalized"),
       }
@@ -995,6 +1013,29 @@ export function useTokenOperations({
     setFundManagementModalAction(action);
   };
 
+  const openLockSupplyModal = () => {
+    if (effectiveLockSupplyDisabledReason) {
+      return;
+    }
+
+    setLockSupplyForm({
+      destination: "",
+      // The same authority signs both the mint and the revoke.
+      signingWalletId: mintSignerSelection.defaultWalletId,
+    });
+    setLockSupplyMinted(false);
+    setLockSupplyRevokeFailed(false);
+    setLockSupplyModalOpen(true);
+  };
+
+  const closeLockSupplyModal = () => {
+    if (isPending) {
+      return;
+    }
+
+    setLockSupplyModalOpen(false);
+  };
+
   const closeFundManagementModal = () => {
     if (isPending) {
       return;
@@ -1003,13 +1044,102 @@ export function useTokenOperations({
     setFundManagementModalAction(null);
   };
 
+  /**
+   * Make the configured max supply a real on-chain cap: mint the remainder, then
+   * revoke the mint authority. SPL has no supply-cap field and `InitializeMint`
+   * requires a mint authority, so a fixed-supply mint can only be reached this
+   * way — mint everything, then set the authority to None (irreversible).
+   *
+   * Two transactions, so there is a real window where the mint lands and the
+   * revoke does not. That leaves the token fully minted with a live authority, so
+   * the flow reports the partial state and lets the operator retry just the
+   * revoke: `lockSupplyMinted` suppresses the mint leg in-session, and after the
+   * token refetches `lockSupplyRemaining` is "0" anyway, which suppresses it for
+   * any later attempt. The revoke is idempotent — re-revoking an already-revoked
+   * authority is rejected by the API, not silently duplicated.
+   */
+  const handleLockSupply = async () => {
+    if (effectiveLockSupplyDisabledReason) {
+      toast.error(effectiveLockSupplyDisabledReason);
+      return;
+    }
+    if (lockSupplyRemaining === null) {
+      toast.error(t("DashboardIssuance.management.lockSupplyAmountUnavailable"));
+      return;
+    }
+
+    const signingWalletId = lockSupplyForm.signingWalletId || undefined;
+    const destination = lockSupplyForm.destination.trim();
+    const needsMint = !lockSupplyMinted && isPositiveAmount(lockSupplyRemaining);
+
+    if (needsMint && !destination) {
+      toast.error(t("DashboardIssuance.management.lockSupplyDestinationRequired"));
+      return;
+    }
+
+    if (needsMint) {
+      const mintResult = await runActionImmediately(
+        {
+          label: t("DashboardIssuance.management.lockSupplyMintLabel"),
+          method: "POST",
+          path: `${tokenBasePath}/mint`,
+          body: {
+            signingWalletId,
+            mint: { destination, amount: lockSupplyRemaining },
+          },
+        },
+        {
+          submitToast: t("DashboardIssuance.management.lockSupplyMinting", {
+            amount: lockSupplyRemaining,
+          }),
+          successToast: t("DashboardIssuance.management.lockSupplyMinted", {
+            amount: lockSupplyRemaining,
+          }),
+        }
+      );
+
+      if (!mintResult.ok) {
+        // Nothing landed, so there is no partial state to report — the operator
+        // can just resubmit.
+        return;
+      }
+      setLockSupplyMinted(true);
+    }
+
+    const revokeResult = await runActionImmediately(
+      {
+        label: t("DashboardIssuance.management.lockSupplyRevokeLabel"),
+        method: "POST",
+        path: `${tokenBasePath}/authority`,
+        body: {
+          signingWalletId,
+          authority: { role: "mint", newAuthority: null },
+        },
+      },
+      {
+        submitToast: t("DashboardIssuance.management.lockSupplyRevoking"),
+        successToast: t("DashboardIssuance.management.lockSupplyLocked"),
+      }
+    );
+
+    if (revokeResult.ok) {
+      setLockSupplyRevokeFailed(false);
+      setLockSupplyMinted(false);
+      setLockSupplyModalOpen(false);
+      return;
+    }
+
+    // Mint landed, revoke did not: surface it in the modal so the operator sees
+    // the supply is now at the cap but still mintable, with a retry for leg 2.
+    setLockSupplyRevokeFailed(true);
+  };
+
+  // Deploy is not routed here: its modal submits through `deployToken`, which
+  // also carries the fee-payment choice.
   const submitFundManagementAction = (action: FundManagementModalAction) => {
     closeFundManagementModal();
 
     switch (action) {
-      case "deploy":
-        handleDeploy();
-        return;
       case "mint":
         handleMint();
         return;
@@ -1154,6 +1284,18 @@ export function useTokenOperations({
     openFundManagementModal,
     closeFundManagementModal,
     submitFundManagementAction,
+    // lock supply (mint to cap, then revoke the mint authority)
+    lockSupplyModalOpen,
+    openLockSupplyModal,
+    closeLockSupplyModal,
+    lockSupplyForm,
+    setLockSupplyForm,
+    lockSupplyRemaining,
+    lockSupplyMinted,
+    lockSupplyRevokeFailed,
+    lockSupplyDisabledReason: effectiveLockSupplyDisabledReason,
+    lockSupplySignerSelection: mintSignerSelection,
+    handleLockSupply,
     // authority modal
     authorityModalRow,
     authorityModalCurrentAuthority,
@@ -1165,7 +1307,7 @@ export function useTokenOperations({
     handleAuthorityModalConfirm,
     // handlers
     handleCopy,
-    handleDeploy,
+    deployToken,
     handleRefreshSupply,
     handleMint,
     handleBurn,

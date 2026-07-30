@@ -17,9 +17,10 @@ export interface Env {
   // Environment variables
   ENVIRONMENT: "development" | "production";
   API_VERSION: string;
-  // Injected automatically by Cloud Run services. Local processes and jobs omit them.
+  // Injected automatically by Cloud Run services and jobs.
   K_SERVICE?: string;
   K_REVISION?: string;
+  CLOUD_RUN_JOB?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). When set,
   // it overrides the request-derived origin used to build the SDP-hosted token
@@ -53,6 +54,10 @@ export interface Env {
   CUSTODY_KMS_KEY_NAME?: string;
   CUSTODY_KMS_API_BASE_URL?: string;
   CUSTODY_KMS_METADATA_TOKEN_URL?: string;
+  COUNTERPARTY_PII_KMS_KEY_NAME?: string;
+  COUNTERPARTY_PII_KMS_API_BASE_URL?: string;
+  COUNTERPARTY_PII_KMS_METADATA_TOKEN_URL?: string;
+  COUNTERPARTY_PII_ENCRYPTION_KEY?: string;
   SENTRY_DSN?: string;
   SENTRY_TRACES_SAMPLE_RATE?: string;
 
@@ -80,6 +85,9 @@ export interface Env {
   SOLANA_RPC_TRITON_API_KEY?: string;
   SOLANA_RPC_HELIUS_URL?: string;
   SOLANA_RPC_HELIUS_API_KEY?: string;
+  /** Defaults to Jupiter's rate-limited lite endpoint; set both to use the keyed tier. */
+  JUPITER_PRICE_API_URL?: string;
+  JUPITER_PRICE_API_KEY?: string;
   SOLANA_RPC_ALCHEMY_URL?: string;
   SOLANA_RPC_ALCHEMY_API_KEY?: string;
   SOLANA_RPC_QUICKNODE_URL?: string;

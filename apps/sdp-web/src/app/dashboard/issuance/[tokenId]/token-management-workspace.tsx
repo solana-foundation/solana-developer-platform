@@ -2,13 +2,14 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Loader2Icon, SparklesIcon, WalletIcon } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { getTokenAccessControlMode, hasAccessControlList } from "../access-control.utils";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
 import { TokenActionForms } from "./token-action-forms";
@@ -187,9 +188,8 @@ export function TokenManagementWorkspace({
 }: TokenManagementWorkspaceProps) {
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
-  const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const { pushSearchParams, replaceSearchParams } = useDashboardUrlState();
   const {
     isPending,
     actionConfirmation,
@@ -654,25 +654,14 @@ export function TokenManagementWorkspace({
         disabledReason: fundManagementDisabledReasons[row.id],
       }));
 
+  // Shallow update: the tabs are fully client-rendered, so a router.push RSC
+  // refetch on every tab switch would only add latency.
   const syncActiveTabInUrl = useCallback(
     (nextTab: TokenManagementTab, mode: "push" | "replace" = "push") => {
-      const nextSearchParams = new URLSearchParams(searchParams.toString());
-      if (nextTab === "overview") {
-        nextSearchParams.delete("tab");
-      } else {
-        nextSearchParams.set("tab", nextTab);
-      }
-
-      const nextQuery = nextSearchParams.toString();
-      const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
-      if (mode === "replace") {
-        router.replace(nextUrl, { scroll: false });
-        return;
-      }
-
-      router.push(nextUrl, { scroll: false });
+      const sync = mode === "replace" ? replaceSearchParams : pushSearchParams;
+      sync({ tab: nextTab === "overview" ? null : nextTab });
     },
-    [pathname, router, searchParams]
+    [pushSearchParams, replaceSearchParams]
   );
 
   useEffect(() => {
@@ -1504,6 +1493,7 @@ export function TokenManagementWorkspace({
               mode="permissions"
               permissionRows={permissionRows}
               extensionRows={extensionRows}
+              authorityWallets={authorityWallets}
               showTitle={false}
               canEditAuthorities={!canDeployToken && canManageTokenAdmin}
               onCopy={handleCopy}
@@ -1519,6 +1509,7 @@ export function TokenManagementWorkspace({
             mode="extensions"
             permissionRows={permissionRows}
             extensionRows={extensionRows}
+            authorityWallets={authorityWallets}
             showTitle={false}
             canEditAuthorities={!canDeployToken && canManageTokenAdmin}
             onCopy={handleCopy}
