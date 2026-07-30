@@ -25,6 +25,7 @@ import type {
 import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { ensureBvnkPaymentRule } from "@/routes/payments/handlers/ramps/bvnk";
+import { getLogger } from "@/runtime/logger";
 import type { AppContext, WebhookProcessor } from "./processor";
 
 export type BvnkWebhookEvent =
@@ -340,7 +341,7 @@ async function handleProviderOnrampCounterpartyRequirementWebhook(
     case "bvnk:customers:status-change":
     case "bvnk:platform:customer:update": {
       if (!event.customerReference) {
-        console.log(`[bvnk webhook] "${event.kind}" has no customer reference`);
+        getLogger().info(`[bvnk webhook] "${event.kind}" has no customer reference`);
         return;
       }
       const counterparty = await repo.findActiveCounterpartyByBvnkCustomerReference(
@@ -358,7 +359,7 @@ async function handleProviderOnrampCounterpartyRequirementWebhook(
   }
 
   if (!event.walletName) {
-    console.log(`[bvnk webhook] "${event.kind}" has no wallet name`);
+    getLogger().info(`[bvnk webhook] "${event.kind}" has no wallet name`);
     return;
   }
   const wallet = parseBvnkOnrampWalletName(event.walletName);
@@ -392,7 +393,7 @@ async function handleProviderOfframpCounterpartyRequirementWebhook(
   >
 ): Promise<void> {
   if (!event.walletName || !event.walletStatus) {
-    console.log("[bvnk webhook] merchant off-ramp wallet event is missing name or status");
+    getLogger().info("[bvnk webhook] merchant off-ramp wallet event is missing name or status");
     return;
   }
   const walletStatus = event.walletStatus;
@@ -428,7 +429,7 @@ async function handleProviderOfframpSettlementWebhook(
   event: BvnkChannelTransactionEvent
 ): Promise<void> {
   if (!event.transferId) {
-    console.log(`[bvnk webhook] "${event.kind}" has no SDP off-ramp transfer reference`);
+    getLogger().info(`[bvnk webhook] "${event.kind}" has no SDP off-ramp transfer reference`);
     return;
   }
 
@@ -589,7 +590,7 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkWebho
   ): Promise<void> {
     switch (event.kind) {
       case "ignore":
-        console.log(`[bvnk webhook] ignoring event "${event.event}"`);
+        getLogger().info(`[bvnk webhook] ignoring event "${event.event}"`);
         return;
       case "bvnk:payment:payin:status-change":
         return handleProviderOnrampSettlementWebhook(c, event);

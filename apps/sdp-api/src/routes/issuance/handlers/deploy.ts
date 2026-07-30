@@ -19,6 +19,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService, type MosaicFeePayment } from "@/services/issuance/mosaic";
@@ -120,11 +121,14 @@ async function persistRecoveredMint(params: {
       },
     });
   } catch (persistError) {
-    console.error("Failed to persist recovered mint after metadata-URI failure", {
-      tokenId,
-      mintAddress: mint,
-      error: persistError instanceof Error ? persistError.message : String(persistError),
-    });
+    getLogger().error(
+      {
+        tokenId,
+        mintAddress: mint,
+        error: persistError instanceof Error ? persistError.message : String(persistError),
+      },
+      "Failed to persist recovered mint after metadata-URI failure"
+    );
   }
 }
 
@@ -228,12 +232,15 @@ async function recordConfirmedDeploy(params: {
 
     return updatedToken;
   } catch (bookkeepingError) {
-    console.error("confirmDeploy: token is live on-chain but post-deploy bookkeeping failed", {
-      tokenId,
-      mintAddress: mint,
-      error:
-        bookkeepingError instanceof Error ? bookkeepingError.message : String(bookkeepingError),
-    });
+    getLogger().error(
+      {
+        tokenId,
+        mintAddress: mint,
+        error:
+          bookkeepingError instanceof Error ? bookkeepingError.message : String(bookkeepingError),
+      },
+      "confirmDeploy: token is live on-chain but post-deploy bookkeeping failed"
+    );
     return deployedToken;
   }
 }

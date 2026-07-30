@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import {
   type ClerkOrganizationInvitation,
@@ -393,11 +394,14 @@ async function resolveClerkInvitations(
     const clerkService = new ClerkOrganizationsService(c.env);
     return await clerkService.listPendingOrganizationInvitations(clerkOrgId);
   } catch (error) {
-    console.error("listMembers: failed to resolve Clerk invitation URLs", {
-      requestId: c.get("requestId"),
-      organizationId,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    getLogger().error(
+      {
+        requestId: c.get("requestId"),
+        organizationId,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "listMembers: failed to resolve Clerk invitation URLs"
+    );
     return [];
   }
 }
@@ -723,13 +727,15 @@ export const removeMember = async (c: AppContext) => {
   // Clerk drives sign-in, so leaving the membership there would keep the
   // organization visible in its switcher even though our API rejects it.
   await removeClerkMembership(c, organizationId, member.user_id).catch((error) =>
-    console.error("Failed to remove Clerk membership after member removal:", error)
+    getLogger().error({ error }, "Failed to remove Clerk membership after member removal")
   );
 
   const sessionService = new SessionService(getDb(c.env));
   await sessionService
     .revokeUserOrganizationSessions(member.user_id, organizationId)
-    .catch((error) => console.error("Failed to revoke sessions after member removal:", error));
+    .catch((error) =>
+      getLogger().error({ error }, "Failed to revoke sessions after member removal")
+    );
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
