@@ -68,6 +68,7 @@ import {
   WalletSetupSkeleton,
   WalletsOverviewSkeleton,
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
+import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
@@ -87,6 +88,7 @@ import {
   DASHBOARD_SIDE_NAV_HREFS,
   type DashboardLoadingRoute,
   type DashboardNavigationStartDetail,
+  isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
 import {
@@ -799,19 +801,6 @@ function resolvePageLoadingComponent(
   }
 }
 
-function isItemActive(pathname: string, href: string): boolean {
-  if (href === "/dashboard") {
-    return pathname === "/dashboard";
-  }
-  if (href === "/dashboard/wallets") {
-    return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
-  }
-  if (href === "/dashboard/payments") {
-    return pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
-  }
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
 const navItemBase =
   "relative flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
 const navItemActive = "border border-border-subtle bg-surface-raised text-primary";
@@ -859,7 +848,7 @@ function SidebarGroup({
         {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: each branch preserves the shared navigation item and accessible payments disclosure in one rendering pass. */}
         {items.map((item) => {
           const Icon = item.icon;
-          const active = isItemActive(pathname, item.href);
+          const active = isDashboardNavItemActive(pathname, item.href);
           const isPaymentsGroup = item.href === DASHBOARD_SIDE_NAV_HREFS.payments;
           const showChildren = !isCollapsed && item.children && item.children.length > 0;
           const childrenExpanded = isPaymentsGroup ? paymentsSubnavOpen : true;
@@ -929,7 +918,7 @@ function SidebarGroup({
               {showChildren && childrenExpanded ? (
                 <div id={subnavId} className="ml-5 mt-2">
                   {(item.children ?? []).map((child, i, siblings) => {
-                    const childActive = isItemActive(pathname, child.href);
+                    const childActive = isDashboardNavItemActive(pathname, child.href);
                     const isFirst = i === 0;
                     const isLast = i === siblings.length - 1;
                     return (
@@ -1375,6 +1364,15 @@ export function DashboardShell({
           </button>
         </aside>
 
+        {/* Unmounted, not CSS-hidden, while the slide-over is open: a covered
+            duplicate of every destination would otherwise sit behind the overlay. */}
+        {isMobileSidebarOpen ? null : (
+          <DashboardBottomNav
+            pathname={shellPathname}
+            onOpenMore={() => setMobileSidebarOpen(true)}
+          />
+        )}
+
         {isMobileSidebarOpen ? (
           <div className="fixed inset-0 z-50 flex xl:hidden">
             <button
@@ -1479,6 +1477,9 @@ export function DashboardShell({
               className={[
                 "mx-auto min-w-0 w-full",
                 contentWidthClass,
+                // Clears the fixed mobile bottom bar so the last row of any page is
+                // still reachable; the bar is xl:hidden, so the padding is too.
+                shouldLockViewportScroll ? "" : "pb-20 xl:pb-0",
                 shouldClipHorizontalOverflow && !shouldLockViewportScroll
                   ? "overflow-x-hidden"
                   : "",
