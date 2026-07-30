@@ -93,7 +93,7 @@ export async function runMint(
   execution: WorkflowExecutionRow,
   action: ActionContext
 ): Promise<ActionExecutionResult> {
-  const prep = await prepareOnchain(env, execution);
+  const prep = await prepareOnchain(env, execution, "mint");
   if (!prep.ok) {
     return prep.result;
   }

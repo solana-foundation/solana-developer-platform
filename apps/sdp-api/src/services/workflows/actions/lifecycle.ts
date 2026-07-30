@@ -150,7 +150,7 @@ export async function runFreeze(
   execution: WorkflowExecutionRow,
   action: ActionContext
 ): Promise<ActionExecutionResult> {
-  const prep = await prepareOnchain(env, execution);
+  const prep = await prepareOnchain(env, execution, "freeze");
   if (!prep.ok) {
     return prep.result;
   }
@@ -188,7 +188,7 @@ export async function runUnfreeze(
   execution: WorkflowExecutionRow,
   action: ActionContext
 ): Promise<ActionExecutionResult> {
-  const prep = await prepareOnchain(env, execution);
+  const prep = await prepareOnchain(env, execution, "freeze");
   if (!prep.ok) {
     return prep.result;
   }
