@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
+import { extractPolicyDenialReason, withPolicyDenialReason } from "./policy-denial-reason";
 
 const DEVNET_FAUCET_LAMPORTS = 1_000_000_000;
 const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -63,8 +64,9 @@ function toApiActionErrorMessage(
 
   const status = match[1];
   const body = match[2] ?? "";
+  const base = getApiErrorMessageFromText(body) || t("DashboardCustody.requestFailed");
   return t("DashboardCustody.httpRequestFailed", {
-    error: getApiErrorMessageFromText(body) || t("DashboardCustody.requestFailed"),
+    error: withPolicyDenialReason(base, extractPolicyDenialReason(body)),
     status,
   });
 }
@@ -103,9 +105,11 @@ async function sdpApiFetchWithApiKey<T>(
   });
 
   if (!res.ok) {
+    // Carry the raw body, not just its `message`. The callers that format this
+    // parse the body themselves, and a policy denial keeps the rule that fired in
+    // `error.details` — reducing it here threw that away before anyone read it.
     const body = await res.text();
-    const apiError = getApiErrorMessageFromText(body);
-    throw new Error(`SDP API request failed (${res.status}): ${apiError}`);
+    throw new Error(`SDP API request failed (${res.status}): ${body}`);
   }
 
   if (res.status === 204) {
