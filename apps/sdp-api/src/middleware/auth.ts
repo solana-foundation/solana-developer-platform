@@ -26,6 +26,7 @@ import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import type { KVStore } from "@/runtime/kv";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
 
@@ -94,7 +95,7 @@ async function cacheInvalidKey(kv: KVStore, keyHash: string): Promise<void> {
       expirationTtl: INVALID_KEY_CACHE_TTL_SECONDS,
     });
   } catch (err) {
-    console.error("Failed to cache invalid api key:", err);
+    getLogger().error({ error: err }, "Failed to cache invalid api key");
   }
 }
 
@@ -191,7 +192,7 @@ function writeLastUsed(db: DatabaseClient, keyId: string): Promise<void> {
 }
 
 function logLastUsedWriteError(error: unknown): void {
-  console.error("Failed to update last_used_at:", error);
+  getLogger().error({ error }, "Failed to update last_used_at");
 }
 
 function getLastUsedWriteCache(db: DatabaseClient): LastUsedWriteCache {

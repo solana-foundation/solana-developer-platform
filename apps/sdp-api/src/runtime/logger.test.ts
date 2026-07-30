@@ -1,13 +1,12 @@
 import pino from "pino";
 import { describe, expect, it } from "vitest";
-import { applyLogContext, getLogContext, runWithLogContext } from "./logger";
+import { baseLoggerOptions, getLogContext, runWithLogContext } from "./logger";
 
 function captureLogger() {
   const records: Record<string, unknown>[] = [];
-  const logger = pino(
-    { base: undefined, messageKey: "message" },
-    { write: (line: string) => records.push(JSON.parse(line)) }
-  );
+  const logger = pino(baseLoggerOptions(), {
+    write: (line: string) => records.push(JSON.parse(line)),
+  });
   return { logger, records };
 }
 
@@ -16,11 +15,11 @@ describe("logger context", () => {
     expect(getLogContext()).toEqual({});
   });
 
-  it("emits request_id and trace_id as first-class fields inside the context", () => {
+  it("injects request_id and trace_id as first-class fields inside the context", () => {
     const { logger, records } = captureLogger();
 
     runWithLogContext({ request_id: "req_1", trace_id: "trace_1" }, () => {
-      applyLogContext(logger).info({ transfer_id: "tr_1" }, "transfer submitted");
+      logger.info({ transfer_id: "tr_1" }, "transfer submitted");
     });
 
     expect(records).toHaveLength(1);
@@ -37,7 +36,7 @@ describe("logger context", () => {
 
     async function nested() {
       await Promise.resolve();
-      applyLogContext(logger).error({ transfer_id: "tr_2" }, "transfer failed");
+      logger.error({ transfer_id: "tr_2" }, "transfer failed");
     }
 
     await runWithLogContext({ request_id: "req_2" }, () => nested());
@@ -50,10 +49,18 @@ describe("logger context", () => {
     const { logger, records } = captureLogger();
 
     runWithLogContext({ request_id: "req_3" }, () => {
-      applyLogContext(logger).info({ transfer_id: "tr_3" }, "settled");
+      logger.info({ transfer_id: "tr_3" }, "settled");
     });
 
     expect(records[0].transfer_id).toBe("tr_3");
     expect(records[0].message).toBe("settled");
+  });
+
+  it("expands Error values under the error field", () => {
+    const { logger, records } = captureLogger();
+
+    logger.error({ error: new Error("boom") }, "failed");
+
+    expect(records[0].error).toMatchObject({ type: "Error", message: "boom" });
   });
 });

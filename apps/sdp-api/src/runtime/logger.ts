@@ -17,22 +17,25 @@ export function getLogContext(): LogContext {
   return store.getStore() ?? {};
 }
 
-export function applyLogContext(logger: Logger): Logger {
-  const context = getLogContext();
-  return Object.keys(context).length > 0 ? logger.child(context) : logger;
+function serializeError(value: unknown): unknown {
+  return value instanceof Error
+    ? { type: value.name, message: value.message, stack: value.stack }
+    : value;
 }
 
-function resolveOptions(): LoggerOptions {
+export function baseLoggerOptions(): LoggerOptions {
   return {
     level: process.env.LOG_LEVEL ?? "info",
     base: undefined,
     messageKey: "message",
+    serializers: { error: serializeError, err: serializeError },
+    mixin: () => getLogContext(),
     ...(process.env.LOG_FORMAT === "pretty" ? { transport: { target: "pino-pretty" } } : {}),
   };
 }
 
-export const rootLogger: Logger = pino(resolveOptions());
+export const rootLogger: Logger = pino(baseLoggerOptions());
 
 export function getLogger(): Logger {
-  return applyLogContext(rootLogger);
+  return rootLogger;
 }
