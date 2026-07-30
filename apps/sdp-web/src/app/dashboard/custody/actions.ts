@@ -5,8 +5,8 @@ import type { CustodyConfigsResponse } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
+import { extractPolicyDenialReason, withPolicyDenialReason } from "@/lib/policy-denial-reason";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { extractPolicyDenialReason, withPolicyDenialReason } from "./policy-denial-reason";
 
 const DEVNET_FAUCET_LAMPORTS = 1_000_000_000;
 const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
