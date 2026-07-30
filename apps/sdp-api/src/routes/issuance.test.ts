@@ -16,6 +16,7 @@ import app from "@/index";
 import { AppError } from "@/lib/errors";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { createKVStoreSet } from "@/runtime/kv-redis";
+import { rootLogger } from "@/runtime/logger";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -4726,7 +4727,7 @@ describe("Issuance Routes", () => {
         const setTokenDeployedSpy = vi
           .spyOn(TokenService.prototype, "setTokenDeployed")
           .mockRejectedValueOnce(new Error("D1_ERROR: timeout"));
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
 
         try {
           const res = await app.request(
@@ -5358,7 +5359,7 @@ describe("Issuance Routes", () => {
         const createTransactionSpy = vi
           .spyOn(TokenService.prototype, "createTransaction")
           .mockRejectedValueOnce(new Error("D1_ERROR: timeout"));
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
 
         try {
           const res = await app.request(

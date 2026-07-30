@@ -74,6 +74,24 @@ function applySearchParamUpdates(updates: Record<string, string | null>, mode: "
   emitUrlStateChange();
 }
 
+/**
+ * Reads the active dashboard tab from the URL's `?tab=` param. Every tab-aware
+ * surface (header tabs, tab shell, workspaces) derives from this hook so the
+ * `?tab=` contract lives in one place; call sites compare against their own
+ * tab ids. The snapshot is the tab value itself rather than the whole search
+ * string, so unrelated search-param churn (filters, pagination) never
+ * re-renders subscribers.
+ *
+ * @returns The active tab id, or null when the default tab is selected.
+ */
+export function useDashboardTab(): string | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => new URLSearchParams(getSearchSnapshot()).get("tab"),
+    () => null
+  );
+}
+
 export function useDashboardUrlState() {
   const search = useSyncExternalStore(subscribe, getSearchSnapshot, getServerSearchSnapshot);
 
