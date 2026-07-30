@@ -75,8 +75,12 @@ function SidebarToggle({
       type="button"
       aria-label={t("Shared.dashboardShell.openNavigation")}
       onClick={() => setMobileSidebarOpen(true)}
+      // Hidden below xl: the bottom bar and its More sheet own mobile navigation,
+      // and two entry points to the same destinations is worse than one. Kept for
+      // the narrow window between the sidebar collapsing and xl, where neither the
+      // persistent sidebar nor the bottom bar is present.
       className={[
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong xl:hidden",
+        "hidden h-8 w-8 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong",
         isMobileSidebarOpen ? "invisible" : "",
       ].join(" ")}
     >
