@@ -239,6 +239,8 @@
     "noWalletsYet": "No wallets created yet.",
     "tokensHeld": "Tokens held",
     "balanceByToken": "Balance by token",
+    "firstRunTitle": "Create a wallet to get started",
+    "firstRunBody": "Balances, payment activity and token holdings appear here once this organization has its first wallet.",
     "notPriced": "No price feed",
     "otherTokens": "{count, plural, one {# other token} other {# other tokens}}",
     "recentTransactions": "Recent transactions",
