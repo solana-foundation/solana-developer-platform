@@ -406,8 +406,12 @@ export function getDashboardPageConfig(
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
+    // Home names itself: the sidebar marks it active and the page opens on a
+    // balance. A 36px "Home" above that spent a slice of the viewport saying
+    // nothing, so the workspace renders an sr-only heading instead.
     return {
       title: t("Shared.dashboardShell.home"),
+      hideTitle: true,
       contentWidthClass: "max-w-none",
     };
   }

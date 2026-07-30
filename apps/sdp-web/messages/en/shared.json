@@ -238,6 +238,7 @@
     "firstRunTitle": "Create a wallet to get started",
     "firstRunBody": "Balances, payment activity and token holdings appear here once this organization has its first wallet.",
     "notPriced": "No price feed",
+    "moreTokens": "{count, plural, one {# more token} other {# more tokens}}",
     "otherTokens": "{count, plural, one {# other token} other {# other tokens}}",
     "recentTransactions": "Recent transactions",
     "activityDescription": "Latest wallet and issuance activity across the organization.",
