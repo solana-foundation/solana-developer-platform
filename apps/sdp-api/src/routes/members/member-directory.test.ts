@@ -171,18 +171,17 @@ describe("member directory", () => {
      */
     it("prefers the identity address over a stored value that is not an address", async () => {
       await seedDirectory(1);
-      await getDb(env)
-        .batch([
-          getDb(env)
-            .prepare("UPDATE users SET email = 'unknown' WHERE id = 'usr_directory_0'")
-            .bind(),
-          getDb(env)
-            .prepare(
-              `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+      await getDb(env).batch([
+        getDb(env)
+          .prepare("UPDATE users SET email = 'unknown' WHERE id = 'usr_directory_0'")
+          .bind(),
+        getDb(env)
+          .prepare(
+            `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
                VALUES ('aui_directory_0', 'clerk', 'clerk_directory_0', 'usr_directory_0', ?)`
-            )
-            .bind("member0@example.com"),
-        ]);
+          )
+          .bind("member0@example.com"),
+      ]);
       await authenticateAs(["org:read"]);
       stubClerk();
 
