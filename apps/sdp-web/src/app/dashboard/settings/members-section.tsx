@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/table";
 import { getTranslations } from "@/i18n/server";
 import { readableApiError } from "@/lib/sdp-api-error";
+import { cn } from "@/lib/utils";
 import { InvitationActions } from "./invitation-actions";
 import { InviteMemberForm } from "./invite-member-form";
 import { MemberActions } from "./member-actions";
@@ -82,7 +83,10 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
             </TableHeader>
             <TableBody>
               {members.map((member) => {
-                const identity = resolveMemberIdentity(member.user);
+                const identity = resolveMemberIdentity(
+                  member.user,
+                  t("Shared.members.unnamedMember")
+                );
 
                 return (
                   <TableRow key={member.id}>
@@ -93,8 +97,15 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
                       <span className="block truncate font-medium text-primary text-sm">
                         {identity.label}
                       </span>
-                      {identity.email ? (
-                        <span className="block truncate text-muted text-xs">{identity.email}</span>
+                      {identity.secondary ? (
+                        <span
+                          className={cn(
+                            "block truncate text-muted text-xs",
+                            identity.isUnresolved && "font-mono"
+                          )}
+                        >
+                          {identity.secondary}
+                        </span>
                       ) : null}
                       {identity.isUnresolved ? (
                         <span className="block truncate text-muted text-xs">
