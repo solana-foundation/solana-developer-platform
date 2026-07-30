@@ -434,6 +434,12 @@ export function HomeWorkspace({
   );
   const isWalletEmptyState = wallets.length === 0;
   const heldTokenCount = countHeldTokens(balances);
+  // Balances come back with a symbol per mint, including for tokens the shared
+  // catalogue has never heard of. The activity route cannot see them — it only
+  // knows issued-token symbols — so the naming happens here instead.
+  const symbolsByMint = Object.fromEntries(
+    balances.map((balance) => [balance.mint, balance.token])
+  );
   const totalBalanceHint = isWalletEmptyState
     ? t("Shared.homeWorkspace.createFirstWalletBalances")
     : totalBalance === null
@@ -529,12 +535,11 @@ export function HomeWorkspace({
                     <TableBody>
                       {activityRows.map((row) => {
                         const timeLabel = formatRelativeTime(row.createdAt, locale);
-                        // `row.token` is already a display label — home-page.data
-                        // resolves it against issued-token symbols before it gets here —
-                        // so it is a symbol, never a mint. Passing it to TokenMark as a
-                        // mint would never match; the symbol alone resolves a bundled
-                        // logo and falls back to a monogram.
-                        const tokenSymbol = row.token;
+                        // `row.token` is already resolved, but only against issued
+                        // tokens — anything else arrives as a shortened mint. Re-resolve
+                        // from the mint using the balance symbols before falling back.
+                        const tokenSymbol =
+                          resolveTransferTokenLabel(row.tokenMint, symbolsByMint) ?? row.token;
                         const amountLabel =
                           row.amount === "—"
                             ? "—"
