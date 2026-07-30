@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 export async function resolveIssuedTokenLabelsByMint(
@@ -30,13 +31,16 @@ export async function resolveIssuedTokenLabelsByMint(
         .filter((entry): entry is [string, string] => entry !== null)
     );
   } catch (error) {
-    // biome-ignore lint/security/noSecrets: Static log message, not a secret.
-    console.error("resolveIssuedTokenLabelsByMint: failed to fetch issued token symbols", {
-      requestId: c.get("requestId"),
-      organizationId: auth.organizationId,
-      projectId: auth.projectId,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    getLogger().error(
+      {
+        requestId: c.get("requestId"),
+        organizationId: auth.organizationId,
+        projectId: auth.projectId,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      // biome-ignore lint/security/noSecrets: Static log message, not a secret.
+      "resolveIssuedTokenLabelsByMint: failed to fetch issued token symbols"
+    );
     return new Map();
   }
 }
