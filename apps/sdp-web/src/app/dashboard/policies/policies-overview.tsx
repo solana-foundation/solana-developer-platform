@@ -302,13 +302,13 @@ function LoadingRows() {
       <TableCell>
         <SkeletonBlock className="h-4 w-16" />
       </TableCell>
-      <TableCell>
+      <TableCell className="hidden xl:table-cell 2xl:w-[12%]">
         <SkeletonBlock className="h-4 w-20" />
       </TableCell>
-      <TableCell>
+      <TableCell className="hidden 2xl:table-cell 2xl:w-[15%]">
         <SkeletonBlock className="h-4 w-20" />
       </TableCell>
-      <TableCell>
+      <TableCell className="hidden 2xl:table-cell 2xl:w-[15%]">
         <SkeletonBlock className="h-4 w-20" />
       </TableCell>
       <TableCell>
@@ -370,16 +370,28 @@ function InventoryTable({
   }
   return (
     <div data-desktop-inventory className="hidden lg:block">
-      <Table className="rounded-none border-0 [&::after]:hidden [&::before]:hidden [&_table]:min-w-[1160px] [&_table]:table-fixed [&_td]:whitespace-nowrap [&_td]:py-4 [&_th]:whitespace-nowrap">
+      <Table className="rounded-none border-0 [&::after]:hidden [&::before]:hidden [&_table]:min-w-0 [&_table]:table-fixed [&_td]:whitespace-nowrap [&_td]:py-4 [&_th]:whitespace-nowrap">
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[22%]">{t("DashboardPolicies.target")}</TableHead>
-            <TableHead className="w-[13%]">{t("DashboardPolicies.status")}</TableHead>
-            <TableHead className="w-[15%]">{t("DashboardPolicies.defaultAction")}</TableHead>
-            <TableHead className="w-[12%]">{t("DashboardPolicies.rules")}</TableHead>
-            <TableHead className="w-[15%]">{t("DashboardPolicies.bindings")}</TableHead>
-            <TableHead className="w-[15%]">{t("DashboardPolicies.lastUpdated")}</TableHead>
-            <TableHead className="w-[8%] text-right">{t("DashboardPolicies.actions")}</TableHead>
+            <TableHead className="w-[45%] xl:w-[35%] 2xl:w-[22%]">
+              {t("DashboardPolicies.target")}
+            </TableHead>
+            <TableHead className="w-[17%] xl:w-[16%] 2xl:w-[13%]">
+              {t("DashboardPolicies.status")}
+            </TableHead>
+            <TableHead className="w-[28%] xl:w-[22%] 2xl:w-[15%]">
+              {t("DashboardPolicies.defaultAction")}
+            </TableHead>
+            <TableHead className="hidden xl:table-cell xl:w-[17%] 2xl:w-[12%]">
+              {t("DashboardPolicies.rules")}
+            </TableHead>
+            <TableHead className="hidden 2xl:table-cell 2xl:w-[15%]">
+              {t("DashboardPolicies.bindings")}
+            </TableHead>
+            <TableHead className="hidden 2xl:table-cell 2xl:w-[15%]">
+              {t("DashboardPolicies.lastUpdated")}
+            </TableHead>
+            <TableHead className="w-[10%] text-right">{t("DashboardPolicies.actions")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -396,11 +408,13 @@ function InventoryTable({
                   <TableCell className="text-sm text-secondary">
                     {formatDefaultAction(item.defaultAction, t)}
                   </TableCell>
-                  <TableCell className="text-sm text-secondary">{formatRules(item, t)}</TableCell>
-                  <TableCell className="text-sm text-secondary">
+                  <TableCell className="hidden text-sm text-secondary xl:table-cell">
+                    {formatRules(item, t)}
+                  </TableCell>
+                  <TableCell className="hidden text-sm text-secondary 2xl:table-cell">
                     {formatBindings(item, t)}
                   </TableCell>
-                  <TableCell className="text-sm text-secondary">
+                  <TableCell className="hidden text-sm text-secondary 2xl:table-cell">
                     <time
                       dateTime={item.updatedAt}
                       title={new Date(item.updatedAt).toLocaleString(locale)}
@@ -527,15 +541,15 @@ export function PoliciesOverviewSurface({
               placeholder={t("DashboardPolicies.searchPlaceholder")}
               aria-label={t("DashboardPolicies.searchPlaceholder")}
               iconLeft={<SearchIcon />}
-              iconRight={
+              action={
                 searchValue ? (
                   <button
                     type="button"
                     aria-label={t("DashboardPolicies.clearSearch")}
                     onClick={() => onSearchChange("")}
-                    className="rounded text-tertiary hover:text-primary"
+                    className="rounded text-tertiary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
                   >
-                    <XIcon />
+                    <XIcon className="size-5" />
                   </button>
                 ) : undefined
               }
