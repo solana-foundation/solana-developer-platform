@@ -23,7 +23,7 @@ const GENERAL_RPC_PROVIDERS = ORGANIZATION_RPC_PROVIDERS.filter(
 );
 
 export default async function OrganizationOnboardingPage() {
-  const [t, onboardingEnabled, { getToken, userId, orgId }] = await Promise.all([
+  const [t, onboardingEnabled, { userId, orgId }] = await Promise.all([
     getTranslations(),
     organizationOnboarding(),
     auth(),
@@ -32,7 +32,7 @@ export default async function OrganizationOnboardingPage() {
   if (!orgId) redirect("/dashboard");
   if (!onboardingEnabled) redirect("/dashboard");
 
-  const { organizationClient } = await createRequestScopedSdpApiClients({ getToken });
+  const { organizationClient } = await createRequestScopedSdpApiClients();
   const status = await organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
 
   if (!status.linked || !status.organization || !status.setup) {

@@ -428,6 +428,42 @@ describe("Clerk auth request cache", () => {
     });
   });
 
+  /**
+   * Reading around the placeholder is not enough on its own. `inviteMember` matches
+   * `users.email` literally, so a row left corrupted keeps letting an existing member be
+   * re-invited — and the established-member path returns before `ensureClerkUser`, which
+   * used to be the only thing that repaired anything.
+   */
+  it("repairs both stored copies for a member who is already established", async () => {
+    const placeholder = "{{user.primary_email_address.email_address}}";
+    await getDb(env)
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .bind(placeholder)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE users SET email = ? WHERE id = 'usr_clerk_cached'")
+      .bind(placeholder)
+      .run();
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+    expect(res.status).toBe(200);
+
+    const identity = await getDb(env)
+      .prepare("SELECT email FROM auth_user_identities WHERE id = 'aui_clerk_cached'")
+      .first<{ email: string }>();
+    const user = await getDb(env)
+      .prepare("SELECT email FROM users WHERE id = 'usr_clerk_cached'")
+      .first<{ email: string }>();
+
+    expect(identity?.email).toBe("clerk-cache@example.com");
+    expect(user?.email).toBe("clerk-cache@example.com");
+  });
+
   it("still provisions when a revoked invitation was superseded by a live one", async () => {
     await getDb(env)
       .prepare("DELETE FROM organization_members WHERE organization_id = ?")

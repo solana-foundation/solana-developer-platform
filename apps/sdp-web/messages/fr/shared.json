@@ -37,6 +37,8 @@
     "empty": "Aucun membre pour l'instant.",
     "loadFailed": "Impossible de charger les membres : {error}",
     "unnamed": "Sans nom",
+    "unnamedMember": "Membre sans nom",
+    "emailUnavailable": "E-mail indisponible",
     "statusPending": "En attente",
     "invitedOn": "Invité le {date}",
     "columnActions": "Actions",
