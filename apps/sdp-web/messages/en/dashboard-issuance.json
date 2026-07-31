@@ -489,6 +489,7 @@
       "comingSoon": "Coming soon",
       "stepProgress": "Step {current} of {total}",
       "vulcanForgeOnboardTitle": "Onboard token to Vulcan Forge",
+      "vulcanForgeOnboardDescription": "Mosaic deploys the token onchain; AlphaLedger keeps a registered twin for indexing and reporting.",
       "engineStepLabel": "Engine",
       "deployStepLabel": "Deploy",
       "destinationNotAllowlisted": "Destination is not on this token's allowlist.",

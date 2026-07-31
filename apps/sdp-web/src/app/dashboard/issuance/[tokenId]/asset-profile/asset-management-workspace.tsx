@@ -107,16 +107,16 @@ function TokenizationEngineGate({
   );
 
   const engineStepContent = (
-    <>
+    <div className="flex h-full flex-col">
       <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
         {t("DashboardIssuance.management.tokenizationEngineTitle")}
       </p>
       <p className="mt-2 text-[14px] leading-[1.45] text-secondary">
         {t("DashboardIssuance.management.tokenizationEngineHint")}
       </p>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+      <div className="mt-5 grid flex-1 gap-3 sm:grid-cols-2">
         <div className="flex cursor-not-allowed flex-col rounded-xl border border-border-default bg-fill-subtle p-5">
-          <div className="flex justify-center py-10 opacity-50">
+          <div className="flex flex-1 items-center justify-center py-10 opacity-50">
             <span className="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white]">
               <Image
                 src="/provider-logos/alphaledger.svg"
@@ -145,7 +145,7 @@ function TokenizationEngineGate({
           onClick={() => setEngineChosen(true)}
           className="flex flex-col rounded-xl border border-border-default bg-surface-raised p-5 transition-colors hover:bg-fill-subtle focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
         >
-          <span className="flex w-full justify-center py-10">
+          <span className="flex w-full flex-1 items-center justify-center py-10">
             <span className="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white]">
               <Image
                 src="/landing/solana-logo.svg"
@@ -167,7 +167,7 @@ function TokenizationEngineGate({
           </span>
         </button>
       </div>
-    </>
+    </div>
   );
 
   if (!enabled) {
@@ -487,17 +487,26 @@ export function AssetManagementWorkspace({
                   helperText={t("DashboardIssuance.management.deploySignerHint")}
                 />
                 {alphaledgerEngineEnabled ? (
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-2 text-sm text-secondary">
-                      <Image
-                        src="/provider-logos/alphaledger.svg"
-                        alt=""
-                        width={16}
-                        height={16}
-                        className="object-contain"
-                      />
-                      {t("DashboardIssuance.management.vulcanForgeOnboardTitle")}
-                    </span>
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-border-default bg-fill-subtle p-4">
+                    <div className="flex items-center gap-3">
+                      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border-subtle bg-[white]">
+                        <Image
+                          src="/provider-logos/alphaledger.svg"
+                          alt=""
+                          width={22}
+                          height={22}
+                          className="object-contain"
+                        />
+                      </span>
+                      <div>
+                        <p className="text-sm font-medium text-primary">
+                          {t("DashboardIssuance.management.vulcanForgeOnboardTitle")}
+                        </p>
+                        <p className="mt-0.5 text-[12px] leading-5 text-secondary">
+                          {t("DashboardIssuance.management.vulcanForgeOnboardDescription")}
+                        </p>
+                      </div>
+                    </div>
                     <ToggleSwitch
                       checked={onboardToVulcanForge}
                       onChange={setOnboardToVulcanForge}
