@@ -50,6 +50,7 @@ services:
       SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       API_VERSION: ${SDP_VERSION:-latest}
+      SDP_FLAG_ASSET_PROFILES: ${SDP_FLAG_ASSET_PROFILES:-true}
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-sdp}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-sdp}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       API_KEY_PEPPER: ${API_KEY_PEPPER:?set API_KEY_PEPPER in .env (openssl rand -hex 32)}
