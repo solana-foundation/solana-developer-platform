@@ -10,6 +10,7 @@ import {
   CalendarIcon,
   ChevronRight,
   CircleDotIcon,
+  InboxIcon,
   KeyRoundIcon,
   RotateCw,
   WalletIcon,
@@ -20,6 +21,7 @@ import { toast } from "sonner";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { PaginatedFooter, usePaginationUrlState } from "@/components/ui/paginated-footer";
 import { Select, SelectItem } from "@/components/ui/select";
 import {
@@ -261,10 +263,11 @@ export function ApprovalInbox({
           />
 
           {visibleRequests.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-1 py-16 text-center">
-              <p className="text-sm font-medium text-primary">{emptyTitle}</p>
-              <p className="text-sm text-secondary">{emptyDescription}</p>
-            </div>
+            <ListEmptyState
+              icon={<InboxIcon className="size-5" />}
+              message={emptyTitle}
+              description={emptyDescription}
+            />
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto">
               <ApprovalRequestRows
@@ -342,7 +345,7 @@ function ApprovalFilters({
 }) {
   const t = useTranslations();
   return (
-    <div className="flex shrink-0 flex-wrap items-end gap-3 border-b border-border-default py-4">
+    <div className="flex shrink-0 flex-wrap items-end gap-3 py-4">
       <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.walletFilter")}>
         <Select
           ariaLabel={t("DashboardApprovals.walletFilter")}

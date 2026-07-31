@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
  *
  * @param props.icon - Icon rendered in the rounded tile above the message.
  * @param props.message - The state's headline text.
+ * @param props.description - Optional supporting line below the message.
  * @param props.action - Optional CTA rendered below the message.
  * @param props.className - Extra classes merged onto the root.
  * @returns The centered state element.
@@ -15,11 +16,13 @@ import { cn } from "@/lib/utils";
 export function ListEmptyState({
   icon,
   message,
+  description,
   action,
   className,
 }: {
   icon?: ReactNode;
   message: string;
+  description?: string;
   action?: ReactNode;
   className?: string;
 }) {
@@ -36,6 +39,7 @@ export function ListEmptyState({
         </span>
       ) : null}
       <p className="mt-4 text-sm font-medium text-primary first:mt-0">{message}</p>
+      {description ? <p className="mt-1 text-sm text-secondary">{description}</p> : null}
       {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );
