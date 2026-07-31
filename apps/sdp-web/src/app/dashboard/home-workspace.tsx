@@ -155,7 +155,12 @@ function BalanceAllocation({
           {
             key: "__other__",
             mint: null,
-            label: t("Shared.homeWorkspace.otherTokens", { count: breakdown.otherPricedCount }),
+            label:
+              breakdown.otherPricedCount === 1
+                ? t("Shared.homeWorkspace.singleOtherToken")
+                : t("Shared.homeWorkspace.otherTokensCount", {
+                    count: breakdown.otherPricedCount,
+                  }),
             percent: breakdown.otherPricedSharePercent,
             value: breakdown.otherPricedUsd,
             fill: allocationFill(breakdown.priced.length),
@@ -258,7 +263,11 @@ function BalanceAllocation({
           })}
           {breakdown.otherUnpricedCount > 0 ? (
             <p className="px-2 pt-1 text-[13px] text-tertiary">
-              {t("Shared.homeWorkspace.moreTokens", { count: breakdown.otherUnpricedCount })}
+              {breakdown.otherUnpricedCount === 1
+                ? t("Shared.homeWorkspace.singleMoreToken")
+                : t("Shared.homeWorkspace.moreTokensCount", {
+                    count: breakdown.otherUnpricedCount,
+                  })}
             </p>
           ) : null}
         </div>
