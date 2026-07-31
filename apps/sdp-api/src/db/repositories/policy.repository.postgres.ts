@@ -1585,6 +1585,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
     },
 
     async upsertApiKeyWalletPolicyBinding(input: UpsertApiKeyWalletPolicyBindingInput) {
+      validateApiKeyWalletPolicyBindingInput(input);
       if (!(await tenantOwnsRow(db, scope, "api_keys", input.apiKeyId))) {
         return null;
       }
@@ -1606,11 +1607,16 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       ) {
         return null;
       }
-      validateApiKeyWalletPolicyBindingInput(input);
       return upsertApiKeyWalletPolicyBindingInternal(db, input);
     },
 
     async replaceApiKeyWalletPolicyBindings(input: ReplaceApiKeyWalletPolicyBindingsInput) {
+      if (input.bindings.some((binding) => binding.apiKeyId !== input.apiKeyId)) {
+        throw badRequest("Policy bindings must target the requested API key");
+      }
+      for (const binding of input.bindings) {
+        validateApiKeyWalletPolicyBindingInput(binding);
+      }
       if (!(await tenantOwnsRow(db, scope, "api_keys", input.apiKeyId))) {
         return [];
       }
@@ -1635,12 +1641,6 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         ) {
           return [];
         }
-      }
-      if (input.bindings.some((binding) => binding.apiKeyId !== input.apiKeyId)) {
-        throw badRequest("Policy bindings must target the requested API key");
-      }
-      for (const binding of input.bindings) {
-        validateApiKeyWalletPolicyBindingInput(binding);
       }
 
       return db.transaction(async (tx) => {

@@ -571,6 +571,7 @@ describe("WalletPolicyEnforcementService", () => {
 
     expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
       organizationId: "org_1",
+      projectId: "prj_1",
       approvalRequestId: "appr_1",
       status: "failed",
       operationStatus: "failed",
@@ -594,6 +595,7 @@ describe("WalletPolicyEnforcementService", () => {
 
     expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
       organizationId: "org_1",
+      projectId: "prj_1",
       approvalRequestId: "appr_1",
       status: "failed",
       operationStatus: "failed",
