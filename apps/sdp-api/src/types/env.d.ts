@@ -203,7 +203,7 @@ export interface Env {
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
   // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
-  ASSET_PROFILES_ENABLED?: string;
+  SDP_FLAG_ASSET_PROFILES?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;

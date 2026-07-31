@@ -649,7 +649,7 @@ export const FIELDS: EnvField[] = [
     derive: (v) => v.SOLANA_NETWORK ?? "devnet",
   },
   {
-    key: "ASSET_PROFILES_ENABLED",
+    key: "SDP_FLAG_ASSET_PROFILES",
     section: "advanced",
     kind: "select",
     label: "Asset Profiles production opt-in",

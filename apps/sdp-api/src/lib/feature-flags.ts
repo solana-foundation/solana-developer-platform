@@ -13,7 +13,7 @@ export function isRecurringPaymentCollectionEnabled(
 }
 
 export function isAssetProfilesEnabled(
-  env: Pick<Env, "ASSET_PROFILES_ENABLED" | "ENVIRONMENT" | "SDP_DEPLOYMENT_MODE">
+  env: Pick<Env, "SDP_FLAG_ASSET_PROFILES" | "ENVIRONMENT" | "SDP_DEPLOYMENT_MODE">
 ): boolean {
   // Managed SDP rolls out the UI through Vercel's `asset-profiles` flag. Keep
   // the authenticated API capability available so Cloud Run configuration
@@ -23,7 +23,7 @@ export function isAssetProfilesEnabled(
     return true;
   }
 
-  return env.ENVIRONMENT === "development" || isTruthyFlag(env.ASSET_PROFILES_ENABLED);
+  return env.ENVIRONMENT === "development" || isTruthyFlag(env.SDP_FLAG_ASSET_PROFILES);
 }
 
 export function isPrivyByokProvisioningEnabled(

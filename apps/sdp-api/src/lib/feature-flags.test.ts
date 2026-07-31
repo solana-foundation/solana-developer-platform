@@ -24,7 +24,7 @@ describe("isAssetProfilesEnabled", () => {
     expect(
       isAssetProfilesEnabled({
         ENVIRONMENT: "development",
-        ASSET_PROFILES_ENABLED: flag,
+        SDP_FLAG_ASSET_PROFILES: flag,
         SDP_DEPLOYMENT_MODE: "self_hosted",
       })
     ).toBe(true);
@@ -40,7 +40,7 @@ describe("isAssetProfilesEnabled", () => {
     expect(
       isAssetProfilesEnabled({
         ENVIRONMENT: "production",
-        ASSET_PROFILES_ENABLED: flag,
+        SDP_FLAG_ASSET_PROFILES: flag,
         SDP_DEPLOYMENT_MODE: "self_hosted",
       })
     ).toBe(false);
@@ -50,7 +50,7 @@ describe("isAssetProfilesEnabled", () => {
     expect(
       isAssetProfilesEnabled({
         ENVIRONMENT: "production",
-        ASSET_PROFILES_ENABLED: flag,
+        SDP_FLAG_ASSET_PROFILES: flag,
         SDP_DEPLOYMENT_MODE: "self_hosted",
       })
     ).toBe(true);
