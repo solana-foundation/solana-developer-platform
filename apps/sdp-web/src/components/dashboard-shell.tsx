@@ -448,10 +448,12 @@ export function DashboardShell({
   assetProfilesEnabled,
   children,
   onboardingStatus,
+  privateChannelsEnabled,
 }: {
   assetProfilesEnabled: boolean;
   children: ReactNode;
   onboardingStatus: OrganizationOnboardingStatus | null;
+  privateChannelsEnabled: boolean;
 }) {
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
@@ -482,10 +484,16 @@ export function DashboardShell({
     Boolean(pendingNavigationPathname) || isProjectSwitching || isOrganizationSwitching;
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(shellPathname, t, assetProfilesEnabled);
+  const pageConfig = getDashboardPageConfig(
+    shellPathname,
+    t,
+    assetProfilesEnabled,
+    privateChannelsEnabled
+  );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     pendingApprovalCount,
+    privateChannelsEnabled,
   });
   const bottomNavItems: NavItem[] = [
     {

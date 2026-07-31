@@ -100,13 +100,13 @@ test("NEXT_PUBLIC_SOLANA_NETWORK is derived from SOLANA_NETWORK", () => {
 
 test("Asset Profiles remains an explicit production opt-in", () => {
   const disabled = generateEnv(defaultValues());
-  assert.match(disabled, /^ASSET_PROFILES_ENABLED=false$/m);
+  assert.match(disabled, /^SDP_FLAG_ASSET_PROFILES=false$/m);
 
   const enabled = generateEnv({
     ...defaultValues(),
-    ASSET_PROFILES_ENABLED: "true",
+    SDP_FLAG_ASSET_PROFILES: "true",
   });
-  assert.match(enabled, /^ASSET_PROFILES_ENABLED=true$/m);
+  assert.match(enabled, /^SDP_FLAG_ASSET_PROFILES=true$/m);
 });
 
 test("generated .env covers every base key in infra/self-hosted/.env.example", () => {
