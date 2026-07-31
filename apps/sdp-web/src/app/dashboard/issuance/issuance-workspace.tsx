@@ -643,7 +643,7 @@ export function IssuanceWorkspace({
   if (!assetProfilesEnabled) {
     return (
       <DashboardWorkspaceTabShell
-        overviewClassName={ISSUANCE_OVERVIEW_PANEL_CLASS}
+        overviewClassName="space-y-6"
         overviewKey="tokens-tab"
         overview={
           <IssuanceLegacyOverview
