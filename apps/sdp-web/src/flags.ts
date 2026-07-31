@@ -1,38 +1,48 @@
-import { auth } from "@clerk/nextjs/server";
 import { vercelAdapter } from "@flags-sdk/vercel";
 import { dedupe, flag } from "flags/next";
-import { getAssetProfilesDefault, getHomepageOpenSignupDefault } from "@/lib/feature-flag-defaults";
+import { getSdpAuth } from "@/lib/sdp-api";
 
 type DashboardFlagEntities = {
   user?: {
-    id: string;
-  };
-  team?: {
-    id: string;
-    role?: string;
+    email: string;
   };
 };
 
+/**
+ * Resolves the entities Vercel Flags targeting rules match against: the
+ * signed-in user's email. Signed-out sessions resolve to no entities, so only
+ * default/environment rules apply.
+ *
+ * The email is read from the session token, which requires an `email` custom
+ * claim configured per Clerk instance under Clerk Dashboard → Sessions →
+ * Customize session token.
+ *
+ * @returns The targeting entities for the current request.
+ */
 const identifyDashboardEntities = dedupe(async (): Promise<DashboardFlagEntities> => {
-  const { orgId, orgRole, userId } = await auth();
+  const { userId, sessionClaims } = await getSdpAuth();
+
+  if (!userId) {
+    return {};
+  }
+
+  const email = sessionClaims.email;
+  if (typeof email !== "string" || email.length === 0) {
+    throw new Error(
+      "Clerk session token is missing the `email` claim. Add it under Clerk Dashboard → Sessions → Customize session token."
+    );
+  }
 
   return {
-    user: userId ? { id: userId } : undefined,
-    team: orgId
-      ? {
-          id: orgId,
-          role: orgRole ?? undefined,
-        }
-      : undefined,
+    user: { email },
   };
 });
 
-export const homepageOpenSignup = flag<boolean>({
+export const homepageOpenSignup = flag<boolean, DashboardFlagEntities>({
   key: "homepage-open-signup",
   adapter: vercelAdapter(),
-  defaultValue: getHomepageOpenSignupDefault({
-    vercelEnvironment: process.env.VERCEL_ENV,
-  }),
+  identify: identifyDashboardEntities,
+  defaultValue: true,
   description: "Show self-serve signup and contact CTAs instead of the homepage waitlist CTA.",
   options: [
     { value: false, label: "Waitlist" },
@@ -69,12 +79,7 @@ export const assetProfiles = flag<boolean, DashboardFlagEntities>({
   key: "asset-profiles",
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
-  defaultValue: getAssetProfilesDefault({
-    assetProfilesEnabled: process.env.ASSET_PROFILES_ENABLED,
-    nodeEnvironment: process.env.NODE_ENV,
-    sdpEnvironment: process.env.NEXT_PUBLIC_SDP_ENVIRONMENT,
-    vercelEnvironment: process.env.VERCEL_ENV,
-  }),
+  defaultValue: true,
   description: "Show the Asset Profiles issuance wizard and per-token asset management workspace.",
   options: [
     { value: false, label: "Legacy issuance" },
