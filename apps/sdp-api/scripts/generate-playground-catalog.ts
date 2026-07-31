@@ -321,10 +321,12 @@ const expected = generateCatalog();
 if (process.argv.includes("--check")) {
   const current = await readFile(outputPath, "utf8").catch(() => "");
   if (current !== expected) {
-    console.error("API playground catalog is stale. Run: pnpm -C apps/sdp-api playground:generate");
+    process.stderr.write(
+      "API playground catalog is stale. Run: pnpm -C apps/sdp-api playground:generate\n"
+    );
     process.exitCode = 1;
   }
 } else {
   await writeFile(outputPath, expected, "utf8");
-  console.log(`API playground catalog generated at ${outputPath}`);
+  process.stdout.write(`API playground catalog generated at ${outputPath}\\n`);
 }
