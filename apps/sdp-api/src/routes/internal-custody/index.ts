@@ -12,6 +12,7 @@ import type { Env } from "@/types/env";
 const privyCredentialSubmissionSchema = z
   .object({
     provider: z.literal("privy"),
+    walletLabel: z.string().trim().min(1).max(100).optional(),
     fields: z
       .object({
         credentialLabel: z.string().trim().min(1),

@@ -31,6 +31,7 @@ import {
 import { CustodyConnectionRuntimeStore } from "@/services/stores/custody-connection-runtime.store";
 import {
   type CustodyConnectionRow,
+  getPendingWalletLabel,
   type ProviderCredentialSecretRow,
   ProviderCredentialStore,
 } from "@/services/stores/provider-credential.store";
@@ -430,6 +431,7 @@ async function persistInstallCheckOutcome(params: {
           providerCredentialId: params.providerCredentialId,
           walletId: params.wallet.walletId,
           publicKey: params.wallet.address,
+          label: getPendingWalletLabel(target.connection.setup_metadata),
           setDefault: false,
         });
         return { ...target.credential, ...updated };

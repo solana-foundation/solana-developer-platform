@@ -18,6 +18,7 @@ const CREDENTIAL_ID = "pcred_provider_credential_check";
 const CONNECTION_ID = "cconn_provider_credential_check";
 const APP_ID = "privy-app-1234";
 const APP_SECRET = "exact secret";
+const WALLET_LABEL = "Treasury Wallet";
 const PRIVY_WALLET_ID = "wallet-provider-credential-check";
 const PRIVY_WALLET_ADDRESS = "wallet-address-provider-credential-check";
 const PRIVY_EXTERNAL_ID = `sdp_${CONNECTION_ID}`;
@@ -203,10 +204,19 @@ async function seedPendingCredential(): Promise<void> {
       .prepare(
         `INSERT INTO custody_connections (
            id, organization_id, project_id, provider, scope,
-           provider_credential_id, provider_credential_scope_key, status, created_by
-         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+           provider_credential_id, provider_credential_scope_key,
+           setup_metadata, status, created_by
+         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, 'pending', ?)`
       )
-      .bind(CONNECTION_ID, ORGANIZATION_ID, PROJECT_ID, CREDENTIAL_ID, PROJECT_ID, USER_ID),
+      .bind(
+        CONNECTION_ID,
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        CREDENTIAL_ID,
+        PROJECT_ID,
+        JSON.stringify({ pendingWalletLabel: WALLET_LABEL }),
+        USER_ID
+      ),
   ]);
 }
 
@@ -368,7 +378,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
                 c.status AS connection_status, c.setup_metadata,
                 c.last_check_status, c.last_check_at, c.last_check_failure_code,
                 c.default_custody_wallet_id,
-                w.wallet_id, w.public_key, w.custody_connection_id,
+                w.wallet_id, w.public_key, w.label AS wallet_label, w.custody_connection_id,
                 d.default_custody_config_id, d.default_custody_connection_id,
                 (SELECT COUNT(*) FROM custody_wallets) AS wallet_count,
                 (SELECT COUNT(*) FROM custody_scope_defaults) AS default_count
@@ -392,6 +402,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
         default_custody_wallet_id: string | null;
         wallet_id: string | null;
         public_key: string | null;
+        wallet_label: string | null;
         custody_connection_id: string | null;
         default_custody_config_id: string | null;
         default_custody_connection_id: string | null;
@@ -412,11 +423,16 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       default_custody_wallet_id: expect.any(String),
       wallet_id: `privy_${PRIVY_WALLET_ID}`,
       public_key: PRIVY_WALLET_ADDRESS,
+      wallet_label: WALLET_LABEL,
       custody_connection_id: CONNECTION_ID,
       default_custody_config_id: null,
       default_custody_connection_id: CONNECTION_ID,
       wallet_count: 1,
       default_count: 1,
+    });
+    expect(state?.setup_metadata).toEqual({
+      providerAccountFingerprint:
+        "sha256:227b73d3e3e9e6717d2c6f6500f88386b11130922ae7320de715a6ca237f3296",
     });
   });
 
@@ -630,7 +646,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       credential_status: "failed_validation",
       encrypted_secret_payload: null,
       connection_status: "failed",
-      setup_metadata: {},
+      setup_metadata: { pendingWalletLabel: WALLET_LABEL },
       last_check_status: "failed",
       last_check_at: expect.any(String),
       last_check_failure_code: "invalid_credentials",
@@ -670,7 +686,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       credential_status: "pending",
       encrypted_secret_payload: expect.any(String),
       connection_status: "pending",
-      setup_metadata: {},
+      setup_metadata: { pendingWalletLabel: WALLET_LABEL },
       last_check_status: "retry_unknown",
       last_check_at: expect.any(String),
       last_check_failure_code: "provider_response_unknown",
@@ -884,7 +900,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     expect(await getCheckState()).toMatchObject({
       credential_status: "pending",
       connection_status: "deactivated",
-      setup_metadata: {},
+      setup_metadata: { pendingWalletLabel: WALLET_LABEL },
       last_check_status: null,
     });
   });

@@ -30,6 +30,7 @@ const PROVISIONING_DISABLED_MESSAGE =
 
 interface SubmitPrivyCredentialInput {
   provider: "privy";
+  walletLabel?: string;
   fields: {
     credentialLabel: string;
     scope: "organization" | "project";
@@ -486,6 +487,7 @@ async function persistConnection(
       projectId: submission.projectId,
       providerCredentialId: submission.providerCredentialId,
       providerCredentialScopeKey: providerCredential.scope_key,
+      pendingWalletLabel: submission.input.walletLabel,
       createdBy: submission.userId,
     });
     return;
@@ -496,6 +498,7 @@ async function persistConnection(
     expectedProviderCredentialId: lockedPlan.currentCredential.id,
     providerCredentialId: submission.providerCredentialId,
     providerCredentialScopeKey: providerCredential.scope_key,
+    pendingWalletLabel: submission.input.walletLabel,
   });
   if (!updated) {
     throw new SetupConflict(lockedPlan.connection.id);
@@ -625,6 +628,7 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
         projectId: params.projectId,
       },
       provider: params.input.provider,
+      walletLabel: params.input.walletLabel,
       fields: params.input.fields,
     })
   );

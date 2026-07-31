@@ -203,6 +203,7 @@ type StoredConnection = {
   provider: string;
   provider_credential_id: string;
   status: string;
+  setup_metadata: Record<string, unknown>;
   last_check_status: string | null;
   last_check_at: string | null;
   last_check_failure_code: string | null;
@@ -212,7 +213,7 @@ async function getConnectionForCredential(credentialId: string): Promise<StoredC
   const connection = await getDb(env)
     .prepare(
       `SELECT id, project_id, provider, provider_credential_id, status,
-              last_check_status, last_check_at, last_check_failure_code
+              setup_metadata, last_check_status, last_check_at, last_check_failure_code
        FROM custody_connections
        WHERE provider_credential_id = ?`
     )
@@ -297,6 +298,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
     const response = await submit(app, token, {
       key: "submit-privy-credentials-1",
+      body: { ...VALID_BODY, walletLabel: "  Treasury Wallet  " },
     });
 
     expect(response.status).toBe(201);
@@ -339,6 +341,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       provider: "privy",
       provider_credential_id: body.data.providerCredential.id,
       status: "pending",
+      setup_metadata: { pendingWalletLabel: "Treasury Wallet" },
     });
     const defaults = await getDb(env)
       .prepare("SELECT COUNT(*) AS count FROM custody_scope_defaults")
@@ -453,6 +456,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         fields: { ...VALID_BODY.fields, walletLabel: "Must not be accepted" },
       },
     ],
+    ["blank wallet label", { ...VALID_BODY, walletLabel: "   " }],
+    ["long wallet label", { ...VALID_BODY, walletLabel: "x".repeat(101) }],
     ["blank normalized app ID", { ...VALID_BODY, fields: { ...VALID_BODY.fields, appId: "   " } }],
     [
       "blank normalized label",
@@ -584,7 +589,19 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     ]);
   });
 
-  it("rejects same-key payload reuse before another secret write", async () => {
+  it.each([
+    [
+      "credential secret",
+      {
+        ...VALID_BODY,
+        fields: {
+          ...VALID_BODY.fields,
+          appSecret: "different secret",
+        },
+      },
+    ],
+    ["wallet label", { ...VALID_BODY, walletLabel: "Different wallet" }],
+  ])("rejects same-key %s reuse before another secret write", async (_field, changedBody) => {
     const { app, token } = buildApp();
     expect(
       (
@@ -596,13 +613,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     const response = await submit(app, token, {
       key: "same-key-different-payload",
-      body: {
-        ...VALID_BODY,
-        fields: {
-          ...VALID_BODY.fields,
-          appSecret: "different secret",
-        },
-      },
+      body: changedBody,
     });
 
     expect(response.status).toBe(409);
@@ -658,6 +669,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
     const first = await submit(app, token, {
       key: "replacement-v1",
+      body: { ...VALID_BODY, walletLabel: "First wallet" },
     });
     const firstBody = (await first.json()) as {
       data: {
@@ -675,6 +687,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "replacement-v2",
       body: {
         provider: "privy",
+        walletLabel: "Corrected wallet",
         fields: {
           credentialLabel: "Corrected organization credential",
           scope: "organization",
@@ -703,6 +716,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       id: connectionId,
       provider_credential_id: replacementBody.data.providerCredential.id,
       status: "pending",
+      setup_metadata: { pendingWalletLabel: "Corrected wallet" },
       last_check_status: null,
       last_check_at: null,
       last_check_failure_code: null,
@@ -743,6 +757,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     const oldReplay = await submit(app, token, {
       key: "replacement-v1",
+      body: { ...VALID_BODY, walletLabel: "First wallet" },
     });
     expect(oldReplay.status).toBe(201);
     expect(await oldReplay.json()).toEqual({

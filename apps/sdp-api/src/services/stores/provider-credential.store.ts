@@ -197,7 +197,7 @@ export class ProviderCredentialStore {
     const updated = await this.db.execute(
       `UPDATE custody_connections
        SET setup_metadata =
-             setup_metadata || CAST(? AS jsonb),
+             (setup_metadata - 'pendingWalletLabel') || CAST(? AS jsonb),
            last_check_status = 'success',
            last_check_at = ?,
            last_check_failure_code = NULL,
@@ -346,14 +346,15 @@ export class ProviderCredentialStore {
     projectId: string;
     providerCredentialId: string;
     providerCredentialScopeKey: string;
+    pendingWalletLabel?: string;
     createdBy: string;
   }): Promise<CustodyConnectionRow> {
     const row = await this.db.queryOne<CustodyConnectionRow>(
       `INSERT INTO custody_connections (
          id, organization_id, project_id, provider, scope,
          provider_credential_id, provider_credential_scope_key,
-         status, created_by
-       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)
+         setup_metadata, status, created_by
+       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, 'pending', ?)
        RETURNING id, organization_id, project_id, provider, scope,
                  provider_credential_id, provider_credential_scope_key,
                  default_custody_wallet_id, status, setup_metadata,
@@ -365,6 +366,9 @@ export class ProviderCredentialStore {
         params.projectId,
         params.providerCredentialId,
         params.providerCredentialScopeKey,
+        JSON.stringify(
+          params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}
+        ),
         params.createdBy,
       ]
     );
@@ -379,13 +383,14 @@ export class ProviderCredentialStore {
     expectedProviderCredentialId: string;
     providerCredentialId: string;
     providerCredentialScopeKey: string;
+    pendingWalletLabel?: string;
   }): Promise<CustodyConnectionRow | null> {
     return this.db.queryOne<CustodyConnectionRow>(
       `UPDATE custody_connections
        SET provider_credential_id = ?,
            provider_credential_scope_key = ?,
            status = 'pending',
-           setup_metadata = '{}'::jsonb,
+           setup_metadata = CAST(? AS jsonb),
            last_check_status = NULL,
            last_check_at = NULL,
            last_check_failure_code = NULL,
@@ -401,6 +406,9 @@ export class ProviderCredentialStore {
       [
         params.providerCredentialId,
         params.providerCredentialScopeKey,
+        JSON.stringify(
+          params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}
+        ),
         params.id,
         params.expectedProviderCredentialId,
       ]
@@ -409,5 +417,12 @@ export class ProviderCredentialStore {
 }
 
 export function hasPinnedProviderAccountIdentity(value: unknown): boolean {
-  return Object.keys(parsePostgresJsonOr<Record<string, unknown>>(value, {})).length > 0;
+  return Object.keys(parsePostgresJsonOr<Record<string, unknown>>(value, {})).some(
+    (key) => key !== "pendingWalletLabel"
+  );
+}
+
+export function getPendingWalletLabel(value: unknown): string | undefined {
+  const label = parsePostgresJsonOr<Record<string, unknown>>(value, {}).pendingWalletLabel;
+  return typeof label === "string" ? label : undefined;
 }
