@@ -93,7 +93,6 @@ function TokenizationEngineGate({
 }) {
   const t = useTranslations();
   const [engineChosen, setEngineChosen] = useState(!enabled);
-  const [onboardToVulcanForge, setOnboardToVulcanForge] = useState(false);
 
   const deployStepContent = (
     <>
@@ -103,30 +102,6 @@ function TokenizationEngineGate({
       <p className="mt-2 text-[14px] leading-[1.45] text-secondary">
         {t("DashboardIssuance.workspace.deployHint")}
       </p>
-      {enabled ? (
-        <div className="mt-5 flex items-center justify-between gap-3 rounded-xl border border-border-default bg-fill-subtle p-4">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border-subtle bg-[white]">
-              <Image
-                src="/provider-logos/alphaledger.svg"
-                alt=""
-                width={22}
-                height={22}
-                className="object-contain"
-              />
-            </span>
-            <div>
-              <p className="text-sm font-medium text-primary">
-                {t("DashboardIssuance.management.vulcanForgeOnboardTitle")}
-              </p>
-              <p className="mt-0.5 text-[12px] leading-5 text-secondary">
-                {t("DashboardIssuance.management.vulcanForgeOnboardDescription")}
-              </p>
-            </div>
-          </div>
-          <ToggleSwitch checked={onboardToVulcanForge} onChange={setOnboardToVulcanForge} />
-        </div>
-      ) : null}
       {children(enabled ? () => setEngineChosen(false) : null)}
     </>
   );
@@ -278,6 +253,7 @@ export function AssetManagementWorkspace({
   const [pendingFundManagementModalAction, setPendingFundManagementModalAction] = useState<
     "deploy" | "mint" | "burn" | null
   >(null);
+  const [onboardToVulcanForge, setOnboardToVulcanForge] = useState(false);
 
   const ops = useTokenOperations({
     token,
@@ -510,6 +486,24 @@ export function AssetManagementWorkspace({
                   onSignerWalletIdChange={ops.setDeploySignerWalletId}
                   helperText={t("DashboardIssuance.management.deploySignerHint")}
                 />
+                {alphaledgerEngineEnabled ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-2 text-sm text-secondary">
+                      <Image
+                        src="/provider-logos/alphaledger.svg"
+                        alt=""
+                        width={16}
+                        height={16}
+                        className="object-contain"
+                      />
+                      {t("DashboardIssuance.management.vulcanForgeOnboardTitle")}
+                    </span>
+                    <ToggleSwitch
+                      checked={onboardToVulcanForge}
+                      onChange={setOnboardToVulcanForge}
+                    />
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between gap-2">
                   <button
                     type="button"
