@@ -23,6 +23,8 @@
     "lint": "biome check src/",
     "lint:fix": "biome check --write src/",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
+    "playground:generate": "tsx scripts/generate-playground-catalog.ts",
+    "playground:check": "tsx scripts/generate-playground-catalog.ts --check",
     "rails:discover": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/discover-ramp-rails.ts discover",
     "rails:generate": "tsx scripts/discover-ramp-rails.ts generate",
     "rails:drift": "tsx scripts/discover-ramp-rails.ts drift",

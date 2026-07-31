@@ -65,7 +65,11 @@ function applySearchParamUpdates(updates: Record<string, string | null>, mode: "
 
   const nextQuery = nextParams.toString();
   const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`;
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
 
+  if (nextUrl === currentUrl) {
+    return;
+  }
   if (mode === "push") {
     window.history.pushState(null, "", nextUrl);
   } else {
@@ -75,21 +79,58 @@ function applySearchParamUpdates(updates: Record<string, string | null>, mode: "
 }
 
 /**
+ * Reads the active dashboard tab straight from the current URL, bypassing the
+ * reactive snapshot behind `useDashboardTab`. Use where the snapshot can lag
+ * the real URL: App Router `<Link>` navigation fires no popstate/custom event,
+ * and hydration renders always start from the null server snapshot.
+ *
+ * @returns The live `?tab=` value, or null when absent (or on the server).
+ */
+export function readDashboardTabFromUrl(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return new URLSearchParams(window.location.search).get("tab");
+}
+
+/**
+ * Subscribes to a single search param, snapshotting just its value so
+ * unrelated search-param churn (filters, pagination, other params) never
+ * re-renders the subscriber.
+ *
+ * @param name - The search param to read.
+ * @returns The param's current value, or null when absent (always null on the server).
+ */
+export function useDashboardSearchParam(name: string): string | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => new URLSearchParams(getSearchSnapshot()).get(name),
+    () => null
+  );
+}
+
+/**
+ * Applies search-param updates to the current URL as a shallow history
+ * replacement; no-ops when nothing would change. Non-hook counterpart of
+ * `useDashboardUrlState().replaceSearchParams` for call sites that must not
+ * subscribe to the whole search string.
+ *
+ * @param updates - Param values to set; null or blank values delete the param.
+ */
+export function replaceDashboardSearchParams(updates: Record<string, string | null>): void {
+  applySearchParamUpdates(updates, "replace");
+}
+
+/**
  * Reads the active dashboard tab from the URL's `?tab=` param. Every tab-aware
  * surface (header tabs, tab shell, workspaces) derives from this hook so the
  * `?tab=` contract lives in one place; call sites compare against their own
- * tab ids. The snapshot is the tab value itself rather than the whole search
- * string, so unrelated search-param churn (filters, pagination) never
- * re-renders subscribers.
+ * tab ids.
  *
  * @returns The active tab id, or null when the default tab is selected.
  */
 export function useDashboardTab(): string | null {
-  return useSyncExternalStore(
-    subscribe,
-    () => new URLSearchParams(getSearchSnapshot()).get("tab"),
-    () => null
-  );
+  return useDashboardSearchParam("tab");
 }
 
 export function useDashboardUrlState() {

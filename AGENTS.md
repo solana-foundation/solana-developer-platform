@@ -21,6 +21,7 @@ This file is the canonical agent guide for this repository.
 Do not hand-edit generated artifacts. Regenerate them with the owning script.
 
 - OpenAPI JSON: `pnpm -C apps/sdp-api openapi:generate`
+- API playground catalog: `pnpm generate:api-playground`
 - API reference docs: `pnpm -C apps/sdp-docs generate:api`
 - AI discovery resources: `pnpm -C apps/sdp-docs generate:ai`
 
@@ -36,6 +37,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Docs integrity: `pnpm --filter sdp-docs check:links`
 - Docs build: `pnpm --filter sdp-docs build`
 - Module boundaries: `pnpm check:module-boundaries`
+- API playground drift: `pnpm check:api-playground`
 - API typecheck: `pnpm --filter @sdp/api typecheck`
 - API tests: `pnpm --filter @sdp/api test`
 - Full workspace typecheck: `pnpm typecheck`
