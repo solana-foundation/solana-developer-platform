@@ -4,7 +4,7 @@ import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { badRequest, badRequestQuery, notFound } from "@/lib/errors";
+import { badRequest, badRequestQuery, conflict, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
@@ -213,6 +213,13 @@ export const updateToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
+  // `deploying` is an internal transient state, so it is not part of the
+  // public TokenStatus union even though it can be observed between the claim
+  // and final deployment writes. Reject the whole PATCH during that window.
+  if (String(existing.status) === "deploying") {
+    throw conflict("Token deployment is in progress; retry after it completes");
+  }
+
   // Access-control enforcement is baked into the mint at deploy; the flag only
   // makes sense to change while the token is still an undeployed draft.
   if (
@@ -272,7 +279,10 @@ export const updateToken = async (c: AppContext) => {
       metadataUpdateSlot = result ? result.slot.toString() : null;
     }
 
-    const token = await tokenService.updateToken(tokenId, parsed.data);
+    const token = await tokenService.updateToken(tokenId, parsed.data, {
+      status: existing.status,
+      mintAddress: existing.mintAddress,
+    });
 
     // Audit log
     const auditService = new AuditService(getDb(c.env));

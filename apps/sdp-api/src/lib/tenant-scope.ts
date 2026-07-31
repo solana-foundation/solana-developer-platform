@@ -100,24 +100,24 @@ function assertNestedTenantClaims(
 
   if (!Array.isArray(value)) {
     const record = value as Record<PropertyKey, unknown>;
-    if (Object.hasOwn(record, "organizationId") || Object.hasOwn(record, "projectId")) {
-      assertTenantClaim(
-        scope,
-        {
-          organizationId: record.organizationId,
-          projectId: record.projectId,
-        },
-        operation
+    if ("organizationId" in record && record.organizationId !== scope.organizationId) {
+      throw new TenantScopeViolationError(
+        `${operation} cannot override the repository organization scope`
       );
     }
-    if (Object.hasOwn(record, "organization_id") || Object.hasOwn(record, "project_id")) {
-      assertTenantClaim(
-        scope,
-        {
-          organizationId: record.organization_id,
-          projectId: record.project_id,
-        },
-        operation
+    if ("projectId" in record && record.projectId !== scope.projectId) {
+      throw new TenantScopeViolationError(
+        `${operation} cannot override the repository project scope`
+      );
+    }
+    if ("organization_id" in record && record.organization_id !== scope.organizationId) {
+      throw new TenantScopeViolationError(
+        `${operation} cannot override the repository organization scope`
+      );
+    }
+    if ("project_id" in record && record.project_id !== scope.projectId) {
+      throw new TenantScopeViolationError(
+        `${operation} cannot override the repository project scope`
       );
     }
   }

@@ -281,6 +281,9 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   if (!entry || entry.tokenId !== tokenId) {
     throw notFound("Allowlist entry");
   }
+  if (entry.status === "revoked") {
+    return noContent(c);
+  }
 
   await tokenService.revokeAllowlistEntry(entryId);
 
@@ -302,6 +305,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
         address: entry.address,
         addedBy: entry.addedBy,
         label: entry.label ?? undefined,
+        initialStatus: entry.status,
       });
     } catch (restoreError) {
       throw new AppError(

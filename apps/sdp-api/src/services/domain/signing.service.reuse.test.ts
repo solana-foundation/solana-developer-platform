@@ -187,21 +187,36 @@ describe("signing.service provider reuse", () => {
     expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, signingConfigId);
   });
 
+  it("does not let a project create wallets in an organization-scoped fallback config", async () => {
+    const orgId = "org_shared_wallet_guard";
+    const configRecord = createConfigRecord({
+      id: "cust_shared_wallet_guard",
+      orgId,
+      provider: "privy",
+      defaultWalletId: "privy_shared_default",
+    });
+    const { service, configStore } = createService({ configRecord, wallets: [] });
+    configStore.getDefaultConfig.mockResolvedValue(configRecord);
+
+    await expect(service.createWallet(orgId, "prj_attacker", {})).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(configStore.createWallet).not.toHaveBeenCalled();
+  });
+
   it("does not return cached signatures outside the request tenant", async () => {
     const orgId = "org_signing_owner";
-    const configRecord = {
-      ...createConfigRecord({
-        id: "cust_signing_status",
-        orgId,
-        provider: "privy",
-        defaultWalletId: "privy_wallet_1",
-      }),
-      projectId: "prj_signing_owner",
-    };
+    const configRecord = createConfigRecord({
+      id: "cust_signing_status",
+      orgId,
+      provider: "privy",
+      defaultWalletId: "privy_wallet_1",
+    });
     const { service, signingStore } = createService({ configRecord, wallets: [] });
     signingStore.findByIdOrExternal.mockResolvedValue({
       id: "sreq_owner",
       organizationId: orgId,
+      projectId: "prj_signing_owner",
       custodyConfigId: configRecord.id,
       externalRequestId: "external_owner",
       status: "completed",
@@ -220,6 +235,9 @@ describe("signing.service provider reuse", () => {
     await expect(
       service.getSigningStatus(orgId, "prj_signing_owner", "sreq_owner")
     ).resolves.toMatchObject({ status: "completed" });
+    await expect(service.getSigningStatus(orgId, undefined, "sreq_owner")).resolves.toMatchObject({
+      status: "completed",
+    });
   });
 });
 

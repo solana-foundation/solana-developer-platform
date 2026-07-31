@@ -769,7 +769,11 @@ export class TokenService {
     };
   }
 
-  async updateToken(tokenId: string, input: UpdateTokenInput): Promise<Token> {
+  async updateToken(
+    tokenId: string,
+    input: UpdateTokenInput,
+    expectedDeploymentState?: Pick<Token, "status" | "mintAddress">
+  ): Promise<Token> {
     const existing = await this._getTokenById(tokenId);
     if (!existing) {
       throw new Error("TOKEN_NOT_FOUND");
@@ -830,7 +834,6 @@ export class TokenService {
 
     updates.push("updated_at = ?");
     values.push(now);
-    values.push(tokenId);
 
     // symbol/decimals/requiresAllowlist are only mutable pre-deploy. The route
     // handler enforces that from a read of `existing`, but a concurrent
@@ -842,22 +845,48 @@ export class TokenService {
       input.symbol !== undefined ||
       input.decimals !== undefined ||
       input.requiresAllowlist !== undefined;
+    const requiresStableDeploymentGuard =
+      input.name !== undefined ||
+      input.description !== undefined ||
+      input.uri !== undefined ||
+      input.imageUrl !== undefined ||
+      input.status !== undefined;
 
-    const whereClause = requiresUndeployedGuard
-      ? "WHERE id = ? AND status = 'pending' AND mint_address IS NULL"
-      : "WHERE id = ?";
+    const whereConditions = ["id = ?"];
+    const whereValues: (string | null)[] = [tokenId];
+    if (requiresUndeployedGuard) {
+      whereConditions.push("status = 'pending'", "mint_address IS NULL");
+    } else if (requiresStableDeploymentGuard) {
+      whereConditions.push("status <> 'deploying'");
+    }
+    if (expectedDeploymentState) {
+      whereConditions.push(
+        "status = ?",
+        "(mint_address = ? OR (mint_address IS NULL AND ? IS NULL))"
+      );
+      whereValues.push(
+        expectedDeploymentState.status,
+        expectedDeploymentState.mintAddress,
+        expectedDeploymentState.mintAddress
+      );
+    }
 
     const rowsAffected = await this.db
-      .prepare(`UPDATE issued_tokens SET ${updates.join(", ")} ${whereClause}`)
-      .bind(...values)
+      .prepare(
+        `UPDATE issued_tokens SET ${updates.join(", ")} WHERE ${whereConditions.join(" AND ")}`
+      )
+      .bind(...values, ...whereValues)
       .run();
 
     // The row existed at the top-of-method read, so a guarded 0-row result means
     // it was deployed during the window — surface a 409 rather than a 404.
-    if (requiresUndeployedGuard && rowsAffected === 0) {
+    if (
+      (requiresUndeployedGuard || requiresStableDeploymentGuard || expectedDeploymentState) &&
+      rowsAffected === 0
+    ) {
       throw new AppError(
         "CONFLICT",
-        "Token was deployed while this update was in flight; re-fetch and retry"
+        "Token deployment state changed while this update was in flight; re-fetch and retry"
       );
     }
 

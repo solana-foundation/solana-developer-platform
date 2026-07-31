@@ -1466,6 +1466,33 @@ describe("Issuance Routes", () => {
       expect(body.data.token.description).toBe("New description");
     });
 
+    it("rejects metadata updates while token deployment is in progress", async () => {
+      await getDb(env)
+        .prepare("UPDATE issued_tokens SET status = 'deploying' WHERE id = ?")
+        .bind(tokenId)
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Divergent metadata" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(409);
+      const row = await getDb(env)
+        .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+        .bind(tokenId)
+        .first<{ name: string }>();
+      expect(row?.name).toBe("Update Token");
+    });
+
     it("updates deployed token metadata on-chain before persisting local fields", async () => {
       const db = getDb(env);
       const activeTokenId = "tok_metadataupdate1";
@@ -2585,6 +2612,49 @@ describe("Issuance Routes", () => {
           const restoredListBody = await restoredListRes.json();
           expect(restoredListBody.data).toHaveLength(1);
           expect(restoredListBody.data[0].id).toBe(entryId);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          removeFromListSpy.mockRestore();
+        }
+      });
+
+      it("restores a pending entry as pending when on-chain removal fails", async () => {
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+        const tokenService = new TokenService(db);
+        const { entry } = await tokenService.addAllowlistEntry({
+          tokenId,
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+          addedBy: TEST_PROJECT_API_KEY.id,
+          initialStatus: "pending",
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const removeFromListSpy = vi
+          .spyOn(MosaicService.prototype, "removeFromList")
+          .mockRejectedValueOnce(new Error("pending entry was never confirmed on-chain"));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist/${entry.id}`,
+            {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+
+          expect(res.status).toBe(500);
+          const restored = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry.id)
+            .first<{ status: string }>();
+          expect(restored?.status).toBe("pending");
         } finally {
           createOrgSignerSpy.mockRestore();
           removeFromListSpy.mockRestore();

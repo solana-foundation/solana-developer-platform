@@ -119,6 +119,7 @@ export interface SigningRequestStore {
 
 export interface CreateSigningRequestParams {
   organizationId: string;
+  projectId: string | null;
   custodyConfigId: string;
   tokenTransactionId?: string | null;
   externalRequestId: string;
@@ -129,6 +130,7 @@ export interface CreateSigningRequestParams {
 export interface SigningRequestRecord {
   id: string;
   organizationId: string;
+  projectId: string | null;
   custodyConfigId: string;
   tokenTransactionId?: string | null;
   externalRequestId: string | null;
@@ -1384,9 +1386,7 @@ export class SigningService {
       provider?: SigningConfiguration["provider"];
     }
   ): Promise<CustodyWallet> {
-    const config = params.provider
-      ? await this.getConfigurationByProvider(orgId, projectId, params.provider)
-      : await this.configStore.findActive(orgId, projectId);
+    const config = await this.getConfigurationForMutation(orgId, projectId, params.provider);
     if (!config) {
       throw new SigningError(
         params.provider
@@ -1796,6 +1796,7 @@ export class SigningService {
     if (result.status === "pending" && result.requestId) {
       await this.signingStore.create({
         organizationId: orgId,
+        projectId: projectId ?? null,
         custodyConfigId: config.id,
         externalRequestId: result.requestId,
         transactionMessage: encodeBase64(request.message),
@@ -1820,10 +1821,14 @@ export class SigningService {
       return { status: "failed", error: "Signing request not found" };
     }
 
+    if (projectId !== undefined && record.projectId !== projectId) {
+      return { status: "failed", error: "Signing request not found" };
+    }
+
     const config = await this.configStore.getById(record.custodyConfigId);
     const configIsVisible =
       config?.organizationId === orgId &&
-      (projectId === undefined || config.projectId === null || config.projectId === projectId);
+      (config.projectId === null || config.projectId === record.projectId);
     if (!configIsVisible) {
       return { status: "failed", error: "Signing request not found" };
     }

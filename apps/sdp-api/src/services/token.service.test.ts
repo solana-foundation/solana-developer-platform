@@ -380,6 +380,59 @@ describe("TokenService", () => {
       expect(row?.decimals).toBe(9);
     });
 
+    it("blocks metadata updates while deployment is using the claimed snapshot", async () => {
+      await insertToken("tok_claim_metadata_race", { status: "pending", mintAddress: null });
+      await tokenService.beginTokenDeploy("tok_claim_metadata_race");
+
+      await expect(
+        tokenService.updateToken("tok_claim_metadata_race", {
+          name: "Divergent metadata",
+          description: "Must not persist while deployment is in flight",
+        })
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+
+      const row = await db
+        .prepare("SELECT name, description FROM issued_tokens WHERE id = ?")
+        .bind("tok_claim_metadata_race")
+        .first<{ name: string; description: string | null }>();
+      expect(row).toEqual({ name: "Claimed Token", description: null });
+    });
+
+    it("blocks stale metadata updates after deployment completes", async () => {
+      await insertToken("tok_completed_metadata_race", { status: "pending", mintAddress: null });
+      const pendingSnapshot = await tokenService.getToken({
+        tokenId: "tok_completed_metadata_race",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+      expect(pendingSnapshot).not.toBeNull();
+
+      await tokenService.beginTokenDeploy("tok_completed_metadata_race");
+      await tokenService.setTokenDeployed(
+        "tok_completed_metadata_race",
+        "11111111111111111111111111111111",
+        "11111111111111111111111111111111",
+        null
+      );
+
+      await expect(
+        tokenService.updateToken(
+          "tok_completed_metadata_race",
+          { name: "Stale route snapshot" },
+          {
+            status: pendingSnapshot?.status ?? "pending",
+            mintAddress: pendingSnapshot?.mintAddress ?? null,
+          }
+        )
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+
+      const row = await db
+        .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+        .bind("tok_completed_metadata_race")
+        .first<{ name: string }>();
+      expect(row?.name).toBe("Claimed Token");
+    });
+
     it("releases a deploying claim back to pending so a failed deploy stays editable", async () => {
       await insertToken("tok_claim_release", { status: "pending", mintAddress: null });
       await tokenService.beginTokenDeploy("tok_claim_release");

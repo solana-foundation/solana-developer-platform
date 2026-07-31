@@ -106,7 +106,7 @@ describe("tenant repository scope", () => {
     expect(calls).toBe(0);
   });
 
-  it("rejects incomplete tenant claims before repository execution", () => {
+  it("validates each tenant claim independently without rejecting legitimate partial filters", () => {
     let calls = 0;
     const repository = bindRepositoryToTenant(
       {
@@ -119,9 +119,31 @@ describe("tenant repository scope", () => {
       "TestRepository"
     );
 
-    expect(() => repository.create({ organizationId: "org_alpha", id: "incomplete" })).toThrow(
+    expect(repository.create({ organizationId: "org_alpha", id: "partial" })).toBe("partial");
+    expect(() => repository.create({ organizationId: "org_foreign", id: "foreign" })).toThrow(
       TenantScopeViolationError
     );
+    expect(calls).toBe(1);
+  });
+
+  it("rejects inherited tenant claims before repository execution", () => {
+    let calls = 0;
+    const repository = bindRepositoryToTenant(
+      {
+        create(input: { organizationId: string; projectId: string; id: string }) {
+          calls += 1;
+          return input.id;
+        },
+      },
+      scope,
+      "TestRepository"
+    );
+    const inheritedClaim = Object.assign(
+      Object.create({ organizationId: "org_foreign", projectId: "prj_foreign" }),
+      { id: "inherited" }
+    );
+
+    expect(() => repository.create(inheritedClaim)).toThrow(TenantScopeViolationError);
     expect(calls).toBe(0);
   });
 
