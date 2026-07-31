@@ -24,6 +24,10 @@ COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
+COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
+COPY packages/sdp-spc-escrow/package.json ./packages/sdp-spc-escrow/
+COPY packages/sdp-spc-withdraw/package.json ./packages/sdp-spc-withdraw/
+COPY packages/kit-augment/package.json ./packages/kit-augment/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -41,6 +45,10 @@ COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
 COPY packages/sdp-solana ./packages/sdp-solana
 COPY packages/sdp-issuance ./packages/sdp-issuance
+COPY packages/sdp-private-channels ./packages/sdp-private-channels
+COPY packages/sdp-spc-escrow ./packages/sdp-spc-escrow
+COPY packages/sdp-spc-withdraw ./packages/sdp-spc-withdraw
+COPY packages/kit-augment ./packages/kit-augment
 
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs

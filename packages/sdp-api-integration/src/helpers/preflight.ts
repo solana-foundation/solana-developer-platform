@@ -1,4 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import { probeGatewayHealth } from "@sdp/private-channels";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
 
@@ -39,6 +40,87 @@ export async function ensureIntegrationPreflight(): Promise<void> {
 }
 
 async function runPreflight(): Promise<void> {
+  // Suite scope is explicit when SDP_INTEGRATION_SUITE is set (e.g. `kora`, `spc`,
+  // `kora,spc`); otherwise it is inferred from configured env for back-compat, so
+  // existing Kora/on-chain shards keep working unchanged.
+  const requested = getRequestedSuites();
+  const koraInScope = requested ? requested.has("kora") : !!env.KORA_RPC_URL;
+  const spcInScope = requested
+    ? requested.has("spc")
+    : !env.KORA_RPC_URL && !!readEnv("PRIVATE_CHANNEL_GATEWAY_URL");
+
+  if (!koraInScope && !spcInScope) {
+    throw new Error(
+      "Integration preflight: no suite in scope. Set KORA_RPC_URL or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with SDP_INTEGRATION_SUITE=kora|spc."
+    );
+  }
+
+  // Each scope validates only its own dependencies: an SPC-only run must not
+  // require Kora, or the Private Channels suites are unreachable without standing
+  // up a Kora harness they never call.
+  if (koraInScope) {
+    await preflightKoraSuite();
+  }
+  if (spcInScope) {
+    await preflightSpcSuite();
+  }
+}
+
+function readEnv(key: string): string {
+  const value = (env as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
+}
+
+async function preflightSpcSuite(): Promise<void> {
+  const missing: string[] = [];
+  const gatewayUrl = readEnv("PRIVATE_CHANNEL_GATEWAY_URL");
+  if (!gatewayUrl) missing.push("PRIVATE_CHANNEL_GATEWAY_URL");
+  // The gateway client is built through @sdp/rpc, which resolves a configured Solana
+  // endpoint even though the requests go to the gateway. Without it the suite fails
+  // per-test with "No Solana RPC endpoint is configured", which reads like a gateway
+  // outage; name it here instead.
+  if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Private Channels integration tests require the following env vars to be set: ${missing.join(", ")}`
+    );
+  }
+
+  // Fail with "the gateway is down" rather than letting each test time out.
+  const health = await withLabel("PrivateChannels.probeGatewayHealth", () =>
+    probeGatewayHealth(gatewayUrl)
+  );
+  if (health.status === "unreachable") {
+    throw new Error(
+      `Private Channels preflight failed: gateway ${safeHost(gatewayUrl)} is unreachable (${health.error ?? "no error reported"}).`
+    );
+  }
+}
+
+/** Host and port only — the gateway URL may carry a provider key. */
+function safeHost(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).host;
+  } catch {
+    return "<invalid url>";
+  }
+}
+
+function getRequestedSuites(): Set<string> | null {
+  const raw = (env as { SDP_INTEGRATION_SUITE?: string }).SDP_INTEGRATION_SUITE;
+  if (!raw || raw.trim() === "") {
+    return null;
+  }
+  return new Set(
+    raw
+      .split(",")
+      .map((suite) => suite.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+async function preflightKoraSuite(): Promise<void> {
   const integrationCustodyProvider = getIntegrationCustodyProvider();
   const missing: string[] = [];
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");

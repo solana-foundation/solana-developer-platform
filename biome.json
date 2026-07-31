@@ -70,6 +70,16 @@
       }
     },
     {
+      "includes": ["**/apps/sdp-api/scripts/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/apps/sdp-web/src/**/*.ts", "**/apps/sdp-web/src/**/*.tsx"],
       "linter": {
         "rules": {
@@ -165,7 +175,11 @@
       "!**/dist",
       "!**/*.d.ts",
       "!**/pnpm-lock.yaml",
-      "!**/.source"
+      "!**/.source",
+      "!**/packages/sdp-spc-escrow/src/generated",
+      "!**/packages/sdp-spc-withdraw/src/generated",
+      "!**/packages/sdp-spc-escrow/idl",
+      "!**/packages/sdp-spc-withdraw/idl"
     ]
   },
   "vcs": {
