@@ -1,4 +1,6 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +19,7 @@ const TAG_TO_MODULE = new Map<string, PlaygroundModule>([
 ]);
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = path.resolve(scriptDirectory, "../../..");
 const outputPath = path.resolve(
   scriptDirectory,
   "../../sdp-web/src/lib/api-playground-catalog.generated.json"
@@ -317,7 +320,24 @@ function generateCatalog(): string {
   )}\n`;
 }
 
-const expected = generateCatalog();
+async function formatCatalog(catalog: string): Promise<string> {
+  const directory = await mkdtemp(path.join(tmpdir(), "sdp-playground-catalog-"));
+  const temporaryPath = path.join(directory, "catalog.json");
+
+  try {
+    await writeFile(temporaryPath, catalog, "utf8");
+    execFileSync(
+      "pnpm",
+      ["--dir", repositoryRoot, "exec", "biome", "format", "--write", temporaryPath],
+      { stdio: "ignore" }
+    );
+    return await readFile(temporaryPath, "utf8");
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+}
+
+const expected = await formatCatalog(generateCatalog());
 if (process.argv.includes("--check")) {
   const current = await readFile(outputPath, "utf8").catch(() => "");
   if (current !== expected) {
@@ -328,5 +348,5 @@ if (process.argv.includes("--check")) {
   }
 } else {
   await writeFile(outputPath, expected, "utf8");
-  process.stdout.write(`API playground catalog generated at ${outputPath}\\n`);
+  process.stdout.write(`API playground catalog generated at ${outputPath}\n`);
 }

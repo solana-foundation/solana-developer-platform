@@ -623,9 +623,7 @@
                   "decision": "approval_required",
                   "reasonCode": "wallet_policy_match",
                   "reason": "example",
-                  "matchedRules": [
-                    {}
-                  ],
+                  "matchedRules": [{}],
                   "requiresApproval": true,
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
                 }
@@ -697,9 +695,7 @@
                 "decision": "approval_required",
                 "reasonCode": "wallet_policy_match",
                 "reason": "example",
-                "matchedRules": [
-                  {}
-                ],
+                "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               }
@@ -770,9 +766,7 @@
                 "decision": "approval_required",
                 "reasonCode": "wallet_policy_match",
                 "reason": "example",
-                "matchedRules": [
-                  {}
-                ],
+                "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               }
@@ -843,9 +837,7 @@
                 "decision": "approval_required",
                 "reasonCode": "wallet_policy_match",
                 "reason": "example",
-                "matchedRules": [
-                  {}
-                ],
+                "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               }
@@ -916,9 +908,7 @@
                 "decision": "approval_required",
                 "reasonCode": "wallet_policy_match",
                 "reason": "example",
-                "matchedRules": [
-                  {}
-                ],
+                "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               }
@@ -1113,9 +1103,7 @@
           "data": {
             "policy": {
               "walletId": "privy_wallet_123",
-              "destinationAllowlist": [
-                "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
-              ],
+              "destinationAllowlist": ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
               "maxTransferAmount": "100.00",
               "maxDailyAmount": "100.00",
               "defaultAction": "allow",
@@ -1209,9 +1197,7 @@
           "data": {
             "policy": {
               "walletId": "privy_wallet_123",
-              "destinationAllowlist": [
-                "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
-              ],
+              "destinationAllowlist": ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
               "maxTransferAmount": "100.00",
               "maxDailyAmount": "100.00",
               "defaultAction": "allow",
@@ -1503,9 +1489,7 @@
               "decision": "allow",
               "reasonCode": "example",
               "reason": "example",
-              "matchedRules": [
-                {}
-              ],
+              "matchedRules": [{}],
               "evaluationContext": {
                 "operation": {
                   "id": "_example",
@@ -1607,9 +1591,7 @@
               "decision": "allow",
               "reasonCode": "example",
               "reason": "example",
-              "matchedRules": [
-                {}
-              ],
+              "matchedRules": [{}],
               "evaluationContext": {
                 "operation": {
                   "id": "_example",
@@ -1732,9 +1714,7 @@
                 "kind": "transfer",
                 "version": "v0",
                 "instructionCount": 4,
-                "requiredSigners": [
-                  "So11111111111111111111111111111111111111112"
-                ],
+                "requiredSigners": ["So11111111111111111111111111111111111111112"],
                 "validator": "So11111111111111111111111111111111111111112"
               }
             }
@@ -2110,9 +2090,7 @@
                 "kind": "transfer",
                 "version": "v0",
                 "instructionCount": 4,
-                "requiredSigners": [
-                  "So11111111111111111111111111111111111111112"
-                ],
+                "requiredSigners": ["So11111111111111111111111111111111111111112"],
                 "validator": "So11111111111111111111111111111111111111112"
               }
             }
@@ -3237,9 +3215,7 @@
               "serialized": "AQID",
               "blockhash": "blockhash_example",
               "lastValidBlockHeight": "123456",
-              "requiredSigners": [
-                "So11111111111111111111111111111111111111112"
-              ]
+              "requiredSigners": ["So11111111111111111111111111111111111111112"]
             }
           },
           "meta": {
@@ -3555,9 +3531,7 @@
               "serialized": "AQID",
               "blockhash": "blockhash_example",
               "lastValidBlockHeight": "123456",
-              "requiredSigners": [
-                "So11111111111111111111111111111111111111112"
-              ]
+              "requiredSigners": ["So11111111111111111111111111111111111111112"]
             }
           },
           "meta": {
@@ -3618,9 +3592,7 @@
               "serialized": "AQID",
               "blockhash": "blockhash_example",
               "lastValidBlockHeight": "123456",
-              "requiredSigners": [
-                "So11111111111111111111111111111111111111112"
-              ]
+              "requiredSigners": ["So11111111111111111111111111111111111111112"]
             }
           },
           "meta": {
@@ -3681,9 +3653,7 @@
               "serialized": "AQID",
               "blockhash": "blockhash_example",
               "lastValidBlockHeight": "123456",
-              "requiredSigners": [
-                "So11111111111111111111111111111111111111112"
-              ]
+              "requiredSigners": ["So11111111111111111111111111111111111111112"]
             }
           },
           "meta": {
@@ -3744,9 +3714,7 @@
               "serialized": "AQID",
               "blockhash": "blockhash_example",
               "lastValidBlockHeight": "123456",
-              "requiredSigners": [
-                "So11111111111111111111111111111111111111112"
-              ]
+              "requiredSigners": ["So11111111111111111111111111111111111111112"]
             },
             "collectionAttempt": {
               "id": "psca_example",
@@ -4725,23 +4693,14 @@
         "expectedResponse": {
           "data": {
             "currencies": {
-              "sources": [
-                "USD",
-                "EUR"
-              ],
-              "destinations": [
-                "usdc.solana",
-                "sol.solana"
-              ]
+              "sources": ["USD", "EUR"],
+              "destinations": ["usdc.solana", "sol.solana"]
             },
             "pairs": [
               {
                 "source": "USD",
                 "dest": "usdc.solana",
-                "providers": [
-                  "moonpay",
-                  "lightspark"
-                ]
+                "providers": ["moonpay", "lightspark"]
               }
             ],
             "providerDetails": {
@@ -4754,14 +4713,9 @@
                 },
                 "countrySupport": {
                   "coverage": "all-currencies",
-                  "countries": [
-                    "AL",
-                    "US"
-                  ]
+                  "countries": ["AL", "US"]
                 },
-                "entityTypes": [
-                  "individual"
-                ]
+                "entityTypes": ["individual"]
               }
             },
             "supportHash": "sha256:example"
@@ -5482,23 +5436,14 @@
         "expectedResponse": {
           "data": {
             "currencies": {
-              "sources": [
-                "usdc.solana",
-                "sol.solana"
-              ],
-              "destinations": [
-                "USD",
-                "EUR"
-              ]
+              "sources": ["usdc.solana", "sol.solana"],
+              "destinations": ["USD", "EUR"]
             },
             "pairs": [
               {
                 "source": "usdc.solana",
                 "dest": "USD",
-                "providers": [
-                  "moonpay",
-                  "bvnk"
-                ]
+                "providers": ["moonpay", "bvnk"]
               }
             ],
             "providerDetails": {
@@ -5511,14 +5456,9 @@
                 },
                 "countrySupport": {
                   "coverage": "all-currencies",
-                  "countries": [
-                    "AL",
-                    "US"
-                  ]
+                  "countries": ["AL", "US"]
                 },
-                "entityTypes": [
-                  "individual"
-                ]
+                "entityTypes": ["individual"]
               }
             },
             "supportHash": "sha256:example"
@@ -5565,10 +5505,7 @@
                     "accountType": "USD_ACCOUNT",
                     "accountNumber": "0000000000000000",
                     "routingNumber": "000000000",
-                    "paymentRails": [
-                      "ACH",
-                      "WIRE"
-                    ],
+                    "paymentRails": ["ACH", "WIRE"],
                     "reference": "quote-reference-example",
                     "bankName": "Example Bank",
                     "address": "ExampleSolanaWalletAddress11111111111111111",
@@ -5638,9 +5575,7 @@
         "expectedResponse": {
           "data": {
             "fields": {
-              "entityTypes": [
-                "individual"
-              ],
+              "entityTypes": ["individual"],
               "countries": [
                 {
                   "code": "US",
@@ -6939,14 +6874,8 @@
                 "maxDecimals": 18,
                 "requiresAllowlist": true,
                 "allowlistOverridable": true,
-                "requiredExtensions": [
-                  "permanentDelegate",
-                  "pausable"
-                ],
-                "availableExtensions": [
-                  "scaledUiAmount",
-                  "interestBearing"
-                ],
+                "requiredExtensions": ["permanentDelegate", "pausable"],
+                "availableExtensions": ["scaledUiAmount", "interestBearing"],
                 "defaultExtensions": {
                   "defaultAccountState": "initialized"
                 }
@@ -6985,14 +6914,8 @@
               "maxDecimals": 18,
               "requiresAllowlist": true,
               "allowlistOverridable": true,
-              "requiredExtensions": [
-                "permanentDelegate",
-                "pausable"
-              ],
-              "availableExtensions": [
-                "scaledUiAmount",
-                "interestBearing"
-              ],
+              "requiredExtensions": ["permanentDelegate", "pausable"],
+              "availableExtensions": ["scaledUiAmount", "interestBearing"],
               "defaultExtensions": {
                 "defaultAccountState": "initialized"
               }
@@ -8020,9 +7943,7 @@
             },
             "simulation": {
               "success": true,
-              "logs": [
-                "Program log: success"
-              ],
+              "logs": ["Program log: success"],
               "unitsConsumed": 20000,
               "error": "Insufficient funds"
             }
@@ -8150,9 +8071,7 @@
             "uri": "https://api.example.com/v1/issuance/tokens/tok_123/metadata.json",
             "simulation": {
               "success": true,
-              "logs": [
-                "Program log: success"
-              ],
+              "logs": ["Program log: success"],
               "unitsConsumed": 20000,
               "error": "Insufficient funds"
             }
@@ -8218,9 +8137,7 @@
             "tokenAccount": "So11111111111111111111111111111111111111112",
             "simulation": {
               "success": true,
-              "logs": [
-                "Program log: success"
-              ],
+              "logs": ["Program log: success"],
               "unitsConsumed": 20000,
               "error": "Insufficient funds"
             }
@@ -8340,9 +8257,7 @@
             },
             "simulation": {
               "success": true,
-              "logs": [
-                "Program log: success"
-              ],
+              "logs": ["Program log: success"],
               "unitsConsumed": 20000,
               "error": "Insufficient funds"
             }
@@ -8461,9 +8376,7 @@
             },
             "simulation": {
               "success": true,
-              "logs": [
-                "Program log: success"
-              ],
+              "logs": ["Program log: success"],
               "unitsConsumed": 20000,
               "error": "Insufficient funds"
             }
@@ -8582,9 +8495,7 @@
             },
             "simulation": {
               "success": true,
-              "logs": [
-                "Program log: success"
-              ],
+              "logs": ["Program log: success"],
               "unitsConsumed": 20000,
               "error": "Insufficient funds"
             }
@@ -8703,9 +8614,7 @@
             },
             "simulation": {
               "success": true,
-              "logs": [
-                "Program log: success"
-              ],
+              "logs": ["Program log: success"],
               "unitsConsumed": 20000,
               "error": "Insufficient funds"
             }
@@ -9156,10 +9065,7 @@
         "bodyFields": [],
         "expectedResponse": {
           "data": {
-            "labels": [
-              "Treasury",
-              "Market maker"
-            ],
+            "labels": ["Treasury", "Market maker"],
             "total": 42
           },
           "meta": {
