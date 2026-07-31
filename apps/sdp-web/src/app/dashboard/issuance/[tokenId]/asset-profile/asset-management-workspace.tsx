@@ -123,7 +123,7 @@ function TokenizationEngineGate({
             />
             <span
               aria-hidden="true"
-              className="absolute h-36 w-36 rounded-full border border-border-default opacity-45"
+              className="absolute h-36 w-36 rounded-full border border-border-default border-dotted opacity-45"
             />
             <span
               aria-hidden="true"
@@ -155,22 +155,22 @@ function TokenizationEngineGate({
         <button
           type="button"
           onClick={() => setEngineChosen(true)}
-          className="flex flex-col rounded-xl border border-border-default bg-surface-raised p-5 transition-colors hover:bg-fill-subtle focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+          className="group flex flex-col rounded-xl border border-border-default bg-surface-raised p-5 transition-colors hover:bg-fill-subtle focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
         >
           <span className="relative flex w-full flex-1 items-center justify-center overflow-hidden py-10">
             <span
               aria-hidden="true"
-              className="absolute h-24 w-24 rounded-full border border-border-default opacity-70"
+              className="absolute h-24 w-24 rounded-full border border-border-default opacity-70 transition-transform duration-300 group-hover:scale-110 motion-reduce:transition-none"
             />
             <span
               aria-hidden="true"
-              className="absolute h-36 w-36 rounded-full border border-border-default opacity-45"
+              className="absolute h-36 w-36 rounded-full border border-border-default border-dotted opacity-45 transition-transform duration-500 group-hover:rotate-12 group-hover:scale-110 motion-reduce:transition-none"
             />
             <span
               aria-hidden="true"
-              className="absolute h-48 w-48 rounded-full border border-border-default opacity-25"
+              className="absolute h-48 w-48 rounded-full border border-border-default opacity-25 transition-transform duration-700 group-hover:scale-110 motion-reduce:transition-none"
             />
-            <span className="relative inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white]">
+            <span className="relative inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white] transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:scale-105 motion-reduce:transition-none">
               <Image
                 src="/landing/solana-logo.svg"
                 alt=""
