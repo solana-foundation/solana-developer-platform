@@ -13,7 +13,10 @@ import {
   useTransition,
 } from "react";
 import useSWR from "swr";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import {
+  DashboardWorkspaceCard,
+  DashboardWorkspaceOverviewPanel,
+} from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
@@ -484,8 +487,8 @@ export function TransactionsWorkspace({
     <TransactionFilterContext.Provider
       value={{ filters: displayFilters, isPending, clearFilters, updateFilters }}
     >
-      <DashboardWorkspaceOverviewPanel>
-        <div className="overflow-hidden rounded-lg border border-border-default bg-surface-raised">
+      <DashboardWorkspaceOverviewPanel className="flex flex-col">
+        <DashboardWorkspaceCard>
           <div className="border-b border-border-default p-3">
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto]">
               <Input
@@ -589,7 +592,7 @@ export function TransactionsWorkspace({
             />
           </div>
           {children}
-        </div>
+        </DashboardWorkspaceCard>
       </DashboardWorkspaceOverviewPanel>
     </TransactionFilterContext.Provider>
   );

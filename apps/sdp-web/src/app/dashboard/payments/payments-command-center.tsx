@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { Suspense } from "react";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -493,7 +492,7 @@ export function PaymentsCommandCenter({
   organizationId: string;
 }) {
   return (
-    <DashboardWorkspaceOverviewPanel
+    <div
       className="grid content-start gap-4 xl:grid-cols-[minmax(0,1.63fr)_minmax(20rem,1fr)]"
       data-payments-command-center
     >
@@ -512,6 +511,6 @@ export function PaymentsCommandCenter({
           <PaymentNetwork apiClientPromise={apiClientPromise} organizationId={organizationId} />
         </Suspense>
       </div>
-    </DashboardWorkspaceOverviewPanel>
+    </div>
   );
 }

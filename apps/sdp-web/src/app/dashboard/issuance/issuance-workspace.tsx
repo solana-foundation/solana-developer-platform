@@ -643,7 +643,6 @@ export function IssuanceWorkspace({
   if (!assetProfilesEnabled) {
     return (
       <DashboardWorkspaceTabShell
-        isPlaygroundTab={isPlaygroundTab}
         overviewClassName={ISSUANCE_OVERVIEW_PANEL_CLASS}
         overviewKey="tokens-tab"
         overview={
@@ -674,7 +673,6 @@ export function IssuanceWorkspace({
 
   return (
     <DashboardWorkspaceTabShell
-      isPlaygroundTab={isPlaygroundTab}
       overviewClassName={ISSUANCE_OVERVIEW_PANEL_CLASS}
       overviewKey="tokens-tab"
       overview={

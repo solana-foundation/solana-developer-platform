@@ -1,18 +1,11 @@
 "use client";
 
-import type {
-  CustodyWalletAggregate,
-  PaymentsDashboardWallet,
-  PaymentTransferSummary,
-} from "@sdp/types";
+import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
-import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
-import { PaymentsOverview } from "./payments-overview";
-import type { PaymentsWorkspaceTab } from "./payments-workspace-tabs";
 
 const PaymentsPlayground = dynamic(
   () => import("./payments-playground").then((module) => module.PaymentsPlayground),
@@ -29,33 +22,24 @@ interface PaymentsApiKeyOption {
   environment: string;
 }
 
-interface PaymentsWorkspaceProps {
-  activeTab: PaymentsWorkspaceTab;
+interface PaymentsPlaygroundWorkspaceProps {
   apiBaseUrl: string | null;
   apiKeys: PaymentsApiKeyOption[];
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
-  aggregate: CustodyWalletAggregate | null;
-  aggregateError: string | null;
-  issuedTokenSymbolsByMint: Record<string, string>;
   transfers: PaymentTransferSummary[];
   transfersError: string | null;
 }
 
-export function PaymentsWorkspace({
-  activeTab,
+export function PaymentsPlaygroundWorkspace({
   apiBaseUrl,
   apiKeys,
   wallets,
   walletsError,
-  aggregate,
-  aggregateError,
-  issuedTokenSymbolsByMint,
   transfers,
   transfersError,
-}: PaymentsWorkspaceProps) {
+}: PaymentsPlaygroundWorkspaceProps) {
   const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
-  const isPlaygroundTab = activeTab === "playground";
 
   useEffect(() => {
     setPlaygroundApiKeys(apiKeys);
@@ -80,28 +64,14 @@ export function PaymentsWorkspace({
   }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
 
   return (
-    <DashboardWorkspaceTabShell
-      isPlaygroundTab={isPlaygroundTab}
-      overview={
-        <PaymentsOverview
-          aggregate={aggregate}
-          aggregateError={aggregateError}
-          issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
-          transfers={transfers}
-          transfersError={transfersError}
-        />
-      }
-      playground={
-        <PaymentsPlayground
-          apiBaseUrl={apiBaseUrl}
-          apiKeyValue={playgroundApiKeyValue}
-          hasActiveApiKeys={apiKeys.length > 0}
-          transfers={transfers}
-          transfersError={transfersError}
-          wallets={wallets}
-          walletsError={walletsError}
-        />
-      }
+    <PaymentsPlayground
+      apiBaseUrl={apiBaseUrl}
+      apiKeyValue={playgroundApiKeyValue}
+      hasActiveApiKeys={apiKeys.length > 0}
+      transfers={transfers}
+      transfersError={transfersError}
+      wallets={wallets}
+      walletsError={walletsError}
     />
   );
 }

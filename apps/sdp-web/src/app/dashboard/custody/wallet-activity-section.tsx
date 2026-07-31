@@ -12,7 +12,6 @@ import {
   WALLET_ACTIVITY_HEADING_ID,
   WalletActivitySkeleton,
 } from "@/app/dashboard/custody/wallet-activity-skeleton";
-import { getDevnetExplorerUrl } from "@/app/dashboard/payments/payments-workspace.data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -25,6 +24,8 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import {
   formatDisplayAmount,
   resolveTransferTokenLabel,
@@ -93,6 +94,7 @@ export function WalletActivitySection({
 }: WalletActivitySectionProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const cluster = useSolanaCluster();
   const {
     data: swrActivity,
     error: requestError,
@@ -240,7 +242,7 @@ export function WalletActivitySection({
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <a
-                                  href={getDevnetExplorerUrl(row.signature)}
+                                  href={explorerTxUrl(row.signature, cluster)}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="flex min-w-0 items-center gap-1 text-primary underline underline-offset-2"

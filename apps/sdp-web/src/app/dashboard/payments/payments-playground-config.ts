@@ -4,6 +4,7 @@ import type {
   ApiPlaygroundFieldOption,
 } from "@/components/api-playground-shell";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 
 export interface PaymentsPlaygroundWalletView {
   label: string | null;
@@ -124,7 +125,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
   const exampleWalletAddress = firstWallet?.publicKey ?? exampleWalletAddressFallback;
   const exampleTransferId = firstTransfer?.id ?? "xfr_live_123";
 
-  return [
+  const curatedEndpoints: ApiPlaygroundEndpointConfig[] = [
     {
       id: "wallet-balances",
       title: t("DashboardPayments.playground.getWalletBalances"),
@@ -413,4 +414,6 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       },
     },
   ];
+
+  return mergeOpenApiPlaygroundEndpoints("payments", curatedEndpoints);
 }
