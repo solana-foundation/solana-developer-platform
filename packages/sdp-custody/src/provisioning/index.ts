@@ -333,7 +333,10 @@ export async function provisionPrivyWallet(
       return validatePrivyExternalWallet(created, externalWalletLookup.externalId);
     }
 
-    return validatePrivyWalletPayload(created);
+    if (!created?.id || !created.address) {
+      throw new SigningError("Privy wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+    }
+    return { walletId: created.id, address: created.address };
   } catch (error) {
     if (isTerminalPrivyProvisioningError(error)) {
       throw error;

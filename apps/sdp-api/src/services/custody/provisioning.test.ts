@@ -373,6 +373,23 @@ describe("privy wallet provisioning", () => {
 
     await expect(provisionTestPrivyWallet({})).rejects.toMatchObject({ code });
   });
+
+  it("preserves the legacy malformed create response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({}, 200));
+
+    await expect(
+      provisionPrivyWallet(
+        createPrivyEnv({
+          PRIVY_APP_ID: PRIVY_AUTHENTICATION.appId,
+          PRIVY_APP_SECRET: PRIVY_AUTHENTICATION.appSecret,
+        }),
+        {},
+      ),
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: "Privy wallet creation failed",
+    });
+  });
 });
 
 describe("utila wallet provisioning", () => {
