@@ -433,28 +433,35 @@ export const executeMint = async (c: AppContext) => {
     });
   }
 
-  // Count this mint against the cap before sending it. The check above ran against
-  // a cached total in this process, which two concurrent mints — or a concurrent
-  // cap change — can both pass; this one is a conditional UPDATE on the token row,
-  // so the database serializes it and the second caller sees the first's result.
-  // Everything downstream treats the supply as already counted.
-  const reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
-  if (reservedSupply === null) {
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: "Mint amount would exceed maximum supply",
-    });
-    throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
-  }
-
+  // Counted against the cap in the last moment before the transaction is submitted,
+  // and only then. The check above ran against a cached total in this process, which
+  // two concurrent mints — or a concurrent cap change — can both pass; this is a
+  // conditional UPDATE on the token row, so the database serializes it and the second
+  // caller sees the first's result. Refusing here aborts the submission, so a cap
+  // that has no room does not spend a transaction.
+  //
+  // Placement is the point: building the transaction, resolving the token account and
+  // signing can all fail without anything reaching the chain, and holding a
+  // reservation through those failures would retire headroom no token ever used, down
+  // to false MAX_SUPPLY_EXCEEDED on the next legitimate mint. Past this line no
+  // failure proves that much, which is why the reservation then stands.
+  let reservedSupply: string | null = null;
   try {
-    const result = await mosaic.mintTo({
-      mint: mintAddress,
-      destination,
-      amount: mosaicAmount,
-      mintAuthority: signer.address,
-      feePayer: signer.address,
-    });
+    const result = await mosaic.mintTo(
+      {
+        mint: mintAddress,
+        destination,
+        amount: mosaicAmount,
+        mintAuthority: signer.address,
+        feePayer: signer.address,
+      },
+      async () => {
+        reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
+        if (reservedSupply === null) {
+          throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+        }
+      }
+    );
 
     // Audit log
     const auditService = new AuditService(getDb(c.env));
@@ -486,24 +493,27 @@ export const executeMint = async (c: AppContext) => {
       tokenAccount: result.tokenAccount,
     });
   } catch (error) {
-    // The reservation stands. Reaching here does not mean nothing landed: a timeout
-    // during confirmation leaves a transaction the cluster may still accept, and the
-    // audit write and status write above run *after* the mint has settled. Handing
-    // the headroom back on any of those would let a second mint reserve supply the
-    // first already minted, and both would be above the cap with no way to undo it.
-    // `POST /supply/refresh` reconciles from the mint account once the transaction
+    // A reservation exists only if the gate ran, which means the transaction was
+    // submitted — and then it stands. Reaching here does not mean nothing landed: a
+    // timeout during confirmation leaves a transaction the cluster may still accept,
+    // and the audit write and status write above run *after* the mint has settled.
+    // Handing the headroom back on any of those would let a second mint reserve supply
+    // the first already minted, and both would be above the cap with no way to undo
+    // it. `POST /supply/refresh` reconciles from the mint account once the transaction
     // can no longer land — which is also what returns the headroom if it never did.
-    getLogger().warn(
-      {
-        event: "mint_supply_reservation_retained",
-        tokenId,
-        transactionId: tx.id,
-        reservedBaseUnits: amountBaseUnits.toString(),
-        recordedSupplyBaseUnits: reservedSupply,
-        error: error instanceof Error ? error.message : "Unknown error",
-      },
-      "Mint failed after its supply was reserved; the reservation is kept because the transaction may still land. Refresh the token's supply to reconcile."
-    );
+    if (reservedSupply !== null) {
+      getLogger().warn(
+        {
+          event: "mint_supply_reservation_retained",
+          tokenId,
+          transactionId: tx.id,
+          reservedBaseUnits: amountBaseUnits.toString(),
+          recordedSupplyBaseUnits: reservedSupply,
+          error: error instanceof Error ? error.message : "Unknown error",
+        },
+        "Mint failed after it was submitted and its supply reserved; the reservation is kept because the transaction may still land. Refresh the token's supply to reconcile."
+      );
+    }
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: error instanceof Error ? error.message : "Unknown error",

@@ -3434,7 +3434,17 @@ describe("Issuance Routes", () => {
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(true);
-        const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+        // Stands in for the real submit path: run the caller's pre-submit gate, then
+        // submit. The gate is where the cap is enforced, so `submitted` staying false
+        // is the assertion that a refused cap costs no transaction.
+        let submitted = false;
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementation(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            submitted = true;
+            return mockMintResult as never;
+          });
 
         const originalGetToken = TokenService.prototype.getToken;
         const getTokenSpy = vi
@@ -3463,8 +3473,9 @@ describe("Issuance Routes", () => {
           expect(res.status).toBe(400);
           const body = (await res.json()) as { error: { code: string } };
           expect(body.error.code).toBe("MAX_SUPPLY_EXCEEDED");
-          // Nothing reached the chain, so there is no settled mint to reconcile.
-          expect(mintToSpy).not.toHaveBeenCalled();
+          // The gate refused before submission, so there is no settled mint to
+          // reconcile and no reservation left behind.
+          expect(submitted).toBe(false);
           expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("400000000000");
           expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("failed");
         } finally {
@@ -3475,7 +3486,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("keeps the reservation when the send fails", async () => {
+      it("keeps the reservation when a submitted mint fails", async () => {
         await seedAblListAddress();
         await getDb(env)
           .prepare(
@@ -3490,9 +3501,14 @@ describe("Issuance Routes", () => {
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(true);
+        // Submitted, then lost during confirmation: the gate ran, so the transaction
+        // is out there and may land whatever this request reports.
         const mintToSpy = vi
           .spyOn(MosaicService.prototype, "mintTo")
-          .mockRejectedValueOnce(new Error("fee payer has insufficient funds") as never);
+          .mockImplementation(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            throw new Error("transaction was not confirmed in time");
+          });
 
         try {
           const res = await app.request(
@@ -3512,12 +3528,61 @@ describe("Issuance Routes", () => {
 
           expect(res.status).toBeGreaterThanOrEqual(400);
           expect(mintToSpy).toHaveBeenCalledTimes(1);
-          // A failure this side of the send cannot prove nothing landed — the same
-          // catch also covers a confirmation timeout and the writes that run after a
-          // mint settles. So the reservation stands (100 + 200 recorded) and
-          // `POST /supply/refresh` reconciles it once the transaction cannot land;
-          // handing the headroom back here is what let two mints exceed the cap.
+          // Nothing past submission can prove the mint did not land. So the
+          // reservation stands (100 + 200 recorded) and `POST /supply/refresh`
+          // reconciles it once the transaction cannot land; handing the headroom back
+          // here is what let two mints exceed the cap.
           expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("300000000000");
+          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("failed");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("reserves nothing when the mint fails before it is submitted", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '1000000000000', total_supply_cached = '100000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        // Building, resolving the token account and signing all happen before the
+        // gate, so failing there means no transaction exists to account for.
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockRejectedValueOnce(new Error("failed to build mint transaction") as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBeGreaterThanOrEqual(400);
+          // Untouched: holding a reservation through a failure that never reached the
+          // cluster would refuse later legitimate mints with MAX_SUPPLY_EXCEEDED until
+          // someone refreshed the supply by hand.
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("100000000000");
           expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("failed");
         } finally {
           createOrgSignerSpy.mockRestore();
