@@ -73,8 +73,11 @@ export function SettingsPageSkeleton() {
       </section>
 
       {/* Third card: appearance. The block mirrors the segmented theme control's
-          geometry (full width until sm, then the fixed 3x7.5rem track) so the real
-          card lands in the same box this placeholder occupied. */}
+          geometry — full width until sm, then the fixed 3x6.5rem track plus its gaps,
+          padding and border (20.5rem), at the 36px option height inside that padding
+          (46px) — so the real card lands in the same box this placeholder occupied.
+          The asset-header controls beside it are developer-only, so the settled card
+          is this one group for everyone this skeleton renders for. */}
       <section
         className="flex flex-col gap-6 rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default"
         data-loading-settings-appearance
@@ -83,10 +86,10 @@ export function SettingsPageSkeleton() {
           <SkeletonBlock className="h-6 w-32 max-w-full" />
           <SkeletonBlock className="h-4 w-full max-w-md" />
         </header>
-        <div className="space-y-2 px-6">
-          <SkeletonBlock className="h-4 w-24" />
-          <SkeletonBlock className="h-11 w-full rounded-xl sm:w-[23.5rem]" />
-          <SkeletonBlock className="h-4 w-full max-w-sm" />
+        <div className="space-y-1.5 px-6">
+          <SkeletonBlock className="h-5 w-24" />
+          <SkeletonBlock className="h-[46px] w-full rounded-xl sm:w-[20.5rem]" />
+          <SkeletonBlock className="h-4 w-full max-w-[20.5rem]" />
         </div>
       </section>
     </div>
