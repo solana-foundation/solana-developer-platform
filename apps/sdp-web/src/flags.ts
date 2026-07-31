@@ -8,16 +8,23 @@ type DashboardFlagEntities = {
   };
 };
 
+const TRUTHY_FLAG_VALUES = ["1", "true", "yes", "on"] as const;
+const FALSY_FLAG_VALUES = ["0", "false", "no", "off"] as const;
+
 /** Reads a flag's non-Vercel default from an optional env var override; the dashboard wins on Vercel deploys. */
 function flagDefault(envVar: string, fallback: boolean): boolean {
   const value = process.env[envVar];
   if (value === undefined || value === "") {
     return fallback;
   }
-  if (value === "true" || value === "false") {
-    return value === "true";
+  const normalized = value.trim().toLowerCase();
+  if ((TRUTHY_FLAG_VALUES as readonly string[]).includes(normalized)) {
+    return true;
   }
-  throw new Error(`${envVar} must be "true" or "false", got "${value}"`);
+  if ((FALSY_FLAG_VALUES as readonly string[]).includes(normalized)) {
+    return false;
+  }
+  throw new Error(`${envVar} must be a boolean-like value, got "${value}"`);
 }
 
 /**
@@ -53,7 +60,10 @@ export const homepageOpenSignup = flag<boolean, DashboardFlagEntities>({
   key: "homepage-open-signup",
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
-  defaultValue: flagDefault("SDP_FLAG_HOMEPAGE_OPEN_SIGNUP", true),
+  defaultValue: flagDefault(
+    "SDP_FLAG_HOMEPAGE_OPEN_SIGNUP",
+    process.env.VERCEL_ENV !== "production"
+  ),
   description: "Show self-serve signup and contact CTAs instead of the homepage waitlist CTA.",
   options: [
     { value: false, label: "Waitlist" },
