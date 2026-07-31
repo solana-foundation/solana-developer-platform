@@ -6,17 +6,13 @@ ALTER TABLE custody_wallets
     ADD CONSTRAINT custody_wallets_connection_fkey
         FOREIGN KEY (custody_connection_id)
         REFERENCES custody_connections(id)
-        ON DELETE CASCADE,
+        ON DELETE RESTRICT,
     ADD CONSTRAINT custody_wallets_exactly_one_owner
         CHECK ((custody_config_id IS NOT NULL) <> (custody_connection_id IS NOT NULL)),
     ADD CONSTRAINT custody_wallets_id_connection_unique
         UNIQUE (id, custody_connection_id),
     ADD CONSTRAINT custody_wallets_connection_wallet_unique
         UNIQUE (custody_connection_id, wallet_id);
-
-CREATE INDEX IF NOT EXISTS idx_custody_wallets_connection_status
-    ON custody_wallets(custody_connection_id, status)
-    WHERE custody_connection_id IS NOT NULL;
 
 ALTER TABLE custody_connections
     DROP CONSTRAINT IF EXISTS custody_connections_default_custody_wallet_id_fkey;

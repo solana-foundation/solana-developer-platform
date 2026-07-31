@@ -153,14 +153,16 @@ describe("custody Connection ownership constraints", () => {
         .run()
     ).rejects.toThrow(/custody_connections_default_wallet_owner_fkey/);
 
-    await getDb(env)
-      .prepare("DELETE FROM custody_connections WHERE id = 'cconn_default_one'")
-      .run();
+    await expect(
+      getDb(env)
+        .prepare("DELETE FROM custody_connections WHERE id = 'cconn_default_one'")
+        .run()
+    ).rejects.toThrow(/custody_wallets_connection_fkey/);
     expect(
       await getDb(env)
         .prepare("SELECT id FROM custody_wallets WHERE id = 'cwlt_default_one'")
         .first()
-    ).toBeNull();
+    ).not.toBeNull();
   });
 
   it("allows failed encrypted credentials to retain metadata without ciphertext", async () => {
