@@ -6025,6 +6025,11 @@ describe("Payments routes", () => {
   });
 
   it("activates immutable wallet control profile revisions from wallet policy updates", async () => {
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+      .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
+      .run();
+
     const rules = [
       {
         id: "deny-raw-signing",
