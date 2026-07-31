@@ -388,6 +388,23 @@ export class SigningService {
     return this.configStore.findActiveByProvider(orgId, undefined, provider);
   }
 
+  /**
+   * Resolve an active configuration for an administrative mutation without
+   * project-to-organization fallback. Shared organization configurations may
+   * be used by project workloads, but only organization-scoped callers may
+   * mutate them.
+   */
+  async getConfigurationForMutation(
+    orgId: string,
+    projectId: string | undefined,
+    provider?: SigningConfiguration["provider"]
+  ): Promise<SigningConfigRecord | null> {
+    const config = provider
+      ? await this.configStore.findActiveByProvider(orgId, projectId, provider)
+      : await this.configStore.getDefaultConfig(orgId, projectId);
+    return config?.projectId === (projectId ?? null) ? config : null;
+  }
+
   async setDefaultConfiguration(
     orgId: string,
     projectId: string | undefined,
@@ -1446,9 +1463,7 @@ export class SigningService {
       provider?: SigningConfiguration["provider"];
     }
   ): Promise<void> {
-    const config = params.provider
-      ? await this.getConfigurationByProvider(orgId, projectId, params.provider)
-      : await this.configStore.findActive(orgId, projectId);
+    const config = await this.getConfigurationForMutation(orgId, projectId, params.provider);
     if (!config) {
       throw new SigningError(
         params.provider
@@ -1982,6 +1997,7 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
 
   const tenantMethods = new Set([
     "getConfigurationByProvider",
+    "getConfigurationForMutation",
     "setDefaultConfiguration",
     "setDefaultProvider",
     "getProviderReuseState",

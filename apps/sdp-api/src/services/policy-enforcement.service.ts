@@ -91,6 +91,7 @@ export class WalletPolicyEnforcementService {
             await markApprovalRequestAndWalletOperationFailed(
               this.repository,
               operation.organizationId,
+              operation.projectId,
               approvalRequestId
             );
           } catch (cleanupError) {
@@ -121,7 +122,7 @@ export class WalletPolicyEnforcementService {
   ) {
     const approvalRequest = await this.repository.updateApprovalRequestStatus({
       organizationId,
-      projectId,
+      projectId: projectId ?? null,
       approvalRequestId,
       status: "approved",
       operationStatus: "executing",
@@ -139,7 +140,7 @@ export class WalletPolicyEnforcementService {
   ) {
     const approvalRequest = await this.repository.updateApprovalRequestStatus({
       organizationId,
-      projectId,
+      projectId: projectId ?? null,
       approvalRequestId,
       status: "canceled",
       operationStatus: "canceled",
@@ -157,7 +158,7 @@ export class WalletPolicyEnforcementService {
   ) {
     const approvalRequest = await this.repository.updateApprovalRequestStatus({
       organizationId,
-      projectId,
+      projectId: projectId ?? null,
       approvalRequestId,
       status: "rejected",
       operationStatus: "canceled",
@@ -232,10 +233,12 @@ async function markWalletOperationFailed(
 async function markApprovalRequestAndWalletOperationFailed(
   repository: PolicyRepository,
   organizationId: string,
+  projectId: string | null,
   approvalRequestId: string
 ): Promise<void> {
   await repository.updateApprovalRequestStatus({
     organizationId,
+    projectId,
     approvalRequestId,
     status: "failed",
     operationStatus: "failed",

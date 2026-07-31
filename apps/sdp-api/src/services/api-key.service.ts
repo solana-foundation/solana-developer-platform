@@ -180,7 +180,11 @@ export class ApiKeyService {
   }
 
   async listForProject(projectId: string): Promise<ApiKeyListItem[]> {
-    assertTenantClaim(this.scope, { projectId }, "ApiKeyService.listForProject");
+    assertTenantClaim(
+      this.scope,
+      { organizationId: this.scope.organizationId, projectId },
+      "ApiKeyService.listForProject"
+    );
     const result = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,

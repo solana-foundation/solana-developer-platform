@@ -56,19 +56,42 @@ export function getRequestTenantScope(c: Context<{ Bindings: Env }>): TenantScop
 
 export function assertTenantClaim(
   scope: TenantScope,
-  claim: { organizationId?: unknown; projectId?: unknown },
+  claim: { organizationId: unknown; projectId: unknown },
   operation: string
 ): void {
-  if (claim.organizationId !== undefined && claim.organizationId !== scope.organizationId) {
+  if (claim.organizationId !== scope.organizationId) {
     throw new TenantScopeViolationError(
       `${operation} cannot override the repository organization scope`
     );
   }
 
-  if (claim.projectId !== undefined && claim.projectId !== scope.projectId) {
+  if (claim.projectId !== scope.projectId) {
     throw new TenantScopeViolationError(
       `${operation} cannot override the repository project scope`
     );
+  }
+}
+
+function assertNestedTenantClaims(
+  scope: TenantScope,
+  value: unknown,
+  operation: string,
+  visited: WeakSet<object>
+): void {
+  if (value === null || typeof value !== "object" || visited.has(value)) {
+    return;
+  }
+
+  visited.add(value);
+  if (
+    !Array.isArray(value) &&
+    (Object.hasOwn(value, "organizationId") || Object.hasOwn(value, "projectId"))
+  ) {
+    assertTenantClaim(scope, value as { organizationId: unknown; projectId: unknown }, operation);
+  }
+
+  for (const nested of Object.values(value)) {
+    assertNestedTenantClaims(scope, nested, operation, visited);
   }
 }
 
@@ -96,13 +119,7 @@ export function bindRepositoryToTenant<T extends object>(
         }
 
         for (const argument of args) {
-          if (argument && typeof argument === "object" && !Array.isArray(argument)) {
-            assertTenantClaim(
-              scope,
-              argument as { organizationId?: unknown; projectId?: unknown },
-              `${repositoryName}.${method}`
-            );
-          }
+          assertNestedTenantClaims(scope, argument, `${repositoryName}.${method}`, new WeakSet());
         }
 
         return Reflect.apply(value, target, args);

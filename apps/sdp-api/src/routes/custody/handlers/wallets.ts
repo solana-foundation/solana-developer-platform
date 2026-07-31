@@ -576,13 +576,11 @@ export const setDefaultWallet = async (c: AppContext) => {
 
   const projectId = c.get("projectId");
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
-  const config = parsed.data.provider
-    ? await signingService.getConfigurationByProvider(
-        actor.organizationId,
-        projectId,
-        parsed.data.provider
-      )
-    : await signingService.getConfiguration(actor.organizationId, projectId);
+  const config = await signingService.getConfigurationForMutation(
+    actor.organizationId,
+    projectId,
+    parsed.data.provider
+  );
 
   if (!config?.id) {
     throw new AppError("CONFLICT", "Wallet signing is not initialized");

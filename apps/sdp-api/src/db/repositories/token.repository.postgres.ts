@@ -99,7 +99,11 @@ export function createPostgresTokenRepository(db: AppDb, scope: TenantScope): To
     },
 
     async getStatusByMint(projectId: string, mintAddress: string) {
-      assertTenantClaim(scope, { projectId }, "TokenRepository.getStatusByMint");
+      assertTenantClaim(
+        scope,
+        { organizationId: scope.organizationId, projectId },
+        "TokenRepository.getStatusByMint"
+      );
       const row = await db
         .prepare(
           `SELECT status
@@ -117,7 +121,11 @@ export function createPostgresTokenRepository(db: AppDb, scope: TenantScope): To
     },
 
     async listByProject(projectId: string, options: ListTokensOptions) {
-      assertTenantClaim(scope, { projectId }, "TokenRepository.listByProject");
+      assertTenantClaim(
+        scope,
+        { organizationId: scope.organizationId, projectId },
+        "TokenRepository.listByProject"
+      );
       const clauses = ["organization_id = ?", "project_id = ?"];
       const values: unknown[] = [scope.organizationId, scope.projectId];
 
