@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.51.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.50.1...v0.51.0) (2026-07-31)
+
+### Features
+
+* **web:** replace the mobile drawer with a bottom bar and More sheet ([#1008](https://github.com/solana-foundation/solana-developer-platform/pull/1008)) ([eeea224](https://github.com/solana-foundation/solana-developer-platform/commit/eeea2246e8e7d7b90f6db0f6623564a2b8cd45eb))
+* **sdp-web:** standardize header and tabbed headers title ([#1006](https://github.com/solana-foundation/solana-developer-platform/pull/1006)) ([9c9ad77](https://github.com/solana-foundation/solana-developer-platform/commit/9c9ad7759e6af2138c399ad81cead39c1ae5b497))
+* **api:** structured JSON logging for sdp-api + noConsole gate ([#993](https://github.com/solana-foundation/solana-developer-platform/pull/993)) ([ed427f1](https://github.com/solana-foundation/solana-developer-platform/commit/ed427f1106dd1abbd768403663da22723fa2aac0))
+
+### Bug Fixes
+
+* show a real email in the member directory, and name the row when there isn't one ([#999](https://github.com/solana-foundation/solana-developer-platform/pull/999)) ([dc51fa4](https://github.com/solana-foundation/solana-developer-platform/commit/dc51fa44b7d75987c176e6d1330252747d400130))
+* **web:** say which policy rule denied a wallet action ([#1011](https://github.com/solana-foundation/solana-developer-platform/pull/1011)) ([953147d](https://github.com/solana-foundation/solana-developer-platform/commit/953147da34daba4c8d5b3b6756d65aa9353442e5))
+* **web:** show a new payment request's details without reopening it ([#1001](https://github.com/solana-foundation/solana-developer-platform/pull/1001)) ([b1999cb](https://github.com/solana-foundation/solana-developer-platform/commit/b1999cb4c30a70d56c0ce76771fd9c23046af06d))
+* **web:** stop selected-card focus rings offsetting against white in dark mode ([#1002](https://github.com/solana-foundation/solana-developer-platform/pull/1002)) ([4482c9c](https://github.com/solana-foundation/solana-developer-platform/commit/4482c9cf8d97dfa59bcbe8c3a1dc29b43a72a8c6))
+* **web:** point custody explorer links at the active cluster ([#998](https://github.com/solana-foundation/solana-developer-platform/pull/998)) ([7245f55](https://github.com/solana-foundation/solana-developer-platform/commit/7245f55e139f5d06e5e4f202ef05398579dcebcd))
+* **web:** let settings use its width properly ([#1005](https://github.com/solana-foundation/solana-developer-platform/pull/1005)) ([6f0ae25](https://github.com/solana-foundation/solana-developer-platform/commit/6f0ae25c9ccce46aec8a74c8e5e38d6123e52ade))
+* **web:** draw the dashboard shell while the session resolves ([#1010](https://github.com/solana-foundation/solana-developer-platform/pull/1010)) ([2b2bca2](https://github.com/solana-foundation/solana-developer-platform/commit/2b2bca22077f4f8c79b5cdfebfba83d16d3c7395))
+* prevent cross-tenant custody wallet binding ([#979](https://github.com/solana-foundation/solana-developer-platform/pull/979)) ([9372354](https://github.com/solana-foundation/solana-developer-platform/commit/93723543270a3ea14406866d171e7959d96b8ccd))
+
+### Performance Improvements
+
+* **web:** stop pages minting a second Clerk token per request ([#1012](https://github.com/solana-foundation/solana-developer-platform/pull/1012)) ([22fc8c0](https://github.com/solana-foundation/solana-developer-platform/commit/22fc8c01b2ea0c0f68ff9f05c3c4522b54adb6a6))
+
 ## [0.50.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.50.0...v0.50.1) (2026-07-30)
 
 ### Bug Fixes
