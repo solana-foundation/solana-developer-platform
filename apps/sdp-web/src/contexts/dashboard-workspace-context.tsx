@@ -24,7 +24,7 @@ import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indi
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
-import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { reconcileProjectCookieAction, selectProjectAction } from "@/lib/project-cookie-action";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
@@ -188,12 +188,9 @@ export function DashboardWorkspaceProvider({
     const previousPathname = previousPathnameRef.current;
     if (previousPathname === pathname) return;
     previousPathnameRef.current = pathname;
-    // Read the tab straight from the URL, not the useSyncExternalStore snapshot:
-    // App Router <Link> navigation fires no popstate/custom event, so the snapshot
-    // can still hold the previous page's tab. Acting on that stale value would wipe
-    // an explicit deep-link destination (e.g. ?tab=playground) that just committed.
-    const tab =
-      typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("tab");
+    // The snapshot can still hold the previous page's tab here; acting on that stale
+    // value would wipe an explicit deep-link destination (e.g. ?tab=playground).
+    const tab = readDashboardTabFromUrl();
     if (
       shouldClearDashboardTabAfterPathnameChange({
         previousPathname,

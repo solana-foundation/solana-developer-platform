@@ -10,6 +10,7 @@ import type {
   PaymentsDashboardWallet,
 } from "@sdp/types";
 import { KeyRoundIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
@@ -202,6 +203,7 @@ export function ApiKeysTableClient({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const router = useRouter();
   const [apiKeys, setApiKeys] = useState(initialApiKeys);
 
   useEffect(() => {
@@ -304,6 +306,7 @@ export function ApiKeysTableClient({
                     canRotate={canRotate}
                     onDeleted={() => {
                       setApiKeys((previous) => previous.filter((item) => item.id !== key.id));
+                      router.refresh();
                     }}
                   />
                 ) : null}

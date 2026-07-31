@@ -20,7 +20,7 @@ import { toast } from "sonner";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PaginatedFooter } from "@/components/ui/paginated-footer";
+import { PaginatedFooter, usePaginationUrlState } from "@/components/ui/paginated-footer";
 import { Select, SelectItem } from "@/components/ui/select";
 import {
   Table,
@@ -79,10 +79,9 @@ export function ApprovalInbox({
   const locale = useLocale();
   const reduceMotion = useReducedMotion();
   const tab: ApprovalInboxTab = useDashboardTab() === "history" ? "history" : "pending";
+  const { page, pageSize, setPage, setPageSize } = usePaginationUrlState(APPROVAL_INBOX_PAGE_SIZE);
   const [requests, setRequests] = useState(initialRequests);
   const [filters, setFilters] = useState<ApprovalInboxFilters>(EMPTY_APPROVAL_FILTERS);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(APPROVAL_INBOX_PAGE_SIZE);
   const [isReloading, setReloading] = useState(false);
   const [spinning, setSpinning] = useState(false);
   if (isReloading && !spinning) setSpinning(true);
@@ -92,7 +91,6 @@ export function ApprovalInbox({
   if (previousTab !== tab) {
     setPreviousTab(tab);
     setFilters(EMPTY_APPROVAL_FILTERS);
-    setPage(1);
   }
 
   const pendingCount = useMemo(
@@ -280,50 +278,46 @@ export function ApprovalInbox({
         </motion.div>
       </AnimatePresence>
 
-      <PaginatedFooter
-        className="shrink-0"
-        page={currentPage}
-        pageCount={pageCount}
-        onPageChange={setPage}
-        summary={t("DashboardApprovals.range", {
-          from: rangeStart,
-          to: rangeEnd,
-          total: filteredRequests.length,
-        })}
-        pageSizeControl={{
-          pageSize,
-          onPageSizeChange: (size) => {
-            setPageSize(size);
-            setPage(1);
-          },
-        }}
-      >
-        <div className="flex items-center gap-2 text-xs text-secondary">
-          <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => reload({ silent: false })}
-                disabled={isReloading}
-                aria-label={t("DashboardApprovals.reload")}
-              >
-                <RotateCw
-                  className={cn("size-4", spinning && "animate-spin")}
-                  onAnimationIteration={() => {
-                    if (!isReloading) setSpinning(false);
-                  }}
-                />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="text-xs">
-              {t("DashboardApprovals.autoRefresh")}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </PaginatedFooter>
+      {filteredRequests.length === 0 ? null : (
+        <PaginatedFooter
+          className="shrink-0"
+          page={currentPage}
+          pageCount={pageCount}
+          onPageChange={setPage}
+          summary={t("DashboardApprovals.range", {
+            from: rangeStart,
+            to: rangeEnd,
+            total: filteredRequests.length,
+          })}
+          pageSizeControl={{ pageSize, onPageSizeChange: setPageSize }}
+        >
+          <div className="flex items-center gap-2 text-xs text-secondary">
+            <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => reload({ silent: false })}
+                  disabled={isReloading}
+                  aria-label={t("DashboardApprovals.reload")}
+                >
+                  <RotateCw
+                    className={cn("size-4", spinning && "animate-spin")}
+                    onAnimationIteration={() => {
+                      if (!isReloading) setSpinning(false);
+                    }}
+                  />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">
+                {t("DashboardApprovals.autoRefresh")}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </PaginatedFooter>
+      )}
     </div>
   );
 }
@@ -619,7 +613,7 @@ function ApprovalRequestRows({
       </div>
 
       <div className="hidden lg:block">
-        <Table className="min-w-0 [&::after]:hidden [&::before]:hidden [&_table]:min-w-[1118px] [&_table]:table-fixed">
+        <Table className="min-w-0 [&_table]:min-w-[1118px] [&_table]:table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[88px]">{t("DashboardApprovals.statusColumn")}</TableHead>

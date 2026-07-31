@@ -43,13 +43,23 @@ import {
 } from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { useDashboardTab } from "@/lib/dashboard-url-state";
+import { readDashboardTabFromUrl, useDashboardTab } from "@/lib/dashboard-url-state";
 import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
 
 const POLICIES_TABS = ["all", "wallets", "api_keys"] as const;
 
 export type PoliciesTab = (typeof POLICIES_TABS)[number];
+
+/**
+ * Narrows a raw `?tab=` search-param value to a policies tab.
+ *
+ * @param value - The raw param value, if any.
+ * @returns The matching tab, or "all" for missing or unknown values.
+ */
+function parsePoliciesTab(value: string | null): PoliciesTab {
+  return value === "wallets" || value === "api_keys" ? value : "all";
+}
 
 export interface PoliciesUrlState {
   tab: PoliciesTab;
@@ -606,8 +616,7 @@ export function PoliciesOverviewSurface({
 
 export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewProps) {
   const router = useRouter();
-  const urlTab = useDashboardTab();
-  const activeTab: PoliciesTab = urlTab === "wallets" || urlTab === "api_keys" ? urlTab : "all";
+  const activeTab = parsePoliciesTab(useDashboardTab());
   const stateRef = useRef(state);
   const [displayState, setDisplayState] = useState(state);
   const [searchValue, setSearchValue] = useState(state.query);
@@ -673,7 +682,13 @@ export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewPr
 
   // The header tabs rewrite `?tab=` shallowly (no RSC refetch), so the workspace
   // re-runs the server fetch itself when the URL tab diverges from the loaded data.
+  // During hydration the snapshot behind `activeTab` lags the real URL (its server
+  // snapshot is always null), so the effect defers to the URL and waits for the
+  // store to re-fire with the settled value.
   useEffect(() => {
+    if (activeTab !== parsePoliciesTab(readDashboardTabFromUrl())) {
+      return;
+    }
     if (activeTab !== stateRef.current.tab) {
       updateState({ tab: activeTab, page: 1 });
     }
