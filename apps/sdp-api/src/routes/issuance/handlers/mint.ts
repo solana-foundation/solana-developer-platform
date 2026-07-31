@@ -335,10 +335,11 @@ export const executeMint = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const { mintAddress: mintAddressRaw, mosaicAmount } = resolveMintOperationAmount(
-    token,
-    parsed.data.mint.amount
-  );
+  const {
+    mintAddress: mintAddressRaw,
+    mosaicAmount,
+    amountBaseUnits,
+  } = resolveMintOperationAmount(token, parsed.data.mint.amount);
 
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
@@ -431,30 +432,18 @@ export const executeMint = async (c: AppContext) => {
     });
   }
 
-  // The cap was checked against a read taken before this row existed, so an
-  // operator lowering it in that window would only find out after the mint had
-  // landed — and the recorded supply would sit above their new maximum. The row
-  // above is the marker `updateToken` refuses on, so re-checking here is the other
-  // half of the handshake: whoever published second loses, and this side loses for
-  // free because nothing is on-chain yet.
-  //
-  // What remains is the send itself: a cap that commits between this check and
-  // `mintTo` still ends up below the supply that lands, and no amount of DB work
-  // can prevent that — SPL has no cap of its own, so a settled mint cannot be
-  // taken back. `updateSupply` records it and logs the overshoot, and the cap
-  // blocks every mint after it.
-  const admitted = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
-  if (!admitted) {
-    throw notFound("Token");
-  }
-  try {
-    resolveMintOperationAmount(admitted, parsed.data.mint.amount);
-  } catch (error) {
+  // Count this mint against the cap before sending it. The check above ran against
+  // a cached total in this process, which two concurrent mints — or a concurrent
+  // cap change — can both pass; this one is a conditional UPDATE on the token row,
+  // so the database serializes it and the second caller sees the first's result.
+  // Everything downstream treats the supply as already counted.
+  const reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
+  if (reservedSupply === null) {
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: "Mint amount would exceed maximum supply",
     });
-    throw error;
+    throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
   }
 
   try {
@@ -465,10 +454,6 @@ export const executeMint = async (c: AppContext) => {
       mintAuthority: signer.address,
       feePayer: signer.address,
     });
-
-    // Update transaction with confirmation
-    // Update token supply
-    await tokenService.updateSupply(tokenId, parsed.data.mint.amount, "mint");
 
     // Audit log
     const auditService = new AuditService(getDb(c.env));
@@ -500,7 +485,12 @@ export const executeMint = async (c: AppContext) => {
       tokenAccount: result.tokenAccount,
     });
   } catch (error) {
-    // Update transaction as failed
+    // Nothing landed, so give the reservation back — otherwise a failed send would
+    // retire cap headroom no token ever used. A send that fails ambiguously (a
+    // timeout on a transaction that lands anyway) leaves the cache short until
+    // `POST /supply/refresh` reads the mint itself, which is the direction that can
+    // be corrected.
+    await tokenService.releaseMintSupply(tokenId, amountBaseUnits.toString());
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: error instanceof Error ? error.message : "Unknown error",

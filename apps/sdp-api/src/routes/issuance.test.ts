@@ -3400,15 +3400,30 @@ describe("Issuance Routes", () => {
         }
       });
 
-      // The cap is checked before the transaction row exists, so an operator can
-      // lower it in that window — `updateToken` only refuses once the row is there
-      // to see. Re-checking after the row is written is the other half of that
-      // handshake, and it costs nothing to lose here: no signature has been sent.
-      it("rejects an execute mint whose cap was lowered after it was admitted", async () => {
+      const storedSupply = (tokenId: string) =>
+        getDb(env)
+          .prepare("SELECT total_supply_cached FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ total_supply_cached: string }>();
+
+      const latestMintTransaction = (tokenId: string) =>
+        getDb(env)
+          .prepare(
+            "SELECT status FROM issuance_transactions WHERE token_id = ? AND type = 'mint' ORDER BY created_at DESC LIMIT 1"
+          )
+          .bind(tokenId)
+          .first<{ status: string }>();
+
+      // The handler's own cap check reads a cached total, which two concurrent
+      // mints — or a concurrent cap change — can both pass. The reservation is a
+      // conditional UPDATE on the token row, so it holds even when the process
+      // read a cap that is no longer there. Stubbing `getToken` to return a
+      // generous cap is that stale read, made deterministic.
+      it("enforces the cap in the database even when the request read a stale one", async () => {
         await seedAblListAddress();
         await getDb(env)
           .prepare(
-            "UPDATE issued_tokens SET max_supply = '2000000000', total_supply_cached = '0' WHERE id = ?"
+            "UPDATE issued_tokens SET max_supply = '500000000000', total_supply_cached = '400000000000' WHERE id = ?"
           )
           .bind(allowlistTokenId)
           .run();
@@ -3421,16 +3436,12 @@ describe("Issuance Routes", () => {
           .mockResolvedValueOnce(true);
         const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
 
-        // The second read is the re-check; it sees the cap an operator dropped
-        // while this request was resolving its signer and destination.
         const originalGetToken = TokenService.prototype.getToken;
-        let reads = 0;
         const getTokenSpy = vi
           .spyOn(TokenService.prototype, "getToken")
           .mockImplementation(async function (this: TokenService, params) {
             const token = await originalGetToken.call(this, params);
-            reads += 1;
-            return token && reads > 1 ? { ...token, maxSupply: "0.5" } : token;
+            return token ? { ...token, maxSupply: "100000" } : token;
           });
 
         try {
@@ -3443,7 +3454,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                mint: { destination: freshDestination, amount: "1" },
+                mint: { destination: freshDestination, amount: "200" },
               }),
             },
             env
@@ -3452,21 +3463,59 @@ describe("Issuance Routes", () => {
           expect(res.status).toBe(400);
           const body = (await res.json()) as { error: { code: string } };
           expect(body.error.code).toBe("MAX_SUPPLY_EXCEEDED");
-          expect(reads, "admission read plus the re-check").toBeGreaterThan(1);
           // Nothing reached the chain, so there is no settled mint to reconcile.
           expect(mintToSpy).not.toHaveBeenCalled();
-
-          // And the row that marked this mint in flight no longer blocks cap
-          // changes: it is closed out as failed rather than left pending.
-          const row = await getDb(env)
-            .prepare(
-              "SELECT status FROM issuance_transactions WHERE token_id = ? AND type = 'mint' ORDER BY created_at DESC LIMIT 1"
-            )
-            .bind(allowlistTokenId)
-            .first<{ status: string }>();
-          expect(row?.status).toBe("failed");
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("400000000000");
+          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("failed");
         } finally {
           getTokenSpy.mockRestore();
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("gives the reservation back when the send fails", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '1000000000000', total_supply_cached = '100000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockRejectedValueOnce(new Error("fee payer has insufficient funds") as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBeGreaterThanOrEqual(400);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+          // Reserved, then released: a failed send must not retire cap headroom.
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("100000000000");
+          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("failed");
+        } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           mintToSpy.mockRestore();
