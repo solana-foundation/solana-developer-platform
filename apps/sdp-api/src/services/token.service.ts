@@ -23,10 +23,10 @@ import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-ut
 import { AppError, badRequest } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 
-// How long a prepared mint still counts as in flight. A Solana blockhash is valid
-// for ~150 slots (roughly 60-90s), so a prepared transaction older than this can no
+// How long a mint can still land after SDP last touched its row. A Solana blockhash
+// is valid for ~150 slots (roughly 60-90s), so a transaction older than this can no
 // longer be submitted; five minutes leaves generous room for a slow signer without
-// letting an abandoned prepare hold the cap hostage.
+// letting an abandoned mint hold cap edits — or the supply record — hostage.
 const MINT_IN_FLIGHT_WINDOW_MS = 5 * 60 * 1000;
 
 // Escapes LIKE/ILIKE wildcards so operator-supplied search text matches
@@ -1194,8 +1194,12 @@ export class TokenService {
    * second (and it fails its own "not below the minted supply" check). The
    * recorded supply can no longer end up above the persisted cap.
    *
-   * The reservation *is* the count — the mint handler adds nothing once the
-   * transaction settles, and calls `releaseMintSupply` if the send fails.
+   * The reservation *is* the count: nothing adds to it when the transaction
+   * settles, and nothing hands it back when the send fails — a send can fail
+   * ambiguously, and giving the headroom back to a transaction that lands anyway is
+   * how two mints end up above the cap. Only `setSupplyFromBaseUnits`, reading the
+   * mint account itself, lowers the record, and only once the mint can no longer
+   * land.
    *
    * @returns the recorded supply after reserving, or null if the cap refused it.
    */
@@ -1215,19 +1219,6 @@ export class TokenService {
       .bind(deltaBaseUnits, now, now, tokenId, deltaBaseUnits)
       .first<{ total_supply_cached: string }>();
     return row?.total_supply_cached ?? null;
-  }
-
-  /**
-   * Give a reservation back when the mint never reached the chain.
-   *
-   * Clamped at zero, and best-effort by nature: a send that fails ambiguously (a
-   * timeout on a transaction that lands anyway) leaves the cache short until
-   * `POST /supply/refresh` reads the mint itself. Short is the direction that can
-   * be corrected — the alternative, never releasing, would retire cap headroom
-   * that no token ever used.
-   */
-  async releaseMintSupply(tokenId: string, deltaBaseUnits: string): Promise<void> {
-    await this._applySupplyDelta(tokenId, deltaBaseUnits, "subtract");
   }
 
   /**
@@ -1289,11 +1280,24 @@ export class TokenService {
   }
 
   /**
-   * Overwrite the cached supply with what the mint itself reports.
+   * Reconcile the recorded supply against what the mint itself reports.
    *
-   * The chain is the authority, so this replaces rather than adjusts — including
-   * over a live reservation, which is why a refresh that lands between a mint being
-   * reserved and settling leaves the cache short until the next one.
+   * The chain is the authority on what has settled — but not on what is about to.
+   * A mint SDP admits is counted before it is sent (`reserveMintSupply`) and the
+   * mint account will not show it until it lands, so overwriting inside that window
+   * put the record back below the reservation and handed the same headroom to the
+   * next mint: both then settled, together above the cap.
+   *
+   * So while a mint could still land this may only raise the record — an on-chain
+   * total above it came from outside SDP and has to be picked up at once — and the
+   * downward half waits for the next refresh, by which point the mint has either
+   * settled into the on-chain figure or expired unsubmittable. One statement, so a
+   * mint cannot start between the check and the write.
+   *
+   * "Could still land" deliberately includes mints recorded as failed: a send that
+   * fails ambiguously (a timeout on a transaction the cluster accepted anyway) keeps
+   * its reservation because nobody can yet say otherwise, and the age bound is what
+   * finally settles it — after which this reads the answer off the chain.
    */
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
@@ -1301,16 +1305,55 @@ export class TokenService {
     }
 
     const now = new Date().toISOString();
-    await this.db
+    const since = new Date(Date.now() - MINT_IN_FLIGHT_WINDOW_MS).toISOString();
+    const applied = await this.db
       .prepare(
-        "UPDATE issued_tokens SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ? WHERE id = ?"
+        `WITH unsettled AS (
+           SELECT EXISTS (
+             SELECT 1 FROM issuance_transactions
+             WHERE token_id = ? AND type = 'mint'
+               AND status IN ('pending', 'processing', 'failed')
+               AND updated_at >= ?
+           ) AS present
+         )
+         UPDATE issued_tokens
+         SET total_supply_cached = CASE
+               WHEN unsettled.present
+                 THEN GREATEST(
+                   COALESCE(issued_tokens.total_supply_cached, '0')::numeric,
+                   ?::numeric
+                 )::text
+               ELSE ?
+             END,
+             total_supply_updated_at = CASE
+               WHEN unsettled.present THEN issued_tokens.total_supply_updated_at
+               ELSE ?
+             END,
+             updated_at = ?
+         FROM unsettled
+         WHERE issued_tokens.id = ?
+         RETURNING issued_tokens.total_supply_cached, unsettled.present AS mint_unsettled`
       )
-      .bind(supplyBaseUnits, now, now, tokenId)
-      .run();
+      .bind(tokenId, since, supplyBaseUnits, supplyBaseUnits, now, now, tokenId)
+      .first<{ total_supply_cached: string; mint_unsettled: boolean }>();
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
+    }
+
+    // Held back, so the figure on screen is SDP's own count and its "as of" stamp
+    // stays where it was — the next refresh past the window is what reconciles it.
+    if (applied?.mint_unsettled && applied.total_supply_cached !== supplyBaseUnits) {
+      getLogger().warn(
+        {
+          event: "token_supply_refresh_deferred",
+          tokenId,
+          onChainSupplyBaseUnits: supplyBaseUnits,
+          recordedSupplyBaseUnits: applied.total_supply_cached,
+        },
+        "On-chain supply is below SDP's recorded supply while a mint can still land; kept the recorded figure so the reservation is not handed out twice. Refresh again once the mint settles."
+      );
     }
 
     // Reservations keep SDP's own mints under the cap, so a total above it means

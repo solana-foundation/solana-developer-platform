@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
@@ -485,12 +486,24 @@ export const executeMint = async (c: AppContext) => {
       tokenAccount: result.tokenAccount,
     });
   } catch (error) {
-    // Nothing landed, so give the reservation back — otherwise a failed send would
-    // retire cap headroom no token ever used. A send that fails ambiguously (a
-    // timeout on a transaction that lands anyway) leaves the cache short until
-    // `POST /supply/refresh` reads the mint itself, which is the direction that can
-    // be corrected.
-    await tokenService.releaseMintSupply(tokenId, amountBaseUnits.toString());
+    // The reservation stands. Reaching here does not mean nothing landed: a timeout
+    // during confirmation leaves a transaction the cluster may still accept, and the
+    // audit write and status write above run *after* the mint has settled. Handing
+    // the headroom back on any of those would let a second mint reserve supply the
+    // first already minted, and both would be above the cap with no way to undo it.
+    // `POST /supply/refresh` reconciles from the mint account once the transaction
+    // can no longer land — which is also what returns the headroom if it never did.
+    getLogger().warn(
+      {
+        event: "mint_supply_reservation_retained",
+        tokenId,
+        transactionId: tx.id,
+        reservedBaseUnits: amountBaseUnits.toString(),
+        recordedSupplyBaseUnits: reservedSupply,
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      "Mint failed after its supply was reserved; the reservation is kept because the transaction may still land. Refresh the token's supply to reconcile."
+    );
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: error instanceof Error ? error.message : "Unknown error",

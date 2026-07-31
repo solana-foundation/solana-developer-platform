@@ -3475,7 +3475,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("gives the reservation back when the send fails", async () => {
+      it("keeps the reservation when the send fails", async () => {
         await seedAblListAddress();
         await getDb(env)
           .prepare(
@@ -3512,8 +3512,12 @@ describe("Issuance Routes", () => {
 
           expect(res.status).toBeGreaterThanOrEqual(400);
           expect(mintToSpy).toHaveBeenCalledTimes(1);
-          // Reserved, then released: a failed send must not retire cap headroom.
-          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("100000000000");
+          // A failure this side of the send cannot prove nothing landed — the same
+          // catch also covers a confirmation timeout and the writes that run after a
+          // mint settles. So the reservation stands (100 + 200 recorded) and
+          // `POST /supply/refresh` reconciles it once the transaction cannot land;
+          // handing the headroom back here is what let two mints exceed the cap.
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("300000000000");
           expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("failed");
         } finally {
           createOrgSignerSpy.mockRestore();
