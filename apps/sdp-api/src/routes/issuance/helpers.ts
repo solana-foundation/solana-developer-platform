@@ -1,7 +1,11 @@
+import type { TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { createMosaicService, type MosaicFeePayment } from "@/services/issuance/mosaic";
+import { createToken2022Service } from "@/services/solana";
+import { resolveRequestSponsorshipScope } from "@/services/sponsorship.service";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
@@ -25,3 +29,18 @@ export const requireProjectScope = (c: AppContext) => {
  */
 export const getTenantTokenService = (c: AppContext): TokenService =>
   new TokenService(getDb(c.env), getRequestTenantScope(c));
+
+export const createIssuanceMosaicService = (
+  c: AppContext,
+  signer: TransactionSigner,
+  feePayment: MosaicFeePayment
+) =>
+  createMosaicService(
+    c.env,
+    signer,
+    feePayment,
+    feePayment === "sponsored" ? resolveRequestSponsorshipScope(c) : undefined
+  );
+
+export const createIssuanceToken2022Service = (c: AppContext, signer: TransactionSigner) =>
+  createToken2022Service(c.env, signer, resolveRequestSponsorshipScope(c));

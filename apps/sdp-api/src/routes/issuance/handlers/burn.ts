@@ -8,14 +8,18 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createOrgSigner, createToken2022Service } from "@/services/solana";
+import { createOrgSigner } from "@/services/solana";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
-import { getTenantTokenService, requireProjectScope } from "../helpers";
+import {
+  createIssuanceToken2022Service,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
 
@@ -170,7 +174,7 @@ export const prepareBurn = async (c: AppContext) => {
   );
 
   // Build unsigned transaction
-  const token2022 = createToken2022Service(c.env, signer);
+  const token2022 = createIssuanceToken2022Service(c, signer);
   const prepared = await (async () => {
     try {
       return await token2022.prepareBurn(
@@ -312,7 +316,7 @@ export const executeBurn = async (c: AppContext) => {
     );
 
     // Execute burn on Solana
-    const token2022 = createToken2022Service(c.env, signer);
+    const token2022 = createIssuanceToken2022Service(c, signer);
 
     const result = await token2022.burn({
       mint: mintAddress,

@@ -8,10 +8,13 @@ import { badRequest, badRequestQuery, conflict, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import type { Env } from "@/types/env";
-import { getTenantTokenService, requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { createTokenSchema, listTokensQuerySchema, updateTokenSchema } from "../schemas";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 
@@ -267,7 +270,7 @@ export const updateToken = async (c: AppContext) => {
         currentAuthority: currentAuthorityRaw,
       });
 
-      const mosaic = createMosaicService(c.env, signer, "sponsored");
+      const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
       const result = await mosaic.updateMetadata({
         mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),
         ...metadataPatch,

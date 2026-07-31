@@ -7,12 +7,15 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
-import { getTenantTokenService, requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { mintSchema } from "../schemas";
 import {
   assertDestinationAllowedByControlList,
@@ -104,7 +107,7 @@ async function rollbackCreatedAllowlistEntry(
  */
 async function syncDestinationToOnChainAllowlist(opts: {
   tokenService: TokenService;
-  mosaic: ReturnType<typeof createMosaicService>;
+  mosaic: ReturnType<typeof createIssuanceMosaicService>;
   tokenId: string;
   ablListAddress: string;
   destinationRaw: string;
@@ -238,7 +241,7 @@ export const prepareMint = async (c: AppContext) => {
 
   // Build unsigned transaction using Mosaic
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   // For allowlist tokens with on-chain ABL, sync the destination wallet to
   // the on-chain list (and DB mirror) before preparing the mint tx so the
@@ -386,7 +389,7 @@ export const executeMint = async (c: AppContext) => {
   // (`isWalletOnList` returns true) since the original call drove the
   // wallet on-chain.
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
   const addedToAllowlist = ablListAddress
     ? await syncDestinationToOnChainAllowlist({
         tokenService,
