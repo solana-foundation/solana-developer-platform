@@ -16,6 +16,7 @@ import {
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, conflict, internalError } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import {
   CustodyConfigStore,
@@ -172,7 +173,13 @@ export async function recordLegacyWalletPolicyDenial(
   enforcement: WalletOperationPolicyEnforcement,
   error: unknown
 ): Promise<void> {
-  const repository = createPolicyRepository(env);
+  const repository = createPolicyRepository(
+    env,
+    createTenantScope({
+      organizationId: enforcement.operation.organizationId,
+      projectId: enforcement.operation.projectId,
+    })
+  );
   const reason =
     error instanceof Error && error.message
       ? error.message
@@ -261,7 +268,15 @@ export async function enforceWalletOperationPolicy(
   env: Env,
   input: CreateWalletOperationInput
 ): Promise<WalletOperationPolicyEnforcement> {
-  const service = new WalletPolicyEnforcementService(createPolicyRepository(env));
+  const service = new WalletPolicyEnforcementService(
+    createPolicyRepository(
+      env,
+      createTenantScope({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      })
+    )
+  );
   return service.enforce(input);
 }
 

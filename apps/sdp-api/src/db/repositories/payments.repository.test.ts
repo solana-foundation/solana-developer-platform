@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
@@ -194,6 +195,64 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
 
     expect(updated).toBeNull();
     expect(await readStatus("xfr_guard_project")).toBe("awaiting_payment");
+  });
+
+  it("makes a valid foreign transfer id indistinguishable from a missing row", async () => {
+    await seedTransfer({
+      id: "xfr_foreign_valid_id",
+      status: "awaiting_payment",
+      projectId: OTHER_PROJECT_ID,
+    });
+    const scoped = createPostgresPaymentsRepository(
+      getDb(env),
+      createTenantScope({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    );
+
+    await expect(
+      scoped.updateTransfer({
+        transferId: "xfr_foreign_valid_id",
+        status: "confirmed",
+        updatedAt: new Date().toISOString(),
+      })
+    ).resolves.toBeNull();
+    await expect(
+      scoped.getTransferById({
+        transferId: "xfr_foreign_valid_id",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    ).resolves.toBeNull();
+    expect(await readStatus("xfr_foreign_valid_id")).toBe("awaiting_payment");
+  });
+
+  it("rejects forged tenant claims before querying and preserves same-tenant writes", async () => {
+    await seedTransfer({ id: "xfr_owned_valid_id", status: "awaiting_payment" });
+    const scoped = createPostgresPaymentsRepository(
+      getDb(env),
+      createTenantScope({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    );
+
+    await expect(
+      scoped.getTransferById({
+        transferId: "xfr_owned_valid_id",
+        organizationId: TEST_ORG.id,
+        projectId: OTHER_PROJECT_ID,
+      })
+    ).rejects.toBeInstanceOf(TenantScopeViolationError);
+
+    await expect(
+      scoped.updateTransfer({
+        transferId: "xfr_owned_valid_id",
+        status: "confirmed",
+        updatedAt: new Date().toISOString(),
+      })
+    ).resolves.toMatchObject({ id: "xfr_owned_valid_id", status: "confirmed" });
   });
 
   it("persists idempotency metadata and looks it up by (org, key)", async () => {

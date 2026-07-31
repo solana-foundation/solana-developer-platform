@@ -22,7 +22,7 @@ import { encodeURL } from "@solana/pay";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { Hono } from "hono";
 import { z } from "zod";
-import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest, notFound } from "@/lib/errors";
 import {
   isPaymentRequestExpired,
@@ -43,9 +43,9 @@ const transactionRequestBodySchema = z.object({ account: z.string() });
 const pay = new Hono<{ Bindings: Env }>();
 
 pay.get("/:token", async (c) => {
-  const existing = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
-    c.req.param("token")
-  );
+  const existing = await createSystemPaymentRequestsRepository(
+    c.env
+  ).getPaymentRequestByPublicToken(c.req.param("token"));
   if (!existing) {
     throw notFound("Payment request");
   }
@@ -80,9 +80,9 @@ pay.get("/:token/tx", (c) => {
 });
 
 pay.post("/:token/tx", async (c) => {
-  const existing = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
-    c.req.param("token")
-  );
+  const existing = await createSystemPaymentRequestsRepository(
+    c.env
+  ).getPaymentRequestByPublicToken(c.req.param("token"));
   if (!existing) {
     throw notFound("Payment request");
   }

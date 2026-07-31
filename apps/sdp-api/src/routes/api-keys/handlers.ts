@@ -17,6 +17,7 @@ import {
 import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
   assertWalletBindingsInScope,
@@ -85,11 +86,12 @@ export const listApiKeys = async (c: AppContext) => {
   const projectId = requireProjectId(c);
 
   const db = getDb(c.env);
-  const apiKeyService = new ApiKeyService(db);
+  const apiKeyService = new ApiKeyService(db, getRequestTenantScope(c));
   const apiKeys = await apiKeyService.listForProject(projectId);
   const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
     c.env,
     db,
+    getRequestTenantScope(c),
     apiKeys.map((key) => key.id)
   );
 
@@ -230,7 +232,7 @@ export const createApiKey = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED", "Could not resolve authenticated user for API key creation");
   }
 
-  const apiKeyService = new ApiKeyService(getDb(c.env));
+  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   const createdKey = await apiKeyService.createApiKey({
     organizationId: orgId,
     projectId,
@@ -289,14 +291,19 @@ export const getApiKey = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
-  const apiKeyService = new ApiKeyService(getDb(c.env));
+  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   const key = await apiKeyService.getDetails(keyId, actor.organizationId, projectId);
 
   if (!key) {
     throw notFound("API key");
   }
 
-  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(c.env, getDb(c.env), [key.id]);
+  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
+    c.env,
+    getDb(c.env),
+    getRequestTenantScope(c),
+    [key.id]
+  );
   const accessSummary = accessSummaryByKeyId.get(key.id);
   const walletBindings = accessSummary?.walletBindings ?? [];
 
@@ -366,7 +373,7 @@ export const updateApiKey = async (c: AppContext) => {
     );
   }
 
-  const apiKeyService = new ApiKeyService(getDb(c.env));
+  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   await apiKeyService.updateApiKey({
     keyId,
     organizationId: actor.organizationId,
@@ -420,7 +427,7 @@ export const createApiKeyControlProfile = async (c: AppContext) => {
   }
 
   const profile = await new PolicyFoundationService(
-    createPolicyRepository(c.env)
+    createPolicyRepository(c.env, getRequestTenantScope(c))
   ).createApiKeyControlProfile({
     organizationId: actor.organizationId,
     projectId,
@@ -451,7 +458,7 @@ export const createApiKeyControlProfileRevision = async (c: AppContext) => {
   }
 
   const revision = await new PolicyFoundationService(
-    createPolicyRepository(c.env)
+    createPolicyRepository(c.env, getRequestTenantScope(c))
   ).createApiKeyControlProfileRevision({
     organizationId: actor.organizationId,
     projectId,
@@ -482,7 +489,7 @@ export const activateApiKeyControlProfileRevision = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
   const active = await new PolicyFoundationService(
-    createPolicyRepository(c.env)
+    createPolicyRepository(c.env, getRequestTenantScope(c))
   ).activateApiKeyControlProfileRevision({
     organizationId: actor.organizationId,
     projectId,
@@ -521,7 +528,7 @@ export const writeApiKeyPolicyBindings = async (c: AppContext) => {
         }));
 
   await new PolicyFoundationService(
-    createPolicyRepository(c.env)
+    createPolicyRepository(c.env, getRequestTenantScope(c))
   ).replaceApiKeyWalletPolicyBindings({
     organizationId: actor.organizationId,
     projectId,
@@ -529,7 +536,9 @@ export const writeApiKeyPolicyBindings = async (c: AppContext) => {
     bindings,
   });
 
-  const accessSummary = (await buildApiKeyAccessSummaries(c.env, getDb(c.env), [keyId])).get(keyId);
+  const accessSummary = (
+    await buildApiKeyAccessSummaries(c.env, getDb(c.env), getRequestTenantScope(c), [keyId])
+  ).get(keyId);
   const policyBindings = accessSummary?.policyBindings ?? [];
 
   await new AuditService(getDb(c.env)).log(c, {
@@ -566,7 +575,7 @@ export const rotateApiKey = async (c: AppContext) => {
 
   const gracePeriodHours = parsed.data.gracePeriodHours ?? 24;
 
-  const apiKeyService = new ApiKeyService(getDb(c.env));
+  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   const rotation = await apiKeyService.rotateApiKey(
     keyId,
     actor.organizationId,
@@ -643,7 +652,7 @@ export const revokeApiKey = async (c: AppContext) => {
     throw badRequest("Confirmation did not match the key name");
   }
 
-  const apiKeyService = new ApiKeyService(getDb(c.env));
+  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   const revokedKey = await apiKeyService.revokeApiKey(keyId, actor.organizationId, projectId);
 
   if (!revokedKey) {

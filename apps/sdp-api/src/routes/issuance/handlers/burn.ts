@@ -9,14 +9,13 @@ import { success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner, createToken2022Service } from "@/services/solana";
-import { TokenService } from "@/services/token.service";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import { getTenantTokenService, requireProjectScope } from "../helpers";
 import { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
 
@@ -133,7 +132,7 @@ export const prepareBurn = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -244,7 +243,7 @@ export const executeBurn = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,

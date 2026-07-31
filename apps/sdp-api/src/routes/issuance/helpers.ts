@@ -1,5 +1,8 @@
 import type { Context } from "hono";
+import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
@@ -15,3 +18,10 @@ export const requireProjectScope = (c: AppContext) => {
   const projectId = requireProjectId(c);
   return { auth, projectId, orgId: auth.organizationId };
 };
+
+/**
+ * The only tenant-facing TokenService construction path. Its scope comes from
+ * authenticated middleware state, never request-controlled headers or bodies.
+ */
+export const getTenantTokenService = (c: AppContext): TokenService =>
+  new TokenService(getDb(c.env), getRequestTenantScope(c));

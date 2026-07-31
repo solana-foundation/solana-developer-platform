@@ -7,6 +7,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   isPaymentRequestExpired,
@@ -53,7 +54,10 @@ export async function listPaymentRequests(c: AppContext) {
   if (!query.success) throw badRequestQuery();
 
   const { page, pageSize, status } = query.data;
-  const { rows, total } = await createPaymentRequestsRepository(c.env).listPaymentRequests({
+  const { rows, total } = await createPaymentRequestsRepository(
+    c.env,
+    getRequestTenantScope(c)
+  ).listPaymentRequests({
     organizationId: auth.organizationId,
     projectId,
     status,
@@ -97,7 +101,10 @@ export async function createPaymentRequest(c: AppContext) {
   const wallet = resolveWallet(scope.wallets, body.data.walletId);
   assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
 
-  const row = await createPaymentRequestsRepository(c.env).createPaymentRequest({
+  const row = await createPaymentRequestsRepository(
+    c.env,
+    getRequestTenantScope(c)
+  ).createPaymentRequest({
     organizationId: scope.auth.organizationId,
     projectId,
     counterpartyId: body.data.counterpartyId,

@@ -9,10 +9,10 @@ import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import { getTenantTokenService, requireProjectScope } from "../helpers";
 import { mintSchema } from "../schemas";
 import {
   assertDestinationAllowedByControlList,
@@ -195,7 +195,7 @@ export const prepareMint = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -324,7 +324,7 @@ export const executeMint = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,

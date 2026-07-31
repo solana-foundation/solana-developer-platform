@@ -6,6 +6,7 @@ import type {
 } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { ApiKeyService } from "@/services/api-key.service";
 import { PolicyFoundationService } from "@/services/policy-foundation.service";
 import { TEST_API_KEY } from "@/test/fixtures/api-keys";
@@ -37,6 +38,10 @@ const OTHER_PROJECT = {
 };
 
 const OTHER_PROJECT_CUSTODY_CONFIG_ID = "ccfg_policy_other_project";
+const TEST_SCOPE = createTenantScope({
+  organizationId: TEST_ORG.id,
+  projectId: TEST_PROJECT.id,
+});
 const OTHER_PROJECT_CUSTODY_WALLET = {
   id: "cw_policy_other_project",
   walletId: "wallet_policy_other_project",
@@ -59,7 +64,7 @@ describe("PolicyRepository (postgres)", () => {
   beforeEach(async () => {
     await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
     await seedPolicyFoundationFixtures();
-    repo = createPostgresPolicyRepository(getDb(env));
+    repo = createPostgresPolicyRepository(getDb(env), TEST_SCOPE);
   });
 
   it("resolves implicit default allow when no customer-authored profiles exist", async () => {
@@ -530,7 +535,14 @@ describe("PolicyRepository (postgres)", () => {
       approvalRequestId: request?.id,
     });
 
-    const otherOperation = await repo.createWalletOperation({
+    const otherProjectRepo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({
+        organizationId: TEST_ORG.id,
+        projectId: OTHER_PROJECT.id,
+      })
+    );
+    const otherOperation = await otherProjectRepo.createWalletOperation({
       organizationId: TEST_ORG.id,
       projectId: OTHER_PROJECT.id,
       custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
@@ -541,7 +553,7 @@ describe("PolicyRepository (postgres)", () => {
     });
     expect(otherOperation).not.toBeNull();
 
-    const otherRequest = await repo.createApprovalRequest({
+    const otherRequest = await otherProjectRepo.createApprovalRequest({
       organizationId: TEST_ORG.id,
       projectId: OTHER_PROJECT.id,
       walletOperationId: otherOperation?.id ?? "",
@@ -1009,7 +1021,7 @@ describe("PolicyRepository (postgres)", () => {
       apiKeyControlProfileId: apiKeyProfile?.id,
     });
 
-    const rotation = await new ApiKeyService(getDb(env)).rotateApiKey(
+    const rotation = await new ApiKeyService(getDb(env), TEST_SCOPE).rotateApiKey(
       TEST_API_KEY.id,
       TEST_ORG.id,
       TEST_PROJECT.id,

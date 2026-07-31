@@ -19,6 +19,7 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { createTokenRepository } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { isNativePaymentToken, normalizePaymentToken } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -33,6 +34,7 @@ const RECURRING_PAYMENT_TOKEN_ERROR =
  */
 export async function assertRecurringPaymentTokenMint(
   token: string,
+  organizationId: string,
   projectId: string,
   env: Env
 ): Promise<string> {
@@ -50,7 +52,10 @@ export async function assertRecurringPaymentTokenMint(
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }
 
-  const issuedTokenStatus = await createTokenRepository(env).getStatusByMint(projectId, mint);
+  const issuedTokenStatus = await createTokenRepository(
+    env,
+    createTenantScope({ organizationId, projectId })
+  ).getStatusByMint(projectId, mint);
   if (issuedTokenStatus !== "active") {
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }

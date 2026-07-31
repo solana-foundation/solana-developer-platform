@@ -30,6 +30,7 @@ import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
+import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
@@ -1970,9 +1971,67 @@ function decodeBase64(base64: string): Uint8Array {
  * @param env - API process environment
  * @returns Configured SigningService instance
  */
-export function createSigningService(env: Env): SigningService {
+export function createSigningService(env: Env, scope?: TenantScope): SigningService {
   const configStore = new CustodyConfigStore(getDb(env), env);
   const signingStore = new SigningRequestStorePg(getDb(env));
+  const service = new SigningService(configStore, signingStore, env);
 
-  return new SigningService(configStore, signingStore, env);
+  if (!scope) {
+    return service;
+  }
+
+  const tenantMethods = new Set([
+    "getConfigurationByProvider",
+    "setDefaultConfiguration",
+    "setDefaultProvider",
+    "getProviderReuseState",
+    "initializeLocalSigning",
+    "initializeFireblocksSigning",
+    "initializePrivySigning",
+    "initializeCoinbaseCdpSigning",
+    "initializeParaSigning",
+    "initializeTurnkeySigning",
+    "initializeDfnsSigning",
+    "initializeIbmHavenSigning",
+    "initializeAnchorageWalletLifecycle",
+    "initializeAnchorageSigning",
+    "initializeUtilaSigning",
+    "getWallets",
+    "getWalletsWithProviders",
+    // biome-ignore lint/security/noSecrets: public service method identifier, not a credential
+    "getWalletById",
+    "createWallet",
+    "deleteWallet",
+    "getAdapter",
+    "getPublicKey",
+    "getKeypairSigner",
+    "getTransactionSigner",
+    "sign",
+    "configureProvider",
+    "getConfiguration",
+    "getConfigurations",
+    "requiresApproval",
+    "invalidateCache",
+  ]);
+
+  return new Proxy(service, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function" || !tenantMethods.has(String(property))) {
+        return value;
+      }
+
+      return (...args: unknown[]) => {
+        assertTenantClaim(
+          scope,
+          {
+            organizationId: args[0],
+            projectId: args[1] ?? null,
+          },
+          `SigningService.${String(property)}`
+        );
+        return Reflect.apply(value, target, args);
+      };
+    },
+  });
 }

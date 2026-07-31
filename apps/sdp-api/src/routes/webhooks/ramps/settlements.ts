@@ -1,7 +1,7 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
 import type { Context } from "hono";
 import type { PaymentTransferStatus, UpdatePaymentTransferInput } from "@/db/repositories";
-import { createPaymentsRepository, isRampTransferType } from "@/db/repositories";
+import { createSystemPaymentsRepository, isRampTransferType } from "@/db/repositories";
 import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -29,7 +29,7 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
     return;
   }
 
-  const repo = createPaymentsRepository(c.env);
+  const repo = createSystemPaymentsRepository(c.env);
   const transfer = await repo.getTransferByProviderReference({
     provider: event.provider,
     providerReference: event.reference,

@@ -9,9 +9,8 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
-import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import { getTenantTokenService, requireProjectScope } from "../helpers";
 import { freezeSchema, unfreezeSchema } from "../schemas";
 import { getTokenAccessControlMode, type TokenAccessControlMode } from "./access-control";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
@@ -139,7 +138,7 @@ export const freezeAccount = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -306,7 +305,7 @@ export const listFrozenAccounts = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -342,7 +341,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,

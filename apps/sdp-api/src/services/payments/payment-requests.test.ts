@@ -13,6 +13,7 @@ import {
 import { getDb } from "@/db";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { SOL_MINT } from "@/services/payment-operation.service";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
@@ -47,7 +48,10 @@ function mockSettlementSucceeds() {
 }
 
 async function createRequest(overrides?: { token?: string; expiresAt?: string }) {
-  return createPaymentRequestsRepository(env).createPaymentRequest({
+  return createPaymentRequestsRepository(
+    env,
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+  ).createPaymentRequest({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
     counterpartyId: null,

@@ -24,9 +24,9 @@ import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService, type MosaicFeePayment } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import { getTenantTokenService, requireProjectScope } from "../helpers";
 import { confirmDeploySchema, deployTokenSchema } from "../schemas";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
@@ -257,7 +257,7 @@ export const deployToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   let token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -504,7 +504,7 @@ export const prepareDeploy = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -676,7 +676,7 @@ export const confirmDeploy = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -834,7 +834,7 @@ export const prepareDeployMetadata = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,

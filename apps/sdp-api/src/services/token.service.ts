@@ -21,6 +21,7 @@ import type {
 } from "@sdp/types";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
+import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 
 // Escapes LIKE/ILIKE wildcards so operator-supplied search text matches
 // literally (mirrors the payments/policy repositories' `ESCAPE '\'` idiom).
@@ -396,13 +397,23 @@ interface WalletTransactionScope {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class TokenService {
-  constructor(private db: DatabaseClient) {}
+  constructor(
+    private db: DatabaseClient,
+    private readonly tenantScope?: TenantScope
+  ) {}
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Token CRUD
   // ═══════════════════════════════════════════════════════════════════════════
 
   async createToken(input: CreateTokenInput): Promise<Token> {
+    if (this.tenantScope) {
+      assertTenantClaim(
+        this.tenantScope,
+        { organizationId: input.organizationId, projectId: input.projectId },
+        "TokenService"
+      );
+    }
     const id = `tok_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const decimals = input.decimals ?? 9;
@@ -514,6 +525,9 @@ export class TokenService {
     organizationId: string;
     projectId: string;
   }): Promise<Token | null> {
+    if (this.tenantScope) {
+      assertTenantClaim(this.tenantScope, params, "TokenService");
+    }
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
@@ -536,6 +550,12 @@ export class TokenService {
   }
 
   private async _getTokenById(tokenId: string): Promise<Token | null> {
+    const tenantWhere = this.tenantScope
+      ? " AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?"
+      : "";
+    const tenantValues = this.tenantScope
+      ? [this.tenantScope.organizationId, this.tenantScope.projectId]
+      : [];
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
@@ -544,9 +564,9 @@ export class TokenService {
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                 freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
                 created_at, updated_at
-         FROM issued_tokens WHERE id = ?`
+         FROM issued_tokens WHERE id = ?${tenantWhere}`
       )
-      .bind(tokenId)
+      .bind(tokenId, ...tenantValues)
       .first<TokenRow>();
 
     if (!row) {
@@ -639,6 +659,9 @@ export class TokenService {
     projectId: string,
     options: ListTokensOptions = {}
   ): Promise<{ tokens: Token[]; total: number }> {
+    if (this.tenantScope && this.tenantScope.projectId !== projectId) {
+      throw new AppError("FORBIDDEN", "Token project is outside the authenticated tenant");
+    }
     const { limit = 50, offset = 0, sortBy = "createdAt", sortDirection = "desc" } = options;
 
     const { whereClause, values } = buildTokenListFilter(projectId, options);
@@ -692,6 +715,9 @@ export class TokenService {
    * over-filtered one.
    */
   async listTokenFacets(projectId: string): Promise<TokenListFacets> {
+    if (this.tenantScope && this.tenantScope.projectId !== projectId) {
+      throw new AppError("FORBIDDEN", "Token project is outside the authenticated tenant");
+    }
     const [templateRows, counts] = await Promise.all([
       this.db
         .prepare(

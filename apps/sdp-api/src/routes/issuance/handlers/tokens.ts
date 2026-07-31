@@ -10,9 +10,8 @@ import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
-import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import { getTenantTokenService, requireProjectScope } from "../helpers";
 import { createTokenSchema, listTokensQuerySchema, updateTokenSchema } from "../schemas";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 
@@ -73,7 +72,7 @@ export const createToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const signingWalletId = resolveApiKeySigningWalletId(auth, parsed.data.signingWalletId, [
     "tokens:write",
   ]);
@@ -143,7 +142,7 @@ export const listTokens = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const { tokens, total } = await tokenService.listTokens(projectId, {
     // A blank search passes validation (an empty input isn't an error) but must
     // not become an `ILIKE '%%'` filter.
@@ -165,7 +164,7 @@ export const listTokens = async (c: AppContext) => {
 export const listTokenFacets = async (c: AppContext) => {
   const { projectId } = requireProjectScope(c);
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const facets = await tokenService.listTokenFacets(projectId);
 
   return success(c, facets);
@@ -175,7 +174,7 @@ export const getToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -203,7 +202,7 @@ export const updateToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
 
   const existing = await tokenService.getToken({
     tokenId,

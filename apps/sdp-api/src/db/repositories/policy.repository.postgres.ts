@@ -5,6 +5,7 @@ import {
   parseOptionalPostgresJson,
 } from "@/db/postgres-utils";
 import { badRequest } from "@/lib/errors";
+import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import type {
   ActivateApiKeyControlProfileRevisionInput,
   ActivateWalletControlProfileRevisionInput,
@@ -919,9 +920,79 @@ function walletPolicyEvaluationAuditFilters(input: ListWalletPolicyEvaluationAud
   return { conditions, params };
 }
 
-export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
+async function tenantOwnsRow(
+  db: DatabaseExecutor,
+  scope: TenantScope,
+  table:
+    | "api_key_control_profiles"
+    | "api_keys"
+    | "approval_requests"
+    | "wallet_control_profiles"
+    | "wallet_operations",
+  id: string
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT id
+       FROM ${table}
+       WHERE id = ?
+         AND organization_id = ?
+         AND project_id IS NOT DISTINCT FROM ?
+       LIMIT 1`
+    )
+    .bind(id, scope.organizationId, scope.projectId)
+    .first<{ id: string }>();
+  return Boolean(row);
+}
+
+async function tenantOwnsWallet(
+  db: DatabaseExecutor,
+  scope: TenantScope,
+  walletId: string
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT w.id
+       FROM custody_wallets w
+       INNER JOIN custody_configs c ON c.id = w.custody_config_id
+       WHERE (w.id = ? OR w.wallet_id = ?)
+         AND c.organization_id = ?
+         AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
+         AND w.status = 'active'
+         AND c.status = 'active'
+       LIMIT 1`
+    )
+    .bind(walletId, walletId, scope.organizationId, scope.projectId)
+    .first<{ id: string }>();
+  return Boolean(row);
+}
+
+async function tenantOwnsPolicyRevision(
+  db: DatabaseExecutor,
+  scope: TenantScope,
+  revisionTable: "api_key_control_profile_revisions" | "wallet_control_profile_revisions",
+  profileTable: "api_key_control_profiles" | "wallet_control_profiles",
+  revisionId: string
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT r.id
+       FROM ${revisionTable} r
+       INNER JOIN ${profileTable} p ON p.id = r.profile_id
+       WHERE r.id = ?
+         AND p.organization_id = ?
+         AND p.project_id IS NOT DISTINCT FROM ?
+       LIMIT 1`
+    )
+    .bind(revisionId, scope.organizationId, scope.projectId)
+    .first<{ id: string }>();
+  return Boolean(row);
+}
+
+export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): PolicyRepository {
   return {
     async listPolicyControlInventory(input: ListPolicyControlInventoryInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.listPolicyControlInventory");
       const page = Math.max(input.page ?? 1, 1);
       const pageSize = Math.min(Math.max(input.pageSize ?? 25, 1), 100);
       const offset = (page - 1) * pageSize;
@@ -989,6 +1060,10 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async createWalletControlProfile(input: CreateWalletControlProfileInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.createWalletControlProfile");
+      if (!(await tenantOwnsWallet(db, scope, input.custodyWalletId))) {
+        return null;
+      }
       const id = generateWalletControlProfileId();
 
       await db
@@ -1018,6 +1093,9 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async createWalletControlProfileRevision(input: CreateWalletControlProfileRevisionInput) {
+      if (!(await tenantOwnsRow(db, scope, "wallet_control_profiles", input.profileId))) {
+        return null;
+      }
       const id = generateWalletControlProfileRevisionId();
       const row = await db.transaction(async (tx) => {
         const profile = await tx
@@ -1065,6 +1143,18 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async activateWalletControlProfileRevision(input: ActivateWalletControlProfileRevisionInput) {
+      if (
+        !(await tenantOwnsRow(db, scope, "wallet_control_profiles", input.profileId)) ||
+        !(await tenantOwnsPolicyRevision(
+          db,
+          scope,
+          "wallet_control_profile_revisions",
+          "wallet_control_profiles",
+          input.revisionId
+        ))
+      ) {
+        return null;
+      }
       const activatedAt = input.activatedAt ?? new Date().toISOString();
 
       const profile = await db.transaction(async (tx) => {
@@ -1108,16 +1198,21 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async getActiveWalletControlProfileByCustodyWalletId(custodyWalletId: string) {
+      if (!(await tenantOwnsWallet(db, scope, custodyWalletId))) {
+        return null;
+      }
       const profile = await db
         .prepare(
           `SELECT *
            FROM wallet_control_profiles
            WHERE custody_wallet_id = ?
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
              AND status = 'active'
            ORDER BY activated_at DESC NULLS LAST, created_at DESC
            LIMIT 1`
         )
-        .bind(custodyWalletId)
+        .bind(custodyWalletId, scope.organizationId, scope.projectId)
         .first<Record<string, unknown>>();
 
       if (!profile) {
@@ -1136,6 +1231,9 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async getActiveWalletControlProfileByProfileId(profileId: string) {
+      if (!(await tenantOwnsRow(db, scope, "wallet_control_profiles", profileId))) {
+        return null;
+      }
       const profile = await db
         .prepare(
           `SELECT *
@@ -1165,6 +1263,7 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     async getWalletControlProfileRevisionHistory(
       input: GetWalletControlProfileRevisionHistoryInput
     ) {
+      assertTenantClaim(scope, input, "PolicyRepository.getWalletControlProfileRevisionHistory");
       const profile = await db
         .prepare(
           `SELECT *
@@ -1203,6 +1302,10 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async createApiKeyControlProfile(input: CreateApiKeyControlProfileInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.createApiKeyControlProfile");
+      if (!(await tenantOwnsRow(db, scope, "api_keys", input.apiKeyId))) {
+        return null;
+      }
       const id = generateApiKeyControlProfileId();
 
       await db
@@ -1232,10 +1335,16 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async getApiKeyControlProfileById(profileId: string) {
+      if (!(await tenantOwnsRow(db, scope, "api_key_control_profiles", profileId))) {
+        return null;
+      }
       return getApiKeyControlProfileById(db, profileId);
     },
 
     async createApiKeyControlProfileRevision(input: CreateApiKeyControlProfileRevisionInput) {
+      if (!(await tenantOwnsRow(db, scope, "api_key_control_profiles", input.profileId))) {
+        return null;
+      }
       const id = generateApiKeyControlProfileRevisionId();
       const row = await db.transaction(async (tx) => {
         const profile = await tx
@@ -1283,10 +1392,33 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async getApiKeyControlProfileRevisionById(revisionId: string) {
+      if (
+        !(await tenantOwnsPolicyRevision(
+          db,
+          scope,
+          "api_key_control_profile_revisions",
+          "api_key_control_profiles",
+          revisionId
+        ))
+      ) {
+        return null;
+      }
       return getApiKeyControlProfileRevisionById(db, revisionId);
     },
 
     async activateApiKeyControlProfileRevision(input: ActivateApiKeyControlProfileRevisionInput) {
+      if (
+        !(await tenantOwnsRow(db, scope, "api_key_control_profiles", input.profileId)) ||
+        !(await tenantOwnsPolicyRevision(
+          db,
+          scope,
+          "api_key_control_profile_revisions",
+          "api_key_control_profiles",
+          input.revisionId
+        ))
+      ) {
+        return null;
+      }
       const activatedAt = input.activatedAt ?? new Date().toISOString();
 
       const profile = await db.transaction(async (tx) => {
@@ -1330,16 +1462,21 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async getActiveApiKeyControlProfileByApiKeyId(apiKeyId: string) {
+      if (!(await tenantOwnsRow(db, scope, "api_keys", apiKeyId))) {
+        return null;
+      }
       const profile = await db
         .prepare(
           `SELECT *
            FROM api_key_control_profiles
            WHERE api_key_id = ?
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
              AND status = 'active'
            ORDER BY activated_at DESC NULLS LAST, created_at DESC
            LIMIT 1`
         )
-        .bind(apiKeyId)
+        .bind(apiKeyId, scope.organizationId, scope.projectId)
         .first<Record<string, unknown>>();
 
       if (!profile) {
@@ -1358,6 +1495,9 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async getActiveApiKeyControlProfileByProfileId(profileId: string) {
+      if (!(await tenantOwnsRow(db, scope, "api_key_control_profiles", profileId))) {
+        return null;
+      }
       const profile = await db
         .prepare(
           `SELECT *
@@ -1385,6 +1525,9 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async getApiKeyPolicySubject(apiKeyId: string) {
+      if (!(await tenantOwnsRow(db, scope, "api_keys", apiKeyId))) {
+        return null;
+      }
       const row = await db
         .prepare(
           `SELECT
@@ -1403,11 +1546,53 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async upsertApiKeyWalletPolicyBinding(input: UpsertApiKeyWalletPolicyBindingInput) {
+      if (!(await tenantOwnsRow(db, scope, "api_keys", input.apiKeyId))) {
+        return null;
+      }
+      if (
+        input.walletControlProfileId &&
+        !(await tenantOwnsRow(db, scope, "wallet_control_profiles", input.walletControlProfileId))
+      ) {
+        return null;
+      }
+      if (
+        input.apiKeyControlProfileId &&
+        !(await tenantOwnsRow(db, scope, "api_key_control_profiles", input.apiKeyControlProfileId))
+      ) {
+        return null;
+      }
+      if (input.walletId && !(await tenantOwnsWallet(db, scope, input.walletId))) {
+        return null;
+      }
       validateApiKeyWalletPolicyBindingInput(input);
       return upsertApiKeyWalletPolicyBindingInternal(db, input);
     },
 
     async replaceApiKeyWalletPolicyBindings(input: ReplaceApiKeyWalletPolicyBindingsInput) {
+      if (!(await tenantOwnsRow(db, scope, "api_keys", input.apiKeyId))) {
+        return [];
+      }
+      for (const binding of input.bindings) {
+        if (
+          (binding.walletControlProfileId &&
+            !(await tenantOwnsRow(
+              db,
+              scope,
+              "wallet_control_profiles",
+              binding.walletControlProfileId
+            ))) ||
+          (binding.apiKeyControlProfileId &&
+            !(await tenantOwnsRow(
+              db,
+              scope,
+              "api_key_control_profiles",
+              binding.apiKeyControlProfileId
+            ))) ||
+          (binding.walletId && !(await tenantOwnsWallet(db, scope, binding.walletId)))
+        ) {
+          return [];
+        }
+      }
       if (input.bindings.some((binding) => binding.apiKeyId !== input.apiKeyId)) {
         throw badRequest("Policy bindings must target the requested API key");
       }
@@ -1434,6 +1619,9 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async listApiKeyWalletPolicyBindings(apiKeyId: string) {
+      if (!(await tenantOwnsRow(db, scope, "api_keys", apiKeyId))) {
+        return [];
+      }
       const rows = await db
         .prepare(
           `SELECT *
@@ -1454,12 +1642,15 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
 
       const rows = await db
         .prepare(
-          `SELECT *
-           FROM api_key_wallet_policy_bindings
-           WHERE api_key_id = ANY(?::text[])
+          `SELECT b.*
+           FROM api_key_wallet_policy_bindings b
+           INNER JOIN api_keys ak ON ak.id = b.api_key_id
+           WHERE b.api_key_id = ANY(?::text[])
+             AND ak.organization_id = ?
+             AND ak.project_id IS NOT DISTINCT FROM ?
            ORDER BY api_key_id ASC, created_at ASC`
         )
-        .bind(apiKeyIds)
+        .bind(apiKeyIds, scope.organizationId, scope.projectId)
         .all<Record<string, unknown>>();
 
       return rows.results.map(mapApiKeyWalletPolicyBindingRow);
@@ -1475,9 +1666,11 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
           `SELECT id AS profile_id, active_revision_id
            FROM wallet_control_profiles
            WHERE id = ANY(?::text[])
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
              AND status = 'active'`
         )
-        .bind(profileIds)
+        .bind(profileIds, scope.organizationId, scope.projectId)
         .all<ActivePolicyProfileRevisionRefRow>();
 
       return rows.results;
@@ -1493,15 +1686,26 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
           `SELECT id AS profile_id, active_revision_id
            FROM api_key_control_profiles
            WHERE id = ANY(?::text[])
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
              AND status = 'active'`
         )
-        .bind(profileIds)
+        .bind(profileIds, scope.organizationId, scope.projectId)
         .all<ActivePolicyProfileRevisionRefRow>();
 
       return rows.results;
     },
 
     async getApiKeyWalletPolicyBindingResolution(apiKeyId: string, walletId: string) {
+      if (
+        !(await tenantOwnsRow(db, scope, "api_keys", apiKeyId)) ||
+        !(await tenantOwnsWallet(db, scope, walletId))
+      ) {
+        return {
+          total_binding_count: 0,
+          binding: null,
+        };
+      }
       const row = await db
         .prepare(
           `WITH binding_count AS (
@@ -1536,6 +1740,12 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async getApiKeyWalletPolicyTarget(apiKeyId: string, walletId: string) {
+      if (
+        !(await tenantOwnsRow(db, scope, "api_keys", apiKeyId)) ||
+        !(await tenantOwnsWallet(db, scope, walletId))
+      ) {
+        return null;
+      }
       const row = await db
         .prepare(
           `WITH target_api_key AS (
@@ -1587,6 +1797,13 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async createWalletOperation(input: CreateWalletOperationInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.createWalletOperation");
+      if (!(await tenantOwnsWallet(db, scope, input.custodyWalletId ?? input.walletId))) {
+        return null;
+      }
+      if (input.apiKeyId && !(await tenantOwnsRow(db, scope, "api_keys", input.apiKeyId))) {
+        return null;
+      }
       const id = generateWalletOperationId();
 
       await db
@@ -1632,6 +1849,9 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async getWalletOperationById(walletOperationId: string) {
+      if (!(await tenantOwnsRow(db, scope, "wallet_operations", walletOperationId))) {
+        return null;
+      }
       return getWalletOperationByIdInternal(db, walletOperationId);
     },
 
@@ -1639,6 +1859,9 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       walletOperationId: string,
       status: WalletOperationRow["status"]
     ) {
+      if (!(await tenantOwnsRow(db, scope, "wallet_operations", walletOperationId))) {
+        return null;
+      }
       const row = await db
         .prepare(
           `UPDATE wallet_operations
@@ -1654,6 +1877,33 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async createPolicyEvaluation(input: CreatePolicyEvaluationInput) {
+      if (!(await tenantOwnsRow(db, scope, "wallet_operations", input.walletOperationId))) {
+        return null;
+      }
+      if (
+        input.walletPolicyRevisionId &&
+        !(await tenantOwnsPolicyRevision(
+          db,
+          scope,
+          "wallet_control_profile_revisions",
+          "wallet_control_profiles",
+          input.walletPolicyRevisionId
+        ))
+      ) {
+        return null;
+      }
+      if (
+        input.apiKeyPolicyRevisionId &&
+        !(await tenantOwnsPolicyRevision(
+          db,
+          scope,
+          "api_key_control_profile_revisions",
+          "api_key_control_profiles",
+          input.apiKeyPolicyRevisionId
+        ))
+      ) {
+        return null;
+      }
       const id = generatePolicyEvaluationId();
 
       await db
@@ -1691,10 +1941,14 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async listPolicyEvaluationsForOperation(walletOperationId: string) {
+      if (!(await tenantOwnsRow(db, scope, "wallet_operations", walletOperationId))) {
+        return [];
+      }
       return listPolicyEvaluationsForOperationInternal(db, walletOperationId);
     },
 
     async listWalletPolicyEvaluationAudits(input: ListWalletPolicyEvaluationAuditsInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.listWalletPolicyEvaluationAudits");
       const page = Math.max(input.page ?? 1, 1);
       const pageSize = Math.min(Math.max(input.pageSize ?? 25, 1), 100);
       const offset = (page - 1) * pageSize;
@@ -1728,6 +1982,7 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async getWalletPolicyEvaluationAudit(input: GetWalletPolicyEvaluationAuditInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.getWalletPolicyEvaluationAudit");
       const { conditions, params } = walletPolicyEvaluationAuditFilters(input);
       conditions.push("pe.id = ?");
       params.push(input.policyEvaluationId);
@@ -1745,6 +2000,10 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async createApprovalRequest(input: CreateApprovalRequestInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.createApprovalRequest");
+      if (!(await tenantOwnsRow(db, scope, "wallet_operations", input.walletOperationId))) {
+        return null;
+      }
       const id = generateApprovalRequestId();
       const row = await db
         .prepare(
@@ -1784,15 +2043,15 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async updateApprovalRequestStatus(input: UpdateApprovalRequestStatusInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.updateApprovalRequestStatus");
+      if (!(await tenantOwnsRow(db, scope, "approval_requests", input.approvalRequestId))) {
+        return null;
+      }
       const resolvedAt = input.resolvedAt ?? new Date().toISOString();
 
       const row = await db.transaction(async (tx) => {
-        const conditions = ["id = ?", "organization_id = ?"];
-        const params: unknown[] = [input.approvalRequestId, input.organizationId];
-        if (input.projectId) {
-          conditions.push("project_id = ?");
-          params.push(input.projectId);
-        }
+        const conditions = ["id = ?", "organization_id = ?", "project_id IS NOT DISTINCT FROM ?"];
+        const params: unknown[] = [input.approvalRequestId, scope.organizationId, scope.projectId];
 
         const current = await tx
           .prepare(`SELECT * FROM approval_requests WHERE ${conditions.join(" AND ")} FOR UPDATE`)
@@ -1815,6 +2074,7 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
                  updated_at = ?
              WHERE id = ?
                AND organization_id = ?
+               AND project_id IS NOT DISTINCT FROM ?
              RETURNING *`
           )
           .bind(
@@ -1823,7 +2083,8 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
             resolvedAt,
             resolvedAt,
             input.approvalRequestId,
-            input.organizationId
+            scope.organizationId,
+            scope.projectId
           )
           .first<Record<string, unknown>>();
 
@@ -1844,13 +2105,15 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
                    updated_at = ?
                WHERE id = ?
                  AND organization_id = ?
+                 AND project_id IS NOT DISTINCT FROM ?
                  AND ${currentOperationStatus}`
             )
             .bind(
               input.operationStatus,
               resolvedAt,
               current.wallet_operation_id,
-              input.organizationId
+              scope.organizationId,
+              scope.projectId
             )
             .run();
         }
@@ -1862,10 +2125,12 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async listApprovalRequestDetails(input: ListApprovalRequestDetailsInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.listApprovalRequestDetails");
       return listApprovalRequestDetailsInternal(db, input);
     },
 
     async getApprovalRequestDetail(input: GetApprovalRequestDetailInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.getApprovalRequestDetail");
       const rows = await listApprovalRequestDetailsInternal(db, {
         ...input,
         approvalRequestId: input.approvalRequestId,

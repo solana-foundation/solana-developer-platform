@@ -9,9 +9,9 @@ import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import { getTenantTokenService, requireProjectScope } from "../helpers";
 import { addAllowlistSchema, listAllowlistQuerySchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -174,7 +174,7 @@ export const listAllowlist = async (c: AppContext) => {
   }
   const { page, pageSize, search, label } = parsed.data;
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -201,7 +201,7 @@ export const listAllowlistLabels = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -230,7 +230,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -290,7 +290,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   const { tokenId, entryId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,

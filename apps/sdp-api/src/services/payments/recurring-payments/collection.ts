@@ -30,6 +30,7 @@ import {
   type PaymentTransferRow,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
@@ -50,6 +51,13 @@ import {
 } from "./shared";
 
 const COLLECTION_STALE_AFTER_MS = RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS;
+
+function tenantScope(input: { organizationId: string; projectId: string }) {
+  return createTenantScope({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+}
 
 type RecurringCollectionSource = "manual" | "automated";
 
@@ -276,7 +284,13 @@ async function finalizeRecurringPaymentCollection(input: {
     // Recovery can safely re-run this transaction because the period updates below are CAS-guarded.
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
-    const paymentsRepo = createPostgresPaymentsRepository(tx);
+    const paymentsRepo = createPostgresPaymentsRepository(
+      tx,
+      createTenantScope({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      })
+    );
 
     const updatedTransfer = await paymentsRepo.updateTransfer({
       transferId: input.transfer.id,
@@ -701,9 +715,9 @@ export async function collectRecurringPayment(input: {
   const nowIso = new Date().toISOString();
   const dueAt = input.recurringPayment.next_collection_due_at;
 
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
-  const paymentsRepo = createPaymentsRepository(input.env);
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
+  const paymentsRepo = createPaymentsRepository(input.env, tenantScope(input));
+  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
   const subscription = await subscriptionsRepo.getSubscriptionById({
     subscriptionId: input.recurringPayment.subscription_id,
     organizationId: input.organizationId,
