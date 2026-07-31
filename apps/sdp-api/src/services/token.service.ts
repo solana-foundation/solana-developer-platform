@@ -22,6 +22,10 @@ import type {
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
 
+function bigIntMax(a: bigint, b: bigint): bigint {
+  return a > b ? a : b;
+}
+
 // Escapes LIKE/ILIKE wildcards so operator-supplied search text matches
 // literally (mirrors the payments/policy repositories' `ESCAPE '\'` idiom).
 function escapeLikePattern(value: string): string {
@@ -791,9 +795,14 @@ export class TokenService {
       values.push(input.requiresAllowlist ? 1 : 0);
     }
 
+    // The supply the cap was validated against, kept so the write can be guarded
+    // on that same read — see the guards below.
+    let supplyAtCapCheck: string | null = null;
     if (input.maxSupply !== undefined) {
+      const resolved = await this._resolveMaxSupplyBaseUnits(input, existing);
+      supplyAtCapCheck = resolved.supplyBaseUnits;
       updates.push("max_supply = ?");
-      values.push(this._resolveMaxSupplyBaseUnits(input, existing));
+      values.push(resolved.maxSupplyBaseUnits);
     }
 
     if (updates.length === 0) {
@@ -828,6 +837,16 @@ export class TokenService {
     if (requiresUnlockedSupplyGuard) {
       guards.push("is_mintable = 1", "mint_authority IS NOT NULL");
     }
+    // And the same race one step further out: the cap was checked against a supply
+    // read, and a mint landing in this window is exactly what makes that read
+    // stale. Guarding on it means losing to a mint costs a 409 the operator can
+    // retry against the real supply, rather than storing a cap below what was just
+    // minted. (COALESCE because the column is nullable, and NULL never equals a
+    // bound value.)
+    if (supplyAtCapCheck !== null) {
+      guards.push("COALESCE(total_supply_cached, '0') = ?");
+      values.push(supplyAtCapCheck);
+    }
 
     const whereClause =
       guards.length > 0 ? `WHERE id = ? AND ${guards.join(" AND ")}` : "WHERE id = ?";
@@ -840,12 +859,7 @@ export class TokenService {
     // The row existed at the top-of-method read, so a guarded 0-row result means
     // the lifecycle moved on during the window — surface a 409 rather than a 404.
     if (guards.length > 0 && rowsAffected === 0) {
-      throw new AppError(
-        "CONFLICT",
-        requiresUndeployedGuard
-          ? "Token was deployed while this update was in flight; re-fetch and retry"
-          : "Token supply was locked on-chain while this update was in flight; re-fetch and retry"
-      );
+      throw new AppError("CONFLICT", await this._describeUpdateConflict(existing));
     }
 
     const updated = await this._getTokenById(tokenId);
@@ -863,10 +877,21 @@ export class TokenService {
    * decimals, which a pre-deploy update may be changing in the same request —
    * and additionally refuses a cap the token has already outgrown, since minting
    * can only ever push the total further past it.
+   *
+   * Returns the supply it compared against, in base units, so the caller can
+   * guard the write on that same read: a mint landing in between is exactly what
+   * would make a cap that passed this check wrong by the time it is stored. Read
+   * from the column rather than round-tripped through `existing.totalSupply`,
+   * which is formatted for display and would not compare byte-for-byte.
    */
-  private _resolveMaxSupplyBaseUnits(input: UpdateTokenInput, existing: Token): string | null {
+  private async _resolveMaxSupplyBaseUnits(
+    input: UpdateTokenInput,
+    existing: Token
+  ): Promise<{ maxSupplyBaseUnits: string | null; supplyBaseUnits: string | null }> {
+    // Clearing a cap depends on no supply at all — uncapping can never conflict
+    // with a mint — so it neither reads one nor gets guarded on one.
     if (!input.maxSupply) {
-      return null;
+      return { maxSupplyBaseUnits: null, supplyBaseUnits: null };
     }
 
     const decimals = input.decimals ?? existing.decimals;
@@ -885,15 +910,61 @@ export class TokenService {
     // sides share a scale) and a draft has no minted supply to undercut. The
     // stored total is the last cached read of the mint, so this is best-effort —
     // the on-chain supply is the authority.
-    if (existing.mintAddress && baseUnits < parseDecimalAmount(existing.totalSupply, decimals)) {
+    if (!existing.mintAddress) {
+      return { maxSupplyBaseUnits: baseUnits.toString(), supplyBaseUnits: null };
+    }
+
+    const supplyBaseUnits = await this._getCachedSupplyBaseUnits(existing.id);
+    if (baseUnits < BigInt(supplyBaseUnits)) {
       throw badRequest("maxSupply cannot be below the already-minted supply", {
         errors: {
-          maxSupply: [`Must be at least the current supply of ${existing.totalSupply}`],
+          maxSupply: [
+            `Must be at least the current supply of ${formatDecimalAmount(supplyBaseUnits, decimals)}`,
+          ],
         },
       });
     }
 
-    return baseUnits.toString();
+    return { maxSupplyBaseUnits: baseUnits.toString(), supplyBaseUnits };
+  }
+
+  /**
+   * The cached supply exactly as stored, for comparing against and then guarding
+   * on. Anything that isn't a base-unit integer reads as `0`, so a malformed
+   * cache can't make a cap check throw from inside a bigint parse.
+   */
+  private async _getCachedSupplyBaseUnits(tokenId: string): Promise<string> {
+    const row = await this.db
+      .prepare(
+        "SELECT COALESCE(total_supply_cached, '0') AS supply FROM issued_tokens WHERE id = ?"
+      )
+      .bind(tokenId)
+      .first<{ supply: string }>();
+    const supply = row?.supply ?? "0";
+    return /^\d+$/.test(supply) ? supply : "0";
+  }
+
+  /**
+   * Why a guarded update matched no rows. The row existed at the top-of-method
+   * read, so something moved it out from under one of the guards in the window —
+   * re-read to name which, since a `maxSupply` update carries three of them and
+   * an operator retrying deserves to know what actually changed.
+   */
+  private async _describeUpdateConflict(before: Token): Promise<string> {
+    const after = await this._getTokenById(before.id);
+    if (!after) {
+      return "Token was deleted while this update was in flight; re-fetch and retry";
+    }
+    if (after.mintAddress && !before.mintAddress) {
+      return "Token was deployed while this update was in flight; re-fetch and retry";
+    }
+    if (before.mintAddress && (!after.mintAuthority || !after.isMintable)) {
+      return "Token supply was locked on-chain while this update was in flight; re-fetch and retry";
+    }
+    if (after.totalSupply !== before.totalSupply) {
+      return "Token supply changed while this update was in flight; re-fetch and retry";
+    }
+    return "Token changed while this update was in flight; re-fetch and retry";
   }
 
   /**
@@ -1068,6 +1139,23 @@ export class TokenService {
     return updated;
   }
 
+  /**
+   * Record a supply change that has already settled on-chain.
+   *
+   * This is a cache write, not an admission check. Both limits are enforced
+   * before the transaction is sent — the cap in `resolveMintOperationAmount`, the
+   * balance against the authority's token account in the burn handler — and
+   * re-checking them here can only produce two wrong answers: report a settled
+   * mint as failed to the caller, or leave the cached total behind what the mint
+   * actually did. Either way SDP's copy of the supply ends up wrong about tokens
+   * that exist, which is worse than any of it being briefly out of policy.
+   *
+   * A cap an operator lowers mid-mint still does its job: it is compared against
+   * the total this write records, so it blocks the *next* mint. The cap limits
+   * what may be minted, never what already has been — SPL has no cap of its own,
+   * so admission control is all SDP has, and it is only as tight as this cache is
+   * fresh (two mints admitted concurrently can still overshoot together).
+   */
   async updateSupply(tokenId: string, delta: string, operation: "mint" | "burn"): Promise<void> {
     const token = await this._getTokenById(tokenId);
     if (!token) {
@@ -1076,24 +1164,13 @@ export class TokenService {
 
     const currentSupply = parseDecimalAmount(token.totalSupply, token.decimals);
     const deltaAmount = parseDecimalAmount(delta, token.decimals);
-    let newSupply: bigint;
-
-    if (operation === "mint") {
-      newSupply = currentSupply + deltaAmount;
-
-      // Check max supply
-      if (token.maxSupply) {
-        const maxSupply = parseDecimalAmount(token.maxSupply, token.decimals);
-        if (newSupply > maxSupply) {
-          throw new Error("MAX_SUPPLY_EXCEEDED");
-        }
-      }
-    } else {
-      newSupply = currentSupply - deltaAmount;
-      if (newSupply < 0n) {
-        throw new Error("INSUFFICIENT_SUPPLY");
-      }
-    }
+    const newSupply =
+      operation === "mint"
+        ? currentSupply + deltaAmount
+        : // Clamped rather than rejected, for the same reason: the burn happened.
+          // A cached total that was already behind reality is not a reason to
+          // record a negative supply — the next refresh reads the mint itself.
+          bigIntMax(0n, currentSupply - deltaAmount);
 
     const now = new Date().toISOString();
     await this.db

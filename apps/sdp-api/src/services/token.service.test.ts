@@ -3,7 +3,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb, type PreparedStatement } from "@/db";
 import { AppError } from "@/lib/errors";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -298,6 +298,134 @@ describe("TokenService", () => {
       await expect(
         tokenService.updateToken("tok_does_not_exist", { name: "Nope" })
       ).rejects.not.toBeInstanceOf(AppError);
+    });
+  });
+
+  describe("maxSupply concurrency", () => {
+    // A deployed, still-mintable token: cap and minted supply in base units.
+    async function insertCappedToken(
+      id: string,
+      supplyBaseUnits: string,
+      maxSupplyBaseUnits: string | null
+    ): Promise<void> {
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (
+            id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+            name, symbol, decimals, total_supply_cached, max_supply, is_mintable,
+            freeze_authority_enabled, allowlist_enabled, status, created_by
+          ) VALUES (?, ?, ?, 'Capped11111111111111111111111111111111111111', 'Auth111111111111111111111111111111111111111',
+            NULL, 'Capped Token', 'CAP', 6, ?, ?, 1, 1, 0, 'active', ?)`
+        )
+        .bind(
+          id,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          supplyBaseUnits,
+          maxSupplyBaseUnits,
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+    }
+
+    const storedSupply = (id: string) =>
+      db
+        .prepare("SELECT total_supply_cached, max_supply FROM issued_tokens WHERE id = ?")
+        .bind(id)
+        .first<{ total_supply_cached: string; max_supply: string | null }>();
+
+    it("records a settled mint even when the cap was lowered under it", async () => {
+      // The pre-flight check passed against a 2000 cap, the mint landed, and an
+      // operator lowered the cap to 1000 before this write. The tokens exist:
+      // refusing to record them would report a successful mint as failed and
+      // leave the cache behind the chain.
+      await insertCappedToken("tok_cap_settled_mint", "900000000", "1000000000");
+
+      await expect(
+        tokenService.updateSupply("tok_cap_settled_mint", "500", "mint")
+      ).resolves.toBeUndefined();
+
+      const row = await storedSupply("tok_cap_settled_mint");
+      expect(row?.total_supply_cached).toBe("1400000000");
+      // And the cap still does its job — on the next mint, not on this one.
+      expect(row?.max_supply).toBe("1000000000");
+    });
+
+    it("records a settled burn rather than a negative supply", async () => {
+      // The on-chain balance check is what bounds a burn; a cached total that
+      // already lagged reality is not a reason to reject the write.
+      await insertCappedToken("tok_cap_settled_burn", "100000000", null);
+
+      await expect(
+        tokenService.updateSupply("tok_cap_settled_burn", "500", "burn")
+      ).resolves.toBeUndefined();
+
+      expect((await storedSupply("tok_cap_settled_burn"))?.total_supply_cached).toBe("0");
+    });
+
+    it("refuses a cap that a mint outran between the check and the write", async () => {
+      await insertCappedToken("tok_cap_lost_race", "500000000", "1000000000");
+      const originalPrepare = db.prepare.bind(db);
+
+      // Lands the mint inside the window the guard exists for: after the cap has
+      // been checked against the stored supply, before the new cap is written. A
+      // 1200 cap is legal against 500 minted and illegal against the 1500 this
+      // leaves behind, so an unguarded write would persist a cap the token has
+      // already outgrown.
+      let injected = false;
+      db.prepare = ((query: string) => {
+        const statement = originalPrepare(query);
+        if (injected || !query.includes("COALESCE(total_supply_cached")) {
+          return statement;
+        }
+        injected = true;
+        return {
+          ...statement,
+          bind: (...args: unknown[]) => {
+            const bound = statement.bind(...args);
+            return {
+              ...bound,
+              first: async (columnName?: string) => {
+                const result = await bound.first(columnName);
+                await originalPrepare(
+                  "UPDATE issued_tokens SET total_supply_cached = ? WHERE id = ?"
+                )
+                  .bind("1500000000", "tok_cap_lost_race")
+                  .run();
+                return result;
+              },
+            } as PreparedStatement;
+          },
+        } as PreparedStatement;
+      }) as typeof db.prepare;
+
+      try {
+        await expect(
+          tokenService.updateToken("tok_cap_lost_race", { maxSupply: "1200" })
+        ).rejects.toMatchObject({
+          code: "CONFLICT",
+          message: expect.stringContaining("supply changed while this update was in flight"),
+        });
+      } finally {
+        db.prepare = originalPrepare as typeof db.prepare;
+      }
+
+      expect(injected, "supply read was intercepted").toBe(true);
+      // The cap the race would have persisted is not there, and the mint is.
+      const row = await storedSupply("tok_cap_lost_race");
+      expect(row?.max_supply).toBe("1000000000");
+      expect(row?.total_supply_cached).toBe("1500000000");
+    });
+
+    it("does not guard an uncapping request on the supply", async () => {
+      // Clearing a cap cannot conflict with a mint, so a supply that moved in the
+      // window is not a reason to make the operator retry.
+      await insertCappedToken("tok_cap_cleared", "500000000", "1000000000");
+
+      const updated = await tokenService.updateToken("tok_cap_cleared", { maxSupply: null });
+
+      expect(updated.maxSupply).toBeNull();
+      expect((await storedSupply("tok_cap_cleared"))?.max_supply).toBeNull();
     });
   });
 
