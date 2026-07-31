@@ -1,4 +1,5 @@
-import { vercelAdapter } from "@flags-sdk/vercel";
+import { createVercelAdapter, vercelAdapter } from "@flags-sdk/vercel";
+import { createClient } from "@vercel/flags-core";
 import { dedupe, flag } from "flags/next";
 import { getSdpAuth } from "@/lib/sdp-api";
 
@@ -52,9 +53,28 @@ const identifyDashboardEntities = dedupe(async (): Promise<DashboardFlagEntities
   };
 });
 
+/**
+ * Adapter serving the dashboard flags. On Vercel deploys this is the default
+ * streaming adapter (build-time bundled definitions cover its fallback). In
+ * local dev the stream regularly misses the SDK's 3s init timeout, which made
+ * every flag silently serve its defaultValue until the background connection
+ * caught up — so dev polls the datafile instead: the initial fetch resolves in
+ * well under the init timeout, and dashboard changes still land within the
+ * polling interval.
+ */
+const dashboardFlagsAdapter =
+  process.env.NODE_ENV === "development"
+    ? createVercelAdapter(
+        createClient(process.env.FLAGS, {
+          stream: false,
+          polling: { intervalMs: 30_000, initTimeoutMs: 10_000 },
+        })
+      )
+    : vercelAdapter;
+
 export const homepageOpenSignup = flag<boolean, DashboardFlagEntities>({
   key: "homepage-open-signup",
-  adapter: vercelAdapter(),
+  adapter: dashboardFlagsAdapter(),
   identify: identifyDashboardEntities,
   defaultValue: flagDefault(
     "SDP_FLAG_HOMEPAGE_OPEN_SIGNUP",
@@ -69,7 +89,7 @@ export const homepageOpenSignup = flag<boolean, DashboardFlagEntities>({
 
 export const organizationOnboarding = flag<boolean, DashboardFlagEntities>({
   key: "organization-onboarding",
-  adapter: vercelAdapter(),
+  adapter: dashboardFlagsAdapter(),
   identify: identifyDashboardEntities,
   defaultValue: flagDefault("SDP_FLAG_ORGANIZATION_ONBOARDING", true),
   description:
@@ -82,7 +102,7 @@ export const organizationOnboarding = flag<boolean, DashboardFlagEntities>({
 
 export const alphaledgerTokenizationEngine = flag<boolean, DashboardFlagEntities>({
   key: "alphaledger-tokenization-engine",
-  adapter: vercelAdapter(),
+  adapter: dashboardFlagsAdapter(),
   identify: identifyDashboardEntities,
   defaultValue: flagDefault("SDP_FLAG_ALPHALEDGER_TOKENIZATION_ENGINE", false),
   description: "Offer the AlphaLedger tokenization engine as an issuance provider option.",
@@ -94,7 +114,7 @@ export const alphaledgerTokenizationEngine = flag<boolean, DashboardFlagEntities
 
 export const assetProfiles = flag<boolean, DashboardFlagEntities>({
   key: "asset-profiles",
-  adapter: vercelAdapter(),
+  adapter: dashboardFlagsAdapter(),
   identify: identifyDashboardEntities,
   defaultValue: flagDefault("SDP_FLAG_ASSET_PROFILES", true),
   description: "Show the Asset Profiles issuance wizard and per-token asset management workspace.",
