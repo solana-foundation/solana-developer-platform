@@ -1,0 +1,12 @@
+{
+  "files": [
+    {
+      "path": ".github/translation-guidance.json",
+      "description": "Locale glossary, French terminology, and deterministic forbidden-term rules"
+    },
+    {
+      "path": "apps/sdp-web/src/i18n/README.md",
+      "description": "Catalog ownership and source-vs-translation pull request workflow"
+    }
+  ]
+}

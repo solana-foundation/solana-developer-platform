@@ -1,0 +1,125 @@
+{
+  "default": {
+    "product": "Solana Developer Platform",
+    "audience": "Web3 developers and institutional finance operators",
+    "principles": [
+      "Translate the product meaning, not the English sentence word for word.",
+      "Prefer concise, natural interface copy over formal or literary language.",
+      "Keep product names, protocol names, code, identifiers, placeholders, and URLs unchanged.",
+      "Use nearby approved translations to keep terminology and tone consistent."
+    ]
+  },
+  "locales": {
+    "fr": {
+      "localeName": "français (France)",
+      "voice": [
+        "Use natural professional French and address the user with vous.",
+        "Keep established Web3 terms in English when French practitioners normally use the English term.",
+        "Use French financial vocabulary when it is genuinely standard, such as actif and contrepartie."
+      ],
+      "terminology": [
+        {
+          "source": "token / tokens",
+          "preferred": "Token / Tokens",
+          "avoid": "jeton / jetons",
+          "note": "Token is the established Web3 product noun. Use French grammar around it."
+        },
+        {
+          "source": "wallet / wallets",
+          "preferred": "Wallet / Wallets",
+          "avoid": "portefeuille / portefeuilles",
+          "note": "Wallet is the established product noun in this dashboard."
+        },
+        {
+          "source": "mint / burn",
+          "preferred": "mint / burn",
+          "note": "Keep protocol action names recognizable; write natural French around them, for example minter des Tokens."
+        },
+        {
+          "source": "allowlist / blocklist",
+          "preferred": "allowlist / blocklist",
+          "avoid": "liste blanche / liste noire",
+          "note": "Keep the neutral technical terms used by the product."
+        },
+        {
+          "source": "on-chain / off-chain",
+          "preferred": "on-chain / off-chain"
+        },
+        {
+          "source": "stablecoin, API, RPC, webhook, blockchain",
+          "preferred": "Keep these established technical terms unchanged."
+        },
+        {
+          "source": "endpoint / API Playground",
+          "preferred": "endpoint / API Playground",
+          "avoid": "point de terminaison / bac à sable API",
+          "note": "Use the established developer-facing product terms."
+        },
+        {
+          "source": "asset / counterparty",
+          "preferred": "actif / contrepartie",
+          "note": "These have natural, standard French financial equivalents."
+        },
+        {
+          "source": "transfer / provider / quote",
+          "preferred": "transfert / fournisseur / devis",
+          "note": "Use the standard French product and financial terms, including in API error copy."
+        },
+        {
+          "source": "draft / deploy",
+          "preferred": "brouillon / déployer or déploiement",
+          "note": "Use the verb or noun that fits the sentence; do not insert the English word into French grammar."
+        },
+        {
+          "source": "custody",
+          "preferred": "custody for a product category; conservation in explanatory prose",
+          "note": "Choose from context instead of forcing one translation everywhere."
+        }
+      ],
+      "forbiddenTerms": [
+        {
+          "label": "jeton / jetons",
+          "pattern": "\\bjetons?\\b",
+          "flags": "iu",
+          "preferred": "Token / Tokens"
+        },
+        {
+          "label": "portefeuille / portefeuilles",
+          "pattern": "\\bportefeuilles?\\b",
+          "flags": "iu",
+          "preferred": "Wallet / Wallets"
+        },
+        {
+          "label": "point de terminaison",
+          "pattern": "\\bpoints? de terminaison\\b",
+          "flags": "iu",
+          "preferred": "endpoint / endpoints"
+        },
+        {
+          "label": "bac à sable API",
+          "pattern": "\\bbac à sable API\\b",
+          "flags": "iu",
+          "preferred": "API Playground"
+        },
+        {
+          "label": "liste d’autorisation",
+          "pattern": "\\bliste d[’']autorisation\\b",
+          "flags": "iu",
+          "preferred": "allowlist"
+        },
+        {
+          "label": "liste de blocage",
+          "pattern": "\\bliste de blocage\\b",
+          "flags": "iu",
+          "preferred": "blocklist"
+        },
+        {
+          "label": "allow list",
+          "pattern": "\\ballow list\\b",
+          "flags": "iu",
+          "preferred": "allowlist"
+        }
+      ]
+    }
+  }
+}
