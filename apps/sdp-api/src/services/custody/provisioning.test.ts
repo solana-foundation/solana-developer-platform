@@ -335,7 +335,7 @@ describe("privy wallet provisioning", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("classifies a reconciliation 401 as an invalid credential", async () => {
+  it("preserves an ambiguous create outcome when reconciliation returns 401", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(privyWalletNotFound())
@@ -343,7 +343,7 @@ describe("privy wallet provisioning", () => {
       .mockResolvedValueOnce(jsonResponse({ error: "invalid credentials" }, 401));
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
-      code: "PROVIDER_CREDENTIAL_INVALID",
+      code: "NETWORK_ERROR",
     });
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
   });
@@ -383,8 +383,8 @@ describe("privy wallet provisioning", () => {
           PRIVY_APP_ID: PRIVY_AUTHENTICATION.appId,
           PRIVY_APP_SECRET: PRIVY_AUTHENTICATION.appSecret,
         }),
-        {},
-      ),
+        {}
+      )
     ).rejects.toMatchObject({
       code: "PROVIDER_NOT_CONFIGURED",
       message: "Privy wallet creation failed",

@@ -346,13 +346,17 @@ export async function provisionPrivyWallet(
         const reconciled = await findPrivyWalletByExternalId(runtime, externalWalletLookup);
         if (reconciled) return reconciled;
       } catch (reconciliationError) {
-        if (isTerminalPrivyProvisioningError(reconciliationError)) {
+        if (isPrivyProvisioningConflict(reconciliationError)) {
           throw reconciliationError;
         }
       }
     }
     throw error;
   }
+}
+
+function isPrivyProvisioningConflict(error: unknown): error is SigningError {
+  return error instanceof SigningError && error.code === "CONFLICT";
 }
 
 function isTerminalPrivyProvisioningError(error: unknown): error is SigningError {
