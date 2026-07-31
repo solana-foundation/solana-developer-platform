@@ -112,30 +112,52 @@ async function removeExistingAllowlistEntryOnChain(opts: {
     wallet: opts.wallet,
   });
 
-  if (opts.c.env.KORA_SURFPOOL_SHIM !== "true") {
-    await removeOperation;
-    return;
-  }
-
   try {
-    await withTimeout(
-      removeOperation,
-      getSurfpoolAblRemoveTimeoutMs(opts.c.env),
-      "Surfpool control-list removal timed out"
-    );
+    if (opts.c.env.KORA_SURFPOOL_SHIM === "true") {
+      await withTimeout(
+        removeOperation,
+        getSurfpoolAblRemoveTimeoutMs(opts.c.env),
+        "Surfpool control-list removal timed out"
+      );
+    } else {
+      await removeOperation;
+    }
   } catch (error) {
-    if (!isTimeoutLikeError(error)) {
-      throw error;
+    // Submission and confirmation errors are ambiguous: the removal may have
+    // landed despite the client error, and retrying an already-absent member
+    // must remain idempotent. Verify the authoritative on-chain state before
+    // deciding whether the operation failed.
+    try {
+      if (!(await mosaic.isWalletOnList(opts.list, opts.wallet))) {
+        return;
+      }
+    } catch (verificationError) {
+      getLogger().warn(
+        {
+          list: opts.list,
+          wallet: opts.wallet,
+          error:
+            verificationError instanceof Error
+              ? verificationError.message
+              : "Unknown verification error",
+        },
+        "Unable to verify control-list state after removal error"
+      );
     }
 
-    getLogger().warn(
-      {
-        list: opts.list,
-        wallet: opts.wallet,
-        error: error.message,
-      },
-      "Surfpool control-list removal timed out; keeping DB revocation as test truth"
-    );
+    if (opts.c.env.KORA_SURFPOOL_SHIM === "true" && isTimeoutLikeError(error)) {
+      getLogger().warn(
+        {
+          list: opts.list,
+          wallet: opts.wallet,
+          error: error.message,
+        },
+        "Surfpool control-list removal timed out; keeping DB revocation as test truth"
+      );
+      return;
+    }
+
+    throw error;
   }
 }
 
@@ -281,45 +303,23 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   if (!entry || entry.tokenId !== tokenId) {
     throw notFound("Allowlist entry");
   }
-  if (entry.status === "revoked") {
+  if (entry.status === "revoked" && !token.ablListAddress) {
     return noContent(c);
   }
 
-  await tokenService.revokeAllowlistEntry(entryId);
+  if (entry.status !== "revoked") {
+    await tokenService.revokeAllowlistEntry(entryId);
+  }
 
-  try {
-    if (token.ablListAddress) {
-      await removeExistingAllowlistEntryOnChain({
-        c,
-        organizationId: auth.organizationId,
-        projectId,
-        signingWalletId: token.signingWalletId,
-        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
-        wallet: assertValidAddress(entry.address, "address"),
-      });
-    }
-  } catch (error) {
-    try {
-      await tokenService.addAllowlistEntry({
-        tokenId,
-        address: entry.address,
-        addedBy: entry.addedBy,
-        label: entry.label ?? undefined,
-        initialStatus: entry.status,
-      });
-    } catch (restoreError) {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "Failed to restore control-list entry after sync error",
-        {
-          originalError: error instanceof Error ? error.message : "Unknown removal error",
-          restoreError:
-            restoreError instanceof Error ? restoreError.message : "Unknown restore error",
-        }
-      );
-    }
-
-    throw error;
+  if (token.ablListAddress) {
+    await removeExistingAllowlistEntryOnChain({
+      c,
+      organizationId: auth.organizationId,
+      projectId,
+      signingWalletId: token.signingWalletId,
+      list: assertValidAddress(token.ablListAddress, "ablListAddress"),
+      wallet: assertValidAddress(entry.address, "address"),
+    });
   }
 
   // Audit log

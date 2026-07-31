@@ -2553,7 +2553,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("restores the database entry if on-chain control-list removal fails", async () => {
+      it("keeps the database entry revoked and retries a failed on-chain removal", async () => {
         await app.request(
           `/v1/issuance/tokens/${tokenId}/allowlist`,
           {
@@ -2585,10 +2585,14 @@ describe("Issuance Routes", () => {
 
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const removeFromListSpy = vi
           .spyOn(MosaicService.prototype, "removeFromList")
-          .mockRejectedValueOnce(new Error("mosaic removal failed"));
+          .mockRejectedValueOnce(new Error("mosaic removal failed"))
+          .mockResolvedValueOnce(undefined as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
 
         try {
           const res = await app.request(
@@ -2602,23 +2606,30 @@ describe("Issuance Routes", () => {
 
           expect(res.status).toBe(500);
 
-          const restoredListRes = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+          const revoked = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entryId)
+            .first<{ status: string }>();
+          expect(revoked?.status).toBe("revoked");
+
+          const retry = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
             {
+              method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
             },
             env
           );
-          const restoredListBody = await restoredListRes.json();
-          expect(restoredListBody.data).toHaveLength(1);
-          expect(restoredListBody.data[0].id).toBe(entryId);
+          expect(retry.status).toBe(204);
+          expect(removeFromListSpy).toHaveBeenCalledTimes(2);
         } finally {
           createOrgSignerSpy.mockRestore();
           removeFromListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
         }
       });
 
-      it("restores a pending entry as pending when on-chain removal fails", async () => {
+      it("treats a timed-out removal as success when on-chain absence is confirmed", async () => {
         const db = getDb(env);
         await db
           .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
@@ -2637,7 +2648,10 @@ describe("Issuance Routes", () => {
           .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const removeFromListSpy = vi
           .spyOn(MosaicService.prototype, "removeFromList")
-          .mockRejectedValueOnce(new Error("pending entry was never confirmed on-chain"));
+          .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
 
         try {
           const res = await app.request(
@@ -2649,15 +2663,16 @@ describe("Issuance Routes", () => {
             env
           );
 
-          expect(res.status).toBe(500);
-          const restored = await db
+          expect(res.status).toBe(204);
+          const revoked = await db
             .prepare("SELECT status FROM token_allowlists WHERE id = ?")
             .bind(entry.id)
             .first<{ status: string }>();
-          expect(restored?.status).toBe("pending");
+          expect(revoked?.status).toBe("revoked");
         } finally {
           createOrgSignerSpy.mockRestore();
           removeFromListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
         }
       });
     });

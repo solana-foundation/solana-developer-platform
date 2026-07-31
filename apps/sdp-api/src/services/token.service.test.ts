@@ -475,9 +475,29 @@ describe("TokenService", () => {
         ["tok_foreign_release", "deploying"],
         ["tok_foreign_deployed", "pending"],
         ["tok_foreign_supply", "active"],
+        ["tok_foreign_child", "active"],
       ] as const) {
         await insertToken(id, { projectId: foreignProjectId, status });
       }
+
+      const { entry: foreignEntry } = await tokenService.addAllowlistEntry({
+        tokenId: "tok_foreign_child",
+        address: "ForeignAllowlist111111111111111111111111111111",
+        addedBy: TEST_USER.id,
+      });
+      await tokenService.freezeAccount({
+        tokenId: "tok_foreign_child",
+        accountAddress: "foreign_account",
+        frozenBy: TEST_USER.id,
+      });
+      const { transaction: foreignTransaction } = await tokenService.createTransaction({
+        tokenId: "tok_foreign_child",
+        organizationId: TEST_ORG.id,
+        type: "mint",
+        params: { destination: "foreign_account", amount: "1" },
+        idempotencyKey: "foreign-idempotency-key",
+        idempotencyFingerprint: "foreign-idempotency-fingerprint",
+      });
 
       const scoped = new TokenService(
         db,
@@ -498,6 +518,60 @@ describe("TokenService", () => {
         "TOKEN_NOT_FOUND"
       );
 
+      // Child resources must enforce the same boundary even when a caller has
+      // only a globally unique entry/transaction id.
+      await expect(scoped.getAllowlistEntry(foreignEntry.id)).resolves.toBeNull();
+      await expect(scoped.listAllowlistEntries("tok_foreign_child")).rejects.toThrow(
+        "TOKEN_NOT_FOUND"
+      );
+      await expect(scoped.listAllowlistLabels("tok_foreign_child")).rejects.toThrow(
+        "TOKEN_NOT_FOUND"
+      );
+      await expect(scoped.revokeAllowlistEntry(foreignEntry.id)).rejects.toThrow(
+        "ALLOWLIST_ENTRY_NOT_FOUND"
+      );
+      await expect(scoped.activateAllowlistEntry(foreignEntry.id)).rejects.toThrow(
+        "ALLOWLIST_ENTRY_NOT_FOUND"
+      );
+      await expect(scoped.deleteAllowlistEntry(foreignEntry.id)).rejects.toThrow(
+        "ALLOWLIST_ENTRY_NOT_FOUND"
+      );
+      await expect(
+        scoped.addAllowlistEntry({
+          tokenId: "tok_foreign_child",
+          address: "BlockedForeignAdd11111111111111111111111111111",
+          addedBy: TEST_USER.id,
+        })
+      ).rejects.toThrow("TOKEN_NOT_FOUND");
+
+      await expect(
+        scoped.freezeAccount({
+          tokenId: "tok_foreign_child",
+          accountAddress: "blocked_foreign_account",
+          frozenBy: TEST_USER.id,
+        })
+      ).rejects.toThrow("TOKEN_NOT_FOUND");
+      await expect(
+        scoped.unfreezeAccount("tok_foreign_child", "foreign_account", TEST_USER.id)
+      ).rejects.toThrow("TOKEN_NOT_FOUND");
+      await expect(scoped.listFrozenAccounts("tok_foreign_child")).rejects.toThrow(
+        "TOKEN_NOT_FOUND"
+      );
+
+      await expect(scoped.getTransaction(foreignTransaction.id)).resolves.toBeNull();
+      await expect(
+        scoped.updateTransaction(foreignTransaction.id, { status: "confirmed" })
+      ).rejects.toThrow("TRANSACTION_NOT_FOUND");
+      await expect(scoped.listTokenTransactions("tok_foreign_child")).rejects.toThrow(
+        "TOKEN_NOT_FOUND"
+      );
+      await expect(
+        scoped.listTransactions({
+          organizationId: TEST_ORG.id,
+          projectId: foreignProjectId,
+        })
+      ).rejects.toThrow("cannot override the repository project scope");
+
       await expect(readStatus("tok_foreign_claim")).resolves.toBe("pending");
       await expect(readStatus("tok_foreign_release")).resolves.toBe("deploying");
       const rows = await db
@@ -512,6 +586,25 @@ describe("TokenService", () => {
         { id: "tok_foreign_deployed", mint_address: null, total_supply_cached: "0" },
         { id: "tok_foreign_supply", mint_address: null, total_supply_cached: "0" },
       ]);
+
+      const childState = await db
+        .prepare(
+          `SELECT
+             (SELECT status FROM token_allowlists WHERE id = ?) AS allowlist_status,
+             (SELECT unfrozen_at FROM frozen_accounts WHERE token_id = ? AND account_address = ?) AS unfrozen_at,
+             (SELECT status FROM issuance_transactions WHERE id = ?) AS transaction_status`
+        )
+        .bind(foreignEntry.id, "tok_foreign_child", "foreign_account", foreignTransaction.id)
+        .first<{
+          allowlist_status: string;
+          unfrozen_at: string | null;
+          transaction_status: string;
+        }>();
+      expect(childState).toEqual({
+        allowlist_status: "active",
+        unfrozen_at: null,
+        transaction_status: "pending",
+      });
     });
   });
 
