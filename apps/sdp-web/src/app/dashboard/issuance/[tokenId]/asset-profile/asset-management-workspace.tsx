@@ -116,20 +116,8 @@ function TokenizationEngineGate({
       </p>
       <div className="mt-5 grid flex-1 gap-3 sm:grid-cols-2">
         <div className="flex cursor-not-allowed flex-col rounded-xl border border-border-default bg-fill-subtle p-5">
-          <div className="relative flex flex-1 items-center justify-center overflow-hidden py-10 opacity-50">
-            <span
-              aria-hidden="true"
-              className="absolute h-24 w-24 rounded-full border border-border-default opacity-70"
-            />
-            <span
-              aria-hidden="true"
-              className="absolute h-44 w-44 rounded-full border border-border-default border-dotted opacity-45"
-            />
-            <span
-              aria-hidden="true"
-              className="absolute h-64 w-64 rounded-full border border-border-default opacity-25"
-            />
-            <span className="relative inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white]">
+          <div className="flex flex-1 items-center justify-center py-10 opacity-50">
+            <span className="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white]">
               <Image
                 src="/provider-logos/alphaledger.svg"
                 alt=""
@@ -157,20 +145,8 @@ function TokenizationEngineGate({
           onClick={() => setEngineChosen(true)}
           className="group flex flex-col rounded-xl border border-border-default bg-surface-raised p-5 transition-colors hover:bg-fill-subtle focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
         >
-          <span className="relative flex w-full flex-1 items-center justify-center overflow-hidden py-10">
-            <span
-              aria-hidden="true"
-              className="absolute h-24 w-24 rounded-full border border-border-default opacity-70 transition-transform duration-500 group-hover:scale-105 motion-reduce:transition-none"
-            />
-            <span
-              aria-hidden="true"
-              className="absolute h-44 w-44 rounded-full border border-border-default border-dotted opacity-45 transition-transform duration-500 group-hover:scale-105 motion-reduce:transition-none"
-            />
-            <span
-              aria-hidden="true"
-              className="absolute h-64 w-64 rounded-full border border-border-default opacity-25 transition-transform duration-500 group-hover:scale-105 motion-reduce:transition-none"
-            />
-            <span className="relative inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white] transition-transform duration-500 group-hover:scale-105 motion-reduce:transition-none">
+          <span className="flex w-full flex-1 items-center justify-center py-10">
+            <span className="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white] transition-transform duration-500 group-hover:scale-105 motion-reduce:transition-none">
               <Image
                 src="/landing/solana-logo.svg"
                 alt=""
