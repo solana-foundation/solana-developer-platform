@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.52.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.51.0...v0.52.0) (2026-07-31)
+
+### Features
+
+* **sdp-web:** standardize policy layout ([#1013](https://github.com/solana-foundation/solana-developer-platform/pull/1013)) ([ef26f40](https://github.com/solana-foundation/solana-developer-platform/commit/ef26f40403da18b3d2e4980750fd36cf56d051da))
+
+### Bug Fixes
+
+* **sdp-web:** repair policy search and table responsiveness ([#1027](https://github.com/solana-foundation/solana-developer-platform/pull/1027)) ([6dd9581](https://github.com/solana-foundation/solana-developer-platform/commit/6dd958112909ce8b9f825989c53fb35dc63b3990))
+* **i18n:** improve French translation quality and automation context ([#1022](https://github.com/solana-foundation/solana-developer-platform/pull/1022)) ([32b4d7d](https://github.com/solana-foundation/solana-developer-platform/commit/32b4d7d2d150108279fd758a9de2ad79077e6f17))
+
+### Maintenance
+
+* **deps:** bump the actions group across 1 directory with 2 updates ([#955](https://github.com/solana-foundation/solana-developer-platform/pull/955)) ([e738a57](https://github.com/solana-foundation/solana-developer-platform/commit/e738a5759ae92f3e05d95a5055a149a958efe635))
+
 ## [0.51.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.50.1...v0.51.0) (2026-07-31)
 
 ### Features
