@@ -774,9 +774,7 @@ function AuthorityGlyphIcon({
                 <p className="min-w-0 truncate text-[12px] leading-snug font-medium text-primary">
                   {label}
                 </p>
-                <Icon
-                  className={cn("shrink-0", CHIP_GLYPH, authorityControlColor(control))}
-                />
+                <Icon className={cn("shrink-0", CHIP_GLYPH, authorityControlColor(control))} />
               </div>
               <div className="mt-2">
                 <WalletIdentityBadge identity={identity} onCopy={onCopy} />

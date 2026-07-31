@@ -92,7 +92,7 @@ export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId:
           className={cn(
             "grid gap-4",
             operationRows.length > 1 && "lg:grid-cols-2",
-            operationRows.length > 2 && "2xl:grid-cols-3",
+            operationRows.length > 2 && "2xl:grid-cols-3"
           )}
         >
           {operationRows.map((row) => {
@@ -103,7 +103,7 @@ export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId:
                 data-testid={`fund-management-row-${row.id}`}
                 className={cn(
                   "flex items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised p-5",
-                  row.id === "lock-supply" && "lg:col-span-2 2xl:col-span-1",
+                  row.id === "lock-supply" && "lg:col-span-2 2xl:col-span-1"
                 )}
               >
                 <div className="flex min-w-0 items-center gap-3.5">

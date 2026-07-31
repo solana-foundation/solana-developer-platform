@@ -129,17 +129,13 @@
       "noneAvailable": "Aucun Wallet Signer disponible."
     },
     "header": {
-      "tokenLogo": "Logo du Token {name}",
       "notDeployed": "Non Deploy",
       "copyTokenAddress": "Copier l'adresse du Token",
-      "mintAddress": "Adresse Mint",
       "onchainAddress": "Adresse onchain",
       "tokenId": "ID Token",
       "internalTokenId": "ID Token interne",
       "ticker": "Ticker",
       "statusLabel": "Statut",
-      "or": "ou",
-      "variantPreview": "Aperçu de la mise en page de l'en-tête",
       "copyTokenId": "Copier l'ID Token",
       "explorer": "Explorer",
       "deploy": "Deploy",

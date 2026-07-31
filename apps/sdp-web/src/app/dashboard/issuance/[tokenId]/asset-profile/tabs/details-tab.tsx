@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Label } from "@/components/ui/label";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { getDetailSections } from "../../../create/asset-details-config";
@@ -33,10 +34,8 @@ import {
 } from "../../../create/form-primitives";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
 import { MetadataJsonPanel, MetadataJsonToggle } from "../../../create/metadata-json";
-import {
-  findWalletByWalletId,
-  getSignerWalletOptionLabel,
-} from "../../token-management-workspace.utils";
+import { buildWalletIdentityForSigner } from "../../../issuance-token-fields";
+import { WalletIdentityBadge } from "../../../wallet-identity";
 import type { AssetProfileForm } from "../use-asset-profile-form";
 import type { TokenOperations } from "../use-token-operations";
 
@@ -87,10 +86,12 @@ export function DetailsTab({
   // the token is on-chain and stay editable only while it's a draft.
   const isDeployed = Boolean(token.mintAddress);
 
-  const signerWallet = findWalletByWalletId(ops.authorityWallets, draft.signingWalletId);
-  const signerLabel = signerWallet
-    ? getSignerWalletOptionLabel(signerWallet, t)
-    : draft.signingWalletId || t("DashboardIssuance.assetDetails.projectDefaultSigner");
+  // null while the authority wallets are in flight — see the skeleton below.
+  const signerIdentity = buildWalletIdentityForSigner(
+    draft.signingWalletId,
+    ops.authorityWallets,
+    t
+  );
 
   return (
     <div className="space-y-4">
@@ -287,12 +288,26 @@ export function DetailsTab({
         description={t("DashboardIssuance.assetDetails.operationalDescription")}
         icon={SlidersHorizontal}
       >
-        <div className="grid items-start gap-4 sm:grid-cols-2">
-          <ReadOnlyField
-            label={t("DashboardIssuance.assetDetails.signingWallet")}
-            value={signerLabel}
-            lockReason={t("DashboardIssuance.assetDetails.signingWalletLockReason")}
-          />
+        {/* Same card the Operations forms show for a locked signer, so the wallet
+            SDP signs with looks the same wherever you meet it — named, linked to its
+            wallet page, with both identifiers copyable — instead of a read-only field
+            repeating the shortened key twice. Full width rather than the half-width
+            field grid the other sections use: the card holds whole 44-char
+            identifiers, and half a column forces them to wrap. */}
+        <div className="grid gap-1.5">
+          <Label>{t("DashboardIssuance.assetDetails.signingWallet")}</Label>
+          {signerIdentity ? (
+            // Read-only surface — no unsaved state to protect, so the wallet page
+            // opens in place.
+            <WalletIdentityBadge variant="card" walletLink="same-tab" identity={signerIdentity} />
+          ) : (
+            // Authority wallets still loading: the pinned walletId alone would render
+            // as "Signer unavailable", which is a claim, not a pending state.
+            <SkeletonBlock className="h-[7.5rem] rounded-[12px]" />
+          )}
+          <p className="text-xs text-tertiary">
+            {t("DashboardIssuance.assetDetails.signingWalletLockReason")}
+          </p>
         </div>
       </FormCard>
     </div>

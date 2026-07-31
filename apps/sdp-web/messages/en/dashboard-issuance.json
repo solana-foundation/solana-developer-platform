@@ -129,17 +129,13 @@
       "noneAvailable": "No signer wallets available."
     },
     "header": {
-      "tokenLogo": "{name} token logo",
       "notDeployed": "Not deployed",
       "copyTokenAddress": "Copy token address",
-      "mintAddress": "Mint address",
       "onchainAddress": "Onchain address",
       "tokenId": "Token ID",
       "internalTokenId": "Internal token ID",
       "ticker": "Ticker",
       "statusLabel": "Status",
-      "or": "or",
-      "variantPreview": "Header layout preview",
       "copyTokenId": "Copy token ID",
       "explorer": "Explorer",
       "deploy": "Deploy",
