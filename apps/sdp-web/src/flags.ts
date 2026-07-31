@@ -8,16 +8,19 @@ type DashboardFlagEntities = {
   };
 };
 
-/** Reads a flag's non-Vercel default from an optional env var override; the dashboard wins on Vercel deploys. */
+/** Reads a flag's non-Vercel default from an optional env var override; the dashboard wins on Vercel deploys. Mirrors sdp-api's isTruthyFlag vocabulary so shared vars parse identically on both sides. */
 function flagDefault(envVar: string, fallback: boolean): boolean {
-  const value = process.env[envVar]?.trim();
+  const value = process.env[envVar]?.trim().toLowerCase();
   if (value === undefined || value === "") {
     return fallback;
   }
-  if (value !== "true" && value !== "false") {
-    throw new Error(`${envVar} must be "true" or "false", got "${value}"`);
+  if (["1", "true", "yes", "on"].includes(value)) {
+    return true;
   }
-  return value === "true";
+  if (["0", "false", "no", "off"].includes(value)) {
+    return false;
+  }
+  throw new Error(`${envVar} must be a boolean value like "true" or "false", got "${value}"`);
 }
 
 /**
@@ -93,7 +96,7 @@ export const assetProfiles = flag<boolean, DashboardFlagEntities>({
   key: "asset-profiles",
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
-  defaultValue: flagDefault("SDP_FLAG_ASSET_PROFILES", false),
+  defaultValue: flagDefault("SDP_FLAG_ASSET_PROFILES", true),
   description: "Show the Asset Profiles issuance wizard and per-token asset management workspace.",
   options: [
     { value: false, label: "Legacy issuance" },
