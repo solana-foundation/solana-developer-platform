@@ -116,8 +116,20 @@ function TokenizationEngineGate({
       </p>
       <div className="mt-5 grid flex-1 gap-3 sm:grid-cols-2">
         <div className="flex cursor-not-allowed flex-col rounded-xl border border-border-default bg-fill-subtle p-5">
-          <div className="flex flex-1 items-center justify-center py-10 opacity-50">
-            <span className="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white]">
+          <div className="relative flex flex-1 items-center justify-center overflow-hidden py-10 opacity-50">
+            <span
+              aria-hidden="true"
+              className="absolute h-24 w-24 rounded-full border border-border-default opacity-70"
+            />
+            <span
+              aria-hidden="true"
+              className="absolute h-36 w-36 rounded-full border border-border-default opacity-45"
+            />
+            <span
+              aria-hidden="true"
+              className="absolute h-48 w-48 rounded-full border border-border-default opacity-25"
+            />
+            <span className="relative inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white]">
               <Image
                 src="/provider-logos/alphaledger.svg"
                 alt=""
@@ -145,8 +157,20 @@ function TokenizationEngineGate({
           onClick={() => setEngineChosen(true)}
           className="flex flex-col rounded-xl border border-border-default bg-surface-raised p-5 transition-colors hover:bg-fill-subtle focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
         >
-          <span className="flex w-full flex-1 items-center justify-center py-10">
-            <span className="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white]">
+          <span className="relative flex w-full flex-1 items-center justify-center overflow-hidden py-10">
+            <span
+              aria-hidden="true"
+              className="absolute h-24 w-24 rounded-full border border-border-default opacity-70"
+            />
+            <span
+              aria-hidden="true"
+              className="absolute h-36 w-36 rounded-full border border-border-default opacity-45"
+            />
+            <span
+              aria-hidden="true"
+              className="absolute h-48 w-48 rounded-full border border-border-default opacity-25"
+            />
+            <span className="relative inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white]">
               <Image
                 src="/landing/solana-logo.svg"
                 alt=""
