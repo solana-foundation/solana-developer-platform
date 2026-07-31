@@ -3400,6 +3400,79 @@ describe("Issuance Routes", () => {
         }
       });
 
+      // The cap is checked before the transaction row exists, so an operator can
+      // lower it in that window — `updateToken` only refuses once the row is there
+      // to see. Re-checking after the row is written is the other half of that
+      // handshake, and it costs nothing to lose here: no signature has been sent.
+      it("rejects an execute mint whose cap was lowered after it was admitted", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '2000000000', total_supply_cached = '0' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+
+        // The second read is the re-check; it sees the cap an operator dropped
+        // while this request was resolving its signer and destination.
+        const originalGetToken = TokenService.prototype.getToken;
+        let reads = 0;
+        const getTokenSpy = vi
+          .spyOn(TokenService.prototype, "getToken")
+          .mockImplementation(async function (this: TokenService, params) {
+            const token = await originalGetToken.call(this, params);
+            reads += 1;
+            return token && reads > 1 ? { ...token, maxSupply: "0.5" } : token;
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          const body = (await res.json()) as { error: { code: string } };
+          expect(body.error.code).toBe("MAX_SUPPLY_EXCEEDED");
+          expect(reads, "admission read plus the re-check").toBeGreaterThan(1);
+          // Nothing reached the chain, so there is no settled mint to reconcile.
+          expect(mintToSpy).not.toHaveBeenCalled();
+
+          // And the row that marked this mint in flight no longer blocks cap
+          // changes: it is closed out as failed rather than left pending.
+          const row = await getDb(env)
+            .prepare(
+              "SELECT status FROM issuance_transactions WHERE token_id = ? AND type = 'mint' ORDER BY created_at DESC LIMIT 1"
+            )
+            .bind(allowlistTokenId)
+            .first<{ status: string }>();
+          expect(row?.status).toBe("failed");
+        } finally {
+          getTokenSpy.mockRestore();
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
       it("auto-adds destination to on-chain allowlist on execute mint", async () => {
         await seedAblListAddress();
 

@@ -21,10 +21,17 @@ import type {
 } from "@sdp/types";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 
 function bigIntMax(a: bigint, b: bigint): bigint {
   return a > b ? a : b;
 }
+
+// How long a `pending`/`processing` mint row still counts as in flight. A Solana
+// blockhash is valid for ~150 slots (roughly 60-90s), so a prepared mint older
+// than this can no longer be submitted; five minutes leaves generous room for a
+// slow signer without letting an abandoned prepare hold the cap hostage.
+const MINT_IN_FLIGHT_WINDOW_MS = 5 * 60 * 1000;
 
 // Escapes LIKE/ILIKE wildcards so operator-supplied search text matches
 // literally (mirrors the payments/policy repositories' `ESCAPE '\'` idiom).
@@ -925,7 +932,48 @@ export class TokenService {
       });
     }
 
+    // A mint SDP admitted under the old cap but has not counted yet would land
+    // after this write and push the recorded supply past the new maximum. The
+    // cached supply cannot show it — that is the whole point of "in flight" — so
+    // refuse rather than store a cap the token is about to be over. The mint
+    // re-checks the cap after publishing this marker, so the two sides can't both
+    // decide they won.
+    if (await this.hasMintInFlight(existing.id)) {
+      throw new AppError(
+        "CONFLICT",
+        "A mint is in flight for this token; retry the cap change once it settles"
+      );
+    }
+
     return { maxSupplyBaseUnits: baseUnits.toString(), supplyBaseUnits };
+  }
+
+  /**
+   * Whether a mint for this token is between "admitted" and "settled".
+   *
+   * The mint handler writes its `issuance_transactions` row before it sends
+   * anything on-chain and moves it off `pending`/`processing` once the result is
+   * recorded, so the row is the only marker of a mint SDP has already let past the
+   * cap but has not yet counted. Lowering the cap while one is in flight is what
+   * would leave the recorded supply above the new maximum.
+   *
+   * Bounded by age, because `prepare` mints leave the same row behind for a client
+   * that may never submit: past the window its blockhash has expired, so it can no
+   * longer land and no longer has a claim on the cap. Nothing reaps those rows, so
+   * without the bound one abandoned prepare would wedge cap edits for good.
+   */
+  async hasMintInFlight(tokenId: string): Promise<boolean> {
+    const since = new Date(Date.now() - MINT_IN_FLIGHT_WINDOW_MS).toISOString();
+    const row = await this.db
+      .prepare(
+        `SELECT 1 AS present FROM issuance_transactions
+         WHERE token_id = ? AND type = 'mint' AND status IN ('pending', 'processing')
+           AND updated_at >= ?
+         LIMIT 1`
+      )
+      .bind(tokenId, since)
+      .first<{ present: number }>();
+    return row !== null;
   }
 
   /**
@@ -1153,8 +1201,11 @@ export class TokenService {
    * A cap an operator lowers mid-mint still does its job: it is compared against
    * the total this write records, so it blocks the *next* mint. The cap limits
    * what may be minted, never what already has been — SPL has no cap of its own,
-   * so admission control is all SDP has, and it is only as tight as this cache is
-   * fresh (two mints admitted concurrently can still overshoot together).
+   * so admission control is all SDP has, and a mint already on its way to the
+   * chain cannot be taken back. `updateToken` and the mint handler hand off
+   * through the in-flight transaction row (see `hasMintInFlight`) to keep that
+   * window to the send itself; when it happens anyway, the overshoot is logged
+   * rather than left to be inferred from the numbers.
    */
   async updateSupply(tokenId: string, delta: string, operation: "mint" | "burn"): Promise<void> {
     const token = await this._getTokenById(tokenId);
@@ -1179,6 +1230,26 @@ export class TokenService {
       )
       .bind(newSupply.toString(), now, now, tokenId)
       .run();
+
+    // The one state the handshake between this write and a cap change cannot rule
+    // out: a mint that was already on its way to the chain when a lower cap
+    // committed. Recorded truthfully above, and said out loud here, because
+    // otherwise the only trace is a supply figure quietly larger than the cap
+    // beside it.
+    if (operation === "mint" && token.maxSupply) {
+      const maxSupply = parseDecimalAmount(token.maxSupply, token.decimals);
+      if (newSupply > maxSupply) {
+        getLogger().warn(
+          {
+            event: "token_supply_exceeds_max_supply",
+            tokenId,
+            recordedSupplyBaseUnits: newSupply.toString(),
+            maxSupplyBaseUnits: maxSupply.toString(),
+          },
+          "Recorded a settled mint above the token's configured max supply; the cap was lowered while it was in flight. No further mints are admitted until the cap is raised."
+        );
+      }
+    }
   }
 
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {

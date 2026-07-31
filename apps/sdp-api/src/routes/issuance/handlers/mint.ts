@@ -431,6 +431,32 @@ export const executeMint = async (c: AppContext) => {
     });
   }
 
+  // The cap was checked against a read taken before this row existed, so an
+  // operator lowering it in that window would only find out after the mint had
+  // landed — and the recorded supply would sit above their new maximum. The row
+  // above is the marker `updateToken` refuses on, so re-checking here is the other
+  // half of the handshake: whoever published second loses, and this side loses for
+  // free because nothing is on-chain yet.
+  //
+  // What remains is the send itself: a cap that commits between this check and
+  // `mintTo` still ends up below the supply that lands, and no amount of DB work
+  // can prevent that — SPL has no cap of its own, so a settled mint cannot be
+  // taken back. `updateSupply` records it and logs the overshoot, and the cap
+  // blocks every mint after it.
+  const admitted = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!admitted) {
+    throw notFound("Token");
+  }
+  try {
+    resolveMintOperationAmount(admitted, parsed.data.mint.amount);
+  } catch (error) {
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
+
   try {
     const result = await mosaic.mintTo({
       mint: mintAddress,

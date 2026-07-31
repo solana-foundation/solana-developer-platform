@@ -2,9 +2,10 @@
  * Token Service Unit Tests
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb, type PreparedStatement } from "@/db";
 import { AppError } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
@@ -340,10 +341,24 @@ describe("TokenService", () => {
       // refusing to record them would report a successful mint as failed and
       // leave the cache behind the chain.
       await insertCappedToken("tok_cap_settled_mint", "900000000", "1000000000");
+      const warn = vi.spyOn(getLogger(), "warn");
 
       await expect(
         tokenService.updateSupply("tok_cap_settled_mint", "500", "mint")
       ).resolves.toBeUndefined();
+
+      // Recording it quietly would leave a supply larger than the cap beside it as
+      // the only trace, so the overshoot says so.
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "token_supply_exceeds_max_supply",
+          tokenId: "tok_cap_settled_mint",
+          recordedSupplyBaseUnits: "1400000000",
+          maxSupplyBaseUnits: "1000000000",
+        }),
+        expect.any(String)
+      );
+      warn.mockRestore();
 
       const row = await storedSupply("tok_cap_settled_mint");
       expect(row?.total_supply_cached).toBe("1400000000");
@@ -415,6 +430,65 @@ describe("TokenService", () => {
       const row = await storedSupply("tok_cap_lost_race");
       expect(row?.max_supply).toBe("1000000000");
       expect(row?.total_supply_cached).toBe("1500000000");
+    });
+
+    // The mint handler's own row, written before it sends anything on-chain.
+    async function insertMintTransaction(
+      tokenId: string,
+      status: "pending" | "confirmed" | "failed",
+      ageMs = 0
+    ): Promise<void> {
+      const at = new Date(Date.now() - ageMs).toISOString();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+            id, token_id, organization_id, type, status, operation_params, created_at, updated_at
+          ) VALUES (?, ?, ?, 'mint', ?, '{}', ?, ?)`
+        )
+        .bind(`txn_${tokenId}_${status}`, tokenId, TEST_ORG.id, status, at, at)
+        .run();
+    }
+
+    it("refuses a cap change while a mint it already admitted is in flight", async () => {
+      // The supply guard cannot see this one: the mint passed the cap check, has
+      // not landed, and would push the recorded total past the new maximum.
+      await insertCappedToken("tok_cap_inflight", "500000000", "2000000000");
+      await insertMintTransaction("tok_cap_inflight", "pending");
+
+      await expect(
+        tokenService.updateToken("tok_cap_inflight", { maxSupply: "1000" })
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        message: expect.stringContaining("mint is in flight"),
+      });
+
+      expect((await storedSupply("tok_cap_inflight"))?.max_supply).toBe("2000000000");
+    });
+
+    it("lets the cap change once every mint has settled", async () => {
+      await insertCappedToken("tok_cap_settled_txns", "500000000", "2000000000");
+      await insertMintTransaction("tok_cap_settled_txns", "confirmed");
+      await insertMintTransaction("tok_cap_settled_txns", "failed");
+
+      const updated = await tokenService.updateToken("tok_cap_settled_txns", {
+        maxSupply: "1000",
+      });
+
+      expect(updated.maxSupply).toBe("1000");
+    });
+
+    it("stops treating an abandoned prepared mint as in flight", async () => {
+      // `prepare` leaves a pending row for a client that may never submit, and
+      // nothing reaps it. Past the blockhash's life it cannot land, so it must not
+      // hold the cap hostage forever.
+      await insertCappedToken("tok_cap_stale_prepare", "500000000", "2000000000");
+      await insertMintTransaction("tok_cap_stale_prepare", "pending", 10 * 60 * 1000);
+
+      const updated = await tokenService.updateToken("tok_cap_stale_prepare", {
+        maxSupply: "1000",
+      });
+
+      expect(updated.maxSupply).toBe("1000");
     });
 
     it("does not guard an uncapping request on the supply", async () => {
