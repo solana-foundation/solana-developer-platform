@@ -1,0 +1,30 @@
+{
+  "name": "@sdp/spc-escrow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "generate": "tsx scripts/generate.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sdp/kit-augment": "workspace:*",
+    "@solana-program/token": "catalog:",
+    "@solana/kit": "catalog:"
+  },
+  "devDependencies": {
+    "@codama/renderers-js": "^2.2.0",
+    "codama": "^1.6.0",
+    "tsx": "4.22.4",
+    "vitest": "^4.1.8"
+  }
+}

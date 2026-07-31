@@ -10,11 +10,16 @@
  */
 
 import { type ScheduledTask, schedule } from "node-cron";
-import { isRecurringPaymentCollectionEnabled } from "@/lib/feature-flags";
+import { isPrivateChannelsEnabled, isRecurringPaymentCollectionEnabled } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
+import { PENDING_DEPOSITS_CRON, runPendingDepositsReconciliation } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
+import {
+  PENDING_WITHDRAWALS_CRON,
+  runPendingWithdrawalsReconciliation,
+} from "./pending-withdrawals";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
@@ -85,6 +90,33 @@ export function startCron(deps: CronDeps): CronHandle | null {
           return;
         }
         runRecurringPaymentsCollection({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        });
+      })
+    );
+  }
+
+  if (isPrivateChannelsEnabled(deps.env)) {
+    tasks.push(
+      schedule(PENDING_DEPOSITS_CRON, () => {
+        if (stopping) {
+          return;
+        }
+        runPendingDepositsReconciliation({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        });
+      })
+    );
+    tasks.push(
+      schedule(PENDING_WITHDRAWALS_CRON, () => {
+        if (stopping) {
+          return;
+        }
+        runPendingWithdrawalsReconciliation({
           env: deps.env,
           bg: deps.bg,
           observability: deps.observability,

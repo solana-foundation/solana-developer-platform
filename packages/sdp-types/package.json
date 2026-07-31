@@ -39,6 +39,11 @@
       "import": "./src/payment-rails.ts",
       "default": "./src/payment-rails.ts"
     },
+    "./private-channels": {
+      "types": "./src/private-channels.ts",
+      "import": "./src/private-channels.ts",
+      "default": "./src/private-channels.ts"
+    },
     "./provider-access": {
       "types": "./src/provider-access.ts",
       "import": "./src/provider-access.ts",

@@ -410,7 +410,8 @@ function getIssuanceRoutePageConfig(
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
-  assetProfilesEnabled: boolean
+  assetProfilesEnabled: boolean,
+  privateChannelsEnabled: boolean
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -525,7 +526,9 @@ export function getDashboardPageConfig(
     };
   }
   if (pathname.startsWith("/dashboard/payments/")) {
-    const action = getPaymentsActions(t).find((item) => pathname.startsWith(item.href));
+    const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
+      pathname.startsWith(item.href)
+    );
     const centeredTitle = action
       ? action.label
       : pathname.endsWith("/receive")
