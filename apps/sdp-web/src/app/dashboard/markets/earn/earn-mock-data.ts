@@ -209,6 +209,9 @@ export const MOCK_EARN_STRATEGIES: readonly MockEarnStrategy[] = [
 export interface MockEarnWallet {
   id: string;
   name: string;
+  provider: "fireblocks" | "anchorage";
+  providerLabel: string;
+  address: string;
   /** Display-unit balances keyed by mint. */
   balances: Readonly<Record<string, number>>;
 }
@@ -217,12 +220,18 @@ export const MOCK_EARN_WALLETS: readonly MockEarnWallet[] = [
   {
     id: "wallet_mock_treasury",
     name: "Operating treasury",
-    balances: { [USDC]: 1_250_000, [USDG]: 400_000, [USDT]: 180_000 },
+    provider: "fireblocks",
+    providerLabel: "Fireblocks",
+    address: "7M6bFdwsXQZX9MjoD4PDxQJb9FZbwdQh6VS8sK7F3WcQ",
+    balances: { [USDC]: 1_250_000, [USDG]: 400_000, [USDT]: 180_000, [PYUSD]: 260_000 },
   },
   {
     id: "wallet_mock_reserve",
     name: "Yield reserve",
-    balances: { [USDC]: 3_800_000, [USDG]: 950_000, [USDT]: 0 },
+    provider: "anchorage",
+    providerLabel: "Anchorage Digital",
+    address: "2uARXC5jQ4aZxRJXkGmVScQfGwhWJPUcqYZ5gHufzq7E",
+    balances: { [USDC]: 3_800_000, [USDG]: 950_000, [USDT]: 0, [PYUSD]: 125_000 },
   },
 ];
 

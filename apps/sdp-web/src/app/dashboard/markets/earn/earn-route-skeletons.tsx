@@ -25,21 +25,21 @@ export function EarnOverviewSkeleton() {
 export function EarnDepositSkeleton() {
   return (
     <div className="flex h-full min-h-0 w-full flex-col" aria-busy="true">
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
-        <SkeletonBlock className="h-3 w-40" />
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
+        <div className="mx-auto w-full max-w-4xl">
+          <SkeletonBlock className="h-2 w-32 rounded-full" />
+        </div>
       </div>
       <div className="min-h-0 flex-1 px-4 md:px-6">
-        <div className="mx-auto grid w-full max-w-4xl gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
-          <div>
-            <SkeletonBlock className="h-7 w-56" />
-            <SkeletonBlock className="mt-2 h-4 w-80" />
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              {STRATEGY_ROW_IDS.slice(0, 3).map((id) => (
-                <SkeletonBlock key={id} className="h-32 w-full rounded-2xl" />
-              ))}
-            </div>
+        <div className="mx-auto w-full max-w-4xl pb-8">
+          <SkeletonBlock className="h-7 w-64" />
+          <SkeletonBlock className="mt-2 h-4 w-96 max-w-full" />
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            {STRATEGY_ROW_IDS.slice(0, 2).map((id) => (
+              <SkeletonBlock key={id} className="h-28 w-full rounded-2xl" />
+            ))}
           </div>
-          <SkeletonBlock className="hidden h-40 w-full rounded-lg lg:block" />
+          <SkeletonBlock className="mt-6 h-14 w-full rounded-xl" />
         </div>
       </div>
       <div className="shrink-0 border-t border-border-default px-4 py-4 md:px-6">
