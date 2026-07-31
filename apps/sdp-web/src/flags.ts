@@ -8,14 +8,24 @@ type DashboardFlagEntities = {
   };
 };
 
+/** Reads a flag's non-Vercel default from an optional env var override; the dashboard wins on Vercel deploys. */
+function flagDefault(envVar: string, fallback: boolean): boolean {
+  const value = process.env[envVar];
+  if (value === undefined || value === "") {
+    return fallback;
+  }
+  if (value === "true" || value === "false") {
+    return value === "true";
+  }
+  throw new Error(`${envVar} must be "true" or "false", got "${value}"`);
+}
+
 /**
  * Resolves the entities Vercel Flags targeting rules match against: the
- * signed-in user's email. Signed-out sessions resolve to no entities, so only
- * default/environment rules apply.
- *
- * The email is read from the session token, which requires an `email` custom
- * claim configured per Clerk instance under Clerk Dashboard → Sessions →
- * Customize session token.
+ * signed-in user's email. Signed-out sessions — and Clerk instances whose
+ * session token lacks the `email` custom claim (Clerk Dashboard → Sessions →
+ * Customize session token) — resolve to no entities, so email-targeted rules
+ * skip and each flag serves its environment fallthrough or `defaultValue`.
  *
  * @returns The targeting entities for the current request.
  */
@@ -28,9 +38,10 @@ const identifyDashboardEntities = dedupe(async (): Promise<DashboardFlagEntities
 
   const email = sessionClaims.email;
   if (typeof email !== "string" || email.length === 0) {
-    throw new Error(
-      "Clerk session token is missing the `email` claim. Add it under Clerk Dashboard → Sessions → Customize session token."
+    console.warn(
+      "Clerk session token has no `email` claim; email-targeted flag rules will not match. Add it under Clerk Dashboard → Sessions → Customize session token."
     );
+    return {};
   }
 
   return {
@@ -42,7 +53,7 @@ export const homepageOpenSignup = flag<boolean, DashboardFlagEntities>({
   key: "homepage-open-signup",
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
-  defaultValue: true,
+  defaultValue: flagDefault("SDP_FLAG_HOMEPAGE_OPEN_SIGNUP", true),
   description: "Show self-serve signup and contact CTAs instead of the homepage waitlist CTA.",
   options: [
     { value: false, label: "Waitlist" },
@@ -54,7 +65,7 @@ export const organizationOnboarding = flag<boolean, DashboardFlagEntities>({
   key: "organization-onboarding",
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
-  defaultValue: true,
+  defaultValue: flagDefault("SDP_FLAG_ORGANIZATION_ONBOARDING", true),
   description:
     "Require newly created organizations to choose RPC and custody providers before entering the dashboard.",
   options: [
@@ -67,7 +78,7 @@ export const alphaledgerTokenizationEngine = flag<boolean, DashboardFlagEntities
   key: "alphaledger-tokenization-engine",
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
-  defaultValue: false,
+  defaultValue: flagDefault("SDP_FLAG_ALPHALEDGER_TOKENIZATION_ENGINE", false),
   description: "Offer the AlphaLedger tokenization engine as an issuance provider option.",
   options: [
     { value: false, label: "Mosaic only" },
@@ -79,7 +90,7 @@ export const assetProfiles = flag<boolean, DashboardFlagEntities>({
   key: "asset-profiles",
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
-  defaultValue: true,
+  defaultValue: flagDefault("SDP_FLAG_ASSET_PROFILES", true),
   description: "Show the Asset Profiles issuance wizard and per-token asset management workspace.",
   options: [
     { value: false, label: "Legacy issuance" },
