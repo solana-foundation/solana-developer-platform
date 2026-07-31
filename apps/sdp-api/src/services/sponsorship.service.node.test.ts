@@ -157,9 +157,7 @@ describe("sponsorship construction guard", () => {
       .filter((file) => !file.endsWith(".test.ts") && !file.endsWith(".spec.ts"))
       .filter((file) => !file.endsWith("/services/sponsorship.service.ts"))
       .filter((file) => !file.endsWith("/services/adapters/index.ts"))
-      .filter((file) =>
-        readFileSync(file, "utf8").includes('from "@sdp/payments/fee-payment"')
-      )
+      .filter((file) => readFileSync(file, "utf8").includes('from "@sdp/payments/fee-payment"'))
       .map((file) => path.relative(sourceRoot, file));
 
     expect(violations).toEqual([]);
