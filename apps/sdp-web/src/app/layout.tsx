@@ -7,7 +7,6 @@ import { I18nProvider } from "@/i18n/provider";
 import { getI18nRequest, getTranslations } from "@/i18n/server";
 import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import "./globals.css";
-import Script from "next/script";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations();
@@ -33,15 +32,6 @@ export default async function RootLayout({
 
   return (
     <html lang={locale} suppressHydrationWarning>
-      <head>
-        {process.env.NODE_ENV === "development" && (
-          <Script
-            src="//unpkg.com/react-grab/dist/index.global.js"
-            crossOrigin="anonymous"
-            strategy="beforeInteractive"
-          />
-        )}
-      </head>
       <body>
         <ThemeProvider>
           <I18nProvider locale={locale} messages={messages}>
