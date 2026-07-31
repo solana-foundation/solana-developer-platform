@@ -451,7 +451,7 @@ describe("PolicyRepository (postgres)", () => {
       requested_by: TEST_USER.id,
     });
 
-    expect(() =>
+    await expect(
       repo.updateApprovalRequestStatus({
         organizationId: "org_other",
         approvalRequestId: request?.id ?? "",
@@ -459,7 +459,7 @@ describe("PolicyRepository (postgres)", () => {
         operationStatus: "executing",
         resolvedBy: TEST_USER.id,
       })
-    ).toThrowError("cannot override the repository organization scope");
+    ).rejects.toThrowError("cannot override the repository organization scope");
 
     await expect(
       repo.updateApprovalRequestStatus({
