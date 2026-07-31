@@ -303,14 +303,14 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   if (!entry || entry.tokenId !== tokenId) {
     throw notFound("Allowlist entry");
   }
-  if (entry.status === "revoked" && !token.ablListAddress) {
+  if (entry.status === "revoked") {
     return noContent(c);
   }
 
-  if (entry.status !== "revoked") {
-    await tokenService.revokeAllowlistEntry(entryId);
-  }
-
+  // For on-chain lists, confirm authoritative removal before publishing the
+  // final DB state. The helper reconciles ambiguous submission errors by
+  // reading membership, so a timeout that landed still completes, while a
+  // definite failure leaves the entry accurately active and safely retryable.
   if (token.ablListAddress) {
     await removeExistingAllowlistEntryOnChain({
       c,
@@ -321,6 +321,8 @@ export const removeAllowlistEntry = async (c: AppContext) => {
       wallet: assertValidAddress(entry.address, "address"),
     });
   }
+
+  await tokenService.revokeAllowlistEntry(entryId);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

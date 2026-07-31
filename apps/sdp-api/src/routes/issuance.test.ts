@@ -2553,7 +2553,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("keeps the database entry revoked and retries a failed on-chain removal", async () => {
+      it("keeps the database entry active until a retry confirms on-chain removal", async () => {
         await app.request(
           `/v1/issuance/tokens/${tokenId}/allowlist`,
           {
@@ -2606,11 +2606,11 @@ describe("Issuance Routes", () => {
 
           expect(res.status).toBe(500);
 
-          const revoked = await db
+          const stillActive = await db
             .prepare("SELECT status FROM token_allowlists WHERE id = ?")
             .bind(entryId)
             .first<{ status: string }>();
-          expect(revoked?.status).toBe("revoked");
+          expect(stillActive?.status).toBe("active");
 
           const retry = await app.request(
             `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
@@ -2622,6 +2622,12 @@ describe("Issuance Routes", () => {
           );
           expect(retry.status).toBe(204);
           expect(removeFromListSpy).toHaveBeenCalledTimes(2);
+
+          const revoked = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entryId)
+            .first<{ status: string }>();
+          expect(revoked?.status).toBe("revoked");
         } finally {
           createOrgSignerSpy.mockRestore();
           removeFromListSpy.mockRestore();
