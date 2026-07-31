@@ -1,5 +1,6 @@
 import type { Token } from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
@@ -27,7 +28,7 @@ export async function enforceIssuanceWalletOperationPolicy(
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, input.auth, input.walletId);
 
-  await enforceWalletOperationPolicy(c.env, {
+  await enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
     organizationId: input.auth.organizationId,
     projectId: input.token.projectId,
     custodyWalletId: policyWallet?.id ?? null,

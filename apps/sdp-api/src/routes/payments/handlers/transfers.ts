@@ -36,6 +36,7 @@ import { getAuth } from "@/lib/auth";
 import { AppError, accountFrozen, badRequest, badRequestQuery, solanaRpcError } from "@/lib/errors";
 import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -232,7 +233,7 @@ async function enforcePaymentTransferOperationPolicy(
     rawPayload?: Record<string, unknown>;
   }
 ) {
-  return enforceWalletOperationPolicy(c.env, {
+  return enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
     custodyWalletId: operation.sourceWallet.id,

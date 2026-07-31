@@ -83,11 +83,43 @@ function assertNestedTenantClaims(
   }
 
   visited.add(value);
-  if (
-    !Array.isArray(value) &&
-    (Object.hasOwn(value, "organizationId") || Object.hasOwn(value, "projectId"))
-  ) {
-    assertTenantClaim(scope, value as { organizationId: unknown; projectId: unknown }, operation);
+  if (value instanceof Map) {
+    for (const [key, nested] of value) {
+      assertNestedTenantClaims(scope, key, operation, visited);
+      assertNestedTenantClaims(scope, nested, operation, visited);
+    }
+    return;
+  }
+
+  if (value instanceof Set) {
+    for (const nested of value) {
+      assertNestedTenantClaims(scope, nested, operation, visited);
+    }
+    return;
+  }
+
+  if (!Array.isArray(value)) {
+    const record = value as Record<PropertyKey, unknown>;
+    if (Object.hasOwn(record, "organizationId") || Object.hasOwn(record, "projectId")) {
+      assertTenantClaim(
+        scope,
+        {
+          organizationId: record.organizationId,
+          projectId: record.projectId,
+        },
+        operation
+      );
+    }
+    if (Object.hasOwn(record, "organization_id") || Object.hasOwn(record, "project_id")) {
+      assertTenantClaim(
+        scope,
+        {
+          organizationId: record.organization_id,
+          projectId: record.project_id,
+        },
+        operation
+      );
+    }
   }
 
   for (const nested of Object.values(value)) {

@@ -1,3 +1,4 @@
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { assertWalletPolicyAllowsTransferWithRows } from "@/services/payments/wallet-policy";
 import {
   enforceWalletOperationPolicy,
@@ -22,7 +23,7 @@ export async function enforceBatchPolicies(
   resolved: ResolvedBatchRequest,
   input: CreateTransferBatchInput
 ): Promise<void> {
-  const enforcement = await enforceWalletOperationPolicy(c.env, {
+  const enforcement = await enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
     organizationId: resolved.scope.auth.organizationId,
     projectId: resolved.scope.auth.projectId,
     custodyWalletId: resolved.sourceWallet.id,

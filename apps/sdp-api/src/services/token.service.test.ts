@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
@@ -225,7 +226,7 @@ describe("TokenService", () => {
   describe("updateToken undeployed guard", () => {
     async function insertToken(
       id: string,
-      overrides: { mintAddress?: string | null; status?: string }
+      overrides: { mintAddress?: string | null; projectId?: string; status?: string }
     ): Promise<void> {
       await db
         .prepare(
@@ -237,7 +238,7 @@ describe("TokenService", () => {
         )
         .bind(
           id,
-          TEST_PROJECT.id,
+          overrides.projectId ?? TEST_PROJECT.id,
           TEST_ORG.id,
           overrides.mintAddress ?? null,
           overrides.status ?? "pending",
@@ -304,7 +305,7 @@ describe("TokenService", () => {
   describe("deploy claim lifecycle (beginTokenDeploy / releaseTokenDeploy)", () => {
     async function insertToken(
       id: string,
-      overrides: { mintAddress?: string | null; status?: string }
+      overrides: { mintAddress?: string | null; projectId?: string; status?: string }
     ): Promise<void> {
       await db
         .prepare(
@@ -316,7 +317,7 @@ describe("TokenService", () => {
         )
         .bind(
           id,
-          TEST_PROJECT.id,
+          overrides.projectId ?? TEST_PROJECT.id,
           TEST_ORG.id,
           overrides.mintAddress ?? null,
           overrides.status ?? "pending",
@@ -405,6 +406,59 @@ describe("TokenService", () => {
       await tokenService.releaseTokenDeploy("tok_claim_release_noop");
 
       expect(await readStatus("tok_claim_release_noop")).toBe("active");
+    });
+
+    it("applies tenant predicates before deployment and supply mutations", async () => {
+      const foreignProjectId = "prj_token_foreign";
+      await db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Foreign Project', ?, 'sandbox', 'active', ?)`
+        )
+        .bind(foreignProjectId, TEST_ORG.id, foreignProjectId, TEST_USER.id)
+        .run();
+      for (const [id, status] of [
+        ["tok_foreign_claim", "pending"],
+        ["tok_foreign_release", "deploying"],
+        ["tok_foreign_deployed", "pending"],
+        ["tok_foreign_supply", "active"],
+      ] as const) {
+        await insertToken(id, { projectId: foreignProjectId, status });
+      }
+
+      const scoped = new TokenService(
+        db,
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      );
+
+      await expect(scoped.beginTokenDeploy("tok_foreign_claim")).resolves.toBeNull();
+      await scoped.releaseTokenDeploy("tok_foreign_release");
+      await expect(
+        scoped.setTokenDeployed(
+          "tok_foreign_deployed",
+          "ForeignMint111111111111111111111111111111111",
+          "ForeignAuthority11111111111111111111111111111",
+          null
+        )
+      ).rejects.toThrow("TOKEN_NOT_FOUND");
+      await expect(scoped.setSupplyFromBaseUnits("tok_foreign_supply", "999")).rejects.toThrow(
+        "TOKEN_NOT_FOUND"
+      );
+
+      await expect(readStatus("tok_foreign_claim")).resolves.toBe("pending");
+      await expect(readStatus("tok_foreign_release")).resolves.toBe("deploying");
+      const rows = await db
+        .prepare(
+          `SELECT id, mint_address, total_supply_cached
+           FROM issued_tokens
+           WHERE id IN ('tok_foreign_deployed', 'tok_foreign_supply')
+           ORDER BY id`
+        )
+        .all<{ id: string; mint_address: string | null; total_supply_cached: string }>();
+      expect(rows.results).toEqual([
+        { id: "tok_foreign_deployed", mint_address: null, total_supply_cached: "0" },
+        { id: "tok_foreign_supply", mint_address: null, total_supply_cached: "0" },
+      ]);
     });
   });
 

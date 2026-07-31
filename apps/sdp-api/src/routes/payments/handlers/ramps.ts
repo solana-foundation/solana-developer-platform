@@ -55,6 +55,7 @@ import {
   unsupportedRampCorridor,
 } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
   enforceWalletOperationPolicy,
@@ -243,7 +244,7 @@ async function enforceRampWalletOperationPolicy(
     rawPayload?: Record<string, unknown>;
   }
 ) {
-  return enforceWalletOperationPolicy(c.env, {
+  return enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
     organizationId: input.scope.auth.organizationId,
     projectId: input.scope.auth.projectId,
     custodyWalletId: input.wallet.id,

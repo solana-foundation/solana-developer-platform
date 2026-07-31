@@ -2161,7 +2161,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("surfaces both errors when add compensation fails", async () => {
+      it("keeps a pending DB row and audit trail when on-chain confirmation is ambiguous", async () => {
         const db = getDb(env);
         await db
           .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
@@ -2173,16 +2173,12 @@ describe("Issuance Routes", () => {
           .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
-          .mockRejectedValueOnce(new Error("on-chain add failed"));
-        // After addToList fails the handler re-checks on-chain membership; if
-        // it returns true, we'd keep the DB row and succeed — for this test we
-        // want the rollback path, so return false.
+          .mockRejectedValueOnce(new Error("on-chain add failed"))
+          .mockResolvedValueOnce(undefined as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(false);
-        const deleteAllowlistEntrySpy = vi
-          .spyOn(TokenService.prototype, "deleteAllowlistEntry")
-          .mockRejectedValueOnce(new Error("rollback failed"));
+        const deleteAllowlistEntrySpy = vi.spyOn(TokenService.prototype, "deleteAllowlistEntry");
 
         try {
           const res = await app.request(
@@ -2202,10 +2198,44 @@ describe("Issuance Routes", () => {
           );
 
           expect(res.status).toBe(500);
-          const body = await res.json();
-          expect(body.error.code).toBe("INTERNAL_ERROR");
-          expect(body.error.details.originalError).toBe("on-chain add failed");
-          expect(body.error.details.restoreError).toBe("rollback failed");
+          expect(deleteAllowlistEntrySpy).not.toHaveBeenCalled();
+
+          const entry = await db
+            .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
+            .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
+            .first<{ id: string; status: string }>();
+          expect(entry?.status).toBe("pending");
+          const audit = await db
+            .prepare(
+              `SELECT id FROM audit_logs
+               WHERE action = 'create' AND resource_type = 'token_allowlist'
+                 AND resource_id = ?`
+            )
+            .bind(entry?.id)
+            .first<{ id: string }>();
+          expect(audit).not.toBeNull();
+
+          const retry = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                address: TEST_SOLANA_ADDRESSES.wallet1,
+                label: "On-chain Wallet",
+              }),
+            },
+            env
+          );
+          expect(retry.status).toBe(201);
+          const reconciled = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry?.id)
+            .first<{ status: string }>();
+          expect(reconciled?.status).toBe("active");
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
@@ -2298,11 +2328,7 @@ describe("Issuance Routes", () => {
         expect(res.status).toBe(409);
       });
 
-      it("restores prior revoked state on rollback when re-adding a previously-revoked entry", async () => {
-        // Reactivated row (previously revoked → addAllowlistEntry promotes back
-        // to active in-place). If addToList then fails and on-chain membership
-        // is not confirmed, rollback must re-revoke (not hard-delete) so the
-        // operator's original revocation record survives.
+      it("keeps a re-added entry pending when on-chain membership is uncertain", async () => {
         const db = getDb(env);
         await db
           .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
@@ -2354,7 +2380,7 @@ describe("Issuance Routes", () => {
             .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
             .first<{ id: string; status: string }>();
           expect(row?.id).toBe(entry.id);
-          expect(row?.status).toBe("revoked");
+          expect(row?.status).toBe("pending");
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();

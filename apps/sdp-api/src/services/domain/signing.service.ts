@@ -1809,10 +1809,22 @@ export class SigningService {
   /**
    * Check the status of an async signing request.
    */
-  async getSigningStatus(requestId: string): Promise<SignStatus> {
+  async getSigningStatus(
+    orgId: string,
+    projectId: string | undefined,
+    requestId: string
+  ): Promise<SignStatus> {
     const record = await this.signingStore.findByIdOrExternal(requestId);
 
-    if (!record) {
+    if (!record || record.organizationId !== orgId) {
+      return { status: "failed", error: "Signing request not found" };
+    }
+
+    const config = await this.configStore.getById(record.custodyConfigId);
+    const configIsVisible =
+      config?.organizationId === orgId &&
+      (projectId === undefined || config.projectId === null || config.projectId === projectId);
+    if (!configIsVisible) {
       return { status: "failed", error: "Signing request not found" };
     }
 
@@ -1840,16 +1852,10 @@ export class SigningService {
       return { status: "failed", error: "Signing failed" };
     }
 
-    // Query the provider for current status
-    const config = await this.configStore.getById(record.custodyConfigId);
-    if (!config) {
-      return { status: "failed", error: "Custody configuration not found" };
-    }
-
     // Use encrypted config handler to properly decrypt credentials
     const adapter = await createAdapterFromEncryptedConfig(
       this.env,
-      record.organizationId,
+      orgId,
       config,
       this.getCustodyCipher()
     );
@@ -2023,6 +2029,7 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
     "getKeypairSigner",
     "getTransactionSigner",
     "sign",
+    "getSigningStatus",
     "configureProvider",
     "getConfiguration",
     "getConfigurations",

@@ -16,7 +16,7 @@ import {
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, conflict, internalError } from "@/lib/errors";
-import { createTenantScope } from "@/lib/tenant-scope";
+import { assertTenantClaim, createTenantScope, type TenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import {
   CustodyConfigStore,
@@ -269,17 +269,11 @@ function errorMessage(error: unknown): string {
 
 export async function enforceWalletOperationPolicy(
   env: Env,
+  scope: TenantScope,
   input: CreateWalletOperationInput
 ): Promise<WalletOperationPolicyEnforcement> {
-  const service = new WalletPolicyEnforcementService(
-    createPolicyRepository(
-      env,
-      createTenantScope({
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      })
-    )
-  );
+  assertTenantClaim(scope, input, "enforceWalletOperationPolicy");
+  const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope));
   return service.enforce(input);
 }
 

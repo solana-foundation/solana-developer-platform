@@ -20,6 +20,7 @@ import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { resolveKoraUserId } from "@/lib/kora-user";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import {
   enforceWalletOperationPolicy,
@@ -69,7 +70,7 @@ export const signerCheck = async (c: AppContext) => {
   }
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, resolvedWalletId);
-  await enforceWalletOperationPolicy(c.env, {
+  await enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
     custodyWalletId: policyWallet?.id ?? null,

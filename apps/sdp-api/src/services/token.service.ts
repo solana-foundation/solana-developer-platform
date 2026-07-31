@@ -233,6 +233,7 @@ export interface AddAllowlistInput {
   address: string;
   addedBy: string;
   label?: string;
+  initialStatus?: Extract<AllowlistEntryStatus, "pending" | "active">;
 }
 
 export interface FreezeAccountInput {
@@ -401,6 +402,17 @@ export class TokenService {
     private db: DatabaseClient,
     private readonly tenantScope?: TenantScope
   ) {}
+
+  private tenantMutationScope(): { clause: string; values: Array<string | null> } {
+    if (!this.tenantScope) {
+      return { clause: "", values: [] };
+    }
+
+    return {
+      clause: " AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?",
+      values: [this.tenantScope.organizationId, this.tenantScope.projectId],
+    };
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Token CRUD
@@ -955,12 +967,13 @@ export class TokenService {
    */
   async beginTokenDeploy(tokenId: string): Promise<Token | null> {
     const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
     const rowsAffected = await this.db
       .prepare(
         `UPDATE issued_tokens SET status = 'deploying', updated_at = ?
-         WHERE id = ? AND status = 'pending' AND mint_address IS NULL`
+         WHERE id = ?${tenant.clause} AND status = 'pending' AND mint_address IS NULL`
       )
-      .bind(now, tokenId)
+      .bind(now, tokenId, ...tenant.values)
       .run();
 
     if (rowsAffected === 0) {
@@ -978,12 +991,13 @@ export class TokenService {
    */
   async releaseTokenDeploy(tokenId: string): Promise<void> {
     const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
     await this.db
       .prepare(
         `UPDATE issued_tokens SET status = 'pending', updated_at = ?
-         WHERE id = ? AND status = 'deploying' AND mint_address IS NULL`
+         WHERE id = ?${tenant.clause} AND status = 'deploying' AND mint_address IS NULL`
       )
-      .bind(now, tokenId)
+      .bind(now, tokenId, ...tenant.values)
       .run();
   }
 
@@ -995,8 +1009,9 @@ export class TokenService {
     ablListAddress?: string | null
   ): Promise<Token> {
     const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
 
-    await this.db
+    const rowsAffected = await this.db
       .prepare(
         `UPDATE issued_tokens SET
           mint_address = ?,
@@ -1007,7 +1022,7 @@ export class TokenService {
           status = 'active',
           deployed_at = ?,
           updated_at = ?
-         WHERE id = ?`
+         WHERE id = ?${tenant.clause}`
       )
       .bind(
         mintAddress,
@@ -1017,9 +1032,14 @@ export class TokenService {
         ablListAddress ?? null,
         now,
         now,
-        tokenId
+        tokenId,
+        ...tenant.values
       )
       .run();
+
+    if (rowsAffected === 0) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
@@ -1071,12 +1091,19 @@ export class TokenService {
     }
 
     const now = new Date().toISOString();
-    await this.db
+    const tenant = this.tenantMutationScope();
+    const rowsAffected = await this.db
       .prepare(
-        "UPDATE issued_tokens SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ? WHERE id = ?"
+        `UPDATE issued_tokens
+         SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ?
+         WHERE id = ?${tenant.clause}`
       )
-      .bind(supplyBaseUnits, now, now, tokenId)
+      .bind(supplyBaseUnits, now, now, tokenId, ...tenant.values)
       .run();
+
+    if (rowsAffected === 0) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
@@ -1566,16 +1593,15 @@ export class TokenService {
   /**
    * Add an address to the token allowlist.
    *
-   * Returns `{ entry, wasReactivated }`. `wasReactivated` is `true` when this
-   * call promoted a previously-revoked row back to `active` (vs. inserting a
-   * fresh row). Callers rolling back after a downstream on-chain failure need
-   * this to choose between `deleteAllowlistEntry` (fresh row → hard-delete)
-   * and `revokeAllowlistEntry` (reactivated row → restore the prior `revoked`
-   * state, preserving the operator's original revocation record).
+   * `initialStatus: "pending"` gives on-chain callers a durable intent record
+   * before submission. A retry reuses that pending row; confirmed membership
+   * is promoted with `activateAllowlistEntry`. Database-only callers keep the
+   * default immediate `active` status.
    */
   async addAllowlistEntry(
     input: AddAllowlistInput
   ): Promise<{ entry: TokenAllowlistEntry; wasReactivated: boolean }> {
+    const requestedStatus = input.initialStatus ?? "active";
     const existing = await this.db
       .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(input.tokenId, input.address)
@@ -1585,21 +1611,23 @@ export class TokenService {
       if (existing.status === "active") {
         throw new Error("ADDRESS_ALREADY_ALLOWLISTED");
       }
-      // Reactivate revoked entry — operator-initiated re-add.
+      const wasReactivated = existing.status === "revoked";
       await this.db
         .prepare(
-          "UPDATE token_allowlists SET status = 'active', revoked_at = NULL, label = ?, added_by = ? WHERE id = ?"
+          "UPDATE token_allowlists SET status = ?, revoked_at = NULL, label = ?, added_by = ? WHERE id = ?"
         )
-        .bind(input.label ?? null, input.addedBy, existing.id)
+        .bind(requestedStatus, input.label ?? null, input.addedBy, existing.id)
         .run();
 
-      await this.insertAllowlistStatus(existing.id, "active", new Date().toISOString());
+      if (existing.status !== requestedStatus) {
+        await this.insertAllowlistStatus(existing.id, requestedStatus, new Date().toISOString());
+      }
 
       const entry = await this.getAllowlistEntry(existing.id);
       if (!entry) {
         throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
       }
-      return { entry, wasReactivated: true };
+      return { entry, wasReactivated };
     }
 
     const entry = await this.insertNewAllowlistEntry(input);
@@ -1644,7 +1672,7 @@ export class TokenService {
       tokenId: input.tokenId,
       address: input.address,
       label: input.label ?? null,
-      status: "active",
+      status: input.initialStatus ?? "active",
       addedBy: input.addedBy,
       createdAt: now,
       revokedAt: null,
@@ -1813,11 +1841,11 @@ export class TokenService {
   async getAllowlistEntryStatusByAddress(
     tokenId: string,
     address: string
-  ): Promise<"active" | "revoked" | null> {
+  ): Promise<AllowlistEntryStatus | null> {
     const row = await this.db
       .prepare("SELECT status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(tokenId, address)
-      .first<{ status: "active" | "revoked" }>();
+      .first<{ status: AllowlistEntryStatus }>();
 
     return row?.status ?? null;
   }
@@ -1830,6 +1858,25 @@ export class TokenService {
       .run();
 
     await this.insertAllowlistStatus(entryId, "revoked", now);
+  }
+
+  async activateAllowlistEntry(entryId: string): Promise<TokenAllowlistEntry> {
+    const now = new Date().toISOString();
+    const rowsAffected = await this.db
+      .prepare(
+        "UPDATE token_allowlists SET status = 'active', revoked_at = NULL WHERE id = ? AND status = 'pending'"
+      )
+      .bind(entryId)
+      .run();
+
+    if (rowsAffected > 0) {
+      await this.insertAllowlistStatus(entryId, "active", now);
+    }
+    const entry = await this.getAllowlistEntry(entryId);
+    if (!entry) {
+      throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
+    }
+    return entry;
   }
 
   /**

@@ -164,6 +164,7 @@ function mapPolicyRow(row: Record<string, unknown>): PaymentWalletPolicyRow {
 function buildTransferScopeWhere(params: {
   organizationId: string;
   projectId: string | null;
+  includeAllOrganizationProjects?: boolean;
   tableAlias?: string;
   extraClauses?: string[];
   extraValues?: unknown[];
@@ -172,8 +173,10 @@ function buildTransferScopeWhere(params: {
   const clauses = [`${prefix}organization_id = ?`];
   const values: unknown[] = [params.organizationId];
 
-  clauses.push(`${prefix}project_id IS NOT DISTINCT FROM ?`);
-  values.push(params.projectId);
+  if (!params.includeAllOrganizationProjects) {
+    clauses.push(`${prefix}project_id IS NOT DISTINCT FROM ?`);
+    values.push(params.projectId);
+  }
 
   if (params.extraClauses?.length) {
     clauses.push(...params.extraClauses);
@@ -210,17 +213,24 @@ export function createPostgresPaymentsRepository(
   db: DatabaseExecutor,
   tenantScope?: TenantScope
 ): PaymentsRepository {
+  const canAccessAllOrganizationProjects = tenantScope?.projectId === null;
   const assertScope = (claim: { organizationId: string; projectId: string | null }) => {
     if (tenantScope) {
       assertTenantClaim(tenantScope, claim, "PaymentsRepository");
     }
   };
-  const ownsCustodyWallet = async (custodyWalletId: string): Promise<boolean> => {
+  const ownsCustodyWallet = async (
+    custodyWalletId: string,
+    access: "read" | "write"
+  ): Promise<boolean> => {
     if (!tenantScope) return true;
-    const projectClause = tenantScope.projectId
-      ? "(cc.project_id = ? OR cc.project_id IS NULL)"
-      : "cc.project_id IS NULL";
-    const projectValues = tenantScope.projectId ? [tenantScope.projectId] : [];
+    const projectClause =
+      tenantScope.projectId === null
+        ? ""
+        : access === "read"
+          ? "AND (cc.project_id = ? OR cc.project_id IS NULL)"
+          : "AND cc.project_id = ?";
+    const projectValues = tenantScope.projectId === null ? [] : [tenantScope.projectId];
     const row = await db
       .prepare(
         `SELECT cw.id
@@ -228,7 +238,7 @@ export function createPostgresPaymentsRepository(
          JOIN custody_configs cc ON cc.id = cw.custody_config_id
          WHERE cw.id = ?
            AND cc.organization_id = ?
-           AND ${projectClause}`
+           ${projectClause}`
       )
       .bind(custodyWalletId, tenantScope.organizationId, ...projectValues)
       .first<{ id: string }>();
@@ -335,7 +345,7 @@ export function createPostgresPaymentsRepository(
         input = {
           ...input,
           organizationId: tenantScope.organizationId,
-          projectId: tenantScope.projectId,
+          projectId: canAccessAllOrganizationProjects ? undefined : tenantScope.projectId,
         };
       }
       const clauses = ["id = ?"];
@@ -410,6 +420,7 @@ export function createPostgresPaymentsRepository(
       const scope = buildTransferScopeWhere({
         organizationId: input.organizationId,
         projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: ["id = ?", "status = ANY(?)"],
         extraValues: [input.transferId, [...input.fromStatuses]],
       });
@@ -434,6 +445,7 @@ export function createPostgresPaymentsRepository(
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: ["id = ?"],
         extraValues: [params.transferId],
       });
@@ -451,6 +463,7 @@ export function createPostgresPaymentsRepository(
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: ["signature = ?"],
         extraValues: [params.signature],
       });
@@ -472,6 +485,7 @@ export function createPostgresPaymentsRepository(
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: ["id = ANY(?)"],
         extraValues: [params.transferIds],
       });
@@ -497,6 +511,7 @@ export function createPostgresPaymentsRepository(
         ? buildTransferScopeWhere({
             organizationId: effectiveOrganizationId,
             projectId: effectiveProjectId ?? null,
+            includeAllOrganizationProjects: canAccessAllOrganizationProjects,
             extraClauses: ["provider = ?", "provider_reference = ?"],
             extraValues: [params.provider, params.providerReference],
           })
@@ -522,6 +537,7 @@ export function createPostgresPaymentsRepository(
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         tableAlias: "pt",
         extraClauses: [`pt.signature IN (${buildInClause(params.signatures.length)})`],
         extraValues: params.signatures,
@@ -596,6 +612,7 @@ export function createPostgresPaymentsRepository(
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: [
           "wallet_id = ?",
           "token = ?",
@@ -677,7 +694,7 @@ export function createPostgresPaymentsRepository(
     },
 
     async getWalletPoliciesByCustodyWalletId(custodyWalletId) {
-      if (!(await ownsCustodyWallet(custodyWalletId))) {
+      if (!(await ownsCustodyWallet(custodyWalletId, "read"))) {
         return [];
       }
       return getWalletPoliciesInternal(db, custodyWalletId);
@@ -689,7 +706,7 @@ export function createPostgresPaymentsRepository(
       }
 
       for (const input of inputs) {
-        if (!(await ownsCustodyWallet(input.custodyWalletId))) {
+        if (!(await ownsCustodyWallet(input.custodyWalletId, "write"))) {
           throw new TenantScopeViolationError(
             "PaymentsRepository.upsertWalletPolicies rejected a foreign custody wallet"
           );
