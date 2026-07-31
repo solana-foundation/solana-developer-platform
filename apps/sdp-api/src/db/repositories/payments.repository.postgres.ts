@@ -217,6 +217,10 @@ export function createPostgresPaymentsRepository(
   };
   const ownsCustodyWallet = async (custodyWalletId: string): Promise<boolean> => {
     if (!tenantScope) return true;
+    const projectClause = tenantScope.projectId
+      ? "(cc.project_id = ? OR cc.project_id IS NULL)"
+      : "cc.project_id IS NULL";
+    const projectValues = tenantScope.projectId ? [tenantScope.projectId] : [];
     const row = await db
       .prepare(
         `SELECT cw.id
@@ -224,17 +228,9 @@ export function createPostgresPaymentsRepository(
          JOIN custody_configs cc ON cc.id = cw.custody_config_id
          WHERE cw.id = ?
            AND cc.organization_id = ?
-           AND (
-             cc.project_id IS NOT DISTINCT FROM ?
-             OR (? IS NOT NULL AND cc.project_id IS NULL)
-           )`
+           AND ${projectClause}`
       )
-      .bind(
-        custodyWalletId,
-        tenantScope.organizationId,
-        tenantScope.projectId,
-        tenantScope.projectId
-      )
+      .bind(custodyWalletId, tenantScope.organizationId, ...projectValues)
       .first<{ id: string }>();
     return row !== null;
   };
