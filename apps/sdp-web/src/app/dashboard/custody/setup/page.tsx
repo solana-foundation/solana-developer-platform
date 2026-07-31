@@ -57,7 +57,7 @@ async function getConnectedCustodyProviders(
 }
 
 export default async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
-  const { getToken, userId, orgId } = await auth();
+  const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -71,7 +71,6 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
 
   const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
     createRequestScopedSdpApiClients({
-      getToken,
       organizationTraceContext: trace.childContext("dashboard.custody.setup.org.api"),
       projectTraceContext: trace.childContext("dashboard.custody.setup.api"),
     })
