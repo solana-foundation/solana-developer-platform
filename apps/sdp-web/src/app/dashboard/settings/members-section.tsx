@@ -11,9 +11,11 @@ import {
 } from "@/components/ui/table";
 import { getTranslations } from "@/i18n/server";
 import { readableApiError } from "@/lib/sdp-api-error";
+import { cn } from "@/lib/utils";
 import { InvitationActions } from "./invitation-actions";
 import { InviteMemberForm } from "./invite-member-form";
 import { MemberActions } from "./member-actions";
+import { resolveMemberIdentity } from "./member-identity";
 import { MembersPagination } from "./members-pagination";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -28,18 +30,6 @@ function formatJoined(value: string): string {
 
 function roleLabel(role: string, t: Translate): string {
   return role === "admin" ? t("Shared.members.roleAdmin") : t("Shared.members.roleMember");
-}
-
-/**
- * A misconfigured Clerk JWT template can store an unsubstituted placeholder —
- * literally `{{user.primary_email_address.email_address}}` — as a user's
- * email. Printing that verbatim reads as a rendering bug rather than as the
- * data problem it is, so anything that is not an address is not shown as one.
- */
-function displayEmail(value: string): string {
-  const trimmed = value?.trim() ?? "";
-  const looksLikeAddress = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
-  return looksLikeAddress ? trimmed : "—";
 }
 
 export async function MembersSection({ page = 1 }: { page?: number }) {
@@ -93,8 +83,10 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
             </TableHeader>
             <TableBody>
               {members.map((member) => {
-                const name = member.user.name?.trim();
-                const email = displayEmail(member.user.email);
+                const identity = resolveMemberIdentity(
+                  member.user,
+                  t("Shared.members.unnamedMember")
+                );
 
                 return (
                   <TableRow key={member.id}>
@@ -103,10 +95,22 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
                           up rather than sitting under an "Unnamed" placeholder
                           that says nothing and reads as an error. */}
                       <span className="block truncate font-medium text-primary text-sm">
-                        {name || email}
+                        {identity.label}
                       </span>
-                      {name ? (
-                        <span className="block truncate text-muted text-xs">{email}</span>
+                      {identity.secondary ? (
+                        <span
+                          className={cn(
+                            "block truncate text-muted text-xs",
+                            identity.isUnresolved && "font-mono"
+                          )}
+                        >
+                          {identity.secondary}
+                        </span>
+                      ) : null}
+                      {identity.isUnresolved ? (
+                        <span className="block truncate text-muted text-xs">
+                          {t("Shared.members.emailUnavailable")}
+                        </span>
                       ) : null}
                     </TableCell>
                     <TableCell className="text-secondary text-sm">
@@ -118,7 +122,7 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
                     <TableCell className="text-right">
                       <MemberActions
                         memberId={member.id}
-                        label={name || email}
+                        label={identity.actionLabel}
                         isSelf={Boolean(member.isSelf)}
                         isLastAdmin={member.role === "admin" && meta.activeAdminCount <= 1}
                       />
