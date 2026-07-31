@@ -19,7 +19,10 @@ import { motion, useReducedMotion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import {
+  DashboardWorkspaceCard,
+  DashboardWorkspaceOverviewPanel,
+} from "@/components/dashboard-workspace-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -515,7 +518,7 @@ export function PoliciesOverviewSurface({
 
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col">
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border-default bg-surface-raised">
+      <DashboardWorkspaceCard>
         <div className="border-b border-border-default px-4 py-3">
           <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_170px_auto]">
             <Input
@@ -609,7 +612,7 @@ export function PoliciesOverviewSurface({
             </>
           )}
         </motion.div>
-      </div>
+      </DashboardWorkspaceCard>
     </DashboardWorkspaceOverviewPanel>
   );
 }

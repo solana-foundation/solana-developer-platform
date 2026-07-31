@@ -19,6 +19,10 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import {
+  DashboardWorkspaceCard,
+  DashboardWorkspaceOverviewPanel,
+} from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
@@ -237,91 +241,91 @@ export function ApprovalInbox({
       : t("DashboardApprovals.emptyHistoryDescription");
 
   return (
-    <div className="flex h-full min-h-0 flex-col px-3 outline-none md:px-6">
-      {!canDecide ? (
-        <p className="shrink-0 border-y border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
-          {t("DashboardApprovals.viewOnly")}
-        </p>
-      ) : null}
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
+      <DashboardWorkspaceCard>
+        {!canDecide ? (
+          <p className="border-b border-border-default bg-fill-subtle px-4 py-2 text-sm text-secondary">
+            {t("DashboardApprovals.viewOnly")}
+          </p>
+        ) : null}
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={tab}
-          className="flex min-h-0 flex-1 flex-col"
-          initial={reduceMotion ? false : { opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
-          transition={{ duration: 0.16, ease: "easeOut" }}
-        >
-          <ApprovalFilters
-            tab={tab}
-            filters={filters}
-            walletOptions={walletOptions}
-            apiKeyOptions={apiKeyOptions}
-            updateFilter={updateFilter}
-            patchFilters={patchFilters}
-          />
-
-          {visibleRequests.length === 0 ? (
-            <ListEmptyState
-              icon={<InboxIcon className="size-5" />}
-              message={emptyTitle}
-              description={emptyDescription}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={tab}
+            className="flex min-w-0 flex-1 flex-col"
+            initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
+            transition={{ duration: 0.16, ease: "easeOut" }}
+          >
+            <ApprovalFilters
+              tab={tab}
+              filters={filters}
+              walletOptions={walletOptions}
+              apiKeyOptions={apiKeyOptions}
+              updateFilter={updateFilter}
+              patchFilters={patchFilters}
             />
-          ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto">
+
+            {visibleRequests.length === 0 ? (
+              <ListEmptyState
+                icon={<InboxIcon className="size-5" />}
+                message={emptyTitle}
+                description={emptyDescription}
+              />
+            ) : (
               <ApprovalRequestRows
                 requests={visibleRequests}
                 apiKeyNames={apiKeyNames}
                 locale={locale}
                 relativeTimeBase={relativeTimeBase}
               />
-            </div>
-          )}
-        </motion.div>
-      </AnimatePresence>
+            )}
+          </motion.div>
+        </AnimatePresence>
 
-      {filteredRequests.length === 0 ? null : (
-        <PaginatedFooter
-          className="shrink-0"
-          page={currentPage}
-          pageCount={pageCount}
-          onPageChange={setPage}
-          summary={t("DashboardApprovals.range", {
-            from: rangeStart,
-            to: rangeEnd,
-            total: filteredRequests.length,
-          })}
-          pageSizeControl={{ pageSize, onPageSizeChange: setPageSize }}
-        >
-          <div className="flex items-center gap-2 text-xs text-secondary">
-            <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={() => reload({ silent: false })}
-                  disabled={isReloading}
-                  aria-label={t("DashboardApprovals.reload")}
-                >
-                  <RotateCw
-                    className={cn("size-4", spinning && "animate-spin")}
-                    onAnimationIteration={() => {
-                      if (!isReloading) setSpinning(false);
-                    }}
-                  />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs">
-                {t("DashboardApprovals.autoRefresh")}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        </PaginatedFooter>
-      )}
-    </div>
+        {filteredRequests.length === 0 ? null : (
+          <PaginatedFooter
+            className="mt-auto"
+            page={currentPage}
+            pageCount={pageCount}
+            onPageChange={setPage}
+            summary={t("DashboardApprovals.range", {
+              from: rangeStart,
+              to: rangeEnd,
+              total: filteredRequests.length,
+            })}
+            pageSizeControl={{ pageSize, onPageSizeChange: setPageSize }}
+          >
+            <div className="flex items-center gap-2 text-xs text-secondary">
+              <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => reload({ silent: false })}
+                    disabled={isReloading}
+                    aria-label={t("DashboardApprovals.reload")}
+                  >
+                    <RotateCw
+                      className={cn("size-4", spinning && "animate-spin")}
+                      onAnimationIteration={() => {
+                        if (!isReloading) setSpinning(false);
+                      }}
+                    />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  {t("DashboardApprovals.autoRefresh")}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </PaginatedFooter>
+        )}
+      </DashboardWorkspaceCard>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 
@@ -345,7 +349,7 @@ function ApprovalFilters({
 }) {
   const t = useTranslations();
   return (
-    <div className="flex shrink-0 flex-wrap items-end gap-3 py-4">
+    <div className="flex flex-wrap items-end gap-3 border-b border-border-default p-3">
       <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.walletFilter")}>
         <Select
           ariaLabel={t("DashboardApprovals.walletFilter")}
@@ -577,7 +581,7 @@ function ApprovalRequestRows({
             <Link
               key={request.id}
               href={approvalRequestHref(request.id)}
-              className="group grid grid-cols-[minmax(0,1fr)_auto] gap-4 py-4 outline-none transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle"
+              className="group grid grid-cols-[minmax(0,1fr)_auto] gap-4 p-4 outline-none transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle"
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -616,7 +620,7 @@ function ApprovalRequestRows({
       </div>
 
       <div className="hidden lg:block">
-        <Table className="min-w-0 [&_table]:min-w-[1118px] [&_table]:table-fixed">
+        <Table className="min-w-0 rounded-none border-0 [&_table]:min-w-[1118px] [&_table]:table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[88px]">{t("DashboardApprovals.statusColumn")}</TableHead>
