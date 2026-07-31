@@ -27,6 +27,8 @@ jobs:
         env:
           I18N_BASE_REF: origin/${{ github.base_ref }}
           I18N_HEAD_BRANCH: ${{ github.head_ref }}
+          I18N_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          I18N_BASE_REPOSITORY: ${{ github.repository }}
         run: node .github/scripts/check-catalog-change-policy.mjs
 
   module_boundaries:

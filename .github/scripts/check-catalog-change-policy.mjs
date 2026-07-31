@@ -8,12 +8,16 @@ const LOCALIZED_CATALOG =
 export function checkCatalogChangePolicy({
   changedFiles,
   headBranch,
+  headRepository,
+  baseRepository,
   releaseBranch = "codex/release-main",
 }) {
   const sourceFiles = changedFiles.filter((file) => SOURCE_CATALOG.test(file));
   const localizedFiles = changedFiles.filter((file) => LOCALIZED_CATALOG.test(file));
+  const isAutomatedRelease =
+    headBranch === releaseBranch && Boolean(headRepository) && headRepository === baseRepository;
 
-  if (localizedFiles.length === 0 || headBranch === releaseBranch) {
+  if (localizedFiles.length === 0 || isAutomatedRelease) {
     return {
       sourceFiles,
       localizedFiles,
@@ -52,6 +56,8 @@ function main() {
   const result = checkCatalogChangePolicy({
     changedFiles: changedFiles(baseRef),
     headBranch,
+    headRepository: process.env.I18N_HEAD_REPOSITORY,
+    baseRepository: process.env.I18N_BASE_REPOSITORY,
     releaseBranch: process.env.I18N_RELEASE_BRANCH,
   });
 
