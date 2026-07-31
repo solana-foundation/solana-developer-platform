@@ -6,6 +6,7 @@ import type {
   ApiPlaygroundFieldOption,
 } from "@/components/api-playground-shell";
 import type { useTranslations } from "@/i18n/provider";
+import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 
 export interface WalletsPlaygroundWalletView {
   walletId: string;
@@ -76,15 +77,13 @@ export function buildWalletsPlaygroundEndpointConfigs({
   const firstWallet = wallets[0];
   const exampleWalletId = firstWallet?.walletId ?? "privy_wallet_123";
   const exampleWalletLabel = firstWallet?.label?.trim() || t("DashboardCustody.mainWallet");
-  // biome-ignore lint/security/noSecrets: Playground sample public key for example responses only.
   const examplePublicKey = firstWallet?.publicKey ?? "11111111111111111111111111111111";
 
-  return [
+  const curatedEndpoints: ApiPlaygroundEndpointConfig[] = [
     {
       id: "list-wallets",
       title: t("DashboardCustody.playgroundListWallets"),
       method: "GET",
-      // biome-ignore lint/security/noSecrets: Public API path with static query flags.
       path: "/v1/wallets?includeAllProviders=true",
       pathFields: [],
       bodyFields: [],
@@ -156,7 +155,6 @@ export function buildWalletsPlaygroundEndpointConfigs({
       id: "get-wallet-public-key",
       title: t("DashboardCustody.playgroundGetWalletPublicKey"),
       method: "GET",
-      // biome-ignore lint/security/noSecrets: Public API path with a documented query parameter.
       path: "/v1/wallets/public-key?walletId={walletId}",
       pathFields: [
         buildSelectOrTextField(
@@ -177,7 +175,6 @@ export function buildWalletsPlaygroundEndpointConfigs({
       id: "aggregate-balances",
       title: t("DashboardCustody.playgroundAggregateBalances"),
       method: "GET",
-      // biome-ignore lint/security/noSecrets: Public API path with static query flags.
       path: "/v1/wallets/aggregate?includeAllProviders=true",
       pathFields: [],
       bodyFields: [],
@@ -256,11 +253,12 @@ export function buildWalletsPlaygroundEndpointConfigs({
       expectedResponse: {
         data: {
           transaction: {
-            // biome-ignore lint/security/noSecrets: Example signature for playground response preview.
             signature: "5n2ExampleSignature",
           },
         },
       },
     },
   ];
+
+  return mergeOpenApiPlaygroundEndpoints("wallets", curatedEndpoints);
 }

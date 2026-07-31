@@ -10,7 +10,6 @@ import {
   UsersIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
@@ -43,11 +42,11 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
-import { PaymentsRouteTabs } from "../payments-workspace-tabs";
 import type { CounterpartyPlaygroundView } from "./counterparty-playground-config";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 import { useCounterpartyDirectory } from "./use-counterparty-directory";
@@ -82,8 +81,7 @@ export function CounterpartyWorkspace({
   const locale = useLocale();
   const router = useDashboardRouter();
   const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
-  const searchParams = useSearchParams();
-  const isPlaygroundTab = searchParams.get("tab") === "playground";
+  const isPlaygroundTab = useDashboardTab() === "playground";
 
   const {
     page,
@@ -163,13 +161,6 @@ export function CounterpartyWorkspace({
   return (
     <>
       <DashboardWorkspaceTabShell
-        isPlaygroundTab={isPlaygroundTab}
-        tabNavigation={
-          <PaymentsRouteTabs
-            basePath="/dashboard/payments/counterparty"
-            value={isPlaygroundTab ? "playground" : "overview"}
-          />
-        }
         overviewClassName="flex min-h-0 flex-col overflow-hidden"
         overviewKey="counterparty-overview-tab"
         playgroundKey="counterparty-playground-tab"

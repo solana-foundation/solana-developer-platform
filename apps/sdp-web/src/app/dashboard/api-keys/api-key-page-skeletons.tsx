@@ -1,3 +1,4 @@
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
 const API_KEY_ROW_IDS = [
@@ -23,12 +24,12 @@ const API_KEY_SUMMARY_ROW_IDS = [
 
 export function ApiKeysListSkeleton() {
   return (
-    <div
-      className="flex w-full flex-col gap-6"
+    <DashboardWorkspaceOverviewPanel
+      className="flex flex-col gap-6"
       data-loading-layout="api-keys-list"
       aria-busy="true"
     >
-      <section className="flex flex-col gap-6 rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default">
+      <section className="flex flex-1 flex-col gap-6 rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default">
         <header className="grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-6 sm:grid-cols-[1fr_auto]">
           <SkeletonBlock className="h-6 w-48" />
           <SkeletonBlock className="h-4 w-full max-w-md sm:col-start-1" />
@@ -75,7 +76,7 @@ export function ApiKeysListSkeleton() {
           </div>
         </div>
       </section>
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 

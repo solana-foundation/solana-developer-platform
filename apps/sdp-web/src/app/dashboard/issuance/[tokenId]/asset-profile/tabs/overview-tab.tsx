@@ -1,29 +1,37 @@
 "use client";
 
-import { Popover } from "@base-ui/react/popover";
 import type { AssetProfile, Token } from "@sdp/types";
 import {
-  Activity,
   ArrowUpRight,
+  Building2,
   Clock,
   Coins,
-  Copy,
-  Globe,
   Hash,
-  KeyRound,
   type LucideIcon,
   RefreshCw,
   ShieldCheck,
-  TriangleAlert,
-  Wallet,
+  Signature,
+  UsersRound,
 } from "lucide-react";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
-import { cn } from "@/lib/utils";
+import {
+  AccessBadge,
+  AssetOverviewHero,
+  AuthoritiesGlyph,
+  StatTile,
+} from "../../../asset-overview-hero";
 import { getCategoryPresentation, getSubTypePresentation } from "../../../create/asset-taxonomy";
-import { safeLinkHref } from "../../../create/draft-mapping";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
+import {
+  buildAuthorityGlyphRows,
+  buildWalletIdentityForSigner,
+  formatSmartSupply,
+  resolveAccessMode,
+  resolveVerifiedHolders,
+} from "../../../issuance-token-fields";
+import { WalletIdentityBadge } from "../../../wallet-identity";
 import { formatDate, formatDateTime } from "../../token-management-workspace.utils";
 import { fetchAssetAuditHistory } from "../asset-audit.data";
 import {
@@ -51,60 +59,129 @@ export function OverviewTab({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const statusLabels: Record<Token["status"], string> = {
-    pending: t("DashboardIssuance.status.draft"),
-    active: t("DashboardIssuance.status.active"),
-    paused: t("DashboardIssuance.status.paused"),
-    revoked: t("DashboardIssuance.status.revoked"),
-  };
   const category = getCategoryPresentation(assetProfile.assetCategory);
   const subType = getSubTypePresentation(assetProfile.assetCategory, assetProfile.assetType);
-  const website = draft.website.trim();
-  const websiteHref = safeLinkHref(website);
+
+  // Smart supply / date + authority glyph, composed identically to the issuance
+  // list's expanded card (see buildOverviewHeroData) so the two surfaces match.
+  const supply = formatSmartSupply(token.totalSupply, token.maxSupply, locale);
+  const deployed = Boolean(token.deployedAt);
+  const date = deployed
+    ? {
+        label: t("DashboardIssuance.overview.deployed"),
+        value: formatDate(token.deployedAt, locale),
+        tooltip: t("DashboardIssuance.overview.deployedTooltip"),
+      }
+    : {
+        label: t("DashboardIssuance.list.created"),
+        value: formatDate(token.createdAt, locale),
+        tooltip: t("DashboardIssuance.overview.createdTooltip"),
+      };
+  const authorityRows = buildAuthorityGlyphRows(
+    token,
+    ops.authorityWallets,
+    ops.authoritySummary.known,
+    t
+  );
+  const signerWallet = buildWalletIdentityForSigner(token.signingWalletId, ops.authorityWallets, t);
+  const accessMode = resolveAccessMode(token, draft);
+  const verifiedHolders = resolveVerifiedHolders(draft);
+  const signerBadge = signerWallet ? (
+    <WalletIdentityBadge identity={signerWallet} onCopy={(value) => void ops.handleCopy(value)} />
+  ) : null;
 
   return (
     <div className="space-y-4">
-      {/* Identity hero — same grammar as the creation flow's public preview */}
-      <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
-        <div className="grid gap-4 md:grid-cols-2 md:gap-5">
-          <div className="flex min-w-0 flex-col">
-            <p
-              className={
-                token.description
-                  ? "max-w-prose text-[13px] leading-relaxed text-secondary"
-                  : "text-[13px] text-muted"
-              }
-            >
-              {token.description || t("DashboardIssuance.overview.noDescription")}
-            </p>
-            <IdentityFields
-              website={website}
-              websiteHref={websiteHref}
-              mintAddress={token.mintAddress}
-              onCopy={(value) => void ops.handleCopy(value)}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-x-4 md:gap-0 md:border-l md:border-border-subtle md:pl-5">
+      {/* Identity hero — shared, presentational; also used by the issuance list's
+          expanded card so both surfaces stay identical. Tiles: Status · Smart supply
+          · Decimals · Smart date · Authorities glyph · Signer wallet. */}
+      <AssetOverviewHero
+        description={token.description}
+        website={draft.website}
+        mintAddress={token.mintAddress}
+        onCopyMintAddress={(value) => void ops.handleCopy(value)}
+        tiles={
+          // Authorities + signer wallet lead, matching the issuance list's expanded
+          // card: who controls the asset is the headline, and the plain facts
+          // (status, supply, decimals, date) read underneath it.
+          <>
+            {/* Both `framed`: their values are objects, not text, and they sit side
+                by side — so they need the same optical gap under the label to stay
+                level with each other. */}
+            {/* "Control" while the policy pills sit in here with the marks — see the
+                issuance list's card, which labels the same tile the same way. */}
             <StatTile
-              icon={Activity}
-              label={t("DashboardIssuance.transactions.status")}
-              value={statusLabels[token.status]}
+              icon={ShieldCheck}
+              label={t(
+                deployed
+                  ? "DashboardIssuance.overview.authorities"
+                  : "DashboardIssuance.overview.control"
+              )}
+              framed
+              value={
+                <AuthoritiesGlyph
+                  rows={authorityRows}
+                  accessMode={accessMode}
+                  verifiedHolders={verifiedHolders}
+                  deployed={deployed}
+                  onCopy={(value) => void ops.handleCopy(value)}
+                  onViewPermissions={onViewPermissions}
+                />
+              }
+            />
+            {/* The second slot follows the token's own state, same as the issuance
+                list's card. Before deploy the signer IS the decision — whichever
+                custody wallet signs becomes the authorities on-chain — so it earns a
+                tile, and access control stays a footnote pill in the row beside it.
+                After deploy the signer is determined rather than chosen (an operation
+                is signed by whatever wallet holds the authority it exercises), so the
+                tile goes to access control instead. */}
+            {deployed ? (
+              <StatTile
+                // Who may hold the asset — neutral on purpose. A list glyph here reads
+                // as "allowlist" before the value has said so, and the tile also has
+                // to head "Blocklist" and "Unrestricted".
+                icon={UsersRound}
+                label={t("DashboardIssuance.summary.accessControl")}
+                framed
+                value={
+                  <AccessBadge mode={accessMode} verifiedHolders={verifiedHolders} standalone />
+                }
+              />
+            ) : (
+              <StatTile
+                icon={Signature}
+                label={t("DashboardIssuance.overview.signerWallet")}
+                framed
+                value={signerBadge}
+              />
+            )}
+            {/* No status tile: the page header already carries the status pill next
+                to the asset name. Issuer name takes the slot instead — the one
+                identifying fact from the list card that this tab was missing. */}
+            <StatTile
+              icon={Building2}
+              label={t("DashboardIssuance.config.issuerName")}
+              value={draft.issuerName.trim() || null}
+              clamp
             />
             <StatTile
               icon={Coins}
-              label={t("DashboardIssuance.overview.totalSupply")}
-              value={token.totalSupply}
+              label={t("DashboardIssuance.workspace.supply")}
+              value={supply}
               action={
                 token.status !== "pending" ? (
                   <button
                     type="button"
                     onClick={ops.handleRefreshSupply}
                     disabled={ops.isPending}
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-md text-tertiary transition-colors hover:bg-fill hover:text-primary disabled:pointer-events-none disabled:opacity-50"
+                    // `p-1 -m-1` (the StatHint trick): only the 10px glyph takes room
+                    // in the label row, so it sits at the row's own gap from the text
+                    // and centers on the same line — while the hit target stays 18px.
+                    className="-m-1 inline-flex shrink-0 items-center justify-center rounded-full p-1 text-tertiary transition-colors hover:bg-fill hover:text-primary disabled:pointer-events-none disabled:opacity-50"
                     aria-label={t("DashboardIssuance.management.refreshSupply")}
                   >
-                    <RefreshCw className="h-3 w-3" />
+                    <RefreshCw className="h-2.5 w-2.5" />
                   </button>
                 ) : null
               }
@@ -116,36 +193,12 @@ export function OverviewTab({
             />
             <StatTile
               icon={Clock}
-              label={t("DashboardIssuance.transactions.created")}
-              value={formatDate(token.createdAt, locale)}
+              label={date.label}
+              value={<span title={date.tooltip}>{date.value}</span>}
             />
-            <StatTile
-              icon={KeyRound}
-              label={t("DashboardIssuance.overview.mintAuthority")}
-              value={
-                ops.displayedMintAuthority
-                  ? `${ops.displayedMintAuthority.slice(0, 5)}…${ops.displayedMintAuthority.slice(-4)}`
-                  : t("DashboardIssuance.wallet.none")
-              }
-            />
-            <StatTile
-              icon={ShieldCheck}
-              label={t("DashboardIssuance.overview.authoritiesControlled")}
-              value={
-                ops.authoritySummary.known
-                  ? `${ops.authoritySummary.controlled} / ${ops.authoritySummary.total}`
-                  : null
-              }
-              valueAdornment={
-                ops.authoritySummary.known &&
-                ops.authoritySummary.controlled < ops.authoritySummary.total ? (
-                  <ManagedAuthoritiesWarning onViewPermissions={onViewPermissions} />
-                ) : null
-              }
-            />
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* Classification (category + asset type) stacked in one column beside a
           wider recent-activity preview. Grid stretch keeps both the same height. */}
@@ -188,7 +241,7 @@ function RecentActivityCard({ tokenId, onViewAll }: { tokenId: string; onViewAll
   return (
     <div className="@container flex h-full flex-col rounded-2xl border border-border-default bg-surface-raised px-4 pt-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[15px] font-semibold text-primary">
+        <p className="text-[15px] font-medium text-primary">
           {t("DashboardIssuance.activity.recentTitle")}
         </p>
         <button
@@ -272,152 +325,6 @@ function RecentActivityCard({ tokenId, onViewAll }: { tokenId: string; onViewAll
   );
 }
 
-function IdentityFields({
-  website,
-  websiteHref,
-  mintAddress,
-  onCopy,
-}: {
-  website: string;
-  websiteHref: string | undefined;
-  mintAddress: string | null;
-  onCopy: (value: string) => void;
-}) {
-  const t = useTranslations();
-  return (
-    <div className="mt-6 flex flex-col gap-3 md:mt-auto md:pt-6">
-      {website ? (
-        <div>
-          <div className="flex items-center gap-1.5 text-tertiary">
-            <Globe className="h-3 w-3 shrink-0" />
-            <span className="text-[11px]">{t("DashboardIssuance.assetDetails.website")}</span>
-          </div>
-          {websiteHref ? (
-            <a
-              href={websiteHref}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-0.5 inline-flex w-fit max-w-full items-center gap-1 text-[13px] font-medium text-primary hover:underline"
-            >
-              <span className="truncate">{website}</span>
-              <ArrowUpRight className="h-3 w-3 shrink-0" />
-            </a>
-          ) : (
-            <p className="mt-0.5 truncate text-[13px] font-medium text-secondary">{website}</p>
-          )}
-        </div>
-      ) : null}
-      <div>
-        <div className="flex items-center gap-1.5 text-tertiary">
-          <Wallet className="h-3 w-3 shrink-0" />
-          <span className="text-[11px]">{t("DashboardIssuance.overview.mintAddress")}</span>
-        </div>
-        {mintAddress ? (
-          <div className="mt-0.5 flex w-fit max-w-full items-center gap-1.5">
-            <span className="min-w-0 truncate text-[13px] font-medium text-primary">
-              {mintAddress}
-            </span>
-            <button
-              type="button"
-              onClick={() => onCopy(mintAddress)}
-              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-tertiary transition-colors hover:bg-fill hover:text-primary"
-              aria-label={t("DashboardIssuance.header.copyTokenAddress")}
-            >
-              <Copy className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ) : (
-          <p className="mt-0.5 text-[13px] text-muted">
-            {t("DashboardIssuance.overview.notDeployedYet")}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function StatTile({
-  icon: Icon,
-  label,
-  value,
-  action,
-  valueAdornment,
-  className,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string | null;
-  action?: React.ReactNode;
-  valueAdornment?: React.ReactNode;
-  className?: string;
-}) {
-  const hasValue = value !== null && value.trim().length > 0;
-  return (
-    // Full-height flex column so the value bottom-aligns across a grid row even
-    // when a neighbouring tile's label wraps to two lines (values stay aligned
-    // regardless of label length / locale).
-    <div className={cn("flex h-full flex-col py-2.5 md:px-3", className)}>
-      <div className="flex items-center gap-1.5 text-tertiary">
-        <Icon className="h-3 w-3 shrink-0" />
-        <span className="text-[11px]">{label}</span>
-        {action ? <span className="-my-1 ml-1">{action}</span> : null}
-      </div>
-      <div className="mt-auto flex items-center gap-1.5 pt-0.5">
-        <p
-          className={cn(
-            "min-w-0 truncate text-[13px] font-medium",
-            hasValue ? "text-primary" : "text-muted"
-          )}
-        >
-          {hasValue ? value : "—"}
-        </p>
-        {valueAdornment}
-      </div>
-    </div>
-  );
-}
-
-// Amber warning surfaced beside the "Managed authorities" count when not every
-// authority is SDP-managed. Hover/focus opens an interactive popover (Base UI
-// popover stays open while hovering its content, unlike a tooltip) so the link
-// through to the Permissions tab — where the full remediation guidance lives —
-// is clickable.
-function ManagedAuthoritiesWarning({ onViewPermissions }: { onViewPermissions: () => void }) {
-  const t = useTranslations();
-  return (
-    <Popover.Root>
-      <Popover.Trigger
-        openOnHover
-        delay={120}
-        closeDelay={160}
-        aria-label={t("DashboardIssuance.overview.authoritiesIncompleteTooltip")}
-        className="inline-flex shrink-0 items-center justify-center rounded text-warning outline-none transition-opacity hover:opacity-80 focus-visible:opacity-80"
-      >
-        <TriangleAlert className="h-4 w-4" />
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Positioner side="top" align="center" sideOffset={8} className="z-50">
-          {/* Opaque surface base under the translucent amber tint so page content
-              behind the portalled popover doesn't show through. */}
-          <Popover.Popup className="max-w-[240px] overflow-hidden rounded-xl border border-warning-border bg-surface-raised outline-none">
-            <div className="bg-warning-bg px-3 py-2.5 text-[12px] leading-snug text-warning">
-              <p>{t("DashboardIssuance.overview.authoritiesIncompleteTooltip")}</p>
-              <button
-                type="button"
-                onClick={onViewPermissions}
-                className="mt-1.5 inline-flex items-center gap-1 font-medium underline underline-offset-2 hover:decoration-2"
-              >
-                {t("DashboardIssuance.overview.authoritiesIncompleteLink")}
-                <ArrowUpRight className="h-3 w-3" />
-              </button>
-            </div>
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
-
 function ClassificationCell({
   icon: Icon,
   title,
@@ -433,7 +340,7 @@ function ClassificationCell({
         <Icon className="h-4.5 w-4.5" />
       </span>
       <div className="min-w-0">
-        <p className="text-[15px] font-semibold text-primary">{title}</p>
+        <p className="text-[15px] font-medium text-primary">{title}</p>
         <p className="mt-1 text-[13px] leading-relaxed text-secondary">{description}</p>
       </div>
     </div>

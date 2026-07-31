@@ -8,6 +8,7 @@ import { redactCredentialSecrets } from "@sdp/custody";
 import type { Context } from "hono";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getClientIp } from "@/lib/client-ip";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 // Runtime list is the source of truth for the AuditAction type so callers can
@@ -90,6 +91,44 @@ export interface AuditLogEntry {
   status?: "success" | "failure";
 }
 
+/**
+ * An identity value fit to show a human, or null.
+ *
+ * A misconfigured Clerk JWT template passes unknown shortcodes through unsubstituted, so
+ * a user row can hold a literal `{{...}}` placeholder where its email or name belongs.
+ * Printed verbatim it reads as a rendering bug rather than the data problem it is, so it
+ * is treated as absent and the generic actor label stands in instead.
+ *
+ * Deliberately not an email-shape check: `name` is free-form, and the fault being guarded
+ * against is the unsubstituted placeholder, whichever field it landed in.
+ */
+export function displayableIdentity(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed || /\{\{.*\}\}/.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+/**
+ * How a user actor is named in an audit feed.
+ *
+ * Two failures are deliberately not collapsed into one label. A user with nothing
+ * recorded is ordinary; a user whose recorded identity is unusable means the stored data
+ * is broken. Labelling both "Team member" makes corruption read as normal and removes the
+ * only signal an operator would have — which is how this went unnoticed until a
+ * placeholder happened to be visible on screen.
+ */
+function resolveUserActorLabel(name: string | null, email: string | null): string {
+  const displayable = displayableIdentity(name) ?? displayableIdentity(email);
+  if (displayable) {
+    return displayable;
+  }
+
+  const somethingWasRecorded = Boolean(name?.trim()) || Boolean(email?.trim());
+  return somethingWasRecorded ? "Unknown user" : "Team member";
+}
+
 export class AuditService {
   constructor(private db: DatabaseClient) {}
 
@@ -143,7 +182,7 @@ export class AuditService {
         .run();
     } catch (err) {
       // Log but don't fail the request
-      console.error("Failed to write audit log:", redactCredentialSecrets(err));
+      getLogger().error({ error: redactCredentialSecrets(err) }, "Failed to write audit log");
     }
   }
 
@@ -305,7 +344,7 @@ export class AuditService {
           ? "api_key"
           : "system";
       const actorLabel = userId
-        ? (row.user_name as string | null) || (row.user_email as string | null) || "Team member"
+        ? resolveUserActorLabel(row.user_name as string | null, row.user_email as string | null)
         : apiKeyId
           ? (row.api_key_name as string | null) || "API key"
           : "SDP";

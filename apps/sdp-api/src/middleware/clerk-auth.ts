@@ -16,6 +16,7 @@ import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import {
   type ClerkJwtPayload,
   extractBearerToken,
+  isPlausibleEmail,
   resolveClerkEmail,
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
@@ -30,16 +31,24 @@ import {
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 
+/**
+ * The stored identity for a Clerk user, with both copies of the email.
+ *
+ * They are read separately rather than COALESCEd in SQL because either copy can hold an
+ * unsubstituted JWT-template placeholder, and a plain COALESCE prefers whichever is
+ * non-null — including the corrupted one. Which copy is good depends on the code path
+ * that wrote the row, so the caller picks the first that is actually an address.
+ */
 async function resolveClerkUser(db: DatabaseClient, clerkUserId: string) {
   return db
     .prepare(
-      `SELECT aui.user_id, COALESCE(aui.email, u.email) AS email
+      `SELECT aui.user_id, aui.email AS identity_email, u.email AS user_email
        FROM auth_user_identities aui
        LEFT JOIN users u ON u.id = aui.user_id
        WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
     )
     .bind(clerkUserId)
-    .first<{ user_id: string; email: string | null }>();
+    .first<{ user_id: string; identity_email: string | null; user_email: string | null }>();
 }
 
 async function resolveClerkOrganization(db: DatabaseClient, clerkOrgId: string) {
@@ -53,12 +62,17 @@ async function resolveClerkOrganization(db: DatabaseClient, clerkOrgId: string) 
     .first<{ organization_id: string; slug: string | null }>();
 }
 
+/**
+ * Both copies of the email are read separately here for the same reason as
+ * {@link resolveClerkUser}: a COALESCE prefers whichever copy is non-null, and the
+ * corrupted one is a placeholder string rather than a NULL. This is the path taken for an
+ * established user, so it is the one a repaired database still has to keep clean.
+ */
 async function resolveExistingClerkContext(
   db: DatabaseClient,
   params: {
     clerkUserId: string;
     clerkOrgId: string;
-    fallbackEmail: string;
     fallbackOrgSlug: string | null;
   }
 ) {
@@ -66,7 +80,8 @@ async function resolveExistingClerkContext(
     .prepare(
       `SELECT
          aui.user_id,
-         COALESCE(aui.email, u.email, ?) AS email,
+         aui.email AS identity_email,
+         u.email AS user_email,
          aoi.organization_id,
          COALESCE(aoi.slug, ?) AS org_slug,
          om.role,
@@ -100,15 +115,11 @@ async function resolveExistingClerkContext(
        WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?
        LIMIT 1`
     )
-    .bind(
-      params.fallbackEmail.toLowerCase(),
-      params.fallbackOrgSlug,
-      params.clerkUserId,
-      params.clerkOrgId
-    )
+    .bind(params.fallbackOrgSlug, params.clerkUserId, params.clerkOrgId)
     .first<{
       user_id: string | null;
-      email: string | null;
+      identity_email: string | null;
+      user_email: string | null;
       organization_id: string;
       org_slug: string | null;
       role: string | null;
@@ -128,6 +139,48 @@ async function resolveOrgMembership(db: DatabaseClient, userId: string, organiza
     .first<{ role: string; status: string }>();
 }
 
+/**
+ * Writes a known-good email over a stored placeholder.
+ *
+ * Each copy is repaired only when it is actually broken, so a healthy row does no
+ * writes. `users.email` is UNIQUE, so the update is skipped when another row already
+ * holds the address — that is a merge decision, not a repair, and matches how
+ * migration 0040 leaves colliding rows alone.
+ */
+async function repairClerkEmails(
+  db: DatabaseClient,
+  params: {
+    userId: string;
+    clerkUserId: string;
+    email: string;
+    identityEmail: string | null;
+    userEmail: string | null;
+  }
+): Promise<void> {
+  const { userId, clerkUserId, email, identityEmail, userEmail } = params;
+
+  if (!isPlausibleEmail(userEmail)) {
+    await db
+      .prepare(
+        `UPDATE users SET email = ?
+         WHERE id = ?
+           AND NOT EXISTS (SELECT 1 FROM users other WHERE other.email = ? AND other.id <> ?)`
+      )
+      .bind(email, userId, email, userId)
+      .run();
+  }
+
+  if (!isPlausibleEmail(identityEmail)) {
+    await db
+      .prepare(
+        `UPDATE auth_user_identities SET email = ?, updated_at = sdp_datetime_now()
+         WHERE provider = 'clerk' AND provider_user_id = ?`
+      )
+      .bind(email, clerkUserId)
+      .run();
+  }
+}
+
 async function ensureClerkUser(
   env: Env,
   db: DatabaseClient,
@@ -136,7 +189,30 @@ async function ensureClerkUser(
 ): Promise<{ userId: string; email: string }> {
   const existing = await resolveClerkUser(db, clerkUserId);
   if (existing) {
-    return { userId: existing.user_id, email: existing.email ?? fallbackEmail };
+    // A stored placeholder is worse than no value: it is byte-identical for every
+    // affected user, so it identifies nobody, and it is matched literally against
+    // `invitations.email` below — which silently denies an invited role. Skip anything
+    // that is not an address and fall through to the other copy.
+    const email =
+      [existing.identity_email, existing.user_email].find(isPlausibleEmail) ?? fallbackEmail;
+
+    // Repair the corrupted copy from the good one while we are holding both.
+    // Clerk's own guidance is that webhook delivery is not guaranteed and a synced
+    // table should carry an on-demand fallback, and `user.updated` only fires when
+    // something changes in Clerk — so an account corrupted once would otherwise stay
+    // corrupted through every future sign-in, and every surface reading `users.email`
+    // stays wrong with it. Migration 0040 does the same repair, but only on deploy.
+    if (isPlausibleEmail(email)) {
+      await repairClerkEmails(db, {
+        userId: existing.user_id,
+        clerkUserId,
+        email,
+        identityEmail: existing.identity_email,
+        userEmail: existing.user_email,
+      });
+    }
+
+    return { userId: existing.user_id, email };
   }
 
   const clerkUser = await new ClerkUsersService(env).getUser(clerkUserId);
@@ -331,7 +407,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {
     clerkUserId: payload.sub as string,
     clerkOrgId: payload.org_id as string,
-    fallbackEmail: email,
     fallbackOrgSlug: payload.org_slug ?? null,
   });
 
@@ -357,6 +432,23 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
       );
     }
 
+    const resolvedEmail =
+      [existingContext.identity_email, existingContext.user_email].find(isPlausibleEmail) ??
+      email.toLowerCase();
+
+    // This is the branch an established member actually takes, and it returns before
+    // `ensureClerkUser` — so repairing only in there left the corrupted population the
+    // one population never repaired. It matters beyond the directory: the duplicate
+    // guard in `inviteMember` matches `users.email` literally, so a row still holding a
+    // placeholder lets an existing member be re-invited. A healthy row issues no writes.
+    await repairClerkEmails(getDb(c.env), {
+      userId: existingContext.user_id,
+      clerkUserId: payload.sub as string,
+      email: resolvedEmail,
+      identityEmail: existingContext.identity_email,
+      userEmail: existingContext.user_email,
+    });
+
     return {
       userId: existingContext.user_id,
       organizationId: existingContext.organization_id,
@@ -364,7 +456,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
       role,
       clerkUserId: payload.sub as string,
       clerkOrgId: payload.org_id as string,
-      email: existingContext.email ?? email,
+      email: resolvedEmail,
       orgSlug: payload.org_slug ?? existingContext.org_slug,
       orgRole: payload.org_role ?? null,
     };

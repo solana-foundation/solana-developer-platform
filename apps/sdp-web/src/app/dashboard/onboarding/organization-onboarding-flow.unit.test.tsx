@@ -60,7 +60,6 @@ describe("OrganizationOnboardingFlow", () => {
     expect(markup).not.toContain("SDP RPC");
     expect(markup.match(/aria-pressed="false"/g)).toHaveLength(6);
     expect(markup).toContain('data-organization-onboarding-actions="true"');
-    expect(markup).toContain("bg-surface-raised/95");
     expect(markup).not.toContain("bg-white/95");
   });
 

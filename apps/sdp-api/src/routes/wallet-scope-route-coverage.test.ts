@@ -110,6 +110,8 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /templates/:templateId",
       "GET /tokens",
       "GET /tokens/:tokenId",
+      // Read-only filter facets for the token list: no signing wallet resolved.
+      "GET /tokens/facets",
       "GET /tokens/:tokenId/allowlist",
       "GET /tokens/:tokenId/allowlist/labels",
       "GET /tokens/:tokenId/audit",

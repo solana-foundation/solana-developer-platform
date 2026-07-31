@@ -61,14 +61,16 @@ async function persistMuralOrganization(
   organization: MuralOrganizationResolution
 ): Promise<void> {
   const repo = getCounterpartiesRepository(c);
-  const mural = readMuralData(counterparty.provider_data);
-  await repo.updateCounterparty({
+  await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
     projectId,
-    providerData: {
-      ...counterparty.provider_data,
-      mural: { ...mural, organization },
+    mutate(providerData) {
+      const mural = readMuralData(providerData);
+      return {
+        ...providerData,
+        mural: { ...mural, organization },
+      };
     },
   });
 }

@@ -56,7 +56,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
   });
 
   async function seedCounterparty(externalId: string | null = null) {
-    const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
+    const counterpartiesRepo = createPostgresCounterpartiesRepository(
+      getDb(env),
+      env.counterpartyPiiCipher
+    );
     const row = await counterpartiesRepo.createCounterparty({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,

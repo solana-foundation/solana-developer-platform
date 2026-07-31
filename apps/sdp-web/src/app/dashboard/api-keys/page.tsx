@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -68,14 +69,14 @@ export default async function ApiKeysPage() {
   }
 
   return (
-    <div className="w-full flex flex-col gap-6">
+    <DashboardWorkspaceOverviewPanel className="flex flex-col gap-6">
       <ApiKeyFlashSurface />
 
-      <Card>
+      <Card className="flex-1">
         <CardHeader>
           <CardTitle>{t("DashboardCustody.existingApiKeys")}</CardTitle>
           <CardDescription>{t("DashboardCustody.existingApiKeysDescription")}</CardDescription>
-          {dashboardAccess.capabilities.canManageApiKeys ? (
+          {dashboardAccess.capabilities.canManageApiKeys && apiKeys.length > 0 ? (
             <CardAction>
               <Button asChild>
                 <Link href="/dashboard/api-keys/new">{t("DashboardCustody.newApiKey")}</Link>
@@ -83,7 +84,7 @@ export default async function ApiKeysPage() {
             </CardAction>
           ) : null}
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-1 flex-col">
           {!dashboardAccess.capabilities.canManageApiKeys ? (
             <div className="mb-4 rounded-[10px] border border-border-default bg-fill-subtle px-3 py-2 text-xs text-secondary">
               {t("DashboardCustody.apiKeysViewOnly")}
@@ -92,7 +93,7 @@ export default async function ApiKeysPage() {
           <div className="mb-4 rounded-[10px] border border-border-default bg-fill-subtle px-3 py-2 text-xs text-secondary">
             <p className="text-xs text-secondary">{t("DashboardCustody.apiKeyRotationHint")}</p>
           </div>
-          <div className="@container/api-keys-table">
+          <div className="@container/api-keys-table flex flex-1 flex-col">
             <ApiKeysTableClient
               initialApiKeys={apiKeys}
               canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
@@ -101,6 +102,6 @@ export default async function ApiKeysPage() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }

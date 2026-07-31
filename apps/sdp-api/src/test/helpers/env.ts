@@ -1,4 +1,5 @@
 import { getDb } from "@/db";
+import { LocalPiiCipher } from "@/services/pii-cipher/pii-cipher";
 import type { Env } from "@/types/env";
 
 // CI runs under Doppler. Only pass through the test data-service endpoints so
@@ -9,6 +10,7 @@ const providedEnv: Env = {
   DATABASE_URL: process.env.TEST_DATABASE_URL,
   REDIS_URL: process.env.REDIS_URL,
   API_KEY_PEPPER: "test-pepper-for-unit-tests",
+  CREDENTIAL_FINGERPRINT_PEPPER: "test-credential-fingerprint-pepper-for-unit-tests",
   SOLANA_MOCK: "true",
   RUN_INTEGRATION_TESTS: "false",
   SOLANA_NETWORK: "devnet",
@@ -27,4 +29,5 @@ if (!providedEnv.REDIS_URL) {
 export const env = {
   ...providedEnv,
   db: getDb(providedEnv),
+  counterpartyPiiCipher: new LocalPiiCipher("BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="),
 };

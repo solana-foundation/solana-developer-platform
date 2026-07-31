@@ -16,6 +16,7 @@ import {
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
 import { AppError, internalError, nullOnExpected } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
@@ -56,10 +57,13 @@ export async function reconcilePaymentRequest(
     if (!options.bestEffort || err instanceof AppError) {
       throw err;
     }
-    console.error("reconcilePaymentRequest: best-effort reconcile failed, returning stored row", {
-      paymentRequestId: row.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    getLogger().error(
+      {
+        payment_request_id: row.id,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "reconcilePaymentRequest: best-effort reconcile failed, returning stored row"
+    );
     return row;
   }
 }

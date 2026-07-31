@@ -124,19 +124,29 @@ export function countryDisplayName(code: string): string {
 const ISO_3166_USER_ASSIGNED_ALPHA2 = /^(AA|Q[M-Z]|X[A-Z]|ZZ)$/;
 
 /**
- * Flag emoji for a fiat currency via its issuing region — the first two ISO
- * 4217 letters, shifted into the Unicode regional-indicator block. Returns
- * null for currencies without a national flag: ISO 4217 assigns supranational
- * and commodity codes (XCD, XAU, …) the user-assigned alpha-2 ranges, and
- * CLDR pseudo-regions are excluded by the same rule.
+ * Flag emoji for an ISO 3166-1 alpha-2 region code — its two letters shifted
+ * into the Unicode regional-indicator block, e.g. "MX" → 🇲🇽. Also covers the
+ * exceptionally reserved "EU". Returns null for anything without a flag: the
+ * user-assigned alpha-2 ranges and codes CLDR does not know as a region.
  */
-export function fiatCurrencyFlagEmoji(code: RampFiatCurrency): string | null {
-  const region = code.slice(0, 2);
+export function regionFlagEmoji(code: string): string | null {
+  const region = code.toUpperCase();
   if (
+    !/^[A-Z]{2}$/.test(region) ||
     ISO_3166_USER_ASSIGNED_ALPHA2.test(region) ||
     getCountryDisplayNames().of(region) === region
   ) {
     return null;
   }
   return String.fromCodePoint(...[...region].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65));
+}
+
+/**
+ * Flag emoji for a fiat currency via its issuing region — the first two ISO
+ * 4217 letters. Returns null for currencies without a national flag: ISO 4217
+ * assigns supranational and commodity codes (XCD, XAU, …) the user-assigned
+ * alpha-2 ranges, and CLDR pseudo-regions are excluded by the same rule.
+ */
+export function fiatCurrencyFlagEmoji(code: RampFiatCurrency): string | null {
+  return regionFlagEmoji(code.slice(0, 2));
 }

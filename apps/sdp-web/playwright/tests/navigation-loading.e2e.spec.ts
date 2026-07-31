@@ -90,11 +90,11 @@ test.describe("dashboard navigation loading contract", () => {
     const stalledRsc = await stallRsc(page, /\/dashboard\/wallets(?:\?.*)?$/);
 
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: /open navigation/i }).click();
 
+    // Mobile navigation is the bottom bar; the slide-over trigger is hidden below xl.
     const navigation = page
+      .locator('[data-dashboard-bottom-nav="true"]')
       .getByRole("link", { name: "Wallets", exact: true })
-      .last()
       .click({ noWaitAfter: true });
 
     try {

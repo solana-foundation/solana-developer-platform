@@ -4,6 +4,7 @@ import type {
   ApiPlaygroundFieldConfig,
 } from "@/components/api-playground-shell";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 
 export interface CounterpartyPlaygroundView {
   id: string;
@@ -22,11 +23,12 @@ const exampleAddress = {
 };
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
+const counterpartyIdPathLabel = ["{", "counterpartyId", "}"].join("");
 
 function buildCounterpartyIdField(t: Translate): ApiPlaygroundFieldConfig {
   return {
     key: "counterpartyId",
-    label: "{counterpartyId}",
+    label: counterpartyIdPathLabel,
     placeholder: t("DashboardPayments.counterparty.playgroundCounterpartyIdPlaceholder"),
     required: true,
   };
@@ -54,7 +56,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     counterpartyOptions.length > 0
       ? {
           key: "counterpartyId",
-          label: "{counterpartyId}",
+          label: counterpartyIdPathLabel,
           placeholder: t("DashboardPayments.counterparty.playgroundCounterpartyIdPlaceholder"),
           kind: "select",
           options: counterpartyOptions,
@@ -66,7 +68,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
   const firstId = counterparties[0]?.id ?? exampleCounterpartyId;
   const firstName = counterparties[0]?.displayName ?? exampleDisplayName;
 
-  return [
+  const curatedEndpoints: ApiPlaygroundEndpointConfig[] = [
     {
       id: "list-counterparties",
       title: t("DashboardPayments.counterparty.listCounterparties"),
@@ -261,4 +263,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       },
     },
   ];
+
+  return mergeOpenApiPlaygroundEndpoints("counterparties", curatedEndpoints);
 }

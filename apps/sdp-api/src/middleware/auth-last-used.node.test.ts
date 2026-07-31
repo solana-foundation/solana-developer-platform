@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DatabaseClient } from "@/db";
+import { rootLogger } from "@/runtime/logger";
 import { scheduleApiKeyLastUsedUpdate } from "./auth";
 
 function createDatabase(run: ReturnType<typeof vi.fn>) {
@@ -53,7 +54,7 @@ describe("API key last-used write scheduling", () => {
   });
 
   it("allows the next Node request to retry after a failed write", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(rootLogger, "error").mockImplementation(() => {});
     const run = vi
       .fn()
       .mockRejectedValueOnce(new Error("temporary database error"))

@@ -109,6 +109,7 @@ describe("Clerk auth request cache", () => {
     app.get("/protected", requirePermissions("org:read"), (c) => {
       return c.json({
         organizationId: c.get("clerk")?.organizationId ?? null,
+        email: c.get("clerk")?.email ?? null,
       });
     });
     app.onError((error, c) => {
@@ -147,6 +148,7 @@ describe("Clerk auth request cache", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       organizationId: TEST_ORG.id,
+      email: "clerk-cache@example.com",
     });
 
     const projects = await getDb(env)
@@ -357,6 +359,109 @@ describe("Clerk auth request cache", () => {
       .bind(TEST_ORG.id)
       .first<{ id: string }>();
     expect(membership).toBeNull();
+  });
+
+  /**
+   * A misconfigured Clerk JWT template stored the literal
+   * `{{user.primary_email_address.email_address}}` as an identity email. It is matched
+   * against `invitations.email` here, so an affected user silently missed their own
+   * pending invitation: they were provisioned with the Clerk role instead of the invited
+   * one, and the invitation stayed pending forever.
+   */
+  it("applies an invited role when the stored identity email is a template placeholder", async () => {
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .bind("{{user.primary_email_address.email_address}}")
+      .run();
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z");
+
+    // The token claims org:admin while the invitation grants member, so the invited role
+    // is only visible in the result if the invitation was actually matched.
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+
+    const membership = await getDb(env)
+      .prepare("SELECT role FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ role: string }>();
+    expect(membership?.role).toBe("member");
+
+    const invitation = await getDb(env)
+      .prepare("SELECT status FROM invitations WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ status: string }>();
+    expect(invitation?.status).toBe("accepted");
+  });
+
+  /**
+   * The established-user path returns before any provisioning runs, so it resolves the
+   * email straight out of storage. A placeholder is a non-null string, so it would win a
+   * COALESCE over the good copy sitting next to it.
+   */
+  it("skips a stored placeholder email for a user who is already a member", async () => {
+    await getDb(env)
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .bind("{{user.primary_email_address.email_address}}")
+      .run();
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      organizationId: TEST_ORG.id,
+      email: "clerk-cache@example.com",
+    });
+  });
+
+  /**
+   * Reading around the placeholder is not enough on its own. `inviteMember` matches
+   * `users.email` literally, so a row left corrupted keeps letting an existing member be
+   * re-invited — and the established-member path returns before `ensureClerkUser`, which
+   * used to be the only thing that repaired anything.
+   */
+  it("repairs both stored copies for a member who is already established", async () => {
+    const placeholder = "{{user.primary_email_address.email_address}}";
+    await getDb(env)
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .bind(placeholder)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE users SET email = ? WHERE id = 'usr_clerk_cached'")
+      .bind(placeholder)
+      .run();
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+    expect(res.status).toBe(200);
+
+    const identity = await getDb(env)
+      .prepare("SELECT email FROM auth_user_identities WHERE id = 'aui_clerk_cached'")
+      .first<{ email: string }>();
+    const user = await getDb(env)
+      .prepare("SELECT email FROM users WHERE id = 'usr_clerk_cached'")
+      .first<{ email: string }>();
+
+    expect(identity?.email).toBe("clerk-cache@example.com");
+    expect(user?.email).toBe("clerk-cache@example.com");
   });
 
   it("still provisions when a revoked invitation was superseded by a live one", async () => {

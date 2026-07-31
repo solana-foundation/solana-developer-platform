@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import {
   type ClerkOrganizationInvitation,
@@ -273,8 +274,39 @@ export const listMembers = async (c: AppContext) => {
 
   const results = await getDb(c.env)
     .prepare(
+      // A misconfigured Clerk JWT template stored an unsubstituted placeholder as
+      // the email. Sign-in repairs `auth_user_identities` (its upsert overwrites the
+      // email) but never `users`, whose insert is ON CONFLICT DO NOTHING — so the
+      // directory kept showing the placeholder until a deploy re-ran migration 0040.
+      // Preferring a clean identity email makes a re-login enough on its own.
+      // The subselect avoids multiplying rows when a user holds more than one
+      // identity for the provider.
+      //
+      // "Usable" is migration 0040's own test, both halves of it: not a placeholder
+      // AND shaped like an address. Excluding only `{{` still let values like
+      // `unknown` or a bare id through, so the endpoint emitted something its own
+      // repair rule does not consider an email. The final `u.email` stays as a last
+      // resort — a row where nothing is usable has to return the stored value rather
+      // than NULL, and the caller decides how to render it.
       `SELECT om.id, om.role, om.status, om.created_at,
-            u.id as user_id, u.email, u.name
+            u.id as user_id, u.name,
+            COALESCE(
+              NULLIF(
+                CASE
+                  WHEN u.email NOT LIKE '%{{%' AND u.email LIKE '%@%.%' THEN u.email
+                  ELSE ''
+                END, ''),
+              (SELECT aui.email
+                 FROM auth_user_identities aui
+                WHERE aui.user_id = u.id
+                  AND aui.provider = 'clerk'
+                  AND aui.email IS NOT NULL
+                  AND aui.email NOT LIKE '%{{%'
+                  AND aui.email LIKE '%@%.%'
+                ORDER BY aui.updated_at DESC NULLS LAST
+                LIMIT 1),
+              u.email
+            ) AS email
      FROM organization_members om
      JOIN users u ON om.user_id = u.id
      WHERE om.organization_id = ? AND om.status = 'active'
@@ -393,11 +425,14 @@ async function resolveClerkInvitations(
     const clerkService = new ClerkOrganizationsService(c.env);
     return await clerkService.listPendingOrganizationInvitations(clerkOrgId);
   } catch (error) {
-    console.error("listMembers: failed to resolve Clerk invitation URLs", {
-      requestId: c.get("requestId"),
-      organizationId,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    getLogger().error(
+      {
+        requestId: c.get("requestId"),
+        organizationId,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "listMembers: failed to resolve Clerk invitation URLs"
+    );
     return [];
   }
 }
@@ -723,13 +758,15 @@ export const removeMember = async (c: AppContext) => {
   // Clerk drives sign-in, so leaving the membership there would keep the
   // organization visible in its switcher even though our API rejects it.
   await removeClerkMembership(c, organizationId, member.user_id).catch((error) =>
-    console.error("Failed to remove Clerk membership after member removal:", error)
+    getLogger().error({ error }, "Failed to remove Clerk membership after member removal")
   );
 
   const sessionService = new SessionService(getDb(c.env));
   await sessionService
     .revokeUserOrganizationSessions(member.user_id, organizationId)
-    .catch((error) => console.error("Failed to revoke sessions after member removal:", error));
+    .catch((error) =>
+      getLogger().error({ error }, "Failed to revoke sessions after member removal")
+    );
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

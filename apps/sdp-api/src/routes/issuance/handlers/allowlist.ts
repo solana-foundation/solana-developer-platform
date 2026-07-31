@@ -5,8 +5,9 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/mosaic";
+import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -152,11 +153,14 @@ async function removeExistingAllowlistEntryOnChain(opts: {
       throw error;
     }
 
-    console.warn("Surfpool control-list removal timed out; keeping DB revocation as test truth", {
-      list: opts.list,
-      wallet: opts.wallet,
-      error: error.message,
-    });
+    getLogger().warn(
+      {
+        list: opts.list,
+        wallet: opts.wallet,
+        error: error.message,
+      },
+      "Surfpool control-list removal timed out; keeping DB revocation as test truth"
+    );
   }
 }
 

@@ -39,7 +39,8 @@ const issuanceMetadataExample = {
   settings: {
     version: 1,
     selected: {
-      freezeTransfers: {},
+      pauseTransfers: {},
+      freezeAccounts: {},
       transferFee: { params: { basisPoints: 50, maxFee: "100" } },
     },
   },
@@ -160,6 +161,12 @@ export const listAssetProfilesQuerySchema = listAssetProfilesQuerySchemaBase.ext
   category: withOpenApi(listAssetProfilesQuerySchemaBase.shape.category, {
     description: "Filter by asset category.",
     example: "stablecoin",
+  }),
+  tokenIds: withOpenApi(listAssetProfilesQuerySchemaBase.shape.tokenIds, {
+    type: "string",
+    description:
+      "Restrict results to these token ids as a comma-separated list (max 100). Lets a client hydrate exactly the tokens on the page it is rendering.",
+    example: "tok_abc123,tok_def456",
   }),
 });
 

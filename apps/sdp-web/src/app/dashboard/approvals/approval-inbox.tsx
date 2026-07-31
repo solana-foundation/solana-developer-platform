@@ -5,13 +5,28 @@ import type {
   WalletApprovalRequestSummary,
   WalletOperationFamily,
 } from "@sdp/types";
-import { ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
+import {
+  ArrowLeftRightIcon,
+  CalendarIcon,
+  ChevronRight,
+  CircleDotIcon,
+  InboxIcon,
+  KeyRoundIcon,
+  RotateCw,
+  WalletIcon,
+} from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import {
+  DashboardWorkspaceCard,
+  DashboardWorkspaceOverviewPanel,
+} from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
+import { PaginatedFooter, usePaginationUrlState } from "@/components/ui/paginated-footer";
 import { Select, SelectItem } from "@/components/ui/select";
 import {
   Table,
@@ -21,7 +36,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { cn } from "@/lib/utils";
 import { ApprovalStatusBadge } from "./approval-request-shared";
 import {
@@ -43,6 +60,8 @@ import {
   shortApprovalIdentifier,
 } from "./approval-requests.data";
 
+const AUTO_REFRESH_INTERVAL_MS = 5000;
+
 function approvalRequestHref(approvalRequestId: string): string {
   return `/dashboard/approvals/${encodeURIComponent(approvalRequestId)}`;
 }
@@ -51,7 +70,6 @@ interface ApprovalInboxProps {
   initialRequests: WalletApprovalRequestSummary[];
   apiKeyNames: Record<string, string>;
   canDecide: boolean;
-  initialTab: ApprovalInboxTab;
   renderedAt: number;
   loadError?: boolean;
 }
@@ -60,20 +78,26 @@ export function ApprovalInbox({
   initialRequests,
   apiKeyNames,
   canDecide,
-  initialTab,
   renderedAt,
   loadError = false,
 }: ApprovalInboxProps) {
   const t = useTranslations();
   const locale = useLocale();
   const reduceMotion = useReducedMotion();
+  const tab: ApprovalInboxTab = useDashboardTab() === "history" ? "history" : "pending";
+  const { page, pageSize, setPage, setPageSize } = usePaginationUrlState(APPROVAL_INBOX_PAGE_SIZE);
   const [requests, setRequests] = useState(initialRequests);
-  const [tab, setTab] = useState<ApprovalInboxTab>(initialTab);
   const [filters, setFilters] = useState<ApprovalInboxFilters>(EMPTY_APPROVAL_FILTERS);
-  const [page, setPage] = useState(1);
   const [isReloading, setReloading] = useState(false);
+  const [spinning, setSpinning] = useState(false);
+  if (isReloading && !spinning) setSpinning(true);
   const [hasLoadError, setLoadError] = useState(loadError);
   const [relativeTimeBase, setRelativeTimeBase] = useState(renderedAt);
+  const [previousTab, setPreviousTab] = useState(tab);
+  if (previousTab !== tab) {
+    setPreviousTab(tab);
+    setFilters(EMPTY_APPROVAL_FILTERS);
+  }
 
   const pendingCount = useMemo(
     () => requests.filter((request) => request.status === "pending").length,
@@ -99,15 +123,14 @@ export function ApprovalInbox({
     () => filterApprovalRequests(requests, tab, filters),
     [filters, requests, tab]
   );
-  const pageCount = Math.max(1, Math.ceil(filteredRequests.length / APPROVAL_INBOX_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(filteredRequests.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visibleRequests = filteredRequests.slice(
-    (currentPage - 1) * APPROVAL_INBOX_PAGE_SIZE,
-    currentPage * APPROVAL_INBOX_PAGE_SIZE
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
   );
-  const rangeStart =
-    filteredRequests.length === 0 ? 0 : (currentPage - 1) * APPROVAL_INBOX_PAGE_SIZE + 1;
-  const rangeEnd = Math.min(currentPage * APPROVAL_INBOX_PAGE_SIZE, filteredRequests.length);
+  const rangeStart = filteredRequests.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(currentPage * pageSize, filteredRequests.length);
 
   function updateFilter<TKey extends keyof ApprovalInboxFilters>(
     key: TKey,
@@ -122,13 +145,14 @@ export function ApprovalInbox({
     setPage(1);
   }
 
-  function selectTab(nextTab: ApprovalInboxTab) {
-    setTab(nextTab);
-    setFilters(EMPTY_APPROVAL_FILTERS);
-    setPage(1);
-  }
-
-  async function reload() {
+  /**
+   * Refetches pending and recent approval requests and merges them into state.
+   *
+   * @param options - `silent` suppresses the failure toast for background auto-refreshes;
+   * manual reloads pass `silent: false` to surface the error.
+   */
+  async function reload(options: { silent: boolean }) {
+    if (isReloading) return;
     setReloading(true);
     try {
       const [pendingResponse, recentResponse] = await Promise.all([
@@ -154,13 +178,24 @@ export function ApprovalInbox({
       window.dispatchEvent(new Event("sdp:approval-requests-updated"));
     } catch {
       setLoadError(true);
-      if (requests.length > 0) {
+      if (!options.silent && requests.length > 0) {
         toast.error(t("DashboardApprovals.refreshFailed"), { position: "bottom-right" });
       }
     } finally {
       setReloading(false);
     }
   }
+
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
+  });
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void reloadRef.current({ silent: true });
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   if (hasLoadError && requests.length === 0) {
     return (
@@ -175,9 +210,16 @@ export function ApprovalInbox({
           <Button
             className="mt-5"
             variant="outline"
-            onClick={reload}
+            onClick={() => reload({ silent: false })}
             disabled={isReloading}
-            iconLeft={<RotateCw className={isReloading ? "size-4 animate-spin" : "size-4"} />}
+            iconLeft={
+              <RotateCw
+                className={cn("size-4", spinning && "animate-spin")}
+                onAnimationIteration={() => {
+                  if (!isReloading) setSpinning(false);
+                }}
+              />
+            }
           >
             {t("DashboardApprovals.reload")}
           </Button>
@@ -199,53 +241,18 @@ export function ApprovalInbox({
       : t("DashboardApprovals.emptyHistoryDescription");
 
   return (
-    <div className="h-full overflow-y-auto px-3 pb-8 outline-none md:px-6">
-      <div className="mx-auto w-full max-w-[1500px] py-6">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-medium text-primary sm:text-3xl">
-              {t("DashboardApprovals.title")}
-            </h1>
-            <p className="mt-1 text-sm text-secondary">{t("DashboardApprovals.description")}</p>
-          </div>
-          <div className="flex items-center gap-3 text-sm text-secondary">
-            <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              onClick={reload}
-              disabled={isReloading}
-              aria-label={t("DashboardApprovals.reload")}
-              title={t("DashboardApprovals.reload")}
-            >
-              <RotateCw className={isReloading ? "size-4 animate-spin" : "size-4"} />
-            </Button>
-          </div>
-        </header>
-
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
+      <DashboardWorkspaceCard>
         {!canDecide ? (
-          <p className="mt-4 border-y border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
+          <p className="border-b border-border-default bg-fill-subtle px-4 py-2 text-sm text-secondary">
             {t("DashboardApprovals.viewOnly")}
           </p>
         ) : null}
 
-        <div
-          className="mt-6 flex h-10 items-end gap-8 border-b border-border-default"
-          role="tablist"
-          aria-label={t("DashboardApprovals.title")}
-        >
-          <TabButton active={tab === "pending"} onClick={() => selectTab("pending")}>
-            {t("DashboardApprovals.pendingTab")}
-          </TabButton>
-          <TabButton active={tab === "history"} onClick={() => selectTab("history")}>
-            {t("DashboardApprovals.historyTab")}
-          </TabButton>
-        </div>
-
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={tab}
+            className="flex min-w-0 flex-1 flex-col"
             initial={reduceMotion ? false : { opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
@@ -258,17 +265,14 @@ export function ApprovalInbox({
               apiKeyOptions={apiKeyOptions}
               updateFilter={updateFilter}
               patchFilters={patchFilters}
-              clear={() => {
-                setFilters(EMPTY_APPROVAL_FILTERS);
-                setPage(1);
-              }}
             />
 
             {visibleRequests.length === 0 ? (
-              <div className="border-y border-border-default py-16 text-center">
-                <p className="text-sm font-medium text-primary">{emptyTitle}</p>
-                <p className="mt-1 text-sm text-secondary">{emptyDescription}</p>
-              </div>
+              <ListEmptyState
+                icon={<InboxIcon className="size-5" />}
+                message={emptyTitle}
+                description={emptyDescription}
+              />
             ) : (
               <ApprovalRequestRows
                 requests={visibleRequests}
@@ -280,70 +284,48 @@ export function ApprovalInbox({
           </motion.div>
         </AnimatePresence>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-secondary">
-            {t("DashboardApprovals.range", {
+        {filteredRequests.length === 0 ? null : (
+          <PaginatedFooter
+            className="mt-auto"
+            page={currentPage}
+            pageCount={pageCount}
+            onPageChange={setPage}
+            summary={t("DashboardApprovals.range", {
               from: rangeStart,
               to: rangeEnd,
               total: filteredRequests.length,
             })}
-          </p>
-          {pageCount > 1 ? (
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                disabled={currentPage <= 1}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                aria-label={t("DashboardApprovals.previousPage")}
-              >
-                <ChevronLeft className="size-4" />
-              </Button>
-              <span className="min-w-20 text-center text-xs text-secondary">
-                {t("DashboardApprovals.pageOf", { page: currentPage, pageCount })}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                disabled={currentPage >= pageCount}
-                onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
-                aria-label={t("DashboardApprovals.nextPage")}
-              >
-                <ChevronRight className="size-4" />
-              </Button>
+            pageSizeControl={{ pageSize, onPageSizeChange: setPageSize }}
+          >
+            <div className="flex items-center gap-2 text-xs text-secondary">
+              <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => reload({ silent: false })}
+                    disabled={isReloading}
+                    aria-label={t("DashboardApprovals.reload")}
+                  >
+                    <RotateCw
+                      className={cn("size-4", spinning && "animate-spin")}
+                      onAnimationIteration={() => {
+                        if (!isReloading) setSpinning(false);
+                      }}
+                    />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  {t("DashboardApprovals.autoRefresh")}
+                </TooltipContent>
+              </Tooltip>
             </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={
-        active
-          ? "relative h-10 text-sm font-medium text-primary after:absolute after:right-0 after:bottom-0 after:left-0 after:h-0.5 after:bg-primary"
-          : "h-10 text-sm font-medium text-secondary transition-colors hover:text-primary"
-      }
-    >
-      {children}
-    </button>
+          </PaginatedFooter>
+        )}
+      </DashboardWorkspaceCard>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 
@@ -354,7 +336,6 @@ function ApprovalFilters({
   apiKeyOptions,
   updateFilter,
   patchFilters,
-  clear,
 }: {
   tab: ApprovalInboxTab;
   filters: ApprovalInboxFilters;
@@ -365,103 +346,89 @@ function ApprovalFilters({
     value: ApprovalInboxFilters[TKey]
   ) => void;
   patchFilters: (patch: Partial<ApprovalInboxFilters>) => void;
-  clear: () => void;
 }) {
   const t = useTranslations();
   return (
-    <div className="space-y-4 border-b border-border-default py-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        <FilterField label={t("DashboardApprovals.walletFilter")}>
-          <Select
-            ariaLabel={t("DashboardApprovals.walletFilter")}
-            value={filters.walletId || "all"}
-            onValueChange={(value) =>
-              updateFilter("walletId", value === "all" ? "" : (value ?? ""))
-            }
-          >
-            <SelectItem value="all">{t("DashboardApprovals.allWallets")}</SelectItem>
-            {walletOptions.map(([walletId, label]) => (
-              <SelectItem key={walletId} value={walletId}>
-                {label}
-              </SelectItem>
-            ))}
-          </Select>
-        </FilterField>
-
-        {tab === "history" ? (
-          <FilterField label={t("DashboardApprovals.statusFilter")}>
-            <Select
-              ariaLabel={t("DashboardApprovals.statusFilter")}
-              value={filters.status || "all"}
-              onValueChange={(value) =>
-                updateFilter("status", value === "all" ? "" : (value as ApprovalRequestStatus))
-              }
-            >
-              <SelectItem value="all">{t("DashboardApprovals.allStatuses")}</SelectItem>
-              {APPROVAL_HISTORY_STATUSES.map((status) => (
-                <SelectItem key={status} value={status}>
-                  {formatApprovalLabel(status)}
-                </SelectItem>
-              ))}
-            </Select>
-          </FilterField>
-        ) : null}
-
-        <FilterField label={t("DashboardApprovals.operationFilter")}>
-          <Select
-            ariaLabel={t("DashboardApprovals.operationFilter")}
-            value={filters.operationFamily || "all"}
-            onValueChange={(value) =>
-              updateFilter(
-                "operationFamily",
-                value === "all" ? "" : (value as WalletOperationFamily)
-              )
-            }
-          >
-            <SelectItem value="all">{t("DashboardApprovals.allOperations")}</SelectItem>
-            {APPROVAL_OPERATION_FAMILIES.map((family) => (
-              <SelectItem key={family} value={family}>
-                {formatApprovalLabel(family)}
-              </SelectItem>
-            ))}
-          </Select>
-        </FilterField>
-
-        <FilterField label={t("DashboardApprovals.apiKeyFilter")}>
-          <Select
-            ariaLabel={t("DashboardApprovals.apiKeyFilter")}
-            value={filters.apiKeyId || "all"}
-            onValueChange={(value) =>
-              updateFilter("apiKeyId", value === "all" ? "" : (value ?? ""))
-            }
-          >
-            <SelectItem value="all">{t("DashboardApprovals.allApiKeys")}</SelectItem>
-            {apiKeyOptions.map(([apiKeyId, label]) => (
-              <SelectItem key={apiKeyId} value={apiKeyId}>
-                {label}
-              </SelectItem>
-            ))}
-          </Select>
-        </FilterField>
-      </div>
-
-      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <DateRangeFilter
-          from={filters.from}
-          to={filters.to}
-          onChange={(from, to) => patchFilters({ from, to })}
-        />
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="shrink-0"
-          onClick={clear}
-          disabled={!hasApprovalFilters(filters)}
+    <div className="flex flex-wrap items-end gap-3 border-b border-border-default p-3">
+      <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.walletFilter")}>
+        <Select
+          ariaLabel={t("DashboardApprovals.walletFilter")}
+          size="xl"
+          iconLeft={<WalletIcon />}
+          value={filters.walletId || "all"}
+          onValueChange={(value) => updateFilter("walletId", value === "all" ? "" : (value ?? ""))}
         >
-          {t("DashboardApprovals.clearFilters")}
-        </Button>
-      </div>
+          <SelectItem value="all">{t("DashboardApprovals.allWallets")}</SelectItem>
+          {walletOptions.map(([walletId, label]) => (
+            <SelectItem key={walletId} value={walletId}>
+              {label}
+            </SelectItem>
+          ))}
+        </Select>
+      </FilterField>
+
+      {tab === "history" ? (
+        <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.statusFilter")}>
+          <Select
+            ariaLabel={t("DashboardApprovals.statusFilter")}
+            size="xl"
+            iconLeft={<CircleDotIcon />}
+            value={filters.status || "all"}
+            onValueChange={(value) =>
+              updateFilter("status", value === "all" ? "" : (value as ApprovalRequestStatus))
+            }
+          >
+            <SelectItem value="all">{t("DashboardApprovals.allStatuses")}</SelectItem>
+            {APPROVAL_HISTORY_STATUSES.map((status) => (
+              <SelectItem key={status} value={status}>
+                {formatApprovalLabel(status)}
+              </SelectItem>
+            ))}
+          </Select>
+        </FilterField>
+      ) : null}
+
+      <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.operationFilter")}>
+        <Select
+          ariaLabel={t("DashboardApprovals.operationFilter")}
+          size="xl"
+          iconLeft={<ArrowLeftRightIcon />}
+          value={filters.operationFamily || "all"}
+          onValueChange={(value) =>
+            updateFilter("operationFamily", value === "all" ? "" : (value as WalletOperationFamily))
+          }
+        >
+          <SelectItem value="all">{t("DashboardApprovals.allOperations")}</SelectItem>
+          {APPROVAL_OPERATION_FAMILIES.map((family) => (
+            <SelectItem key={family} value={family}>
+              {formatApprovalLabel(family)}
+            </SelectItem>
+          ))}
+        </Select>
+      </FilterField>
+
+      <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.apiKeyFilter")}>
+        <Select
+          ariaLabel={t("DashboardApprovals.apiKeyFilter")}
+          size="xl"
+          iconLeft={<KeyRoundIcon />}
+          value={filters.apiKeyId || "all"}
+          onValueChange={(value) => updateFilter("apiKeyId", value === "all" ? "" : (value ?? ""))}
+        >
+          <SelectItem value="all">{t("DashboardApprovals.allApiKeys")}</SelectItem>
+          {apiKeyOptions.map(([apiKeyId, label]) => (
+            <SelectItem key={apiKeyId} value={apiKeyId}>
+              {label}
+            </SelectItem>
+          ))}
+        </Select>
+      </FilterField>
+
+      <DateRangeFilter
+        from={filters.from}
+        to={filters.to}
+        onChange={(from, to) => patchFilters({ from, to })}
+      />
     </div>
   );
 }
@@ -511,55 +478,44 @@ function DateRangeFilter({
   const showCustom = customOpen || derived === "custom";
   const active: DatePreset = showCustom ? "custom" : derived;
 
-  const chips: Array<{ id: DatePreset; label: string }> = [
-    { id: "all", label: t("DashboardApprovals.dateAllTime") },
-    { id: "7", label: t("DashboardApprovals.dateLast7") },
-    { id: "30", label: t("DashboardApprovals.dateLast30") },
-    { id: "90", label: t("DashboardApprovals.dateLast90") },
-    { id: "custom", label: t("DashboardApprovals.dateCustom") },
-  ];
-
-  function selectChip(id: DatePreset) {
-    if (id === "all") {
+  function selectPreset(preset: DatePreset) {
+    if (preset === "all") {
       setCustomOpen(false);
       onChange("", "");
       return;
     }
-    if (id === "custom") {
+    if (preset === "custom") {
       setCustomOpen(true);
       return;
     }
     setCustomOpen(false);
-    const range = presetRange(Number(id));
+    const range = presetRange(Number(preset));
     onChange(range.from, range.to);
   }
 
   return (
-    <div className="min-w-0 space-y-2">
-      <p className="text-xs font-medium text-secondary">{t("DashboardApprovals.dateRangeLabel")}</p>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {chips.map((chip) => (
-          <button
-            key={chip.id}
-            type="button"
-            aria-pressed={active === chip.id}
-            onClick={() => selectChip(chip.id)}
-            className={cn(
-              "h-8 rounded-full border px-3 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/30",
-              active === chip.id
-                ? "border-transparent bg-primary text-on-primary"
-                : "border-border-default bg-surface-raised text-secondary hover:border-border-strong hover:text-primary"
-            )}
-          >
-            {chip.label}
-          </button>
-        ))}
-      </div>
+    <>
+      <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.dateRangeLabel")}>
+        <Select
+          ariaLabel={t("DashboardApprovals.dateRangeLabel")}
+          size="xl"
+          iconLeft={<CalendarIcon />}
+          value={active}
+          onValueChange={(value) => selectPreset(value as DatePreset)}
+        >
+          <SelectItem value="all">{t("DashboardApprovals.dateAllTime")}</SelectItem>
+          <SelectItem value="7">{t("DashboardApprovals.dateLast7")}</SelectItem>
+          <SelectItem value="30">{t("DashboardApprovals.dateLast30")}</SelectItem>
+          <SelectItem value="90">{t("DashboardApprovals.dateLast90")}</SelectItem>
+          <SelectItem value="custom">{t("DashboardApprovals.dateCustom")}</SelectItem>
+        </Select>
+      </FilterField>
       {showCustom ? (
-        <div className="flex flex-wrap items-end gap-3 pt-1">
+        <>
           <FilterField label={t("DashboardApprovals.fromFilter")}>
             <Input
               type="date"
+              size="xl"
               value={from}
               max={to || undefined}
               onChange={(event) => onChange(event.target.value, to)}
@@ -569,21 +525,30 @@ function DateRangeFilter({
           <FilterField label={t("DashboardApprovals.toFilter")}>
             <Input
               type="date"
+              size="xl"
               value={to}
               min={from || undefined}
               onChange={(event) => onChange(from, event.target.value)}
               className="w-[168px]"
             />
           </FilterField>
-        </div>
+        </>
       ) : null}
-    </div>
+    </>
   );
 }
 
-function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+function FilterField({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <fieldset className="space-y-1.5">
+    <fieldset className={cn("space-y-1.5", className)}>
       <legend className="block text-xs font-medium text-secondary">{label}</legend>
       {children}
     </fieldset>
@@ -604,7 +569,7 @@ function ApprovalRequestRows({
   const t = useTranslations();
   return (
     <>
-      <div className="divide-y divide-border-default border-b border-border-default 2xl:hidden">
+      <div className="divide-y divide-border-default lg:hidden">
         {requests.map((request) => {
           const reason = approvalReason(request, t("DashboardApprovals.approvalRequiredByPolicy"));
           const apiKeyLabel = approvalApiKeyLabel(
@@ -616,7 +581,7 @@ function ApprovalRequestRows({
             <Link
               key={request.id}
               href={approvalRequestHref(request.id)}
-              className="group grid grid-cols-[minmax(0,1fr)_auto] gap-4 py-4 outline-none transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle"
+              className="group grid grid-cols-[minmax(0,1fr)_auto] gap-4 p-4 outline-none transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle"
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -654,8 +619,8 @@ function ApprovalRequestRows({
         })}
       </div>
 
-      <div className="hidden 2xl:block">
-        <Table className="min-w-0 [&::after]:hidden [&::before]:hidden [&_table]:min-w-[1118px] [&_table]:table-fixed">
+      <div className="hidden lg:block">
+        <Table className="min-w-0 rounded-none border-0 [&_table]:min-w-[1118px] [&_table]:table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[88px]">{t("DashboardApprovals.statusColumn")}</TableHead>

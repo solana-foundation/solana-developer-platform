@@ -19,6 +19,7 @@ import type {
   MetadataFormState,
   MintFormState,
   MintValidationErrors,
+  PermissionControlStatus,
   PermissionRow,
   SeizeFormState,
   SeizeValidationErrors,
@@ -344,6 +345,31 @@ function getWalletTokenBalanceRecord(wallet: PaymentsDashboardWallet, mintAddres
   return wallet.balances?.find((balance) => balance.mint === mintAddress) ?? null;
 }
 
+// How much more can be minted before the configured cap is reached, as a whole-
+// token decimal string. Used by the lock-supply flow to size its mint leg.
+//
+// Returns null when there is no cap or either figure is unparseable (the caller
+// must then refuse to act rather than guess), and "0" when the cap is already
+// met or exceeded — meaning lock-supply degenerates to a bare revoke.
+export function getRemainingMintableSupply(token: {
+  totalSupply: string;
+  maxSupply: string | null;
+  decimals: number;
+}): string | null {
+  if (!token.maxSupply) {
+    return null;
+  }
+
+  const total = parseTokenAmountToBaseUnits(token.totalSupply, token.decimals);
+  const max = parseTokenAmountToBaseUnits(token.maxSupply, token.decimals);
+  if (total === null || max === null) {
+    return null;
+  }
+
+  const remaining = max > total ? max - total : ZERO_BIGINT;
+  return formatBaseUnitsAsTokenAmount(remaining, token.decimals);
+}
+
 export function hasReachedMaxSupply(totalSupply: string, maxSupply: string | null): boolean {
   if (!maxSupply) {
     return false;
@@ -412,6 +438,31 @@ function getTokenLifecycleDisabledReason(
 
 function getPauseAuthorityAddress(token: Token): string | null {
   return token.extensions?.pausable?.authority ?? token.mintAuthority ?? null;
+}
+
+// Why the "lock supply" action can't run, or null when it can.
+//
+// The action mints the remainder up to the cap and then revokes the mint
+// authority, so it inherits the mint lifecycle gate (leg 1 is a real mint) and
+// additionally needs a cap to aim at and a live mint authority to revoke. A
+// remainder of zero is NOT a blocker — the flow then degenerates to a bare
+// revoke, which is exactly right for a token already minted to its cap.
+export function getLockSupplyDisabledReason(token: Token, t: Translate): string | null {
+  const lifecycleReason = getTokenLifecycleDisabledReason(token, "mint", t);
+  if (lifecycleReason) {
+    return lifecycleReason;
+  }
+  if (!token.maxSupply) {
+    return t("DashboardIssuance.management.lockSupplyNoMaxSupply");
+  }
+  // Both mean the authority is already gone, i.e. supply is already permanent.
+  if (!token.isMintable || !token.mintAuthority) {
+    return t("DashboardIssuance.management.lockSupplyAlreadyLocked");
+  }
+  if (getRemainingMintableSupply(token) === null) {
+    return t("DashboardIssuance.management.lockSupplyAmountUnavailable");
+  }
+  return null;
 }
 
 export function getTokenActionDisabledReasons(
@@ -614,6 +665,68 @@ export function getPermissionRows(
       authorityRole: "permanentDelegate",
     },
   ];
+}
+
+// Classify who controls a single authority address. `none` = unset,
+// `unknown` = custody wallets not yet known (loading/error), `sdp` = the address
+// matches one of the org's custody wallets, `external` = a set address we don't
+// custody. Single source for both the permissions-tab rows and the roll-up below.
+export function classifyAuthorityControl(
+  displayedAuthorityAddress: string | null,
+  authorityWallets: PaymentsDashboardWallet[],
+  controlKnown: boolean
+): PermissionControlStatus {
+  if (!displayedAuthorityAddress) {
+    return "none";
+  }
+  if (!controlKnown) {
+    return "unknown";
+  }
+  return findWalletByPublicKey(authorityWallets, displayedAuthorityAddress) ? "sdp" : "external";
+}
+
+export interface AuthorityControlSummary {
+  controlled: number;
+  total: number;
+  hasExternal: boolean;
+  known: boolean;
+}
+
+// Roll-up for the overview "Managed authorities: N of M" tile — counts only
+// authorities that are actually set and whose custody is resolvable (control
+// status other than none/unknown). Powers both the asset-management detail page
+// and the issuance list's expanded card, so the two never diverge.
+export function summarizeAuthorityControl({
+  token,
+  authorityWallets,
+  controlKnown,
+  t,
+}: {
+  token: Token;
+  authorityWallets: PaymentsDashboardWallet[];
+  controlKnown: boolean;
+  t: Translate;
+}): AuthorityControlSummary {
+  const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
+  const statuses = getPermissionRows(token, metadataAuthority, t).map((row) =>
+    classifyAuthorityControl(
+      getDisplayedAuthorityAddress({
+        token,
+        role: row.authorityRole,
+        metadataAuthority,
+        authorityWallets,
+      }),
+      authorityWallets,
+      controlKnown
+    )
+  );
+  const known = statuses.filter((status) => status === "sdp" || status === "external");
+  return {
+    controlled: known.filter((status) => status === "sdp").length,
+    total: known.length,
+    hasExternal: known.some((status) => status === "external"),
+    known: controlKnown,
+  };
 }
 
 function getPendingAuthoritySignerWallet(
