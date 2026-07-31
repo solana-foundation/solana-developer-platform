@@ -447,6 +447,14 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/policies") {
     return {
       title: t("Shared.dashboardShell.policies"),
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("DashboardPolicies.all") },
+          { id: "wallets", label: t("DashboardPolicies.wallets") },
+          { id: "api_keys", label: t("DashboardPolicies.apiKeys") },
+        ],
+        hideOnMobile: false,
+      },
       contentWidthClass: "max-w-none",
     };
   }

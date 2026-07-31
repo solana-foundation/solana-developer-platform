@@ -8,9 +8,9 @@ import type {
 import {
   ArrowLeftRightIcon,
   CalendarIcon,
-  ChevronLeft,
   ChevronRight,
   CircleDotIcon,
+  InboxIcon,
   KeyRoundIcon,
   RotateCw,
   WalletIcon,
@@ -19,8 +19,14 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import {
+  DashboardWorkspaceCard,
+  DashboardWorkspaceOverviewPanel,
+} from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
+import { PaginatedFooter, usePaginationUrlState } from "@/components/ui/paginated-footer";
 import { Select, SelectItem } from "@/components/ui/select";
 import {
   Table,
@@ -79,17 +85,18 @@ export function ApprovalInbox({
   const locale = useLocale();
   const reduceMotion = useReducedMotion();
   const tab: ApprovalInboxTab = useDashboardTab() === "history" ? "history" : "pending";
+  const { page, pageSize, setPage, setPageSize } = usePaginationUrlState(APPROVAL_INBOX_PAGE_SIZE);
   const [requests, setRequests] = useState(initialRequests);
   const [filters, setFilters] = useState<ApprovalInboxFilters>(EMPTY_APPROVAL_FILTERS);
-  const [page, setPage] = useState(1);
   const [isReloading, setReloading] = useState(false);
+  const [spinning, setSpinning] = useState(false);
+  if (isReloading && !spinning) setSpinning(true);
   const [hasLoadError, setLoadError] = useState(loadError);
   const [relativeTimeBase, setRelativeTimeBase] = useState(renderedAt);
   const [previousTab, setPreviousTab] = useState(tab);
   if (previousTab !== tab) {
     setPreviousTab(tab);
     setFilters(EMPTY_APPROVAL_FILTERS);
-    setPage(1);
   }
 
   const pendingCount = useMemo(
@@ -116,15 +123,14 @@ export function ApprovalInbox({
     () => filterApprovalRequests(requests, tab, filters),
     [filters, requests, tab]
   );
-  const pageCount = Math.max(1, Math.ceil(filteredRequests.length / APPROVAL_INBOX_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(filteredRequests.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visibleRequests = filteredRequests.slice(
-    (currentPage - 1) * APPROVAL_INBOX_PAGE_SIZE,
-    currentPage * APPROVAL_INBOX_PAGE_SIZE
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
   );
-  const rangeStart =
-    filteredRequests.length === 0 ? 0 : (currentPage - 1) * APPROVAL_INBOX_PAGE_SIZE + 1;
-  const rangeEnd = Math.min(currentPage * APPROVAL_INBOX_PAGE_SIZE, filteredRequests.length);
+  const rangeStart = filteredRequests.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(currentPage * pageSize, filteredRequests.length);
 
   function updateFilter<TKey extends keyof ApprovalInboxFilters>(
     key: TKey,
@@ -206,7 +212,14 @@ export function ApprovalInbox({
             variant="outline"
             onClick={() => reload({ silent: false })}
             disabled={isReloading}
-            iconLeft={<RotateCw className={isReloading ? "size-4 animate-spin" : "size-4"} />}
+            iconLeft={
+              <RotateCw
+                className={cn("size-4", spinning && "animate-spin")}
+                onAnimationIteration={() => {
+                  if (!isReloading) setSpinning(false);
+                }}
+              />
+            }
           >
             {t("DashboardApprovals.reload")}
           </Button>
@@ -228,107 +241,91 @@ export function ApprovalInbox({
       : t("DashboardApprovals.emptyHistoryDescription");
 
   return (
-    <div className="flex h-full min-h-0 flex-col px-3 outline-none md:px-6">
-      {!canDecide ? (
-        <p className="shrink-0 border-y border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
-          {t("DashboardApprovals.viewOnly")}
-        </p>
-      ) : null}
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
+      <DashboardWorkspaceCard>
+        {!canDecide ? (
+          <p className="border-b border-border-default bg-fill-subtle px-4 py-2 text-sm text-secondary">
+            {t("DashboardApprovals.viewOnly")}
+          </p>
+        ) : null}
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={tab}
-          className="flex min-h-0 flex-1 flex-col"
-          initial={reduceMotion ? false : { opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
-          transition={{ duration: 0.16, ease: "easeOut" }}
-        >
-          <ApprovalFilters
-            tab={tab}
-            filters={filters}
-            walletOptions={walletOptions}
-            apiKeyOptions={apiKeyOptions}
-            updateFilter={updateFilter}
-            patchFilters={patchFilters}
-          />
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={tab}
+            className="flex min-w-0 flex-1 flex-col"
+            initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
+            transition={{ duration: 0.16, ease: "easeOut" }}
+          >
+            <ApprovalFilters
+              tab={tab}
+              filters={filters}
+              walletOptions={walletOptions}
+              apiKeyOptions={apiKeyOptions}
+              updateFilter={updateFilter}
+              patchFilters={patchFilters}
+            />
 
-          {visibleRequests.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-1 py-16 text-center">
-              <p className="text-sm font-medium text-primary">{emptyTitle}</p>
-              <p className="text-sm text-secondary">{emptyDescription}</p>
-            </div>
-          ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            {visibleRequests.length === 0 ? (
+              <ListEmptyState
+                icon={<InboxIcon className="size-5" />}
+                message={emptyTitle}
+                description={emptyDescription}
+              />
+            ) : (
               <ApprovalRequestRows
                 requests={visibleRequests}
                 apiKeyNames={apiKeyNames}
                 locale={locale}
                 relativeTimeBase={relativeTimeBase}
               />
-            </div>
-          )}
-        </motion.div>
-      </AnimatePresence>
+            )}
+          </motion.div>
+        </AnimatePresence>
 
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border-default py-2">
-        <div className="flex items-center gap-2 text-xs text-secondary">
-          <p>
-            {t("DashboardApprovals.range", {
+        {filteredRequests.length === 0 ? null : (
+          <PaginatedFooter
+            className="mt-auto"
+            page={currentPage}
+            pageCount={pageCount}
+            onPageChange={setPage}
+            summary={t("DashboardApprovals.range", {
               from: rangeStart,
               to: rangeEnd,
               total: filteredRequests.length,
             })}
-          </p>
-          <span aria-hidden="true">·</span>
-          <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => reload({ silent: false })}
-                disabled={isReloading}
-                aria-label={t("DashboardApprovals.reload")}
-              >
-                <RotateCw className={isReloading ? "size-4 animate-spin" : "size-4"} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="text-xs">
-              {t("DashboardApprovals.autoRefresh")}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        {pageCount > 1 ? (
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              disabled={currentPage <= 1}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              aria-label={t("DashboardApprovals.previousPage")}
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-            <span className="min-w-20 text-center text-xs text-secondary">
-              {t("DashboardApprovals.pageOf", { page: currentPage, pageCount })}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              disabled={currentPage >= pageCount}
-              onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
-              aria-label={t("DashboardApprovals.nextPage")}
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-          </div>
-        ) : null}
-      </div>
-    </div>
+            pageSizeControl={{ pageSize, onPageSizeChange: setPageSize }}
+          >
+            <div className="flex items-center gap-2 text-xs text-secondary">
+              <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => reload({ silent: false })}
+                    disabled={isReloading}
+                    aria-label={t("DashboardApprovals.reload")}
+                  >
+                    <RotateCw
+                      className={cn("size-4", spinning && "animate-spin")}
+                      onAnimationIteration={() => {
+                        if (!isReloading) setSpinning(false);
+                      }}
+                    />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  {t("DashboardApprovals.autoRefresh")}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </PaginatedFooter>
+        )}
+      </DashboardWorkspaceCard>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 
@@ -352,7 +349,7 @@ function ApprovalFilters({
 }) {
   const t = useTranslations();
   return (
-    <div className="flex shrink-0 flex-wrap items-end gap-3 border-b border-border-default py-4">
+    <div className="flex flex-wrap items-end gap-3 border-b border-border-default p-3">
       <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.walletFilter")}>
         <Select
           ariaLabel={t("DashboardApprovals.walletFilter")}
@@ -572,7 +569,7 @@ function ApprovalRequestRows({
   const t = useTranslations();
   return (
     <>
-      <div className="divide-y divide-border-default 2xl:hidden">
+      <div className="divide-y divide-border-default lg:hidden">
         {requests.map((request) => {
           const reason = approvalReason(request, t("DashboardApprovals.approvalRequiredByPolicy"));
           const apiKeyLabel = approvalApiKeyLabel(
@@ -584,7 +581,7 @@ function ApprovalRequestRows({
             <Link
               key={request.id}
               href={approvalRequestHref(request.id)}
-              className="group grid grid-cols-[minmax(0,1fr)_auto] gap-4 py-4 outline-none transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle"
+              className="group grid grid-cols-[minmax(0,1fr)_auto] gap-4 p-4 outline-none transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle"
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -622,8 +619,8 @@ function ApprovalRequestRows({
         })}
       </div>
 
-      <div className="hidden 2xl:block">
-        <Table className="min-w-0 [&::after]:hidden [&::before]:hidden [&_table]:min-w-[1118px] [&_table]:table-fixed">
+      <div className="hidden lg:block">
+        <Table className="min-w-0 rounded-none border-0 [&_table]:min-w-[1118px] [&_table]:table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[88px]">{t("DashboardApprovals.statusColumn")}</TableHead>

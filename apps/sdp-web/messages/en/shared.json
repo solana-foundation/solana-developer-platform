@@ -112,6 +112,7 @@
     "pageOf": "Page {page} of {pageCount}",
     "previousPage": "Previous page",
     "nextPage": "Next page",
+    "rowsPerPage": "Rows per page",
     "loading": "Loading…",
     "noOptionsAvailable": "No options available.",
     "noSearchMatches": "No matches for your search.",

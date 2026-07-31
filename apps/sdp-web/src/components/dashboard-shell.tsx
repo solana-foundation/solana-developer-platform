@@ -537,6 +537,7 @@ export function DashboardShell({
     shellPathname === "/dashboard/issuance" ||
     shellPathname === "/dashboard/issuance/create" ||
     shellPathname === "/dashboard/policies" ||
+    shellPathname === "/dashboard/api-keys" ||
     shellPathname === "/dashboard/api-keys/new" ||
     (shellPathname.startsWith("/dashboard/api-keys/") && shellPathname.endsWith("/edit")) ||
     shellPathname.startsWith("/dashboard/payments") ||

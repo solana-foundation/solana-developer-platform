@@ -19,7 +19,8 @@ export interface DashboardHeaderTabsConfig {
  * The route's tab set rendered in the dashboard header nav row, as declared by
  * the page config's `headerTabs`. Tab state lives in the `?tab=` search param
  * and switches shallowly (no RSC refetch) — workspaces re-render off the same
- * URL state and manage their own data refresh.
+ * URL state and manage their own data refresh. Switching tabs clears the
+ * `?page=` param so paginated lists restart on page 1.
  *
  * @param props - The route's header tab configuration.
  * @returns The header tab list, or null on mobile viewports when hidden there.
@@ -44,7 +45,7 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
 
   useEffect(() => {
     if (hideOnMobile && isMobile && activeTab !== defaultTabId) {
-      replaceSearchParams({ tab: null });
+      replaceSearchParams({ tab: null, page: null });
     }
   }, [hideOnMobile, isMobile, activeTab, defaultTabId, replaceSearchParams]);
 
@@ -57,7 +58,7 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
       bordered={false}
       value={activeTab}
       onValueChange={(value) => {
-        replaceSearchParams({ tab: value === defaultTabId ? null : value });
+        replaceSearchParams({ tab: value === defaultTabId ? null : value, page: null });
       }}
     >
       <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)]">
