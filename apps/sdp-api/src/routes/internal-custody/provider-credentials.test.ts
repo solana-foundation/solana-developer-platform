@@ -774,6 +774,43 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
+  it("clears the pending wallet label when replacement omits walletLabel", async () => {
+    const { app, token } = buildApp();
+    const first = await submit(app, token, {
+      key: "replacement-clear-label-v1",
+      body: { ...VALID_BODY, walletLabel: "First wallet" },
+    });
+    const firstBody = (await first.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+    const firstCredentialId = firstBody.data.providerCredential.id;
+    const connectionId = (await getConnectionForCredential(firstCredentialId)).id;
+    await markInitialValidationFailed(getDb(env), {
+      credentialId: firstCredentialId,
+      connectionId,
+    });
+
+    const replacement = await submit(app, token, {
+      key: "replacement-clear-label-v2",
+      body: {
+        ...VALID_BODY,
+        fields: {
+          ...VALID_BODY.fields,
+          appId: "replacement-app-id",
+          appSecret: "replacement secret",
+        },
+      },
+    });
+    expect(replacement.status).toBe(201);
+    const replacementBody = (await replacement.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+
+    const connection = await getConnectionForCredential(replacementBody.data.providerCredential.id);
+    expect(connection.id).toBe(connectionId);
+    expect(connection.setup_metadata).toEqual({});
+  });
+
   it.each([
     {
       label: "a pending connection",

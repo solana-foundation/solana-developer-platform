@@ -45,7 +45,9 @@ async function seedScope(): Promise<void> {
 async function insertCredential(
   id: string,
   status = "pending",
-  ciphertext: string | null = "secret"
+  ciphertext: string | null = "secret",
+  organizationId = ORGANIZATION_ID,
+  projectId = PROJECT_ID
 ) {
   await getDb(env)
     .prepare(
@@ -55,11 +57,16 @@ async function insertCredential(
        ) VALUES (?, ?, ?, 'privy', 'Privy', 'project', 'stored',
                  'encrypted_db', ?, ?, ?)`
     )
-    .bind(id, ORGANIZATION_ID, PROJECT_ID, ciphertext, status, USER_ID)
+    .bind(id, organizationId, projectId, ciphertext, status, USER_ID)
     .run();
 }
 
-async function insertConnection(id: string, credentialId: string): Promise<void> {
+async function insertConnection(
+  id: string,
+  credentialId: string,
+  organizationId = ORGANIZATION_ID,
+  projectId = PROJECT_ID
+): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO custody_connections (
@@ -67,7 +74,7 @@ async function insertConnection(id: string, credentialId: string): Promise<void>
          provider_credential_id, provider_credential_scope_key, status, created_by
        ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
     )
-    .bind(id, ORGANIZATION_ID, PROJECT_ID, credentialId, PROJECT_ID, USER_ID)
+    .bind(id, organizationId, projectId, credentialId, projectId, USER_ID)
     .run();
 }
 
@@ -201,6 +208,84 @@ describe("custody Connection ownership constraints", () => {
         .bind(ORGANIZATION_ID)
         .run()
     ).rejects.toThrow(/custody_scope_defaults_connection_project_only/);
+  });
+
+  it("requires a selected Connection to belong to the same organization and project", async () => {
+    const otherProjectId = "prj_custody_connection_constraints_other";
+    const otherOrganizationId = "org_custody_connection_constraints_other";
+    const otherOrganizationProjectId = "prj_custody_connection_constraints_other_org";
+    const db = getDb(env);
+
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO projects (
+             id, organization_id, name, slug, environment, status, created_by
+           ) VALUES (?, ?, 'Other project', ?, 'sandbox', 'active', ?)`
+        )
+        .bind(otherProjectId, ORGANIZATION_ID, "custody-connection-constraints-other", USER_ID),
+      db
+        .prepare(
+          `INSERT INTO organizations (id, name, slug, tier, status)
+           VALUES (?, 'Other organization', ?, 'individual', 'active')`
+        )
+        .bind(otherOrganizationId, "custody-connection-constraints-other-org"),
+      db
+        .prepare(
+          `INSERT INTO projects (
+             id, organization_id, name, slug, environment, status, created_by
+           ) VALUES (?, ?, 'Other organization project', ?, 'sandbox', 'active', ?)`
+        )
+        .bind(
+          otherOrganizationProjectId,
+          otherOrganizationId,
+          "custody-connection-constraints-other-org",
+          USER_ID
+        ),
+    ]);
+
+    await insertCredential(
+      "pcred_other_project",
+      "pending",
+      "secret",
+      ORGANIZATION_ID,
+      otherProjectId
+    );
+    await insertConnection(
+      "cconn_other_project",
+      "pcred_other_project",
+      ORGANIZATION_ID,
+      otherProjectId
+    );
+    await insertCredential(
+      "pcred_other_organization",
+      "pending",
+      "secret",
+      otherOrganizationId,
+      otherOrganizationProjectId
+    );
+    await insertConnection(
+      "cconn_other_organization",
+      "pcred_other_organization",
+      otherOrganizationId,
+      otherOrganizationProjectId
+    );
+
+    for (const [id, connectionId] of [
+      ["csd_cross_project", "cconn_other_project"],
+      ["csd_cross_organization", "cconn_other_organization"],
+    ]) {
+      await expect(
+        db
+          .prepare(
+            `INSERT INTO custody_scope_defaults (
+               id, organization_id, project_id, default_custody_connection_id
+             ) VALUES (?, ?, ?, ?)`
+          )
+          .bind(id, ORGANIZATION_ID, PROJECT_ID, connectionId)
+          .run()
+      ).rejects.toThrow(/custody_scope_defaults_default_custody_connection_id_fkey/);
+    }
   });
 
   it("does not cascade a retained Connection target when its Config is deleted", async () => {

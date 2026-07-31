@@ -179,9 +179,7 @@ describe("privy wallet provisioning", () => {
   });
 
   it("reuses a wallet found by external ID before creating one", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(privyWalletList([PRIVY_WALLET]));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(privyWalletResponse());
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).resolves.toEqual({
       walletId: "wallet-existing",
@@ -190,7 +188,7 @@ describe("privy wallet provisioning", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(toUrlString(fetchMock.mock.calls[0]?.[0] as string | URL | Request)).toBe(
-      "https://privy.test/v1/wallets?external_id=sdp_connection_123&limit=1&include_archived=true"
+      "https://privy.test/v1/wallets/ext_wal_sdp_connection_123"
     );
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
     expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
@@ -199,8 +197,10 @@ describe("privy wallet provisioning", () => {
   it("creates a wallet with stable external and idempotency IDs", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletList())
-      .mockResolvedValueOnce(jsonResponse({ id: "wallet-created", address: CREATED_ADDRESS }, 200));
+      .mockResolvedValueOnce(privyWalletNotFound())
+      .mockResolvedValueOnce(
+        privyWalletResponse({ id: "wallet-created", address: CREATED_ADDRESS })
+      );
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).resolves.toEqual({
       walletId: "wallet-created",
@@ -218,9 +218,9 @@ describe("privy wallet provisioning", () => {
   it("reconciles by external ID after an ambiguous create outcome", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletList())
+      .mockResolvedValueOnce(privyWalletNotFound())
       .mockRejectedValueOnce(new TypeError("connection reset"))
-      .mockResolvedValueOnce(privyWalletList([{ ...PRIVY_WALLET, id: "wallet-reconciled" }]));
+      .mockResolvedValueOnce(privyWalletResponse({ id: "wallet-reconciled" }));
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).resolves.toEqual({
       walletId: "wallet-reconciled",
@@ -229,11 +229,38 @@ describe("privy wallet provisioning", () => {
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
   });
 
+  it("reconciles the unique external ID when create reports it already exists", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(privyWalletNotFound())
+      .mockResolvedValueOnce(jsonResponse({ error: "external_id already exists" }, 409))
+      .mockResolvedValueOnce(privyWalletResponse({ id: "wallet-reconciled" }));
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).resolves.toEqual({
+      walletId: "wallet-reconciled",
+      address: EXISTING_ADDRESS,
+    });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
+  });
+
+  it("fails closed when a duplicate external ID remains unavailable to lookup", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(privyWalletNotFound())
+      .mockResolvedValueOnce(jsonResponse({ error: "external_id already exists" }, 409))
+      .mockResolvedValueOnce(privyWalletNotFound());
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+    });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
+  });
+
   it("surfaces a deterministic conflict found during reconciliation", async () => {
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletList())
+      .mockResolvedValueOnce(privyWalletNotFound())
       .mockResolvedValueOnce(jsonResponse({ error: "rejected" }, 500))
-      .mockResolvedValueOnce(privyWalletList([{ ...PRIVY_WALLET, archived_at: Date.now() }]));
+      .mockResolvedValueOnce(privyWalletResponse({ archived_at: Date.now() }));
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
       code: "CONFLICT",
@@ -250,24 +277,75 @@ describe("privy wallet provisioning", () => {
   });
 
   it.each([
-    ["a malformed list", {}, "NETWORK_ERROR"],
+    ["a malformed wallet", {}, "NETWORK_ERROR"],
     [
-      "an archived wallet",
-      { data: [{ ...PRIVY_WALLET, archived_at: 1_725_000_000_000 }] },
-      "CONFLICT",
+      "a wallet without an external ID",
+      { ...PRIVY_WALLET, external_id: undefined },
+      "NETWORK_ERROR",
     ],
-    [
-      "another external ID",
-      { data: [{ ...PRIVY_WALLET, external_id: "sdp_connection_other" }] },
-      "CONFLICT",
-    ],
-    ["a non-Solana chain", { data: [{ ...PRIVY_WALLET, chain_type: "ethereum" }] }, "CONFLICT"],
+    ["a wallet without a chain", { ...PRIVY_WALLET, chain_type: undefined }, "NETWORK_ERROR"],
+    ["an archived wallet", { ...PRIVY_WALLET, archived_at: 1_725_000_000_000 }, "CONFLICT"],
+    ["another external ID", { ...PRIVY_WALLET, external_id: "sdp_connection_other" }, "CONFLICT"],
+    ["a non-Solana chain", { ...PRIVY_WALLET, chain_type: "ethereum" }, "CONFLICT"],
   ] as const)("fails closed when external-ID lookup returns %s", async (_case, body, code) => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(body, 200));
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({ code });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
+  });
+
+  it.each([
+    ["an archived wallet", { ...PRIVY_WALLET, archived_at: Date.now() }],
+    ["another external ID", { ...PRIVY_WALLET, external_id: "sdp_connection_other" }],
+    ["a non-Solana chain", { ...PRIVY_WALLET, chain_type: "ethereum" }],
+  ] as const)("rejects a create response containing %s", async (_case, body) => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(privyWalletNotFound())
+      .mockResolvedValueOnce(jsonResponse(body, 200));
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats an incomplete create response as ambiguous and reconciles once", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(privyWalletNotFound())
+      .mockResolvedValueOnce(jsonResponse({ id: "wallet-created", address: CREATED_ADDRESS }, 200))
+      .mockResolvedValueOnce(privyWalletNotFound());
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
+      code: "NETWORK_ERROR",
+    });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
+  });
+
+  it("classifies a Provider 401 during external-ID lookup as an invalid credential", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse({ error: "invalid credentials" }, 401));
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
+      code: "PROVIDER_CREDENTIAL_INVALID",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an ambiguous create retryable when reconciliation cannot authenticate", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(privyWalletNotFound())
+      .mockResolvedValueOnce(jsonResponse({ error: "unknown" }, 500))
+      .mockResolvedValueOnce(jsonResponse({ error: "invalid credentials" }, 401));
+
+    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
+      code: "NETWORK_ERROR",
+    });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
   });
 
   it.each([
@@ -286,9 +364,10 @@ describe("privy wallet provisioning", () => {
   });
 
   it.each([
+    [401, "PROVIDER_NOT_CONFIGURED"],
     [400, "PROVIDER_NOT_CONFIGURED"],
     [503, "NETWORK_ERROR"],
-  ] as const)("classifies HTTP %s create responses as %s", async (status, code) => {
+  ] as const)("preserves legacy HTTP %s create classification as %s", async (status, code) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "rejected" }, status));
 
     await expect(provisionTestPrivyWallet({})).rejects.toMatchObject({ code });
@@ -569,8 +648,12 @@ function provisionTestPrivyWallet(options: Parameters<typeof provisionPrivyWalle
   return provisionPrivyWallet(createPrivyEnv(), options, PRIVY_AUTHENTICATION);
 }
 
-function privyWalletList(wallets: unknown[] = []): Response {
-  return jsonResponse({ data: wallets }, 200);
+function privyWalletResponse(overrides: Record<string, unknown> = {}): Response {
+  return jsonResponse({ ...PRIVY_WALLET, ...overrides }, 200);
+}
+
+function privyWalletNotFound(): Response {
+  return jsonResponse({ error: "not found" }, 404);
 }
 
 function createParaEnv(overrides: Partial<Env> = {}): Env {

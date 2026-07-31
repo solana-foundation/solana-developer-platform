@@ -252,6 +252,8 @@ export function mapWalletCreationSigningError(
       return conflict(redactCredentialString(error.message));
     case "PROVIDER_UNAVAILABLE":
       return providerUnavailable("The custody provider is temporarily unavailable");
+    case "PROVIDER_CREDENTIAL_INVALID":
+      return badRequest("Provider credentials are invalid");
     case "INTERNAL_ERROR":
       return internalError("The wallet could not be created");
     default:

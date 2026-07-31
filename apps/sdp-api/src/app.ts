@@ -130,6 +130,8 @@ function getSafeSigningErrorMessage(err: SigningError): string {
       return "The signing provider could not complete the request. Check provider status and try again.";
     case "PROVIDER_NOT_CONFIGURED":
       return "The signing provider is not configured. Check provider configuration and try again.";
+    case "PROVIDER_CREDENTIAL_INVALID":
+      return "Provider credentials are invalid.";
     default:
       return redactCredentialString(err.message);
   }

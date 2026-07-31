@@ -403,6 +403,48 @@ describe("Privy BYOK custody target switch", () => {
     });
   });
 
+  it("round-trips flag rollback without changing the retained targets", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults (
+           id, organization_id, project_id,
+           default_custody_config_id, default_custody_connection_id
+         ) VALUES ('csd_privy_byok_switch', ?, ?, ?, ?)`
+      )
+      .bind(ORG_ID, PROJECT_ID, CONFIG_ID, CONNECTION_ID)
+      .run();
+
+    expect((await getWalletRoute("config")).status).toBe(404);
+
+    env.PRIVY_BYOK_ENABLED = "false";
+    const rolledBack = await getWalletRoute("config");
+    expect(rolledBack.status).toBe(200);
+    expect(await rolledBack.json()).toMatchObject({
+      data: {
+        config: {
+          id: CONFIG_ID,
+          defaultWalletId: CONFIG_WALLET_ID,
+        },
+      },
+    });
+
+    env.PRIVY_BYOK_ENABLED = "true";
+    expect((await getWalletRoute("config")).status).toBe(404);
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT default_custody_config_id, default_custody_connection_id
+           FROM custody_scope_defaults
+           WHERE organization_id = ? AND project_id = ?`
+        )
+        .bind(ORG_ID, PROJECT_ID)
+        .first()
+    ).toEqual({
+      default_custody_config_id: CONFIG_ID,
+      default_custody_connection_id: CONNECTION_ID,
+    });
+  });
+
   it("does not create the first Connection wallet through switch", async () => {
     await prepareCheckedPendingConnection();
     const providerFetch = stubPrivyWalletCreation();
@@ -417,6 +459,60 @@ describe("Privy BYOK custody target switch", () => {
     });
     expect(providerFetch).not.toHaveBeenCalled();
 
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT c.status, c.default_custody_wallet_id,
+                  d.default_custody_config_id, d.default_custody_connection_id,
+                  (
+                    SELECT COUNT(*)
+                    FROM custody_wallets w
+                    WHERE w.custody_connection_id = c.id
+                  ) AS connection_wallet_count
+           FROM custody_connections c
+           LEFT JOIN custody_scope_defaults d
+             ON d.organization_id = c.organization_id
+            AND d.project_id = c.project_id
+           WHERE c.id = ?`
+        )
+        .bind(CONNECTION_ID)
+        .first()
+    ).toEqual({
+      status: "pending",
+      default_custody_wallet_id: null,
+      default_custody_config_id: CONFIG_ID,
+      default_custody_connection_id: null,
+      connection_wallet_count: 0,
+    });
+  });
+
+  it("does not bootstrap a pending Connection through POST /v1/wallets", async () => {
+    await prepareCheckedPendingConnection();
+    const providerFetch = stubPrivyWalletCreation();
+
+    const response = await app.request(
+      "/v1/wallets",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          provider: "privy",
+          label: "Must not be created",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
+      },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
     expect(
       await getDb(env)
         .prepare(

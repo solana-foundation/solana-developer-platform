@@ -5,6 +5,7 @@ import { created, success } from "@/lib/response";
 import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { checkProviderCredential } from "@/services/provider-credential-check.service";
 import { submitProviderCredential } from "@/services/provider-credential-submission.service";
 import type { Env } from "@/types/env";
@@ -50,6 +51,9 @@ internalCustody.post("/provider-credentials", async (c) => {
 
 internalCustody.post("/provider-credentials/:providerCredentialId/check", async (c) => {
   const result = await checkProviderCredential(c, c.req.param("providerCredentialId"));
+  if (result.check.status === "success") {
+    clearWalletCaches();
+  }
   return success(c, result);
 });
 

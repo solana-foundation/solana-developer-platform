@@ -620,7 +620,11 @@ function handleSigningInitializationError(error: unknown): never {
     if (error.code === "ALREADY_INITIALIZED") {
       throw new AppError("CONFLICT", redactCredentialString(error.message));
     }
-    if (error.code === "NETWORK_ERROR" || error.code === "PROVIDER_NOT_CONFIGURED") {
+    if (
+      error.code === "NETWORK_ERROR" ||
+      error.code === "PROVIDER_NOT_CONFIGURED" ||
+      error.code === "PROVIDER_CREDENTIAL_INVALID"
+    ) {
       throw badRequest("Provider setup failed. Check provider configuration and try again.");
     }
     throw badRequest(redactCredentialString(error.message));

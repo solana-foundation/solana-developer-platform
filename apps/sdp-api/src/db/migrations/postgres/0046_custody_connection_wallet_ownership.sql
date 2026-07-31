@@ -22,6 +22,8 @@ ALTER TABLE custody_connections
     DROP CONSTRAINT IF EXISTS custody_connections_default_custody_wallet_id_fkey;
 
 ALTER TABLE custody_connections
+    ADD CONSTRAINT custody_connections_id_org_project_key
+        UNIQUE (id, organization_id, project_id),
     ADD CONSTRAINT custody_connections_default_wallet_owner_fkey
         FOREIGN KEY (default_custody_wallet_id, id)
         REFERENCES custody_wallets(id, custody_connection_id)
@@ -37,8 +39,8 @@ ALTER TABLE custody_scope_defaults
         FOREIGN KEY (default_custody_config_id)
         REFERENCES custody_configs(id),
     ADD CONSTRAINT custody_scope_defaults_default_custody_connection_id_fkey
-        FOREIGN KEY (default_custody_connection_id)
-        REFERENCES custody_connections(id),
+        FOREIGN KEY (default_custody_connection_id, organization_id, project_id)
+        REFERENCES custody_connections(id, organization_id, project_id),
     ADD CONSTRAINT custody_scope_defaults_has_target
         CHECK (
             default_custody_config_id IS NOT NULL

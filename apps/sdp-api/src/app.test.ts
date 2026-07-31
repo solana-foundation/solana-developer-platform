@@ -70,7 +70,7 @@ function buildApp(observability: Observability) {
   app.all(SECRET_SIGNING_ERROR_PATH, () => {
     throw new SigningError(
       'Privy API error: 401 - {"appSecret":"privy-secret"}',
-      "PROVIDER_NOT_CONFIGURED"
+      "PROVIDER_CREDENTIAL_INVALID"
     );
   });
   app.all(SECRET_UNEXPECTED_ERROR_PATH, () => {
@@ -256,9 +256,7 @@ describe("createApp onError Sentry guard", () => {
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toBe(
-      "The signing provider is not configured. Check provider configuration and try again."
-    );
+    expect(body.error.message).toBe("Provider credentials are invalid.");
     expect(JSON.stringify(body)).not.toContain("privy-secret");
   });
 

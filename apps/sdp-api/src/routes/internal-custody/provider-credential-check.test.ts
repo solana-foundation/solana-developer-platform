@@ -4,7 +4,10 @@ import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import custodyRoutes from "@/routes/custody";
+import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as credentialSecretStore from "@/services/credential-secret-store";
+import { CustodyConnectionRuntimeStore } from "@/services/stores/custody-connection-runtime.store";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -22,27 +25,36 @@ const WALLET_LABEL = "Treasury Wallet";
 const PRIVY_WALLET_ID = "wallet-provider-credential-check";
 const PRIVY_WALLET_ADDRESS = "wallet-address-provider-credential-check";
 const PRIVY_EXTERNAL_ID = `sdp_${CONNECTION_ID}`;
-const PRIVY_IDEMPOTENCY_KEY = `sdp_install_${CONNECTION_ID}_${CREDENTIAL_ID}_initial`;
+const PRIVY_IDEMPOTENCY_KEY = `sdp_install_${CONNECTION_ID}`;
+const PRIVY_EXTERNAL_WALLET_URL = `https://privy.example.test/v1/wallets/ext_wal_${PRIVY_EXTERNAL_ID}`;
 
 function privyJson(body: unknown, status = 200): Response {
   return Response.json(body, { status });
 }
 
-function privyWalletResponse(overrides: Record<string, unknown> = {}): Response {
-  return privyJson({
+function privyWallet(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
     id: PRIVY_WALLET_ID,
     address: PRIVY_WALLET_ADDRESS,
     chain_type: "solana",
     external_id: PRIVY_EXTERNAL_ID,
     ...overrides,
-  });
+  };
+}
+
+function privyWalletResponse(overrides: Record<string, unknown> = {}): Response {
+  return privyJson(privyWallet(overrides));
+}
+
+function privyWalletNotFoundResponse(): Response {
+  return privyJson({ error: "wallet not found" }, 404);
 }
 
 function stubSuccessfulPrivyProvisioning() {
   const providerFetch = vi
     .fn()
     .mockResolvedValueOnce(privyJson({ data: [], next_cursor: null }))
-    .mockResolvedValueOnce(privyJson({ data: [], next_cursor: null }))
+    .mockResolvedValueOnce(privyWalletNotFoundResponse())
     .mockResolvedValueOnce(privyWalletResponse());
   vi.stubGlobal("fetch", providerFetch);
   return providerFetch;
@@ -86,6 +98,7 @@ function buildApp(options: { injectJwt?: boolean } = {}) {
     await next();
   });
   app.route("/internal/dashboard/custody", internalCustody);
+  app.route("/v1/wallets", custodyRoutes);
   app.onError((error, c) => {
     if (error instanceof AppError) {
       return c.json(
@@ -238,6 +251,20 @@ async function check(
   );
 }
 
+async function listWallets(app: Hono<{ Bindings: Env }>, token: string): Promise<Response> {
+  return app.request(
+    "/v1/wallets",
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Project-ID": PROJECT_ID,
+      },
+    },
+    env
+  );
+}
+
 async function getCheckState(): Promise<{
   credential_status: string;
   encrypted_secret_payload: string | null;
@@ -284,6 +311,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
   };
 
   beforeEach(async () => {
+    clearWalletCaches();
     await seedTestDatabase(env);
     await clearKVStores(env);
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
@@ -314,6 +342,9 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
   it("validates the exact stored credential, provisions one wallet, and activates its Connection", async () => {
     const providerFetch = stubSuccessfulPrivyProvisioning();
     const { app, token } = buildApp();
+    const cachedBeforeInstall = await listWallets(app, token);
+    expect(cachedBeforeInstall.status).toBe(200);
+    expect(await cachedBeforeInstall.json()).toMatchObject({ data: { wallets: [] } });
 
     const response = await check(app, token);
 
@@ -344,6 +375,19 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     expect(JSON.stringify(body)).not.toContain(APP_ID);
     expect(JSON.stringify(body)).not.toContain(APP_SECRET);
     expect(JSON.stringify(body)).not.toContain(CONNECTION_ID);
+    const refreshedAfterInstall = await listWallets(app, token);
+    expect(refreshedAfterInstall.status).toBe(200);
+    expect(await refreshedAfterInstall.json()).toMatchObject({
+      data: {
+        wallets: [
+          expect.objectContaining({
+            walletId: `privy_${PRIVY_WALLET_ID}`,
+            publicKey: PRIVY_WALLET_ADDRESS,
+            label: WALLET_LABEL,
+          }),
+        ],
+      },
+    });
     expect(providerFetch).toHaveBeenCalledTimes(3);
     expect(providerFetch.mock.calls[0]?.[0]).toBe(
       "https://privy.example.test/v1/wallets?limit=1&chain_type=solana"
@@ -355,9 +399,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
         "privy-app-id": APP_ID,
       },
     });
-    expect(providerFetch.mock.calls[1]?.[0]).toBe(
-      `https://privy.example.test/v1/wallets?external_id=${PRIVY_EXTERNAL_ID}&limit=1&include_archived=true`
-    );
+    expect(providerFetch.mock.calls[1]?.[0]).toBe(PRIVY_EXTERNAL_WALLET_URL);
     expect(providerFetch.mock.calls[2]).toEqual([
       "https://privy.example.test/v1/wallets",
       expect.objectContaining({
@@ -477,13 +519,111 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     });
   });
 
+  it("reconciles the same Privy wallet after local completion persistence fails", async () => {
+    let providerWalletExists = false;
+    const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        providerWalletExists = true;
+        return privyWalletResponse();
+      }
+      if (url.endsWith("/wallets?limit=1&chain_type=solana")) {
+        return privyJson({ data: [] });
+      }
+      if (url === PRIVY_EXTERNAL_WALLET_URL) {
+        return providerWalletExists ? privyWalletResponse() : privyWalletNotFoundResponse();
+      }
+      throw new Error(`Unexpected Privy request: ${url}`);
+    });
+    vi.stubGlobal("fetch", providerFetch);
+    vi.spyOn(CustodyConnectionRuntimeStore.prototype, "persistCreatedWallet").mockRejectedValueOnce(
+      new Error("injected completion persistence failure")
+    );
+    const { app, token } = buildApp();
+
+    const failedCompletion = await check(app, token);
+
+    expect(failedCompletion.status).toBe(500);
+    expect(await getCheckState()).toMatchObject({
+      credential_status: "pending",
+      connection_status: "pending",
+      setup_metadata: { pendingWalletLabel: WALLET_LABEL },
+      last_check_status: null,
+    });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM custody_wallets) AS wallets,
+             (SELECT COUNT(*) FROM custody_scope_defaults) AS defaults`
+        )
+        .first()
+    ).toEqual({ wallets: 0, defaults: 0 });
+
+    const retry = await check(app, token);
+
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "active" },
+        check: { status: "success" },
+      },
+    });
+    const createCalls = providerFetch.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(createCalls).toHaveLength(1);
+    expect(new Headers(createCalls[0]?.[1]?.headers).get("privy-idempotency-key")).toBe(
+      PRIVY_IDEMPOTENCY_KEY
+    );
+    expect(JSON.parse(String(createCalls[0]?.[1]?.body))).toEqual({
+      chain_type: "solana",
+      external_id: PRIVY_EXTERNAL_ID,
+    });
+    expect(
+      providerFetch.mock.calls
+        .filter(([url]) => String(url).includes("ext_wal_") || String(url).includes("external_id="))
+        .map(([url]) => String(url))
+    ).toEqual([PRIVY_EXTERNAL_WALLET_URL, PRIVY_EXTERNAL_WALLET_URL]);
+    expect(await getCheckState()).toMatchObject({
+      credential_status: "active",
+      connection_status: "active",
+      setup_metadata: {
+        providerAccountFingerprint:
+          "sha256:227b73d3e3e9e6717d2c6f6500f88386b11130922ae7320de715a6ca237f3296",
+      },
+      last_check_status: "success",
+      last_check_failure_code: null,
+    });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT c.default_custody_wallet_id, w.wallet_id, w.label,
+                  d.default_custody_connection_id,
+                  (SELECT COUNT(*) FROM custody_wallets) AS wallet_count
+           FROM custody_connections c
+           JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
+           JOIN custody_scope_defaults d
+             ON d.organization_id = c.organization_id
+            AND d.project_id = c.project_id
+           WHERE c.id = ?`
+        )
+        .bind(CONNECTION_ID)
+        .first()
+    ).toMatchObject({
+      default_custody_wallet_id: expect.any(String),
+      wallet_id: `privy_${PRIVY_WALLET_ID}`,
+      label: WALLET_LABEL,
+      default_custody_connection_id: CONNECTION_ID,
+      wallet_count: 1,
+    });
+  });
+
   it("keeps setup pending when wallet creation fails and reconciliation finds nothing", async () => {
     const providerFetch = vi
       .fn()
       .mockResolvedValueOnce(privyJson({ data: [] }))
-      .mockResolvedValueOnce(privyJson({ data: [] }))
+      .mockResolvedValueOnce(privyWalletNotFoundResponse())
       .mockResolvedValueOnce(new Response(null, { status: 500 }))
-      .mockResolvedValueOnce(privyJson({ data: [] }));
+      .mockResolvedValueOnce(privyWalletNotFoundResponse());
     vi.stubGlobal("fetch", providerFetch);
     const { app, token } = buildApp();
 
@@ -525,19 +665,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     const providerFetch = vi
       .fn()
       .mockResolvedValueOnce(privyJson({ data: [] }))
-      .mockResolvedValueOnce(
-        privyJson({
-          data: [
-            {
-              id: PRIVY_WALLET_ID,
-              address: PRIVY_WALLET_ADDRESS,
-              chain_type: "solana",
-              external_id: PRIVY_EXTERNAL_ID,
-              archived_at: Date.now(),
-            },
-          ],
-        })
-      );
+      .mockResolvedValueOnce(privyWalletResponse({ archived_at: Date.now() }));
     vi.stubGlobal("fetch", providerFetch);
     const { app, token } = buildApp();
 
@@ -596,9 +724,11 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     const bothCreatesStarted = new Promise<void>((resolve) => {
       releaseCreates = resolve;
     });
-    const providerFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+    const providerFetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method !== "POST") {
-        return privyJson({ data: [] });
+        return url === PRIVY_EXTERNAL_WALLET_URL
+          ? privyWalletNotFoundResponse()
+          : privyJson({ data: [] });
       }
 
       createCalls += 1;
@@ -615,6 +745,22 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
 
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
     expect(createCalls).toBe(2);
+    const createRequests = providerFetch.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(
+      createRequests.map(([, init]) => ({
+        body: JSON.parse(String(init?.body)),
+        idempotencyKey: new Headers(init?.headers).get("privy-idempotency-key"),
+      }))
+    ).toEqual([
+      {
+        body: { chain_type: "solana", external_id: PRIVY_EXTERNAL_ID },
+        idempotencyKey: PRIVY_IDEMPOTENCY_KEY,
+      },
+      {
+        body: { chain_type: "solana", external_id: PRIVY_EXTERNAL_ID },
+        idempotencyKey: PRIVY_IDEMPOTENCY_KEY,
+      },
+    ]);
     expect(
       await getDb(env).prepare("SELECT COUNT(*) AS count FROM custody_wallets").first()
     ).toEqual({ count: 1 });
@@ -652,6 +798,64 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       last_check_failure_code: "invalid_credentials",
     });
     expect(providerFetch).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    "wallet lookup",
+    "wallet create",
+  ] as const)("records a late Privy 401 during %s as a failed check", async (failureStage) => {
+    const providerFetch = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        const url = String(input);
+        if (url.endsWith("/wallets?limit=1&chain_type=solana")) {
+          return privyJson({ data: [] });
+        }
+        if (failureStage === "wallet lookup") {
+          return privyJson({ error: "raw provider detail" }, 401);
+        }
+        if (init?.method === "POST") {
+          return privyJson({ error: "raw provider detail" }, 401);
+        }
+        return url === PRIVY_EXTERNAL_WALLET_URL
+          ? privyWalletNotFoundResponse()
+          : privyJson({ data: [] });
+      }
+    );
+    vi.stubGlobal("fetch", providerFetch);
+    const { app, token } = buildApp();
+
+    const response = await check(app, token);
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      data: {
+        providerCredential: {
+          id: CREDENTIAL_ID,
+          status: "failed_validation",
+        },
+        check: {
+          status: "failed",
+          checkedAt: expect.any(String),
+        },
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("raw provider detail");
+    expect(await getCheckState()).toMatchObject({
+      credential_status: "failed_validation",
+      encrypted_secret_payload: null,
+      connection_status: "failed",
+      setup_metadata: { pendingWalletLabel: WALLET_LABEL },
+      last_check_status: "failed",
+      last_check_at: expect.any(String),
+      last_check_failure_code: "invalid_credentials",
+    });
+    expect(
+      providerFetch.mock.calls.some(([url]) => String(url) === PRIVY_EXTERNAL_WALLET_URL)
+    ).toBe(true);
+    expect(providerFetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(
+      failureStage === "wallet create" ? 1 : 0
+    );
   });
 
   it.each([

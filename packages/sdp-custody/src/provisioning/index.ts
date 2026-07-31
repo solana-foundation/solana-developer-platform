@@ -67,10 +67,6 @@ interface PrivyWalletResponse {
   external_id?: string;
 }
 
-interface PrivyWalletListResponse {
-  data?: PrivyWalletResponse[];
-}
-
 interface CoinbaseCdpSolanaAccountResponse {
   address: string;
   name?: string;
@@ -323,6 +319,7 @@ export async function provisionPrivyWallet(
       apiBaseUrl,
       authHeader,
       appId,
+      reportInvalidCredential: externalWalletLookup !== undefined,
       idempotencyKey: options.idempotencyKey,
       method: "POST",
       path: "/wallets",
@@ -332,12 +329,15 @@ export async function provisionPrivyWallet(
       },
     });
 
-    if (!created?.id || !created?.address) {
-      throw new SigningError("Privy wallet creation outcome is unknown", "NETWORK_ERROR");
+    if (externalWalletLookup) {
+      return validatePrivyExternalWallet(created, externalWalletLookup.externalId);
     }
 
-    return { walletId: created.id, address: created.address };
+    return validatePrivyWalletPayload(created);
   } catch (error) {
+    if (isTerminalPrivyProvisioningError(error)) {
+      throw error;
+    }
     if (externalWalletLookup) {
       try {
         const reconciled = await findPrivyWalletByExternalId(runtime, externalWalletLookup);
@@ -353,6 +353,13 @@ export async function provisionPrivyWallet(
     }
     throw error;
   }
+}
+
+function isTerminalPrivyProvisioningError(error: unknown): error is SigningError {
+  return (
+    error instanceof SigningError &&
+    (error.code === "CONFLICT" || error.code === "PROVIDER_CREDENTIAL_INVALID")
+  );
 }
 
 function validatePrivyProvisionOptions(options: ProvisionPrivyOptions): void {
@@ -802,7 +809,9 @@ interface PrivyRequestParams {
   apiBaseUrl: string;
   authHeader: string;
   appId: string;
+  allowNotFound?: boolean;
   idempotencyKey?: string;
+  reportInvalidCredential?: boolean;
   method: "GET" | "POST";
   path: string;
   body?: unknown;
@@ -827,10 +836,15 @@ async function privyRequest<T>(
 
     if (!response.ok) {
       const errorText = await readErrorResponseText(response);
-      throw new SigningError(
-        `Privy API error: ${response.status} - ${errorText}`,
-        response.status >= 500 ? "NETWORK_ERROR" : "PROVIDER_NOT_CONFIGURED"
-      );
+      const code =
+        response.status === 401 && params.reportInvalidCredential
+          ? "PROVIDER_CREDENTIAL_INVALID"
+          : response.status === 404 && params.allowNotFound
+            ? "NOT_FOUND"
+            : response.status >= 500
+              ? "NETWORK_ERROR"
+              : "PROVIDER_NOT_CONFIGURED";
+      throw new SigningError(`Privy API error: ${response.status} - ${errorText}`, code);
     }
 
     return parseJsonResponse<T>(response);
@@ -853,32 +867,49 @@ async function findPrivyWalletByExternalId(
     externalId: string;
   }
 ): Promise<ProvisionPrivyResult | undefined> {
-  const response = await privyRequest<PrivyWalletListResponse>(runtime, {
-    apiBaseUrl: params.apiBaseUrl,
-    authHeader: params.authHeader,
-    appId: params.appId,
-    method: "GET",
-    path: `/wallets?external_id=${encodeURIComponent(params.externalId)}&limit=1&include_archived=true`,
-  });
-  if (!Array.isArray(response?.data)) {
-    throw new SigningError("Privy wallet lookup outcome is unknown", "NETWORK_ERROR");
+  let wallet: PrivyWalletResponse;
+  try {
+    wallet = await privyRequest<PrivyWalletResponse>(runtime, {
+      apiBaseUrl: params.apiBaseUrl,
+      allowNotFound: true,
+      authHeader: params.authHeader,
+      appId: params.appId,
+      method: "GET",
+      path: `/wallets/ext_wal_${encodeURIComponent(params.externalId)}`,
+      reportInvalidCredential: true,
+    });
+  } catch (error) {
+    if (error instanceof SigningError && error.code === "NOT_FOUND") {
+      return undefined;
+    }
+    throw error;
   }
 
-  const wallet = response.data[0];
-  if (!wallet) return undefined;
+  return validatePrivyExternalWallet(wallet, params.externalId);
+}
+
+function validatePrivyWalletPayload(wallet: PrivyWalletResponse): ProvisionPrivyResult {
   if (!wallet.id || !wallet.address) {
-    throw new SigningError("Privy wallet lookup outcome is unknown", "NETWORK_ERROR");
+    throw new SigningError("Privy wallet outcome is unknown", "NETWORK_ERROR");
   }
+  return { walletId: wallet.id, address: wallet.address };
+}
+
+function validatePrivyExternalWallet(
+  wallet: PrivyWalletResponse,
+  externalId: string
+): ProvisionPrivyResult {
+  const result = validatePrivyWalletPayload(wallet);
   if (wallet.archived_at != null) {
     throw new SigningError("Privy external wallet is archived", "CONFLICT");
   }
-  if (
-    wallet.chain_type !== "solana" ||
-    (wallet.external_id !== undefined && wallet.external_id !== params.externalId)
-  ) {
+  if (!wallet.chain_type || !wallet.external_id) {
+    throw new SigningError("Privy wallet identity is unknown", "NETWORK_ERROR");
+  }
+  if (wallet.chain_type !== "solana" || wallet.external_id !== externalId) {
     throw new SigningError("Privy external wallet identity does not match", "CONFLICT");
   }
-  return { walletId: wallet.id, address: wallet.address };
+  return result;
 }
 
 async function turnkeyRequest<T>(

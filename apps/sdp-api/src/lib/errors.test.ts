@@ -2,8 +2,16 @@
  * Error handling tests
  */
 
+import { SigningError } from "@sdp/custody/signing";
 import { describe, expect, it } from "vitest";
-import { AppError, badRequest, notFound, rateLimited, unauthorized } from "./errors";
+import {
+  AppError,
+  badRequest,
+  mapWalletCreationSigningError,
+  notFound,
+  rateLimited,
+  unauthorized,
+} from "./errors";
 
 describe("AppError", () => {
   it("creates error with default message", () => {
@@ -79,5 +87,19 @@ describe("error helper functions", () => {
     const error = rateLimited();
     expect(error.statusCode).toBe(429);
     expect(error.code).toBe("RATE_LIMITED");
+  });
+
+  it("does not expose a Provider response for invalid stored credentials", () => {
+    const error = mapWalletCreationSigningError(
+      new SigningError("Privy API error: raw provider detail", "PROVIDER_CREDENTIAL_INVALID"),
+      "CONFLICT"
+    );
+
+    expect(error.toResponse()).toEqual({
+      error: {
+        code: "BAD_REQUEST",
+        message: "Provider credentials are invalid",
+      },
+    });
   });
 });

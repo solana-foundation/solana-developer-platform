@@ -99,7 +99,7 @@ export async function checkProviderCredential(
         c.env,
         {
           externalId: `sdp_${target.connection.id}`,
-          idempotencyKey: createPrivyInstallAttemptKey(target),
+          idempotencyKey: `sdp_install_${target.connection.id}`,
         },
         credential
       );
@@ -111,7 +111,10 @@ export async function checkProviderCredential(
       if (error instanceof SigningError && error.code === "CONFLICT") {
         throw conflict("Privy wallet cannot be reconciled");
       }
-      outcome = "retry_unknown";
+      outcome =
+        error instanceof SigningError && error.code === "PROVIDER_CREDENTIAL_INVALID"
+          ? "failed"
+          : "retry_unknown";
     }
   }
 
@@ -204,13 +207,6 @@ function completedInstallCheckResult(
   }
 
   return null;
-}
-
-function createPrivyInstallAttemptKey(target: InstallCheckTarget): string {
-  // Privy caches failures per key; the stable external ID remains the operation identity.
-  const previousAttempt =
-    target.connection.last_check_at?.replace(/[^a-zA-Z0-9_-]/g, "") || "initial";
-  return `sdp_install_${target.connection.id}_${target.credential.id}_${previousAttempt}`;
 }
 
 async function loadInstallCheckTarget(
