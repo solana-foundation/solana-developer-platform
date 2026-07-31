@@ -860,15 +860,8 @@ export class TokenService {
       whereConditions.push("status <> 'deploying'");
     }
     if (expectedDeploymentState) {
-      whereConditions.push(
-        "status = ?",
-        "(mint_address = ? OR (mint_address IS NULL AND ? IS NULL))"
-      );
-      whereValues.push(
-        expectedDeploymentState.status,
-        expectedDeploymentState.mintAddress,
-        expectedDeploymentState.mintAddress
-      );
+      whereConditions.push("status = ?", "mint_address IS NOT DISTINCT FROM ?");
+      whereValues.push(expectedDeploymentState.status, expectedDeploymentState.mintAddress);
     }
 
     const rowsAffected = await this.db
