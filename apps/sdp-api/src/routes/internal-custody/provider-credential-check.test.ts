@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { env } from "@/test/helpers/env";
@@ -56,6 +57,13 @@ function stubSuccessfulPrivyProvisioning() {
     .mockResolvedValueOnce(privyWalletResponse());
   vi.stubGlobal("fetch", providerFetch);
   return providerFetch;
+}
+
+async function getLatestCheckAudit() {
+  const [audit] = await new AuditService(getDb(env)).getForOrganization(ORGANIZATION_ID, {
+    action: "check",
+  });
+  return audit;
 }
 
 function encodeJwtPart(value: Record<string, unknown>): string {
@@ -588,6 +596,13 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       last_check_status: "retry_unknown",
       last_check_failure_code: "provider_response_unknown",
     });
+    const audit = await getLatestCheckAudit();
+    expect(audit?.metadata).toEqual({
+      provider: "privy",
+      checkStatus: "retry_unknown",
+      failureStage: "wallet_provisioning",
+      failureCode: "provider_response_unknown",
+    });
     expect(
       await getDb(env)
         .prepare(
@@ -620,6 +635,17 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       credential_status: "pending",
       connection_status: "pending",
       last_check_status: null,
+    });
+    const audit = await getLatestCheckAudit();
+    expect(audit).toMatchObject({
+      resourceId: CREDENTIAL_ID,
+      status: "failure",
+    });
+    expect(audit?.metadata).toEqual({
+      provider: "privy",
+      checkStatus: "failed",
+      failureStage: "wallet_provisioning",
+      failureCode: "wallet_conflict",
     });
   });
 
@@ -734,6 +760,22 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       last_check_at: expect.any(String),
       last_check_failure_code: "invalid_credentials",
     });
+    const audit = await getLatestCheckAudit();
+    expect(audit).toMatchObject({
+      resourceId: CREDENTIAL_ID,
+      status: "failure",
+    });
+    expect(audit?.metadata).toEqual({
+      provider: "privy",
+      checkStatus: "failed",
+      failureStage: "credential_validation",
+      failureCode: "invalid_credentials",
+    });
+    expect(JSON.stringify(audit)).not.toContain("raw provider detail");
+    expect(JSON.stringify(audit)).not.toContain(APP_SECRET);
+    expect(JSON.stringify(audit)).not.toContain(APP_ID);
+    expect(JSON.stringify(audit)).not.toContain(CONNECTION_ID);
+    expect(JSON.stringify(audit)).not.toContain(PRIVY_WALLET_ID);
     expect(providerFetch).toHaveBeenCalledOnce();
   });
 
@@ -820,6 +862,13 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     expect(providerFetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(
       failureStage === "wallet create" ? 1 : 0
     );
+    const audit = await getLatestCheckAudit();
+    expect(audit?.metadata).toEqual({
+      provider: "privy",
+      checkStatus: "failed",
+      failureStage: "wallet_provisioning",
+      failureCode: "invalid_credentials",
+    });
   });
 
   it.each([
@@ -858,6 +907,13 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       last_check_status: "retry_unknown",
       last_check_at: expect.any(String),
       last_check_failure_code: "provider_response_unknown",
+    });
+    const audit = await getLatestCheckAudit();
+    expect(audit?.metadata).toEqual({
+      provider: "privy",
+      checkStatus: "retry_unknown",
+      failureStage: "credential_validation",
+      failureCode: "provider_response_unknown",
     });
   });
 

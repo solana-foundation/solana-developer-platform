@@ -42,6 +42,7 @@ const INSTALL_CHECK_DISABLED_MESSAGE =
 const PRIVY_CHECK_TIMEOUT_MS = 10_000;
 
 type InstallCheckStatus = "success" | "failed" | "retry_unknown";
+type InstallCheckFailureStage = "credential_validation" | "wallet_provisioning";
 
 interface InstallCheckTarget {
   credential: ProviderCredentialSecretRow;
@@ -73,6 +74,7 @@ export async function checkProviderCredential(
 
   const db = getDb(c.env);
   const store = new ProviderCredentialStore(db);
+  const audit = new AuditService(db);
   const target = await loadInstallCheckTarget(
     store,
     auth.organizationId,
@@ -91,6 +93,7 @@ export async function checkProviderCredential(
   const secretStore = createPersistedSecretStore(c.env, target.credential.storage_backend);
   const credential = await readPrivyCredential(secretStore, auth.organizationId, target.credential);
   let outcome = await validatePrivyCredential(c.env, credential);
+  let failureMetadata = installCheckFailureMetadata(outcome, "credential_validation");
   let wallet: ProvisionPrivyResult | undefined;
   if (outcome === "success") {
     try {
@@ -108,12 +111,27 @@ export async function checkProviderCredential(
       };
     } catch (error) {
       if (error instanceof SigningError && error.code === "CONFLICT") {
+        await audit.log(c, {
+          organizationId: auth.organizationId,
+          userId: auth.userId,
+          action: "check",
+          resourceType: "provider_credential",
+          resourceId: providerCredentialId,
+          status: "failure",
+          metadata: {
+            provider: "privy",
+            checkStatus: "failed",
+            failureStage: "wallet_provisioning",
+            failureCode: "wallet_conflict",
+          },
+        });
         throw conflict("Privy wallet cannot be reconciled");
       }
       outcome =
         error instanceof SigningError && error.code === "PROVIDER_CREDENTIAL_INVALID"
           ? "failed"
           : "retry_unknown";
+      failureMetadata = installCheckFailureMetadata(outcome, "wallet_provisioning");
     }
   }
 
@@ -163,7 +181,7 @@ export async function checkProviderCredential(
     );
   }
 
-  await new AuditService(db).log(c, {
+  await audit.log(c, {
     organizationId: auth.organizationId,
     userId: auth.userId,
     action: "check",
@@ -173,12 +191,27 @@ export async function checkProviderCredential(
     metadata: {
       provider: "privy",
       checkStatus: outcome,
+      ...failureMetadata,
     },
   });
 
   return {
     providerCredential: mapProviderCredential(providerCredential),
     check: { status: outcome, checkedAt },
+  };
+}
+
+function installCheckFailureMetadata(
+  status: InstallCheckStatus,
+  failureStage: InstallCheckFailureStage
+): {
+  failureStage?: InstallCheckFailureStage;
+  failureCode?: "invalid_credentials" | "provider_response_unknown";
+} {
+  if (status === "success") return {};
+  return {
+    failureStage,
+    failureCode: status === "failed" ? "invalid_credentials" : "provider_response_unknown",
   };
 }
 
