@@ -154,9 +154,7 @@ describe("custody Connection ownership constraints", () => {
     ).rejects.toThrow(/custody_connections_default_wallet_owner_fkey/);
 
     await expect(
-      getDb(env)
-        .prepare("DELETE FROM custody_connections WHERE id = 'cconn_default_one'")
-        .run()
+      getDb(env).prepare("DELETE FROM custody_connections WHERE id = 'cconn_default_one'").run()
     ).rejects.toThrow(/custody_wallets_connection_fkey/);
     expect(
       await getDb(env)
