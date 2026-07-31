@@ -7,6 +7,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, forbidden, internalError, providerUnavailable } from "@/lib/errors";
 import { isPrivyByokProvisioningEnabled } from "@/lib/feature-flags";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
@@ -821,16 +822,19 @@ function logOrphanRisk(params: {
   requestId: string;
   reason: "secret_write_outcome_unknown" | "secret_cleanup_failed";
 }): void {
-  console.error("provider_credential_orphan_risk", {
-    providerCredentialId: params.providerCredentialId,
-    provider: "privy",
-    storageBackend: params.storageBackend,
-    ...(params.providerResourceVersion !== undefined && {
-      providerResourceVersion: params.providerResourceVersion,
-    }),
-    requestId: params.requestId,
-    reason: params.reason,
-  });
+  getLogger().error(
+    {
+      providerCredentialId: params.providerCredentialId,
+      provider: "privy",
+      storageBackend: params.storageBackend,
+      ...(params.providerResourceVersion !== undefined && {
+        providerResourceVersion: params.providerResourceVersion,
+      }),
+      requestId: params.requestId,
+      reason: params.reason,
+    },
+    "provider_credential_orphan_risk"
+  );
 }
 
 async function auditFailure(

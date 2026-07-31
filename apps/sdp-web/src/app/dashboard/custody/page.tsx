@@ -61,7 +61,7 @@ async function getCustodyWallets(
 }
 
 export default async function CustodyPage() {
-  const [t, { getToken, userId, orgId }] = await Promise.all([getTranslations(), auth()]);
+  const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -74,7 +74,6 @@ export default async function CustodyPage() {
   try {
     const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
       createRequestScopedSdpApiClients({
-        getToken,
         organizationTraceContext: trace.childContext("dashboard.custody.org.api"),
         projectTraceContext: trace.childContext("dashboard.custody.api"),
       })

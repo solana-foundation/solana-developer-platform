@@ -8,6 +8,7 @@ import { redactCredentialSecrets } from "@sdp/custody";
 import type { Context } from "hono";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getClientIp } from "@/lib/client-ip";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 // Runtime list is the source of truth for the AuditAction type so callers can
@@ -181,7 +182,7 @@ export class AuditService {
         .run();
     } catch (err) {
       // Log but don't fail the request
-      console.error("Failed to write audit log:", redactCredentialSecrets(err));
+      getLogger().error({ error: redactCredentialSecrets(err) }, "Failed to write audit log");
     }
   }
 

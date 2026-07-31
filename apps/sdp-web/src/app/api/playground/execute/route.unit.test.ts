@@ -137,4 +137,35 @@ describe("POST /api/playground/execute", () => {
       expect.objectContaining({ headers: {} })
     );
   });
+
+  it("forwards documented request bodies for DELETE operations", async () => {
+    const request = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ deleted: true }), {
+        status: 200,
+        statusText: "OK",
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    mocks.createSdpApiClient.mockResolvedValue({ request });
+    const body = { provider: "anchorage", walletId: "anchorage_wallet_123" };
+    const deleteRequest = new Request("https://dashboard.example.com/api/playground/execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        method: "DELETE",
+        path: "/v1/wallets",
+        body,
+        apiKey: null,
+      }),
+    });
+
+    const response = await POST(deleteRequest);
+
+    expect(response.status).toBe(200);
+    expect(request).toHaveBeenCalledWith("/v1/wallets", {
+      method: "DELETE",
+      headers: {},
+      body: JSON.stringify(body),
+    });
+  });
 });

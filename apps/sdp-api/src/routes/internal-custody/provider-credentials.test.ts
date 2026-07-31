@@ -5,6 +5,7 @@ import { type DatabaseClient, getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { rootLogger } from "@/runtime/logger";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
 import {
   type CredentialSecretStore,
@@ -1178,7 +1179,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       destroyVersion: vi.fn(),
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
@@ -1201,13 +1202,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
     expect(consoleError).toHaveBeenCalledOnce();
     expect(consoleError).toHaveBeenCalledWith(
-      "provider_credential_orphan_risk",
       expect.objectContaining({
         provider: "privy",
         storageBackend: "gcp_secret_manager",
         requestId: "req_provider_credential_submit",
         reason: "secret_write_outcome_unknown",
-      })
+      }),
+      "provider_credential_orphan_risk"
     );
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("raw upstream detail");
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("exact secret");
@@ -1327,7 +1328,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       destroyVersion: vi.fn().mockRejectedValue(new Error("raw cleanup failure")),
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
@@ -1337,13 +1338,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(response.status).toBe(500);
     expect(consoleError).toHaveBeenCalledOnce();
     expect(consoleError).toHaveBeenCalledWith(
-      "provider_credential_orphan_risk",
       expect.objectContaining({
         provider: "privy",
         storageBackend: "gcp_secret_manager",
         providerResourceVersion: 11,
         reason: "secret_cleanup_failed",
-      })
+      }),
+      "provider_credential_orphan_risk"
     );
     const logged = JSON.stringify(consoleError.mock.calls);
     expect(logged).not.toContain("pcred-sensitive-name");

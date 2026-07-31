@@ -29,7 +29,7 @@ export function SettingsPageSkeleton() {
           <SkeletonBlock className="h-4 w-full max-w-lg" />
         </header>
         <div className="px-6" data-loading-settings-form>
-          <div className="w-full max-w-3xl space-y-5">
+          <div className="w-full space-y-5">
             <SkeletonBlock className="h-10 w-full rounded-xl" />
             <div className="space-y-2">
               <SkeletonBlock className="h-4 w-32" />

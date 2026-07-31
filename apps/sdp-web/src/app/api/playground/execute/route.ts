@@ -110,10 +110,7 @@ export async function POST(request: Request) {
       method,
       headers,
       body:
-        method !== "GET" &&
-        method !== "DELETE" &&
-        payload.body !== null &&
-        payload.body !== undefined
+        method !== "GET" && payload.body !== null && payload.body !== undefined
           ? JSON.stringify(payload.body)
           : undefined,
     });

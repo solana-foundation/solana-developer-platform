@@ -381,7 +381,7 @@ export function OrganizationRpcSettingsForm({
 
   return (
     <div className="grid gap-5">
-      <div className="w-full max-w-3xl space-y-5">
+      <div className="w-full space-y-5">
         <div className="flex h-10 w-full items-center rounded-xl border border-border-default bg-fill-subtle px-3 text-sm text-secondary">
           {t("DashboardCustody.editingOrganization", { name: organization.name })}
         </div>
@@ -471,7 +471,7 @@ export function OrganizationRpcSettingsForm({
       </div>
 
       {errorMessage ? (
-        <div className="w-full max-w-3xl rounded-xl border border-destructive-border bg-destructive-bg px-3 py-2 text-sm text-destructive-strong">
+        <div className="w-full rounded-xl border border-destructive-border bg-destructive-bg px-3 py-2 text-sm text-destructive-strong">
           {errorMessage}
         </div>
       ) : null}

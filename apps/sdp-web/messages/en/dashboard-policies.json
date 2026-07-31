@@ -13,9 +13,6 @@
     "configureControls": "Configure controls",
     "walletControls": "Wallet controls",
     "apiKeyControls": "API key controls",
-    "policySummary": "Policy summary",
-    "summaryDescription": "Controls are attached to wallets and API keys.",
-    "apiKeyBindings": "API key bindings",
     "target": "Target",
     "status": "Status",
     "defaultAction": "Default action",
@@ -43,9 +40,10 @@
     "noMatches": "No controls match these filters.",
     "clearFilters": "Clear filters",
     "emptyProject": "No wallet or API-key controls are configured.",
+    "emptyProjectWallets": "No wallet controls are configured.",
+    "emptyProjectApiKeys": "No API key controls are configured.",
     "loadError": "Could not load policy controls.",
     "retry": "Retry",
-    "rowsPerPage": "Rows per page",
     "range": "{start}–{end} of {total}"
   }
 }

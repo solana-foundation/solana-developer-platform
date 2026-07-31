@@ -20,7 +20,7 @@ import {
   WalletIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
   type KeyboardEvent,
@@ -61,6 +61,7 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
@@ -69,7 +70,6 @@ import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
-import { PaymentsRouteTabs } from "../payments-workspace-tabs";
 import {
   deriveTokenOptions,
   type PaymentRequestsLocalErrorCode,
@@ -201,7 +201,11 @@ function CreateRequestModal({
   tokens: PaymentRequestTokenOption[];
   counterparties: Counterparty[];
   onClose: () => void;
-  onCreated: () => void;
+  /**
+   * Receives the created request so its details can be shown without a round trip,
+   * or `null` when the response carried no usable link.
+   */
+  onCreated: (request: PaymentRequest | null) => void;
 }) {
   const t = useTranslations();
   const form = useZodForm(createRequestSchema, {
@@ -251,7 +255,7 @@ function CreateRequestModal({
     const expiresAt = resolveExpiryDate(result.data.expiry);
 
     setSubmitting(true);
-    const res = await dashboardFetch("/api/dashboard/payments/requests", {
+    const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
       method: "POST",
       body: {
         walletId: result.data.wallet,
@@ -266,8 +270,16 @@ function CreateRequestModal({
       toast.error(res.error);
       return;
     }
+
     toast.success(t("DashboardPayments.requests.paymentLinkCreated"));
-    onCreated();
+
+    // The create response is the full request, so the details view can open straight
+    // away. Without this the link was only reachable by waiting for the table to
+    // repopulate and then reopening the row. A response without a `publicToken` still
+    // means the request was created, so fall back to closing rather than reporting a
+    // failure that did not happen — the row will arrive with the refresh.
+    const created = res.data?.data;
+    onCreated(created?.publicToken ? created : null);
   }
 
   return (
@@ -467,12 +479,11 @@ export function PaymentRequestsWorkspace({
   const router = useRouter();
   const { sdpEnvironment, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
-  const searchParams = useSearchParams();
   const tokens = useMemo(
     () => deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]),
     [sdpEnvironment]
   );
-  const isPlaygroundTab = searchParams.get("tab") === "playground";
+  const isPlaygroundTab = useDashboardTab() === "playground";
   const [selected, setSelected] = useState<PaymentRequest | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const requests = initialPaymentRequests;
@@ -524,13 +535,6 @@ export function PaymentRequestsWorkspace({
   return (
     <>
       <DashboardWorkspaceTabShell
-        isPlaygroundTab={isPlaygroundTab}
-        tabNavigation={
-          <PaymentsRouteTabs
-            basePath="/dashboard/payments/requests"
-            value={isPlaygroundTab ? "playground" : "overview"}
-          />
-        }
         overviewClassName="flex min-h-0 flex-col overflow-hidden"
         overviewKey="payment-requests-overview-tab"
         playgroundKey="payment-requests-playground-tab"
@@ -769,8 +773,11 @@ export function PaymentRequestsWorkspace({
           tokens={tokens}
           counterparties={counterparties}
           onClose={() => setCreateOpen(false)}
-          onCreated={() => {
+          onCreated={(request) => {
+            // Swap the create form for the details view and let the table repopulate
+            // behind it, rather than closing and making the user find the new row.
             setCreateOpen(false);
+            setSelected(request);
             router.refresh();
           }}
         />

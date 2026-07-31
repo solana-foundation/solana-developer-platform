@@ -6,7 +6,7 @@ import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { getDeveloperControlsDefault } from "@/lib/feature-flag-defaults";
+import { isDeveloperControlsEnabled } from "@/lib/developer-controls";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
@@ -191,7 +191,7 @@ export default async function SettingsPage({
       <AppearanceSection
         showAssetHeaderControls={
           assetProfilesEnabled &&
-          getDeveloperControlsDefault({
+          isDeveloperControlsEnabled({
             nodeEnvironment: process.env.NODE_ENV,
             sdpEnvironment: process.env.NEXT_PUBLIC_SDP_ENVIRONMENT,
             vercelEnvironment: process.env.VERCEL_ENV,

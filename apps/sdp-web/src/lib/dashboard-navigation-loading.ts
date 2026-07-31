@@ -16,6 +16,7 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
   deposit: "/dashboard/payments/deposit",
   requests: "/dashboard/payments/requests",
   recurring: "/dashboard/payments/recurring",
+  privateChannels: "/dashboard/payments/private-channels",
 } as const;
 
 export type DashboardLoadingRoute =
@@ -214,4 +215,24 @@ export function announceDashboardNavigation(targetHref: string): void {
       },
     })
   );
+}
+
+/**
+ * Whether a top-level nav destination is the one currently being viewed.
+ *
+ * Lives here rather than in the shell so the sidebar and the mobile bottom bar
+ * cannot drift apart on which tab is highlighted. Wallets deliberately claims the
+ * `/dashboard/custody` tree too — they are the same destination under two paths.
+ */
+export function isDashboardNavItemActive(pathname: string, href: string): boolean {
+  if (href === "/dashboard") {
+    return pathname === "/dashboard";
+  }
+  if (href === "/dashboard/wallets") {
+    return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
+  }
+  if (href === "/dashboard/payments") {
+    return pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
 }

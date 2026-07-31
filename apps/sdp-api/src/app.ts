@@ -44,9 +44,11 @@ import payments from "@/routes/payments";
 import places from "@/routes/places";
 import playgroundInternal from "@/routes/playground-internal";
 import policies from "@/routes/policies";
+import privateChannels from "@/routes/private-channels";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
+import { getLogger } from "@/runtime/logger";
 import { isSentryEnabled, type Observability } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
@@ -351,6 +353,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/payments", payments);
   v1.route("/places", places);
   v1.route("/policies", policies);
+  v1.route("/private-channels", privateChannels);
   v1.route("/compliance", compliance);
 
   const registeredPluginNames = new Set<string>();
@@ -463,8 +466,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       context?: Record<string, unknown>;
       cause?: unknown;
     };
-    console.error(
-      "Unexpected error:",
+    getLogger().error(
       redactCredentialSecrets({
         requestId,
         traceId,
@@ -473,7 +475,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         stack: err.stack,
         context: solanaErr.context,
         cause: solanaErr.cause,
-      })
+      }),
+      "Unexpected error"
     );
     // SENTRY_DSN gate is the runtime-wiring decision: app-level error handling
     // shouldn't pay the cost of building a scope when no observability backend
