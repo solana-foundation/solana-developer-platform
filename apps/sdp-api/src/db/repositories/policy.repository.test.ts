@@ -451,7 +451,7 @@ describe("PolicyRepository (postgres)", () => {
       requested_by: TEST_USER.id,
     });
 
-    await expect(
+    expect(() =>
       repo.updateApprovalRequestStatus({
         organizationId: "org_other",
         approvalRequestId: request?.id ?? "",
@@ -459,7 +459,7 @@ describe("PolicyRepository (postgres)", () => {
         operationStatus: "executing",
         resolvedBy: TEST_USER.id,
       })
-    ).resolves.toBeNull();
+    ).toThrowError("cannot override the repository organization scope");
 
     await expect(
       repo.updateApprovalRequestStatus({
@@ -542,6 +542,13 @@ describe("PolicyRepository (postgres)", () => {
         projectId: OTHER_PROJECT.id,
       })
     );
+    const organizationRepo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      })
+    );
     const otherOperation = await otherProjectRepo.createWalletOperation({
       organizationId: TEST_ORG.id,
       projectId: OTHER_PROJECT.id,
@@ -607,7 +614,7 @@ describe("PolicyRepository (postgres)", () => {
       })
     ).resolves.toBeNull();
     await expect(
-      repo.getApprovalRequestDetail({
+      organizationRepo.getApprovalRequestDetail({
         organizationId: TEST_ORG.id,
         projectId: null,
         approvalRequestId: otherRequest?.id ?? "",
@@ -618,7 +625,7 @@ describe("PolicyRepository (postgres)", () => {
       operation_status: "pending_approval",
     });
 
-    const orgRows = await repo.listApprovalRequestDetails({
+    const orgRows = await organizationRepo.listApprovalRequestDetails({
       organizationId: TEST_ORG.id,
       projectId: null,
       status: "pending",
@@ -889,7 +896,7 @@ describe("PolicyRepository (postgres)", () => {
       })
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
-      message: "Project API keys cannot use wallets from other projects",
+      message: "API key is not authorized for the requested wallet",
     });
   });
 

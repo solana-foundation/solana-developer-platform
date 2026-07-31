@@ -311,7 +311,8 @@ async function provisionPendingBvnkOnramps(
         reloadedCounterparty,
         reloadedCounterparty.project_id,
         readBvnkCustomer(reloadedCounterparty.provider_data),
-        entry.request
+        entry.request,
+        repo
       );
     } catch (error) {
       await updateBvnkOnrampPaymentRuleState(repo, reloadedCounterparty, key, {
