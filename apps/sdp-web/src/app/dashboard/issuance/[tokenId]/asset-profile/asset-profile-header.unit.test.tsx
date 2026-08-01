@@ -197,36 +197,55 @@ describe("asset profile header", () => {
     expect(render(deployed, HEADER_APPEARANCE_DEFAULTS)).toContain("58NU6…VjVu");
   });
 
-  it("steps the mark down to a quiet placeholder when the asset has no logo", () => {
+  it("puts the ticker pill inside the mark when the asset has no logo", () => {
     const markup = render(token);
-    // Two stand-ins in the default mode — the stepped-down mark and the
-    // narrow-screen avatar. The mark keeps the inset padding; the avatar drops it.
-    const marks = [...markup.matchAll(/<div class="([^"]*bg-fill-subtle[^"]*)">([^<]*)<\/div>/g)];
-    const mark = marks.find(([, classes = ""]) => classes.includes("px-3"));
-    expect(mark, "stepped-down letter mark").toBeDefined();
-    const [, markClasses = "", label = ""] = mark ?? [];
 
-    // The whole symbol, at the issuer's own casing and sized to fit — a prefix of
-    // a longer ticker would read as truncated rather than as a mark.
-    expect(label).toBe(token.symbol);
-    expect(markClasses).toContain("text-xs");
-    expect(markClasses).not.toContain("uppercase");
-    // It stands in for artwork, so it is a tinted placeholder rather than the
-    // full-contrast block a hero mark would be.
-    expect(markClasses).toContain("text-tertiary");
-    expect(markup).not.toContain("bg-primary");
+    // The circle would only spell the symbol anyway, so the pill IS the mark: set
+    // once, centred on the letter mark's tint, at the issuer's own casing.
+    const inMark = (rendered: string) =>
+      rendered.match(
+        /justify-center bg-fill-subtle"><p class="([^"]*)"><span class="sr-only">Ticker<\/span>([^<]*)<\/p>/
+      );
+    const [, pillClasses = "", pillSymbol = ""] = inMark(markup) ?? [];
+    expect(pillSymbol, "pill inside the mark").toBe(token.symbol);
+    expect(pillClasses).toContain("bg-fill");
+    expect(pillClasses).toContain("text-base");
+    expect(pillClasses).not.toContain("uppercase");
 
-    // And it is the small mark, not the hero bleed: no full-size box, and the
-    // ticker beside it moves in to the stepped-down inset.
+    // The ticker mark is its own geometry: a larger circle than a low-res logo
+    // would get, stepped in towards the title rather than hugging the card edge.
+    expect(markup).toContain("width:120px");
+    expect(markup).toContain("left:32px");
+
+    // No second copy beside the mark, and no big letter mark underneath: one
+    // desktop ticker in the circle, one under the name for narrow screens.
+    expect(markup).not.toContain("left-[132px]");
+    expect(markup).not.toMatch(/<div class="[^"]*px-3[^"]*">/);
+    expect(markup.match(/<span class="sr-only">Ticker/g)).toHaveLength(2);
+
+    // Still the small mark, not the hero bleed.
     expect(markup).not.toContain("-left-10");
-    expect(markup).toContain("left-[132px]");
 
-    // The avatar carries a monogram instead — a symbol at 56px would be illegible.
-    const avatarMark = marks.find(([, classes = ""]) => classes.includes("px-0"));
-    expect(avatarMark?.[2], "avatar monogram").toBe("t");
+    // The avatar keeps its monogram — a pill does not fit in 56px.
+    const avatar = markup.match(/<div class="([^"]*px-0[^"]*)">([^<]*)<\/div>/);
+    expect(avatar?.[2], "avatar monogram").toBe("t");
 
-    // A logo replaces the letters entirely.
-    expect(render(deployed)).not.toMatch(/<div class="[^"]*px-3[^"]*">[^<]/);
+    // The pill steps its type down as the symbol lengthens, so ten characters
+    // still fit inside the same circle.
+    expect(inMark(render({ ...token, symbol: "ABCDEFGHIJ" }))?.[1]).toContain("text-xs");
+
+    // Artwork gets the mark-plus-pill pair back, positioned at the hero inset.
+    const withLogo = render(deployed);
+    expect(withLogo).toContain("left-[172px]");
+    expect(withLogo).not.toContain("justify-center bg-fill-subtle");
+  });
+
+  it("keeps the ticker readable on desktop when its pill lives in the aria-hidden mark", () => {
+    // The mark is decoration, so the pill inside it is invisible to readers; the
+    // under-name copy stays in the tree at every width instead of display:none.
+    expect(render(token)).toContain('<div class="lg:sr-only">');
+    expect(render(token)).not.toContain('<div class="lg:hidden">');
+    expect(render(deployed)).toContain('<div class="lg:hidden">');
   });
 
   it("swaps the mark for a small avatar below lg only when the content centres over it", () => {
@@ -261,14 +280,23 @@ describe("asset profile header", () => {
     }
   });
 
-  it("sizes the ticker to the mark it sits beside", () => {
-    const tickerType = (tokenInput: Token) =>
-      render(tokenInput).match(/<p class="([^"]*)"><span class="sr-only">Ticker/)?.[1] ?? "";
+  it("sizes each ticker to the mark it belongs to", () => {
+    const tickerTypes = (tokenInput: Token) =>
+      [...render(tokenInput).matchAll(/<p class="([^"]*)"><span class="sr-only">Ticker/g)].map(
+        (match) => match[1] ?? ""
+      );
 
-    // The hero bleed carries the large symbol; a stepped-down mark (here, no
-    // artwork at all) pulls it down so the symbol never outweighs the mark.
-    expect(tickerType(deployed), "hero").toContain("text-lg");
-    expect(tickerType(token), "stepped down").toContain("text-sm");
+    // Artwork: the pill beside the hero bleed and the below-lg copy share one
+    // size — a step under the title, annotating the name without competing.
+    for (const type of tickerTypes(deployed)) {
+      expect(type, "hero").toContain("text-base");
+    }
+
+    // No artwork: the in-circle pill is set to its circle, and the below-lg copy
+    // steps down with the mark as before.
+    const [inCircle = "", underName = ""] = tickerTypes(token);
+    expect(inCircle, "in the mark").toContain("text-base");
+    expect(underName, "under the name").toContain("text-sm");
   });
 
   it("gives the ticker the exchange face and never recases the symbol", () => {

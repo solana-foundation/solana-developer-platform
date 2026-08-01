@@ -100,12 +100,20 @@ export function AssetProfileHeaderCard({
   // bleed, so everything measured against the logo (the reserved clearance, the
   // ticker's inset, the ticker's own size) collapses to the small-mark geometry.
   // Having no artwork is knowable here and now; artwork being too small to enlarge
-  // is only knowable once the browser has measured it, which is what the callback
-  // reports. Deriving the first case rather than waiting for the second keeps the
-  // server render of a logoless asset identical to what the client settles on.
-  const [markSteppedDown, setMarkSteppedDown] = useState(false);
-  const handleSteppedDownChange = useCallback((next: boolean) => setMarkSteppedDown(next), []);
-  const logoIsSteppedDown = !token.imageUrl || markSteppedDown;
+  // — or failing to load at all — is only knowable once the browser has tried,
+  // which is what the callback reports. Deriving the first case rather than
+  // waiting for the second keeps the server render of a logoless asset identical
+  // to what the client settles on.
+  const [markState, setMarkState] = useState({ steppedDown: false, letterOnly: false });
+  const handleSteppedDownChange = useCallback(
+    (steppedDown: boolean, letterOnly: boolean) => setMarkState({ steppedDown, letterOnly }),
+    []
+  );
+  const logoIsSteppedDown = !token.imageUrl || markState.steppedDown;
+  // With no artwork the mark would spell the symbol anyway, and the pill beside it
+  // would say the same thing twice — so the pill moves inside the circle and IS
+  // the mark. Only artwork earns a mark-plus-pill pair.
+  const tickerInsideMark = !token.imageUrl || markState.letterOnly;
   const actionNodes = (
     <>
       <QuietActionLink
@@ -129,23 +137,26 @@ export function AssetProfileHeaderCard({
   // step with the single weight loaded there, or the browser synthesises one.
   // Tabular figures keep numeric symbols on a grid, and casing is left exactly as
   // the issuer typed the symbol. The eyebrow treatment on top of that is what
-  // ties it to the classification row above the name.
-  const ticker = (
+  // ties it to the classification row above the name. A function rather than a
+  // node because the pill renders at more than one size in the same header.
+  const renderTicker = (typeClassName: string) => (
     <p
       className={cn(
         "tabular-nums [font-family:var(--font-ticker-archivo)]",
         EYEBROW_TREATMENT_CLASSNAME,
         "font-semibold text-primary",
         "inline-flex w-fit items-center rounded-full bg-fill px-2.5 py-0.5",
-        // A stepped-down mark pulls the ticker down with it, so the symbol never
-        // outweighs the artwork beside it.
-        logoIsSteppedDown ? "text-sm" : "text-lg"
+        typeClassName
       )}
     >
       <span className="sr-only">{t("DashboardIssuance.header.ticker")}</span>
       {token.symbol}
     </p>
   );
+  // A stepped-down mark pulls the ticker down with it, so the symbol never
+  // outweighs the artwork beside it. Even against the hero bleed the pill stays a
+  // step under the title's scale — it annotates the name, it doesn't compete.
+  const ticker = renderTicker(logoIsSteppedDown ? "text-sm" : "text-base");
   // The mark is out of flow, so `reserve` pads the content clear of it and the
   // title centres in the space that is left. Without it the title centres against
   // the card's own edges and the mark sits behind it.
@@ -180,11 +191,16 @@ export function AssetProfileHeaderCard({
         // avatar above the content; expanded has nothing to reserve down there.
         belowLg={reserveLogoSpace ? "hide" : "avatar"}
         onSteppedDownChange={handleSteppedDownChange}
+        tickerPill={renderTicker(tickerPillTypeClassName(token.symbol))}
       />
 
-      <div className={cn("absolute top-1/2 hidden -translate-y-1/2 lg:block", tickerInset)}>
-        {ticker}
-      </div>
+      {/* Beside the mark only when the mark is artwork — a letter-only mark
+          carries the pill itself, and a second one would say it twice. */}
+      {tickerInsideMark ? null : (
+        <div className={cn("absolute top-1/2 hidden -translate-y-1/2 lg:block", tickerInset)}>
+          {ticker}
+        </div>
+      )}
 
       <div className={cn("flex flex-col items-center text-center", contentPadding)}>
         <UppercaseClassificationRow assetProfile={assetProfile} className="justify-center" />
@@ -192,8 +208,10 @@ export function AssetProfileHeaderCard({
         <div className="mt-2.5 flex max-w-full flex-col items-center justify-center gap-1">
           <h2 className={cn(TITLE_TYPE_CLASSNAME, "text-primary")}>{token.name}</h2>
           {/* Below lg the ticker has no mark to sit beside, so it stacks under the
-              name instead. */}
-          <div className="lg:hidden">{ticker}</div>
+              name instead. When the desktop pill lives inside the aria-hidden
+              mark, this copy stays in the accessibility tree at every width
+              rather than leaving desktop readers without a ticker. */}
+          <div className={tickerInsideMark ? "lg:sr-only" : "lg:hidden"}>{ticker}</div>
         </div>
 
         <MetaLine
@@ -498,6 +516,13 @@ function UppercaseClassificationRow({
   );
 }
 
+function tickerPillTypeClassName(symbol: string): string {
+  if (symbol.length >= 10) {
+    return "text-xs";
+  }
+  return symbol.length >= 8 ? "text-sm" : "text-base";
+}
+
 // Oversized logo cropped by the card's right edge — decoration, so the token
 // name in the heading carries the accessible label.
 function BleedingLogo({
@@ -507,6 +532,7 @@ function BleedingLogo({
   size = 208,
   belowLg = "hide",
   onSteppedDownChange,
+  tickerPill,
 }: {
   imageUrl: string | null;
   symbol: string;
@@ -518,10 +544,16 @@ function BleedingLogo({
   // changing what it is — a small round avatar in flow above the content, rather
   // than a full-size mark behind the type.
   belowLg?: "hide" | "avatar";
-  // True whenever the mark steps down to the small geometry instead of filling
-  // the hero bleed, so the header can scale type and spacing to the mark it
+  // Reports whenever the mark steps down to the small geometry instead of filling
+  // the hero bleed — and, separately, whether what it shows is letters rather
+  // than artwork — so the header can scale type and spacing to the mark it
   // actually got. Must be referentially stable — pass a useCallback.
-  onSteppedDownChange?: (isSteppedDown: boolean) => void;
+  onSteppedDownChange?: (isSteppedDown: boolean, isLetterOnly: boolean) => void;
+  // What the stepped-down circle shows when there is no artwork to show: the
+  // ticker pill takes the letter mark's place, so the symbol is set once, in the
+  // mark, rather than beside it. The 56px avatar keeps its monogram — a pill
+  // does not fit in it.
+  tickerPill?: React.ReactNode;
 }) {
   const imageRef = useRef<HTMLImageElement>(null);
   const [quality, setQuality] = useState<LogoQuality>("pending");
@@ -567,8 +599,8 @@ function BleedingLogo({
   // to the same modest circle.
   const isSteppedDown = (quality === "lowRes" && hasArtwork) || !hasArtwork;
   useEffect(() => {
-    onSteppedDownChange?.(isSteppedDown);
-  }, [isSteppedDown, onSteppedDownChange]);
+    onSteppedDownChange?.(isSteppedDown, !hasArtwork);
+  }, [isSteppedDown, hasArtwork, onSteppedDownChange]);
 
   // The narrow-screen stand-in: same artwork, different object. It sits in flow
   // at the top of the card, so nothing reads through the type — and at this size
@@ -594,15 +626,11 @@ function BleedingLogo({
       </div>
     ) : null;
 
-  // The stepped-down mark. Its inner edge lines up with where the full-size
-  // logo's would be, so anything positioned against the logo — the ticker beside
-  // it, the reserved clearance — still reads correctly.
   if (isSteppedDown) {
-    const markSize = hasArtwork ? Math.min(naturalSize, LOGO_LOWRES_MAX_PX) : LOGO_LOWRES_MAX_PX;
-    const offset = Math.max(
-      LOGO_LOWRES_MIN_OFFSET_PX,
-      LOGO_SMALL_BOX_PX - LOGO_BLEED_PX - markSize
-    );
+    const markSize = hasArtwork ? Math.min(naturalSize, LOGO_LOWRES_MAX_PX) : LOGO_TICKER_MARK_PX;
+    const offset = hasArtwork
+      ? Math.max(LOGO_LOWRES_MIN_OFFSET_PX, LOGO_SMALL_BOX_PX - LOGO_BLEED_PX - markSize)
+      : LOGO_TICKER_MARK_OFFSET_PX;
     return (
       <>
         {avatar}
@@ -624,6 +652,13 @@ function BleedingLogo({
               onError={() => setFailed(true)}
               className="h-full w-full object-cover"
             />
+          ) : tickerPill ? (
+            // The pill on the letter mark's tint: the circle still reads as a
+            // placeholder for artwork, but the symbol in it is the ticker, set
+            // once instead of repeated beside the mark.
+            <div className="flex h-full w-full items-center justify-center bg-fill-subtle">
+              {tickerPill}
+            </div>
           ) : (
             <LogoLetterMark label={symbol.trim() || "?"} />
           )}
@@ -671,6 +706,13 @@ const LOGO_BLEED_PX = 40;
 
 // Keeps a stepped-down mark clear of the card edge.
 const LOGO_LOWRES_MIN_OFFSET_PX = 20;
+
+// The ticker mark: the circle that carries the pill when there is no artwork.
+// Bigger than a low-res mark — it holds type, not pixels — and inset further, so
+// it sits with the title rather than against the card edge. Its outer edge stays
+// inside the 160px clearance the expanded mode reserves (32 + 120 < 160).
+const LOGO_TICKER_MARK_PX = 120;
+const LOGO_TICKER_MARK_OFFSET_PX = 32;
 
 // The small-mark box. A stepped-down mark is always placed against this
 // geometry, so a low-res logo sits in the same place whichever mode is on — the
