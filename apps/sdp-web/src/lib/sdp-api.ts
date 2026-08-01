@@ -159,6 +159,24 @@ async function parseSdpApiResponse<T>(res: Response): Promise<T> {
   return json as T;
 }
 
+/**
+ * Pull a human-readable message out of the `SDP API request failed (N): {body}`
+ * error thrown by {@link parseSdpApiResponse}: prefer the JSON `error.message`,
+ * then the raw body, then the original error text.
+ */
+export function extractSdpApiErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return "Unknown error.";
+  const match = /^SDP API request failed \(\d+\):\s*([\s\S]*)$/.exec(error.message);
+  if (!match) return error.message;
+  const body = match[1] ?? "";
+  try {
+    const payload = JSON.parse(body) as { error?: { message?: string } };
+    return payload.error?.message ?? body ?? error.message;
+  } catch {
+    return body || error.message;
+  }
+}
+
 export interface SdpApiClient {
   request: SdpApiRequestFn;
   fetch: <T>(path: string, options?: RequestInit) => Promise<T>;

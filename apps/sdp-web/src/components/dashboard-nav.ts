@@ -13,6 +13,7 @@ import {
   RepeatIcon,
   ShieldCheckIcon,
   UsersIcon,
+  VenetianMaskIcon,
   WalletIcon,
 } from "lucide-react";
 import type { useTranslations } from "@/i18n/provider";
@@ -48,7 +49,10 @@ export const PAYMENTS_SUBNAV_IDS = {
   mobile: "payments-subnav-mobile",
 } as const;
 
-export function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[] {
+export function getPaymentsActions(
+  t: ReturnType<typeof useTranslations>,
+  privateChannelsEnabled: boolean
+): SubNavItem[] {
   return [
     {
       label: t("Shared.dashboardShell.transactions"),
@@ -80,12 +84,25 @@ export function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNa
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
       icon: RepeatIcon,
     },
+    ...(privateChannelsEnabled
+      ? [
+          {
+            label: t("Shared.dashboardShell.privateChannels"),
+            href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.privateChannels,
+            icon: VenetianMaskIcon,
+          },
+        ]
+      : []),
   ];
 }
 
 export function getNavSections(
   t: ReturnType<typeof useTranslations>,
-  options: { canReadApprovals: boolean; pendingApprovalCount: number | null }
+  options: {
+    canReadApprovals: boolean;
+    pendingApprovalCount: number | null;
+    privateChannelsEnabled: boolean;
+  }
 ): NavSection[] {
   return [
     {
@@ -115,7 +132,7 @@ export function getNavSections(
           label: t("Shared.dashboardShell.payments"),
           href: DASHBOARD_SIDE_NAV_HREFS.payments,
           icon: ArrowLeftRightIcon,
-          children: getPaymentsActions(t),
+          children: getPaymentsActions(t, options.privateChannelsEnabled),
         },
         {
           label: t("Shared.dashboardShell.apiKeys"),

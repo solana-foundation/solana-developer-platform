@@ -4,6 +4,7 @@ import dashboardCustody from "../../messages/en/dashboard-custody.json";
 import dashboardIssuance from "../../messages/en/dashboard-issuance.json";
 import dashboardPayments from "../../messages/en/dashboard-payments.json";
 import dashboardPolicies from "../../messages/en/dashboard-policies.json";
+import dashboardPrivateChannels from "../../messages/en/dashboard-private-channels.json";
 import shared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
 import esDashboardApprovals from "../../messages/es/dashboard-approvals.json";
@@ -28,6 +29,7 @@ const enMessages = {
   ...dashboardIssuance,
   ...dashboardPayments,
   ...dashboardPolicies,
+  ...dashboardPrivateChannels,
   Shared: shared,
 };
 
