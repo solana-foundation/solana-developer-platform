@@ -961,7 +961,6 @@
       "wallet": "Wallet",
       "provider": "Provider",
       "created": "Creada",
-      "rowsPerPage": "Filas por página",
       "range": "{start}–{end} de {total}",
       "noMatches": "Ninguna transacción coincide con estos filtros.",
       "emptyProject": "Aún no hay transacciones.",

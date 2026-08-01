@@ -13,9 +13,6 @@
     "configureControls": "Configurar controles",
     "walletControls": "Controles de Wallet",
     "apiKeyControls": "Controles de claves API",
-    "policySummary": "Resumen de la política",
-    "summaryDescription": "Los controles están vinculados a Wallets y claves API.",
-    "apiKeyBindings": "Vinculaciones de claves API",
     "target": "Objetivo",
     "status": "Estado",
     "defaultAction": "Acción por defecto",
@@ -43,9 +40,10 @@
     "noMatches": "Ningún control coincide con estos filtros.",
     "clearFilters": "Borrar filtros",
     "emptyProject": "No hay controles de Wallet ni de clave API configurados.",
+    "emptyProjectWallets": "No hay controles de Wallet configurados.",
+    "emptyProjectApiKeys": "No hay controles de clave API configurados.",
     "loadError": "No se pudieron cargar los controles de política.",
     "retry": "Reintentar",
-    "rowsPerPage": "Filas por página",
     "range": "{start}–{end} de {total}"
   }
 }
