@@ -2045,6 +2045,143 @@ describe("Issuance Routes", () => {
       expect(body.error.code).toBe("MAX_SUPPLY_EXCEEDED");
     });
 
+    it("counts a prepared mint against the cap before the transaction leaves", async () => {
+      // A prepared transaction is a mint the client can settle at any point until
+      // its blockhash expires, so it is reserved like an executed one — handing it
+      // out is prepare's point of no return.
+      const db = getDb(env);
+      await db
+        .prepare(
+          "UPDATE issued_tokens SET max_supply = '500000000000', total_supply_cached = '100000000000' WHERE id = ?"
+        )
+        .bind(activeTokenId)
+        .run();
+
+      const createOrgSignerSpy = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
+      const prepareMintToSpy = vi
+        .spyOn(MosaicService.prototype, "prepareMintTo")
+        .mockResolvedValueOnce({
+          serializedTx: "cHJlcGFyZWQtbWludA==",
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 0n,
+          requiredSigners: [],
+          tokenAccount: TEST_SOLANA_ADDRESSES.wallet1,
+        } as never);
+
+      try {
+        const res = await app.request(
+          `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              mint: { destination: TEST_SOLANA_ADDRESSES.wallet1, amount: "200" },
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.transaction.status).toBe("pending");
+        expect(body.data.transaction.serializedTx).toBe("cHJlcGFyZWQtbWludA==");
+
+        // The reservation is in the recorded supply, where cap checks and cap
+        // changes will see it.
+        const row = await db
+          .prepare("SELECT total_supply_cached FROM issued_tokens WHERE id = ?")
+          .bind(activeTokenId)
+          .first<{ total_supply_cached: string }>();
+        expect(row?.total_supply_cached).toBe("300000000000");
+      } finally {
+        createOrgSignerSpy.mockRestore();
+        prepareMintToSpy.mockRestore();
+      }
+    });
+
+    it("enforces the cap in the database even when prepare read a stale one", async () => {
+      // The pre-flight check reads a cached token in this process; the reservation
+      // is a conditional UPDATE on the token row. A stale generous cap, made
+      // deterministic by stubbing `getToken`, must be refused by the database —
+      // after the transaction is built, before it leaves.
+      const db = getDb(env);
+      await db
+        .prepare(
+          "UPDATE issued_tokens SET max_supply = '500000000000', total_supply_cached = '400000000000' WHERE id = ?"
+        )
+        .bind(activeTokenId)
+        .run();
+
+      const createOrgSignerSpy = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
+      const prepareMintToSpy = vi
+        .spyOn(MosaicService.prototype, "prepareMintTo")
+        .mockResolvedValueOnce({
+          serializedTx: "cmVmdXNlZC1taW50",
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 0n,
+          requiredSigners: [],
+          tokenAccount: TEST_SOLANA_ADDRESSES.wallet1,
+        } as never);
+
+      const originalGetToken = TokenService.prototype.getToken;
+      const getTokenSpy = vi
+        .spyOn(TokenService.prototype, "getToken")
+        .mockImplementation(async function (this: TokenService, params) {
+          const token = await originalGetToken.call(this, params);
+          return token ? { ...token, maxSupply: "100000" } : token;
+        });
+
+      try {
+        const res = await app.request(
+          `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              mint: { destination: TEST_SOLANA_ADDRESSES.wallet1, amount: "200" },
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error.code).toBe("MAX_SUPPLY_EXCEEDED");
+
+        // No reservation left behind, and — decisive for the wallet-authority
+        // flow, where the client could sign and submit whatever it can read — the
+        // failed row must not carry the serialized transaction the cap refused.
+        const supply = await db
+          .prepare("SELECT total_supply_cached FROM issued_tokens WHERE id = ?")
+          .bind(activeTokenId)
+          .first<{ total_supply_cached: string }>();
+        expect(supply?.total_supply_cached).toBe("400000000000");
+
+        const tx = await db
+          .prepare(
+            "SELECT status, serialized_tx FROM issuance_transactions WHERE token_id = ? AND type = 'mint' ORDER BY created_at DESC LIMIT 1"
+          )
+          .bind(activeTokenId)
+          .first<{ status: string; serialized_tx: string | null }>();
+        expect(tx?.status).toBe("failed");
+        expect(tx?.serialized_tx).toBeNull();
+      } finally {
+        getTokenSpy.mockRestore();
+        createOrgSignerSpy.mockRestore();
+        prepareMintToSpy.mockRestore();
+      }
+    });
+
     it("returns 400 for paused token", async () => {
       const db = getDb(env);
       await db

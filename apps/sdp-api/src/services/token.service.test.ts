@@ -566,54 +566,51 @@ describe("TokenService", () => {
         .run();
     }
 
-    it("refuses a cap change while a prepared mint can still be submitted", async () => {
-      // Nothing else can see this one: SDP signed it, cannot reserve for it (it may
-      // never be submitted), and would only learn it landed from a later refresh.
-      await insertCappedToken("tok_cap_inflight", "500000000", "2000000000");
-      await insertMintTransaction("tok_cap_inflight", "pending");
+    it("protects an outstanding prepared mint through its reservation", async () => {
+      // A prepared mint is reserved before the serialized transaction leaves SDP,
+      // so the cap change needs no knowledge of its row: the reservation is in the
+      // recorded supply, and the "not below the already-minted supply" check reads
+      // it there. 500 settled + 600 reserved = 1100, so a cap of 1000 undercuts the
+      // mint the client may still submit.
+      await insertCappedToken("tok_cap_prepared_reserved", "500000000", "2000000000");
+      await tokenService.reserveMintSupply("tok_cap_prepared_reserved", "600000000");
+      await insertMintTransaction("tok_cap_prepared_reserved", "pending");
 
       await expect(
-        tokenService.updateToken("tok_cap_inflight", { maxSupply: "1000" })
+        tokenService.updateToken("tok_cap_prepared_reserved", { maxSupply: "1000" })
       ).rejects.toMatchObject({
-        code: "CONFLICT",
-        message: expect.stringContaining("mint is in flight"),
+        code: "BAD_REQUEST",
+        message: expect.stringContaining("already-minted supply"),
       });
 
-      expect((await storedSupply("tok_cap_inflight"))?.max_supply).toBe("2000000000");
+      expect((await storedSupply("tok_cap_prepared_reserved"))?.max_supply).toBe("2000000000");
     });
 
-    it("lets the cap change once every prepared mint has settled", async () => {
-      await insertCappedToken("tok_cap_settled_txns", "500000000", "2000000000");
-      await insertMintTransaction("tok_cap_settled_txns", "confirmed");
-      await insertMintTransaction("tok_cap_settled_txns", "failed");
+    it("lets the cap change over an outstanding prepared mint it does not undercut", async () => {
+      // The old marker check refused every cap edit for the length of the window,
+      // whether or not the edit conflicted with anything. Room for the reservation
+      // is the actual requirement: 500 + 600 fit under 1200.
+      await insertCappedToken("tok_cap_prepared_fits", "500000000", "2000000000");
+      await tokenService.reserveMintSupply("tok_cap_prepared_fits", "600000000");
+      await insertMintTransaction("tok_cap_prepared_fits", "pending");
 
-      const updated = await tokenService.updateToken("tok_cap_settled_txns", {
-        maxSupply: "1000",
+      const updated = await tokenService.updateToken("tok_cap_prepared_fits", {
+        maxSupply: "1200",
       });
 
-      expect(updated.maxSupply).toBe("1000");
+      expect(updated.maxSupply).toBe("1200");
     });
 
-    it("ignores an executing mint's row, which the reservation already covers", async () => {
-      // An executed mint is counted in the cached supply before it is sent, so the
-      // cap check sees it directly — blocking on its row too would refuse cap
-      // changes for a supply that is already accounted for.
-      await insertCappedToken("tok_cap_executing", "500000000", "2000000000");
-      await insertMintTransaction("tok_cap_executing", "pending", { prepared: false });
+    it("does not gate the cap on transaction rows, settled or executing", async () => {
+      // Every admitted mint lives in the recorded supply — an executing mint since
+      // its pre-submission reservation, a settled one for good. Its rows carry no
+      // extra information for the cap, so they must not block the edit.
+      await insertCappedToken("tok_cap_rows_ignored", "500000000", "2000000000");
+      await insertMintTransaction("tok_cap_rows_ignored", "confirmed");
+      await insertMintTransaction("tok_cap_rows_ignored", "failed");
+      await insertMintTransaction("tok_cap_rows_ignored", "pending", { prepared: false });
 
-      const updated = await tokenService.updateToken("tok_cap_executing", { maxSupply: "1000" });
-
-      expect(updated.maxSupply).toBe("1000");
-    });
-
-    it("stops treating an abandoned prepared mint as in flight", async () => {
-      // `prepare` leaves a pending row for a client that may never submit, and
-      // nothing reaps it. Past the blockhash's life it cannot land, so it must not
-      // hold the cap hostage forever.
-      await insertCappedToken("tok_cap_stale_prepare", "500000000", "2000000000");
-      await insertMintTransaction("tok_cap_stale_prepare", "pending", { ageMs: 10 * 60 * 1000 });
-
-      const updated = await tokenService.updateToken("tok_cap_stale_prepare", {
+      const updated = await tokenService.updateToken("tok_cap_rows_ignored", {
         maxSupply: "1000",
       });
 

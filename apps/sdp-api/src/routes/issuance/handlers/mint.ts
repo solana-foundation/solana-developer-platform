@@ -207,10 +207,11 @@ export const prepareMint = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const { mintAddress: mintAddressRaw, mosaicAmount } = resolveMintOperationAmount(
-    token,
-    parsed.data.mint.amount
-  );
+  const {
+    mintAddress: mintAddressRaw,
+    mosaicAmount,
+    amountBaseUnits,
+  } = resolveMintOperationAmount(token, parsed.data.mint.amount);
 
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
@@ -271,7 +272,12 @@ export const prepareMint = async (c: AppContext) => {
     simulation = await simulateTransaction(rpc, txBytes);
   }
 
-  // Create transaction record with serialized tx
+  // The row goes in before the reservation and without the serialized transaction.
+  // Before: the row is what tells `POST /supply/refresh` a mint is unsettled, so a
+  // reservation without one sits exposed to a concurrent refresh erasing it.
+  // Without: a serialized transaction in the row is readable through the
+  // transactions API and, in the wallet-authority flow, submittable by whoever
+  // reads it — it may not exist anywhere durable until the cap has admitted it.
   const { transaction: tx } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
@@ -281,8 +287,29 @@ export const prepareMint = async (c: AppContext) => {
       amount: parsed.data.mint.amount,
       memo: parsed.data.mint.memo,
     },
-    serializedTx: prepared.serializedTx,
     initiatedByKeyId: auth.id,
+  });
+
+  // Counted against the cap before the transaction leaves SDP, exactly as an
+  // executed mint is counted before submission — a prepared transaction is a mint
+  // the client can settle at any point until its blockhash expires, so handing it
+  // out IS the point of no return. The pre-flight check above read a cached total
+  // in this process, which a concurrent mint or cap change can invalidate; this
+  // conditional UPDATE contends for the token row itself, so it either sees the
+  // new cap and refuses, or lands first and the cap change fails its own
+  // supply-unchanged guard. If the client never submits, the reservation comes
+  // back through `POST /supply/refresh` once the transaction can no longer land.
+  const reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
+  if (reservedSupply === null) {
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: "Mint amount would exceed maximum supply",
+    });
+    throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+  }
+
+  const preparedTx = await tokenService.updateTransaction(tx.id, {
+    serializedTx: prepared.serializedTx,
   });
 
   // Audit log
@@ -301,7 +328,7 @@ export const prepareMint = async (c: AppContext) => {
   });
 
   return success(c, {
-    transaction: tx,
+    transaction: preparedTx,
     preparedTransaction: {
       serialized: prepared.serializedTx,
       blockhash: prepared.blockhash,

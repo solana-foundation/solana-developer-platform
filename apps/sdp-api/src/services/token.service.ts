@@ -26,7 +26,7 @@ import { getLogger } from "@/runtime/logger";
 // How long a mint can still land after SDP last touched its row. A Solana blockhash
 // is valid for ~150 slots (roughly 60-90s), so a transaction older than this can no
 // longer be submitted; five minutes leaves generous room for a slow signer without
-// letting an abandoned mint hold cap edits — or the supply record — hostage.
+// letting an abandoned mint hold the supply record hostage.
 const MINT_IN_FLIGHT_WINDOW_MS = 5 * 60 * 1000;
 
 // Escapes LIKE/ILIKE wildcards so operator-supplied search text matches
@@ -207,6 +207,13 @@ export interface UpdateTokenTransactionInput {
   blockTime?: string;
   fee?: number;
   error?: string;
+  /**
+   * Attached only after the mint's supply reservation is admitted: a serialized
+   * transaction in the row is readable through the transactions API and, in the
+   * wallet-authority flow, submittable by whoever reads it — so a row must never
+   * carry one the cap refused.
+   */
+  serializedTx?: string;
   params?: Record<string, unknown>;
 }
 
@@ -910,13 +917,18 @@ export class TokenService {
     }
 
     // Only compared for deployed tokens: their decimals are immutable (so both
-    // sides share a scale) and a draft has no minted supply to undercut. The
-    // stored total is the last cached read of the mint, so this is best-effort —
-    // the on-chain supply is the authority.
+    // sides share a scale) and a draft has no minted supply to undercut.
     if (!existing.mintAddress) {
       return { maxSupplyBaseUnits: baseUnits.toString(), supplyBaseUnits: null };
     }
 
+    // The recorded supply counts every mint SDP has admitted — settled ones, and
+    // reservations for ones that could still land, executed or prepared — because
+    // `reserveMintSupply` runs before any transaction can reach the chain. So a cap
+    // at or above this figure cannot be outrun by an in-flight mint, and the
+    // supply-unchanged guard on the write catches one admitted in this window: the
+    // reservation and the cap change contend for the same row, and whichever
+    // commits second sees the other.
     const supplyBaseUnits = await this._getCachedSupplyBaseUnits(existing.id);
     if (baseUnits < BigInt(supplyBaseUnits)) {
       throw badRequest("maxSupply cannot be below the already-minted supply", {
@@ -928,47 +940,7 @@ export class TokenService {
       });
     }
 
-    // A mint SDP admitted under the old cap but has not counted yet would land
-    // after this write and push the recorded supply past the new maximum. The
-    // cached supply cannot show it — that is the whole point of "in flight" — so
-    // refuse rather than store a cap the token is about to be over. The mint
-    // re-checks the cap after publishing this marker, so the two sides can't both
-    // decide they won.
-    if (await this.hasMintInFlight(existing.id)) {
-      throw new AppError(
-        "CONFLICT",
-        "A mint is in flight for this token; retry the cap change once it settles"
-      );
-    }
-
     return { maxSupplyBaseUnits: baseUnits.toString(), supplyBaseUnits };
-  }
-
-  /**
-   * Whether a mint SDP has signed for but cannot account for is still submittable.
-   *
-   * `prepare` hands a serialized transaction to the client, so SDP never learns
-   * whether it landed and cannot reserve against the cap for it — the row is the
-   * only trace. Executed mints need no such marker: they are counted before they
-   * are sent (`reserveMintSupply`), so the cached supply already includes them and
-   * the cap check sees them directly.
-   *
-   * Bounded by age because nothing reaps these rows: past the blockhash's life the
-   * transaction can no longer be submitted, and without the bound one abandoned
-   * prepare would wedge cap edits for good.
-   */
-  async hasMintInFlight(tokenId: string): Promise<boolean> {
-    const since = new Date(Date.now() - MINT_IN_FLIGHT_WINDOW_MS).toISOString();
-    const row = await this.db
-      .prepare(
-        `SELECT 1 AS present FROM issuance_transactions
-         WHERE token_id = ? AND type = 'mint' AND status IN ('pending', 'processing')
-           AND serialized_tx IS NOT NULL AND updated_at >= ?
-         LIMIT 1`
-      )
-      .bind(tokenId, since)
-      .first<{ present: number }>();
-    return row !== null;
   }
 
   /**
@@ -1183,7 +1155,9 @@ export class TokenService {
   }
 
   /**
-   * Count a mint against the cap, atomically, before it is sent.
+   * Count a mint against the cap, atomically, before it can reach the chain —
+   * executed mints at the moment of submission, prepared mints before the
+   * serialized transaction is handed to the client.
    *
    * This — not the handler's read of a cached total — is where the cap is
    * enforced. Two requests that each check a cached supply in their own process
@@ -1228,9 +1202,9 @@ export class TokenService {
    * authority's token account before the burn is sent, and re-checking a cached
    * total here could only report a settled burn as failed or leave the cache
    * ahead of the chain. Mints do not come through here at all; they are counted by
-   * `reserveMintSupply` before they are sent, because a cap cannot be enforced
-   * after the fact — SPL has no cap of its own and a settled mint cannot be taken
-   * back.
+   * `reserveMintSupply` before they can reach the chain, because a cap cannot be
+   * enforced after the fact — SPL has no cap of its own and a settled mint cannot
+   * be taken back.
    */
   async updateSupply(tokenId: string, delta: string, operation: "mint" | "burn"): Promise<void> {
     const token = await this._getTokenById(tokenId);
@@ -1357,8 +1331,8 @@ export class TokenService {
     }
 
     // Reservations keep SDP's own mints under the cap, so a total above it means
-    // supply came from somewhere SDP does not admit — a mint authority used outside
-    // the platform, or a prepared transaction submitted after its cap was lowered.
+    // supply came from somewhere SDP does not admit — a mint authority used
+    // outside the platform.
     // Worth saying out loud: the only other trace is a supply figure quietly larger
     // than the cap beside it, and no further mints will be admitted.
     if (updated.maxSupply) {
@@ -1526,6 +1500,11 @@ export class TokenService {
     if (input.error !== undefined) {
       updates.push("error = ?");
       values.push(input.error);
+    }
+
+    if (input.serializedTx !== undefined) {
+      updates.push("serialized_tx = ?");
+      values.push(input.serializedTx);
     }
 
     if (input.params !== undefined) {
