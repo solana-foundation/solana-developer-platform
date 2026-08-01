@@ -1257,21 +1257,30 @@ export class TokenService {
    * Reconcile the recorded supply against what the mint itself reports.
    *
    * The chain is the authority on what has settled — but not on what is about to.
-   * A mint SDP admits is counted before it is sent (`reserveMintSupply`) and the
-   * mint account will not show it until it lands, so overwriting inside that window
-   * put the record back below the reservation and handed the same headroom to the
-   * next mint: both then settled, together above the cap.
+   * A mint SDP admits is counted before it can reach the chain
+   * (`reserveMintSupply`) and the mint account will not show it until it lands, so
+   * overwriting inside that window put the record back below the reservation and
+   * handed the same headroom to the next mint: both then settled, together above
+   * the cap.
    *
-   * So while a mint could still land this may only raise the record — an on-chain
-   * total above it came from outside SDP and has to be picked up at once — and the
-   * downward half waits for the next refresh, by which point the mint has either
-   * settled into the on-chain figure or expired unsubmittable. One statement, so a
-   * mint cannot start between the check and the write.
+   * What that protects is a quantity, not a flag. The floor a refresh must respect
+   * is the on-chain total plus what the mints that could still land could still
+   * add — each unsettled mint row carries its amount — and the record may come
+   * down to that floor at once. A hold that only asked "is anything in flight?"
+   * kept everything above the floor too, and on a busy token the window never
+   * reopened: reservations whose transactions had expired unsubmittable leaked
+   * forever, until the cap refused mints for supply that did not exist. Upward is
+   * never held — an on-chain total above the record came from outside SDP and has
+   * to start refusing mints at once. One statement, so a mint cannot start between
+   * the check and the write.
    *
    * "Could still land" deliberately includes mints recorded as failed: a send that
    * fails ambiguously (a timeout on a transaction the cluster accepted anyway) keeps
    * its reservation because nobody can yet say otherwise, and the age bound is what
-   * finally settles it — after which this reads the answer off the chain.
+   * finally settles it — after which this reads the answer off the chain. A mint
+   * that already landed counts twice for the length of the window (once in the
+   * chain total, once as its row); the floor is deliberately an upper bound, and
+   * the excess falls away as rows settle or age out.
    */
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
@@ -1282,51 +1291,77 @@ export class TokenService {
     const since = new Date(Date.now() - MINT_IN_FLIGHT_WINDOW_MS).toISOString();
     const applied = await this.db
       .prepare(
-        `WITH unsettled AS (
-           SELECT EXISTS (
-             SELECT 1 FROM issuance_transactions
-             WHERE token_id = ? AND type = 'mint'
-               AND status IN ('pending', 'processing', 'failed')
-               AND updated_at >= ?
-           ) AS present
+        `WITH live AS (
+           SELECT COALESCE(SUM(CASE
+             WHEN t.operation_params::jsonb ->> 'amount' ~ '^\\d+(\\.\\d+)?$'
+               THEN trunc(
+                 (t.operation_params::jsonb ->> 'amount')::numeric
+                   * (10::numeric ^ tok.decimals),
+                 0
+               )
+             ELSE 0
+           END), 0) AS reserved
+           FROM issuance_transactions t
+           JOIN issued_tokens tok ON tok.id = t.token_id
+           WHERE t.token_id = ? AND t.type = 'mint'
+             AND t.status IN ('pending', 'processing', 'failed')
+             AND t.updated_at >= ?
+         ),
+         resolved AS (
+           SELECT
+             GREATEST(
+               ?::numeric,
+               LEAST(
+                 COALESCE(tok.total_supply_cached, '0')::numeric,
+                 ?::numeric + live.reserved
+               )
+             ) AS supply,
+             live.reserved AS reserved
+           FROM issued_tokens tok, live
+           WHERE tok.id = ?
          )
          UPDATE issued_tokens
-         SET total_supply_cached = CASE
-               WHEN unsettled.present
-                 THEN GREATEST(
-                   COALESCE(issued_tokens.total_supply_cached, '0')::numeric,
-                   ?::numeric
-                 )::text
-               ELSE ?
-             END,
+         SET total_supply_cached = resolved.supply::text,
              total_supply_updated_at = CASE
-               WHEN unsettled.present THEN issued_tokens.total_supply_updated_at
-               ELSE ?
+               WHEN resolved.supply = ?::numeric THEN ?
+               ELSE issued_tokens.total_supply_updated_at
              END,
              updated_at = ?
-         FROM unsettled
+         FROM resolved
          WHERE issued_tokens.id = ?
-         RETURNING issued_tokens.total_supply_cached, unsettled.present AS mint_unsettled`
+         RETURNING issued_tokens.total_supply_cached, resolved.reserved::text AS live_reserved`
       )
-      .bind(tokenId, since, supplyBaseUnits, supplyBaseUnits, now, now, tokenId)
-      .first<{ total_supply_cached: string; mint_unsettled: boolean }>();
+      .bind(
+        tokenId,
+        since,
+        supplyBaseUnits,
+        supplyBaseUnits,
+        tokenId,
+        supplyBaseUnits,
+        now,
+        now,
+        tokenId
+      )
+      .first<{ total_supply_cached: string; live_reserved: string }>();
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
     }
 
-    // Held back, so the figure on screen is SDP's own count and its "as of" stamp
-    // stays where it was — the next refresh past the window is what reconciles it.
-    if (applied?.mint_unsettled && applied.total_supply_cached !== supplyBaseUnits) {
+    // Held above the reading, so the figure on screen is SDP's own count and its
+    // "as of" stamp stays where it was — the next refresh past the window is what
+    // finishes the reconciliation.
+    if (applied && applied.total_supply_cached !== supplyBaseUnits) {
       getLogger().warn(
         {
           event: "token_supply_refresh_deferred",
           tokenId,
           onChainSupplyBaseUnits: supplyBaseUnits,
           recordedSupplyBaseUnits: applied.total_supply_cached,
+          liveReservedBaseUnits: applied.live_reserved,
         },
-        "On-chain supply is below SDP's recorded supply while a mint can still land; kept the recorded figure so the reservation is not handed out twice. Refresh again once the mint settles."
+        "SDP's recorded supply is above the on-chain total by what in-flight mints could still add; kept the difference so no reservation is handed out twice. Refresh again once they settle."
       );
     }
 

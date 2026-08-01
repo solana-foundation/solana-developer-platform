@@ -388,7 +388,10 @@ describe("TokenService", () => {
       // headroom to the next mint, and both would land above the cap.
       await insertCappedToken("tok_cap_refresh_inflight", "0", "1000000000");
       await tokenService.reserveMintSupply("tok_cap_refresh_inflight", "600000000");
-      await insertMintTransaction("tok_cap_refresh_inflight", "pending", { prepared: false });
+      await insertMintTransaction("tok_cap_refresh_inflight", "pending", {
+        prepared: false,
+        amount: "600",
+      });
       const before = await storedSupply("tok_cap_refresh_inflight");
 
       await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_inflight", "0");
@@ -407,7 +410,10 @@ describe("TokenService", () => {
       // cluster may still accept it, so its row keeps counting until it cannot.
       await insertCappedToken("tok_cap_refresh_failed", "0", "1000000000");
       await tokenService.reserveMintSupply("tok_cap_refresh_failed", "600000000");
-      await insertMintTransaction("tok_cap_refresh_failed", "failed", { prepared: false });
+      await insertMintTransaction("tok_cap_refresh_failed", "failed", {
+        prepared: false,
+        amount: "600",
+      });
 
       await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_failed", "0");
 
@@ -432,6 +438,32 @@ describe("TokenService", () => {
       ).not.toBeNull();
       await expect(
         tokenService.reserveMintSupply("tok_cap_refresh_expired", "1000000000")
+      ).resolves.not.toBeNull();
+    });
+
+    it("reclaims an abandoned reservation even while newer mints are in flight", async () => {
+      // The leak: an abandoned 900k reservation whose transaction expired long ago,
+      // and a live 10-token mint keeping the token busy. A hold that asks only
+      // "is anything in flight?" never reopens on a busy token, so the 900k stays
+      // recorded forever and minting is denied at the cap for supply that does not
+      // exist. What a refresh must protect is a quantity, not a flag: the chain
+      // total plus what live mints could still add — here 0 + 10 tokens — and
+      // everything recorded above that line is reclaimable now.
+      await insertCappedToken("tok_cap_refresh_leak", "900010000000", "1000000000000");
+      await insertMintTransaction("tok_cap_refresh_leak", "pending", {
+        amount: "900000",
+        ageMs: 10 * 60 * 1000,
+      });
+      await insertMintTransaction("tok_cap_refresh_leak", "pending", { amount: "10" });
+
+      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_leak", "0");
+
+      const row = await storedSupply("tok_cap_refresh_leak");
+      // The live mint's 10 tokens are still protected; the abandoned 900k is gone.
+      expect(row?.total_supply_cached).toBe("10000000");
+      // And the headroom the leak was holding is mintable again.
+      await expect(
+        tokenService.reserveMintSupply("tok_cap_refresh_leak", "990000000000")
       ).resolves.not.toBeNull();
     });
 
@@ -540,11 +572,17 @@ describe("TokenService", () => {
 
     // A mint transaction row. `prepared` is what `POST /mint/prepare` leaves
     // behind: a serialized transaction handed to a client who may submit it at any
-    // point until its blockhash expires.
+    // point until its blockhash expires. `amount` is the decimal amount the real
+    // handlers always store in the row's params — it is what tells the refresh how
+    // much this mint could still add to the chain.
     async function insertMintTransaction(
       tokenId: string,
       status: "pending" | "confirmed" | "failed",
-      { prepared = true, ageMs = 0 }: { prepared?: boolean; ageMs?: number } = {}
+      {
+        prepared = true,
+        ageMs = 0,
+        amount,
+      }: { prepared?: boolean; ageMs?: number; amount?: string } = {}
     ): Promise<void> {
       const at = new Date(Date.now() - ageMs).toISOString();
       await db
@@ -552,14 +590,15 @@ describe("TokenService", () => {
           `INSERT INTO issuance_transactions (
             id, token_id, organization_id, type, status, serialized_tx, operation_params,
             created_at, updated_at
-          ) VALUES (?, ?, ?, 'mint', ?, ?, '{}', ?, ?)`
+          ) VALUES (?, ?, ?, 'mint', ?, ?, ?, ?, ?)`
         )
         .bind(
-          `txn_${tokenId}_${status}_${prepared ? "prepared" : "executed"}`,
+          `txn_${tokenId}_${status}_${prepared ? "prepared" : "executed"}_${ageMs}`,
           tokenId,
           TEST_ORG.id,
           status,
           prepared ? "c2VyaWFsaXplZA==" : null,
+          JSON.stringify(amount === undefined ? {} : { amount }),
           at,
           at
         )
