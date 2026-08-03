@@ -144,8 +144,12 @@ export function DepositForm({
 
       {tokens.length > 0 && (
         <div className="space-y-1.5">
-          <Label htmlFor="deposit-token">{t("DashboardPrivateChannels.common.tokenLabel")}</Label>
-          <Select onValueChange={(value) => setMint(value ?? "")} value={mint}>
+          <Label>{t("DashboardPrivateChannels.common.tokenLabel")}</Label>
+          <Select
+            ariaLabel={t("DashboardPrivateChannels.common.tokenLabel")}
+            onValueChange={(value) => setMint(value ?? "")}
+            value={mint}
+          >
             {tokens.map((token) => (
               <SelectItem key={token.mint} value={token.mint}>
                 {token.symbol}
