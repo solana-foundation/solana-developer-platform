@@ -19,6 +19,8 @@ test("randomBase64_32 decodes to 32 bytes and varies", () => {
 
 test("generateSecret honors a field's secretEncoding", () => {
   assert.equal(Buffer.from(generateSecret("CUSTODY_ENCRYPTION_KEY"), "base64").length, 32);
+  // All cipher keys must be base64-32: EncryptionService rejects any other length.
+  assert.equal(Buffer.from(generateSecret("SPC_CREDENTIAL_ENCRYPTION_KEY"), "base64").length, 32);
   assert.equal(Buffer.from(generateSecret("COUNTERPARTY_PII_ENCRYPTION_KEY"), "base64").length, 32);
   assert.match(generateSecret("API_KEY_PEPPER"), /^[0-9a-f]{64}$/);
   assert.match(generateSecret("CREDENTIAL_FINGERPRINT_PEPPER"), /^[0-9a-f]{64}$/);
@@ -30,6 +32,7 @@ test("autoSecretKeys without values lists only secret-kind fields", () => {
     "COUNTERPARTY_PII_ENCRYPTION_KEY",
     "CREDENTIAL_FINGERPRINT_PEPPER",
     "CUSTODY_ENCRYPTION_KEY",
+    "SPC_CREDENTIAL_ENCRYPTION_KEY",
   ]);
 });
 

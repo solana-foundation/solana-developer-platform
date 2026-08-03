@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
+import { runPendingDepositsReconciliation } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
+import { runPendingWithdrawalsReconciliation } from "./pending-withdrawals";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
@@ -42,6 +44,20 @@ vi.mock("./recurring-payments", () => {
     runRecurringPaymentsCollection: vi.fn(),
   };
 });
+
+// The private-channels reconcilers pull in heavy Solana modules; mock the wrappers so
+// runner.ts loads without them (they're feature-flag gated, off in most tests).
+// Unmocked they fail to resolve (@solana/mosaic-sdk ships a directory import Node ESM
+// rejects), which also poisons the module graph for any test file sharing the pool.
+vi.mock("./pending-deposits", () => ({
+  PENDING_DEPOSITS_CRON: "* * * * *",
+  runPendingDepositsReconciliation: vi.fn(),
+}));
+
+vi.mock("./pending-withdrawals", () => ({
+  PENDING_WITHDRAWALS_CRON: "* * * * *",
+  runPendingWithdrawalsReconciliation: vi.fn(),
+}));
 
 function makeBg(): BackgroundRunner {
   return { run: vi.fn(), awaitAll: vi.fn(async () => {}), draining: false };
@@ -113,6 +129,30 @@ describe("startCron", () => {
     expect(scheduleMock).toHaveBeenCalledTimes(2);
     expect(scheduleMock.mock.calls[0][0]).toBe(PENDING_TRANSFERS_CRON);
     expect(scheduleMock.mock.calls[1][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
+  });
+
+  it("schedules deposit + withdrawal reconcilers when private channels are enabled", () => {
+    const bg = makeBg();
+    const env = { PRIVATE_CHANNELS_ENABLED: "true" } as Env;
+    startCron({ env, bg });
+
+    // transfers + deposits + withdrawals (recurring stays off).
+    expect(scheduleMock).toHaveBeenCalledTimes(3);
+
+    // Fire every scheduled tick; the two private-channels reconcilers must run.
+    for (const call of scheduleMock.mock.calls) {
+      (call[1] as () => void)();
+    }
+    expect(runPendingDepositsReconciliation).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: undefined,
+    });
+    expect(runPendingWithdrawalsReconciliation).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: undefined,
+    });
   });
 
   it("schedules when DISABLE_CRON is set to a recognised falsy value ('false' / '0')", () => {

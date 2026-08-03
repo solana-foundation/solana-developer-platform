@@ -17,8 +17,9 @@ if (!globalWithSecureContext.isSecureContext) {
   }
 }
 
-// Fail fast when running integration tests in CI: validate Kora + Solana RPC
-// connectivity and basic funding assumptions before any test files are evaluated.
+// Fail fast when running integration tests in CI: validate the in-scope suites'
+// connectivity and funding assumptions before any test files are evaluated. Scope
+// comes from SDP_INTEGRATION_SUITE, or is inferred from configured env.
 await ensureIntegrationPreflight();
 
 afterAll(async () => {

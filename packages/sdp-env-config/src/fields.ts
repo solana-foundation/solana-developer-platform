@@ -649,7 +649,7 @@ export const FIELDS: EnvField[] = [
     derive: (v) => v.SOLANA_NETWORK ?? "devnet",
   },
   {
-    key: "ASSET_PROFILES_ENABLED",
+    key: "SDP_FLAG_ASSET_PROFILES",
     section: "advanced",
     kind: "select",
     label: "Asset Profiles production opt-in",
@@ -692,6 +692,34 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Recurring payment collection retry delay (minutes)",
     defaultValue: "30",
+  },
+  {
+    key: "PRIVATE_CHANNELS_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Private Channels enabled",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Gates Private Channels API routes and deposit/withdrawal reconcilers.",
+  },
+  {
+    key: "SPC_CREDENTIAL_ENCRYPTION_KEY",
+    section: "secrets",
+    kind: "secret",
+    secretEncoding: "base64",
+    label: "SPC credential encryption key",
+    help: "Base64-encoded 256-bit key for encrypting invited SPC user passwords. Separate from the custody key so compromising one cannot expose the other.",
+  },
+  {
+    key: "SPC_CREDENTIAL_KMS_KEY_NAME",
+    section: "secrets",
+    kind: "text",
+    label: "SPC credential Cloud KMS key name",
+    pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
+    help: "Optional Cloud KMS key used for SPC credential envelope encryption. Keep the SPC credential encryption key configured too: KMS authenticates through the GCE metadata server, so non-GCP deployments run on the key-in-environment path.",
   },
   {
     key: "SENTRY_DSN",

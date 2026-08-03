@@ -14,28 +14,36 @@ This map is generated from the module-boundary check. It records the permitted w
 
 | Module | Purpose | Allowed workspace dependencies |
 | --- | --- | --- |
-| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
-| `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/rpc`, `@sdp/types` |
+| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types` |
+| `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types` |
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/kit-augment` | Shared @solana/kit type augmentation for the generated Codama clients. | None |
 | `@sdp/payments` | Payment domain services, fee payment, and ramp providers. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/private-channels` | Solana Private Channels gateway, auth, and instance clients. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/rpc` | Solana RPC clients, errors, and relay helpers. | `@sdp/types` |
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` |
+| `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | `@sdp/kit-augment` |
+| `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | `@sdp/kit-augment` |
 | `@sdp/types` | Shared runtime types, constants, and product contracts. | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
-| `sdp-web` | Dashboard application. | `@sdp/issuance`, `@sdp/solana`, `@sdp/types` |
+| `sdp-web` | Dashboard application. | `@sdp/issuance`, `@sdp/private-channels`, `@sdp/solana`, `@sdp/types` |
 
 ## Declared Workspace Graph
 
-- `@sdp/api` -> `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
-- `@sdp/api-integration` -> `@sdp/api`, `@sdp/rpc`, `@sdp/types`
+- `@sdp/api` -> `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`
+- `@sdp/api-integration` -> `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types`
 - `@sdp/custody` -> `@sdp/types`
 - `@sdp/env-config` -> None
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
+- `@sdp/kit-augment` -> None
 - `@sdp/payments` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
+- `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/rpc` -> `@sdp/types`
 - `@sdp/solana` -> `@sdp/rpc`, `@sdp/types`
+- `@sdp/spc-escrow` -> `@sdp/kit-augment`
+- `@sdp/spc-withdraw` -> `@sdp/kit-augment`
 - `@sdp/types` -> None
 - `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
-- `sdp-web` -> `@sdp/issuance`, `@sdp/solana`, `@sdp/types`
+- `sdp-web` -> `@sdp/issuance`, `@sdp/private-channels`, `@sdp/solana`, `@sdp/types`
