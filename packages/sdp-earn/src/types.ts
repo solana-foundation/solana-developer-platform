@@ -11,13 +11,14 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
 
 /**
  * Runtime context for catalogue/quote/execute calls. Providers read their own
- * credentials from `env` keyed by `mode`; the route handler resolves `mode`
- * (it depends on AppContext) and passes plain values so the provider stays
- * AppContext-free. Mirrors `RampRuntimeContext` in @sdp/payments.
+ * credentials from `env` keyed by `environment`; the route handler resolves
+ * `environment` (it depends on AppContext) and passes plain values so the
+ * provider stays AppContext-free. Same shape as `RampRuntimeContext` in
+ * @sdp/payments, but named `environment` to match the rest of Earn.
  */
 export interface EarnRuntimeContext {
   env: Record<string, string | undefined>;
-  mode: SdpEnvironment;
+  environment: SdpEnvironment;
 }
 
 export interface EarnWebhookValidationContext {
@@ -30,10 +31,13 @@ export interface EarnWebhookValidationContext {
 
 /**
  * Static support a provider declares up front (before any live call): which
- * stablecoin mints it can take deposits in and which strategy shapes it
- * fronts. The live catalogue itself is synced into the DB via
- * `listStrategies`, so — unlike ramp rail support — there is no committed
- * dump/distill snapshot for Earn yet.
+ * stablecoin symbols it can take deposits in and which strategy shapes it
+ * fronts. Consumed by catalogue-sync validation — a snapshot reported by
+ * `listStrategies` that falls outside this envelope is provider drift, not a
+ * strategy to persist (see `isStrategyWithinDeclaredSupport`). Declared in
+ * symbols, not mints, because the declaration is cluster-agnostic; the
+ * helper bridges to the mint addresses the runtime speaks. Unlike ramp rail
+ * support there is no committed dump/distill snapshot for Earn yet.
  */
 export interface EarnDeclaredStrategySupport {
   sourceKinds: readonly EarnStrategySourceKind[];

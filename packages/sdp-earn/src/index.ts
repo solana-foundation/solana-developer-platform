@@ -19,8 +19,10 @@ export {
 } from "./errors";
 export { GroundEarnClient } from "./providers/ground/client";
 export { PerenaEarnClient } from "./providers/perena/client";
+export { StubEarnClient } from "./providers/stub";
 export { UpshiftEarnClient } from "./providers/upshift/client";
 export { VedaEarnClient } from "./providers/veda/client";
+export { isStrategyWithinDeclaredSupport } from "./support";
 export type {
   EarnDeclaredStrategySupport,
   EarnDepositIntent,

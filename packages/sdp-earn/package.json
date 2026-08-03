@@ -29,6 +29,11 @@
       "import": "./src/shared.ts",
       "default": "./src/shared.ts"
     },
+    "./support": {
+      "types": "./src/support.ts",
+      "import": "./src/support.ts",
+      "default": "./src/support.ts"
+    },
     "./types": {
       "types": "./src/types.ts",
       "import": "./src/types.ts",

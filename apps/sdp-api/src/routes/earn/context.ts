@@ -23,7 +23,7 @@ export function resolveSdpEnvironment(c: AppContext): SdpEnvironment {
 export function earnRuntime(c: AppContext): EarnRuntimeContext {
   return {
     env: c.env as unknown as Record<string, string | undefined>,
-    mode: resolveSdpEnvironment(c),
+    environment: resolveSdpEnvironment(c),
   };
 }
 
