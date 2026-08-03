@@ -146,16 +146,20 @@ async function preflightKoraSuite(): Promise<void> {
     throw new Error("Integration preflight internal error: required env vars were missing.");
   }
 
-  // Validate Solana RPC connectivity early so failures are explicit.
-  await assertSolanaRpcHealthy(solanaRpcUrl);
-
   // Validate Kora connectivity and that it can sponsor transactions (fee payer exists and is funded).
   const koraClient = new KoraClient({
     rpcUrl: koraUrl,
     ...(env.KORA_API_KEY ? { apiKey: env.KORA_API_KEY } : {}),
   });
 
-  const config = await withLabel("Kora.getConfig", () => koraClient.getConfig());
+  // These are independent read-only checks. Run them together so the two Kora
+  // requests cannot consume the setup hook budget ahead of the bounded RPC retries.
+  const [, config, payerSignerResp] = await Promise.all([
+    assertSolanaRpcHealthy(solanaRpcUrl),
+    withLabel("Kora.getConfig", () => koraClient.getConfig()),
+    withLabel("Kora.getPayerSigner", () => koraClient.getPayerSigner()),
+  ]);
+
   if (!config?.validation_config?.allowed_programs) {
     throw new Error("Kora preflight failed: missing validation_config.allowed_programs");
   }
@@ -169,7 +173,6 @@ async function preflightKoraSuite(): Promise<void> {
     );
   }
 
-  const payerSignerResp = await withLabel("Kora.getPayerSigner", () => koraClient.getPayerSigner());
   const feePayerAddress =
     (payerSignerResp as { signer_address?: string }).signer_address ??
     (payerSignerResp as { payment_address?: string }).payment_address ??
