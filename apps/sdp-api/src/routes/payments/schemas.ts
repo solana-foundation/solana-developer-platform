@@ -179,17 +179,8 @@ const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnion("kind
 ]);
 
 export const updateWalletPolicySchema = z.object({
-  destinationAllowlist: z.array(solanaAddressSchema("destinationAllowlist entry")).max(500),
-  maxTransferAmount: z
-    .string()
-    .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
-    .optional(),
-  maxDailyAmount: z
-    .string()
-    .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
-    .optional(),
-  defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional(),
-  rules: z.array(walletPolicyRuleSchema).max(100).optional(),
+  defaultAction: z.enum(["allow", "deny", "approval_required", "review"]),
+  rules: z.array(walletPolicyRuleSchema).max(100),
 });
 
 export const paymentAmountSchema = z

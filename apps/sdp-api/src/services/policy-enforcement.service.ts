@@ -16,14 +16,14 @@ import {
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, conflict, internalError } from "@/lib/errors";
-import { assertTenantClaim, createTenantScope, type TenantScope } from "@/lib/tenant-scope";
+import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import {
   CustodyConfigStore,
   type CustodyWalletLookup,
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { createPolicyEvaluationInput } from "./policy-evaluation.service";
+import { type BatchPolicyLeg, createPolicyEvaluationInput } from "./policy-evaluation.service";
 import { PolicyFoundationService } from "./policy-foundation.service";
 
 export interface WalletOperationPolicyEnforcement {
@@ -38,7 +38,10 @@ export class WalletPolicyEnforcementService {
     this.foundation = new PolicyFoundationService(repository);
   }
 
-  async enforce(input: CreateWalletOperationInput): Promise<WalletOperationPolicyEnforcement> {
+  async enforce(
+    input: CreateWalletOperationInput,
+    legs?: BatchPolicyLeg[]
+  ): Promise<WalletOperationPolicyEnforcement> {
     const operation = await this.foundation.recordWalletOperation({
       ...input,
       status: input.status ?? "created",
@@ -48,7 +51,7 @@ export class WalletPolicyEnforcementService {
 
     const { result, evaluation, updatedOperation } = await (async () => {
       try {
-        const result = await this.foundation.evaluateWalletOperationPolicies(operation);
+        const result = await this.foundation.evaluateWalletOperationPolicies(operation, legs);
         const status = walletOperationStatusForDecision(result.decision);
         if (status === "pending_approval") {
           const approvalRequest = await this.repository.createApprovalRequest(
@@ -169,50 +172,6 @@ export class WalletPolicyEnforcementService {
   }
 }
 
-export async function recordLegacyWalletPolicyDenial(
-  env: Env,
-  enforcement: WalletOperationPolicyEnforcement,
-  error: unknown
-): Promise<void> {
-  const repository = createPolicyRepository(
-    env,
-    createTenantScope({
-      organizationId: enforcement.operation.organizationId,
-      projectId: enforcement.operation.projectId,
-    })
-  );
-  const reason =
-    error instanceof Error && error.message
-      ? error.message
-      : "Legacy wallet policy denied wallet operation";
-
-  try {
-    if (enforcement.evaluation.evaluationContext) {
-      await repository.createPolicyEvaluation({
-        walletOperationId: enforcement.operation.id,
-        walletPolicyRevisionId: null,
-        apiKeyPolicyRevisionId: null,
-        decision: "deny",
-        reasonCode: "legacy_wallet_policy_denied",
-        reason,
-        matchedRules: [],
-        evaluationContext: enforcement.evaluation.evaluationContext,
-        requiresApproval: false,
-      });
-    }
-
-    await repository.updateWalletOperationStatus(enforcement.operation.id, "failed");
-  } catch (auditError) {
-    getLogger().error(
-      {
-        walletOperationId: enforcement.operation.id,
-        error: auditError instanceof Error ? auditError.message : String(auditError),
-      },
-      "Failed to record legacy wallet policy denial"
-    );
-  }
-}
-
 async function markWalletOperationFailed(
   repository: PolicyRepository,
   walletOperationId: string
@@ -270,11 +229,12 @@ function errorMessage(error: unknown): string {
 export async function enforceWalletOperationPolicy(
   env: Env,
   scope: TenantScope,
-  input: CreateWalletOperationInput
+  input: CreateWalletOperationInput,
+  legs?: BatchPolicyLeg[]
 ): Promise<WalletOperationPolicyEnforcement> {
   assertTenantClaim(scope, input, "enforceWalletOperationPolicy");
   const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope));
-  return service.enforce(input);
+  return service.enforce(input, legs);
 }
 
 export function walletOperationActorFromAuth(auth: ApiKeyContext): WalletOperationActor | null {

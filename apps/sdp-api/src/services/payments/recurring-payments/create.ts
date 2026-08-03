@@ -1,14 +1,14 @@
+import type { WalletOperationActor } from "@sdp/types";
 import {
   createPaymentRecurringPaymentsRepository,
-  createPaymentsRepository,
   type PaymentRecurringPaymentRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { enforceWalletOperationPolicy } from "@/services/policy-enforcement.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
-import { assertWalletPolicyAllowsTransferWithRepository } from "../wallet-policy";
 import { assertRecurringPaymentTokenMint } from "./shared";
 
 export async function createRecurringPayment(input: {
@@ -24,6 +24,8 @@ export async function createRecurringPayment(input: {
   firstCollectionAt?: string | null;
   metadataUri?: string | null;
   createdBy: string | null;
+  apiKeyId: string | null;
+  actor: WalletOperationActor | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const [tokenMint, destination] = await Promise.all([
     assertRecurringPaymentTokenMint(input.token, input.organizationId, input.projectId, input.env),
@@ -40,14 +42,25 @@ export async function createRecurringPayment(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
   });
-  await assertWalletPolicyAllowsTransferWithRepository(createPaymentsRepository(input.env, scope), {
+  await enforceWalletOperationPolicy(input.env, scope, {
     organizationId: input.organizationId,
     projectId: input.projectId,
-    wallet: input.sourceWallet,
-    destinationAddress: destination.destinationAddress,
-    enforceDailyLimit: false,
-    token: tokenMint,
+    custodyWalletId: input.sourceWallet.id,
+    walletId: input.sourceWallet.walletId,
+    apiKeyId: input.apiKeyId,
+    actor: input.actor,
+    operationFamily: "payment",
+    operationType: "payment_recurring_create",
+    asset: tokenMint,
     amount: input.amount,
+    destination: destination.destinationAddress,
+    rawPayload: {
+      counterpartyId: input.counterpartyId,
+      counterpartyAccountId: input.counterpartyAccountId,
+      token: tokenMint,
+      amount: input.amount,
+      periodHours: input.periodHours,
+    },
   });
 
   const now = new Date().toISOString();

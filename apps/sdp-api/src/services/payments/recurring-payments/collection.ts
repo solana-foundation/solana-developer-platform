@@ -8,6 +8,7 @@ import {
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import type { WalletOperationActor } from "@sdp/types";
 import { type Address, createNoopSigner, type Signature } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import {
@@ -36,6 +37,7 @@ import {
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
+import { enforceWalletOperationPolicy } from "@/services/policy-enforcement.service";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -43,7 +45,6 @@ import {
   DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
   parsePositiveIntegerConfig,
 } from "../recurring-payment-config";
-import { assertWalletPolicyAllowsTransferWithRepository } from "../wallet-policy";
 import {
   activationErrorMessage,
   confirmSubscriptionSignature,
@@ -714,6 +715,9 @@ export async function collectRecurringPayment(input: {
 
   const nowIso = new Date().toISOString();
   const dueAt = input.recurringPayment.next_collection_due_at;
+  const actor: WalletOperationActor | null = input.initiatedByKeyId
+    ? { type: "api_key", id: input.initiatedByKeyId, apiKeyId: input.initiatedByKeyId }
+    : null;
 
   const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
   const paymentsRepo = createPaymentsRepository(input.env, tenantScope(input));
@@ -807,13 +811,30 @@ export async function collectRecurringPayment(input: {
       throw new AppError("CONFLICT", "Recurring payment collection is already processing");
     }
 
-    await assertWalletPolicyAllowsTransferWithRepository(paymentsRepo, {
+    await enforceWalletOperationPolicy(input.env, tenantScope(input), {
       organizationId: input.organizationId,
       projectId: input.projectId,
-      wallet: input.sourceWallet,
-      destinationAddress: input.recurringPayment.destination_address,
-      token: input.recurringPayment.token,
+      custodyWalletId: input.sourceWallet.id,
+      walletId: input.sourceWallet.walletId,
+      apiKeyId: input.initiatedByKeyId,
+      actor,
+      operationFamily: "payment",
+      operationType: "payment_recurring_collect",
+      asset: input.recurringPayment.token,
       amount: input.recurringPayment.amount,
+      destination: input.recurringPayment.destination_address,
+      ...(input.collectionSource === "automated" ? { source: "automated" } : {}),
+      context: {
+        recurringPaymentId: input.recurringPayment.id,
+        collectionSource: input.collectionSource,
+      },
+      rawPayload: {
+        recurringPaymentId: input.recurringPayment.id,
+        subscriptionId: subscription.id,
+        destinationAddress: input.recurringPayment.destination_address,
+        token: input.recurringPayment.token,
+        amount: input.recurringPayment.amount,
+      },
     });
 
     transfer = await paymentsRepo.createTransfer({

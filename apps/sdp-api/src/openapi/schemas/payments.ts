@@ -71,19 +71,16 @@ export const tokenAmountSchema = z.string().openapi({
   example: "100.00",
 });
 
-export const policyRuleSchema = withOpenApi(
-  updateWalletPolicySchemaBase.shape.rules.unwrap().element,
-  {
-    description:
-      "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
-    example: {
-      id: "deny-raw-signing",
-      kind: "operation_family",
-      family: "raw_sign",
-      action: "deny",
-    },
-  }
-);
+export const policyRuleSchema = withOpenApi(updateWalletPolicySchemaBase.shape.rules.element, {
+  description:
+    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
+  example: {
+    id: "deny-raw-signing",
+    kind: "operation_family",
+    family: "raw_sign",
+    action: "deny",
+  },
+});
 
 const walletControlProfileSummarySchema = z
   .object({
@@ -423,19 +420,6 @@ export const paymentTransferBatchIdParamsSchema = transferBatchIdParamsSchemaBas
 
 export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
   .extend({
-    destinationAllowlist: withOpenApi(updateWalletPolicySchemaBase.shape.destinationAllowlist, {
-      description:
-        "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
-      example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
-    }),
-    maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
-      description: "Maximum amount allowed per transfer.",
-      example: "100.00",
-    }),
-    maxDailyAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxDailyAmount, {
-      description: "Maximum total amount allowed per day.",
-      example: "1000.00",
-    }),
     defaultAction: withOpenApi(updateWalletPolicySchemaBase.shape.defaultAction, {
       description: "Default action for the activated wallet control profile revision.",
       example: "allow",

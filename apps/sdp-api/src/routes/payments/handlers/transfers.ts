@@ -48,7 +48,6 @@ import {
 } from "@/services/payment-operation.service";
 import {
   enforceWalletOperationPolicy,
-  recordLegacyWalletPolicyDenial,
   walletOperationActorFromAuth,
 } from "@/services/policy-enforcement.service";
 import {
@@ -60,7 +59,6 @@ import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { type AppContext, getFeePayment, getPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
-import { assertWalletPolicyAllowsTransfer } from "../policy";
 import {
   createTransferSchema,
   listTransfersQuerySchema,
@@ -678,7 +676,7 @@ async function executePreparedPrivateTransfer(
       sourceAddress: assertValidAddress(wallet.publicKey, "required signer"),
       sourceWallet: wallet,
     };
-    const enforcement = await enforcePaymentTransferOperationPolicy(c, scope, signerOperation, {
+    await enforcePaymentTransferOperationPolicy(c, scope, signerOperation, {
       operationType: "payment_transfer_execute",
       privateTransfer: true,
       rawPayload: {
@@ -688,19 +686,6 @@ async function executePreparedPrivateTransfer(
         amount: operation.amount,
       },
     });
-    try {
-      await assertWalletPolicyAllowsTransfer(c, {
-        organizationId: scope.auth.organizationId,
-        projectId: scope.auth.projectId,
-        wallet,
-        destinationAddress: operation.destinationAddress,
-        token: operation.token,
-        amount: operation.amount,
-      });
-    } catch (error) {
-      await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
-      throw error;
-    }
   }
 
   const signers = await Promise.all(
@@ -923,7 +908,7 @@ export async function createTransfer(c: AppContext) {
     }
   }
 
-  const enforcement = await enforcePaymentTransferOperationPolicy(c, scope, operation, {
+  await enforcePaymentTransferOperationPolicy(c, scope, operation, {
     operationType: "payment_transfer_execute",
     memo: parsed.data.memo,
     privateTransfer: Boolean(privateTransfer),
@@ -934,19 +919,6 @@ export async function createTransfer(c: AppContext) {
       amount: parsed.data.amount,
     },
   });
-  try {
-    await assertWalletPolicyAllowsTransfer(c, {
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-      wallet: operation.sourceWallet,
-      destinationAddress: operation.destinationAddress,
-      token: operation.token,
-      amount: operation.amount,
-    });
-  } catch (error) {
-    await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
-    throw error;
-  }
 
   if (privateTransfer) {
     assertMagicBlockKoraSponsoredExecutionOptions(privateTransfer.magicBlock);

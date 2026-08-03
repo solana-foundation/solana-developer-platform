@@ -218,10 +218,8 @@ function normalizeAuthoringRuleAction(
   return isAuthoringRuleAction(normalized) ? normalized : null;
 }
 
-function normalizeAuthoringDefaultAction(
-  action: PolicyDefaultAction | undefined
-): AuthoringDefaultAction {
-  return action === "review" ? "approval_required" : (action ?? "allow");
+function normalizeAuthoringDefaultAction(action: PolicyDefaultAction): AuthoringDefaultAction {
+  return action === "review" ? "approval_required" : action;
 }
 
 function isWalletOperationFamily(value: unknown): value is WalletOperationFamily {
@@ -320,7 +318,7 @@ export function parseDestinationText(value: string): ParsedDestinations {
 // Each rule kind has a distinct public shape; keeping the conversion in one pass preserves order.
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the branches mirror the PolicyRule union.
 export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyAuthoringState {
-  const rules = policy.rules ?? policy.controlProfile?.rules ?? [];
+  const rules = policy.rules;
   const categories: RestrictionCategory[] = [];
   const assets: string[] = [];
   const allowDestinations: string[] = [];
@@ -330,7 +328,7 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
   const passthroughRules: PolicyRule[] = [];
   let hasEditableAllowRule = false;
   let hasEditableBlockRule = false;
-  let maxTransferAmount = policy.maxTransferAmount ?? "";
+  let maxTransferAmount = "";
 
   for (const rule of rules) {
     switch (rule.kind) {
@@ -439,21 +437,15 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
     }
   }
 
-  if (policy.destinationAllowlist.length > 0 && allowDestinations.length === 0) {
-    allowDestinations.push(...policy.destinationAllowlist);
-  }
   if (allowDestinations.length > 0 || blockDestinations.length > 0) {
     addCategory(categories, "destinations");
   }
-  if (policy.maxTransferAmount || policy.maxDailyAmount) addCategory(categories, "limits");
 
   return {
-    defaultAction: normalizeAuthoringDefaultAction(
-      policy.defaultAction ?? policy.controlProfile?.defaultAction
-    ),
+    defaultAction: normalizeAuthoringDefaultAction(policy.defaultAction),
     categories,
     maxTransferAmount,
-    maxDailyAmount: policy.maxDailyAmount ?? "",
+    maxDailyAmount: "",
     assets: uniqueValues(assets),
     destinationMode:
       blockDestinations.length > 0 && allowDestinations.length === 0 ? "blocklist" : "allowlist",
@@ -480,7 +472,7 @@ function groupedValuesByAction<TValue extends string>(
 export function buildPolicyPayload(
   walletId: string,
   state: PolicyAuthoringState
-): PaymentWalletPolicy & { rules: PolicyRule[] } {
+): PaymentWalletPolicy {
   const categories = new Set(state.categories);
   const allowDestinations = parseDestinationText(state.destinationAllowText).valid;
   const blockDestinations = parseDestinationText(state.destinationBlockText).valid;
@@ -547,7 +539,6 @@ export function buildPolicyPayload(
   }
 
   const maxTransferAmount = state.maxTransferAmount.trim();
-  const maxDailyAmount = state.maxDailyAmount.trim();
   if (categories.has("limits") && maxTransferAmount) {
     rules.push({
       id: "per-transaction-limit",
@@ -560,9 +551,6 @@ export function buildPolicyPayload(
 
   return {
     walletId,
-    destinationAllowlist: categories.has("destinations") ? allowDestinations : [],
-    ...(categories.has("limits") && maxTransferAmount ? { maxTransferAmount } : {}),
-    ...(categories.has("limits") && maxDailyAmount ? { maxDailyAmount } : {}),
     defaultAction: state.defaultAction,
     rules,
   };
@@ -571,7 +559,6 @@ export function buildPolicyPayload(
 export function buildDisabledPolicyPayload(walletId: string): PaymentWalletPolicy {
   return {
     walletId,
-    destinationAllowlist: [],
     defaultAction: "allow",
     rules: [],
   };
@@ -582,12 +569,8 @@ export function validatePolicyState(state: PolicyAuthoringState): PolicyValidati
   const categories = new Set(state.categories);
 
   const payload = buildPolicyPayload("validation", state);
-  if (
-    payload.defaultAction === "allow" &&
-    payload.rules.length === 0 &&
-    !payload.maxTransferAmount &&
-    !payload.maxDailyAmount
-  ) {
+  const hasLimitsInput = categories.has("limits") && Boolean(state.maxDailyAmount.trim());
+  if (payload.defaultAction === "allow" && payload.rules.length === 0 && !hasLimitsInput) {
     errors.review = "no_restrictions";
     if (state.categories.length === 0 && state.passthroughRules.length === 0) {
       errors.intent = "restriction_required";

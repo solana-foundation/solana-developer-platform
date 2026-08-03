@@ -22,6 +22,12 @@ interface EvaluateWalletOperationPoliciesInput {
   operation: WalletOperationEnvelope;
   walletPolicy: EffectiveWalletPolicy;
   apiKeyPolicy?: EffectiveApiKeyPolicy | null;
+  legs?: BatchPolicyLeg[];
+}
+
+export interface BatchPolicyLeg {
+  destination: string | null;
+  amount: string | null;
 }
 
 interface RuleEvaluation {
@@ -50,10 +56,12 @@ const RULE_ACTIONS = new Set<PolicyRuleAction>([
 export function evaluateWalletOperationPolicies(
   input: EvaluateWalletOperationPoliciesInput
 ): WalletOperationPolicyEvaluation {
+  const legs = input.legs;
   const wallet = evaluatePolicyScope({
     scope: "wallet",
     policy: input.walletPolicy,
     operation: input.operation,
+    legs,
   });
   const apiKey =
     input.apiKeyPolicy || input.operation.apiKeyId
@@ -61,6 +69,7 @@ export function evaluateWalletOperationPolicies(
           scope: "api_key",
           policy: input.apiKeyPolicy ?? createImplicitApiKeyPolicy(),
           operation: input.operation,
+          legs,
         })
       : null;
   const scopes = apiKey ? [wallet, apiKey] : [wallet];
@@ -105,6 +114,7 @@ function evaluatePolicyScope(input: {
   scope: PolicyRuleScope;
   policy: EffectiveWalletPolicy | EffectiveApiKeyPolicy;
   operation: WalletOperationEnvelope;
+  legs?: BatchPolicyLeg[];
 }): PolicyScopeEvaluation {
   const revision = input.policy.revision;
 
@@ -123,10 +133,19 @@ function evaluatePolicyScope(input: {
     };
   }
 
-  const ruleEvaluations = revision.rules.flatMap((rule) => {
+  const primaryEvaluations = revision.rules.flatMap((rule) => {
+    if (input.legs !== undefined && ruleKindOf(rule) === "destination") {
+      return [];
+    }
+
     const evaluation = evaluatePolicyRule(rule, input.operation);
     return evaluation ? [evaluation] : [];
   });
+  const legEvaluations =
+    input.legs === undefined
+      ? []
+      : evaluateBatchLegRules(revision.rules, input.operation, input.legs);
+  const ruleEvaluations = [...primaryEvaluations, ...legEvaluations];
   const selectedRule = selectStrictestDecision(ruleEvaluations);
 
   if (selectedRule) {
@@ -160,6 +179,55 @@ function evaluatePolicyScope(input: {
     matchedRules: [],
     requiresApproval: isApprovalDecision(defaultDecision),
   };
+}
+
+/**
+ * Reads a rule's kind without asserting the rule parses as a known variant.
+ *
+ * @param rule - The stored rule, which may predate the current vocabulary.
+ * @returns The rule's kind string, or null when absent.
+ */
+function ruleKindOf(rule: RuntimePolicyRule): string | null {
+  const kind = (rule as Record<string, unknown>).kind;
+  return typeof kind === "string" ? kind : null;
+}
+
+/**
+ * Evaluates destination and amount rules against every batch leg. Legs
+ * contribute matched-rule decisions only — the scope's default action fires
+ * once via the primary evaluation, mirroring the legacy per-recipient checks,
+ * and leg-invariant rule kinds (family, type, asset, approval, always) are
+ * evaluated on the primary alone.
+ *
+ * @param rules - The active revision's rules.
+ * @param operation - The primary batch operation envelope.
+ * @param legs - Per-recipient destination and amount pairs.
+ * @returns Matched rule evaluations labeled with the tripping leg.
+ */
+function evaluateBatchLegRules(
+  rules: RuntimePolicyRule[],
+  operation: WalletOperationEnvelope,
+  legs: BatchPolicyLeg[]
+): RuleEvaluation[] {
+  return legs.flatMap((leg, index) =>
+    rules.flatMap((rule) => {
+      const kind = ruleKindOf(rule);
+      if (kind !== "destination" && kind !== "amount") {
+        return [];
+      }
+
+      const evaluation = evaluatePolicyRule(rule, {
+        ...operation,
+        destination: leg.destination,
+        amount: leg.amount,
+      });
+      if (!evaluation) {
+        return [];
+      }
+
+      return [{ ...evaluation, reason: `Batch recipient ${index + 1}: ${evaluation.reason}` }];
+    })
+  );
 }
 
 function evaluatePolicyRule(

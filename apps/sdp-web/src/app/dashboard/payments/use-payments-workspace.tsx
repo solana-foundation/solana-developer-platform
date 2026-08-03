@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  PolicyRule,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
   PaymentsDashboardWallet as WalletRecord,
@@ -26,6 +27,27 @@ const PAYMENTS_WORKSPACE_WALLETS_KEY = "payments-workspace-wallets";
 const PAYMENTS_WORKSPACE_TRANSFERS_KEY = "payments-workspace-transfers";
 const PAYMENTS_WORKSPACE_WALLETS_CACHE_TTL_MS = 30_000;
 const PAYMENTS_WORKSPACE_TRANSFERS_CACHE_TTL_MS = 20_000;
+
+/**
+ * Collects the effective destination allowlist from a policy's rules, mirroring
+ * the policy engine's own union semantics for a "destination" rule (`allowlist`,
+ * `destination`, and `destinations` all contribute).
+ *
+ * @param rules - Policy rules from the wallet's active control profile.
+ * @returns Deduplicated allowlisted addresses across every destination rule.
+ */
+function collectDestinationAllowlist(rules: PolicyRule[]): string[] {
+  const addresses = rules.flatMap((rule) =>
+    rule.kind === "destination"
+      ? [
+          ...(rule.destination ? [rule.destination] : []),
+          ...(rule.destinations ?? []),
+          ...(rule.allowlist ?? []),
+        ]
+      : []
+  );
+  return [...new Set(addresses)];
+}
 
 export interface DestinationAllowlistSectionState {
   walletId: string;
@@ -200,7 +222,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     const loadTransferPolicy = async () => {
       try {
         const policy = await fetchWalletPolicy(transferSource, t);
-        setTransferPolicyAllowlist(policy.destinationAllowlist);
+        setTransferPolicyAllowlist(collectDestinationAllowlist(policy.rules));
       } catch {
         setTransferPolicyAllowlist([]);
       }
@@ -217,7 +239,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     transferCompliance.providers.length > 0;
   const transferDestinationIsAllowlisted =
     !!transferDestinationTrimmed && transferPolicyAllowlist.includes(transferDestinationTrimmed);
-  const allowlistAddresses = addPolicy?.destinationAllowlist ?? [];
+  const allowlistAddresses = addPolicy ? collectDestinationAllowlist(addPolicy.rules) : [];
   const canAddAddress =
     !!addWalletId &&
     !!addAddressTrimmed &&
@@ -297,18 +319,29 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     setAddError(null);
     setAddSuccess(null);
     try {
+      const existingDestinationRule = addPolicy.rules.find(
+        (rule): rule is Extract<PolicyRule, { kind: "destination" }> => rule.kind === "destination"
+      );
+      const mergedRules: PolicyRule[] = existingDestinationRule
+        ? addPolicy.rules.map((rule) =>
+            rule === existingDestinationRule
+              ? { ...rule, allowlist: [...(rule.allowlist ?? []), addAddressTrimmed] }
+              : rule
+          )
+        : [...addPolicy.rules, { kind: "destination", allowlist: [addAddressTrimmed] }];
+
       const updated = await updateWalletPolicy(
         addWalletId,
         {
           ...addPolicy,
-          destinationAllowlist: [...allowlistAddresses, addAddressTrimmed],
+          rules: mergedRules,
         },
         t
       );
       setAddPolicy(updated);
       void mutateWallets();
       if (addWalletId === transferSource) {
-        setTransferPolicyAllowlist(updated.destinationAllowlist);
+        setTransferPolicyAllowlist(collectDestinationAllowlist(updated.rules));
       }
       setAddSuccess(t("DashboardPayments.workspace.addressAddedToAllowlist"));
     } catch (error) {
@@ -439,8 +472,9 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     setTransferAllowlistError(null);
     try {
       const policy = await fetchWalletPolicy(transferSource, t);
-      setTransferPolicyAllowlist(policy.destinationAllowlist);
-      setTransferAllowlist(policy.destinationAllowlist);
+      const allowlist = collectDestinationAllowlist(policy.rules);
+      setTransferPolicyAllowlist(allowlist);
+      setTransferAllowlist(allowlist);
     } catch (error) {
       setTransferAllowlist(null);
       setTransferAllowlistError(

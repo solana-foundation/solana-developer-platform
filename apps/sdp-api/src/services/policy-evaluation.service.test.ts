@@ -445,6 +445,87 @@ describe("evaluateWalletOperationPolicies", () => {
   });
 });
 
+describe("batch leg evaluation", () => {
+  const batchOperation: WalletOperationEnvelope = {
+    ...operation,
+    apiKeyId: null,
+    operationType: "payment_transfer_batch_execute",
+    destination: null,
+    amount: "300",
+  };
+
+  it("denies the batch when one recipient trips a destination allowlist", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation: batchOperation,
+      walletPolicy: walletPolicy([
+        { id: "allow-dests", kind: "destination", allowlist: ["recipient_allowed"] },
+      ]),
+      legs: [
+        { destination: "recipient_allowed", amount: "100" },
+        { destination: "recipient_blocked", amount: "200" },
+      ],
+    });
+
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("Batch recipient 2");
+  });
+
+  it("does not deny the primary batch operation for having no destination", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation: batchOperation,
+      walletPolicy: walletPolicy([
+        { id: "allow-dests", kind: "destination", allowlist: ["recipient_allowed"] },
+      ]),
+      legs: [{ destination: "recipient_allowed", amount: "300" }],
+    });
+
+    expect(result.decision).toBe("allow");
+  });
+
+  it("applies amount rules to each leg and to the batch total", () => {
+    const perLegOk = evaluateWalletOperationPolicies({
+      operation: { ...batchOperation, amount: "300" },
+      walletPolicy: walletPolicy([{ id: "cap", kind: "amount", max: "250" }]),
+      legs: [
+        { destination: "recipient_a", amount: "150" },
+        { destination: "recipient_b", amount: "150" },
+      ],
+    });
+
+    expect(perLegOk.decision).toBe("deny");
+    expect(perLegOk.reason).toContain("exceeds policy maximum 250");
+
+    const legTripped = evaluateWalletOperationPolicies({
+      operation: { ...batchOperation, amount: "150" },
+      walletPolicy: walletPolicy([{ id: "cap", kind: "amount", max: "180" }]),
+      legs: [
+        { destination: "recipient_a", amount: "190" },
+        { destination: "recipient_b", amount: "10" },
+      ],
+    });
+
+    expect(legTripped.decision).toBe("deny");
+    expect(legTripped.reason).toContain("Batch recipient 1");
+  });
+
+  it("fires the default action once when no rule matches primary or legs", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation: batchOperation,
+      walletPolicy: walletPolicy(
+        [{ id: "other-asset", kind: "asset", assets: ["EURC"], action: "deny" }],
+        "approval_required"
+      ),
+      legs: [
+        { destination: "recipient_a", amount: "100" },
+        { destination: "recipient_b", amount: "200" },
+      ],
+    });
+
+    expect(result.decision).toBe("approval_required");
+    expect(result.matchedRules).toHaveLength(0);
+  });
+});
+
 describe("PolicyFoundationService policy evaluation", () => {
   it("resolves active policies and records the evaluation payload", async () => {
     const createPolicyEvaluation = vi.fn(async (input: CreatePolicyEvaluationInput) => ({

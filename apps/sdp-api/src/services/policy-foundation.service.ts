@@ -33,6 +33,7 @@ import type {
 } from "@/db/repositories";
 import { badRequest, forbidden, notFound } from "@/lib/errors";
 import {
+  type BatchPolicyLeg,
   createPolicyEvaluationInput,
   evaluateWalletOperationPolicies,
 } from "./policy-evaluation.service";
@@ -358,7 +359,8 @@ export class PolicyFoundationService {
   }
 
   async evaluateWalletOperationPolicies(
-    operation: WalletOperationEnvelope
+    operation: WalletOperationEnvelope,
+    legs?: BatchPolicyLeg[]
   ): Promise<WalletOperationPolicyEvaluation> {
     let apiKeyScope: ResolvedApiKeyWalletPolicyScope | null = null;
     let apiKeyPolicy: EffectiveApiKeyPolicy | null = null;
@@ -397,6 +399,7 @@ export class PolicyFoundationService {
       operation,
       walletPolicy,
       apiKeyPolicy,
+      legs,
     });
   }
 

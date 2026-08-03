@@ -258,7 +258,8 @@ export async function fetchWalletPolicy(walletId: string, t: Translate): Promise
   return (
     body.data?.policy ?? {
       walletId,
-      destinationAllowlist: [],
+      defaultAction: "allow",
+      rules: [],
     }
   );
 }
@@ -518,11 +519,8 @@ export async function updateWalletPolicy(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        destinationAllowlist: policy.destinationAllowlist,
-        ...(policy.maxTransferAmount ? { maxTransferAmount: policy.maxTransferAmount } : {}),
-        ...(policy.maxDailyAmount ? { maxDailyAmount: policy.maxDailyAmount } : {}),
-        ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
-        ...(policy.rules ? { rules: policy.rules } : {}),
+        defaultAction: policy.defaultAction,
+        rules: policy.rules,
       }),
     }
   );
