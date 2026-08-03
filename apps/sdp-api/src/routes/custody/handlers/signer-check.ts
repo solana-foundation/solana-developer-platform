@@ -27,7 +27,7 @@ import {
 } from "@/services/policy-enforcement.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSigner } from "@/services/solana";
-import { createRequestSponsorshipFeePayment } from "@/services/sponsorship.service";
+import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { AppContext } from "../context";
 import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
 
@@ -95,7 +95,7 @@ export const signerCheck = async (c: AppContext) => {
       resolvedWalletId
     );
 
-    const feePayment = createRequestSponsorshipFeePayment(c);
+    const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const feePayer = await feePayment.getFeePayer();
 
     const rpcTarget = await resolveRpcTarget({

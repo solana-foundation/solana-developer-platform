@@ -107,4 +107,28 @@ describe("KoraAdapter user_id forwarding", () => {
       params: { user_id: "sdp:v1:production:org:project:user:actor" },
     });
   });
+
+  it("rejects a Cloud Run identity audience that does not match the Kora origin", () => {
+    expect(() =>
+      createKoraAdapter(
+        {
+          FEE_PAYMENT_PROVIDER: "kora",
+          KORA_RPC_URL: "https://kora-devnet.solana.com",
+          KORA_CLOUD_RUN_AUDIENCE: "https://private-kora.example",
+        },
+        "sdp:v1:production:org:organization:api_key:key"
+      )
+    ).toThrow("KORA_RPC_URL must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE origin");
+  });
+
+  it("rejects sending a Cloud Run identity token over HTTP", () => {
+    expect(
+      () =>
+        new KoraAdapter({
+          rpcUrl: "http://private-kora.example",
+          identityTokenAudience: "http://private-kora.example",
+          userId: "sdp:v1:production:org:organization:api_key:key",
+        })
+    ).toThrow("KORA_RPC_URL must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE origin");
+  });
 });

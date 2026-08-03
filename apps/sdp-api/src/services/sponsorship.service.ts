@@ -12,7 +12,7 @@ export type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
 export interface SponsorshipScope {
   environment: ProjectEnvironment;
   organizationId: string;
-  projectId: string;
+  projectId: string | null;
   actor: {
     type: SponsorshipActorType;
     id: string;
@@ -39,11 +39,14 @@ function requireScopeSegment(value: string, label: string): string {
 export function buildKoraUserId(scope: SponsorshipScope): string {
   const environment = requireScopeSegment(scope.environment, "Sponsorship environment");
   const organizationId = requireScopeSegment(scope.organizationId, "Sponsorship organization id");
-  const projectId = requireScopeSegment(scope.projectId, "Sponsorship project id");
+  const tenantScope =
+    scope.projectId === null
+      ? "organization"
+      : `project:${requireScopeSegment(scope.projectId, "Sponsorship project id")}`;
   const actorType = requireScopeSegment(scope.actor.type, "Sponsorship actor type");
   const actorId = requireScopeSegment(scope.actor.id, "Sponsorship actor id");
 
-  return `sdp:v1:${environment}:${organizationId}:${projectId}:${actorType}:${actorId}`;
+  return `sdp:v1:${environment}:${organizationId}:${tenantScope}:${actorType}:${actorId}`;
 }
 
 /** Owned application boundary for constructing a fee-payment provider. */
@@ -62,8 +65,13 @@ export function createUnscopedSponsorshipFeePayment(env: Env): FeePaymentPort {
 
 /** Resolve a scope exclusively from trusted request middleware state. */
 export function resolveRequestSponsorshipScope(c: AppContext): SponsorshipScope {
+  const scope = resolveAuthenticatedSponsorshipScope(c);
+  return { ...scope, projectId: requireProjectId(c) };
+}
+
+/** Resolve either project or organization scope from trusted authentication state. */
+export function resolveAuthenticatedSponsorshipScope(c: AppContext): SponsorshipScope {
   const auth = getAuth(c);
-  const projectId = requireProjectId(c);
   const environment = c.get("projectEnvironment") ?? auth.environment;
 
   if (environment !== "sandbox" && environment !== "production") {
@@ -73,7 +81,7 @@ export function resolveRequestSponsorshipScope(c: AppContext): SponsorshipScope 
   return {
     environment,
     organizationId: auth.organizationId,
-    projectId,
+    projectId: c.get("projectId") ?? auth.projectId ?? null,
     actor:
       auth.authType === "api_key"
         ? { type: "api_key", id: auth.id }
@@ -83,6 +91,10 @@ export function resolveRequestSponsorshipScope(c: AppContext): SponsorshipScope 
 
 export function createRequestSponsorshipFeePayment(c: AppContext): FeePaymentPort {
   return createSponsorshipFeePayment(c.env, resolveRequestSponsorshipScope(c));
+}
+
+export function createAuthenticatedSponsorshipFeePayment(c: AppContext): FeePaymentPort {
+  return createSponsorshipFeePayment(c.env, resolveAuthenticatedSponsorshipScope(c));
 }
 
 /**

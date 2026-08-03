@@ -75,10 +75,17 @@ export class KoraAdapter implements FeePaymentPort {
 
   constructor(config: KoraAdapterConfig) {
     const { rpcUrl, apiKey, getRecaptchaToken, hmacSecret, userId } = config;
+    const identityTokenAudience = config.identityTokenAudience?.trim();
+    if (config.identityTokenProvider && !identityTokenAudience) {
+      throw new Error("identityTokenAudience is required with an identityTokenProvider");
+    }
+    if (identityTokenAudience) {
+      assertCloudRunIdentityDestination(rpcUrl, identityTokenAudience);
+    }
     const identityTokenProvider =
       config.identityTokenProvider ??
-      (config.identityTokenAudience
-        ? createCloudRunIdentityTokenProvider(config.identityTokenAudience)
+      (identityTokenAudience
+        ? createCloudRunIdentityTokenProvider(identityTokenAudience)
         : undefined);
     this.client =
       config.client ??
@@ -466,6 +473,31 @@ function createCloudRunIdentityTokenProvider(audience: string): () => Promise<st
     refreshAt = resolveTokenRefreshAt(token);
     return token;
   };
+}
+
+function assertCloudRunIdentityDestination(rpcUrl: string, audience: string): void {
+  let destination: URL;
+  let trustedAudience: URL;
+  try {
+    destination = new URL(rpcUrl);
+    trustedAudience = new URL(audience);
+  } catch {
+    throw new Error("KORA_RPC_URL and KORA_CLOUD_RUN_AUDIENCE must be valid URLs");
+  }
+
+  const hasCredentials =
+    destination.username ||
+    destination.password ||
+    trustedAudience.username ||
+    trustedAudience.password;
+  if (
+    destination.protocol !== "https:" ||
+    trustedAudience.protocol !== "https:" ||
+    destination.origin !== trustedAudience.origin ||
+    hasCredentials
+  ) {
+    throw new Error("KORA_RPC_URL must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE origin");
+  }
 }
 
 function resolveTokenRefreshAt(token: string): number {

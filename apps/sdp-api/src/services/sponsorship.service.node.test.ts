@@ -7,6 +7,7 @@ import {
   buildKoraUserId,
   createProjectSponsorshipFeePayment,
   createSponsorshipFeePayment,
+  resolveAuthenticatedSponsorshipScope,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
@@ -43,7 +44,7 @@ describe("sponsorship identity boundary", () => {
         projectId: "project/one",
         actor: { type: "api_key", id: "key:primary" },
       })
-    ).toBe("sdp:v1:production:org%3Aalpha:project%2Fone:api_key:key%3Aprimary");
+    ).toBe("sdp:v1:production:org%3Aalpha:project:project%2Fone:api_key:key%3Aprimary");
   });
 
   it("rejects an incomplete scope instead of emitting an unscoped identity", () => {
@@ -68,7 +69,7 @@ describe("sponsorship identity boundary", () => {
 
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
-      "sdp:v1:sandbox:org_1:project_1:user:user_1"
+      "sdp:v1:sandbox:org_1:project:project_1:user:user_1"
     );
   });
 
@@ -97,8 +98,60 @@ describe("sponsorship identity boundary", () => {
     );
 
     expect(await response.text()).toBe(
-      "sdp:v1:production:org_trusted:project_trusted:api_key:key_trusted"
+      "sdp:v1:production:org_trusted:project:project_trusted:api_key:key_trusted"
     );
+  });
+
+  it("derives an organization-scoped identity for an API key without a project", async () => {
+    const app = new Hono<{ Bindings: Env }>();
+    app.use("*", async (c, next) => {
+      c.set("apiKey", {
+        id: "key_org",
+        organizationId: "org_trusted",
+        projectId: null as never,
+        role: "api_admin",
+        permissions: ["*"],
+        environment: "production",
+        signingWalletId: "wallet_trusted",
+      });
+      await next();
+    });
+    app.get("/probe", (c) => c.text(buildKoraUserId(resolveAuthenticatedSponsorshipScope(c))));
+
+    const response = await app.request("/probe", {}, {} as Env);
+
+    expect(await response.text()).toBe(
+      "sdp:v1:production:org_trusted:organization:api_key:key_org"
+    );
+  });
+
+  it("keeps project-required request sponsorship fail closed", async () => {
+    const app = new Hono<{ Bindings: Env }>();
+    let sponsorshipError: unknown;
+    app.use("*", async (c, next) => {
+      c.set("apiKey", {
+        id: "key_org",
+        organizationId: "org_trusted",
+        projectId: null as never,
+        role: "api_admin",
+        permissions: ["*"],
+        environment: "production",
+        signingWalletId: "wallet_trusted",
+      });
+      await next();
+    });
+    app.get("/probe", (c) => {
+      try {
+        resolveRequestSponsorshipScope(c);
+      } catch (error) {
+        sponsorshipError = error;
+      }
+      return c.text("checked");
+    });
+
+    await app.request("/probe", {}, {} as Env);
+
+    expect(sponsorshipError).toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("derives background and public scopes from persisted project ownership", async () => {
@@ -118,7 +171,7 @@ describe("sponsorship identity boundary", () => {
 
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
-      "sdp:v1:production:org_stored:project_stored:wallet:wallet_stored"
+      "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored"
     );
   });
 
