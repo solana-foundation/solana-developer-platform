@@ -38,6 +38,18 @@ export interface MockEarnRedemption {
   availableAt: string;
 }
 
+export interface MockEarnWithdrawalRoute {
+  positionId: string;
+  redemptionDelayDays: number | null;
+  /** Portion that settles immediately even when the remaining leg is delayed. */
+  intradayFraction?: number;
+}
+
+export interface MockEarnWithdrawalLeg {
+  positionId: string;
+  amount: number;
+}
+
 const POSITIONS_KEY = "sdp-earn-mock-positions";
 const REDEMPTIONS_KEY = "sdp-earn-mock-redemptions";
 const CHANGE_EVENT = "sdp:earn-mock-positions-change";
@@ -79,6 +91,11 @@ function write(storageKey: string, value: readonly unknown[]): void {
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
+export function delayedWithdrawalAmount(amount: number, intradayFraction = 0): number {
+  const immediateFraction = Math.min(1, Math.max(0, intradayFraction));
+  return amount * (1 - immediateFraction);
+}
+
 export function addMockPosition(position: Omit<MockEarnPosition, "id" | "createdAt">): void {
   const next: MockEarnPosition = {
     ...position,
@@ -96,7 +113,8 @@ export function addMockPosition(position: Omit<MockEarnPosition, "id" | "created
 export function withdrawFromMockPosition(
   positionId: string,
   amount: number,
-  redemptionDelayDays: number | null
+  redemptionDelayDays: number | null,
+  intradayFraction = 0
 ): void {
   const positions = readPositions();
   const position = positions.find((candidate) => candidate.id === positionId);
@@ -111,7 +129,9 @@ export function withdrawFromMockPosition(
         )
       : positions.filter((candidate) => candidate.id !== positionId);
 
-  if (redemptionDelayDays !== null && redemptionDelayDays > 0) {
+  const pendingAmount = delayedWithdrawalAmount(withdrawn, intradayFraction);
+
+  if (redemptionDelayDays !== null && redemptionDelayDays > 0 && pendingAmount > 0) {
     const requestedAt = new Date();
     const availableAt = new Date(requestedAt.getTime() + redemptionDelayDays * 24 * 60 * 60 * 1000);
     const redemption: MockEarnRedemption = {
@@ -120,7 +140,7 @@ export function withdrawFromMockPosition(
       strategyId: position.strategyId,
       walletId: position.walletId,
       tokenMint: position.tokenMint,
-      amount: withdrawn,
+      amount: pendingAmount,
       requestedAt: requestedAt.toISOString(),
       availableAt: availableAt.toISOString(),
     };
@@ -128,6 +148,95 @@ export function withdrawFromMockPosition(
   }
 
   write(POSITIONS_KEY, nextPositions);
+}
+
+/**
+ * Plan an exact-total proportional withdrawal in caller order. An empty plan
+ * means the request is invalid or exceeds the currently available balance.
+ */
+export function planProportionalWithdrawal(
+  positions: readonly { positionId: string; amount: number }[],
+  requestedAmount: number
+): MockEarnWithdrawalLeg[] {
+  const available = positions.reduce((total, position) => total + position.amount, 0);
+  if (
+    !Number.isFinite(requestedAmount) ||
+    requestedAmount <= 0 ||
+    available <= 0 ||
+    requestedAmount > available
+  ) {
+    return [];
+  }
+
+  let routed = 0;
+  return positions.map((position, index) => {
+    const amount =
+      index === positions.length - 1
+        ? Math.max(0, requestedAmount - routed)
+        : requestedAmount * (position.amount / available);
+    routed += amount;
+    return { positionId: position.positionId, amount };
+  });
+}
+
+/**
+ * Atomically re-resolve and proportionally reduce the requested positions.
+ * Returns zero without mutation if another tab made the request unaffordable.
+ */
+export function withdrawFromMockPositionsProportionally(
+  routes: readonly MockEarnWithdrawalRoute[],
+  requestedAmount: number
+): number {
+  const routeByPosition = new Map(routes.map((route) => [route.positionId, route]));
+  const positions = readPositions();
+  const eligiblePositions = positions.filter((position) => routeByPosition.has(position.id));
+  const withdrawalLegs = planProportionalWithdrawal(
+    eligiblePositions.map((position) => ({ positionId: position.id, amount: position.amount })),
+    requestedAmount
+  );
+  if (withdrawalLegs.length === 0) return 0;
+
+  const amountByPosition = new Map(
+    withdrawalLegs.map((leg) => [leg.positionId, leg.amount] as const)
+  );
+  const requestedAt = new Date();
+  const newRedemptions: MockEarnRedemption[] = [];
+
+  for (const position of eligiblePositions) {
+    const withdrawn = amountByPosition.get(position.id) ?? 0;
+    const route = routeByPosition.get(position.id);
+    if (!route || withdrawn <= 0) continue;
+
+    const pendingAmount = delayedWithdrawalAmount(withdrawn, route.intradayFraction);
+    if (route.redemptionDelayDays !== null && route.redemptionDelayDays > 0 && pendingAmount > 0) {
+      const availableAt = new Date(
+        requestedAt.getTime() + route.redemptionDelayDays * 24 * 60 * 60 * 1000
+      );
+      newRedemptions.push({
+        id: `earn_redemption_mock_${crypto.randomUUID()}`,
+        positionId: position.id,
+        strategyId: position.strategyId,
+        walletId: position.walletId,
+        tokenMint: position.tokenMint,
+        amount: pendingAmount,
+        requestedAt: requestedAt.toISOString(),
+        availableAt: availableAt.toISOString(),
+      });
+    }
+  }
+
+  const nextPositions = positions.flatMap((position) => {
+    const withdrawn = amountByPosition.get(position.id);
+    if (withdrawn === undefined) return [position];
+    const remaining = position.amount - withdrawn;
+    return remaining > 0 ? [{ ...position, amount: remaining }] : [];
+  });
+
+  if (newRedemptions.length > 0) {
+    write(REDEMPTIONS_KEY, [...newRedemptions, ...readRedemptions()]);
+  }
+  write(POSITIONS_KEY, nextPositions);
+  return requestedAmount;
 }
 
 export function clearMockRedemption(redemptionId: string): void {

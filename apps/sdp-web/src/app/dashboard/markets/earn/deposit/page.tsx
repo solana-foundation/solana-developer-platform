@@ -25,7 +25,11 @@ export default async function EarnDepositPage({ searchParams }: EarnDepositPageP
 
   const resolved = searchParams ? await searchParams : undefined;
   const strategyParam = resolved?.strategy;
+  const curatorParam = resolved?.curator;
   const initialStrategyId = Array.isArray(strategyParam) ? strategyParam[0] : strategyParam;
+  const initialCuratorId = Array.isArray(curatorParam) ? curatorParam[0] : curatorParam;
 
-  return <EarnDepositWizard initialStrategyId={initialStrategyId} />;
+  return (
+    <EarnDepositWizard initialStrategyId={initialStrategyId} initialCuratorId={initialCuratorId} />
+  );
 }

@@ -1,9 +1,7 @@
-import { commonDepositMints, type EarnRiskTier, type MockEarnStrategy } from "../earn-mock-data";
+import type { EarnRiskTier, MockEarnStrategy } from "../earn-mock-data";
 
 export type EarnDestination = "treasury" | "retail";
 export type AssetPreference = "all" | "rwa" | "defi";
-export type AllocationMode = "delegate" | "custom";
-export type SelectionShape = "single" | "same-curator" | "mixed-curators";
 
 export type StrategyAllocation = Readonly<Record<string, number>>;
 
@@ -12,32 +10,18 @@ export interface EarnStrategyPreferences {
   source: AssetPreference;
 }
 
-/** Resolve a selection in caller order, ignoring unknown and repeated ids. */
-export function selectedStrategies(
-  ids: readonly string[],
-  catalogue: readonly MockEarnStrategy[]
-): MockEarnStrategy[] {
-  const strategiesById = new Map(catalogue.map((strategy) => [strategy.id, strategy]));
-  const seen = new Set<string>();
-
-  return ids.flatMap((id) => {
-    const strategy = strategiesById.get(id);
-    if (!strategy || seen.has(id)) return [];
-
-    seen.add(id);
-    return [strategy];
-  });
+export interface CuratorProgram {
+  id: string;
+  strategies: readonly MockEarnStrategy[];
+  /** Deposit mints accepted by at least one strategy in this curator's program. */
+  depositMints: readonly string[];
 }
 
-/** There is no selection shape until at least one strategy is selected. */
-export function selectionShape(strategies: readonly MockEarnStrategy[]): SelectionShape | null {
-  if (strategies.length === 0) return null;
-  if (strategies.length === 1) return "single";
-
-  const curator = strategies[0].curator;
-  return strategies.every((strategy) => strategy.curator === curator)
-    ? "same-curator"
-    : "mixed-curators";
+export interface CuratorFundingPlan {
+  curatorId: string;
+  depositMint: string;
+  strategies: readonly MockEarnStrategy[];
+  strategyAllocation: StrategyAllocation;
 }
 
 /** Split 100 integer percentage points as evenly as possible in caller order. */
@@ -82,29 +66,88 @@ export function strategyMatchesPreferences(
   return riskMatches && sourceMatches;
 }
 
-/**
- * A candidate can join the selection only when every resulting strategy can
- * accept at least one common deposit mint.
- */
-export function isCommonDepositCompatible(
-  selected: readonly MockEarnStrategy[],
-  candidate: MockEarnStrategy
+/** Whether a curator offers at least one strategy matching the user's preferences. */
+export function curatorMatchesPreferences(
+  curatorId: string,
+  catalogue: readonly MockEarnStrategy[],
+  preferences: EarnStrategyPreferences
 ): boolean {
-  return commonDepositMints([...selected, candidate]).length > 0;
+  return catalogue.some(
+    (strategy) =>
+      strategy.curator === curatorId && strategyMatchesPreferences(strategy, preferences)
+  );
 }
 
-/** Id-based convenience helper for strategy-picking UI. */
-export function canAddCompatibleStrategy(
-  selectedIds: readonly string[],
-  candidateId: string,
+/**
+ * Deposit mints accepted by at least one strategy from a curator. This is a
+ * union, not an intersection: the selected funding mint determines which
+ * underlying strategies participate in the mock funding plan.
+ */
+export function curatorDepositMints(
+  curatorId: string,
   catalogue: readonly MockEarnStrategy[]
-): boolean {
-  const candidate = catalogue.find((strategy) => strategy.id === candidateId);
-  if (!candidate) return false;
+): string[] {
+  const seen = new Set<string>();
+  const mints: string[] = [];
 
-  const selected = selectedStrategies(
-    selectedIds.filter((id) => id !== candidateId),
-    catalogue
+  for (const strategy of catalogue) {
+    if (strategy.curator !== curatorId) continue;
+    for (const mint of strategy.depositMints) {
+      if (seen.has(mint)) continue;
+      seen.add(mint);
+      mints.push(mint);
+    }
+  }
+
+  return mints;
+}
+
+/** Group strategies by curator in first catalogue appearance order. */
+export function buildCuratorPrograms(catalogue: readonly MockEarnStrategy[]): CuratorProgram[] {
+  const strategiesByCurator = new Map<string, MockEarnStrategy[]>();
+
+  for (const strategy of catalogue) {
+    const strategies = strategiesByCurator.get(strategy.curator);
+    if (strategies) {
+      strategies.push(strategy);
+    } else {
+      strategiesByCurator.set(strategy.curator, [strategy]);
+    }
+  }
+
+  return [...strategiesByCurator].map(([id, strategies]) => ({
+    id,
+    strategies,
+    depositMints: curatorDepositMints(id, catalogue),
+  }));
+}
+
+/** Resolve the strategies a curator can fund with a specific deposit mint. */
+export function strategiesForCuratorAndMint(
+  curatorId: string,
+  depositMint: string,
+  catalogue: readonly MockEarnStrategy[]
+): MockEarnStrategy[] {
+  return catalogue.filter(
+    (strategy) => strategy.curator === curatorId && strategy.depositMints.includes(depositMint)
   );
-  return isCommonDepositCompatible(selected, candidate);
+}
+
+/**
+ * Build the single-curator mock execution plan. Curator selection is the user
+ * decision; underlying strategies receive a deterministic even initial split.
+ */
+export function buildCuratorFundingPlan(
+  curatorId: string,
+  depositMint: string,
+  catalogue: readonly MockEarnStrategy[]
+): CuratorFundingPlan {
+  const strategies = strategiesForCuratorAndMint(curatorId, depositMint, catalogue);
+
+  return {
+    curatorId,
+    depositMint,
+    strategies,
+    strategyAllocation: evenAllocation(strategies.map((strategy) => strategy.id)),
+  };
 }

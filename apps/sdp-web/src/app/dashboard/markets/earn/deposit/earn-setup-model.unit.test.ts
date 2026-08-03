@@ -1,77 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { MOCK_EARN_STRATEGIES, MOCK_EARN_WALLETS, type MockEarnStrategy } from "../earn-mock-data";
+import {
+  DEFAULT_DEPOSIT_MINT,
+  MOCK_EARN_STRATEGIES,
+  MOCK_EARN_WALLETS,
+  type MockEarnStrategy,
+  tokenSymbol,
+} from "../earn-mock-data";
 import {
   allocationTotal,
-  canAddCompatibleStrategy,
+  buildCuratorFundingPlan,
+  buildCuratorPrograms,
+  curatorDepositMints,
+  curatorMatchesPreferences,
   evenAllocation,
-  isCommonDepositCompatible,
-  selectedStrategies,
-  selectionShape,
+  strategiesForCuratorAndMint,
   strategyMatchesPreferences,
   weightedApy,
 } from "./earn-setup-model";
 
-function strategies(...ids: string[]): MockEarnStrategy[] {
-  const resolved = selectedStrategies(ids, MOCK_EARN_STRATEGIES);
-  if (resolved.length !== ids.length) {
-    throw new Error(`Unknown strategy fixture in test: ${ids.join(", ")}`);
-  }
+function strategy(id: string): MockEarnStrategy {
+  const resolved = MOCK_EARN_STRATEGIES.find((candidate) => candidate.id === id);
+  if (!resolved) throw new Error(`Unknown strategy fixture in test: ${id}`);
   return resolved;
 }
-
-describe("selectedStrategies", () => {
-  it("resolves strategies in caller order", () => {
-    expect(
-      selectedStrategies(
-        ["earn_strategy_mock_kamino", "earn_strategy_mock_buidl"],
-        MOCK_EARN_STRATEGIES
-      ).map((strategy) => strategy.id)
-    ).toEqual(["earn_strategy_mock_kamino", "earn_strategy_mock_buidl"]);
-  });
-
-  it("ignores unknown and repeated ids", () => {
-    expect(
-      selectedStrategies(
-        ["missing", "earn_strategy_mock_buidl", "earn_strategy_mock_buidl"],
-        MOCK_EARN_STRATEGIES
-      ).map((strategy) => strategy.id)
-    ).toEqual(["earn_strategy_mock_buidl"]);
-  });
-
-  it("returns an empty selection for empty inputs", () => {
-    expect(selectedStrategies([], MOCK_EARN_STRATEGIES)).toEqual([]);
-    expect(selectedStrategies(["earn_strategy_mock_buidl"], [])).toEqual([]);
-  });
-});
-
-describe("selectionShape", () => {
-  it("has no shape before a strategy is selected", () => {
-    expect(selectionShape([])).toBeNull();
-  });
-
-  it("identifies a single strategy", () => {
-    expect(selectionShape(strategies("earn_strategy_mock_buidl"))).toBe("single");
-  });
-
-  it("identifies multiple strategies from the same curator", () => {
-    expect(selectionShape(strategies("earn_strategy_mock_buidl", "earn_strategy_mock_ousg"))).toBe(
-      "same-curator"
-    );
-  });
-
-  it("identifies a mixed-curator selection", () => {
-    expect(selectionShape(strategies("earn_strategy_mock_buidl", "earn_strategy_mock_benji"))).toBe(
-      "mixed-curators"
-    );
-  });
-});
 
 describe("evenAllocation", () => {
   it("returns no allocation when nothing is selected", () => {
     expect(evenAllocation([])).toEqual({});
   });
 
-  it("allocates a single strategy at 100 percent", () => {
+  it("allocates one underlying strategy at 100 percent", () => {
     expect(evenAllocation(["a"])).toEqual({ a: 100 });
   });
 
@@ -83,7 +41,7 @@ describe("evenAllocation", () => {
     expect(allocationTotal(allocation)).toBe(100);
   });
 
-  it("treats repeated strategy ids as one selection", () => {
+  it("treats repeated ids as one allocation target", () => {
     expect(evenAllocation(["a", "a", "b"])).toEqual({ a: 50, b: 50 });
   });
 });
@@ -97,7 +55,8 @@ describe("allocationTotal", () => {
 });
 
 describe("weightedApy", () => {
-  const [buidl, kamino] = strategies("earn_strategy_mock_buidl", "earn_strategy_mock_kamino");
+  const buidl = strategy("earn_strategy_mock_buidl");
+  const kamino = strategy("earn_strategy_mock_kamino");
 
   it("weights decimal APYs by portfolio percentage", () => {
     expect(
@@ -133,93 +92,185 @@ describe("weightedApy", () => {
   });
 });
 
-describe("strategyMatchesPreferences", () => {
-  const [buidl, kamino] = strategies("earn_strategy_mock_buidl", "earn_strategy_mock_kamino");
+describe("strategy and curator preference matching", () => {
+  const buidl = strategy("earn_strategy_mock_buidl");
+  const kamino = strategy("earn_strategy_mock_kamino");
 
-  it("matches both risk and a specific source", () => {
+  it("matches a strategy against both risk and source preferences", () => {
     expect(
       strategyMatchesPreferences(buidl, {
         riskTier: "conservative",
         source: "rwa",
       })
     ).toBe(true);
-  });
-
-  it("uses all as a source wildcard", () => {
-    expect(
-      strategyMatchesPreferences(kamino, {
-        riskTier: "balanced",
-        source: "all",
-      })
-    ).toBe(true);
-  });
-
-  it("uses a missing risk choice as a risk wildcard", () => {
-    expect(
-      strategyMatchesPreferences(kamino, {
-        riskTier: null,
-        source: "defi",
-      })
-    ).toBe(true);
-  });
-
-  it("rejects either a risk or source mismatch", () => {
     expect(
       strategyMatchesPreferences(buidl, {
         riskTier: "enhanced",
         source: "rwa",
       })
     ).toBe(false);
+  });
+
+  it("uses all sources and a missing risk choice as wildcards", () => {
+    expect(strategyMatchesPreferences(kamino, { riskTier: "balanced", source: "all" })).toBe(true);
+    expect(strategyMatchesPreferences(kamino, { riskTier: null, source: "defi" })).toBe(true);
+  });
+
+  it("matches a curator when any of its strategies fit", () => {
     expect(
-      strategyMatchesPreferences(buidl, {
+      curatorMatchesPreferences("steakhouse", MOCK_EARN_STRATEGIES, {
         riskTier: "conservative",
+        source: "rwa",
+      })
+    ).toBe(true);
+    expect(
+      curatorMatchesPreferences("sentora", MOCK_EARN_STRATEGIES, {
+        riskTier: "enhanced",
+        source: "rwa",
+      })
+    ).toBe(true);
+  });
+
+  it("rejects a curator with no matching offering, including unknown ids", () => {
+    expect(
+      curatorMatchesPreferences("steakhouse", MOCK_EARN_STRATEGIES, {
+        riskTier: "balanced",
         source: "defi",
+      })
+    ).toBe(false);
+    expect(
+      curatorMatchesPreferences("unknown-curator", MOCK_EARN_STRATEGIES, {
+        riskTier: null,
+        source: "all",
       })
     ).toBe(false);
   });
 });
 
-describe("common deposit compatibility", () => {
-  const [buidl, benji, ousg, sweep] = strategies(
-    "earn_strategy_mock_buidl",
-    "earn_strategy_mock_benji",
-    "earn_strategy_mock_ousg",
-    "earn_strategy_mock_sweep"
-  );
+describe("curator programs", () => {
+  it("groups the catalogue in first curator appearance order", () => {
+    const programs = buildCuratorPrograms(MOCK_EARN_STRATEGIES);
 
-  it("allows a candidate that retains at least one common mint", () => {
-    expect(isCommonDepositCompatible([benji, ousg], buidl)).toBe(true);
-    expect(canAddCompatibleStrategy([benji.id, ousg.id], buidl.id, MOCK_EARN_STRATEGIES)).toBe(
-      true
-    );
+    expect(programs.map((program) => program.id)).toEqual(["steakhouse", "gauntlet", "sentora"]);
+    expect(programs.map((program) => program.strategies.length)).toEqual([3, 4, 2]);
   });
 
-  it("rejects a candidate that empties the common-mint intersection", () => {
-    expect(isCommonDepositCompatible([buidl], sweep)).toBe(false);
-    expect(canAddCompatibleStrategy([buidl.id], sweep.id, MOCK_EARN_STRATEGIES)).toBe(false);
+  it("uses a mint union within each curator program", () => {
+    expect(curatorDepositMints("steakhouse", MOCK_EARN_STRATEGIES).map(tokenSymbol)).toEqual([
+      "USDC",
+      "USDG",
+      "PYUSD",
+    ]);
+    expect(curatorDepositMints("gauntlet", MOCK_EARN_STRATEGIES).map(tokenSymbol)).toEqual([
+      "USDC",
+      "USDG",
+    ]);
+    expect(curatorDepositMints("sentora", MOCK_EARN_STRATEGIES).map(tokenSymbol)).toEqual([
+      "USDC",
+      "USDT",
+    ]);
   });
 
-  it("allows a first candidate only when it accepts a deposit mint", () => {
-    expect(isCommonDepositCompatible([], buidl)).toBe(true);
-    expect(isCommonDepositCompatible([], { ...buidl, depositMints: [] })).toBe(false);
+  it("keeps an open-registry curator found in catalogue data", () => {
+    const custom = {
+      ...strategy("earn_strategy_mock_buidl"),
+      id: "earn_strategy_mock_custom",
+      curator: "unknown-curator",
+    };
+
+    expect(buildCuratorPrograms([custom])).toEqual([
+      {
+        id: "unknown-curator",
+        strategies: [custom],
+        depositMints: custom.depositMints,
+      },
+    ]);
   });
 
-  it("handles an already-selected candidate without duplicating it", () => {
-    expect(canAddCompatibleStrategy([buidl.id], buidl.id, MOCK_EARN_STRATEGIES)).toBe(true);
-  });
-
-  it("rejects an unknown candidate id", () => {
-    expect(canAddCompatibleStrategy([buidl.id], "missing", MOCK_EARN_STRATEGIES)).toBe(false);
+  it("returns empty fallbacks for an unknown curator or catalogue", () => {
+    expect(curatorDepositMints("unknown-curator", MOCK_EARN_STRATEGIES)).toEqual([]);
+    expect(buildCuratorPrograms([])).toEqual([]);
   });
 });
 
-describe("mock funding paths", () => {
-  it("keeps every catalogue strategy fundable from every selectable wallet", () => {
-    for (const wallet of MOCK_EARN_WALLETS) {
-      for (const strategy of MOCK_EARN_STRATEGIES) {
+describe("single-curator funding plan", () => {
+  const sweep = strategy("earn_strategy_mock_sweep");
+  const pyusd = sweep.depositMints[0];
+
+  it("routes Steakhouse USDC into only its USDC-compatible strategies", () => {
+    const plan = buildCuratorFundingPlan("steakhouse", DEFAULT_DEPOSIT_MINT, MOCK_EARN_STRATEGIES);
+
+    expect(plan.strategies.map((candidate) => candidate.id)).toEqual([
+      "earn_strategy_mock_buidl",
+      "earn_strategy_mock_ousg",
+    ]);
+    expect(plan.strategyAllocation).toEqual({
+      earn_strategy_mock_buidl: 50,
+      earn_strategy_mock_ousg: 50,
+    });
+    expect(allocationTotal(plan.strategyAllocation)).toBe(100);
+    expect(weightedApy(plan.strategies, plan.strategyAllocation)).toBeCloseTo(0.0485);
+  });
+
+  it("routes Steakhouse PYUSD exclusively into its sweep strategy", () => {
+    const plan = buildCuratorFundingPlan("steakhouse", pyusd, MOCK_EARN_STRATEGIES);
+
+    expect(plan.strategies.map((candidate) => candidate.id)).toEqual([sweep.id]);
+    expect(plan.strategyAllocation).toEqual({ [sweep.id]: 100 });
+  });
+
+  it("keeps derived allocation totals exact when a curator has three legs", () => {
+    const buidl = strategy("earn_strategy_mock_buidl");
+    const ousg = strategy("earn_strategy_mock_ousg");
+    const catalogue = [{ ...buidl }, { ...ousg }, { ...buidl, id: "third" }];
+    const plan = buildCuratorFundingPlan("steakhouse", DEFAULT_DEPOSIT_MINT, catalogue);
+
+    expect(plan.strategyAllocation).toEqual({
+      [buidl.id]: 34,
+      [ousg.id]: 33,
+      third: 33,
+    });
+    expect(allocationTotal(plan.strategyAllocation)).toBe(100);
+  });
+
+  it("returns a stable empty plan for an unknown curator or unsupported mint", () => {
+    expect(
+      buildCuratorFundingPlan("unknown-curator", DEFAULT_DEPOSIT_MINT, MOCK_EARN_STRATEGIES)
+    ).toEqual({
+      curatorId: "unknown-curator",
+      depositMint: DEFAULT_DEPOSIT_MINT,
+      strategies: [],
+      strategyAllocation: {},
+    });
+    expect(strategiesForCuratorAndMint("steakhouse", "unsupported", MOCK_EARN_STRATEGIES)).toEqual(
+      []
+    );
+  });
+
+  it("builds a non-empty exact plan for every advertised curator mint", () => {
+    for (const program of buildCuratorPrograms(MOCK_EARN_STRATEGIES)) {
+      for (const mint of program.depositMints) {
+        const plan = buildCuratorFundingPlan(program.id, mint, MOCK_EARN_STRATEGIES);
         expect(
-          strategy.depositMints.some((mint) => (wallet.balances[mint] ?? 0) > 0),
-          `${wallet.name} cannot fund ${strategy.name}`
+          plan.strategies.length,
+          `${program.id} cannot route ${tokenSymbol(mint)}`
+        ).toBeGreaterThan(0);
+        expect(plan.strategies.every((candidate) => candidate.depositMints.includes(mint))).toBe(
+          true
+        );
+        expect(allocationTotal(plan.strategyAllocation)).toBe(100);
+      }
+    }
+  });
+});
+
+describe("mock wallet funding paths", () => {
+  it("keeps every curator fundable from every selectable wallet", () => {
+    for (const wallet of MOCK_EARN_WALLETS) {
+      for (const program of buildCuratorPrograms(MOCK_EARN_STRATEGIES)) {
+        expect(
+          program.depositMints.some((mint) => (wallet.balances[mint] ?? 0) > 0),
+          `${wallet.name} cannot fund ${program.id}`
         ).toBe(true);
       }
     }

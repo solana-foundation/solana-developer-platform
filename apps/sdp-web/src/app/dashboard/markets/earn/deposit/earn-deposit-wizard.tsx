@@ -8,6 +8,7 @@ import {
   BriefcaseBusinessIcon,
   CheckCircle2Icon,
   CheckIcon,
+  ChevronDownIcon,
   CopyIcon,
   LandmarkIcon,
   Layers3Icon,
@@ -24,7 +25,7 @@ import {
   WalletCardsIcon,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { type ChangeEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { PaymentsWizardFrame } from "@/app/dashboard/payments/payments-wizard-frame";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,14 +37,12 @@ import { useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { cn } from "@/lib/utils";
 import {
-  commonDepositMints,
   DEFAULT_DEPOSIT_MINT,
   EARN_RISK_TIERS,
   type EarnRiskTier,
   formatApy,
   formatTokenAmount,
   formatUsd,
-  formatUsdCompact,
   MOCK_EARN_STRATEGIES,
   MOCK_EARN_WALLETS,
   type MockEarnStrategy,
@@ -53,22 +52,20 @@ import {
 } from "../earn-mock-data";
 import { addMockPosition } from "../earn-mock-positions";
 import {
-  type AllocationMode,
   type AssetPreference,
-  allocationTotal,
-  canAddCompatibleStrategy,
+  buildCuratorFundingPlan,
+  buildCuratorPrograms,
+  type CuratorProgram,
+  curatorMatchesPreferences,
   type EarnDestination,
-  evenAllocation,
-  selectedStrategies,
-  selectionShape,
-  strategyMatchesPreferences,
+  type StrategyAllocation,
   weightedApy,
 } from "./earn-setup-model";
 
-type SetupStep = "wallet" | "profile" | "strategy" | "allocation" | "review";
+type SetupStep = "wallet" | "profile" | "curator" | "review";
 type PostSetupScreen = "treasury" | "retail-preview" | "retail-integration" | "vault-live";
 type WalletProvider = MockEarnWallet["provider"];
-type Allocation = Record<string, number>;
+type Allocation = StrategyAllocation;
 
 interface DepositLeg {
   strategy: MockEarnStrategy;
@@ -76,7 +73,7 @@ interface DepositLeg {
   legAmount: number;
 }
 
-const SETUP_PROGRESS = ["wallet", "profile", "strategy", "review"] as const;
+const SETUP_PROGRESS = ["wallet", "profile", "curator", "review"] as const;
 
 const stepMeta: Record<SetupStep, { title: MessageKey; description: MessageKey }> = {
   wallet: {
@@ -87,13 +84,9 @@ const stepMeta: Record<SetupStep, { title: MessageKey; description: MessageKey }
     title: "DashboardEarn.setup.preferencesTitle",
     description: "DashboardEarn.setup.preferencesDescription",
   },
-  strategy: {
-    title: "DashboardEarn.setup.strategiesTitle",
-    description: "DashboardEarn.setup.strategiesDescription",
-  },
-  allocation: {
-    title: "DashboardEarn.setup.allocationTitle",
-    description: "DashboardEarn.setup.allocationDescription",
+  curator: {
+    title: "DashboardEarn.setup.curatorsTitle",
+    description: "DashboardEarn.setup.curatorsDescription",
   },
   review: {
     title: "DashboardEarn.setup.reviewTitle",
@@ -127,6 +120,35 @@ const PROVIDERS: readonly {
   },
 ];
 
+const CURATOR_PROGRAMS = buildCuratorPrograms(MOCK_EARN_STRATEGIES);
+const KNOWN_CURATOR_IDS = new Set(["steakhouse", "gauntlet", "sentora"]);
+type CuratorProfileField = "headline" | "description" | "bestFor" | "risk" | "liquidity";
+
+function curatorProfileKey(curatorId: string, field: CuratorProfileField): MessageKey {
+  const profileId = KNOWN_CURATOR_IDS.has(curatorId) ? curatorId : "default";
+  return `DashboardEarn.setup.curatorProfiles.${profileId}.${field}` as MessageKey;
+}
+
+function curatorMonogram(curatorId: string): string {
+  const words = earnCuratorLabel(curatorId).split(/\s+/).filter(Boolean);
+  return words
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+function curatorApyRange(program: CuratorProgram | undefined): string {
+  if (!program || program.strategies.length === 0) return "—";
+  const apys = program.strategies
+    .map((strategy) => Number(strategy.currentApy))
+    .filter((apy) => Number.isFinite(apy));
+  if (apys.length === 0) return "—";
+  const minimum = Math.min(...apys);
+  const maximum = Math.max(...apys);
+  if (minimum === maximum) return formatApy(String(minimum));
+  return `${formatApy(String(minimum))}–${formatApy(String(maximum))}`;
+}
+
 const EARN_SDK_PACKAGE = "@sdp/earn";
 
 const SDK_SNIPPET = `import { createEarnClient } from "${EARN_SDK_PACKAGE}";
@@ -159,11 +181,6 @@ const INTEGRATION_CHECKLIST: readonly MessageKey[] = [
 
 function shortenAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-6)}`;
-}
-
-function clampPercentage(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 function buildLegs(
@@ -433,6 +450,8 @@ function QuestionnaireStep({
   onBrowseAll: () => void;
 }) {
   const t = useTranslations();
+  const [showAdvanced, setShowAdvanced] = useState(source !== "all");
+  const reduceMotion = useReducedMotion();
 
   return (
     <div className="space-y-7">
@@ -483,511 +502,422 @@ function QuestionnaireStep({
         </div>
       </section>
 
-      <section className="space-y-3">
-        <SectionHeading
-          icon={<Layers3Icon className="size-4" />}
-          title={t("DashboardEarn.setup.yieldSourceTitle")}
-          description={t("DashboardEarn.setup.yieldSourceDescription")}
-        />
-        <div className="grid gap-3 sm:grid-cols-3">
-          <ChoiceCard
-            selected={source === "all"}
-            icon={<SparklesIcon className="size-4" />}
-            title={t("DashboardEarn.setup.sourceAll")}
-            description={t("DashboardEarn.setup.sourceAllDescription")}
-            onClick={() => onSourceChange("all")}
+      <section className="rounded-2xl border border-border-default bg-surface-raised">
+        <button
+          type="button"
+          aria-expanded={showAdvanced}
+          aria-controls="earn-advanced-preferences"
+          onClick={() => setShowAdvanced((current) => !current)}
+          className="flex min-h-12 w-full items-center justify-between gap-4 rounded-2xl px-4 py-3 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+              <Layers3Icon className="size-4" />
+            </span>
+            <span>
+              <span className="block text-sm font-medium text-primary">
+                {showAdvanced
+                  ? t("DashboardEarn.setup.hideAdvancedPreferences")
+                  : t("DashboardEarn.setup.advancedPreferences")}
+              </span>
+              <span className="mt-0.5 block text-[13px] leading-5 text-tertiary">
+                {t("DashboardEarn.setup.yieldSourceDescription")}
+              </span>
+            </span>
+          </span>
+          <ChevronDownIcon
+            className={cn(
+              "size-4 shrink-0 text-tertiary transition-transform duration-200 motion-reduce:transition-none",
+              showAdvanced && "rotate-180"
+            )}
           />
-          <ChoiceCard
-            selected={source === "rwa"}
-            icon={<LandmarkIcon className="size-4" />}
-            title={t("DashboardEarn.source.rwa")}
-            description={t("DashboardEarn.setup.sourceRwaDescription")}
-            onClick={() => onSourceChange("rwa")}
-          />
-          <ChoiceCard
-            selected={source === "defi"}
-            icon={<PieChartIcon className="size-4" />}
-            title={t("DashboardEarn.source.defi")}
-            description={t("DashboardEarn.setup.sourceDefiDescription")}
-            onClick={() => onSourceChange("defi")}
-          />
+        </button>
+
+        <div id="earn-advanced-preferences">
+          <AnimatePresence initial={false}>
+            {showAdvanced ? (
+              <motion.div
+                initial={reduceMotion ? false : { opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
+                transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
+                className="overflow-hidden"
+              >
+                <div className="border-t border-border-subtle px-4 pt-4 pb-4">
+                  <p className="mb-3 text-sm font-medium text-primary">
+                    {t("DashboardEarn.setup.yieldSourceTitle")}
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <ChoiceCard
+                      selected={source === "all"}
+                      icon={<SparklesIcon className="size-4" />}
+                      title={t("DashboardEarn.setup.sourceAll")}
+                      description={t("DashboardEarn.setup.sourceAllDescription")}
+                      onClick={() => onSourceChange("all")}
+                    />
+                    <ChoiceCard
+                      selected={source === "rwa"}
+                      icon={<LandmarkIcon className="size-4" />}
+                      title={t("DashboardEarn.source.rwa")}
+                      description={t("DashboardEarn.setup.sourceRwaDescription")}
+                      onClick={() => onSourceChange("rwa")}
+                    />
+                    <ChoiceCard
+                      selected={source === "defi"}
+                      icon={<PieChartIcon className="size-4" />}
+                      title={t("DashboardEarn.source.defi")}
+                      description={t("DashboardEarn.setup.sourceDefiDescription")}
+                      onClick={() => onSourceChange("defi")}
+                    />
+                  </div>
+                </div>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
         </div>
       </section>
 
       <div className="flex flex-col gap-3 border-t border-border-subtle pt-5 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-xl text-[13px] leading-5 text-tertiary">
-          {t("DashboardEarn.setup.preferencesAreFilters")}
+          {t("DashboardEarn.setup.preferencesRankCurators")}
         </p>
         <Button type="button" variant="ghost" size="sm" onClick={onBrowseAll}>
-          {t("DashboardEarn.setup.browseAll")}
+          {t("DashboardEarn.setup.browseAllCurators")}
         </Button>
       </div>
     </div>
   );
 }
 
-function FilterButton({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean;
-  children: ReactNode;
-  onClick: () => void;
-}) {
+function CuratorFact({ label, value }: { label: string; value: string }) {
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none",
-        active
-          ? "border-primary bg-primary text-on-primary"
-          : "border-border-default bg-surface-raised text-secondary hover:border-border-strong hover:text-primary"
-      )}
-    >
-      {children}
-    </button>
+    <span className="min-w-0 rounded-xl bg-fill-subtle px-3 py-2.5">
+      <span className="block text-[11px] font-medium tracking-[0.04em] text-tertiary uppercase">
+        {label}
+      </span>
+      <span className="mt-1 block text-[13px] leading-5 font-medium text-primary">{value}</span>
+    </span>
   );
 }
 
-function StrategyCard({
-  strategy,
-  selected,
-  disabled,
-  onToggle,
+function UnderlyingHoldings({
+  strategies,
+  allocation,
+  tokenMint,
+  amount,
 }: {
-  strategy: MockEarnStrategy;
-  selected: boolean;
-  disabled: boolean;
-  onToggle: () => void;
+  strategies: readonly MockEarnStrategy[];
+  allocation?: Allocation;
+  tokenMint?: string;
+  amount?: number;
 }) {
   const t = useTranslations();
   const liquidityLabel = useLiquidityLabel();
-  const incompatibilityId = `${strategy.id}-incompatibility`;
 
   return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      aria-disabled={disabled}
-      aria-label={t("DashboardEarn.setup.strategyCardLabel", {
-        strategy: strategy.name,
-        apy: formatApy(strategy.currentApy),
-        risk: t(`DashboardEarn.risk.${strategy.riskTier}`),
-        source: t(`DashboardEarn.source.${strategy.sourceKind}`),
-        curator: earnCuratorLabel(strategy.curator),
-        liquidity: liquidityLabel(strategy),
-        tvl: formatUsdCompact(strategy.tvlUsd),
-        assets: strategy.depositMints.map(tokenSymbol).join(", "),
-      })}
-      aria-describedby={disabled ? incompatibilityId : undefined}
-      onClick={onToggle}
-      className={cn(
-        "group flex min-h-48 flex-col rounded-2xl border p-4 text-left transition-[border-color,background-color,box-shadow,opacity] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none",
-        selected
-          ? "border-primary bg-fill-subtle shadow-sm"
-          : disabled
-            ? "cursor-not-allowed border-border-default bg-fill-subtle"
-            : "border-border-default bg-surface-raised hover:border-border-strong hover:bg-fill-subtle"
-      )}
-    >
-      <span className="flex items-start justify-between gap-4">
-        <span className="min-w-0">
-          <span className="text-[11px] font-semibold tracking-[0.08em] text-tertiary uppercase">
-            {t(`DashboardEarn.source.${strategy.sourceKind}`)} ·{" "}
-            {t(`DashboardEarn.risk.${strategy.riskTier}`)}
-          </span>
-          <span className="mt-1.5 block text-sm font-medium text-primary">{strategy.name}</span>
-          <span className="mt-1 block text-xs text-secondary">
-            {t("DashboardEarn.setup.curatedBy", { curator: earnCuratorLabel(strategy.curator) })}
-          </span>
-        </span>
-        <SelectionMark selected={selected} />
-      </span>
-
-      <span className="mt-5 flex items-end justify-between gap-4">
-        <span>
-          <span className="block text-2xl leading-none font-medium tracking-tight text-primary">
-            {formatApy(strategy.currentApy)}
-          </span>
-          <span className="mt-1 block text-xs text-tertiary">
-            {t("DashboardEarn.setup.estimatedApy")}
-          </span>
-        </span>
-        <span className="text-right text-xs leading-5 text-secondary">
-          <span className="block">{liquidityLabel(strategy)}</span>
-          <span className="block text-tertiary">
-            {t("DashboardEarn.setup.tvl", { value: formatUsdCompact(strategy.tvlUsd) })}
-          </span>
-        </span>
-      </span>
-
-      <span className="mt-auto flex flex-wrap gap-1.5 border-t border-border-subtle pt-3">
-        {strategy.depositMints.map((mint) => (
-          <span
-            key={mint}
-            className="rounded-md bg-fill px-2 py-1 text-[11px] font-medium text-secondary"
+    <div className="divide-y divide-border-subtle">
+      {strategies.map((strategy) => {
+        const pct = allocation?.[strategy.id];
+        return (
+          <div
+            key={strategy.id}
+            className="grid gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
           >
-            {tokenSymbol(mint)}
-          </span>
-        ))}
-        {disabled ? (
-          <span id={incompatibilityId} className="ml-auto text-[11px] font-medium text-warning">
-            {t("DashboardEarn.setup.incompatibleAsset")}
-          </span>
-        ) : null}
-      </span>
-    </button>
-  );
-}
-
-function StrategyStep({
-  selectedIds,
-  riskTier,
-  source,
-  curator,
-  onSelectedIdsChange,
-  onRiskTierChange,
-  onSourceChange,
-  onCuratorChange,
-}: {
-  selectedIds: readonly string[];
-  riskTier: EarnRiskTier | null;
-  source: AssetPreference;
-  curator: string | null;
-  onSelectedIdsChange: (ids: string[]) => void;
-  onRiskTierChange: (tier: EarnRiskTier | null) => void;
-  onSourceChange: (source: AssetPreference) => void;
-  onCuratorChange: (curator: string | null) => void;
-}) {
-  const t = useTranslations();
-  const curators = useMemo(
-    () => [...new Set(MOCK_EARN_STRATEGIES.map((strategy) => strategy.curator))],
-    []
-  );
-  const choices = MOCK_EARN_STRATEGIES.filter(
-    (strategy) =>
-      selectedIds.includes(strategy.id) ||
-      (strategyMatchesPreferences(strategy, { riskTier, source }) &&
-        (curator === null || strategy.curator === curator))
-  );
-  const selected = selectedStrategies(selectedIds, MOCK_EARN_STRATEGIES);
-  const shape = selectionShape(selected);
-
-  const toggle = (strategyId: string) => {
-    if (selectedIds.includes(strategyId)) {
-      onSelectedIdsChange(selectedIds.filter((id) => id !== strategyId));
-      return;
-    }
-    if (!canAddCompatibleStrategy(selectedIds, strategyId, MOCK_EARN_STRATEGIES)) return;
-    onSelectedIdsChange([...selectedIds, strategyId]);
-  };
-
-  return (
-    <div className="space-y-5">
-      <div className="space-y-3 rounded-2xl border border-border-default bg-fill-subtle p-4">
-        <fieldset className="flex flex-wrap items-center gap-2">
-          <legend className="sr-only">{t("DashboardEarn.setup.riskFilter")}</legend>
-          <span aria-hidden="true" className="mr-1 text-xs font-medium text-secondary">
-            {t("DashboardEarn.setup.riskFilter")}
-          </span>
-          <FilterButton active={riskTier === null} onClick={() => onRiskTierChange(null)}>
-            {t("DashboardEarn.setup.all")}
-          </FilterButton>
-          {EARN_RISK_TIERS.map((tier) => (
-            <FilterButton
-              key={tier}
-              active={riskTier === tier}
-              onClick={() => onRiskTierChange(tier)}
-            >
-              {t(`DashboardEarn.risk.${tier}`)}
-            </FilterButton>
-          ))}
-        </fieldset>
-        <fieldset className="flex flex-wrap items-center gap-2">
-          <legend className="sr-only">{t("DashboardEarn.setup.sourceFilter")}</legend>
-          <span aria-hidden="true" className="mr-1 text-xs font-medium text-secondary">
-            {t("DashboardEarn.setup.sourceFilter")}
-          </span>
-          <FilterButton active={source === "all"} onClick={() => onSourceChange("all")}>
-            {t("DashboardEarn.setup.all")}
-          </FilterButton>
-          <FilterButton active={source === "rwa"} onClick={() => onSourceChange("rwa")}>
-            {t("DashboardEarn.source.rwa")}
-          </FilterButton>
-          <FilterButton active={source === "defi"} onClick={() => onSourceChange("defi")}>
-            {t("DashboardEarn.source.defi")}
-          </FilterButton>
-        </fieldset>
-        <fieldset className="flex flex-wrap items-center gap-2">
-          <legend className="sr-only">{t("DashboardEarn.setup.curatorFilter")}</legend>
-          <span aria-hidden="true" className="mr-1 text-xs font-medium text-secondary">
-            {t("DashboardEarn.setup.curatorFilter")}
-          </span>
-          <FilterButton active={curator === null} onClick={() => onCuratorChange(null)}>
-            {t("DashboardEarn.setup.all")}
-          </FilterButton>
-          {curators.map((candidate) => (
-            <FilterButton
-              key={candidate}
-              active={curator === candidate}
-              onClick={() => onCuratorChange(candidate)}
-            >
-              {earnCuratorLabel(candidate)}
-            </FilterButton>
-          ))}
-        </fieldset>
-      </div>
-
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-secondary" role="status" aria-live="polite">
-          {selectedIds.length === 0
-            ? t("DashboardEarn.setup.noStrategiesSelected")
-            : selectedIds.length === 1
-              ? t("DashboardEarn.setup.strategySelected")
-              : t("DashboardEarn.setup.strategiesSelected", { count: selectedIds.length })}
-          {selectedIds.length > 1 ? (
-            <span className="text-tertiary">
-              {" "}
-              ·{" "}
-              {shape === "same-curator"
-                ? t("DashboardEarn.setup.sameCurator")
-                : t("DashboardEarn.setup.mixedCurators")}
-            </span>
-          ) : null}
-        </p>
-        {selectedIds.length > 0 ? (
-          <Button type="button" variant="ghost" size="sm" onClick={() => onSelectedIdsChange([])}>
-            {t("DashboardEarn.setup.clearSelection")}
-          </Button>
-        ) : null}
-      </div>
-
-      {choices.length > 0 ? (
-        <div className="grid gap-3 md:grid-cols-2">
-          {choices.map((strategy) => {
-            const isSelected = selectedIds.includes(strategy.id);
-            const disabled =
-              !isSelected &&
-              !canAddCompatibleStrategy(selectedIds, strategy.id, MOCK_EARN_STRATEGIES);
-            return (
-              <StrategyCard
-                key={strategy.id}
-                strategy={strategy}
-                selected={isSelected}
-                disabled={disabled}
-                onToggle={() => toggle(strategy.id)}
-              />
-            );
-          })}
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-dashed border-border-strong px-5 py-10 text-center">
-          <p className="text-sm font-medium text-primary">
-            {t("DashboardEarn.setup.noResultsTitle")}
-          </p>
-          <p className="mt-1 text-sm text-tertiary">
-            {t("DashboardEarn.setup.noResultsDescription")}
-          </p>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="mt-4"
-            onClick={() => {
-              onRiskTierChange(null);
-              onSourceChange("all");
-              onCuratorChange(null);
-            }}
-          >
-            {t("DashboardEarn.setup.resetFilters")}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AllocationRows({
-  strategies,
-  allocation,
-  onChange,
-  onEvenSplit,
-}: {
-  strategies: readonly MockEarnStrategy[];
-  allocation: Allocation;
-  onChange: (strategyId: string, value: number) => void;
-  onEvenSplit: () => void;
-}) {
-  const t = useTranslations();
-  const total = allocationTotal(allocation);
-  const allStrategiesWeighted = strategies.every((strategy) => (allocation[strategy.id] ?? 0) > 0);
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
-      <div className="flex items-center justify-between gap-3 border-b border-border-default bg-fill-subtle px-4 py-3">
-        <div>
-          <p className="text-sm font-medium text-primary">
-            {t("DashboardEarn.setup.targetAllocation")}
-          </p>
-          <p
-            id="earn-allocation-status"
-            role="status"
-            aria-live="polite"
-            className={cn(
-              "mt-0.5 text-xs",
-              total === 100 && allStrategiesWeighted ? "text-success" : "text-warning"
-            )}
-          >
-            {total === 100 && !allStrategiesWeighted
-              ? t("DashboardEarn.setup.positiveWeightsRequired")
-              : t("DashboardEarn.setup.percentAllocated", { percent: total })}
-          </p>
-        </div>
-        <Button type="button" variant="secondary" size="sm" onClick={onEvenSplit}>
-          {t("DashboardEarn.setup.splitEvenly")}
-        </Button>
-      </div>
-      <div className="divide-y divide-border-subtle">
-        {strategies.map((strategy) => {
-          const inputId = strategy.id;
-          return (
-            <div
-              key={strategy.id}
-              className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-center"
-            >
-              <div className="min-w-0">
-                <Label
-                  htmlFor={inputId}
-                  className="block truncate text-sm font-medium text-primary"
-                >
-                  {strategy.name}
-                </Label>
-                <p className="mt-0.5 text-xs text-tertiary">
-                  {earnCuratorLabel(strategy.curator)} · {formatApy(strategy.currentApy)}{" "}
-                  {t("DashboardEarn.setup.estimatedApyLower")}
-                </p>
-              </div>
-              <div className="relative">
-                <Input
-                  id={inputId}
-                  size="md"
-                  type="number"
-                  inputMode="numeric"
-                  min="0"
-                  max="100"
-                  value={String(allocation[strategy.id] ?? 0)}
-                  aria-label={t("DashboardEarn.setup.allocationPercentageLabel", {
-                    strategy: strategy.name,
-                  })}
-                  aria-describedby="earn-allocation-status"
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    onChange(strategy.id, clampPercentage(Number(event.target.value)))
-                  }
-                  className="pr-8 text-right [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                />
-                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-tertiary">
-                  %
-                </span>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-primary">{strategy.name}</p>
+              <p className="mt-1 text-xs leading-5 text-tertiary">
+                {t(`DashboardEarn.source.${strategy.sourceKind}`)} ·{" "}
+                {t(`DashboardEarn.risk.${strategy.riskTier}`)} · {liquidityLabel(strategy)}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {strategy.depositMints.map((mint) => (
+                  <span
+                    key={mint}
+                    className="rounded-md bg-fill px-2 py-1 text-[11px] font-medium text-secondary"
+                  >
+                    {tokenSymbol(mint)}
+                  </span>
+                ))}
               </div>
             </div>
-          );
-        })}
+            <div className="text-left sm:text-right">
+              <p className="text-sm font-medium text-primary">{formatApy(strategy.currentApy)}</p>
+              {pct !== undefined ? (
+                <p className="mt-1 text-xs text-secondary">
+                  {t("DashboardEarn.setup.routingEstimate", { percent: pct })}
+                  {tokenMint && amount !== undefined
+                    ? ` · ${formatTokenAmount(amount * (pct / 100), tokenMint)}`
+                    : ""}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PortfolioDisclosure({
+  strategies,
+  allocation,
+  tokenMint,
+  amount,
+  routing = false,
+}: {
+  strategies: readonly MockEarnStrategy[];
+  allocation?: Allocation;
+  tokenMint?: string;
+  amount?: number;
+  routing?: boolean;
+}) {
+  const t = useTranslations();
+  const reduceMotion = useReducedMotion();
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={contentId}
+        onClick={() => setExpanded((current) => !current)}
+        className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-1 py-2 text-left text-[13px] font-medium text-secondary transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
+      >
+        <span>
+          {routing
+            ? t(
+                expanded
+                  ? "DashboardEarn.setup.hideRoutingDetails"
+                  : "DashboardEarn.setup.viewRoutingDetails"
+              )
+            : t(
+                expanded
+                  ? "DashboardEarn.setup.hideAvailableOpportunities"
+                  : "DashboardEarn.setup.viewAvailableOpportunities"
+              )}
+        </span>
+        <ChevronDownIcon
+          className={cn(
+            "size-4 shrink-0 transition-transform duration-200 motion-reduce:transition-none",
+            expanded && "rotate-180"
+          )}
+        />
+      </button>
+      <div id={contentId}>
+        <AnimatePresence initial={false}>
+          {expanded ? (
+            <motion.div
+              initial={reduceMotion ? false : { opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
+              transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
+              className="overflow-hidden"
+            >
+              <div className="border-t border-border-subtle pt-3 pb-1">
+                <p className="mb-3 text-xs leading-5 text-tertiary">
+                  {t(
+                    routing
+                      ? "DashboardEarn.setup.routingTransparency"
+                      : "DashboardEarn.setup.opportunityTransparency"
+                  )}
+                </p>
+                <UnderlyingHoldings
+                  strategies={strategies}
+                  allocation={allocation}
+                  tokenMint={tokenMint}
+                  amount={amount}
+                />
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
     </div>
   );
 }
 
-function AllocationStep({
-  strategies,
-  mode,
-  allocation,
-  onModeChange,
-  onAllocationChange,
-  onEvenSplit,
+function CuratorCard({
+  program,
+  selected,
+  preferenceMatch,
+  showPreferenceFit,
+  initialStrategy,
+  onSelect,
 }: {
-  strategies: readonly MockEarnStrategy[];
-  mode: AllocationMode | null;
-  allocation: Allocation;
-  onModeChange: (mode: AllocationMode) => void;
-  onAllocationChange: (strategyId: string, value: number) => void;
-  onEvenSplit: () => void;
+  program: CuratorProgram;
+  selected: boolean;
+  preferenceMatch: boolean;
+  showPreferenceFit: boolean;
+  initialStrategy: MockEarnStrategy | undefined;
+  onSelect: () => void;
 }) {
   const t = useTranslations();
-  const shape = selectionShape(strategies);
-  const curator = strategies[0]?.curator;
-  const customRequired = shape === "mixed-curators";
-  const effectiveMode = customRequired ? "custom" : mode;
+  const inputId = `earn-curator-${program.id}`;
+  const nameId = `${inputId}-name`;
+  const headlineId = `${inputId}-headline`;
+  const descriptionId = `${inputId}-description`;
+  const curatorName = earnCuratorLabel(program.id);
+
+  return (
+    <article
+      className={cn(
+        "rounded-2xl border bg-surface-raised transition-[border-color,background-color,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+        selected
+          ? "border-primary bg-fill-subtle shadow-sm"
+          : "border-border-default hover:border-border-strong"
+      )}
+    >
+      <input
+        id={inputId}
+        className="peer sr-only"
+        type="radio"
+        name="earn-curator"
+        value={program.id}
+        checked={selected}
+        aria-labelledby={`${nameId} ${headlineId}`}
+        aria-describedby={descriptionId}
+        onChange={onSelect}
+      />
+      <label
+        htmlFor={inputId}
+        className="block cursor-pointer rounded-2xl p-4 focus-within:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40 sm:p-5"
+      >
+        <span className="flex items-start gap-3.5">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border-subtle bg-fill text-sm font-semibold text-primary">
+            {curatorMonogram(program.id)}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-start justify-between gap-3">
+              <span>
+                <span
+                  id={nameId}
+                  className="block text-base font-medium tracking-tight text-primary"
+                >
+                  {curatorName}
+                </span>
+                <span id={headlineId} className="mt-1 block text-sm font-medium text-secondary">
+                  {t(curatorProfileKey(program.id, "headline"))}
+                </span>
+              </span>
+              <SelectionMark selected={selected} />
+            </span>
+            <span
+              id={descriptionId}
+              className="mt-3 block max-w-2xl text-[13px] leading-5 text-secondary"
+            >
+              {t(curatorProfileKey(program.id, "description"))}
+            </span>
+            <span className="mt-2 block text-[13px] leading-5 text-primary">
+              <span className="font-medium">{t("DashboardEarn.setup.bestFor")}</span>{" "}
+              {t(curatorProfileKey(program.id, "bestFor"))}
+            </span>
+          </span>
+        </span>
+
+        <span className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <CuratorFact
+            label={t("DashboardEarn.setup.indicativeApyRange")}
+            value={curatorApyRange(program)}
+          />
+          <CuratorFact
+            label={t("DashboardEarn.setup.riskRange")}
+            value={t(curatorProfileKey(program.id, "risk"))}
+          />
+          <CuratorFact
+            label={t("DashboardEarn.setup.liquidity")}
+            value={t(curatorProfileKey(program.id, "liquidity"))}
+          />
+          <CuratorFact
+            label={t("DashboardEarn.setup.fundingAssets")}
+            value={program.depositMints.map(tokenSymbol).join(", ")}
+          />
+        </span>
+
+        {showPreferenceFit || initialStrategy ? (
+          <span className="mt-3 flex flex-wrap items-center gap-2">
+            {showPreferenceFit ? (
+              <Badge variant={preferenceMatch ? "info" : "default"}>
+                {preferenceMatch
+                  ? t("DashboardEarn.setup.includesPreferenceMatch")
+                  : t("DashboardEarn.setup.noDirectPreferenceOverlap")}
+              </Badge>
+            ) : null}
+            {initialStrategy ? (
+              <span className="text-xs text-secondary">
+                {t("DashboardEarn.setup.includesStrategy", { strategy: initialStrategy.name })}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+      </label>
+      <div className="border-t border-border-subtle px-4 sm:px-5">
+        <PortfolioDisclosure strategies={program.strategies} />
+      </div>
+    </article>
+  );
+}
+
+function CuratorStep({
+  selectedCuratorId,
+  riskTier,
+  source,
+  initialStrategy,
+  onCuratorChange,
+}: {
+  selectedCuratorId: string | null;
+  riskTier: EarnRiskTier | null;
+  source: AssetPreference;
+  initialStrategy: MockEarnStrategy | undefined;
+  onCuratorChange: (curatorId: string) => void;
+}) {
+  const t = useTranslations();
+  const showPreferenceFit = riskTier !== null || source !== "all";
 
   return (
     <div className="space-y-5">
-      {shape === "same-curator" ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <ChoiceCard
-            selected={mode === "delegate"}
-            icon={<SparklesIcon className="size-4" />}
-            title={t("DashboardEarn.setup.delegateTitle", {
-              curator: earnCuratorLabel(curator ?? ""),
-            })}
-            description={t("DashboardEarn.setup.delegateDescription")}
-            onClick={() => onModeChange("delegate")}
-          />
-          <ChoiceCard
-            selected={mode === "custom"}
-            icon={<SlidersHorizontalIcon className="size-4" />}
-            title={t("DashboardEarn.setup.customWeightsTitle")}
-            description={t("DashboardEarn.setup.customWeightsDescription")}
-            onClick={() => onModeChange("custom")}
-          />
+      <div className="flex items-start gap-3 rounded-2xl border border-border-default bg-fill-subtle p-4">
+        <ShieldCheckIcon className="mt-0.5 size-5 shrink-0 text-secondary" />
+        <div>
+          <p className="text-sm font-medium text-primary">
+            {t("DashboardEarn.setup.whatCuratorDoesTitle")}
+          </p>
+          <p className="mt-1 text-[13px] leading-5 text-secondary">
+            {t("DashboardEarn.setup.whatCuratorDoesDescription")}
+          </p>
         </div>
-      ) : (
-        <div className="flex items-start gap-3 rounded-2xl border border-border-default bg-fill-subtle p-4">
-          <SlidersHorizontalIcon className="mt-0.5 size-5 shrink-0 text-secondary" />
-          <div>
-            <p className="text-sm font-medium text-primary">
-              {t("DashboardEarn.setup.mixedRequiresWeights")}
-            </p>
-            <p className="mt-1 text-[13px] leading-5 text-secondary">
-              {t("DashboardEarn.setup.mixedRequiresWeightsDescription")}
-            </p>
-          </div>
-        </div>
-      )}
+      </div>
 
-      {effectiveMode === "delegate" ? (
-        <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
-          <SectionHeading
-            icon={<ShieldCheckIcon className="size-4" />}
-            title={t("DashboardEarn.setup.delegationSummaryTitle")}
-            description={t("DashboardEarn.setup.delegationSummaryDescription", {
-              curator: earnCuratorLabel(curator ?? ""),
-              count: strategies.length,
+      <fieldset className="space-y-3">
+        <legend className="sr-only">{t("DashboardEarn.setup.curatorsTitle")}</legend>
+        {CURATOR_PROGRAMS.map((program) => (
+          <CuratorCard
+            key={program.id}
+            program={program}
+            selected={program.id === selectedCuratorId}
+            preferenceMatch={curatorMatchesPreferences(program.id, MOCK_EARN_STRATEGIES, {
+              riskTier,
+              source,
             })}
+            showPreferenceFit={showPreferenceFit}
+            initialStrategy={initialStrategy?.curator === program.id ? initialStrategy : undefined}
+            onSelect={() => onCuratorChange(program.id)}
           />
-          <div className="mt-4 divide-y divide-border-subtle border-y border-border-subtle">
-            {strategies.map((strategy) => (
-              <div
-                key={strategy.id}
-                className="flex items-center justify-between gap-3 py-3 text-sm"
-              >
-                <span className="text-primary">{strategy.name}</span>
-                <span className="text-secondary">{formatApy(strategy.currentApy)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
+        ))}
+      </fieldset>
 
-      {effectiveMode === "custom" ? (
-        <AllocationRows
-          strategies={strategies}
-          allocation={allocation}
-          onChange={onAllocationChange}
-          onEvenSplit={onEvenSplit}
-        />
-      ) : null}
+      <p className="flex items-start gap-2.5 rounded-xl border border-border-subtle bg-fill-subtle px-3.5 py-3 text-[13px] leading-5 text-secondary">
+        <SparklesIcon className="mt-0.5 size-4 shrink-0" />
+        <span>{t("DashboardEarn.setup.curatorMockNotice")}</span>
+      </p>
+      <p className="sr-only" role="status" aria-live="polite">
+        {selectedCuratorId
+          ? t("DashboardEarn.setup.selectedCuratorAnnouncement", {
+              curator: earnCuratorLabel(selectedCuratorId),
+            })
+          : ""}
+      </p>
     </div>
   );
 }
@@ -1031,9 +961,7 @@ function ReviewStep({
   destination,
   riskTier,
   source,
-  strategies,
-  allocationMode,
-  allocation,
+  program,
   onDestinationChange,
   onEdit,
 }: {
@@ -1041,16 +969,12 @@ function ReviewStep({
   destination: EarnDestination | null;
   riskTier: EarnRiskTier | null;
   source: AssetPreference;
-  strategies: readonly MockEarnStrategy[];
-  allocationMode: AllocationMode | null;
-  allocation: Allocation;
+  program: CuratorProgram | undefined;
   onDestinationChange: (destination: EarnDestination) => void;
   onEdit: (step: SetupStep) => void;
 }) {
   const t = useTranslations();
-  const shape = selectionShape(strategies);
-  const delegated = shape === "same-curator" && allocationMode === "delegate";
-  const effectiveAllocation = strategies.length === 1 ? { [strategies[0].id]: 100 } : allocation;
+  const curatorName = program ? earnCuratorLabel(program.id) : "—";
 
   return (
     <div className="space-y-4">
@@ -1086,36 +1010,45 @@ function ReviewStep({
               : t(`DashboardEarn.source.${source}`)
           }
         />
+        <p className="border-t border-border-subtle py-3 text-xs leading-5 text-tertiary">
+          {t("DashboardEarn.setup.preferencesDiscoveryOnly")}
+        </p>
       </ReviewSection>
 
       <ReviewSection
-        icon={<Layers3Icon className="size-4" />}
-        title={t("DashboardEarn.setup.reviewStrategies")}
-        onEdit={() => onEdit("strategy")}
+        icon={<ShieldCheckIcon className="size-4" />}
+        title={t("DashboardEarn.setup.reviewCurator")}
+        onEdit={() => onEdit("curator")}
       >
-        {strategies.map((strategy) => (
-          <SummaryRow
-            key={strategy.id}
-            label={strategy.name}
-            value={
-              <span>
-                {delegated
-                  ? t("DashboardEarn.setup.initialWeight", {
-                      percent: effectiveAllocation[strategy.id] ?? 0,
-                    })
-                  : `${effectiveAllocation[strategy.id] ?? 0}%`}{" "}
-                · {formatApy(strategy.currentApy)}
-              </span>
-            }
-          />
-        ))}
-        {shape === "same-curator" && allocationMode === "delegate" ? (
-          <SummaryRow
-            label={t("DashboardEarn.setup.allocation")}
-            value={t("DashboardEarn.setup.delegatedTo", {
-              curator: earnCuratorLabel(strategies[0]?.curator ?? ""),
-            })}
-          />
+        <SummaryRow label={t("DashboardEarn.setup.curator")} value={curatorName} />
+        <SummaryRow
+          label={t("DashboardEarn.setup.managedProgram")}
+          value={program ? t(curatorProfileKey(program.id, "headline")) : "—"}
+        />
+        <SummaryRow
+          label={t("DashboardEarn.setup.indicativeApyRange")}
+          value={curatorApyRange(program)}
+        />
+        <SummaryRow
+          label={t("DashboardEarn.setup.riskRange")}
+          value={program ? t(curatorProfileKey(program.id, "risk")) : "—"}
+        />
+        <SummaryRow
+          label={t("DashboardEarn.setup.liquidity")}
+          value={program ? t(curatorProfileKey(program.id, "liquidity")) : "—"}
+        />
+        <SummaryRow
+          label={t("DashboardEarn.setup.fundingAssets")}
+          value={program ? program.depositMints.map(tokenSymbol).join(", ") : "—"}
+        />
+        <SummaryRow
+          label={t("DashboardEarn.setup.allocation")}
+          value={t("DashboardEarn.setup.curatorManaged")}
+        />
+        {program ? (
+          <div className="border-t border-border-subtle">
+            <PortfolioDisclosure strategies={program.strategies} />
+          </div>
         ) : null}
       </ReviewSection>
 
@@ -1154,19 +1087,16 @@ function ProgramSummaryRail({
   wallet,
   destination,
   riskTier,
-  strategies,
-  allocation,
+  program,
   ready,
 }: {
   wallet: MockEarnWallet | undefined;
   destination: EarnDestination | null;
   riskTier: EarnRiskTier | null;
-  strategies: readonly MockEarnStrategy[];
-  allocation: Allocation;
+  program: CuratorProgram | undefined;
   ready: boolean;
 }) {
   const t = useTranslations();
-  const estimatedApy = weightedApy(strategies, allocation);
   return (
     <aside className="hidden lg:block">
       <div className="sticky top-2 overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
@@ -1197,12 +1127,12 @@ function ProgramSummaryRail({
             value={riskTier ? t(`DashboardEarn.risk.${riskTier}`) : "—"}
           />
           <SummaryRow
-            label={t("DashboardEarn.setup.strategies")}
-            value={strategies.length > 0 ? String(strategies.length) : "—"}
+            label={t("DashboardEarn.setup.curator")}
+            value={program ? earnCuratorLabel(program.id) : "—"}
           />
           <SummaryRow
-            label={t("DashboardEarn.setup.estimatedApy")}
-            value={strategies.length > 0 ? formatApy(String(estimatedApy)) : "—"}
+            label={t("DashboardEarn.setup.indicativeApyRange")}
+            value={curatorApyRange(program)}
           />
         </div>
       </div>
@@ -1264,9 +1194,9 @@ function PostSetupFrame({
 
 function TreasuryFundingScreen({
   wallet,
+  program,
   strategies,
   allocation,
-  delegated,
   tokenMint,
   amountInput,
   submitting,
@@ -1276,9 +1206,9 @@ function TreasuryFundingScreen({
   onSubmit,
 }: {
   wallet: MockEarnWallet;
+  program: CuratorProgram;
   strategies: readonly MockEarnStrategy[];
   allocation: Allocation;
-  delegated: boolean;
   tokenMint: string;
   amountInput: string;
   submitting: boolean;
@@ -1288,7 +1218,8 @@ function TreasuryFundingScreen({
   onSubmit: () => void;
 }) {
   const t = useTranslations();
-  const eligibleMints = commonDepositMints(strategies);
+  const curatorName = earnCuratorLabel(program.id);
+  const eligibleMints = program.depositMints;
   const amount = Number(amountInput);
   const balance = wallet.balances[tokenMint] ?? 0;
   const amountEntered = amountInput.trim().length > 0;
@@ -1303,12 +1234,10 @@ function TreasuryFundingScreen({
   return (
     <PostSetupFrame
       eyebrow={t("DashboardEarn.setup.treasuryEyebrow")}
-      title={t("DashboardEarn.setup.fundVaultTitle")}
-      description={t(
-        delegated
-          ? "DashboardEarn.setup.fundVaultDelegatedDescription"
-          : "DashboardEarn.setup.fundVaultDescription"
-      )}
+      title={t("DashboardEarn.setup.fundCuratorProgramTitle", { curator: curatorName })}
+      description={t("DashboardEarn.setup.fundCuratorProgramDescription", {
+        curator: curatorName,
+      })}
       onBack={onBack}
       footer={
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between [&>button]:w-full sm:[&>button]:w-auto">
@@ -1431,13 +1360,10 @@ function TreasuryFundingScreen({
             </h3>
           </div>
           <div className="px-4 py-2">
-            {legs.map((leg) => (
-              <SummaryRow
-                key={leg.strategy.id}
-                label={`${leg.strategy.name} · ${leg.pct}%`}
-                value={formatTokenAmount(leg.legAmount, tokenMint)}
-              />
-            ))}
+            <SummaryRow
+              label={t("DashboardEarn.setup.managedBy", { curator: curatorName })}
+              value={amountValid ? formatTokenAmount(amount, tokenMint) : "—"}
+            />
             <SummaryRow
               label={t("DashboardEarn.setup.projectedYearlyYield")}
               value={amountValid ? formatUsd(projectedYield) : "—"}
@@ -1446,6 +1372,15 @@ function TreasuryFundingScreen({
               label={t("DashboardEarn.setup.networkFee")}
               value={t("DashboardEarn.setup.sponsored")}
             />
+            <div className="border-t border-border-subtle">
+              <PortfolioDisclosure
+                strategies={strategies}
+                allocation={allocation}
+                tokenMint={tokenMint}
+                amount={amountValid ? amount : undefined}
+                routing
+              />
+            </div>
           </div>
           <p className="border-t border-border-subtle px-4 py-3 text-xs leading-5 text-tertiary">
             {t("DashboardEarn.setup.depositMockNotice")}
@@ -1457,22 +1392,17 @@ function TreasuryFundingScreen({
 }
 
 function RetailPreviewScreen({
-  strategies,
-  allocation,
-  tokenMint,
-  delegated,
+  program,
   onBack,
   onContinue,
 }: {
-  strategies: readonly MockEarnStrategy[];
-  allocation: Allocation;
-  tokenMint: string;
-  delegated: boolean;
+  program: CuratorProgram;
   onBack: () => void;
   onContinue: () => void;
 }) {
   const t = useTranslations();
-  const estimatedApy = weightedApy(strategies, allocation);
+  const estimatedApyRange = curatorApyRange(program);
+  const curatorName = earnCuratorLabel(program.id);
   return (
     <PostSetupFrame
       eyebrow={t("DashboardEarn.setup.retailEyebrow")}
@@ -1498,15 +1428,15 @@ function RetailPreviewScreen({
             </h3>
           </div>
           <div className="px-4 py-2">
+            <SummaryRow label={t("DashboardEarn.setup.curator")} value={curatorName} />
             <SummaryRow
-              label={t("DashboardEarn.setup.strategies")}
-              value={String(strategies.length)}
+              label={t("DashboardEarn.setup.indicativeApyRange")}
+              value={estimatedApyRange}
             />
             <SummaryRow
-              label={t("DashboardEarn.setup.estimatedApy")}
-              value={formatApy(String(estimatedApy))}
+              label={t("DashboardEarn.setup.fundingAssets")}
+              value={program.depositMints.map(tokenSymbol).join(", ")}
             />
-            <SummaryRow label={t("DashboardEarn.setup.asset")} value={tokenSymbol(tokenMint)} />
             <SummaryRow
               label={t("DashboardEarn.setup.environment")}
               value={t("DashboardEarn.setup.sandbox")}
@@ -1544,33 +1474,45 @@ function RetailPreviewScreen({
                 </div>
                 <p className="text-right text-sm text-secondary">
                   <span className="block text-lg font-medium text-primary">
-                    {formatApy(String(estimatedApy))}
+                    {estimatedApyRange}
                   </span>
-                  {t("DashboardEarn.setup.estimatedApy")}
+                  {t("DashboardEarn.setup.indicativeApyRange")}
                 </p>
               </div>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                {strategies.map((strategy) => (
-                  <div key={strategy.id} className="rounded-xl border border-border-default p-3.5">
-                    <p className="text-sm font-medium text-primary">{strategy.name}</p>
-                    <p className="mt-1 text-xs text-tertiary">
-                      {earnCuratorLabel(strategy.curator)}
-                    </p>
-                    <div className="mt-4 flex items-end justify-between gap-2">
-                      <span className="text-lg font-medium text-primary">
-                        {formatApy(strategy.currentApy)}
-                      </span>
-                      <span className="text-xs text-secondary">
-                        {delegated
-                          ? t("DashboardEarn.setup.initialWeight", {
-                              percent: allocation[strategy.id] ?? 0,
-                            })
-                          : `${allocation[strategy.id] ?? 0}%`}
-                      </span>
+              <div className="mt-6 rounded-2xl border border-border-default bg-fill-subtle p-4 sm:p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-subtle bg-surface-raised text-sm font-semibold text-primary">
+                      {curatorMonogram(program.id)}
+                    </span>
+                    <div>
+                      <p className="text-base font-medium tracking-tight text-primary">
+                        {t(curatorProfileKey(program.id, "headline"))}
+                      </p>
+                      <p className="mt-1 text-xs text-secondary">
+                        {t("DashboardEarn.setup.retailManagedBy", { curator: curatorName })}
+                      </p>
                     </div>
                   </div>
-                ))}
+                  <Badge variant="info">{t("DashboardEarn.setup.curatorManaged")}</Badge>
+                </div>
+                <p className="mt-4 max-w-2xl text-[13px] leading-5 text-secondary">
+                  {t(curatorProfileKey(program.id, "description"))}
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <CuratorFact
+                    label={t("DashboardEarn.setup.indicativeApyRange")}
+                    value={estimatedApyRange}
+                  />
+                  <CuratorFact
+                    label={t("DashboardEarn.setup.liquidity")}
+                    value={t(curatorProfileKey(program.id, "liquidity"))}
+                  />
+                </div>
+                <div className="mt-2">
+                  <PortfolioDisclosure strategies={program.strategies} />
+                </div>
               </div>
 
               <Button type="button" disabled className="mt-5 w-full">
@@ -1584,8 +1526,17 @@ function RetailPreviewScreen({
   );
 }
 
-function RetailIntegrationScreen({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
+function RetailIntegrationScreen({
+  program,
+  onBack,
+  onDone,
+}: {
+  program: CuratorProgram;
+  onBack: () => void;
+  onDone: () => void;
+}) {
   const t = useTranslations();
+  const curatorName = earnCuratorLabel(program.id);
   const [tab, setTab] = useState<IntegrationTab>(INTEGRATION_TABS.sdk);
   const [copied, setCopied] = useState(false);
   const snippet = tab === INTEGRATION_TABS.sdk ? SDK_SNIPPET : API_SNIPPET;
@@ -1669,6 +1620,10 @@ function RetailIntegrationScreen({ onBack, onDone }: { onBack: () => void; onDon
                 label={t("DashboardEarn.setup.configurationId")}
                 value="earn_config_sandbox_01"
               />
+              <SummaryRow
+                label={t("DashboardEarn.setup.managedProgram")}
+                value={t("DashboardEarn.setup.managedBy", { curator: curatorName })}
+              />
               <SummaryRow label={t("DashboardEarn.setup.network")} value="Solana Devnet" />
             </div>
           </section>
@@ -1695,24 +1650,25 @@ function RetailIntegrationScreen({ onBack, onDone }: { onBack: () => void; onDon
 }
 
 function VaultLiveScreen({
+  program,
   strategies,
   allocation,
   amount,
   tokenMint,
-  delegated,
   onAnother,
   onDashboard,
 }: {
+  program: CuratorProgram;
   strategies: readonly MockEarnStrategy[];
   allocation: Allocation;
   amount: number;
   tokenMint: string;
-  delegated: boolean;
   onAnother: () => void;
   onDashboard: () => void;
 }) {
   const t = useTranslations();
   const estimatedApy = weightedApy(strategies, allocation);
+  const curatorName = earnCuratorLabel(program.id);
   const projectedYield = strategies.reduce(
     (sum, strategy) =>
       sum +
@@ -1736,7 +1692,10 @@ function VaultLiveScreen({
         </div>
       }
     >
-      <div className="flex items-start gap-3 rounded-2xl border border-success-border bg-success-bg p-4 text-success">
+      <div
+        className="flex items-start gap-3 rounded-2xl border border-success-border bg-success-bg p-4 text-success"
+        role="status"
+      >
         <CheckCircle2Icon className="size-5 shrink-0" />
         <div>
           <p className="text-sm font-medium">{t("DashboardEarn.setup.depositConfirmed")}</p>
@@ -1771,31 +1730,28 @@ function VaultLiveScreen({
       <section className="mt-5 overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
         <div className="border-b border-border-default bg-fill-subtle px-4 py-3">
           <h3 className="text-sm font-medium text-primary">
-            {t("DashboardEarn.setup.strategyAllocation")}
+            {t("DashboardEarn.setup.curatorAllocation")}
           </h3>
         </div>
-        <div className="divide-y divide-border-subtle">
-          {strategies.map((strategy) => (
-            <div
-              key={strategy.id}
-              className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_8rem_8rem] sm:items-center"
-            >
-              <div>
-                <p className="text-sm text-primary">{strategy.name}</p>
-                <p className="mt-0.5 text-xs text-tertiary">{earnCuratorLabel(strategy.curator)}</p>
-              </div>
-              <p className="text-sm text-secondary sm:text-right">
-                {delegated
-                  ? t("DashboardEarn.setup.initialWeight", {
-                      percent: allocation[strategy.id] ?? 0,
-                    })
-                  : `${allocation[strategy.id] ?? 0}%`}
-              </p>
-              <p className="text-sm text-primary sm:text-right">
-                {formatTokenAmount(amount * ((allocation[strategy.id] ?? 0) / 100), tokenMint)}
-              </p>
-            </div>
-          ))}
+        <div className="px-4 py-2">
+          <SummaryRow label={t("DashboardEarn.setup.curator")} value={curatorName} />
+          <SummaryRow
+            label={t("DashboardEarn.setup.managedProgram")}
+            value={t(curatorProfileKey(program.id, "headline"))}
+          />
+          <SummaryRow
+            label={t("DashboardEarn.setup.allocation")}
+            value={t("DashboardEarn.setup.curatorManaged")}
+          />
+          <div className="border-t border-border-subtle">
+            <PortfolioDisclosure
+              strategies={strategies}
+              allocation={allocation}
+              tokenMint={tokenMint}
+              amount={amount}
+              routing
+            />
+          </div>
         </div>
       </section>
     </PostSetupFrame>
@@ -1804,91 +1760,61 @@ function VaultLiveScreen({
 
 interface EarnDepositWizardProps {
   initialStrategyId?: string;
+  initialCuratorId?: string;
 }
 
 interface SetupReadinessInput {
   wallet: MockEarnWallet | undefined;
-  strategies: readonly MockEarnStrategy[];
-  shape: ReturnType<typeof selectionShape>;
-  allocationMode: AllocationMode | null;
-  allocation: Allocation;
+  program: CuratorProgram | undefined;
   destination: EarnDestination | null;
 }
 
 function getSetupReadiness({
   wallet,
-  strategies,
-  shape,
-  allocationMode,
-  allocation,
+  program,
   destination,
 }: SetupReadinessInput): Record<SetupStep, boolean> {
-  const total = allocationTotal(allocation);
-  const weightsReady =
-    total === 100 && strategies.every((strategy) => (allocation[strategy.id] ?? 0) > 0);
-  const allocationReady =
-    strategies.length > 1 &&
-    (shape === "mixed-curators"
-      ? weightsReady
-      : allocationMode === "delegate" || (allocationMode === "custom" && weightsReady));
-
-  const programReady =
-    Boolean(wallet) &&
-    strategies.length > 0 &&
-    Boolean(destination) &&
-    (strategies.length === 1 || allocationReady);
+  const curatorReady = Boolean(program && program.depositMints.length > 0);
 
   return {
     wallet: Boolean(wallet),
     profile: true,
-    strategy: strategies.length > 0,
-    allocation: allocationReady,
-    review: programReady,
+    curator: curatorReady,
+    review: Boolean(wallet) && curatorReady && Boolean(destination),
   };
 }
 
-function nextSetupStep(step: SetupStep, strategyCount: number): SetupStep | null {
+function nextSetupStep(step: SetupStep): SetupStep | null {
   if (step === "wallet") return "profile";
-  if (step === "profile") return "strategy";
-  if (step === "strategy") return strategyCount > 1 ? "allocation" : "review";
-  if (step === "allocation") return "review";
+  if (step === "profile") return "curator";
+  if (step === "curator") return "review";
   return null;
 }
 
-function previousSetupStep(step: SetupStep, strategyCount: number): SetupStep | null {
+function previousSetupStep(step: SetupStep): SetupStep | null {
   if (step === "profile") return "wallet";
-  if (step === "strategy") return "profile";
-  if (step === "allocation") return "strategy";
-  if (step === "review") return strategyCount > 1 ? "allocation" : "strategy";
+  if (step === "curator") return "profile";
+  if (step === "review") return "curator";
   return null;
-}
-
-function setupProgressIndex(step: SetupStep): number {
-  if (step === "allocation") return 2;
-  return SETUP_PROGRESS.indexOf(step);
 }
 
 function primaryActionLabel(
   step: SetupStep,
   destination: EarnDestination | null,
-  strategyCount: number,
+  selectedCuratorId: string | null,
   editingFromReview: boolean,
   t: ReturnType<typeof useTranslations>
 ): string {
-  if (step === "strategy" && strategyCount === 0) {
-    return t("DashboardEarn.setup.selectStrategy");
-  }
-  if (editingFromReview && (step !== "strategy" || strategyCount <= 1)) {
-    return t("DashboardEarn.setup.saveChanges");
-  }
+  if (editingFromReview) return t("DashboardEarn.setup.saveChanges");
   if (step === "wallet") return t("DashboardEarn.setup.importWallet");
-  if (step === "profile") return t("DashboardEarn.setup.showStrategies");
-  if (step === "strategy") {
-    return strategyCount === 1
-      ? t("DashboardEarn.setup.continueWithStrategy")
-      : t("DashboardEarn.setup.continueWithStrategies", { count: strategyCount });
+  if (step === "profile") return t("DashboardEarn.setup.seeCuratorPrograms");
+  if (step === "curator") {
+    return selectedCuratorId
+      ? t("DashboardEarn.setup.continueWithCurator", {
+          curator: earnCuratorLabel(selectedCuratorId),
+        })
+      : t("DashboardEarn.setup.selectCurator");
   }
-  if (step === "allocation") return t("DashboardEarn.setup.reviewSetup");
   if (destination === null) return t("DashboardEarn.setup.chooseDestination");
   return destination === "retail"
     ? t("DashboardEarn.setup.createEarnExperience")
@@ -1898,9 +1824,9 @@ function primaryActionLabel(
 interface PostSetupContentProps {
   screen: PostSetupScreen;
   wallet: MockEarnWallet | undefined;
+  program: CuratorProgram | undefined;
   strategies: readonly MockEarnStrategy[];
   allocation: Allocation;
-  allocationMode: AllocationMode | null;
   tokenMint: string;
   amountInput: string;
   submitting: boolean;
@@ -1914,9 +1840,9 @@ interface PostSetupContentProps {
 function PostSetupContent({
   screen,
   wallet,
+  program,
   strategies,
   allocation,
-  allocationMode,
   tokenMint,
   amountInput,
   submitting,
@@ -1926,13 +1852,14 @@ function PostSetupContent({
   onSubmitDeposit,
   onDashboard,
 }: PostSetupContentProps) {
+  if (!program) return null;
   if (screen === "treasury" && wallet) {
     return (
       <TreasuryFundingScreen
         wallet={wallet}
+        program={program}
         strategies={strategies}
         allocation={allocation}
-        delegated={allocationMode === "delegate"}
         tokenMint={tokenMint}
         amountInput={amountInput}
         submitting={submitting}
@@ -1946,10 +1873,7 @@ function PostSetupContent({
   if (screen === "retail-preview") {
     return (
       <RetailPreviewScreen
-        strategies={strategies}
-        allocation={allocation}
-        tokenMint={tokenMint}
-        delegated={allocationMode === "delegate"}
+        program={program}
         onBack={() => onScreenChange(null)}
         onContinue={() => onScreenChange("retail-integration")}
       />
@@ -1958,6 +1882,7 @@ function PostSetupContent({
   if (screen === "retail-integration") {
     return (
       <RetailIntegrationScreen
+        program={program}
         onBack={() => onScreenChange("retail-preview")}
         onDone={onDashboard}
       />
@@ -1966,11 +1891,11 @@ function PostSetupContent({
   if (screen === "vault-live") {
     return (
       <VaultLiveScreen
+        program={program}
         strategies={strategies}
         allocation={allocation}
         amount={Number(amountInput)}
         tokenMint={tokenMint}
-        delegated={allocationMode === "delegate"}
         onAnother={() => {
           onAmountChange("");
           onScreenChange("treasury");
@@ -1989,21 +1914,15 @@ interface SetupStepContentProps {
   destination: EarnDestination | null;
   riskTier: EarnRiskTier | null;
   source: AssetPreference;
-  curatorFilter: string | null;
-  strategyIds: readonly string[];
-  strategies: readonly MockEarnStrategy[];
-  allocationMode: AllocationMode | null;
-  allocation: Allocation;
+  selectedCuratorId: string | null;
+  program: CuratorProgram | undefined;
+  initialStrategy: MockEarnStrategy | undefined;
   onProviderChange: (provider: WalletProvider) => void;
   onWalletChange: (walletId: string) => void;
   onDestinationChange: (destination: EarnDestination | null) => void;
   onRiskTierChange: (riskTier: EarnRiskTier | null) => void;
   onSourceChange: (source: AssetPreference) => void;
-  onCuratorChange: (curator: string | null) => void;
-  onStrategiesChange: (ids: string[]) => void;
-  onAllocationModeChange: (mode: AllocationMode) => void;
-  onAllocationChange: (strategyId: string, value: number) => void;
-  onEvenSplit: () => void;
+  onCuratorChange: (curatorId: string) => void;
   onBrowseAll: () => void;
   onEdit: (step: SetupStep) => void;
 }
@@ -2032,29 +1951,14 @@ function SetupStepContent(props: SetupStepContentProps) {
       />
     );
   }
-  if (props.step === "strategy") {
+  if (props.step === "curator") {
     return (
-      <StrategyStep
-        selectedIds={props.strategyIds}
+      <CuratorStep
+        selectedCuratorId={props.selectedCuratorId}
         riskTier={props.riskTier}
         source={props.source}
-        curator={props.curatorFilter}
-        onSelectedIdsChange={props.onStrategiesChange}
-        onRiskTierChange={props.onRiskTierChange}
-        onSourceChange={props.onSourceChange}
+        initialStrategy={props.initialStrategy}
         onCuratorChange={props.onCuratorChange}
-      />
-    );
-  }
-  if (props.step === "allocation") {
-    return (
-      <AllocationStep
-        strategies={props.strategies}
-        mode={props.allocationMode}
-        allocation={props.allocation}
-        onModeChange={props.onAllocationModeChange}
-        onAllocationChange={props.onAllocationChange}
-        onEvenSplit={props.onEvenSplit}
       />
     );
   }
@@ -2064,22 +1968,21 @@ function SetupStepContent(props: SetupStepContentProps) {
       destination={props.destination}
       riskTier={props.riskTier}
       source={props.source}
-      strategies={props.strategies}
-      allocationMode={props.allocationMode}
-      allocation={props.allocation}
+      program={props.program}
       onDestinationChange={(next) => props.onDestinationChange(next)}
       onEdit={props.onEdit}
     />
   );
 }
 
-export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps) {
+export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnDepositWizardProps) {
   const t = useTranslations();
   const router = useDashboardRouter();
   const reduceMotion = useReducedMotion();
   const initialStrategy = MOCK_EARN_STRATEGIES.find(
     (strategy) => strategy.id === initialStrategyId
   );
+  const initialCurator = CURATOR_PROGRAMS.find((program) => program.id === initialCuratorId);
 
   const [step, setStep] = useState<SetupStep>("wallet");
   const [editingFromReview, setEditingFromReview] = useState(false);
@@ -2090,13 +1993,8 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
   const [destination, setDestination] = useState<EarnDestination | null>(null);
   const [riskTier, setRiskTier] = useState<EarnRiskTier | null>(initialStrategy?.riskTier ?? null);
   const [source, setSource] = useState<AssetPreference>(initialStrategy?.sourceKind ?? "all");
-  const [curatorFilter, setCuratorFilter] = useState<string | null>(null);
-  const [strategyIds, setStrategyIds] = useState<string[]>(
-    initialStrategy ? [initialStrategy.id] : []
-  );
-  const [allocationMode, setAllocationMode] = useState<AllocationMode | null>(null);
-  const [allocation, setAllocation] = useState<Allocation>(
-    initialStrategy ? { [initialStrategy.id]: 100 } : {}
+  const [selectedCuratorId, setSelectedCuratorId] = useState<string | null>(
+    initialStrategy?.curator ?? initialCurator?.id ?? null
   );
   const [tokenMint, setTokenMint] = useState(
     initialStrategy?.depositMints[0] ?? DEFAULT_DEPOSIT_MINT
@@ -2105,21 +2003,21 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
   const [submitting, setSubmitting] = useState(false);
 
   const wallet = MOCK_EARN_WALLETS.find((candidate) => candidate.id === walletId);
-  const strategies = selectedStrategies(strategyIds, MOCK_EARN_STRATEGIES);
-  const shape = selectionShape(strategies);
-  const effectiveAllocation = useMemo(() => {
-    if (strategies.length === 1) return { [strategies[0].id]: 100 };
-    if (allocationMode === "delegate") return evenAllocation(strategyIds);
-    return allocation;
-  }, [allocation, allocationMode, strategies, strategyIds]);
+  const program = CURATOR_PROGRAMS.find((candidate) => candidate.id === selectedCuratorId);
+  const fundingPlan = useMemo(
+    () =>
+      selectedCuratorId
+        ? buildCuratorFundingPlan(selectedCuratorId, tokenMint, MOCK_EARN_STRATEGIES)
+        : null,
+    [selectedCuratorId, tokenMint]
+  );
+  const strategies = fundingPlan?.strategies ?? [];
+  const effectiveAllocation = fundingPlan?.strategyAllocation ?? {};
 
-  const progressStep = setupProgressIndex(step);
+  const progressStep = SETUP_PROGRESS.indexOf(step);
   const stepReady = getSetupReadiness({
     wallet,
-    strategies,
-    shape,
-    allocationMode,
-    allocation,
+    program,
     destination,
   });
 
@@ -2129,14 +2027,15 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
     setWalletId(firstWallet?.id ?? "");
   };
 
-  const updateStrategies = (ids: string[]) => {
-    setStrategyIds(ids);
-    setAllocation(evenAllocation(ids));
-    setAllocationMode(null);
-    const selected = selectedStrategies(ids, MOCK_EARN_STRATEGIES);
-    const mints = commonDepositMints(selected);
-    if (!mints.includes(tokenMint)) {
-      setTokenMint(mints[0] ?? DEFAULT_DEPOSIT_MINT);
+  const chooseCurator = (curatorId: string) => {
+    setSelectedCuratorId(curatorId);
+    const nextProgram = CURATOR_PROGRAMS.find((candidate) => candidate.id === curatorId);
+    if (nextProgram && !nextProgram.depositMints.includes(tokenMint)) {
+      setTokenMint(
+        nextProgram.depositMints.includes(DEFAULT_DEPOSIT_MINT)
+          ? DEFAULT_DEPOSIT_MINT
+          : (nextProgram.depositMints[0] ?? DEFAULT_DEPOSIT_MINT)
+      );
     }
   };
 
@@ -2163,15 +2062,11 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
   const goNext = () => {
     if (!stepReady[step]) return;
     if (editingFromReview) {
-      if (step === "strategy" && strategies.length > 1) {
-        moveTo("allocation", 1);
-        return;
-      }
       setEditingFromReview(false);
       moveTo("review", 1);
       return;
     }
-    const nextStep = nextSetupStep(step, strategies.length);
+    const nextStep = nextSetupStep(step);
     if (nextStep) {
       moveTo(nextStep, 1);
       return;
@@ -2187,7 +2082,7 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
       moveTo("review", 1);
       return;
     }
-    const previousStep = previousSetupStep(step, strategies.length);
+    const previousStep = previousSetupStep(step);
     if (!previousStep) {
       router.push("/dashboard/markets/earn");
       return;
@@ -2220,9 +2115,9 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
       <PostSetupContent
         screen={postSetupScreen}
         wallet={wallet}
+        program={program}
         strategies={strategies}
         allocation={effectiveAllocation}
-        allocationMode={allocationMode}
         tokenMint={tokenMint}
         amountInput={amountInput}
         submitting={submitting}
@@ -2236,11 +2131,11 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
   }
 
   const activeMeta = stepMeta[step];
-  const showSummaryRail = step !== "wallet" && step !== "strategy";
+  const showSummaryRail = step !== "wallet" && step !== "curator";
   const primaryLabel = primaryActionLabel(
     step,
     destination,
-    strategies.length,
+    selectedCuratorId,
     editingFromReview,
     t
   );
@@ -2249,11 +2144,7 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
     <PaymentsWizardFrame
       steps={SETUP_PROGRESS.map((progress) => ({
         label: t(`DashboardEarn.setup.progress.${progress}` as MessageKey),
-        title: t(
-          progress === "strategy" && step === "allocation"
-            ? stepMeta.allocation.title
-            : stepMeta[progress].title
-        ),
+        title: t(stepMeta[progress].title),
       }))}
       currentStep={progressStep}
       progressLabel={t("DashboardEarn.setup.stepProgress", {
@@ -2261,7 +2152,7 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
         total: SETUP_PROGRESS.length,
       })}
       description={t(activeMeta.description)}
-      maxWidthClassName={step === "strategy" ? "max-w-5xl" : "max-w-4xl"}
+      maxWidthClassName="max-w-4xl"
       footer={
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between [&>button]:w-full sm:[&>button]:w-auto">
           <Button
@@ -2306,29 +2197,19 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
                 destination={destination}
                 riskTier={riskTier}
                 source={source}
-                curatorFilter={curatorFilter}
-                strategyIds={strategyIds}
-                strategies={strategies}
-                allocationMode={allocationMode}
-                allocation={effectiveAllocation}
+                selectedCuratorId={selectedCuratorId}
+                program={program}
+                initialStrategy={initialStrategy}
                 onProviderChange={chooseProvider}
                 onWalletChange={setWalletId}
                 onDestinationChange={setDestination}
                 onRiskTierChange={setRiskTier}
                 onSourceChange={setSource}
-                onCuratorChange={setCuratorFilter}
-                onStrategiesChange={updateStrategies}
-                onAllocationModeChange={setAllocationMode}
-                onAllocationChange={(strategyId, value) =>
-                  setAllocation((current) => ({ ...current, [strategyId]: value }))
-                }
-                onEvenSplit={() => setAllocation(evenAllocation(strategyIds))}
+                onCuratorChange={chooseCurator}
                 onBrowseAll={() => {
-                  setDestination(null);
                   setRiskTier(null);
                   setSource("all");
-                  setCuratorFilter(null);
-                  moveTo("strategy", 1);
+                  moveTo("curator", 1);
                 }}
                 onEdit={(target) => {
                   setEditingFromReview(true);
@@ -2344,8 +2225,7 @@ export function EarnDepositWizard({ initialStrategyId }: EarnDepositWizardProps)
             wallet={wallet}
             destination={destination}
             riskTier={riskTier}
-            strategies={strategies}
-            allocation={effectiveAllocation}
+            program={program}
             ready={stepReady.review}
           />
         ) : null}

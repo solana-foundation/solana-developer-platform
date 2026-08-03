@@ -1,22 +1,38 @@
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
-const STRATEGY_ROW_IDS = ["one", "two", "three", "four"];
+const SKELETON_ITEM_IDS = ["one", "two", "three", "four"];
 
 export function EarnOverviewSkeleton() {
   return (
     <div className="grid content-start gap-4" aria-busy="true">
+      <SkeletonBlock className="h-4 w-96 max-w-full" />
       <section className="rounded-lg border border-border-default bg-surface-raised p-4">
-        <SkeletonBlock className="h-5 w-40" />
-        <SkeletonBlock className="mt-2 h-4 w-72" />
-        <div className="mt-4 grid gap-2">
-          {STRATEGY_ROW_IDS.map((id) => (
-            <SkeletonBlock key={id} className="h-10 w-full rounded-md" />
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <SkeletonBlock className="h-5 w-40" />
+            <SkeletonBlock className="mt-2 h-4 w-80 max-w-full" />
+          </div>
+          <SkeletonBlock className="h-9 w-28 rounded-md" />
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          {SKELETON_ITEM_IDS.slice(0, 3).map((id) => (
+            <SkeletonBlock key={id} className="h-[4.5rem] w-full rounded-md" />
+          ))}
+        </div>
+        <div className="mt-3 grid gap-3">
+          {SKELETON_ITEM_IDS.slice(0, 2).map((id) => (
+            <SkeletonBlock key={id} className="h-40 w-full rounded-xl" />
           ))}
         </div>
       </section>
       <section className="rounded-lg border border-border-default bg-surface-raised p-4">
-        <SkeletonBlock className="h-5 w-24" />
-        <SkeletonBlock className="mt-4 h-4 w-64" />
+        <SkeletonBlock className="h-5 w-36" />
+        <SkeletonBlock className="mt-2 h-4 w-[34rem] max-w-full" />
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {SKELETON_ITEM_IDS.slice(0, 3).map((id) => (
+            <SkeletonBlock key={id} className="h-96 w-full rounded-xl" />
+          ))}
+        </div>
       </section>
     </div>
   );
@@ -35,7 +51,7 @@ export function EarnDepositSkeleton() {
           <SkeletonBlock className="h-7 w-64" />
           <SkeletonBlock className="mt-2 h-4 w-96 max-w-full" />
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            {STRATEGY_ROW_IDS.slice(0, 2).map((id) => (
+            {SKELETON_ITEM_IDS.slice(0, 2).map((id) => (
               <SkeletonBlock key={id} className="h-28 w-full rounded-2xl" />
             ))}
           </div>
@@ -58,7 +74,7 @@ export function EarnStrategyDetailSkeleton() {
       <section className="rounded-lg border border-border-default bg-surface-raised p-4">
         <SkeletonBlock className="h-5 w-56" />
         <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-4">
-          {STRATEGY_ROW_IDS.map((id) => (
+          {SKELETON_ITEM_IDS.map((id) => (
             <SkeletonBlock key={id} className="h-16 w-full rounded-md" />
           ))}
         </div>
