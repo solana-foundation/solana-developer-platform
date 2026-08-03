@@ -25,7 +25,7 @@ import {
   WalletCardsIcon,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { type ChangeEvent, type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type ChangeEvent, type ReactNode, useId, useLayoutEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,9 +52,15 @@ import {
 } from "../earn-mock-data";
 import { addMockPosition } from "../earn-mock-positions";
 import {
+  CURATOR_PROGRAMS,
+  curatorApyRange,
+  curatorMonogram,
+  curatorProfileKey,
+  useLiquidityLabel,
+} from "../earn-program-presentation";
+import {
   type AssetPreference,
   buildCuratorFundingPlan,
-  buildCuratorPrograms,
   type CuratorProgram,
   curatorMatchesPreferences,
   type EarnDestination,
@@ -120,35 +126,6 @@ const PROVIDERS: readonly {
   },
 ];
 
-const CURATOR_PROGRAMS = buildCuratorPrograms(MOCK_EARN_STRATEGIES);
-const KNOWN_CURATOR_IDS = new Set(["steakhouse", "gauntlet", "sentora"]);
-type CuratorProfileField = "headline" | "description" | "bestFor" | "risk" | "liquidity";
-
-function curatorProfileKey(curatorId: string, field: CuratorProfileField): MessageKey {
-  const profileId = KNOWN_CURATOR_IDS.has(curatorId) ? curatorId : "default";
-  return `DashboardEarn.setup.curatorProfiles.${profileId}.${field}` as MessageKey;
-}
-
-function curatorMonogram(curatorId: string): string {
-  const words = earnCuratorLabel(curatorId).split(/\s+/).filter(Boolean);
-  return words
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
-function curatorApyRange(program: CuratorProgram | undefined): string {
-  if (!program || program.strategies.length === 0) return "—";
-  const apys = program.strategies
-    .map((strategy) => Number(strategy.currentApy))
-    .filter((apy) => Number.isFinite(apy));
-  if (apys.length === 0) return "—";
-  const minimum = Math.min(...apys);
-  const maximum = Math.max(...apys);
-  if (minimum === maximum) return formatApy(String(minimum));
-  return `${formatApy(String(minimum))}–${formatApy(String(maximum))}`;
-}
-
 const EARN_SDK_PACKAGE = "@sdp/earn";
 
 const SDK_SNIPPET = `import { createEarnClient } from "${EARN_SDK_PACKAGE}";
@@ -192,23 +169,6 @@ function buildLegs(
     const pct = allocation[strategy.id] ?? 0;
     return { strategy, pct, legAmount: amount * (pct / 100) };
   });
-}
-
-function useLiquidityLabel() {
-  const t = useTranslations();
-  return (strategy: MockEarnStrategy): string => {
-    if (strategy.liquidityTerm === "instant") {
-      return t("DashboardEarn.liquidity.instant");
-    }
-    const days = strategy.redemptionDelayDays ?? 1;
-    if (strategy.intradayFraction) {
-      return t("DashboardEarn.liquidity.mixed", {
-        pct: Math.round(strategy.intradayFraction * 100),
-        days,
-      });
-    }
-    return t("DashboardEarn.liquidity.delayed", { days });
-  };
 }
 
 function SelectionMark({ selected }: { selected: boolean }) {
@@ -1978,7 +1938,6 @@ function SetupStepContent(props: SetupStepContentProps) {
 export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnDepositWizardProps) {
   const t = useTranslations();
   const router = useDashboardRouter();
-  const reduceMotion = useReducedMotion();
   const initialStrategy = MOCK_EARN_STRATEGIES.find(
     (strategy) => strategy.id === initialStrategyId
   );
@@ -1986,7 +1945,6 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
 
   const [step, setStep] = useState<SetupStep>("wallet");
   const [editingFromReview, setEditingFromReview] = useState(false);
-  const [direction, setDirection] = useState(1);
   const [postSetupScreen, setPostSetupScreen] = useState<PostSetupScreen | null>(null);
   const [provider, setProvider] = useState<WalletProvider | null>(null);
   const [walletId, setWalletId] = useState("");
@@ -2039,19 +1997,20 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
     }
   };
 
-  const moveTo = (nextStep: SetupStep, nextDirection: number) => {
-    setDirection(nextDirection);
+  const moveTo = (nextStep: SetupStep) => {
     setStep(nextStep);
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Every wizard step transition should reset scroll and announce its active heading.
-  useEffect(() => {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Every wizard step transition must land already scrolled to the top with its heading announced.
+  useLayoutEffect(() => {
+    // Pre-paint so the new step's first frame is already at the top — no visible
+    // jump or smooth-scroll drift after the content appears.
     const scrollRegion = document.querySelector<HTMLElement>(
-      postSetupScreen ? "[data-earn-post-setup-scroll]" : "[data-payments-wizard-scroll-region]"
+      postSetupScreen ? "[data-earn-post-setup-scroll]" : "[data-wizard-scroll-region]"
     );
     if (!scrollRegion) return;
 
-    scrollRegion.scrollTop = 0;
+    scrollRegion.scrollTo({ top: 0, behavior: "instant" });
     const heading = scrollRegion.querySelector<HTMLHeadingElement>("h2");
     if (heading) {
       heading.tabIndex = -1;
@@ -2063,12 +2022,12 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
     if (!stepReady[step]) return;
     if (editingFromReview) {
       setEditingFromReview(false);
-      moveTo("review", 1);
+      moveTo("review");
       return;
     }
     const nextStep = nextSetupStep(step);
     if (nextStep) {
-      moveTo(nextStep, 1);
+      moveTo(nextStep);
       return;
     }
     if (destination) {
@@ -2079,7 +2038,7 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
   const goBack = () => {
     if (editingFromReview) {
       setEditingFromReview(false);
-      moveTo("review", 1);
+      moveTo("review");
       return;
     }
     const previousStep = previousSetupStep(step);
@@ -2087,7 +2046,7 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
       router.push("/dashboard/markets/earn");
       return;
     }
-    moveTo(previousStep, -1);
+    moveTo(previousStep);
   };
 
   const submitDeposit = () => {
@@ -2179,45 +2138,35 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
       }
     >
       <div className={cn("grid gap-6", showSummaryRail && "lg:grid-cols-[minmax(0,1fr)_17rem]")}>
-        <div className="relative min-h-[22rem] overflow-hidden">
-          <AnimatePresence mode="wait" custom={direction} initial={false}>
-            <motion.div
-              key={step}
-              custom={direction}
-              initial={reduceMotion ? false : { opacity: 0, x: direction * 8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: direction * -8 }}
-              transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
-              className="px-0.5 py-0.5"
-            >
-              <SetupStepContent
-                step={step}
-                provider={provider}
-                walletId={walletId}
-                destination={destination}
-                riskTier={riskTier}
-                source={source}
-                selectedCuratorId={selectedCuratorId}
-                program={program}
-                initialStrategy={initialStrategy}
-                onProviderChange={chooseProvider}
-                onWalletChange={setWalletId}
-                onDestinationChange={setDestination}
-                onRiskTierChange={setRiskTier}
-                onSourceChange={setSource}
-                onCuratorChange={chooseCurator}
-                onBrowseAll={() => {
-                  setRiskTier(null);
-                  setSource("all");
-                  moveTo("curator", 1);
-                }}
-                onEdit={(target) => {
-                  setEditingFromReview(true);
-                  moveTo(target, -1);
-                }}
-              />
-            </motion.div>
-          </AnimatePresence>
+        {/* Step content swaps instantly: wizard steps must land pre-scrolled to the
+            top with no transition (see the useLayoutEffect scroll reset above). */}
+        <div className="relative min-h-[22rem]">
+          <SetupStepContent
+            step={step}
+            provider={provider}
+            walletId={walletId}
+            destination={destination}
+            riskTier={riskTier}
+            source={source}
+            selectedCuratorId={selectedCuratorId}
+            program={program}
+            initialStrategy={initialStrategy}
+            onProviderChange={chooseProvider}
+            onWalletChange={setWalletId}
+            onDestinationChange={setDestination}
+            onRiskTierChange={setRiskTier}
+            onSourceChange={setSource}
+            onCuratorChange={chooseCurator}
+            onBrowseAll={() => {
+              setRiskTier(null);
+              setSource("all");
+              moveTo("curator");
+            }}
+            onEdit={(target) => {
+              setEditingFromReview(true);
+              moveTo(target);
+            }}
+          />
         </div>
 
         {showSummaryRail ? (
