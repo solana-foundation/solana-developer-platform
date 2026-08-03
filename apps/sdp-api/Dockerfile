@@ -23,6 +23,7 @@ COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
+COPY packages/sdp-policy/package.json ./packages/sdp-policy/
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
 COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
 COPY packages/sdp-spc-escrow/package.json ./packages/sdp-spc-escrow/
@@ -44,6 +45,7 @@ COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
 COPY packages/sdp-solana ./packages/sdp-solana
+COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-issuance ./packages/sdp-issuance
 COPY packages/sdp-private-channels ./packages/sdp-private-channels
 COPY packages/sdp-spc-escrow ./packages/sdp-spc-escrow
