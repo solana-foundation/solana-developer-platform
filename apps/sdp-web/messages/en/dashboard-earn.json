@@ -6,6 +6,7 @@
       "positionsDescription": "Positions are grouped by curator, with individual holdings available when you need them.",
       "positionsEmpty": "No managed positions yet. Choose a curator to start earning.",
       "newDeposit": "New deposit",
+      "exploreCurators": "Explore curators",
       "totalDeposited": "Total deposited",
       "estimatedValue": "Estimated value",
       "projectedYearlyYield": "Projected yearly yield",

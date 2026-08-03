@@ -145,15 +145,24 @@ function PositionsSection() {
               : t("DashboardEarn.overview.positionsDescription")}
           </p>
         </div>
-        <Button asChild className="w-full sm:w-auto">
-          <DashboardNavigationLink
-            href="/dashboard/markets/earn/deposit"
-            data-earn-withdraw-focus-fallback
-          >
-            <PlusIcon />
-            {t("DashboardEarn.overview.newDeposit")}
-          </DashboardNavigationLink>
-        </Button>
+        <div className="flex w-full gap-2 sm:w-auto sm:shrink-0">
+          {positions.length > 0 ? (
+            <Button asChild variant="secondary" className="flex-1 sm:flex-none">
+              <DashboardNavigationLink href="/dashboard/markets/earn/deposit?start=curator">
+                {t("DashboardEarn.overview.exploreCurators")}
+              </DashboardNavigationLink>
+            </Button>
+          ) : null}
+          <Button asChild className="flex-1 sm:flex-none">
+            <DashboardNavigationLink
+              href="/dashboard/markets/earn/deposit"
+              data-earn-withdraw-focus-fallback
+            >
+              <PlusIcon />
+              {t("DashboardEarn.overview.newDeposit")}
+            </DashboardNavigationLink>
+          </Button>
+        </div>
       </div>
 
       {positions.length > 0 ? (
@@ -169,7 +178,7 @@ function PositionsSection() {
             ))}
           </dl>
 
-          <ul className="mt-6 grid gap-4">
+          <ul className="mt-5 grid gap-2.5">
             {groups.map((group) => {
               const curatorName =
                 group.curatorId === "unknown"
@@ -177,72 +186,49 @@ function PositionsSection() {
                   : earnCuratorLabel(group.curatorId);
               const blendedApy =
                 group.deposited > 0 ? group.projectedYearlyYield / group.deposited : 0;
+              const canWithdraw =
+                group.curatorId !== "unknown" &&
+                group.positions.every((entry) => entry.strategy !== undefined);
               return (
-                <li
-                  key={group.curatorId}
-                  className="overflow-hidden rounded-xl border border-border-default bg-surface-raised"
-                >
-                  <div className="p-5">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <h3 className="text-sm font-medium text-primary">{curatorName}</h3>
+                <li key={group.curatorId}>
+                  <details className="sdp-collapse group/drawer overflow-hidden rounded-xl border border-border-default bg-surface-raised">
+                    <summary className="flex min-h-16 cursor-pointer list-none items-center gap-4 px-5 py-3 transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 motion-reduce:transition-none [&::-webkit-details-marker]:hidden">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-primary">{curatorName}</p>
                         <p className="mt-0.5 text-xs text-tertiary">
                           {t("DashboardEarn.overview.holdingsCount", {
                             count: group.positions.length,
-                          })}
+                          })}{" "}
+                          · {t("DashboardEarn.overview.curatorManaged")}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs text-secondary">
-                          {t("DashboardEarn.overview.curatorManaged")}
-                        </p>
-                        {group.curatorId !== "unknown" &&
-                        group.positions.every((entry) => entry.strategy !== undefined) ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            aria-label={t("DashboardEarn.overview.withdrawFromCurator", {
-                              curator: curatorName,
-                            })}
-                            onClick={() => setWithdrawCuratorId(group.curatorId)}
-                          >
-                            {t("DashboardEarn.overview.withdraw")}
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                    <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
-                      <div>
-                        <dt className="text-xs text-tertiary">
-                          {t("DashboardEarn.overview.totalDeposited")}
-                        </dt>
-                        <dd className="mt-1 text-sm text-primary tabular-nums">
-                          {formatUsd(group.deposited)}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-tertiary">
-                          {t("DashboardEarn.overview.estimatedValue")}
-                        </dt>
-                        <dd className="mt-1 text-sm text-primary tabular-nums">
+                      <div className="hidden items-baseline gap-5 tabular-nums sm:flex">
+                        <span className="text-sm text-primary">
                           {formatUsd(group.currentValue)}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-tertiary">
-                          {t("DashboardEarn.overview.indicativeBlendedApy")}
-                        </dt>
-                        <dd className="mt-1 text-sm text-primary tabular-nums">
+                        </span>
+                        <span className="w-14 text-right text-sm text-secondary">
                           {formatApy(String(blendedApy))}
-                        </dd>
+                        </span>
                       </div>
-                    </dl>
-                  </div>
-
-                  <details className="sdp-collapse group/drawer border-t border-border-subtle">
-                    <DrawerSummary>
-                      <span>{t("DashboardEarn.overview.viewStrategyHoldings")}</span>
-                    </DrawerSummary>
+                      {canWithdraw ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          aria-label={t("DashboardEarn.overview.withdrawFromCurator", {
+                            curator: curatorName,
+                          })}
+                          onClick={(event) => {
+                            // Keep the row's disclosure from toggling on withdraw.
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setWithdrawCuratorId(group.curatorId);
+                          }}
+                        >
+                          {t("DashboardEarn.overview.withdraw")}
+                        </Button>
+                      ) : null}
+                      <ChevronDownIcon className="size-4 shrink-0 text-tertiary transition-transform duration-200 group-open/drawer:rotate-180 motion-reduce:transition-none" />
+                    </summary>
                     <ul className="divide-y divide-border-subtle border-t border-border-subtle">
                       {group.positions.map(({ position, strategy }) => (
                         <li
@@ -398,9 +384,20 @@ function ProgramMetaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * The full curator catalogue, shown as the onboarding hero only while there are
+ * no positions. Once funds are in, curator discovery moves to the "Explore
+ * curators" action in the positions header (curator-first deposit flow), so the
+ * overview stays focused on the portfolio rather than burying it below a grid.
+ */
 function CuratorProgramsSection() {
   const t = useTranslations();
   const liquidityLabel = useLiquidityLabel();
+  const positions = useMockEarnPositions();
+
+  if (positions.length > 0) {
+    return null;
+  }
 
   return (
     <section>
