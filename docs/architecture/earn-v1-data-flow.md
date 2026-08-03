@@ -5,7 +5,10 @@ scaffold on `earn-initial` shows the *shape*; this doc shows where every piece
 of data comes from **in the real build**, and which existing SDP components
 Earn rides on instead of rebuilding. Rule of thumb: **Earn adds a domain, not
 a platform** — auth, tenancy, custody, signing, fees, RPC, webhooks, cron,
-compliance, policies, and audit all already exist and are reused.
+compliance, policies, and audit all already exist and are reused. For the
+step-by-step of changing what Earn offers (provider / vault / category /
+custodian), see the
+[Earn pluggability playbook](../contributing/earn-pluggability-playbook.md).
 
 ## System context
 
@@ -52,7 +55,7 @@ flowchart LR
 
 | Surface | Serving read | Fed by | Freshness |
 |---|---|---|---|
-| Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`) | Sync cadence (e.g. hourly) + on-demand refresh |
+| Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) |
 | APY / NAV / TVL | `earn_nav_snapshots` (DB time series) | NAV cron ← provider `getNav` **and/or** on-chain share-price read via RPC relay (open decision below) | Cron cadence (e.g. 15m) |
 | Positions | `earn_positions` (DB ledger) | Written by execution path; **verified** against on-chain share-token balances via Helius DAS / RPC (reconciliation cron) | Ledger = immediate; reconcile = cron |
 | Deposits/withdrawals | `earn_movements` (DB ledger) | Execution endpoints write `pending`; settled via provider webhook (primary) + status-poll cron (backstop) — same ack-then-reconcile shape as ramps | Webhook ≈ real-time |
@@ -107,13 +110,13 @@ pending redemption, settles on the provider's T+n webhook (or poll).
 |---|---|---|---|
 | Auth + API keys + permissions | `middleware/auth.ts`, `@sdp/types/permissions` | `earn:read`/`earn:write` gating, partner `sk_live` access | ✅ wired in scaffold |
 | Org/project tenancy | `projectContextMiddleware` | Position/movement scoping | ✅ wired |
-| Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable, env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
-| Custody + signing | `services/domain/signing.service.ts`, `@sdp/custody` | Signing deposits/withdrawals from org wallets | 🔨 execution phase — extend `SigningMetadata.operationType` (closed union at `packages/sdp-custody/src/signing.ts:99`) with earn ops |
+| Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable (override-only: every org needs an explicit `providerOverrides.earn.<id>`), env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
+| Custody + signing | `services/domain/signing.service.ts`, `@sdp/custody` | Signing deposits/withdrawals from org wallets — full-signing custodians (Fireblocks, ...) work as-is; Anchorage is lifecycle-only today (playbook §5) | 🔨 execution phase — extend `SigningMetadata.operationType` (closed union at `packages/sdp-custody/src/signing.ts:99`) with earn ops |
 | Fee sponsorship | `@sdp/payments/fee-payment` (Kora) | Sponsored fees on earn txs (same as payments) | 🔨 execution phase |
 | RPC relay (org-selected providers) | `@sdp/rpc` (`packages/sdp-rpc/src/relay.ts`) | On-chain reads: share balances, tx confirmation, optional NAV cross-check | 🔨 NAV/reconcile phase |
 | Helius DAS | `services/helius-das.service.ts` | Share-token balance reads for position reconciliation (the "indexer-lite") | 🔨 reconcile phase |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events (`EarnSettlementEvent`, mirrors `RampSettlementEvent`) | 🔨 per-provider processors |
-| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts`; precedent `cron/pending-transfers.ts` | Catalogue sync, NAV snapshots, movement reconciliation | 🔨 net-new tasks on existing rails |
+| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts`; precedent `cron/pending-transfers.ts` | Catalogue sync, NAV snapshots, movement reconciliation | ✅ catalogue sync (`cron/earn-catalogue-sync.ts`, hourly, gated on `EARN_ENABLED`) · 🔨 NAV + reconcile tasks |
 | Idempotency | `middleware/idempotency-key.ts` + `earn_movements.external_id` unique index | Partner-safe deposit/withdraw retries | ✅ schema ready |
 | Compliance providers | `services/compliance/`, compliance family | RWA strategy KYC / depositor checks (open decision) | ⏸ decision pending |
 | Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Graft point for doc's risk tooling (whitelists, buffers, limits, timelocks, maker-checker) | ⏸ the audit's flagged gap — decide V1 vs later |
@@ -121,8 +124,11 @@ pending redemption, settles on the provider's T+n webhook (or poll).
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
 | OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public `/v1/earn` reference when flag flips | ⏸ deliberately deferred |
 
-**Net-new (Earn-only) components:** the four provider HTTP clients in
-`@sdp/earn`, catalogue-sync + NAV cron tasks, earn webhook processors, the
+**Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
+(today `StubEarnClient` subclasses carrying `provider` + `declaredSupport`,
+filled in method-by-method), the catalogue-sync cron
+(`cron/earn-catalogue-sync.ts`) + dev seed (`db:seed:earn` →
+`scripts/seed-earn-demo.ts`), the NAV cron task, earn webhook processors, the
 execution endpoints + `/movements/:id/submit`, and the dashboard's swap from
 mock fixtures to the BFF (single seam: `earn-mock-data.ts`).
 

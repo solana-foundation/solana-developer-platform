@@ -31,21 +31,29 @@ funds in a strategy whose provider was switched off.
 3. **Vault-infra providers — compiler-guided code change.** Adding an id to
    `EARN_PROVIDERS` (`@sdp/types/provider-access`) intentionally breaks the
    build until every `satisfies Record<EarnProviderId, ...>` map is filled:
-   the client registry (`EARN_PROVIDER_CLIENTS` in `@sdp/earn`), entitlement
-   defaults, and the availability definitions
-   (`provider-availability.service.ts`). The compiler enumerates every
-   registration point, so "a lot of lift" is replaced by "follow the type
-   errors". Full checklist:
+   the client registry (`EARN_PROVIDER_CLIENTS` in `@sdp/earn`) and the
+   availability definitions (`provider-availability.service.ts`). The
+   compiler enumerates every registration point, so "a lot of lift" is
+   replaced by "follow the type errors". Full checklist:
    - `packages/sdp-types/src/provider-access.ts` — add the id to
-     `EARN_PROVIDERS`; fill the entitlement defaults the build now demands.
-   - `packages/sdp-earn/src/providers/<id>/client.ts` — implement
-     `EarnVaultProvider` (stub methods may throw `notImplemented`).
+     `EARN_PROVIDERS` (entitlement is override-only; there is no tier
+     default list to fill).
+   - `packages/sdp-earn/src/providers/<id>/client.ts` — subclass
+     `StubEarnClient` (`providers/stub.ts`), declaring only the `provider`
+     literal and `declaredSupport`; every operation throws `NOT_IMPLEMENTED`
+     until the integration overrides it.
    - `packages/sdp-earn/src/index.ts` — register in `EARN_PROVIDER_CLIENTS`
-     (+ `package.json` exports entry for the new subpath).
-   - `apps/sdp-api/src/services/provider-availability.service.ts` — add the
-     `earn.<id>` availability definition (sandbox/production key pair).
-   - `apps/sdp-api/src/types/env.d.ts`, `turbo.json` `globalEnv`,
-     `scripts/secret-keys.mjs` — declare the credential keys (+ Doppler).
+     (+ `package.json` exports entry for the new subpath). Guarded by the
+     registry-consistency test in `packages/sdp-earn/src/index.test.ts`.
+   - `apps/sdp-api/src/services/provider-availability.service.ts` — one
+     line: `<id>: keyPairCredentialDefinition("<Label>", "<ID>")`.
+   - `apps/sdp-api/src/types/env.d.ts` (compile-enforced by the helper),
+     `turbo.json` `globalEnv`, `scripts/secret-keys.mjs` — declare
+     `<ID>_API_KEY` / `<ID>_SANDBOX_API_KEY` (+ Doppler). The latter two are
+     guarded by `provider-availability.drift.test.ts`.
+
+   The followable walk-through, with verify steps, lives in the
+   [Earn pluggability playbook](../contributing/earn-pluggability-playbook.md).
 
 ### Enable/disable without breakage
 
@@ -55,10 +63,14 @@ Independent switches, all runtime-safe:
   `configured: false` — hidden from availability and blocked at quote time
   with a clean 503. Removing a key disables the provider for that deployment;
   no code change.
-- **Org-level entitlement:** tier defaults + `providerOverrides.earn` allow
-  per-organization enable/disable, same as ramps.
+- **Org-level entitlement:** earn providers are override-only — the general
+  defaults enable none (`createBooleanRecord(EARN_PROVIDERS, [])`), so every
+  organization requires an explicit `providerOverrides.earn.<id>` (manual
+  activation), unlike ramps which are on by default.
 - **Strategy status:** `active | paused | deprecated` gates individual
-  strategies without touching the provider.
+  strategies without touching the provider. Catalogue sync re-asserts
+  `active` for references the provider still lists, so the durable removal
+  path is provider delisting — see the playbook's vault checklist.
 - **Feature flag:** the whole `/v1/earn` family sits behind `EARN_ENABLED`.
 
 ### Invariants that make disabling safe
@@ -87,3 +99,35 @@ Independent switches, all runtime-safe:
 - Deviation to note: the strategy catalogue is platform-global (carries an
   `environment` column) rather than org/project-scoped — see the header of
   migration `0034_earn.sql`.
+
+## Addendum — 2026-08-03 backend hardening
+
+Amendments from the earn-initial backend-tightening pass; the decision above
+stands, these tighten how it is enforced:
+
+- **Shared stub base.** The four byte-identical provider stubs collapsed into
+  an abstract `StubEarnClient` (`packages/sdp-earn/src/providers/stub.ts`);
+  a concrete client now declares only its `provider` literal and
+  `declaredSupport`, and an integration lands method-by-method by overriding.
+- **Declared support validates the catalogue.** Each client's
+  `declaredSupport` (source kinds + deposit-token symbols) is checked by
+  `isStrategyWithinDeclaredSupport` (`packages/sdp-earn/src/support.ts`)
+  during catalogue sync. The symbol→mint bridge goes through
+  `WELL_KNOWN_TOKEN_BY_MINT` and fails closed: unknown or empty mint lists
+  are out of support, so drifted snapshots are skipped, never persisted.
+- **Checklist steps are now test-enforced.** Registry/`package.json`-export
+  consistency: `packages/sdp-earn/src/index.test.ts`. Credential-key
+  projections into `turbo.json` and `scripts/secret-keys.mjs`:
+  `apps/sdp-api/src/services/provider-availability.drift.test.ts`. The
+  availability entry itself shrank to a one-line
+  `keyPairCredentialDefinition` call that binds its derived env keys to
+  `keyof Env`, making `env.d.ts` drift a compile error.
+- **Entitlement corrected to override-only.** Earn no longer participates in
+  tier defaults; providers are disabled for every org until an explicit
+  `providerOverrides.earn.<id>` (see the enable/disable section above).
+- **Naming.** `EarnRuntimeContext.mode` was renamed to `environment` to match
+  the rest of Earn (`packages/sdp-earn/src/types.ts`; sole producer
+  `apps/sdp-api/src/routes/earn/context.ts`).
+
+Operational checklists (provider / vault / category / custodian) live in the
+[Earn pluggability playbook](../contributing/earn-pluggability-playbook.md).
