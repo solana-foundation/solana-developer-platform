@@ -39,6 +39,8 @@ export type NavItem = {
   badge?: number;
   external?: boolean;
   children?: SubNavItem[];
+  /** Marks the children as a collapsible disclosure group (chevron + persisted open state). */
+  subnavKey?: DashboardSubnavKey;
 };
 
 export type NavSection = {
@@ -46,10 +48,25 @@ export type NavSection = {
   items: NavItem[];
 };
 
-export const PAYMENTS_SUBNAV_IDS = {
-  desktop: "payments-subnav-desktop",
-  mobile: "payments-subnav-mobile",
+/**
+ * Collapsible sidebar groups. Every group behaves identically: chevron
+ * toggle, open state persisted per group, and open-by-default when the
+ * current route lives under `pathPrefix`.
+ */
+export const DASHBOARD_SUBNAV_GROUPS = {
+  payments: { pathPrefix: "/dashboard/payments" },
+  markets: { pathPrefix: "/dashboard/markets" },
 } as const;
+
+export type DashboardSubnavKey = keyof typeof DASHBOARD_SUBNAV_GROUPS;
+
+export function dashboardSubnavId(key: DashboardSubnavKey, variant: "desktop" | "mobile"): string {
+  return `${key}-subnav-${variant}`;
+}
+
+export function dashboardSubnavStorageKey(key: DashboardSubnavKey): string {
+  return `sdp.dashboard.${key}-subnav-open`;
+}
 
 export function getPaymentsActions(
   t: ReturnType<typeof useTranslations>,
@@ -135,6 +152,7 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.payments,
           icon: ArrowLeftRightIcon,
           children: getPaymentsActions(t, options.privateChannelsEnabled),
+          subnavKey: "payments",
         },
         ...(isEarnUiEnabled()
           ? [
@@ -148,6 +166,7 @@ export function getNavSections(
                     href: DASHBOARD_SIDE_NAV_HREFS.markets,
                   },
                 ],
+                subnavKey: "markets" as const,
               },
             ]
           : []),

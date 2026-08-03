@@ -200,8 +200,8 @@
     "approvals": "Approbations",
     "pendingApprovals": "{count} approbations en attente",
     "colorTheme": "Thème de couleur",
-    "expandPaymentsMenu": "Développer le menu Paiements",
-    "collapsePaymentsMenu": "Réduire le menu Paiements",
+    "expandSectionMenu": "Développer le menu {section}",
+    "collapseSectionMenu": "Réduire le menu {section}",
     "backToWallet": "Retour au Wallet",
     "walletControls": "Contrôles du Wallet",
     "backToApprovals": "Retour aux approbations"

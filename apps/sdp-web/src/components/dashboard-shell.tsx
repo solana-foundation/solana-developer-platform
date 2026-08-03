@@ -65,11 +65,14 @@ import {
 import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
 import { DashboardMoreSheet } from "@/components/dashboard-more-sheet";
 import {
+  DASHBOARD_SUBNAV_GROUPS,
+  type DashboardSubnavKey,
+  dashboardSubnavId,
+  dashboardSubnavStorageKey,
   docsHref,
   getNavSections,
   type NavItem,
   type NavSection,
-  PAYMENTS_SUBNAV_IDS,
 } from "@/components/dashboard-nav";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
@@ -205,8 +208,8 @@ function SidebarGroup({
   onNavigate,
   isCollapsed,
   showTopSeparator,
-  paymentsSubnavOpen,
-  onPaymentsSubnavToggle,
+  openSubnavs,
+  onSubnavToggle,
   variant,
 }: {
   title: string;
@@ -215,8 +218,8 @@ function SidebarGroup({
   onNavigate?: () => void;
   isCollapsed: boolean;
   showTopSeparator: boolean;
-  paymentsSubnavOpen: boolean;
-  onPaymentsSubnavToggle: () => void;
+  openSubnavs: Record<DashboardSubnavKey, boolean>;
+  onSubnavToggle: (key: DashboardSubnavKey) => void;
   variant: "desktop" | "mobile";
 }) {
   const t = useTranslations();
@@ -241,10 +244,10 @@ function SidebarGroup({
         {items.map((item) => {
           const Icon = item.icon;
           const active = isDashboardNavItemActive(pathname, item.href);
-          const isPaymentsGroup = item.href === DASHBOARD_SIDE_NAV_HREFS.payments;
+          const subnavKey = item.subnavKey;
           const showChildren = !isCollapsed && item.children && item.children.length > 0;
-          const childrenExpanded = isPaymentsGroup ? paymentsSubnavOpen : true;
-          const subnavId = isPaymentsGroup ? PAYMENTS_SUBNAV_IDS[variant] : undefined;
+          const childrenExpanded = subnavKey ? openSubnavs[subnavKey] : true;
+          const subnavId = subnavKey ? dashboardSubnavId(subnavKey, variant) : undefined;
 
           return (
             <div key={item.label}>
@@ -264,7 +267,7 @@ function SidebarGroup({
                     navItemBase,
                     active ? navItemActive : navItemInactive,
                     isCollapsed && "justify-center",
-                    isPaymentsGroup && !isCollapsed && "pr-11"
+                    subnavKey && !isCollapsed && "pr-11"
                   )}
                 >
                   <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
@@ -285,23 +288,24 @@ function SidebarGroup({
                     />
                   ) : null}
                 </DashboardNavigationLink>
-                {isPaymentsGroup && !isCollapsed ? (
+                {subnavKey && !isCollapsed ? (
                   <button
                     type="button"
-                    aria-expanded={paymentsSubnavOpen}
+                    aria-expanded={childrenExpanded}
                     aria-controls={subnavId}
                     aria-label={t(
-                      paymentsSubnavOpen
-                        ? "Shared.dashboardShell.collapsePaymentsMenu"
-                        : "Shared.dashboardShell.expandPaymentsMenu"
+                      childrenExpanded
+                        ? "Shared.dashboardShell.collapseSectionMenu"
+                        : "Shared.dashboardShell.expandSectionMenu",
+                      { section: item.label }
                     )}
-                    onClick={onPaymentsSubnavToggle}
+                    onClick={() => onSubnavToggle(subnavKey)}
                     className="absolute right-1 inline-flex size-9 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong hover:text-primary"
                   >
                     <ChevronDownIcon
                       className={cn(
                         "size-4 transition-transform motion-reduce:transition-none",
-                        !paymentsSubnavOpen && "-rotate-90"
+                        !childrenExpanded && "-rotate-90"
                       )}
                     />
                   </button>
@@ -368,8 +372,8 @@ function DashboardSidebarContent({
   isCollapsed,
   variant,
   onOrganizationSwitchingChange,
-  paymentsSubnavOpen,
-  onPaymentsSubnavToggle,
+  openSubnavs,
+  onSubnavToggle,
 }: {
   bottomNavItems: NavItem[];
   navSections: NavSection[];
@@ -379,8 +383,8 @@ function DashboardSidebarContent({
   isCollapsed: boolean;
   variant: "desktop" | "mobile";
   onOrganizationSwitchingChange: (isSwitching: boolean) => void;
-  paymentsSubnavOpen: boolean;
-  onPaymentsSubnavToggle: () => void;
+  openSubnavs: Record<DashboardSubnavKey, boolean>;
+  onSubnavToggle: (key: DashboardSubnavKey) => void;
 }) {
   const t = useTranslations();
   const showMobileClose = variant === "mobile";
@@ -419,8 +423,8 @@ function DashboardSidebarContent({
             onNavigate={onNavigate}
             isCollapsed={isCollapsed}
             showTopSeparator={idx > 0}
-            paymentsSubnavOpen={paymentsSubnavOpen}
-            onPaymentsSubnavToggle={onPaymentsSubnavToggle}
+            openSubnavs={openSubnavs}
+            onSubnavToggle={onSubnavToggle}
             variant={variant}
           />
         ))}
@@ -481,10 +485,14 @@ export function DashboardShell({
     toSearch: string;
   } | null>(null);
   const [pendingApprovalCount, setPendingApprovalCount] = useState<number | null>(null);
-  const [paymentsSubnavOpen, setPaymentsSubnavOpen] = useState(() =>
-    pathname.startsWith("/dashboard/payments")
-  );
-  const paymentsSubnavHydratedRef = useRef(false);
+  const [openSubnavs, setOpenSubnavs] = useState<Record<DashboardSubnavKey, boolean>>(() => {
+    const initial = {} as Record<DashboardSubnavKey, boolean>;
+    for (const [key, group] of Object.entries(DASHBOARD_SUBNAV_GROUPS)) {
+      initial[key as DashboardSubnavKey] = pathname.startsWith(group.pathPrefix);
+    }
+    return initial;
+  });
+  const subnavHydratedRef = useRef(false);
   const previousPathnameRef = useRef(pathname);
   const pendingNavigationPathname =
     pendingNavigation?.fromPathname === pathname ? pendingNavigation.toPathname : null;
@@ -581,18 +589,24 @@ export function DashboardShell({
   }, [router, shouldRedirectToOnboarding]);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("sdp.dashboard.payments-subnav-open");
-    if (stored === "true" || stored === "false") {
-      setPaymentsSubnavOpen(stored === "true");
-    }
-    paymentsSubnavHydratedRef.current = true;
+    setOpenSubnavs((current) => {
+      const next = { ...current };
+      for (const key of Object.keys(DASHBOARD_SUBNAV_GROUPS) as DashboardSubnavKey[]) {
+        const stored = window.localStorage.getItem(dashboardSubnavStorageKey(key));
+        if (stored === "true" || stored === "false") {
+          next[key] = stored === "true";
+        }
+      }
+      return next;
+    });
+    subnavHydratedRef.current = true;
   }, []);
 
-  const togglePaymentsSubnav = () => {
-    setPaymentsSubnavOpen((current) => {
-      const next = !current;
-      if (paymentsSubnavHydratedRef.current) {
-        window.localStorage.setItem("sdp.dashboard.payments-subnav-open", String(next));
+  const toggleSubnav = (key: DashboardSubnavKey) => {
+    setOpenSubnavs((current) => {
+      const next = { ...current, [key]: !current[key] };
+      if (subnavHydratedRef.current) {
+        window.localStorage.setItem(dashboardSubnavStorageKey(key), String(next[key]));
       }
       return next;
     });
@@ -749,8 +763,8 @@ export function DashboardShell({
             isCollapsed={!isSidebarOpen}
             variant="desktop"
             onOrganizationSwitchingChange={setOrganizationSwitching}
-            paymentsSubnavOpen={paymentsSubnavOpen}
-            onPaymentsSubnavToggle={togglePaymentsSubnav}
+            openSubnavs={openSubnavs}
+            onSubnavToggle={toggleSubnav}
           />
           <button
             type="button"
@@ -804,8 +818,8 @@ export function DashboardShell({
                 isCollapsed={false}
                 variant="mobile"
                 onOrganizationSwitchingChange={setOrganizationSwitching}
-                paymentsSubnavOpen={paymentsSubnavOpen}
-                onPaymentsSubnavToggle={togglePaymentsSubnav}
+                openSubnavs={openSubnavs}
+                onSubnavToggle={toggleSubnav}
               />
             </div>
           </div>
