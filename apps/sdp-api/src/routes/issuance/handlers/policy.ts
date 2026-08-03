@@ -5,7 +5,7 @@ import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
   walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import type { AppContext } from "../helpers";
 
 type IssuancePolicyOperationType = "issuance_mint_execute" | "issuance_update_authority_execute";
