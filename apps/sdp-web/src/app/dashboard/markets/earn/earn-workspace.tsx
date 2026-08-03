@@ -6,9 +6,7 @@ import { useMemo, useState } from "react";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { buildCuratorPrograms } from "./deposit/earn-setup-model";
 import {
   EARN_RISK_TIERS,
   formatApy,
@@ -16,7 +14,6 @@ import {
   formatUsd,
   formatUsdCompact,
   getMockStrategy,
-  MOCK_EARN_STRATEGIES,
   type MockEarnStrategy,
   projectYearlyYield,
   tokenSymbol,
@@ -27,10 +24,16 @@ import {
   useMockEarnPositions,
   useMockEarnRedemptions,
 } from "./earn-mock-positions";
+import {
+  CURATOR_PROGRAMS,
+  curatorApyRange,
+  curatorProfileKey,
+  programAssets,
+  useLiquidityLabel,
+} from "./earn-program-presentation";
 import { EarnCuratorWithdrawModal, EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
-const KNOWN_CURATOR_PROFILE_IDS = new Set(["steakhouse", "gauntlet", "sentora"]);
 
 interface CuratorPositionGroup {
   curatorId: string;
@@ -43,52 +46,7 @@ interface CuratorPositionGroup {
   projectedYearlyYield: number;
 }
 
-const CURATOR_PROGRAMS = buildCuratorPrograms(MOCK_EARN_STRATEGIES);
 const CURATOR_ORDER = new Map(CURATOR_PROGRAMS.map((program, index) => [program.id, index]));
-
-function curatorProfileKey(
-  curatorId: string,
-  field: "headline" | "description" | "bestFor"
-): MessageKey {
-  const profileId = KNOWN_CURATOR_PROFILE_IDS.has(curatorId) ? curatorId : "default";
-  return `DashboardEarn.setup.curatorProfiles.${profileId}.${field}` as MessageKey;
-}
-
-function formatProgramApy(strategies: readonly MockEarnStrategy[]): string {
-  const rates = strategies
-    .map((strategy) => Number(strategy.currentApy))
-    .filter((rate) => Number.isFinite(rate));
-  if (rates.length === 0) return "—";
-  const minimum = Math.min(...rates);
-  const maximum = Math.max(...rates);
-  if (minimum === maximum) return formatApy(String(minimum));
-  return `${formatApy(String(minimum))}–${formatApy(String(maximum))}`;
-}
-
-function programAssets(strategies: readonly MockEarnStrategy[]): string[] {
-  return [
-    ...new Set(
-      strategies.flatMap((strategy) => strategy.depositMints.map((mint) => tokenSymbol(mint)))
-    ),
-  ];
-}
-
-function useLiquidityLabel() {
-  const t = useTranslations();
-  return (strategy: MockEarnStrategy): string => {
-    if (strategy.liquidityTerm === "instant") {
-      return t("DashboardEarn.liquidity.instant");
-    }
-    const days = strategy.redemptionDelayDays ?? 1;
-    if (strategy.intradayFraction) {
-      return t("DashboardEarn.liquidity.mixed", {
-        pct: Math.round(strategy.intradayFraction * 100),
-        days,
-      });
-    }
-    return t("DashboardEarn.liquidity.delayed", { days });
-  };
-}
 
 /** Estimated current value with simple-interest accrual since the deposit. */
 function estimatePositionValue(position: MockEarnPosition): number {
@@ -125,6 +83,16 @@ function groupPositionsByCurator(
     (left, right) =>
       (CURATOR_ORDER.get(left.curatorId) ?? Number.MAX_SAFE_INTEGER) -
       (CURATOR_ORDER.get(right.curatorId) ?? Number.MAX_SAFE_INTEGER)
+  );
+}
+
+/** Shared collapsed-drawer summary styling for card-footer disclosures. */
+function DrawerSummary({ children }: { children: React.ReactNode }) {
+  return (
+    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-5 py-2.5 text-[13px] font-medium text-secondary transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 motion-reduce:transition-none [&::-webkit-details-marker]:hidden">
+      {children}
+      <ChevronDownIcon className="size-4 shrink-0 transition-transform duration-200 group-open/drawer:rotate-180 motion-reduce:transition-none" />
+    </summary>
   );
 }
 
@@ -165,17 +133,19 @@ function PositionsSection() {
   ];
 
   return (
-    <section className="rounded-lg border border-border-default bg-surface-raised p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-sm font-medium text-primary">
+    <section className="rounded-xl border border-border-default bg-surface-raised p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-base font-medium tracking-tight text-primary">
             {t("DashboardEarn.overview.positionsTitle")}
           </h2>
-          <p className="mt-1 text-sm text-secondary">
-            {t("DashboardEarn.overview.positionsDescription")}
+          <p className="mt-1 max-w-xl text-sm leading-6 text-secondary">
+            {positions.length === 0
+              ? t("DashboardEarn.overview.positionsEmpty")
+              : t("DashboardEarn.overview.positionsDescription")}
           </p>
         </div>
-        <Button asChild size="sm" className="w-full sm:w-auto">
+        <Button asChild className="w-full sm:w-auto">
           <DashboardNavigationLink
             href="/dashboard/markets/earn/deposit"
             data-earn-withdraw-focus-fallback
@@ -186,20 +156,20 @@ function PositionsSection() {
         </Button>
       </div>
 
-      {positions.length === 0 ? (
-        <p className="mt-4 text-sm text-tertiary">{t("DashboardEarn.overview.positionsEmpty")}</p>
-      ) : (
+      {positions.length > 0 ? (
         <>
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-3">
             {statTiles.map((tile) => (
-              <div key={tile.id} className="rounded-md border border-border-default p-3">
-                <p className="text-xs text-secondary">{tile.label}</p>
-                <p className="mt-1 text-lg font-medium text-primary">{formatUsd(tile.value)}</p>
+              <div key={tile.id} className="min-w-0 border-t border-border-subtle pt-3">
+                <dt className="text-xs text-tertiary">{tile.label}</dt>
+                <dd className="mt-1 text-2xl font-medium tracking-tight text-primary tabular-nums">
+                  {formatUsd(tile.value)}
+                </dd>
               </div>
             ))}
-          </div>
+          </dl>
 
-          <ul className="mt-3 grid gap-3">
+          <ul className="mt-6 grid gap-4">
             {groups.map((group) => {
               const curatorName =
                 group.curatorId === "unknown"
@@ -212,7 +182,7 @@ function PositionsSection() {
                   key={group.curatorId}
                   className="overflow-hidden rounded-xl border border-border-default bg-surface-raised"
                 >
-                  <div className="p-4">
+                  <div className="p-5">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <h3 className="text-sm font-medium text-primary">{curatorName}</h3>
@@ -246,13 +216,15 @@ function PositionsSection() {
                         <dt className="text-xs text-tertiary">
                           {t("DashboardEarn.overview.totalDeposited")}
                         </dt>
-                        <dd className="mt-1 text-sm text-primary">{formatUsd(group.deposited)}</dd>
+                        <dd className="mt-1 text-sm text-primary tabular-nums">
+                          {formatUsd(group.deposited)}
+                        </dd>
                       </div>
                       <div>
                         <dt className="text-xs text-tertiary">
                           {t("DashboardEarn.overview.estimatedValue")}
                         </dt>
-                        <dd className="mt-1 text-sm text-primary">
+                        <dd className="mt-1 text-sm text-primary tabular-nums">
                           {formatUsd(group.currentValue)}
                         </dd>
                       </div>
@@ -260,23 +232,22 @@ function PositionsSection() {
                         <dt className="text-xs text-tertiary">
                           {t("DashboardEarn.overview.indicativeBlendedApy")}
                         </dt>
-                        <dd className="mt-1 text-sm text-primary">
+                        <dd className="mt-1 text-sm text-primary tabular-nums">
                           {formatApy(String(blendedApy))}
                         </dd>
                       </div>
                     </dl>
                   </div>
 
-                  <details className="group border-t border-border-subtle">
-                    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 [&::-webkit-details-marker]:hidden">
+                  <details className="sdp-collapse group/drawer border-t border-border-subtle">
+                    <DrawerSummary>
                       <span>{t("DashboardEarn.overview.viewStrategyHoldings")}</span>
-                      <ChevronDownIcon className="size-4 shrink-0 text-secondary transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none" />
-                    </summary>
+                    </DrawerSummary>
                     <ul className="divide-y divide-border-subtle border-t border-border-subtle">
                       {group.positions.map(({ position, strategy }) => (
                         <li
                           key={position.id}
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
+                          className="grid gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
                         >
                           <div className="min-w-0">
                             <p className="text-sm text-primary">
@@ -294,7 +265,7 @@ function PositionsSection() {
                             </p>
                           </div>
                           <div className="sm:text-right">
-                            <p className="text-sm text-primary">
+                            <p className="text-sm text-primary tabular-nums">
                               {formatUsd(estimatePositionValue(position))}
                             </p>
                             <p className="mt-0.5 text-xs text-secondary">
@@ -323,7 +294,7 @@ function PositionsSection() {
             })}
           </ul>
         </>
-      )}
+      ) : null}
 
       {withdrawTarget && withdrawStrategy ? (
         <EarnWithdrawModal
@@ -353,14 +324,14 @@ function RedemptionsSection() {
   }
 
   return (
-    <section className="rounded-lg border border-border-default bg-surface-raised p-4">
-      <h2 className="text-sm font-medium text-primary">
+    <section className="rounded-xl border border-border-default bg-surface-raised p-6">
+      <h2 className="text-base font-medium tracking-tight text-primary">
         {t("DashboardEarn.overview.redemptionsTitle")}
       </h2>
-      <p className="mt-1 text-sm text-secondary">
+      <p className="mt-1 max-w-xl text-sm leading-6 text-secondary">
         {t("DashboardEarn.overview.redemptionsDescription")}
       </p>
-      <ul className="mt-3 divide-y divide-border-default rounded-md border border-border-default">
+      <ul className="mt-4 divide-y divide-border-subtle rounded-lg border border-border-subtle">
         {redemptions.map((redemption) => {
           const strategy = getMockStrategy(redemption.strategyId);
           const curatorName = strategy
@@ -392,7 +363,7 @@ function RedemptionsSection() {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3 sm:justify-end">
-                <p className="text-sm text-primary">
+                <p className="text-sm text-primary tabular-nums">
                   {formatTokenAmount(redemption.amount, redemption.tokenMint)}
                 </p>
                 <Badge variant={settled ? "success" : "warning"}>
@@ -418,20 +389,31 @@ function RedemptionsSection() {
   );
 }
 
+function ProgramMetaRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 border-t border-border-subtle py-2.5">
+      <dt className="shrink-0 text-xs text-tertiary">{label}</dt>
+      <dd className="text-right text-[13px] leading-5 text-primary">{value}</dd>
+    </div>
+  );
+}
+
 function CuratorProgramsSection() {
   const t = useTranslations();
   const liquidityLabel = useLiquidityLabel();
 
   return (
-    <section className="rounded-lg border border-border-default bg-surface-raised p-4">
-      <h2 className="text-sm font-medium text-primary">
-        {t("DashboardEarn.overview.curatorsTitle")}
-      </h2>
-      <p className="mt-1 max-w-3xl text-sm leading-6 text-secondary">
-        {t("DashboardEarn.overview.curatorsDescription")}
-      </p>
+    <section>
+      <div className="max-w-2xl">
+        <h2 className="text-base font-medium tracking-tight text-primary">
+          {t("DashboardEarn.overview.curatorsTitle")}
+        </h2>
+        <p className="mt-1 text-sm leading-6 text-secondary">
+          {t("DashboardEarn.overview.curatorsDescription")}
+        </p>
+      </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-5 grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
         {CURATOR_PROGRAMS.map((program) => {
           const riskTiers = EARN_RISK_TIERS.filter((tier) =>
             program.strategies.some((strategy) => strategy.riskTier === tier)
@@ -451,71 +433,53 @@ function CuratorProgramsSection() {
           return (
             <article
               key={program.id}
-              className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-border-default bg-surface-raised"
+              className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-border-default bg-surface-raised transition-[border-color,box-shadow] duration-200 ease-out hover:border-border-strong hover:shadow-sm motion-reduce:transition-none"
             >
-              <div className="flex flex-1 flex-col p-4">
-                <p className="text-xs font-medium text-tertiary">
-                  {t("DashboardEarn.overview.curatorLabel")}
-                </p>
-                <h3 className="mt-1 text-base font-medium text-primary">{curatorName}</h3>
-                <p className="mt-2 text-sm font-medium leading-5 text-primary">
+              <div className="flex flex-1 flex-col p-5">
+                <h3 className="text-lg font-medium tracking-tight text-primary">{curatorName}</h3>
+                <p className="mt-1 text-sm text-secondary">
                   {t(curatorProfileKey(program.id, "headline"))}
                 </p>
-                <p className="mt-1 text-[13px] leading-5 text-secondary">
+
+                <p className="mt-6 text-2xl font-medium tracking-tight text-primary tabular-nums">
+                  {curatorApyRange(program)}
+                </p>
+                <p className="mt-1 text-xs text-tertiary">
+                  {t("DashboardEarn.overview.indicativeApyRange")}
+                </p>
+
+                <p className="mt-4 text-[13px] leading-5 text-tertiary">
                   {t(curatorProfileKey(program.id, "description"))}
                 </p>
 
-                <div className="mt-4 rounded-lg bg-fill-subtle px-3 py-2.5">
-                  <p className="text-xs text-tertiary">{t("DashboardEarn.overview.bestFor")}</p>
-                  <p className="mt-0.5 text-[13px] leading-5 text-primary">
-                    {t(curatorProfileKey(program.id, "bestFor"))}
-                  </p>
-                </div>
-
-                <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3">
-                  <div>
-                    <dt className="text-xs text-tertiary">
-                      {t("DashboardEarn.overview.indicativeApyRange")}
-                    </dt>
-                    <dd className="mt-1 text-sm text-primary">
-                      {formatProgramApy(program.strategies)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-tertiary">
-                      {t("DashboardEarn.overview.riskRange")}
-                    </dt>
-                    <dd className="mt-1 text-sm text-primary">{riskRange}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-tertiary">
-                      {t("DashboardEarn.overview.liquidityRange")}
-                    </dt>
-                    <dd className="mt-1 text-sm leading-5 text-primary">
-                      {liquidities.join(" · ")}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-tertiary">
-                      {t("DashboardEarn.overview.fundingAssets")}
-                    </dt>
-                    <dd className="mt-1 text-sm leading-5 text-primary">{assets.join(", ")}</dd>
-                  </div>
+                <dl className="mt-6">
+                  <ProgramMetaRow
+                    label={t("DashboardEarn.overview.bestFor")}
+                    value={t(curatorProfileKey(program.id, "bestFor"))}
+                  />
+                  <ProgramMetaRow label={t("DashboardEarn.overview.riskRange")} value={riskRange} />
+                  <ProgramMetaRow
+                    label={t("DashboardEarn.overview.liquidityRange")}
+                    value={liquidities.join(" · ")}
+                  />
+                  <ProgramMetaRow
+                    label={t("DashboardEarn.overview.fundingAssets")}
+                    value={assets.join(", ")}
+                  />
                 </dl>
               </div>
 
-              <details className="group border-t border-border-subtle">
-                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 [&::-webkit-details-marker]:hidden">
+              <details className="sdp-collapse group/drawer mt-auto border-t border-border-subtle">
+                <DrawerSummary>
                   <span>
                     {t("DashboardEarn.overview.underlyingHoldings", {
                       count: program.strategies.length,
                     })}
                   </span>
-                  <ChevronDownIcon className="size-4 shrink-0 text-secondary transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none" />
-                </summary>
+                </DrawerSummary>
                 <ul className="divide-y divide-border-subtle border-t border-border-subtle bg-fill-subtle/50">
                   {program.strategies.map((strategy) => (
-                    <li key={strategy.id} className="px-4 py-3">
+                    <li key={strategy.id} className="px-5 py-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-sm text-primary">{strategy.name}</p>
@@ -524,7 +488,7 @@ function CuratorProgramsSection() {
                             {t(`DashboardEarn.risk.${strategy.riskTier}`)}
                           </p>
                         </div>
-                        <p className="shrink-0 text-sm text-primary">
+                        <p className="shrink-0 text-sm text-primary tabular-nums">
                           {formatApy(strategy.currentApy)}
                         </p>
                       </div>
@@ -540,8 +504,8 @@ function CuratorProgramsSection() {
                 </ul>
               </details>
 
-              <div className="p-4">
-                <Button asChild className="w-full">
+              <div className="border-t border-border-subtle p-4">
+                <Button asChild variant="secondary" className="w-full">
                   <DashboardNavigationLink
                     href={`/dashboard/markets/earn/deposit?curator=${encodeURIComponent(program.id)}`}
                   >
@@ -553,7 +517,7 @@ function CuratorProgramsSection() {
           );
         })}
       </div>
-      <p className="mt-4 text-xs leading-5 text-tertiary">
+      <p className="mt-4 max-w-3xl text-xs leading-5 text-muted">
         {t("DashboardEarn.overview.programRateDisclosure")}
       </p>
     </section>
@@ -565,8 +529,8 @@ export function EarnWorkspace() {
 
   return (
     // No root padding: the dashboard shell already pads non-viewport-locked routes.
-    <div className="grid content-start gap-4">
-      <p className="text-xs text-tertiary">{t("DashboardEarn.overview.mockNotice")}</p>
+    <div className="grid content-start gap-6">
+      <p className="text-xs leading-5 text-muted">{t("DashboardEarn.overview.mockNotice")}</p>
       <PositionsSection />
       <RedemptionsSection />
       <CuratorProgramsSection />
