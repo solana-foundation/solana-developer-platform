@@ -6,6 +6,7 @@
 import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import { closeDatabasePools, getDb } from "@/db";
+import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import app from "@/index";
 import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -42,6 +43,7 @@ export const apiTestSupport = {
   KoraAdapter,
   KoraClient,
   seedTestDatabase,
+  SponsorshipBudgetRepository,
   TEST_ORG,
   TEST_PROJECT,
   TEST_PROJECT_API_KEY,
