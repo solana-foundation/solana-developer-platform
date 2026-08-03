@@ -5,15 +5,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const signTransaction = vi.fn();
 const signAndSendTransaction = vi.fn();
+const getPayerSigner = vi.fn();
+const getConfig = vi.fn();
 const fakeClient = {
   signTransaction,
   signAndSendTransaction,
+  getPayerSigner,
+  getConfig,
 } as unknown as KoraClient;
 
 const TX = new Uint8Array([1, 2, 3, 4]);
 
 beforeEach(() => {
   signTransaction.mockReset().mockResolvedValue({ signed_transaction: "AQIDBA==" });
+  getPayerSigner.mockReset().mockResolvedValue({ signer_address: "FeePayer111" });
+  getConfig.mockReset().mockResolvedValue({
+    validation_config: {
+      max_allowed_lamports: 1_000_000,
+      fee_payer_policy: { allow_sol_transfers: false, allow_token_transfers: false },
+    },
+  });
   signAndSendTransaction.mockReset().mockResolvedValue({
     signature: "TEST_SIGNATURE",
     signed_transaction: "AQIDBA==",
@@ -33,8 +44,32 @@ describe("KoraAdapter user_id forwarding", () => {
     });
     await adapter.signAndSend(TX);
     expect(signAndSendTransaction).toHaveBeenCalledWith(
-      expect.objectContaining({ user_id: "usr_abc123" })
+      expect.objectContaining({
+        user_id: "usr_abc123",
+        signer_key: "FeePayer111",
+        respond_after: "sent",
+      })
     );
+  });
+
+  it("uses Kora config instead of free-pricing fee estimates", async () => {
+    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    await expect(adapter.getSponsorshipConfiguration()).resolves.toEqual({
+      signerAddress: "FeePayer111",
+      maxAllowedLamports: 1_000_000n,
+      feePayerMayTransferLamports: false,
+    });
+  });
+
+  it("treats unknown fee-payer policy fields conservatively", async () => {
+    getConfig.mockResolvedValueOnce({
+      validation_config: { max_allowed_lamports: "2000000", fee_payer_policy: {} },
+    });
+    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
+      maxAllowedLamports: 2_000_000n,
+      feePayerMayTransferLamports: true,
+    });
   });
 
   it("forwards user_id on signAsFeePayer when configured", async () => {
@@ -79,6 +114,13 @@ describe("KoraAdapter user_id forwarding", () => {
         Response.json({
           id: 1,
           jsonrpc: "2.0",
+          result: { signer_address: "FeePayer111" },
+        })
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          id: 1,
+          jsonrpc: "2.0",
           result: { signed_transaction: "AQIDBA==" },
         })
       );
@@ -97,7 +139,7 @@ describe("KoraAdapter user_id forwarding", () => {
     const metadataUrl = fetchMock.mock.calls[0]?.[0];
     expect(metadataUrl).toBeInstanceOf(URL);
     expect(String(metadataUrl)).toContain("audience=https%3A%2F%2Fprivate-kora.example");
-    const rpcRequest = fetchMock.mock.calls[1]?.[1];
+    const rpcRequest = fetchMock.mock.calls[2]?.[1];
     expect(rpcRequest?.headers).toMatchObject({
       Authorization: "Bearer header.e30.signature",
       "x-api-key": "kora-api-key",

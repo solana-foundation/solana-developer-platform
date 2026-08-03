@@ -4,8 +4,10 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
+import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
+import { BudgetedFeePayment } from "./sponsorship-budget.service";
 
 export type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
 
@@ -51,7 +53,8 @@ export function buildKoraUserId(scope: SponsorshipScope): string {
 
 /** Owned application boundary for constructing a fee-payment provider. */
 export function createSponsorshipFeePayment(env: Env, scope: SponsorshipScope): FeePaymentPort {
-  return createFeePaymentAdapter(env, buildKoraUserId(scope));
+  const provider = createFeePaymentAdapter(env, buildKoraUserId(scope));
+  return isSelfHostedDeployment(env) ? provider : new BudgetedFeePayment(env, scope, provider);
 }
 
 /**
@@ -60,6 +63,12 @@ export function createSponsorshipFeePayment(env: Env, scope: SponsorshipScope): 
  * bucket instead of bypassing Kora's usage tracker.
  */
 export function createUnscopedSponsorshipFeePayment(env: Env): FeePaymentPort {
+  if (!isSelfHostedDeployment(env)) {
+    throw new AppError(
+      "FORBIDDEN",
+      "Managed sponsorship requires a trusted organization or project scope"
+    );
+  }
   return createFeePaymentAdapter(env);
 }
 

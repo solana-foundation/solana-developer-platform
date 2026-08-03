@@ -15,7 +15,19 @@ import { KoraClient, type KoraClientOptions } from "@solana/kora";
 import type { FeePaymentPort } from "./port";
 import { FeePaymentError } from "./port";
 
-type SignRequest = { transaction: string; user_id: string };
+type SignRequest = {
+  transaction: string;
+  user_id: string;
+  signer_key: string;
+  respond_after?: "sent";
+};
+
+type KoraConfigurationResponse = {
+  validation_config?: {
+    max_allowed_lamports?: number | string;
+    fee_payer_policy?: unknown;
+  };
+};
 
 interface KoraClientTransport {
   getPayerSigner(): Promise<{
@@ -32,6 +44,7 @@ interface KoraClientTransport {
     fee_token: string;
   }): Promise<{ fee_in_lamports: number | string }>;
   getSupportedTokens(): Promise<{ tokens: string[] }>;
+  getConfig?(): Promise<KoraConfigurationResponse>;
 }
 
 export type KoraAdapterConfig = KoraClientOptions & {
@@ -148,7 +161,7 @@ export class KoraAdapter implements FeePaymentPort {
       const base64Tx = encodeBase64(transaction);
 
       const { signed_transaction } = await this.client.signTransaction(
-        this.buildSignRequest(base64Tx)
+        await this.buildSignRequest(base64Tx)
       );
 
       return decodeBase64(signed_transaction);
@@ -172,7 +185,7 @@ export class KoraAdapter implements FeePaymentPort {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const { signature: submittedSignature, signed_transaction } =
-          await this.client.signAndSendTransaction(this.buildSignRequest(base64Tx));
+          await this.client.signAndSendTransaction(await this.buildSignRequest(base64Tx, true));
 
         if (submittedSignature) {
           return submittedSignature as Signature;
@@ -235,13 +248,51 @@ export class KoraAdapter implements FeePaymentPort {
     }
   }
 
+  async getSponsorshipConfiguration(): Promise<import("./port").SponsorshipProviderConfiguration> {
+    if (!this.client.getConfig) {
+      throw new FeePaymentError(
+        "Kora does not expose getConfig; sponsorship admission cannot fail closed",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    try {
+      const [signerAddress, response] = await Promise.all([
+        this.getFeePayer(),
+        this.client.getConfig(),
+      ]);
+      const value = response.validation_config?.max_allowed_lamports;
+      if (value === undefined) {
+        throw new Error("Kora getConfig omitted validation_config.max_allowed_lamports");
+      }
+      const maxAllowedLamports = BigInt(value);
+      if (maxAllowedLamports < 0n) {
+        throw new Error("Kora returned a negative max_allowed_lamports");
+      }
+      return {
+        signerAddress,
+        maxAllowedLamports,
+        feePayerMayTransferLamports: policyMaySpendLamports(
+          response.validation_config?.fee_payer_policy
+        ),
+      };
+    } catch (error) {
+      if (error instanceof FeePaymentError) throw error;
+      throw this.wrapError(error, "Failed to read Kora sponsorship configuration");
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Private Methods
   // ═══════════════════════════════════════════════════════════════════════════
 
   /** Always attach a quota identity to signing requests. */
-  private buildSignRequest(transaction: string): { transaction: string; user_id: string } {
-    return { transaction, user_id: this.userId };
+  private async buildSignRequest(transaction: string, send = false): Promise<SignRequest> {
+    return {
+      transaction,
+      user_id: this.userId,
+      signer_key: await this.getFeePayer(),
+      ...(send ? { respond_after: "sent" as const } : {}),
+    };
   }
 
   private async resolveFeeToken(): Promise<string> {
@@ -302,6 +353,33 @@ function decodeBase64(base64: string): Uint8Array {
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+/** Only a policy made entirely of explicit `false` flags proves zero outflow. */
+function policyMaySpendLamports(policy: unknown): boolean {
+  let sawBoolean = false;
+  let unsafe = false;
+  const visit = (value: unknown): void => {
+    if (typeof value === "boolean") {
+      sawBoolean = true;
+      if (value) unsafe = true;
+      return;
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) unsafe = true;
+      for (const item of value) visit(item);
+      return;
+    }
+    if (value !== null && typeof value === "object") {
+      const values = Object.values(value);
+      if (values.length === 0) unsafe = true;
+      for (const item of values) visit(item);
+      return;
+    }
+    unsafe = true;
+  };
+  visit(policy);
+  return unsafe || !sawBoolean;
 }
 
 function extractRpcErrorCode(error: unknown): number | undefined {
@@ -399,6 +477,10 @@ class AuthorizedKoraClient implements KoraClientTransport {
     return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["getSupportedTokens"]>>>(
       "getSupportedTokens"
     );
+  }
+
+  getConfig() {
+    return this.rpcRequest<KoraConfigurationResponse>("getConfig");
   }
 
   private async rpcRequest<T>(method: string, params?: unknown): Promise<T> {

@@ -1,0 +1,279 @@
+import { createHash } from "node:crypto";
+import type { Redis } from "ioredis";
+import type {
+  SponsorshipBudgetPolicy,
+  SponsorshipBudgetUsage,
+  SponsorshipNetwork,
+} from "@/db/repositories/sponsorship-budget.repository";
+import type { Env } from "@/types/env";
+import { getRedisClient } from "./kv-redis";
+
+const INITIALIZE_LUA = `
+if redis.call('HGET', KEYS[1], '__initialized') and redis.call('HGET', KEYS[2], '__initialized') then
+  return 0
+end
+local count = tonumber(ARGV[1])
+if not redis.call('HGET', KEYS[1], '__initialized') then
+  for i = 1, count do redis.call('HSET', KEYS[1], ARGV[1 + i], ARGV[1 + count + i]) end
+  redis.call('HSET', KEYS[1], '__initialized', '1')
+  redis.call('PEXPIRE', KEYS[1], ARGV[2 + count * 3])
+end
+if not redis.call('HGET', KEYS[2], '__initialized') then
+  for i = 1, count do redis.call('HSET', KEYS[2], ARGV[1 + i], ARGV[1 + count * 2 + i]) end
+  redis.call('HSET', KEYS[2], '__initialized', '1')
+  redis.call('PEXPIRE', KEYS[2], ARGV[3 + count * 3])
+end
+return 1
+`;
+
+const RESERVE_LUA = `
+local existing = redis.call('GET', KEYS[3])
+if not redis.call('HGET', KEYS[1], '__initialized') or not redis.call('HGET', KEYS[2], '__initialized') then
+  return {-2, 0}
+end
+local amount = tonumber(ARGV[1])
+local count = tonumber(ARGV[2])
+for i = 1, count do
+  local offset = 2 + ((i - 1) * 6)
+  local field = ARGV[offset + 1]
+  local per_tx = tonumber(ARGV[offset + 2])
+  local hour_limit = tonumber(ARGV[offset + 3])
+  local day_limit = tonumber(ARGV[offset + 4])
+  local control_field = ARGV[offset + 5]
+  local expected_version = ARGV[offset + 6]
+  local control = redis.call('HGET', KEYS[4], control_field)
+  if not control or control ~= expected_version .. ':1' then return {-3, i} end
+end
+if existing then return {2, tonumber(existing)} end
+for i = 1, count do
+  local offset = 2 + ((i - 1) * 6)
+  local field = ARGV[offset + 1]
+  local per_tx = tonumber(ARGV[offset + 2])
+  local hour_limit = tonumber(ARGV[offset + 3])
+  local day_limit = tonumber(ARGV[offset + 4])
+  local hour_used = tonumber(redis.call('HGET', KEYS[1], field) or '0')
+  local day_used = tonumber(redis.call('HGET', KEYS[2], field) or '0')
+  if amount > per_tx or hour_used + amount > hour_limit or day_used + amount > day_limit then
+    return {0, i}
+  end
+end
+for i = 1, count do
+  local offset = 2 + ((i - 1) * 6)
+  local field = ARGV[offset + 1]
+  redis.call('HINCRBY', KEYS[1], field, amount)
+  redis.call('HINCRBY', KEYS[2], field, amount)
+end
+redis.call('SET', KEYS[3], amount, 'PX', ARGV[3 + count * 6])
+return {1, amount}
+`;
+
+const SYNC_CONTROL_LUA = `
+local current = redis.call('HGET', KEYS[1], ARGV[1])
+if current then
+  local separator = string.find(current, ':')
+  local current_version = tonumber(string.sub(current, 1, separator - 1))
+  if current_version > tonumber(ARGV[2]) then return 0 end
+end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2] .. ':' .. ARGV[3])
+return 1
+`;
+
+const CANCEL_LUA = `
+local amount = tonumber(redis.call('GET', KEYS[3]) or '0')
+if amount == 0 then return 0 end
+for i = 1, #ARGV do
+  local field = ARGV[i]
+  local hour_used = tonumber(redis.call('HGET', KEYS[1], field) or '0')
+  local day_used = tonumber(redis.call('HGET', KEYS[2], field) or '0')
+  if hour_used < amount or day_used < amount then return -1 end
+end
+for i = 1, #ARGV do
+  local field = ARGV[i]
+  redis.call('HINCRBY', KEYS[1], field, -amount)
+  redis.call('HINCRBY', KEYS[2], field, -amount)
+end
+redis.call('DEL', KEYS[3])
+return amount
+`;
+
+const SCRIPT_SHA = {
+  initialize: createHash("sha1").update(INITIALIZE_LUA).digest("hex"),
+  reserve: createHash("sha1").update(RESERVE_LUA).digest("hex"),
+  cancel: createHash("sha1").update(CANCEL_LUA).digest("hex"),
+  syncControl: createHash("sha1").update(SYNC_CONTROL_LUA).digest("hex"),
+};
+
+export interface BudgetAdmissionInput {
+  network: SponsorshipNetwork;
+  organizationId: string;
+  projectId: string | null;
+  hourBucket: string;
+  dayBucket: string;
+  reservationId: string;
+  amount: number;
+  policies: SponsorshipBudgetPolicy[];
+  usage: { hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage };
+}
+
+export class SponsorshipBudgetRedis {
+  private client: Promise<Redis> | null = null;
+
+  constructor(private readonly env: Pick<Env, "REDIS_URL">) {}
+
+  async reserve(
+    input: BudgetAdmissionInput
+  ): Promise<"admitted" | "duplicate" | "denied" | "stale_policy"> {
+    const client = await this.getClient();
+    const keys = this.keys(input);
+    const fields = this.fields(input.organizationId, input.projectId);
+    const hourUsage = [input.usage.hour.global, input.usage.hour.organization];
+    const dayUsage = [input.usage.day.global, input.usage.day.organization];
+    if (input.projectId) {
+      hourUsage.push(input.usage.hour.project);
+      dayUsage.push(input.usage.day.project);
+    }
+    await this.runScript(
+      client,
+      "initialize",
+      INITIALIZE_LUA,
+      [keys.hour, keys.day],
+      [
+        fields.length,
+        ...fields,
+        ...hourUsage,
+        ...dayUsage,
+        this.ttlUntilNextHour(),
+        this.ttlUntilNextDay(),
+      ]
+    );
+    const policyByScope = new Map(input.policies.map((policy) => [policy.scopeType, policy]));
+    await Promise.all(input.policies.map((policy) => this.syncPolicy(policy)));
+    const args: Array<string | number> = [input.amount, fields.length];
+    for (let index = 0; index < fields.length; index += 1) {
+      const scopeType = index === 0 ? "global" : index === 1 ? "organization" : "project";
+      const policy = policyByScope.get(scopeType);
+      if (!policy) throw new Error(`Missing ${scopeType} sponsorship budget policy`);
+      args.push(
+        fields[index],
+        policy.perTransactionLamports,
+        policy.hourlyLamports,
+        policy.dailyLamports,
+        this.controlField(policy),
+        policy.version
+      );
+    }
+    args.push(this.ttlUntilNextDay());
+    const result = (await this.runScript(
+      client,
+      "reserve",
+      RESERVE_LUA,
+      [keys.hour, keys.day, keys.reservation, keys.control],
+      args
+    )) as [number, number];
+    if (result[0] === 2) return "duplicate";
+    if (result[0] === 1) return "admitted";
+    if (result[0] === -3) return "stale_policy";
+    return "denied";
+  }
+
+  async cancel(input: Omit<BudgetAdmissionInput, "amount" | "policies" | "usage">): Promise<void> {
+    const client = await this.getClient();
+    const keys = this.keys(input);
+    const result = await this.runScript(
+      client,
+      "cancel",
+      CANCEL_LUA,
+      [keys.hour, keys.day, keys.reservation],
+      this.fields(input.organizationId, input.projectId)
+    );
+    if (result === -1) {
+      throw new Error("Sponsorship budget counter invariant violated during compensation");
+    }
+  }
+
+  async syncPolicy(policy: SponsorshipBudgetPolicy): Promise<void> {
+    const client = await this.getClient();
+    const controlKey = `sdp:sponsorship:{${policy.network}}:control`;
+    await this.runScript(
+      client,
+      "syncControl",
+      SYNC_CONTROL_LUA,
+      [controlKey],
+      [this.controlField(policy), policy.version, policy.enabled ? 1 : 0]
+    );
+  }
+
+  async getPolicyControl(
+    policy: SponsorshipBudgetPolicy
+  ): Promise<{ version: number; enabled: boolean } | null> {
+    const client = await this.getClient();
+    const value = await client.hget(
+      `sdp:sponsorship:{${policy.network}}:control`,
+      this.controlField(policy)
+    );
+    if (!value) return null;
+    const [version, enabled] = value.split(":");
+    const parsedVersion = Number(version);
+    if (!Number.isSafeInteger(parsedVersion) || (enabled !== "0" && enabled !== "1")) {
+      throw new Error(`Malformed Redis sponsorship control for ${policy.id}`);
+    }
+    return { version: parsedVersion, enabled: enabled === "1" };
+  }
+
+  private fields(organizationId: string, projectId: string | null): string[] {
+    const fields = ["global", `organization:${organizationId}`];
+    if (projectId) fields.push(`project:${projectId}`);
+    return fields;
+  }
+
+  private getClient(): Promise<Redis> {
+    this.client ??= getRedisClient(this.env);
+    return this.client;
+  }
+
+  private keys(input: {
+    network: SponsorshipNetwork;
+    hourBucket: string;
+    dayBucket: string;
+    reservationId: string;
+  }) {
+    const prefix = `sdp:sponsorship:{${input.network}}`;
+    return {
+      hour: `${prefix}:hour:${input.hourBucket}`,
+      day: `${prefix}:day:${input.dayBucket}`,
+      reservation: `${prefix}:reservation:${input.reservationId}`,
+      control: `${prefix}:control`,
+    };
+  }
+
+  private controlField(policy: SponsorshipBudgetPolicy): string {
+    return `${policy.scopeType}:${policy.scopeId ?? "default"}`;
+  }
+
+  private ttlUntilNextHour(): number {
+    const now = Date.now();
+    return Math.max(60_000, Math.ceil(3_600_000 - (now % 3_600_000) + 3_600_000));
+  }
+
+  private ttlUntilNextDay(): number {
+    const now = Date.now();
+    return Math.max(60_000, Math.ceil(86_400_000 - (now % 86_400_000) + 86_400_000));
+  }
+
+  private async runScript(
+    client: Redis,
+    name: keyof typeof SCRIPT_SHA,
+    source: string,
+    keys: string[],
+    args: Array<string | number>
+  ): Promise<unknown> {
+    try {
+      return await client.evalsha(SCRIPT_SHA[name], keys.length, ...keys, ...args);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("NOSCRIPT")) {
+        return client.eval(source, keys.length, ...keys, ...args);
+      }
+      throw error;
+    }
+  }
+}

@@ -67,6 +67,15 @@ export interface FeePaymentPort {
    * @returns Transaction signature
    */
   signAndSend(transaction: Uint8Array): Promise<Signature>;
+
+  /** Conservative provider-side lamport outflow ceiling used for admission. */
+  getSponsorshipConfiguration?(): Promise<SponsorshipProviderConfiguration>;
+}
+
+export interface SponsorshipProviderConfiguration {
+  signerAddress: Address;
+  maxAllowedLamports: bigint;
+  feePayerMayTransferLamports: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
