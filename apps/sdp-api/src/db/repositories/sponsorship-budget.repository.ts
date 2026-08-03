@@ -343,7 +343,7 @@ export class SponsorshipBudgetRepository {
       (await this.db.execute(
         `UPDATE sponsorship_budget_reservations
        SET status = 'charged_unknown', failure_reason = ?, updated_at = sdp_iso_now()
-       WHERE id = ? AND attempt = ? AND status IN ('reserved', 'signed')`,
+       WHERE id = ? AND attempt = ? AND status IN ('reserved', 'signed', 'submitted')`,
         [reason.slice(0, 500), id, expectedAttempt]
       )) === 1
     );

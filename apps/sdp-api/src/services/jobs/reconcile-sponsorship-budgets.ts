@@ -171,6 +171,23 @@ async function reconcileReservation(input: {
     await repository.recordReconciliationMiss(reservation.id, reservation.attempt, 0);
     return;
   }
+  if (reservation.status === "submitted") {
+    const persisted = await repository.markChargedUnknown(
+      reservation.id,
+      reservation.attempt,
+      "Submitted signature absent after blockhash expiry on two reconciliation passes"
+    );
+    if (!persisted) {
+      await tripBreaker(
+        repository,
+        budgetRedis,
+        reservation.network,
+        "Ambiguous submitted reservation lost its durable transition"
+      );
+      throw new Error("Failed to retain ambiguous submitted sponsorship charge");
+    }
+    return;
+  }
   await settleDurably(
     repository,
     budgetRedis,

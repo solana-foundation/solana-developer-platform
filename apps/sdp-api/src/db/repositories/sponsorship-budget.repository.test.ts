@@ -194,4 +194,20 @@ describe("SponsorshipBudgetRepository", () => {
       )
     ).toEqual({ attempt: 2, status: "committed", redis_settled_at: null });
   });
+
+  it("retains an ambiguous submitted attempt as charged unknown", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const input = reservationInput("reservation_submitted_unknown");
+    await repository.createReservation(input);
+    await expect(repository.markSubmitted(input.id, 1, "signature_1")).resolves.toBe(true);
+    await expect(
+      repository.markChargedUnknown(input.id, 1, "history remained unavailable")
+    ).resolves.toBe(true);
+    await expect(repository.getReservation(input.id)).resolves.toMatchObject({
+      attempt: 1,
+      status: "charged_unknown",
+      actualLamports: null,
+      reservedLamports: 5,
+    });
+  });
 });

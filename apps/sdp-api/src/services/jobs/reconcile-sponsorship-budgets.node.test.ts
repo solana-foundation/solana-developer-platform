@@ -199,7 +199,7 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(budgetRedis.settle).not.toHaveBeenCalled();
   });
 
-  it("requires two expired-blockhash misses separated by the two-minute job delay", async () => {
+  it("releases only signed transactions after two expired-blockhash misses", async () => {
     const first = harness(reservation({ status: "signed", missCount: 0 }));
     first.getTransaction.mockResolvedValueOnce(null);
     first.isBlockhashValid.mockResolvedValueOnce(false);
@@ -223,6 +223,28 @@ describe("reconcileSponsorshipBudgets", () => {
       0,
       expect.stringContaining("two reconciliation passes")
     );
+  });
+
+  it("retains submitted spend as charged unknown after two expired-blockhash misses", async () => {
+    const first = harness(reservation({ status: "submitted", missCount: 0 }));
+    first.getTransaction.mockResolvedValueOnce(null);
+    first.isBlockhashValid.mockResolvedValueOnce(false);
+    await first.run();
+    expect(first.repository.recordReconciliationMiss).toHaveBeenCalledWith("reservation_1", 1, 0);
+    expect(first.repository.markChargedUnknown).not.toHaveBeenCalled();
+
+    const second = harness(reservation({ status: "submitted", missCount: 1 }));
+    second.getTransaction.mockResolvedValueOnce(null);
+    second.isBlockhashValid.mockResolvedValueOnce(false);
+    await second.run();
+    expect(second.repository.markChargedUnknown).toHaveBeenCalledWith(
+      "reservation_1",
+      1,
+      expect.stringContaining("Submitted signature absent")
+    );
+    expect(second.repository.settleReservation).not.toHaveBeenCalled();
+    expect(second.budgetRedis.settle).not.toHaveBeenCalled();
+    expect(second.repository.markRedisSettled).not.toHaveBeenCalled();
   });
 
   it("charges stale signature-less provider outcomes as unknown", async () => {
