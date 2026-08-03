@@ -220,6 +220,40 @@ describe("BudgetedFeePayment", () => {
     expect(budgetRedis.cancel).not.toHaveBeenCalled();
   });
 
+  it("retains ambiguous sign-only failures and blocks an unsafe retry", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    const transaction = buildTransaction();
+    vi.mocked(provider.signAsFeePayer).mockRejectedValueOnce(
+      new FeePaymentError("KMS response timed out after signing", "SIGNING_FAILED")
+    );
+
+    await expect(feePayment.signAsFeePayer(transaction)).rejects.toThrow("timed out");
+
+    expect(repository.markChargedUnknown).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "KMS response timed out after signing"
+    );
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markRedisSettled).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+
+    repository.getReservation.mockResolvedValue({
+      id: "reservation_1",
+      status: "charged_unknown",
+      signature: null,
+      signedTransaction: null,
+      reservedLamports: 5_000,
+      actualLamports: null,
+      attempt: 1,
+    });
+    await expect(feePayment.signAsFeePayer(transaction)).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
+    expect(budgetRedis.reserve).toHaveBeenCalledOnce();
+  });
+
   it("never lets a duplicate in-progress caller execute Kora", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     budgetRedis.reserve.mockResolvedValueOnce("duplicate");

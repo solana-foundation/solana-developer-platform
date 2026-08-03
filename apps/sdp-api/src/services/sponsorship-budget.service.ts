@@ -173,7 +173,10 @@ export class BudgetedFeePayment implements FeePaymentPort {
     try {
       signed = await this.provider.signAsFeePayer(transaction);
     } catch (error) {
-      await this.releaseDeterministic(reservation, error);
+      // Once custody has been asked to sign, no error proves that a usable
+      // signature was not produced before the response was lost. Retain the
+      // full reservation and block an unsafe replay.
+      await this.markAmbiguous(reservation, error);
       throw error;
     }
     let signature: Signature;
