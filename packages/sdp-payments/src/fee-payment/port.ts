@@ -76,6 +76,8 @@ export interface SponsorshipProviderConfiguration {
   signerAddress: Address;
   maxAllowedLamports: bigint;
   feePayerMayTransferLamports: boolean;
+  /** Raw authority policy used to pin security-relevant provider configuration. */
+  feePayerPolicy: unknown;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

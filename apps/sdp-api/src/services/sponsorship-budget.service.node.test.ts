@@ -26,9 +26,9 @@ const SCOPE: SponsorshipScope = {
   actor: { type: "api_key", id: "key_1" },
 };
 
-function buildTransaction(): Uint8Array {
+function buildTransaction(version: 0 | "legacy" = 0): Uint8Array {
   const message = pipe(
-    createTransactionMessage({ version: 0 }),
+    createTransactionMessage({ version }),
     (current) => setTransactionMessageFeePayer(FEE_PAYER, current),
     (current) =>
       setTransactionMessageLifetimeUsingBlockhash(
@@ -70,16 +70,18 @@ function harness() {
     }),
     getReservation: vi.fn().mockResolvedValue(null),
     createReservation: vi.fn().mockResolvedValue(true),
-    reopenReleasedReservation: vi.fn().mockResolvedValue(false),
-    markSigned: vi.fn().mockResolvedValue(undefined),
-    markSubmitted: vi.fn().mockResolvedValue(undefined),
-    markChargedUnknown: vi.fn().mockResolvedValue(undefined),
-    markReleased: vi.fn().mockResolvedValue(undefined),
+    reopenReleasedReservation: vi.fn().mockResolvedValue(null),
+    markSigned: vi.fn().mockResolvedValue(true),
+    markSubmitted: vi.fn().mockResolvedValue(true),
+    markChargedUnknown: vi.fn().mockResolvedValue(true),
+    markReleased: vi.fn().mockResolvedValue(true),
+    markRedisSettled: vi.fn().mockResolvedValue(undefined),
     tripGlobalBreaker: vi.fn().mockResolvedValue(null),
   };
   const budgetRedis = {
     reserve: vi.fn().mockResolvedValue("admitted" as const),
     cancel: vi.fn().mockResolvedValue(undefined),
+    settle: vi.fn().mockResolvedValue(0),
     syncPolicy: vi.fn().mockResolvedValue(undefined),
   };
   const provider: FeePaymentPort = {
@@ -89,8 +91,13 @@ function harness() {
       signerAddress: FEE_PAYER,
       maxAllowedLamports: 1_000_000n,
       feePayerMayTransferLamports: false,
+      feePayerPolicy: { system: { allow_transfer: false } },
     }),
-    signAsFeePayer: vi.fn().mockImplementation(async (transaction) => transaction),
+    signAsFeePayer: vi.fn().mockImplementation(async (transaction) => {
+      const signed = transaction.slice();
+      signed.fill(1, 1, 65);
+      return signed;
+    }),
     signAndSend: vi.fn().mockResolvedValue("signature_1" as Signature),
   };
   const feePayment = new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, SCOPE, provider, {
@@ -109,6 +116,61 @@ describe("BudgetedFeePayment", () => {
     expect(harness().feePayment.providerId).toBe("kora");
   });
 
+  it.each([
+    0,
+    "legacy",
+  ] as const)("admits and persists %s transaction messages", async (version) => {
+    const { feePayment, repository } = harness();
+    await expect(feePayment.signAndSend(buildTransaction(version))).resolves.toBe("signature_1");
+    expect(repository.createReservation).toHaveBeenCalledOnce();
+  });
+
+  it("denies the tiny-limit Surfpool/Kora canary before Kora or KMS execution", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    repository.resolvePolicies.mockResolvedValueOnce([
+      { ...policy("global"), perTransactionLamports: 1 },
+      { ...policy("organization"), perTransactionLamports: 1 },
+      { ...policy("project"), perTransactionLamports: 1 },
+    ]);
+    budgetRedis.reserve.mockResolvedValueOnce("denied");
+
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+    expect(budgetRedis.reserve).toHaveBeenCalledWith(expect.objectContaining({ amount: 5_000 }));
+    expect(provider.signAndSend).not.toHaveBeenCalled();
+    expect(repository.createReservation).not.toHaveBeenCalled();
+  });
+
+  it("reserves network fee plus Kora outflow ceiling and denies before provider execution", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
+    if (!getSponsorshipConfiguration) throw new Error("test provider omitted configuration");
+    vi.mocked(getSponsorshipConfiguration).mockResolvedValueOnce({
+      signerAddress: FEE_PAYER,
+      maxAllowedLamports: 1_000_000n,
+      feePayerMayTransferLamports: true,
+      feePayerPolicy: { system: { allow_transfer: true } },
+    });
+    repository.resolvePolicies.mockResolvedValueOnce([
+      { ...policy("global"), perTransactionLamports: 1_000_000 },
+      { ...policy("organization"), perTransactionLamports: 1_000_000 },
+      { ...policy("project"), perTransactionLamports: 1_000_000 },
+    ]);
+    budgetRedis.reserve.mockImplementationOnce(async (input) =>
+      input.amount > 1_000_000 ? "denied" : "admitted"
+    );
+
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+    expect(budgetRedis.reserve).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 1_005_000 })
+    );
+    expect(provider.signAndSend).not.toHaveBeenCalled();
+    expect(repository.createReservation).not.toHaveBeenCalled();
+  });
+
   it("releases deterministic pre-send rejections", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     vi.mocked(provider.signAndSend).mockRejectedValueOnce(
@@ -118,8 +180,25 @@ describe("BudgetedFeePayment", () => {
       code: "SIGNING_FAILED",
     });
     expect(repository.markReleased).toHaveBeenCalledOnce();
-    expect(budgetRedis.cancel).toHaveBeenCalledOnce();
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, attempt: 1 })
+    );
+    expect(budgetRedis.cancel).not.toHaveBeenCalled();
     expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+  });
+
+  it("leaves a durable terminal-unsynced row when the Redis sync marker write fails", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAndSend).mockRejectedValueOnce(
+      new FeePaymentError("rejected", "SIGNING_FAILED")
+    );
+    repository.markRedisSettled.mockRejectedValueOnce(new Error("postgres timeout"));
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(budgetRedis.settle).toHaveBeenCalledOnce();
+    expect(repository.tripGlobalBreaker).toHaveBeenCalled();
   });
 
   it("charges ambiguous submission timeouts conservatively", async () => {
@@ -127,6 +206,26 @@ describe("BudgetedFeePayment", () => {
     vi.mocked(provider.signAndSend).mockRejectedValueOnce(new Error("request timed out"));
     await expect(feePayment.signAndSend(buildTransaction())).rejects.toThrow("timed out");
     expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(budgetRedis.cancel).not.toHaveBeenCalled();
+  });
+
+  it("never lets a duplicate in-progress caller execute Kora", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    budgetRedis.reserve.mockResolvedValueOnce("duplicate");
+    repository.getReservation.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: "reservation_1",
+      status: "reserved",
+      signature: null,
+      signedTransaction: null,
+      reservedLamports: 5_000,
+      actualLamports: null,
+      attempt: 1,
+    });
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(provider.signAndSend).not.toHaveBeenCalled();
     expect(repository.markReleased).not.toHaveBeenCalled();
     expect(budgetRedis.cancel).not.toHaveBeenCalled();
   });
@@ -156,6 +255,8 @@ describe("BudgetedFeePayment", () => {
         signature: null,
         signedTransaction: Buffer.from(transaction).toString("base64"),
         reservedLamports: 5_000,
+        actualLamports: null,
+        attempt: 1,
       });
     await feePayment.signAsFeePayer(transaction);
     repository.resolvePolicies.mockResolvedValueOnce([
@@ -170,6 +271,25 @@ describe("BudgetedFeePayment", () => {
     expect(budgetRedis.reserve).toHaveBeenCalledOnce();
   });
 
+  it("never mistakes a sign-only signature for a broadcast send result", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    const signedOnly = {
+      id: "reservation_1",
+      status: "signed" as const,
+      signature: "signed_but_not_sent",
+      signedTransaction: Buffer.from(buildTransaction()).toString("base64"),
+      reservedLamports: 5_000,
+      actualLamports: null,
+      attempt: 1,
+    };
+    repository.getReservation.mockResolvedValue(signedOnly);
+    budgetRedis.reserve.mockResolvedValueOnce("duplicate");
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(provider.signAndSend).not.toHaveBeenCalled();
+  });
+
   it("maps uncertain Kora and RPC preflight failures to service unavailable", async () => {
     const { feePayment, provider, repository } = harness();
     const getConfig = provider.getSponsorshipConfiguration;
@@ -179,6 +299,30 @@ describe("BudgetedFeePayment", () => {
       code: "PROVIDER_NOT_AVAILABLE",
     });
     expect(repository.createReservation).not.toHaveBeenCalled();
+    expect(provider.signAndSend).not.toHaveBeenCalled();
+  });
+
+  it("opens the breaker and returns 503 when durable usage reconstruction fails", async () => {
+    const { feePayment, provider, repository } = harness();
+    repository.getWindowUsage.mockRejectedValueOnce(new Error("postgres unavailable"));
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
+      "devnet",
+      "Budget reconstruction or Redis admission failed"
+    );
+    expect(provider.signAndSend).not.toHaveBeenCalled();
+  });
+
+  it("compensates Redis and returns 503 when durable reservation persistence fails", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    repository.createReservation.mockRejectedValueOnce(new Error("postgres unavailable"));
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(budgetRedis.cancel).toHaveBeenCalledOnce();
+    expect(repository.tripGlobalBreaker).toHaveBeenCalled();
     expect(provider.signAndSend).not.toHaveBeenCalled();
   });
 });

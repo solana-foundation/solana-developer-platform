@@ -38,6 +38,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
@@ -144,6 +145,7 @@ let originalBvnkWalletId: string | undefined;
 let originalBvnkApiBaseUrl: string | undefined;
 let originalMagicBlockApiBaseUrl: string | undefined;
 let originalMagicBlockAuthToken: string | undefined;
+let originalDeploymentMode: Env["SDP_DEPLOYMENT_MODE"];
 
 function assertMoonPaySignature(url: URL): void {
   const signature = url.searchParams.get("signature");
@@ -822,6 +824,7 @@ describe("Payments routes", () => {
     originalBvnkApiBaseUrl = env.BVNK_API_BASE_URL;
     originalMagicBlockApiBaseUrl = env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL;
     originalMagicBlockAuthToken = env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN;
+    originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
@@ -842,6 +845,9 @@ describe("Payments routes", () => {
     env.BVNK_API_BASE_URL = TEST_BVNK_API_BASE_URL;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = undefined;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = undefined;
+    // These route tests mock the legacy fee-payment adapter directly. Keep
+    // that unit boundary explicit instead of changing the shared test mode.
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -867,6 +873,7 @@ describe("Payments routes", () => {
     env.BVNK_API_BASE_URL = originalBvnkApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = originalMagicBlockApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
+    env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
 
     await clearTestDatabase(env);
     await clearKVStores(env);

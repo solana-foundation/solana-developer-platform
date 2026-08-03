@@ -610,6 +610,9 @@ export interface ParsedInstruction {
 export interface ParsedTransaction {
   slot: bigint;
   err: unknown | null;
+  fee?: bigint;
+  preBalances?: readonly bigint[];
+  postBalances?: readonly bigint[];
   /** Top-level + inner instructions flattened, in no particular order. */
   instructions: ParsedInstruction[];
 }
@@ -623,6 +626,9 @@ interface RawGetTransactionResponse {
   slot: bigint;
   meta: {
     err: unknown | null;
+    fee: bigint;
+    preBalances: readonly bigint[];
+    postBalances: readonly bigint[];
     innerInstructions?: Array<{ instructions?: RawParsedInstruction[] }> | null;
   } | null;
   transaction: {
@@ -670,6 +676,9 @@ export async function getTransaction(
   return {
     slot: response.slot,
     err: response.meta?.err ?? null,
+    fee: response.meta?.fee ?? 0n,
+    preBalances: response.meta?.preBalances ?? [],
+    postBalances: response.meta?.postBalances ?? [],
     instructions: [...topLevel, ...inner].map(toParsedInstruction),
   };
 }

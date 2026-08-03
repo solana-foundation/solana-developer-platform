@@ -9,6 +9,9 @@ import { getDb } from "@/db";
 import type { Env } from "@/types/env";
 
 const POSTGRES_TEST_TABLES = [
+  "sponsorship_budget_policy_revisions",
+  "sponsorship_budget_reservations",
+  "sponsorship_budget_policies",
   "policy_provider_sync_status",
   "policy_evaluations",
   "approval_requests",

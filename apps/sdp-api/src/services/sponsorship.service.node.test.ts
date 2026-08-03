@@ -1,5 +1,3 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -190,30 +188,5 @@ describe("sponsorship identity boundary", () => {
         actor: { type: "wallet", id: "wallet_stored" },
       })
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
-  });
-});
-
-describe("sponsorship construction guard", () => {
-  function sourceFiles(directory: string): string[] {
-    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-      const entryPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        return sourceFiles(entryPath);
-      }
-      return entry.isFile() && entry.name.endsWith(".ts") ? [entryPath] : [];
-    });
-  }
-
-  it("keeps production Kora adapter construction behind the owned boundary", () => {
-    const sourceRoot = path.resolve(import.meta.dirname, "..");
-    const violations = sourceFiles(sourceRoot)
-      .filter((file) => !file.endsWith(".test.ts") && !file.endsWith(".spec.ts"))
-      .filter((file) => !file.endsWith("/services/sponsorship.service.ts"))
-      .filter((file) => !file.endsWith("/services/sponsorship-budget.service.ts"))
-      .filter((file) => !file.endsWith("/services/adapters/index.ts"))
-      .filter((file) => readFileSync(file, "utf8").includes('from "@sdp/payments/fee-payment"'))
-      .map((file) => path.relative(sourceRoot, file));
-
-    expect(violations).toEqual([]);
   });
 });

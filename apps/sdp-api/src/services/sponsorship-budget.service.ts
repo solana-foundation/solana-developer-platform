@@ -1,9 +1,14 @@
 import { createHash } from "node:crypto";
-import { FeePaymentError, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import {
+  FeePaymentError,
+  type FeePaymentPort,
+  type SponsorshipProviderConfiguration,
+} from "@sdp/payments/fee-payment";
 import { createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
 import {
   type Address,
   getCompiledTransactionMessageDecoder,
+  getSignatureFromTransaction,
   getTransactionDecoder,
   type Signature,
 } from "@solana/kit";
@@ -32,10 +37,11 @@ type BudgetRepository = Pick<
   | "markSubmitted"
   | "markChargedUnknown"
   | "markReleased"
+  | "markRedisSettled"
   | "tripGlobalBreaker"
 >;
 
-type BudgetRedis = Pick<SponsorshipBudgetRedis, "reserve" | "cancel" | "syncPolicy">;
+type BudgetRedis = Pick<SponsorshipBudgetRedis, "reserve" | "cancel" | "settle" | "syncPolicy">;
 
 export interface BudgetedFeePaymentDependencies {
   repository?: BudgetRepository;
@@ -46,10 +52,12 @@ export interface BudgetedFeePaymentDependencies {
 
 type AdmissionOperation = "sign" | "send";
 type AdmissionCancel = Parameters<SponsorshipBudgetRedis["cancel"]>[0];
+type AdmissionSettlement = Parameters<SponsorshipBudgetRedis["settle"]>[0];
 type AdmissionResult = {
   id: string;
   replay: SponsorshipReservation | null;
   cancel: AdmissionCancel | null;
+  settlement: AdmissionSettlement | null;
 };
 type AdmissionContext = {
   id: string;
@@ -57,6 +65,7 @@ type AdmissionContext = {
   amount: number;
   transactionDigest: string;
   feePayer: string;
+  providerConfigFingerprint: string;
   recentBlockhash: string;
   hourBucket: string;
   dayBucket: string;
@@ -95,6 +104,39 @@ function policyVersions(policies: SponsorshipBudgetPolicy[]): Record<string, num
   return Object.fromEntries(policies.map((policy) => [policy.id, policy.version]));
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return '"__undefined__"';
+  if (typeof value === "boolean" || typeof value === "number") return JSON.stringify(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "bigint") return JSON.stringify(value.toString());
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a.localeCompare(b)
+    );
+    return `{${entries
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .join(",")}}`;
+  }
+  throw new Error("Unsupported sponsorship provider configuration value");
+}
+
+/** Stable digest of every provider setting that can increase fee-payer outflow. */
+export function sponsorshipProviderConfigFingerprint(
+  configuration: SponsorshipProviderConfiguration
+): string {
+  return createHash("sha256")
+    .update(
+      canonicalJson({
+        maxAllowedLamports: configuration.maxAllowedLamports,
+        feePayerMayTransferLamports: configuration.feePayerMayTransferLamports,
+        feePayerPolicy: configuration.feePayerPolicy,
+      })
+    )
+    .digest("hex");
+}
+
 export class BudgetedFeePayment implements FeePaymentPort {
   readonly providerId: string;
   private readonly repository: BudgetRepository;
@@ -126,23 +168,51 @@ export class BudgetedFeePayment implements FeePaymentPort {
     if (reservation.replay?.signedTransaction) {
       return decodeBase64(reservation.replay.signedTransaction);
     }
+    let signed: Uint8Array;
     try {
-      const signed = await this.provider.signAsFeePayer(transaction);
-      await this.repository.markSigned(reservation.id, encodeBase64(signed));
-      return signed;
+      signed = await this.provider.signAsFeePayer(transaction);
     } catch (error) {
       await this.releaseDeterministic(reservation, error);
       throw error;
     }
+    let signature: Signature;
+    try {
+      signature = getSignatureFromTransaction(getTransactionDecoder().decode(signed));
+    } catch (error) {
+      return this.accountingUnavailable(
+        resolveNetwork(this.env),
+        "Signed sponsorship result could not be reconstructed",
+        "Signed sponsorship signature extraction failed",
+        error
+      );
+    }
+    let persisted: boolean;
+    try {
+      persisted = await this.repository.markSigned(reservation.id, encodeBase64(signed), signature);
+    } catch (error) {
+      return this.accountingUnavailable(
+        resolveNetwork(this.env),
+        "Signed sponsorship outcome could not be persisted",
+        "Signed sponsorship persistence failed",
+        error
+      );
+    }
+    if (!persisted) {
+      return this.accountingUnavailable(
+        resolveNetwork(this.env),
+        "Signed sponsorship outcome could not be persisted",
+        "Signed sponsorship outcome lost its durable state transition"
+      );
+    }
+    return signed;
   }
 
   async signAndSend(transaction: Uint8Array): Promise<Signature> {
     const reservation = await this.admit(transaction, "send");
     if (reservation.replay?.signature) return reservation.replay.signature as Signature;
+    let signature: Signature;
     try {
-      const signature = await this.provider.signAndSend(transaction);
-      await this.repository.markSubmitted(reservation.id, signature);
-      return signature;
+      signature = await this.provider.signAndSend(transaction);
     } catch (error) {
       if (isDeterministicProviderRejection(error)) {
         await this.releaseDeterministic(reservation, error);
@@ -151,6 +221,25 @@ export class BudgetedFeePayment implements FeePaymentPort {
       }
       throw error;
     }
+    let persisted: boolean;
+    try {
+      persisted = await this.repository.markSubmitted(reservation.id, signature);
+    } catch (error) {
+      return this.accountingUnavailable(
+        resolveNetwork(this.env),
+        "Submitted sponsorship outcome could not be persisted",
+        "Submitted sponsorship persistence failed",
+        error
+      );
+    }
+    if (!persisted) {
+      return this.accountingUnavailable(
+        resolveNetwork(this.env),
+        "Submitted sponsorship outcome could not be persisted",
+        "Submitted sponsorship outcome lost its durable state transition"
+      );
+    }
+    return signature;
   }
 
   private async admit(
@@ -158,9 +247,9 @@ export class BudgetedFeePayment implements FeePaymentPort {
     operation: AdmissionOperation
   ): Promise<AdmissionResult> {
     const context = await this.prepareAdmission(transaction);
-    const durableReplay = await this.resolveDurableReplay(context.id, operation);
+    const durableReplay = await this.resolveDurableReplay(context, operation);
     if (durableReplay) return durableReplay;
-    return this.admitAgainstCurrentPolicy(context);
+    return this.admitAgainstCurrentPolicy(context, operation);
   }
 
   private async prepareAdmission(transaction: Uint8Array): Promise<AdmissionContext> {
@@ -198,6 +287,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
       );
     }
     const amount = Number(ceiling);
+    const providerConfigFingerprint = sponsorshipProviderConfigFingerprint(providerConfig);
     const decodedTransaction = getTransactionDecoder().decode(transaction);
     const recentBlockhash = getRecentBlockhash(transaction);
     const transactionDigest = createHash("sha256")
@@ -223,6 +313,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
       amount,
       transactionDigest,
       feePayer: providerConfig.signerAddress,
+      providerConfigFingerprint,
       recentBlockhash,
       hourBucket: buckets.hour,
       dayBucket: buckets.day,
@@ -230,18 +321,19 @@ export class BudgetedFeePayment implements FeePaymentPort {
   }
 
   private async resolveDurableReplay(
-    id: string,
+    context: AdmissionContext,
     operation: AdmissionOperation
   ): Promise<AdmissionResult | null> {
-    const durableReplay = await this.repository.getReservation(id);
-    const hasOperationResponse =
-      operation === "sign" ? durableReplay?.signedTransaction : durableReplay?.signature;
+    const durableReplay = await this.readReservation(context);
+    const hasOperationResponse = durableReplay
+      ? reservationHasResponse(durableReplay, operation)
+      : false;
     if (
       durableReplay &&
       ["signed", "submitted", "committed"].includes(durableReplay.status) &&
       hasOperationResponse
     ) {
-      return { id, replay: durableReplay, cancel: null };
+      return { id: context.id, replay: durableReplay, cancel: null, settlement: null };
     }
     if (durableReplay?.status === "charged_unknown") {
       throw new FeePaymentError(
@@ -252,13 +344,26 @@ export class BudgetedFeePayment implements FeePaymentPort {
     return null;
   }
 
-  private async admitAgainstCurrentPolicy(context: AdmissionContext): Promise<AdmissionResult> {
+  private async admitAgainstCurrentPolicy(
+    context: AdmissionContext,
+    operation: AdmissionOperation
+  ): Promise<AdmissionResult> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const policies = await this.repository.resolvePolicies({
-        network: context.network,
-        organizationId: this.scope.organizationId,
-        projectId: this.scope.projectId,
-      });
+      let policies: SponsorshipBudgetPolicy[];
+      try {
+        policies = await this.repository.resolvePolicies({
+          network: context.network,
+          organizationId: this.scope.organizationId,
+          projectId: this.scope.projectId,
+        });
+      } catch (error) {
+        return this.accountingUnavailable(
+          context.network,
+          "Sponsorship policy resolution is unavailable",
+          "Policy resolution failed",
+          error
+        );
+      }
       if (policies.some((policy) => !policy.enabled)) {
         throw new FeePaymentError(
           "Sponsorship is disabled for this scope",
@@ -275,9 +380,15 @@ export class BudgetedFeePayment implements FeePaymentPort {
           admission === "denied" ? "RATE_LIMITED" : "PROVIDER_NOT_AVAILABLE"
         );
       }
-      const replay = await this.repository.getReservation(context.id);
-      if (admission === "duplicate" && replay) {
-        return { id: context.id, replay, cancel: null };
+      const replay = await this.readReservation(context);
+      if (admission === "duplicate") {
+        if (replay && reservationHasResponse(replay, operation)) {
+          return { id: context.id, replay, cancel: null, settlement: null };
+        }
+        throw new FeePaymentError(
+          "An identical sponsorship operation is already in progress",
+          "PROVIDER_NOT_AVAILABLE"
+        );
       }
       return this.persistReservation(context, policies);
     }
@@ -291,14 +402,14 @@ export class BudgetedFeePayment implements FeePaymentPort {
     context: AdmissionContext,
     policies: SponsorshipBudgetPolicy[]
   ): Promise<Awaited<ReturnType<SponsorshipBudgetRedis["reserve"]>>> {
-    const usage = await this.repository.getWindowUsage({
-      network: context.network,
-      organizationId: this.scope.organizationId,
-      projectId: this.scope.projectId,
-      hourBucket: context.hourBucket,
-      dayBucket: context.dayBucket,
-    });
     try {
+      const usage = await this.repository.getWindowUsage({
+        network: context.network,
+        organizationId: this.scope.organizationId,
+        projectId: this.scope.projectId,
+        hourBucket: context.hourBucket,
+        dayBucket: context.dayBucket,
+      });
       return await this.budgetRedis.reserve({
         network: context.network,
         organizationId: this.scope.organizationId,
@@ -311,10 +422,11 @@ export class BudgetedFeePayment implements FeePaymentPort {
         usage,
       });
     } catch (error) {
-      throw new FeePaymentError(
+      return this.accountingUnavailable(
+        context.network,
         "Sponsorship budget admission is unavailable",
-        "PROVIDER_NOT_AVAILABLE",
-        error instanceof Error ? error : undefined
+        "Budget reconstruction or Redis admission failed",
+        error
       );
     }
   }
@@ -334,6 +446,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
       actorId: this.scope.actor.id,
       transactionDigest: context.transactionDigest,
       feePayer: context.feePayer,
+      providerConfigFingerprint: context.providerConfigFingerprint,
       recentBlockhash: context.recentBlockhash,
       reservedLamports: context.amount,
       hourBucket: context.hourBucket,
@@ -342,20 +455,55 @@ export class BudgetedFeePayment implements FeePaymentPort {
     };
     try {
       if (await this.repository.createReservation(reservationInput)) {
-        return { id: context.id, replay: null, cancel };
+        return {
+          id: context.id,
+          replay: null,
+          cancel,
+          settlement: this.settlementInput(context, 1),
+        };
       }
       const existing = await this.repository.getReservation(context.id);
-      if (
-        existing?.status === "released" &&
-        (await this.repository.reopenReleasedReservation(reservationInput))
-      ) {
-        return { id: context.id, replay: null, cancel };
+      if (existing?.status === "released") {
+        const attempt = await this.repository.reopenReleasedReservation(reservationInput);
+        if (attempt !== null) {
+          return {
+            id: context.id,
+            replay: null,
+            cancel,
+            settlement: this.settlementInput(context, attempt),
+          };
+        }
       }
-      if (existing) return { id: context.id, replay: existing, cancel: null };
+      if (existing) {
+        throw new Error("A durable sponsorship reservation already owns provider execution");
+      }
       throw new Error("Reservation insert conflicted without a durable ledger row");
     } catch (error) {
-      await this.compensateReservation(context);
-      throw error;
+      let cause = error;
+      try {
+        await this.compensateReservation(context);
+      } catch (compensationError) {
+        cause = compensationError;
+      }
+      return this.accountingUnavailable(
+        context.network,
+        "Sponsorship reservation persistence is unavailable",
+        "Durable reservation persistence failed",
+        cause
+      );
+    }
+  }
+
+  private async readReservation(context: AdmissionContext): Promise<SponsorshipReservation | null> {
+    try {
+      return await this.repository.getReservation(context.id);
+    } catch (error) {
+      return this.accountingUnavailable(
+        context.network,
+        "Sponsorship reservation state is unavailable",
+        "Durable reservation read failed",
+        error
+      );
     }
   }
 
@@ -367,6 +515,15 @@ export class BudgetedFeePayment implements FeePaymentPort {
       hourBucket: context.hourBucket,
       dayBucket: context.dayBucket,
       reservationId: context.id,
+    };
+  }
+
+  private settlementInput(context: AdmissionContext, attempt: number): AdmissionSettlement {
+    return {
+      ...this.cancelInput(context),
+      attempt,
+      reservedLamports: context.amount,
+      actualLamports: context.amount,
     };
   }
 
@@ -384,13 +541,43 @@ export class BudgetedFeePayment implements FeePaymentPort {
     if (policy) await this.budgetRedis.syncPolicy(policy);
   }
 
+  private async accountingUnavailable(
+    network: SponsorshipNetwork,
+    message: string,
+    breakerReason: string,
+    error?: unknown
+  ): Promise<never> {
+    try {
+      await this.tripBreaker(network, breakerReason);
+    } catch {
+      // The original accounting outage remains the primary failure. Admission
+      // still fails closed even when the breaker cannot be synchronized.
+    }
+    throw new FeePaymentError(
+      message,
+      "PROVIDER_NOT_AVAILABLE",
+      error instanceof Error ? error : undefined
+    );
+  }
+
   private async markAmbiguous(id: string, error: unknown): Promise<void> {
     const reason = error instanceof Error ? error.message : "Unknown Kora failure";
     try {
-      await this.repository.markChargedUnknown(id, reason);
-    } catch {
-      await this.tripBreaker(resolveNetwork(this.env), "Failed to persist ambiguous Kora outcome");
+      const persisted = await this.repository.markChargedUnknown(id, reason);
+      if (persisted) return;
+    } catch (persistenceError) {
+      return this.accountingUnavailable(
+        resolveNetwork(this.env),
+        "Ambiguous sponsorship outcome could not be persisted",
+        "Failed to persist ambiguous Kora outcome",
+        persistenceError
+      );
     }
+    return this.accountingUnavailable(
+      resolveNetwork(this.env),
+      "Ambiguous sponsorship outcome could not be persisted",
+      "Ambiguous sponsorship state transition was lost"
+    );
   }
 
   private async releaseDeterministic(
@@ -398,13 +585,37 @@ export class BudgetedFeePayment implements FeePaymentPort {
     error: unknown
   ): Promise<void> {
     const reason = error instanceof Error ? error.message : "Kora rejected sponsorship";
-    await this.repository.markReleased(reservation.id, reason);
-    if (!reservation.cancel) return;
+    let released: boolean;
     try {
-      await this.budgetRedis.cancel(reservation.cancel);
+      released = await this.repository.markReleased(reservation.id, reason);
+    } catch (releaseError) {
+      return this.accountingUnavailable(
+        resolveNetwork(this.env),
+        "Sponsorship release state is unavailable",
+        "Deterministic release persistence failed",
+        releaseError
+      );
+    }
+    if (!released || !reservation.settlement) {
+      await this.tripBreaker(
+        resolveNetwork(this.env),
+        "Deterministic release lost its durable ownership transition"
+      );
+      throw new FeePaymentError(
+        "Sponsorship release could not be persisted safely",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    try {
+      await this.budgetRedis.settle({ ...reservation.settlement, actualLamports: 0 });
+      await this.repository.markRedisSettled(reservation.id);
     } catch (compensationError) {
-      await this.tripBreaker(resolveNetwork(this.env), "Redis release invariant failed");
-      throw compensationError;
+      return this.accountingUnavailable(
+        resolveNetwork(this.env),
+        "Sponsorship release accounting is unavailable",
+        "Redis release invariant failed",
+        compensationError
+      );
     }
   }
 }
@@ -416,4 +627,17 @@ function isDeterministicProviderRejection(error: unknown): boolean {
       error.code
     )
   );
+}
+
+function reservationHasResponse(
+  reservation: SponsorshipReservation,
+  operation: AdmissionOperation
+): boolean {
+  if (operation === "sign") {
+    return (
+      ["signed", "submitted", "committed"].includes(reservation.status) &&
+      Boolean(reservation.signedTransaction)
+    );
+  }
+  return ["submitted", "committed"].includes(reservation.status) && Boolean(reservation.signature);
 }

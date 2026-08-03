@@ -94,6 +94,42 @@ describe("SponsorshipBudgetRedis", () => {
     expect(hour["organization:org_1"]).toBe("3");
   });
 
+  it("restores each newly-seen organization field from durable usage", async () => {
+    const policies = [policy("global", 1, true, 100), policy("organization", 1, true, 10)];
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "reservation_org_1",
+        amount: 3,
+        policies,
+        usage: EMPTY_USAGE,
+      })
+    ).resolves.toBe("admitted");
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_2",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "reservation_org_2",
+        amount: 4,
+        policies,
+        usage: {
+          hour: { global: 10, organization: 7, project: 0 },
+          day: { global: 10, organization: 7, project: 0 },
+        },
+      })
+    ).resolves.toBe("denied");
+    expect(
+      await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "organization:org_2")
+    ).toBe("7");
+  });
+
   it("rejects a stale policy version without incrementing counters", async () => {
     await budget.syncPolicy(policy("global", 2));
     const result = await budget.reserve({
@@ -108,12 +144,9 @@ describe("SponsorshipBudgetRedis", () => {
       usage: EMPTY_USAGE,
     });
     expect(result).toBe("stale_policy");
-    expect(
-      await raw.hget(
-        "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z",
-        "global"
-      )
-    ).toBe("0");
+    expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
+      "0"
+    );
   });
 
   it("does not let a Redis-only duplicate bypass a later kill", async () => {
@@ -134,5 +167,39 @@ describe("SponsorshipBudgetRedis", () => {
     await expect(
       budget.reserve({ ...input, policies: [killed, policy("organization", 1)] })
     ).resolves.toBe("stale_policy");
+  });
+
+  it.each([
+    { actualLamports: 2, label: "refund" },
+    { actualLamports: 7, label: "over-reservation" },
+  ])("settles $label exactly once across retries", async ({ actualLamports }) => {
+    const input = {
+      network: "devnet" as const,
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      reservationId: `reservation_settle_${actualLamports}`,
+      amount: 5,
+      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      usage: EMPTY_USAGE,
+    };
+    await expect(budget.reserve(input)).resolves.toBe("admitted");
+    const settlement = {
+      network: input.network,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      hourBucket: input.hourBucket,
+      dayBucket: input.dayBucket,
+      reservationId: input.reservationId,
+      attempt: 1,
+      reservedLamports: input.amount,
+      actualLamports,
+    };
+    await budget.settle(settlement);
+    await budget.settle(settlement);
+    expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
+      String(actualLamports)
+    );
   });
 });

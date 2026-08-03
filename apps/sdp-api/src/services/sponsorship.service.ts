@@ -1,4 +1,9 @@
-import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import {
+  createFeePaymentAdapter,
+  FeePaymentError,
+  type FeePaymentPort,
+  type SponsorshipProviderConfiguration,
+} from "@sdp/payments/fee-payment";
 import type { ProjectEnvironment } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -57,11 +62,21 @@ export function createSponsorshipFeePayment(env: Env, scope: SponsorshipScope): 
   return isSelfHostedDeployment(env) ? provider : new BudgetedFeePayment(env, scope, provider);
 }
 
-/**
- * Compatibility boundary for direct service consumers without tenant context.
- * The adapter emits `sdp:unscoped`, so these callers share a conservative quota
- * bucket instead of bypassing Kora's usage tracker.
- */
+/** Read Kora security configuration through the same owned construction boundary. */
+export async function getManagedSponsorshipProviderConfiguration(
+  env: Env
+): Promise<SponsorshipProviderConfiguration> {
+  const provider = createFeePaymentAdapter(env, "sdp:v1:system:sponsorship-reconciliation");
+  if (!provider.getSponsorshipConfiguration) {
+    throw new FeePaymentError(
+      "Managed sponsorship provider does not expose fail-closed configuration",
+      "PROVIDER_NOT_AVAILABLE"
+    );
+  }
+  return provider.getSponsorshipConfiguration();
+}
+
+/** Compatibility boundary for self-hosted consumers without tenant context. */
 export function createUnscopedSponsorshipFeePayment(env: Env): FeePaymentPort {
   if (!isSelfHostedDeployment(env)) {
     throw new AppError(

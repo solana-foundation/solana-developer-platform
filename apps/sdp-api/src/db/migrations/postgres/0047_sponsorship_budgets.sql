@@ -27,7 +27,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sponsorship_budget_policy_scope
 
 CREATE TABLE IF NOT EXISTS sponsorship_budget_policy_revisions (
   id TEXT PRIMARY KEY,
-  policy_id TEXT NOT NULL REFERENCES sponsorship_budget_policies(id) ON DELETE CASCADE,
+  policy_id TEXT NOT NULL REFERENCES sponsorship_budget_policies(id) ON DELETE RESTRICT,
   network TEXT NOT NULL,
   scope_type TEXT NOT NULL,
   scope_id TEXT,
@@ -45,6 +45,19 @@ CREATE TABLE IF NOT EXISTS sponsorship_budget_policy_revisions (
 CREATE INDEX IF NOT EXISTS idx_sponsorship_budget_policy_revisions_policy
   ON sponsorship_budget_policy_revisions (policy_id, version DESC);
 
+CREATE OR REPLACE FUNCTION deny_sponsorship_budget_revision_mutation()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'sponsorship budget policy revisions are append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS sponsorship_budget_revisions_append_only
+  ON sponsorship_budget_policy_revisions;
+CREATE TRIGGER sponsorship_budget_revisions_append_only
+  BEFORE UPDATE OR DELETE ON sponsorship_budget_policy_revisions
+  FOR EACH ROW EXECUTE FUNCTION deny_sponsorship_budget_revision_mutation();
+
 CREATE TABLE IF NOT EXISTS sponsorship_budget_reservations (
   id TEXT PRIMARY KEY,
   network TEXT NOT NULL CHECK (network IN ('devnet', 'mainnet')),
@@ -55,6 +68,7 @@ CREATE TABLE IF NOT EXISTS sponsorship_budget_reservations (
   actor_id TEXT NOT NULL,
   transaction_digest TEXT NOT NULL,
   fee_payer TEXT NOT NULL,
+  provider_config_fingerprint TEXT NOT NULL,
   recent_blockhash TEXT NOT NULL,
   reserved_lamports BIGINT NOT NULL CHECK (reserved_lamports >= 0),
   actual_lamports BIGINT CHECK (actual_lamports IS NULL OR actual_lamports >= 0),
@@ -66,17 +80,23 @@ CREATE TABLE IF NOT EXISTS sponsorship_budget_reservations (
   ),
   signature TEXT,
   signed_transaction TEXT,
+  attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
   miss_count INTEGER NOT NULL DEFAULT 0 CHECK (miss_count >= 0),
   failure_reason TEXT,
   created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
   updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
   submitted_at TEXT,
-  reconciled_at TEXT
+  reconciled_at TEXT,
+  redis_settled_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sponsorship_budget_reservations_reconcile
   ON sponsorship_budget_reservations (status, updated_at)
   WHERE status IN ('reserved', 'signed', 'submitted');
+
+CREATE INDEX IF NOT EXISTS idx_sponsorship_budget_reservations_redis_sync
+  ON sponsorship_budget_reservations (redis_settled_at, updated_at)
+  WHERE status IN ('committed', 'released') AND redis_settled_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_sponsorship_budget_reservations_hour
   ON sponsorship_budget_reservations (network, hour_bucket);

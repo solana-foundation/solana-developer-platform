@@ -42,6 +42,7 @@ export interface CreateSponsorshipReservationInput {
   actorId: string;
   transactionDigest: string;
   feePayer: string;
+  providerConfigFingerprint: string;
   recentBlockhash: string;
   reservedLamports: number;
   hourBucket: string;
@@ -55,6 +56,22 @@ export interface SponsorshipReservation {
   signature: string | null;
   signedTransaction: string | null;
   reservedLamports: number;
+  actualLamports: number | null;
+  attempt: number;
+}
+
+export interface SponsorshipReconciliationReservation extends SponsorshipReservation {
+  network: SponsorshipNetwork;
+  organizationId: string;
+  projectId: string | null;
+  feePayer: string;
+  providerConfigFingerprint: string;
+  recentBlockhash: string;
+  hourBucket: string;
+  dayBucket: string;
+  missCount: number;
+  updatedAt: string;
+  redisSettledAt: string | null;
 }
 
 type PolicyRow = {
@@ -193,9 +210,9 @@ export class SponsorshipBudgetRepository {
     const inserted = await this.db.execute(
       `INSERT INTO sponsorship_budget_reservations (
          id, network, product_environment, organization_id, project_id, actor_type, actor_id,
-         transaction_digest, fee_payer, recent_blockhash, reserved_lamports, hour_bucket,
-         day_bucket, policy_versions, status
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved')
+         transaction_digest, fee_payer, provider_config_fingerprint, recent_blockhash,
+         reserved_lamports, hour_bucket, day_bucket, policy_versions, status
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved')
        ON CONFLICT (id) DO NOTHING`,
       [
         input.id,
@@ -207,6 +224,7 @@ export class SponsorshipBudgetRepository {
         input.actorId,
         input.transactionDigest,
         input.feePayer,
+        input.providerConfigFingerprint,
         input.recentBlockhash,
         input.reservedLamports,
         input.hourBucket,
@@ -224,8 +242,11 @@ export class SponsorshipBudgetRepository {
       signature: string | null;
       signed_transaction: string | null;
       reserved_lamports: number;
+      actual_lamports: number | null;
+      attempt: number;
     }>(
-      `SELECT id, status, signature, signed_transaction, reserved_lamports
+      `SELECT id, status, signature, signed_transaction, reserved_lamports,
+              actual_lamports, attempt
        FROM sponsorship_budget_reservations WHERE id = ?`,
       [id]
     );
@@ -236,27 +257,35 @@ export class SponsorshipBudgetRepository {
           signature: row.signature,
           signedTransaction: row.signed_transaction,
           reservedLamports: row.reserved_lamports,
+          actualLamports: row.actual_lamports,
+          attempt: row.attempt,
         }
       : null;
   }
 
-  async reopenReleasedReservation(input: CreateSponsorshipReservationInput): Promise<boolean> {
-    const updated = await this.db.execute(
+  async reopenReleasedReservation(
+    input: CreateSponsorshipReservationInput
+  ): Promise<number | null> {
+    const updated = await this.db.queryOne<{ attempt: number }>(
       `UPDATE sponsorship_budget_reservations SET
          status = 'reserved', reserved_lamports = ?, actual_lamports = NULL,
-         hour_bucket = ?, day_bucket = ?, policy_versions = ?, signature = NULL,
-         signed_transaction = NULL, miss_count = 0, failure_reason = NULL,
-         submitted_at = NULL, reconciled_at = NULL, updated_at = sdp_iso_now()
-       WHERE id = ? AND status = 'released'`,
+         hour_bucket = ?, day_bucket = ?, policy_versions = ?,
+         provider_config_fingerprint = ?, signature = NULL,
+         signed_transaction = NULL, attempt = attempt + 1, miss_count = 0, failure_reason = NULL,
+         submitted_at = NULL, reconciled_at = NULL, redis_settled_at = NULL,
+         updated_at = sdp_iso_now()
+       WHERE id = ? AND status = 'released'
+       RETURNING attempt`,
       [
         input.reservedLamports,
         input.hourBucket,
         input.dayBucket,
         JSON.stringify(input.policyVersions),
+        input.providerConfigFingerprint,
         input.id,
       ]
     );
-    return updated === 1;
+    return updated?.attempt ?? null;
   }
 
   async tripGlobalBreaker(
@@ -280,40 +309,48 @@ export class SponsorshipBudgetRepository {
     });
   }
 
-  async markSigned(id: string, signedTransaction: string): Promise<void> {
-    await this.db.execute(
-      `UPDATE sponsorship_budget_reservations
-       SET status = 'signed', signed_transaction = ?, updated_at = sdp_iso_now()
+  async markSigned(id: string, signedTransaction: string, signature: string): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE sponsorship_budget_reservations
+       SET status = 'signed', signed_transaction = ?, signature = ?, updated_at = sdp_iso_now()
        WHERE id = ? AND status = 'reserved'`,
-      [signedTransaction, id]
+        [signedTransaction, signature, id]
+      )) === 1
     );
   }
 
-  async markSubmitted(id: string, signature: string): Promise<void> {
-    await this.db.execute(
-      `UPDATE sponsorship_budget_reservations
+  async markSubmitted(id: string, signature: string): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE sponsorship_budget_reservations
        SET status = 'submitted', signature = ?, submitted_at = sdp_iso_now(), updated_at = sdp_iso_now()
        WHERE id = ? AND status IN ('reserved', 'signed')`,
-      [signature, id]
+        [signature, id]
+      )) === 1
     );
   }
 
-  async markChargedUnknown(id: string, reason: string): Promise<void> {
-    await this.db.execute(
-      `UPDATE sponsorship_budget_reservations
+  async markChargedUnknown(id: string, reason: string): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE sponsorship_budget_reservations
        SET status = 'charged_unknown', failure_reason = ?, updated_at = sdp_iso_now()
        WHERE id = ? AND status IN ('reserved', 'signed')`,
-      [reason.slice(0, 500), id]
+        [reason.slice(0, 500), id]
+      )) === 1
     );
   }
 
-  async markReleased(id: string, reason: string): Promise<void> {
-    await this.db.execute(
-      `UPDATE sponsorship_budget_reservations
-       SET status = 'released', failure_reason = ?, reconciled_at = sdp_iso_now(),
-           updated_at = sdp_iso_now()
+  async markReleased(id: string, reason: string): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE sponsorship_budget_reservations
+       SET status = 'released', actual_lamports = 0, failure_reason = ?,
+           reconciled_at = sdp_iso_now(), updated_at = sdp_iso_now()
        WHERE id = ? AND status IN ('reserved', 'signed')`,
-      [reason.slice(0, 500), id]
+        [reason.slice(0, 500), id]
+      )) === 1
     );
   }
 
@@ -364,6 +401,104 @@ export class SponsorshipBudgetRepository {
         project: row?.project_day ?? 0,
       },
     };
+  }
+
+  async listReconciliationCandidates(
+    network: SponsorshipNetwork,
+    updatedBefore: string,
+    limit = 250
+  ): Promise<SponsorshipReconciliationReservation[]> {
+    const rows = await this.db.queryMany<{
+      id: string;
+      status: SponsorshipReservationStatus;
+      signature: string | null;
+      signed_transaction: string | null;
+      reserved_lamports: number;
+      actual_lamports: number | null;
+      attempt: number;
+      network: SponsorshipNetwork;
+      organization_id: string;
+      project_id: string | null;
+      fee_payer: string;
+      provider_config_fingerprint: string;
+      recent_blockhash: string;
+      hour_bucket: string;
+      day_bucket: string;
+      miss_count: number;
+      updated_at: string;
+      redis_settled_at: string | null;
+    }>(
+      `SELECT id, status, signature, signed_transaction, reserved_lamports, actual_lamports,
+              attempt, network,
+              organization_id, project_id, fee_payer, provider_config_fingerprint,
+              recent_blockhash, hour_bucket, day_bucket,
+              miss_count, updated_at, redis_settled_at
+       FROM sponsorship_budget_reservations
+       WHERE network = ? AND (
+         (status IN ('reserved', 'signed', 'submitted') AND updated_at <= ?)
+         OR (status IN ('committed', 'released') AND redis_settled_at IS NULL)
+       )
+       ORDER BY updated_at, id
+       LIMIT ?`,
+      [network, updatedBefore, limit]
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      status: row.status,
+      signature: row.signature,
+      signedTransaction: row.signed_transaction,
+      reservedLamports: row.reserved_lamports,
+      actualLamports: row.actual_lamports,
+      attempt: row.attempt,
+      network: row.network,
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      feePayer: row.fee_payer,
+      providerConfigFingerprint: row.provider_config_fingerprint,
+      recentBlockhash: row.recent_blockhash,
+      hourBucket: row.hour_bucket,
+      dayBucket: row.day_bucket,
+      missCount: row.miss_count,
+      updatedAt: row.updated_at,
+      redisSettledAt: row.redis_settled_at,
+    }));
+  }
+
+  async recordReconciliationMiss(id: string, expectedMissCount: number): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE sponsorship_budget_reservations
+         SET miss_count = miss_count + 1, updated_at = sdp_iso_now()
+         WHERE id = ? AND miss_count = ? AND status IN ('signed', 'submitted')`,
+        [id, expectedMissCount]
+      )) === 1
+    );
+  }
+
+  async settleReservation(
+    id: string,
+    status: "committed" | "released",
+    actualLamports: number,
+    reason?: string
+  ): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE sponsorship_budget_reservations
+         SET status = ?, actual_lamports = ?, failure_reason = ?, reconciled_at = sdp_iso_now(),
+             updated_at = sdp_iso_now()
+         WHERE id = ? AND status IN ('signed', 'submitted')`,
+        [status, actualLamports, reason ?? null, id]
+      )) === 1
+    );
+  }
+
+  async markRedisSettled(id: string): Promise<void> {
+    await this.db.execute(
+      `UPDATE sponsorship_budget_reservations
+       SET redis_settled_at = sdp_iso_now(), updated_at = sdp_iso_now()
+       WHERE id = ? AND status IN ('committed', 'released') AND redis_settled_at IS NULL`,
+      [id]
+    );
   }
 
   private async insertRevision(

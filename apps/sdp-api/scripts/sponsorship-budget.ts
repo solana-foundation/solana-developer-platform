@@ -1,15 +1,26 @@
 import { closeDatabasePools, getDb } from "../src/db";
 import {
   SponsorshipBudgetRepository,
-  type SponsorshipBudgetScopeType,
   type SponsorshipNetwork,
 } from "../src/db/repositories/sponsorship-budget.repository";
 import { getProcessEnv } from "../src/lib/runtime-env";
 import { SponsorshipBudgetRedis } from "../src/runtime/sponsorship-budget-redis";
+import {
+  isPolicyControlInSync,
+  parseSponsorshipNetwork,
+  parseSponsorshipPolicyLimits,
+  parseSponsorshipScope,
+  toRedisLuaSafePolicyLimits,
+} from "../src/services/sponsorship-budget-operator";
 
 function readArg(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
-  return index === -1 ? undefined : process.argv[index + 1]?.trim();
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  if (value === undefined || value.startsWith("--")) {
+    throw new Error(`--${name} requires a value`);
+  }
+  return value;
 }
 
 function requireArg(name: string): string {
@@ -19,27 +30,7 @@ function requireArg(name: string): string {
 }
 
 function parseNetwork(): SponsorshipNetwork {
-  const value = requireArg("network");
-  if (value !== "devnet" && value !== "mainnet") {
-    throw new Error("--network must be devnet or mainnet");
-  }
-  return value;
-}
-
-function parseScope(): SponsorshipBudgetScopeType {
-  const value = readArg("scope") ?? "global";
-  if (value !== "global" && value !== "organization" && value !== "project") {
-    throw new Error("--scope must be global, organization, or project");
-  }
-  return value;
-}
-
-function parseLamports(name: string): number {
-  const value = Number(requireArg(name));
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`--${name} must be a non-negative safe integer`);
-  }
-  return value;
+  return parseSponsorshipNetwork(readArg("network"));
 }
 
 async function persistGlobalEnabled(enabled: boolean) {
@@ -71,11 +62,8 @@ async function main() {
   const repository = new SponsorshipBudgetRepository(getDb(env));
 
   if (command === "status") {
-    const networkValue = readArg("network");
-    if (networkValue && networkValue !== "devnet" && networkValue !== "mainnet") {
-      throw new Error("--network must be devnet or mainnet");
-    }
-    const policies = await repository.listPolicies(networkValue as SponsorshipNetwork | undefined);
+    const network = parseNetwork();
+    const policies = await repository.listPolicies(network);
     const redis = new SponsorshipBudgetRedis(env);
     const status = await Promise.all(
       policies.map(async (policy) => {
@@ -83,7 +71,7 @@ async function main() {
         return {
           ...policy,
           redisControl: control,
-          inSync: control?.version === policy.version && control.enabled === policy.enabled,
+          inSync: isPolicyControlInSync(policy, control),
         };
       })
     );
@@ -104,20 +92,24 @@ async function main() {
   }
 
   const network = parseNetwork();
-  const scopeType = parseScope();
-  const scopeId = scopeType === "global" ? null : (readArg("scope-id") ?? null);
+  const { scopeType, scopeId } = parseSponsorshipScope(readArg("scope"), readArg("scope-id"));
   const enabledArg = readArg("enabled") ?? "true";
   if (enabledArg !== "true" && enabledArg !== "false") {
     throw new Error("--enabled must be true or false");
   }
+  const limits = toRedisLuaSafePolicyLimits(
+    parseSponsorshipPolicyLimits({
+      perTransactionLamports: readArg("per-tx-lamports"),
+      hourlyLamports: readArg("hourly-lamports"),
+      dailyLamports: readArg("daily-lamports"),
+    })
+  );
   const policy = await repository.upsertPolicy({
     network,
     scopeType,
     scopeId,
     enabled: enabledArg === "true",
-    perTransactionLamports: parseLamports("per-tx-lamports"),
-    hourlyLamports: parseLamports("hourly-lamports"),
-    dailyLamports: parseLamports("daily-lamports"),
+    ...limits,
     operator: requireArg("operator"),
     reason: requireArg("reason"),
   });

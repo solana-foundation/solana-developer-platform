@@ -274,6 +274,7 @@ export class KoraAdapter implements FeePaymentPort {
         feePayerMayTransferLamports: policyMaySpendLamports(
           response.validation_config?.fee_payer_policy
         ),
+        feePayerPolicy: response.validation_config?.fee_payer_policy,
       };
     } catch (error) {
       if (error instanceof FeePaymentError) throw error;
@@ -355,31 +356,80 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
-/** Only a policy made entirely of explicit `false` flags proves zero outflow. */
+// Pinned to Kora's complete fee-payer authority schema. Managed sponsorship
+// assumes zero additional lamport outflow only when every authority is present
+// and explicitly disabled; schema drift therefore fails closed.
+const ZERO_OUTFLOW_FEE_PAYER_POLICY = {
+  system: {
+    allow_transfer: false,
+    allow_assign: false,
+    allow_create_account: false,
+    allow_allocate: false,
+    nonce: {
+      allow_initialize: false,
+      allow_advance: false,
+      allow_authorize: false,
+      allow_withdraw: false,
+    },
+  },
+  spl_token: {
+    allow_transfer: false,
+    allow_burn: false,
+    allow_close_account: false,
+    allow_approve: false,
+    allow_revoke: false,
+    allow_set_authority: false,
+    allow_mint_to: false,
+    allow_initialize_mint: false,
+    allow_initialize_account: false,
+    allow_initialize_multisig: false,
+    allow_freeze_account: false,
+    allow_thaw_account: false,
+  },
+  token_2022: {
+    allow_transfer: false,
+    allow_burn: false,
+    allow_close_account: false,
+    allow_approve: false,
+    allow_revoke: false,
+    allow_set_authority: false,
+    allow_mint_to: false,
+    allow_initialize_mint: false,
+    allow_initialize_account: false,
+    allow_initialize_multisig: false,
+    allow_freeze_account: false,
+    allow_thaw_account: false,
+  },
+} as const;
+
+/** Only the complete pinned policy with every authority false proves zero outflow. */
 function policyMaySpendLamports(policy: unknown): boolean {
-  let sawBoolean = false;
-  let unsafe = false;
-  const visit = (value: unknown): void => {
-    if (typeof value === "boolean") {
-      sawBoolean = true;
-      if (value) unsafe = true;
-      return;
-    }
-    if (Array.isArray(value)) {
-      if (value.length === 0) unsafe = true;
-      for (const item of value) visit(item);
-      return;
-    }
-    if (value !== null && typeof value === "object") {
-      const values = Object.values(value);
-      if (values.length === 0) unsafe = true;
-      for (const item of values) visit(item);
-      return;
-    }
-    unsafe = true;
-  };
-  visit(policy);
-  return unsafe || !sawBoolean;
+  return !matchesPinnedFalsePolicy(policy, ZERO_OUTFLOW_FEE_PAYER_POLICY);
+}
+
+function matchesPinnedFalsePolicy(policy: unknown, schema: unknown): boolean {
+  if (schema === false) return policy === false;
+  if (
+    policy === null ||
+    typeof policy !== "object" ||
+    Array.isArray(policy) ||
+    schema === null ||
+    typeof schema !== "object" ||
+    Array.isArray(schema)
+  ) {
+    return false;
+  }
+  const actual = policy as Record<string, unknown>;
+  const expected = schema as Record<string, unknown>;
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    actualKeys.some((key, index) => key !== expectedKeys[index])
+  ) {
+    return false;
+  }
+  return expectedKeys.every((key) => matchesPinnedFalsePolicy(actual[key], expected[key]));
 }
 
 function extractRpcErrorCode(error: unknown): number | undefined {

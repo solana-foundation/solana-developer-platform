@@ -9,28 +9,26 @@ import type { Env } from "@/types/env";
 import { getRedisClient } from "./kv-redis";
 
 const INITIALIZE_LUA = `
-if redis.call('HGET', KEYS[1], '__initialized') and redis.call('HGET', KEYS[2], '__initialized') then
-  return 0
-end
 local count = tonumber(ARGV[1])
-if not redis.call('HGET', KEYS[1], '__initialized') then
-  for i = 1, count do redis.call('HSET', KEYS[1], ARGV[1 + i], ARGV[1 + count + i]) end
-  redis.call('HSET', KEYS[1], '__initialized', '1')
-  redis.call('PEXPIRE', KEYS[1], ARGV[2 + count * 3])
+for i = 1, count do
+  local field = ARGV[1 + i]
+  local marker = '__initialized:' .. field
+  if not redis.call('HGET', KEYS[1], marker) then
+    redis.call('HSET', KEYS[1], field, ARGV[1 + count + i])
+    redis.call('HSET', KEYS[1], marker, '1')
+  end
+  if not redis.call('HGET', KEYS[2], marker) then
+    redis.call('HSET', KEYS[2], field, ARGV[1 + count * 2 + i])
+    redis.call('HSET', KEYS[2], marker, '1')
+  end
 end
-if not redis.call('HGET', KEYS[2], '__initialized') then
-  for i = 1, count do redis.call('HSET', KEYS[2], ARGV[1 + i], ARGV[1 + count * 2 + i]) end
-  redis.call('HSET', KEYS[2], '__initialized', '1')
-  redis.call('PEXPIRE', KEYS[2], ARGV[3 + count * 3])
-end
+redis.call('PEXPIRE', KEYS[1], ARGV[2 + count * 3])
+redis.call('PEXPIRE', KEYS[2], ARGV[3 + count * 3])
 return 1
 `;
 
 const RESERVE_LUA = `
 local existing = redis.call('GET', KEYS[3])
-if not redis.call('HGET', KEYS[1], '__initialized') or not redis.call('HGET', KEYS[2], '__initialized') then
-  return {-2, 0}
-end
 local amount = tonumber(ARGV[1])
 local count = tonumber(ARGV[2])
 for i = 1, count do
@@ -41,6 +39,10 @@ for i = 1, count do
   local day_limit = tonumber(ARGV[offset + 4])
   local control_field = ARGV[offset + 5]
   local expected_version = ARGV[offset + 6]
+  local marker = '__initialized:' .. field
+  if not redis.call('HGET', KEYS[1], marker) or not redis.call('HGET', KEYS[2], marker) then
+    return {-2, i}
+  end
   local control = redis.call('HGET', KEYS[4], control_field)
   if not control or control ~= expected_version .. ':1' then return {-3, i} end
 end
@@ -83,17 +85,60 @@ local amount = tonumber(redis.call('GET', KEYS[3]) or '0')
 if amount == 0 then return 0 end
 for i = 1, #ARGV do
   local field = ARGV[i]
-  local hour_used = tonumber(redis.call('HGET', KEYS[1], field) or '0')
-  local day_used = tonumber(redis.call('HGET', KEYS[2], field) or '0')
-  if hour_used < amount or day_used < amount then return -1 end
+  for key_index = 1, 2 do
+    if redis.call('HGET', KEYS[key_index], '__initialized:' .. field) then
+      local used = tonumber(redis.call('HGET', KEYS[key_index], field) or '0')
+      if used < amount then return -1 end
+    end
+  end
 end
 for i = 1, #ARGV do
   local field = ARGV[i]
-  redis.call('HINCRBY', KEYS[1], field, -amount)
-  redis.call('HINCRBY', KEYS[2], field, -amount)
+  for key_index = 1, 2 do
+    if redis.call('HGET', KEYS[key_index], '__initialized:' .. field) then
+      redis.call('HINCRBY', KEYS[key_index], field, -amount)
+    end
+  end
 end
 redis.call('DEL', KEYS[3])
 return amount
+`;
+
+const SETTLE_LUA = `
+if redis.call('GET', KEYS[4]) then return 0 end
+local reserved = tonumber(ARGV[1])
+local actual = tonumber(ARGV[2])
+local count = tonumber(ARGV[3])
+local delta = actual - reserved
+for key_index = 1, 2 do
+  if redis.call('EXISTS', KEYS[key_index]) == 1 then
+    for i = 4, 3 + count do
+      if not redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then return -1 end
+    end
+  end
+end
+if delta < 0 then
+  for key_index = 1, 2 do
+    for i = 4, 3 + count do
+      if redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then
+        local current = tonumber(redis.call('HGET', KEYS[key_index], ARGV[i]) or '0')
+        if current < -delta then return -1 end
+      end
+    end
+  end
+end
+if delta ~= 0 then
+  for key_index = 1, 2 do
+    for i = 4, 3 + count do
+      if redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then
+        redis.call('HINCRBY', KEYS[key_index], ARGV[i], delta)
+      end
+    end
+  end
+end
+redis.call('DEL', KEYS[3])
+redis.call('SET', KEYS[4], actual, 'PX', ARGV[4 + count])
+return delta
 `;
 
 const SCRIPT_SHA = {
@@ -101,6 +146,7 @@ const SCRIPT_SHA = {
   reserve: createHash("sha1").update(RESERVE_LUA).digest("hex"),
   cancel: createHash("sha1").update(CANCEL_LUA).digest("hex"),
   syncControl: createHash("sha1").update(SYNC_CONTROL_LUA).digest("hex"),
+  settle: createHash("sha1").update(SETTLE_LUA).digest("hex"),
 };
 
 export interface BudgetAdmissionInput {
@@ -220,6 +266,38 @@ export class SponsorshipBudgetRedis {
     return { version: parsedVersion, enabled: enabled === "1" };
   }
 
+  async settle(input: {
+    network: SponsorshipNetwork;
+    organizationId: string;
+    projectId: string | null;
+    hourBucket: string;
+    dayBucket: string;
+    reservationId: string;
+    attempt: number;
+    reservedLamports: number;
+    actualLamports: number;
+  }): Promise<number> {
+    const client = await this.getClient();
+    const keys = this.keys(input);
+    const result = await this.runScript(
+      client,
+      "settle",
+      SETTLE_LUA,
+      [keys.hour, keys.day, keys.reservation, keys.settlement],
+      [
+        input.reservedLamports,
+        input.actualLamports,
+        this.fields(input.organizationId, input.projectId).length,
+        ...this.fields(input.organizationId, input.projectId),
+        this.ttlUntilNextDay(),
+      ]
+    );
+    if (result === -1) {
+      throw new Error("Sponsorship budget counter invariant violated during settlement");
+    }
+    return Number(result);
+  }
+
   private fields(organizationId: string, projectId: string | null): string[] {
     const fields = ["global", `organization:${organizationId}`];
     if (projectId) fields.push(`project:${projectId}`);
@@ -236,12 +314,14 @@ export class SponsorshipBudgetRedis {
     hourBucket: string;
     dayBucket: string;
     reservationId: string;
+    attempt?: number;
   }) {
     const prefix = `sdp:sponsorship:{${input.network}}`;
     return {
       hour: `${prefix}:hour:${input.hourBucket}`,
       day: `${prefix}:day:${input.dayBucket}`,
       reservation: `${prefix}:reservation:${input.reservationId}`,
+      settlement: `${prefix}:settlement:${input.reservationId}:${input.attempt ?? 1}`,
       control: `${prefix}:control`,
     };
   }
