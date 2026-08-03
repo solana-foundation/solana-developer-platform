@@ -1,4 +1,3 @@
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import {
   decideRecurringPaymentActivationTransition,
   getRecurringPaymentOperationStaleBefore,
@@ -27,12 +26,15 @@ import {
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
+import { getLogger } from "@/runtime/logger";
 import { parseU64String } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
@@ -41,6 +43,13 @@ import {
   generateProgramPlanId,
   sendSubscriptionInstructions,
 } from "./shared";
+
+function tenantScope(input: { organizationId: string; projectId: string }) {
+  return createTenantScope({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+}
 
 async function resetRecurringPaymentActivationUnlessAlreadyActive(input: {
   recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
@@ -264,10 +273,13 @@ async function journalActivationClaimConflict(input: {
       updatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Failed to journal recurring payment activation claim conflict", {
-      error: error instanceof Error ? error.message : String(error),
-      recurringPaymentId: input.recurringPayment.id,
-    });
+    getLogger().error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        recurring_payment_id: input.recurringPayment.id,
+      },
+      "Failed to journal recurring payment activation claim conflict"
+    );
   }
 }
 
@@ -399,10 +411,13 @@ async function settleActiveActivationAttempt(input: {
       updatedAt: input.nowIso,
     });
   } catch (error) {
-    console.error("Failed to settle recurring payment activation attempt on active replay", {
-      error: error instanceof Error ? error.message : String(error),
-      recurringPaymentId: input.recurringPayment.id,
-    });
+    getLogger().error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        recurring_payment_id: input.recurringPayment.id,
+      },
+      "Failed to settle recurring payment activation attempt on active replay"
+    );
   }
 }
 
@@ -548,8 +563,8 @@ export async function activateRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   createdBy: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
+  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
   const rpc = solanaRpc.createRpc(input.env);
   const nowIso = new Date().toISOString();
 
@@ -782,7 +797,12 @@ export async function activateRecurringPayment(input: {
         subscriptionAuthorityAddress,
         { commitment: "confirmed" }
       );
-      const feePayer = await createFeePaymentAdapter(input.env).getFeePayer();
+      const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        actor: { type: "wallet", id: input.sourceWallet.walletId },
+      });
+      const feePayer = await feePayment.getFeePayer();
       const payer = createNoopSigner(feePayer);
 
       subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
@@ -920,10 +940,13 @@ export async function activateRecurringPayment(input: {
         failedAt,
       });
     } catch (resetError) {
-      console.error("Failed to journal/reset recurring payment activation after failure", {
-        error: resetError instanceof Error ? resetError.message : String(resetError),
-        recurringPaymentId: claimed.id,
-      });
+      getLogger().error(
+        {
+          error: resetError instanceof Error ? resetError.message : String(resetError),
+          recurring_payment_id: claimed.id,
+        },
+        "Failed to journal/reset recurring payment activation after failure"
+      );
     }
 
     throw error;

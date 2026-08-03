@@ -17,9 +17,10 @@ export interface Env {
   // Environment variables
   ENVIRONMENT: "development" | "production";
   API_VERSION: string;
-  // Injected automatically by Cloud Run services. Local processes and jobs omit them.
+  // Injected automatically by Cloud Run services and jobs.
   K_SERVICE?: string;
   K_REVISION?: string;
+  CLOUD_RUN_JOB?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). When set,
   // it overrides the request-derived origin used to build the SDP-hosted token
@@ -44,13 +45,21 @@ export interface Env {
   GCP_SECRET_MANAGER_PROJECT_ID?: string;
   GCP_SECRET_MANAGER_SECRET_PREFIX?: string;
   GCP_SECRET_MANAGER_API_BASE_URL?: string;
+  PRIVY_BYOK_PROVISIONING_ENABLED?: string;
 
   // Application secrets
   API_KEY_PEPPER?: string;
+  CREDENTIAL_FINGERPRINT_PEPPER?: string;
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
   CUSTODY_KMS_KEY_NAME?: string;
   CUSTODY_KMS_API_BASE_URL?: string;
   CUSTODY_KMS_METADATA_TOKEN_URL?: string;
+  SPC_CREDENTIAL_ENCRYPTION_KEY?: string; // For encrypting invited SPC user passwords
+  SPC_CREDENTIAL_KMS_KEY_NAME?: string; // Optional Cloud KMS key for SPC credential envelopes
+  COUNTERPARTY_PII_KMS_KEY_NAME?: string;
+  COUNTERPARTY_PII_KMS_API_BASE_URL?: string;
+  COUNTERPARTY_PII_KMS_METADATA_TOKEN_URL?: string;
+  COUNTERPARTY_PII_ENCRYPTION_KEY?: string;
   SENTRY_DSN?: string;
   SENTRY_TRACES_SAMPLE_RATE?: string;
 
@@ -78,12 +87,17 @@ export interface Env {
   SOLANA_RPC_TRITON_API_KEY?: string;
   SOLANA_RPC_HELIUS_URL?: string;
   SOLANA_RPC_HELIUS_API_KEY?: string;
+  /** Defaults to Jupiter's rate-limited lite endpoint; set both to use the keyed tier. */
+  JUPITER_PRICE_API_URL?: string;
+  JUPITER_PRICE_API_KEY?: string;
   SOLANA_RPC_ALCHEMY_URL?: string;
   SOLANA_RPC_ALCHEMY_API_KEY?: string;
   SOLANA_RPC_QUICKNODE_URL?: string;
   SOLANA_RPC_QUICKNODE_API_KEY?: string;
   SOLANA_RPC_VALIDATIONCLOUD_URL?: string;
   SOLANA_RPC_VALIDATIONCLOUD_API_KEY?: string;
+  SOLANA_RPC_NODIT_URL?: string;
+  SOLANA_RPC_NODIT_API_KEY?: string;
   SOLANA_NETWORK?: "devnet" | "mainnet-beta";
   CUSTODY_PRIVATE_KEY?: string;
   SOLANA_MOCK?: string;
@@ -174,9 +188,13 @@ export interface Env {
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
+  KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
+
+  // AlphaLedger Vulcan Forge tokenization engine
+  ALPHALEDGER_API_KEY?: string;
 
   // MagicBlock private payments configuration
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
@@ -188,7 +206,10 @@ export interface Env {
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
   // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
-  ASSET_PROFILES_ENABLED?: string;
+  SDP_FLAG_ASSET_PROFILES?: string;
+
+  // Private Channels (SPC) feature gate — API routes + deposit/withdrawal cron.
+  PRIVATE_CHANNELS_ENABLED?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;
@@ -275,6 +296,7 @@ declare module "hono" {
   interface ContextVariableMap {
     // API key auth context set by middleware
     projectId?: string;
+    projectEnvironment?: ApiKeyEnvironment;
     apiKey?: {
       id: string;
       organizationId: string;

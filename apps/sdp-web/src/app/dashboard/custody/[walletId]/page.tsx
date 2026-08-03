@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import { policyRuleRestricts } from "@sdp/policy";
 import type {
   CustodyWalletMetadataResponse,
   CustodyWalletTokenBalance,
@@ -27,6 +28,7 @@ import {
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -38,6 +40,8 @@ import {
   formatCurrencyAmount,
   formatDisplayAmount,
   resolveTotalBalance,
+  resolveTransferTokenLabel,
+  shortenAddress,
 } from "../../payments/payments-overview.utils";
 
 interface WalletBalancesResponse {
@@ -62,7 +66,11 @@ interface OwnedTokenRoute {
   id: string;
   mintAddress: string | null;
   name?: string | null;
+  symbol?: string | null;
 }
+
+/** Mint to issued-token detail, used for both deep links and naming assets. */
+type OwnedTokensByMint = Map<string, { id: string; name: string | null; symbol: string | null }>;
 
 async function getWalletDetail(
   request: SdpApiClient["request"],
@@ -152,9 +160,7 @@ async function getWalletPolicy(
   }
 }
 
-async function getOwnedTokenRoutes(
-  request: SdpApiClient["request"]
-): Promise<Map<string, { id: string; name: string | null }>> {
+async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<OwnedTokensByMint> {
   try {
     const response = await request("/v1/issuance/tokens?page=1&pageSize=100");
     if (!response.ok) {
@@ -168,12 +174,25 @@ async function getOwnedTokenRoutes(
     return new Map(
       (json.data ?? [])
         .filter(
-          (token): token is { id: string; mintAddress: string; name?: string | null } =>
+          (
+            token
+          ): token is {
+            id: string;
+            mintAddress: string;
+            name?: string | null;
+            symbol?: string | null;
+          } =>
             typeof token.id === "string" &&
             typeof token.mintAddress === "string" &&
             token.mintAddress.trim().length > 0
         )
-        .map((token) => [token.mintAddress, { id: token.id, name: token.name ?? null }] as const)
+        .map(
+          (token) =>
+            [
+              token.mintAddress,
+              { id: token.id, name: token.name ?? null, symbol: token.symbol?.trim() || null },
+            ] as const
+        )
     );
   } catch {
     return new Map();
@@ -319,6 +338,7 @@ export default async function WalletDetailPage({
         <WalletControlsPanel
           walletId={resolvedWalletId}
           policyPromise={walletPolicyPromise}
+          ownedTokensByMintPromise={ownedTokensByMintPromise}
           t={t}
         />
       </Suspense>
@@ -331,9 +351,56 @@ export default async function WalletDetailPage({
         />
       </Suspense>
 
-      <WalletActivityViewport walletId={resolvedWalletId} />
+      <Suspense fallback={<WalletActivityViewport walletId={resolvedWalletId} />}>
+        <WalletActivityWithBalanceSymbols
+          walletId={resolvedWalletId}
+          balancesPromise={trackedBalancesPromise}
+          ownedTokensByMintPromise={ownedTokensByMintPromise}
+        />
+      </Suspense>
     </DashboardWorkspaceOverviewPanel>
   );
+}
+
+/**
+ * Hands the activity table the symbols the balances lookup already resolved, plus the
+ * ones this org issued, so a token the well-known catalogue has never seen still reads
+ * as its symbol rather than a shortened mint. The fallback renders the same viewport
+ * without the map, so activity is never gated on either lookup loading.
+ */
+async function WalletActivityWithBalanceSymbols({
+  walletId,
+  balancesPromise,
+  ownedTokensByMintPromise,
+}: {
+  walletId: string;
+  balancesPromise: Promise<WalletTrackedBalancesResult>;
+  ownedTokensByMintPromise: Promise<OwnedTokensByMint>;
+}) {
+  const [{ balances }, ownedTokensByMint] = await Promise.all([
+    balancesPromise,
+    ownedTokensByMintPromise,
+  ]);
+  const symbolsByMint: Record<string, string> = {};
+  // Seeded first so balances can override: a token this org issued should still be
+  // named in activity even when the wallet holds none of it, which is exactly the
+  // case for an asset it has only ever sent away.
+  for (const [mint, token] of ownedTokensByMint) {
+    if (token.symbol) {
+      symbolsByMint[mint] = token.symbol;
+    }
+  }
+  for (const balance of balances) {
+    const mint = balance.mint?.trim();
+    const token = balance.token?.trim();
+    // Skip entries whose "symbol" is just the mint again — they carry no
+    // information and would defeat the shortened-address fallback.
+    if (mint && token && token !== mint) {
+      symbolsByMint[mint] = token;
+    }
+  }
+
+  return <WalletActivityViewport walletId={walletId} symbolsByMint={symbolsByMint} />;
 }
 
 export async function WalletBalanceSummary({
@@ -395,7 +462,7 @@ export async function WalletBalancesSection({
   t,
 }: {
   balancesPromise: Promise<WalletTrackedBalancesResult>;
-  ownedTokensByMintPromise: Promise<Map<string, { id: string; name: string | null }>>;
+  ownedTokensByMintPromise: Promise<OwnedTokensByMint>;
   t: Awaited<ReturnType<typeof getTranslations>>;
 }) {
   const [trackedBalancesResult, ownedTokensByMint] = await Promise.all([
@@ -439,27 +506,77 @@ export async function WalletBalancesSection({
   );
 }
 
+/**
+ * Distinct mints named by the profile's asset rules. The rules array is the
+ * source of truth for allowed assets; destinationAllowlist and the amount caps
+ * are stored separately and say nothing about which tokens are permitted.
+ */
+/**
+ * Mints named by an allow-action asset rule — the only rules that express an
+ * allowlist, and so the only ones honest to render under "Allowed assets".
+ *
+ * An asset rule can equally carry `deny` or `approval_required`, and listing
+ * those mints as allowed would state the opposite of what the profile
+ * enforces — the worst kind of wrong on a custody screen.
+ *
+ * Other kinds are excluded because they say something different: `amount`
+ * rules only cap the mints they name, leaving other assets transferable, and
+ * `approval` rules gate rather than permit. A profile restricted solely by one
+ * of those still reads as restricted — see policyRuleRestricts, which
+ * classifies rules independently of this list.
+ */
+function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
+  const mints = new Set<string>();
+
+  for (const rule of policy?.rules ?? []) {
+    if (rule.kind !== "asset") continue;
+    if (rule.action && rule.action !== "allow") continue;
+
+    for (const mint of rule.assets ?? (rule.asset ? [rule.asset] : [])) {
+      mints.add(mint);
+    }
+  }
+
+  return [...mints];
+}
+
 function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
   if (!policy) return false;
   return (
     policy.destinationAllowlist.length > 0 ||
     Boolean(policy.maxTransferAmount) ||
-    Boolean(policy.maxDailyAmount)
+    Boolean(policy.maxDailyAmount) ||
+    // Operations matching no rule fall through to the policy default, so a
+    // non-allow default is itself a restriction.
+    (policy.defaultAction !== undefined && policy.defaultAction !== "allow") ||
+    (policy.rules ?? []).some(policyRuleRestricts)
   );
 }
 
 async function WalletControlsPanel({
   walletId,
   policyPromise,
+  ownedTokensByMintPromise,
   t,
 }: {
   walletId: string;
   policyPromise: Promise<WalletPolicyResult>;
+  ownedTokensByMintPromise: Promise<OwnedTokensByMint>;
   t: Awaited<ReturnType<typeof getTranslations>>;
 }) {
-  const { policy, error: policyError } = await policyPromise;
+  const [{ policy, error: policyError }, ownedTokensByMint] = await Promise.all([
+    policyPromise,
+    ownedTokensByMintPromise,
+  ]);
   const hasRestrictions = walletPolicyHasRestrictions(policy);
   const destinationCount = policy?.destinationAllowlist.length ?? 0;
+  const allowedAssets = walletPolicyAssets(policy);
+  // Names assets this org issued. Without it any mint outside the well-known
+  // catalogue renders as a shortened address.
+  const issuedSymbolsByMint: Record<string, string> = {};
+  for (const [mint, token] of ownedTokensByMint) {
+    if (token.symbol) issuedSymbolsByMint[mint] = token.symbol;
+  }
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
 
   return (
@@ -479,19 +596,53 @@ async function WalletControlsPanel({
           {policyError ? (
             <p className="text-sm text-error">{policyError}</p>
           ) : (
-            <div className="grid gap-2 sm:grid-cols-3">
-              <WalletControlMetric
-                label={t("DashboardCustody.destinations")}
-                value={destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")}
-              />
-              <WalletControlMetric
-                label={t("DashboardCustody.perTransfer")}
-                value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
-              />
-              <WalletControlMetric
-                label={t("DashboardCustody.daily")}
-                value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
-              />
+            <div className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <WalletControlMetric
+                  label={t("DashboardCustody.policyAllowedAssets")}
+                  value={
+                    allowedAssets.length > 0
+                      ? String(allowedAssets.length)
+                      : t("DashboardCustody.open")
+                  }
+                />
+                <WalletControlMetric
+                  label={t("DashboardCustody.destinations")}
+                  value={
+                    destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")
+                  }
+                />
+                <WalletControlMetric
+                  label={t("DashboardCustody.perTransfer")}
+                  value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
+                />
+                <WalletControlMetric
+                  label={t("DashboardCustody.daily")}
+                  value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
+                />
+              </div>
+              {/* Named here rather than under Balances: these are the assets the
+                  wallet may move, which is not the same as what it holds. */}
+              {allowedAssets.length > 0 ? (
+                <ul className="flex flex-wrap gap-2">
+                  {allowedAssets.map((mint) => (
+                    <li
+                      key={mint}
+                      className="flex items-center gap-2 rounded-full border border-border-subtle bg-fill-subtle py-1 pr-3 pl-1"
+                      title={mint}
+                    >
+                      {/* Only issued symbols are handed over: TokenMark already
+                          resolves well-known mints itself, and an unresolvable mint
+                          should keep its neutral placeholder rather than take a
+                          monogram cut from an address. */}
+                      <TokenMark mint={mint} symbol={issuedSymbolsByMint[mint]} size="sm" />
+                      <span className="text-xs font-medium text-secondary">
+                        {resolveTransferTokenLabel(mint, issuedSymbolsByMint)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           )}
         </div>
@@ -571,11 +722,18 @@ function WalletBalanceRow({
         href ? "transition-colors hover:bg-fill-subtle" : "",
       ].join(" ")}
     >
-      <div>
-        <p className="text-[17px] font-medium text-primary">{label}</p>
-        <p className="font-mono text-xs text-tertiary">{mint}</p>
+      <div className="flex min-w-0 items-center gap-3">
+        <TokenMark mint={mint} symbol={label} size="md" />
+        <div className="min-w-0">
+          <p className="text-[17px] font-medium text-primary">{label}</p>
+          {/* The full mint is 44 characters; keep it reachable on hover rather
+              than letting it dominate the row. */}
+          <p className="font-mono text-xs text-tertiary" title={mint}>
+            {shortenAddress(mint)}
+          </p>
+        </div>
       </div>
-      <p className="text-[15px] text-primary">{value}</p>
+      <p className="text-[15px] text-primary tabular-nums">{value}</p>
     </div>
   );
 

@@ -63,9 +63,14 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1
 
-# Apply OS-level security patches not yet in the pinned base image.
+# Update npm for patched node-tar (CVE-2026-59873) and apply OS-level fixes
+# not yet in the pinned base image.
 # This layer is cached — rebuild with --no-cache to pick up new fixes.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+RUN npm install --global npm@12.0.2 \
+ && npm cache clean --force \
+ && apt-get update \
+ && apt-get upgrade -y \
+ && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 1001 nodejs \
  && useradd --system --uid 1001 --gid nodejs nextjs

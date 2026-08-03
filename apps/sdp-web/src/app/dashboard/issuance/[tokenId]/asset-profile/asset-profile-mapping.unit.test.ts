@@ -92,6 +92,27 @@ const FOREIGN_METADATA: IssuanceMetadata = {
 };
 
 describe("profileToDraftState", () => {
+  it("hydrates the supply cap from the token row", () => {
+    // maxSupply is a `tokens` column, not issuance_metadata, so this is the only
+    // path that can restore it into the draft. (The mint's freeze authority is
+    // not mirrored here — it rides along as the "freezeAccounts" setting.)
+    const draft = profileToDraftState(
+      makeProfile(FOREIGN_METADATA),
+      makeToken({ maxSupply: "1000000", isFreezable: false })
+    );
+
+    expect(draft.maxSupply).toBe("1000000");
+  });
+
+  it("renders an absent cap as an empty field rather than 'null'", () => {
+    const draft = profileToDraftState(
+      makeProfile(FOREIGN_METADATA),
+      makeToken({ maxSupply: null })
+    );
+
+    expect(draft.maxSupply).toBe("");
+  });
+
   it("hydrates form fields from metadata with token-row precedence", () => {
     const token = makeToken({ name: "Renamed On Token", description: "Token-side description" });
     const draft = profileToDraftState(makeProfile(FOREIGN_METADATA), token);

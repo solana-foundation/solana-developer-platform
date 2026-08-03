@@ -6,6 +6,7 @@ import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
@@ -59,11 +60,21 @@ export const listProjectApiKeys = async (c: AppContext) => {
   await assertProjectAccess(c, auth, projectId);
 
   const db = getDb(c.env);
-  const apiKeyService = new ApiKeyService(db);
+  const apiKeyService = new ApiKeyService(
+    db,
+    createTenantScope({
+      organizationId: auth.organizationId,
+      projectId,
+    })
+  );
   const apiKeys = await apiKeyService.listForProject(projectId);
   const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
     c.env,
     db,
+    createTenantScope({
+      organizationId: auth.organizationId,
+      projectId,
+    }),
     apiKeys.map((key) => key.id)
   );
 
@@ -166,7 +177,13 @@ export const createProjectApiKey = async (c: AppContext) => {
     );
   }
 
-  const apiKeyService = new ApiKeyService(getDb(c.env));
+  const apiKeyService = new ApiKeyService(
+    getDb(c.env),
+    createTenantScope({
+      organizationId: auth.organizationId,
+      projectId,
+    })
+  );
   const createdKey = await apiKeyService.createApiKey({
     organizationId: auth.organizationId,
     projectId,

@@ -1,0 +1,83 @@
+{
+  "name": "@sdp/private-channels",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./auth": {
+      "types": "./src/auth.ts",
+      "import": "./src/auth.ts",
+      "default": "./src/auth.ts"
+    },
+    "./channels": {
+      "types": "./src/channels.ts",
+      "import": "./src/channels.ts",
+      "default": "./src/channels.ts"
+    },
+    "./constants": {
+      "types": "./src/constants.ts",
+      "import": "./src/constants.ts",
+      "default": "./src/constants.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
+    },
+    "./health": {
+      "types": "./src/health.ts",
+      "import": "./src/health.ts",
+      "default": "./src/health.ts"
+    },
+    "./probe": {
+      "types": "./src/probe.ts",
+      "import": "./src/probe.ts",
+      "default": "./src/probe.ts"
+    },
+    "./rpc": {
+      "types": "./src/rpc.ts",
+      "import": "./src/rpc.ts",
+      "default": "./src/rpc.ts"
+    },
+    "./schema": {
+      "types": "./src/schema.ts",
+      "import": "./src/schema.ts",
+      "default": "./src/schema.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts",
+      "default": "./src/types.ts"
+    },
+    "./url": {
+      "types": "./src/url.ts",
+      "import": "./src/url.ts",
+      "default": "./src/url.ts"
+    },
+    "./gateway": {
+      "types": "./src/gateway.ts",
+      "import": "./src/gateway.ts",
+      "default": "./src/gateway.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sdp/rpc": "workspace:*",
+    "@sdp/types": "workspace:*",
+    "@solana-program/token": "catalog:",
+    "@solana/kit": "catalog:",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.8"
+  }
+}

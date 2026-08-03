@@ -4,6 +4,7 @@ import type {
   ApiPlaygroundFieldOption,
 } from "@/components/api-playground-shell";
 import type { MessageKey } from "@/i18n/messages";
+import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 import { getTokenAmountFieldDescription } from "./[tokenId]/token-management-workspace.utils";
 
 export interface IssuancePlaygroundTokenView {
@@ -169,7 +170,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
   const exampleTemplateId = firstTemplate?.id ?? "stablecoin";
   const exampleTemplateName = firstTemplate?.name ?? "Stablecoin";
 
-  return [
+  const curatedEndpoints: ApiPlaygroundEndpointConfig[] = [
     {
       id: "list-templates",
       title: t("DashboardIssuance.playground.listTemplates"),
@@ -715,6 +716,19 @@ export function buildIssuancePlaygroundEndpointConfigs({
       },
     },
     {
+      id: "list-allowlist-labels",
+      title: t("DashboardIssuance.playground.listAllowlistLabels"),
+      method: "GET",
+      path: "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+      pathFields: [tokenIdField],
+      bodyFields: [],
+      expectedResponse: {
+        data: {
+          labels: [t("DashboardIssuance.playground.treasuryExample")],
+        },
+      },
+    },
+    {
       id: "add-allowlist-entry",
       title: t("DashboardIssuance.playground.addAllowlistEntry"),
       method: "POST",
@@ -766,4 +780,6 @@ export function buildIssuancePlaygroundEndpointConfigs({
       },
     },
   ];
+
+  return mergeOpenApiPlaygroundEndpoints("issuance", curatedEndpoints);
 }

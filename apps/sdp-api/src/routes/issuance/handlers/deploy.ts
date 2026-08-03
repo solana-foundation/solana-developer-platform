@@ -19,13 +19,18 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService, type MosaicFeePayment } from "@/services/mosaic";
+import type { MosaicFeePayment } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { confirmDeploySchema, deployTokenSchema } from "../schemas";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
@@ -120,11 +125,14 @@ async function persistRecoveredMint(params: {
       },
     });
   } catch (persistError) {
-    console.error("Failed to persist recovered mint after metadata-URI failure", {
-      tokenId,
-      mintAddress: mint,
-      error: persistError instanceof Error ? persistError.message : String(persistError),
-    });
+    getLogger().error(
+      {
+        tokenId,
+        mintAddress: mint,
+        error: persistError instanceof Error ? persistError.message : String(persistError),
+      },
+      "Failed to persist recovered mint after metadata-URI failure"
+    );
   }
 }
 
@@ -228,12 +236,15 @@ async function recordConfirmedDeploy(params: {
 
     return updatedToken;
   } catch (bookkeepingError) {
-    console.error("confirmDeploy: token is live on-chain but post-deploy bookkeeping failed", {
-      tokenId,
-      mintAddress: mint,
-      error:
-        bookkeepingError instanceof Error ? bookkeepingError.message : String(bookkeepingError),
-    });
+    getLogger().error(
+      {
+        tokenId,
+        mintAddress: mint,
+        error:
+          bookkeepingError instanceof Error ? bookkeepingError.message : String(bookkeepingError),
+      },
+      "confirmDeploy: token is live on-chain but post-deploy bookkeeping failed"
+    );
     return deployedToken;
   }
 }
@@ -250,7 +261,7 @@ export const deployToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   let token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -365,7 +376,7 @@ export const deployToken = async (c: AppContext) => {
     }
 
     // Create Mosaic service for template-based token deployment
-    const mosaic = createMosaicService(c.env, signer, feePayment);
+    const mosaic = createIssuanceMosaicService(c, signer, feePayment);
 
     const result = await mosaic.createToken({
       template: token.template,
@@ -497,7 +508,7 @@ export const prepareDeploy = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -540,7 +551,7 @@ export const prepareDeploy = async (c: AppContext) => {
   const custodyAddress = signer.address;
 
   // Create Mosaic service and prepare transaction
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
@@ -669,7 +680,7 @@ export const confirmDeploy = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -827,7 +838,7 @@ export const prepareDeployMetadata = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -851,7 +862,7 @@ export const prepareDeployMetadata = async (c: AppContext) => {
   ]);
 
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at
   // the SDP-hosted (or issuer-supplied) URL.

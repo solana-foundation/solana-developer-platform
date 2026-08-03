@@ -14,6 +14,7 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { internalError, transactionFailed } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import {
   type AppContext,
   type getFeePayment,
@@ -174,7 +175,13 @@ export async function executeChunk(params: {
   const firstRecipient = recipientRows[0];
   const linkedTransfer = await getDb(c.env).transaction(async (tx) => {
     const txClient = asTransactionalClient(tx);
-    const created = await createPostgresPaymentsRepository(txClient).createTransfer({
+    const created = await createPostgresPaymentsRepository(
+      txClient,
+      createTenantScope({
+        organizationId: resolved.scope.auth.organizationId,
+        projectId: resolved.projectId,
+      })
+    ).createTransfer({
       organizationId: resolved.scope.auth.organizationId,
       projectId: resolved.projectId,
       walletId: resolved.sourceWallet.walletId,

@@ -10,6 +10,7 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
+import { setNestedValue } from "@/lib/set-nested-value";
 import { cn } from "@/lib/utils";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -25,10 +26,10 @@ export interface ApiPlaygroundFieldConfig {
   placeholder?: string;
   description?: string;
   defaultValue?: string;
-  kind?: "text" | "select";
+  kind?: "text" | "select" | "textarea";
   options?: ApiPlaygroundFieldOption[];
   required?: boolean;
-  valueType?: "string" | "boolean" | "number" | "string_array";
+  valueType?: "string" | "boolean" | "number" | "string_array" | "json";
 }
 
 export interface ApiPlaygroundEndpointConfig {
@@ -98,26 +99,7 @@ function buildInitialFieldValues(
 }
 
 function hasRequestBody(method: ApiPlaygroundMethod): boolean {
-  return method !== "GET" && method !== "DELETE";
-}
-
-function setNestedValue(target: Record<string, unknown>, path: string, value: unknown) {
-  const segments = path.split(".");
-  let current: Record<string, unknown> = target;
-
-  segments.forEach((segment, index) => {
-    if (index === segments.length - 1) {
-      current[segment] = value;
-      return;
-    }
-
-    const existing = current[segment];
-    if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
-      current[segment] = {};
-    }
-
-    current = current[segment] as Record<string, unknown>;
-  });
+  return method !== "GET";
 }
 
 function serializeFieldValue(field: ApiPlaygroundFieldConfig, rawValue: string): unknown {
@@ -136,15 +118,24 @@ function serializeFieldValue(field: ApiPlaygroundFieldConfig, rawValue: string):
       .filter(Boolean);
   }
 
+  if (field.valueType === "json") {
+    return JSON.parse(rawValue) as unknown;
+  }
+
   return rawValue;
+}
+
+interface RequestBodyResult {
+  body: unknown | null;
+  invalidJsonField: string | null;
 }
 
 function buildRequestBody(
   fields: ApiPlaygroundFieldConfig[],
   values: Record<string, string>
-): Record<string, unknown> | null {
+): RequestBodyResult {
   if (fields.length === 0) {
-    return null;
+    return { body: null, invalidJsonField: null };
   }
 
   const payload: Record<string, unknown> = {};
@@ -155,20 +146,48 @@ function buildRequestBody(
       continue;
     }
 
-    setNestedValue(payload, field.key, serializeFieldValue(field, rawValue));
+    try {
+      const value = serializeFieldValue(field, rawValue);
+      if (field.key === "$body") {
+        return { body: value, invalidJsonField: null };
+      }
+      setNestedValue(payload, field.key, value);
+    } catch {
+      return { body: null, invalidJsonField: field.label };
+    }
   }
 
-  return Object.keys(payload).length > 0 ? payload : null;
+  return {
+    body: Object.keys(payload).length > 0 ? payload : null,
+    invalidJsonField: null,
+  };
 }
 
 function resolvePath(
   endpoint: ApiPlaygroundEndpointConfig,
   values: Record<string, string>
 ): string {
-  return endpoint.path.replace(/\{([^}]+)\}/g, (_, token) => {
+  const [pathname, query = ""] = endpoint.path.split("?", 2);
+  const fieldsByKey = new Map(endpoint.pathFields.map((field) => [field.key, field]));
+  const replaceToken = (_match: string, token: string) => {
     const value = values[token];
-    return value?.trim() ? value.trim() : `{${token}}`;
-  });
+    if (value?.trim()) {
+      return encodeURIComponent(value.trim());
+    }
+    return fieldsByKey.get(token)?.required ? `{${token}}` : "";
+  };
+  const resolvedPathname = pathname.replace(/\{([^}]+)\}/g, replaceToken);
+  const resolvedQuery = query
+    .split("&")
+    .filter(Boolean)
+    .map((part) => part.replace(/\{([^}]+)\}/g, replaceToken))
+    .filter((part) => {
+      const separatorIndex = part.indexOf("=");
+      return separatorIndex === -1 || part.slice(separatorIndex + 1) !== "";
+    })
+    .join("&");
+
+  return resolvedQuery ? `${resolvedPathname}?${resolvedQuery}` : resolvedPathname;
 }
 
 function getMissingRequiredFields(
@@ -206,7 +225,7 @@ function isValidSdpApiKey(rawValue: string): boolean {
 function buildFetchSnippet(
   endpoint: ApiPlaygroundEndpointConfig,
   resolvedPath: string,
-  requestBody: Record<string, unknown> | null,
+  requestBody: unknown | null,
   apiBaseUrl: string
 ): string {
   const lines = [
@@ -233,7 +252,7 @@ function buildFetchSnippet(
 function buildAiInstructions(
   endpoint: ApiPlaygroundEndpointConfig,
   fieldValues: Record<string, string>,
-  requestBody: Record<string, unknown> | null,
+  requestBody: unknown | null,
   productName: string,
   t: (key: MessageKey, values?: TranslationValues) => string
 ): string {
@@ -632,10 +651,11 @@ export function ApiPlaygroundShell({
     setExecuteError(null);
   }, [activeEndpointId, preselectedFieldValues]);
 
-  const requestBody = useMemo(
+  const requestBodyResult = useMemo(
     () => (activeEndpoint ? buildRequestBody(activeEndpoint.bodyFields, fieldValues) : null),
     [activeEndpoint, fieldValues]
   );
+  const requestBody = requestBodyResult?.body ?? null;
   const resolvedPath = useMemo(
     () => (activeEndpoint ? resolvePath(activeEndpoint, fieldValues) : ""),
     [activeEndpoint, fieldValues]
@@ -706,6 +726,16 @@ export function ApiPlaygroundShell({
     if (missingFields.length > 0) {
       setExecuteError(
         t("Shared.SharedComponents.completeRequiredFields", { fields: missingFields.join(", ") })
+      );
+      setActivePanel("response");
+      return;
+    }
+
+    if (requestBodyResult?.invalidJsonField) {
+      setExecuteError(
+        t("Shared.SharedComponents.invalidJsonField", {
+          field: requestBodyResult.invalidJsonField,
+        })
       );
       setActivePanel("response");
       return;
@@ -891,6 +921,18 @@ export function ApiPlaygroundShell({
                               </option>
                             ))}
                           </select>
+                        ) : field.kind === "textarea" ? (
+                          <textarea
+                            id={getFieldId(field.key)}
+                            value={fieldValues[field.key] ?? ""}
+                            onChange={(event) =>
+                              updateFieldValue(field.key, event.currentTarget.value)
+                            }
+                            placeholder={field.placeholder}
+                            rows={8}
+                            spellCheck={false}
+                            className="w-full resize-y rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+                          />
                         ) : (
                           <Input
                             id={getFieldId(field.key)}
@@ -940,6 +982,18 @@ export function ApiPlaygroundShell({
                               </option>
                             ))}
                           </select>
+                        ) : field.kind === "textarea" ? (
+                          <textarea
+                            id={getFieldId(field.key)}
+                            value={fieldValues[field.key] ?? ""}
+                            onChange={(event) =>
+                              updateFieldValue(field.key, event.currentTarget.value)
+                            }
+                            placeholder={field.placeholder}
+                            rows={10}
+                            spellCheck={false}
+                            className="w-full resize-y rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+                          />
                         ) : (
                           <Input
                             id={getFieldId(field.key)}

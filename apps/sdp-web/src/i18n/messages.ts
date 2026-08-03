@@ -5,6 +5,7 @@ import dashboardEarn from "../../messages/en/dashboard-earn.json";
 import dashboardIssuance from "../../messages/en/dashboard-issuance.json";
 import dashboardPayments from "../../messages/en/dashboard-payments.json";
 import dashboardPolicies from "../../messages/en/dashboard-policies.json";
+import dashboardPrivateChannels from "../../messages/en/dashboard-private-channels.json";
 import shared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
 import frDashboardApprovals from "../../messages/fr/dashboard-approvals.json";
@@ -24,12 +25,44 @@ const enMessages = {
   ...dashboardIssuance,
   ...dashboardPayments,
   ...dashboardPolicies,
+  ...dashboardPrivateChannels,
   Shared: shared,
 };
 
 export type Messages = typeof enMessages;
 
-const frMessages = {
+type LocalizedMessages<TValue> = {
+  [TKey in keyof TValue]?: TValue[TKey] extends string ? string : LocalizedMessages<TValue[TKey]>;
+};
+
+export function mergeLocalizedMessages<TValue>(
+  fallback: TValue,
+  localized: LocalizedMessages<TValue> | undefined
+): TValue {
+  return mergeLocalizedValue(fallback, localized) as TValue;
+}
+
+function mergeLocalizedValue(fallback: unknown, localized: unknown): unknown {
+  if (typeof fallback === "string") {
+    return typeof localized === "string" ? localized : fallback;
+  }
+  if (!fallback || typeof fallback !== "object" || Array.isArray(fallback)) {
+    return fallback;
+  }
+
+  const localizedRecord =
+    localized && typeof localized === "object" && !Array.isArray(localized)
+      ? (localized as Record<string, unknown>)
+      : {};
+  return Object.fromEntries(
+    Object.entries(fallback).map(([key, fallbackValue]) => [
+      key,
+      mergeLocalizedValue(fallbackValue, localizedRecord[key]),
+    ])
+  );
+}
+
+const frCatalog = {
   ...fr,
   ...frDashboardApprovals,
   ...frDashboardCustody,
@@ -38,7 +71,9 @@ const frMessages = {
   ...frDashboardPayments,
   ...frDashboardPolicies,
   Shared: frShared,
-} satisfies Messages;
+} satisfies LocalizedMessages<Messages>;
+
+const frMessages = mergeLocalizedMessages(enMessages, frCatalog);
 
 export type MessageKeyFor<TValue> = TValue extends string
   ? ""

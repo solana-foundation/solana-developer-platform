@@ -6,8 +6,11 @@ import type {
 } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { ApiKeyService } from "@/services/api-key.service";
-import { PolicyFoundationService } from "@/services/policy-foundation.service";
+import { ApiKeyPolicyStore } from "@/services/policy/api-key-policy.store";
+import { PostgresPolicyEnforcementStore } from "@/services/policy/enforcement.store";
+import { WalletPolicyStore } from "@/services/policy/wallet-policy.store";
 import { TEST_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_CUSTODY_CONFIG, TEST_CUSTODY_WALLET } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -17,9 +20,30 @@ import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import type {
   ApiKeyControlProfileRevisionRow,
   ApiKeyControlProfileRow,
+  CreateWalletControlProfileInput,
   PolicyRepository,
 } from "./policy.repository";
 import { createPostgresPolicyRepository } from "./policy.repository.postgres";
+
+/**
+ * Compose the per-scope policy stores behind the flat method surface these
+ * tests were written against.
+ *
+ * @param repo - The repository under test.
+ * @returns The composed store methods.
+ */
+function policyStores(repo: PolicyRepository) {
+  const wallet = new WalletPolicyStore(repo);
+  const apiKey = new ApiKeyPolicyStore(repo);
+  const enforcement = new PostgresPolicyEnforcementStore(repo);
+  return {
+    resolveEffectiveWalletPolicy: wallet.resolveEffectiveWalletPolicy.bind(wallet),
+    resolveEffectiveApiKeyPolicy: apiKey.resolveEffectiveApiKeyPolicy.bind(apiKey),
+    resolveApiKeyWalletPolicyScope: apiKey.resolveApiKeyWalletPolicyScope.bind(apiKey),
+    upsertApiKeyWalletPolicyBinding: apiKey.upsertApiKeyWalletPolicyBinding.bind(apiKey),
+    recordWalletOperation: enforcement.createWalletOperation.bind(enforcement),
+  };
+}
 
 const SECOND_CUSTODY_WALLET = {
   id: "cw_policy_second",
@@ -37,6 +61,10 @@ const OTHER_PROJECT = {
 };
 
 const OTHER_PROJECT_CUSTODY_CONFIG_ID = "ccfg_policy_other_project";
+const TEST_SCOPE = createTenantScope({
+  organizationId: TEST_ORG.id,
+  projectId: TEST_PROJECT.id,
+});
 const OTHER_PROJECT_CUSTODY_WALLET = {
   id: "cw_policy_other_project",
   walletId: "wallet_policy_other_project",
@@ -59,11 +87,11 @@ describe("PolicyRepository (postgres)", () => {
   beforeEach(async () => {
     await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
     await seedPolicyFoundationFixtures();
-    repo = createPostgresPolicyRepository(getDb(env));
+    repo = createPostgresPolicyRepository(getDb(env), TEST_SCOPE);
   });
 
   it("resolves implicit default allow when no customer-authored profiles exist", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
 
     await expect(
       service.resolveEffectiveWalletPolicy(TEST_CUSTODY_WALLET.id)
@@ -279,6 +307,113 @@ describe("PolicyRepository (postgres)", () => {
     expect(updatedOperation?.updated_at).not.toBe(operation?.updated_at);
   });
 
+  it("rejects mismatched custody and wallet identifiers on operations and bindings", async () => {
+    await seedOtherProjectCustodyWallet();
+
+    await expect(
+      repo.createWalletOperation({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET.id,
+        walletId: OTHER_PROJECT_CUSTODY_WALLET.walletId,
+        operationFamily: "payment",
+        operationType: "payment_transfer",
+      })
+    ).resolves.toBeNull();
+
+    await expect(
+      repo.upsertApiKeyWalletPolicyBinding({
+        apiKeyId: TEST_API_KEY.id,
+        bindingScope: "selected",
+        walletId: TEST_CUSTODY_WALLET.walletId,
+        custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
+      })
+    ).resolves.toBeNull();
+
+    await expect(
+      repo.replaceApiKeyWalletPolicyBindings({
+        apiKeyId: TEST_API_KEY.id,
+        bindings: [
+          {
+            apiKeyId: TEST_API_KEY.id,
+            bindingScope: "selected",
+            walletId: TEST_CUSTODY_WALLET.walletId,
+            custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
+          },
+        ],
+      })
+    ).resolves.toEqual([]);
+
+    await expect(repo.listApiKeyWalletPolicyBindings(TEST_API_KEY.id)).resolves.toEqual([]);
+  });
+
+  it("rejects a tenant-bearing input that omits its project claim", async () => {
+    const inputWithoutProject = {
+      organizationId: TEST_ORG.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      name: "Canonical tenant scope",
+    } as unknown as CreateWalletControlProfileInput;
+
+    await expect(repo.createWalletControlProfile(inputWithoutProject)).rejects.toThrow(
+      "cannot override the repository project scope"
+    );
+  });
+
+  it("applies active organization wallet and API key policies as project fallbacks", async () => {
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET project_id = NULL WHERE id = ?")
+      .bind(TEST_CUSTODY_CONFIG.id)
+      .run();
+
+    const organizationRepo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: null })
+    );
+    const walletProfile = await organizationRepo.createWalletControlProfile({
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      name: "Organization wallet controls",
+    });
+    const walletRevision = await organizationRepo.createWalletControlProfileRevision({
+      profileId: walletProfile?.id ?? "",
+      defaultAction: "deny",
+    });
+    await organizationRepo.activateWalletControlProfileRevision({
+      profileId: walletProfile?.id ?? "",
+      revisionId: walletRevision?.id ?? "",
+    });
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profiles (
+             id, organization_id, project_id, api_key_id, name, status, active_revision_id
+           ) VALUES ('akcp_org_fallback', ?, NULL, ?, 'Organization key controls', 'active', 'akcpr_org_fallback')`
+        )
+        .bind(TEST_ORG.id, TEST_API_KEY.id),
+      getDb(env).prepare(
+        `INSERT INTO api_key_control_profile_revisions (
+             id, profile_id, revision_number, rules, default_action, activated_at
+           ) VALUES ('akcpr_org_fallback', 'akcp_org_fallback', 1, '[]'::jsonb, 'deny', sdp_iso_now())`
+      ),
+    ]);
+
+    const service = policyStores(repo);
+    await expect(
+      service.resolveEffectiveWalletPolicy(TEST_CUSTODY_WALLET.id)
+    ).resolves.toMatchObject({
+      source: "customer_profile",
+      profile: { id: walletProfile?.id },
+      defaultAction: "deny",
+    });
+    await expect(service.resolveEffectiveApiKeyPolicy(TEST_API_KEY.id)).resolves.toMatchObject({
+      source: "customer_profile",
+      profile: { id: "akcp_org_fallback" },
+      defaultAction: "deny",
+    });
+  });
+
   it("lists recent policy evaluations scoped to a wallet for audit review", async () => {
     await seedAdditionalCustodyWallet();
 
@@ -449,16 +584,18 @@ describe("PolicyRepository (postgres)", () => {
     await expect(
       repo.updateApprovalRequestStatus({
         organizationId: "org_other",
+        projectId: TEST_PROJECT.id,
         approvalRequestId: request?.id ?? "",
         status: "approved",
         operationStatus: "executing",
         resolvedBy: TEST_USER.id,
       })
-    ).resolves.toBeNull();
+    ).rejects.toThrowError("cannot override the repository organization scope");
 
     await expect(
       repo.updateApprovalRequestStatus({
         organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
         approvalRequestId: request?.id ?? "",
         status: "approved",
         operationStatus: "executing",
@@ -473,6 +610,7 @@ describe("PolicyRepository (postgres)", () => {
     await expect(
       repo.updateApprovalRequestStatus({
         organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
         approvalRequestId: request?.id ?? "",
         status: "approved",
         operationStatus: "executing",
@@ -530,7 +668,21 @@ describe("PolicyRepository (postgres)", () => {
       approvalRequestId: request?.id,
     });
 
-    const otherOperation = await repo.createWalletOperation({
+    const otherProjectRepo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({
+        organizationId: TEST_ORG.id,
+        projectId: OTHER_PROJECT.id,
+      })
+    );
+    const organizationRepo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      })
+    );
+    const otherOperation = await otherProjectRepo.createWalletOperation({
       organizationId: TEST_ORG.id,
       projectId: OTHER_PROJECT.id,
       custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
@@ -541,7 +693,7 @@ describe("PolicyRepository (postgres)", () => {
     });
     expect(otherOperation).not.toBeNull();
 
-    const otherRequest = await repo.createApprovalRequest({
+    const otherRequest = await otherProjectRepo.createApprovalRequest({
       organizationId: TEST_ORG.id,
       projectId: OTHER_PROJECT.id,
       walletOperationId: otherOperation?.id ?? "",
@@ -595,7 +747,7 @@ describe("PolicyRepository (postgres)", () => {
       })
     ).resolves.toBeNull();
     await expect(
-      repo.getApprovalRequestDetail({
+      organizationRepo.getApprovalRequestDetail({
         organizationId: TEST_ORG.id,
         projectId: null,
         approvalRequestId: otherRequest?.id ?? "",
@@ -606,7 +758,7 @@ describe("PolicyRepository (postgres)", () => {
       operation_status: "pending_approval",
     });
 
-    const orgRows = await repo.listApprovalRequestDetails({
+    const orgRows = await organizationRepo.listApprovalRequestDetails({
       organizationId: TEST_ORG.id,
       projectId: null,
       status: "pending",
@@ -618,7 +770,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("preserves an explicit null wallet operation actor through service mapping", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
 
     const operation = await service.recordWalletOperation({
       organizationId: TEST_ORG.id,
@@ -678,7 +830,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("resolves an all-wallet API key policy binding for every in-scope wallet", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
     const { profile } = await createActiveApiKeyControlProfile(repo, {
       name: "Shared all-wallet controls",
@@ -715,7 +867,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("resolves selected-wallet API key policy bindings for multiple endpoint-scoped wallets", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
     await seedEndpointWalletPermission("akw_policy_selected_primary", TEST_CUSTODY_WALLET.walletId);
     await seedEndpointWalletPermission(
@@ -760,7 +912,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("prefers a selected per-wallet policy override over an all-wallet shared policy", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
     const shared = await createActiveApiKeyControlProfile(repo, {
       name: "Shared key controls",
@@ -805,7 +957,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("fails closed when policy bindings exist but the requested wallet has no binding", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
     const { profile } = await createActiveApiKeyControlProfile(repo, {
       name: "Primary wallet only",
@@ -831,7 +983,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("fails closed when an all-wallet policy binding would exceed selected endpoint wallet access", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
     await seedEndpointWalletPermission("akw_policy_endpoint_primary", TEST_CUSTODY_WALLET.walletId);
     const { profile } = await createActiveApiKeyControlProfile(repo, {
@@ -857,7 +1009,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("fails closed when an all-wallet policy binding is requested for another project wallet", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedOtherProjectCustodyWallet();
     const { profile } = await createActiveApiKeyControlProfile(repo, {
       name: "All policy project boundary",
@@ -877,12 +1029,12 @@ describe("PolicyRepository (postgres)", () => {
       })
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
-      message: "Project API keys cannot use wallets from other projects",
+      message: "API key is not authorized for the requested wallet",
     });
   });
 
   it("rejects all-wallet policy bindings that reference inactive API key profiles", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     const profile = await repo.createApiKeyControlProfile({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
@@ -907,7 +1059,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("rejects all-wallet policy bindings with wallet-specific profile references", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
 
     await expect(
       service.upsertApiKeyWalletPolicyBinding({
@@ -1009,7 +1161,7 @@ describe("PolicyRepository (postgres)", () => {
       apiKeyControlProfileId: apiKeyProfile?.id,
     });
 
-    const rotation = await new ApiKeyService(getDb(env)).rotateApiKey(
+    const rotation = await new ApiKeyService(getDb(env), TEST_SCOPE).rotateApiKey(
       TEST_API_KEY.id,
       TEST_ORG.id,
       TEST_PROJECT.id,

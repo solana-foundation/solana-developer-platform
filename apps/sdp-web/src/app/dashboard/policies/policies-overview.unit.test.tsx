@@ -117,10 +117,24 @@ describe("PoliciesOverviewSurface", () => {
     expect(markup).toContain("No restrictions");
   });
 
-  it("renders five table rows and summary placeholders while loading", () => {
+  it("renders the clear-search control in the input action slot", () => {
+    const markup = renderSurface({
+      inventory: inventory([wallet("active", "active")]),
+      searchValue: "treasury",
+    });
+    const clearButtonIndex = markup.indexOf('aria-label="Clear search"');
+    const actionSlotIndex = markup.lastIndexOf(
+      "relative z-10 inline-flex shrink-0 items-center justify-center",
+      clearButtonIndex
+    );
+
+    expect(clearButtonIndex).toBeGreaterThan(-1);
+    expect(actionSlotIndex).toBeGreaterThan(-1);
+  });
+
+  it("renders five table skeleton rows while loading", () => {
     const markup = renderSurface({ inventory: null, loading: true });
     expect(markup.match(/data-policy-skeleton-row/g)).toHaveLength(5);
-    expect(markup).toContain("data-summary-skeleton");
   });
 
   it("renders error, empty-project, and filtered-empty states without fake counts", () => {
@@ -145,7 +159,14 @@ describe("PoliciesOverviewSurface", () => {
     const markup = renderSurface({ inventory: inventory([wallet("active", "active")]) });
     expect(markup).toMatch(/data-desktop-inventory="true"[^>]*hidden lg:block/);
     expect(markup).toMatch(/data-mobile-inventory="true"[^>]*lg:hidden/);
-    expect(markup).toContain("lg:grid-cols-[minmax(0,1fr)_260px]");
+  });
+
+  it("progressively hides lower-priority table columns on compact desktops", () => {
+    const markup = renderSurface({ inventory: inventory([wallet("active", "active")]) });
+
+    expect(markup).toContain("hidden xl:table-cell xl:w-[17%] 2xl:w-[12%]");
+    expect(markup).toContain("hidden 2xl:table-cell 2xl:w-[15%]");
+    expect(markup).not.toContain("min-w-[1160px]");
   });
 });
 

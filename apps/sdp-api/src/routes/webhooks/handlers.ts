@@ -12,7 +12,9 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
+import { invitationWasRevoked } from "@/lib/invitations";
 import { success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import {
   ensureClerkOrganizationMapping,
   findClerkOrganizationMapping,
@@ -113,7 +115,7 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
   await sessionService
     .revokeOrganizationSessions(mapping.organization_id)
     .catch((error) =>
-      console.error("Failed to revoke sessions after organization deletion:", error)
+      getLogger().error({ error }, "Failed to revoke sessions after organization deletion")
     );
 }
 
@@ -255,7 +257,19 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
   const sessionService = new SessionService(getDb(c.env));
   await sessionService
     .revokeAllUserSessions(identity.user_id)
-    .catch((error) => console.error("Failed to revoke sessions after user deletion:", error));
+    .catch((error) =>
+      getLogger().error({ error }, "Failed to revoke sessions after user deletion")
+    );
+}
+
+/** The address the revoked-invitation rule is keyed on. */
+async function resolveMemberEmail(c: AppContext, userId: string): Promise<string | null> {
+  const user = await getDb(c.env)
+    .prepare("SELECT email FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ email: string }>();
+
+  return user?.email ?? null;
 }
 
 async function upsertVerifiedMembership(
@@ -279,9 +293,31 @@ async function upsertVerifiedMembership(
     .bind(organizationId, data.userId)
     .first<{ role: string; status: string }>();
 
-  await getDb(c.env)
-    .prepare(
-      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+  const email = await resolveMemberEmail(c, data.userId);
+
+  // The check and the write share one transaction, and the check locks the
+  // invitation rows. Reading the status and inserting as separate statements
+  // let a revocation commit in between and still admit the member.
+  const admitted = await getDb(c.env).transaction(async (tx) => {
+    if (
+      existing?.status !== "active" &&
+      email &&
+      (await invitationWasRevoked(tx, organizationId, email, { lock: true }))
+    ) {
+      // Clerk says join, we say the invitation was withdrawn. Clerk mints the
+      // acceptance link and we cannot expire it, so this sync is the last point
+      // that can honour the revocation — without this, revoking an invitation
+      // stopped the local token but not the Clerk link.
+      //
+      // Scoped to users who are not already active members, so this can only
+      // decline a join, never strip access from someone who has it. A revoked
+      // invitation for an existing member is stale and irrelevant.
+      return false;
+    }
+
+    await tx
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
        VALUES (?, ?, ?, ?, 'active')
        ON CONFLICT(organization_id, user_id)
        DO UPDATE SET
@@ -291,16 +327,31 @@ async function upsertVerifiedMembership(
              THEN organization_members.status
            ELSE 'active'
          END`
-    )
-    .bind(memberId, organizationId, data.userId, role, data.reactivateRemoved ? 1 : 0)
-    .run();
+      )
+      .bind(memberId, organizationId, data.userId, role, data.reactivateRemoved ? 1 : 0)
+      .run();
+
+    return true;
+  });
+
+  if (!admitted) {
+    getLogger().warn(
+      {
+        requestId: c.get("requestId"),
+        organizationId,
+        userId: data.userId,
+      },
+      "webhooks: declined membership for a revoked invitation"
+    );
+    return;
+  }
 
   if (existing?.status === "active" && existing.role !== role) {
     const sessionService = new SessionService(getDb(c.env));
     await sessionService
       .revokeUserOrganizationSessions(data.userId, organizationId)
       .catch((error) =>
-        console.error("Failed to revoke sessions after membership role change:", error)
+        getLogger().error({ error }, "Failed to revoke sessions after membership role change")
       );
   }
 
@@ -359,7 +410,9 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
   const sessionService = new SessionService(getDb(c.env));
   await sessionService
     .revokeUserOrganizationSessions(identity.user_id, mapping.organization_id)
-    .catch((error) => console.error("Failed to revoke sessions after membership deletion:", error));
+    .catch((error) =>
+      getLogger().error({ error }, "Failed to revoke sessions after membership deletion")
+    );
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
@@ -382,13 +435,15 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
   // path that settles a transfer. The cron will reconcile any transaction left in a
   // non-terminal state here (e.g. background processing that failed).
   c.executionCtx.waitUntil(
-    processor
-      .process(c, environment, event)
-      .catch((error) =>
-        console.error(
-          `[ramp webhook] background processing failed (${processor.provider}): ${error instanceof Error ? error.message : String(error)}`
-        )
+    processor.process(c, environment, event).catch((error) =>
+      getLogger().error(
+        {
+          provider: processor.provider,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "[ramp webhook] background processing failed"
       )
+    )
   );
 
   return success(c, {

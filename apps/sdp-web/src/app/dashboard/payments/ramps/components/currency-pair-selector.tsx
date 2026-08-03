@@ -135,7 +135,6 @@ export function CurrencyPairSelector() {
             onBlur={onAmountBlur}
             placeholder={isOfframp ? "1.0" : "20.00"}
             size="xl"
-            className="h-[var(--input-height-xl)] shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
             action={
               offrampBalance !== null ? (
                 <AmountBalanceReadout

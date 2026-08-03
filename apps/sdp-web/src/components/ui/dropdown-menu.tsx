@@ -52,7 +52,7 @@ function DropdownMenuItem({
       data-slot="dropdown-menu-item"
       data-inset={inset}
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-[var(--select-item-radius)] px-2.5 py-2 text-sm font-medium text-primary outline-none select-none",
+        "relative flex items-center gap-2 rounded-[var(--select-item-radius)] px-2.5 py-2 text-sm font-medium text-primary outline-none select-none",
         "focus:bg-[var(--select-item-highlight-bg)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         "data-[inset]:pl-8",
         className
@@ -103,7 +103,7 @@ function DropdownMenuCheckboxItem({
     <DropdownMenuPrimitive.CheckboxItem
       data-slot="dropdown-menu-checkbox-item"
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-[var(--select-item-radius)] py-2 pr-2 pl-8 text-sm font-medium text-primary outline-none select-none focus:bg-[var(--select-item-highlight-bg)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex items-center gap-2 rounded-[var(--select-item-radius)] py-2 pr-2 pl-8 text-sm font-medium text-primary outline-none select-none focus:bg-[var(--select-item-highlight-bg)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className
       )}
       checked={checked}
@@ -134,7 +134,7 @@ function DropdownMenuRadioItem({
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-[var(--select-item-radius)] py-2 pr-2 pl-8 text-sm font-medium text-primary outline-none select-none focus:bg-[var(--select-item-highlight-bg)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex items-center gap-2 rounded-[var(--select-item-radius)] py-2 pr-2 pl-8 text-sm font-medium text-primary outline-none select-none focus:bg-[var(--select-item-highlight-bg)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className
       )}
       {...props}
@@ -164,7 +164,7 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex cursor-default items-center rounded-[var(--select-item-radius)] px-2.5 py-2 text-sm font-medium text-primary outline-none select-none focus:bg-[var(--select-item-highlight-bg)] data-[state=open]:bg-[var(--select-item-highlight-bg)] data-[inset]:pl-8",
+        "flex items-center rounded-[var(--select-item-radius)] px-2.5 py-2 text-sm font-medium text-primary outline-none select-none focus:bg-[var(--select-item-highlight-bg)] data-[state=open]:bg-[var(--select-item-highlight-bg)] data-[inset]:pl-8",
         className
       )}
       {...props}

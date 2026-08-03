@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { Suspense } from "react";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -32,19 +31,27 @@ import {
   normalizeAggregateBalances,
   resolveAggregateBalanceDisplayToken,
   resolveTotalBalance,
+  resolveTransferTokenLabel,
   resolveTransferTypeLabel,
   resolveUsdBalanceValue,
   selectTopAggregateBalanceRows,
   shortenAddress,
 } from "./payments-overview.utils";
-import { fetchPaymentsAggregate, fetchPaymentTransfers } from "./payments-page.data";
+import {
+  fetchPaymentsAggregate,
+  fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentTransfers,
+} from "./payments-page.data";
 import { fetchRecurringPayments } from "./recurring/recurring-payments.data";
 import { fetchPaymentRequests } from "./requests/payment-requests-page.data";
 
 type ApiClientPromise = Promise<{ request: SdpApiClient["request"] }>;
 
 const sectionClassName = "min-w-0 rounded-lg border border-border-default bg-surface-raised p-4";
-const activityColumns = "grid-cols-[6.5rem_8rem_minmax(8rem,1fr)_8rem_7.5rem_1rem]";
+// Type carries the longest strings here ("Outbound · Transfer"), so it takes the larger
+// share of the slack. Counterparty is a shortened address of predictable width, and
+// giving it every spare pixel left a dead gap between it and the amount.
+const activityColumns = "grid-cols-[6.5rem_minmax(10rem,1.4fr)_minmax(8rem,1fr)_8rem_7.5rem_1rem]";
 
 function SectionHeading({ title }: { title: string }) {
   return <h2 className="text-base font-semibold tracking-[-0.01em] text-primary">{title}</h2>;
@@ -190,16 +197,18 @@ function formatStatus(status: string): string {
     .join(" ");
 }
 
-function compactAmount(transfer: PaymentTransferSummary): string {
+function compactAmount(
+  transfer: PaymentTransferSummary,
+  issuedTokenSymbolsByMint?: Readonly<Record<string, string>>
+): string {
   if (!transfer.amount) return "—";
   const sign =
     transfer.direction === "inbound" ? "+" : transfer.direction === "outbound" ? "−" : "";
   const amount = transfer.amount.replace(/^-/, "");
-  const asset = transfer.token
-    ? transfer.token.length > 10
-      ? shortenAddress(transfer.token)
-      : transfer.token
-    : "";
+  // Shared resolver rather than a local shortening rule, so this card agrees with the
+  // Transactions table: it names well-known mints and tokens this org issued, and only
+  // shortens what neither can name. Shortening first meant even USDC read as a mint here.
+  const asset = resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint) ?? "";
   return `${sign}${amount}${asset ? ` ${asset}` : ""}`;
 }
 
@@ -218,8 +227,14 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
     getRequestLocale(),
   ]);
   const trace = createTimedTrace("dashboard.payments.overview.activity");
-  const result = await trace.step("fetch_recent_transfers", () =>
-    fetchPaymentTransfers(request, 5, { includeObserved: false })
+  const [result, issuedTokenSymbolsResult] = await Promise.all([
+    trace.step("fetch_recent_transfers", () =>
+      fetchPaymentTransfers(request, 5, { includeObserved: false })
+    ),
+    fetchPaymentsIssuedTokenSymbols(request),
+  ]);
+  const issuedTokenSymbolsByMint = Object.fromEntries(
+    (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
   );
   trace.log({
     ok: result.ok,
@@ -292,9 +307,9 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                     </span>
                     <span
                       className="truncate font-medium text-primary"
-                      title={compactAmount(transfer)}
+                      title={compactAmount(transfer, issuedTokenSymbolsByMint)}
                     >
-                      {compactAmount(transfer)}
+                      {compactAmount(transfer, issuedTokenSymbolsByMint)}
                     </span>
                     <span className="truncate text-xs text-secondary">
                       {formatTimestamp(transfer.createdAt, t, locale)}
@@ -326,7 +341,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                   <span className="flex min-w-0 items-center justify-between gap-3">
                     <span className="truncate text-secondary">{counterparty}</span>
                     <span className="shrink-0 font-medium text-primary">
-                      {compactAmount(transfer)}
+                      {compactAmount(transfer, issuedTokenSymbolsByMint)}
                     </span>
                   </span>
                 </DashboardNavigationLink>
@@ -477,7 +492,7 @@ export function PaymentsCommandCenter({
   organizationId: string;
 }) {
   return (
-    <DashboardWorkspaceOverviewPanel
+    <div
       className="grid content-start gap-4 xl:grid-cols-[minmax(0,1.63fr)_minmax(20rem,1fr)]"
       data-payments-command-center
     >
@@ -496,6 +511,6 @@ export function PaymentsCommandCenter({
           <PaymentNetwork apiClientPromise={apiClientPromise} organizationId={organizationId} />
         </Suspense>
       </div>
-    </DashboardWorkspaceOverviewPanel>
+    </div>
   );
 }

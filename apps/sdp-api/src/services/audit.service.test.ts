@@ -115,6 +115,32 @@ describe("AuditService", () => {
       expect(events[1]?.actorLabel).toBe("Team member");
     });
 
+    it("does not print an unsubstituted Clerk placeholder as the actor", async () => {
+      const placeholder = "{{user.primary_email_address.email_address}}";
+      const { db } = mockDb([
+        { ...rows[0], user_name: null, user_email: placeholder },
+        { ...rows[0], id: "aud_y", user_name: placeholder, user_email: "jordan@example.com" },
+      ]);
+
+      const events = await new AuditService(db).getForAsset("org_1", "tok_1");
+      // Something was recorded but is unusable, which is a data fault rather than an
+      // ordinary nameless user, so it must not read as one.
+      expect(events[0]?.actorLabel).toBe("Unknown user");
+      // A corrupted name must not shadow an email that is still good.
+      expect(events[1]?.actorLabel).toBe("jordan@example.com");
+    });
+
+    it("separates an unusable identity from one that was never recorded", async () => {
+      const { db } = mockDb([
+        { ...rows[0], user_name: null, user_email: null },
+        { ...rows[0], id: "aud_z", user_name: "  ", user_email: "{{user.primary_email_address}}" },
+      ]);
+
+      const events = await new AuditService(db).getForAsset("org_1", "tok_1");
+      expect(events[0]?.actorLabel).toBe("Team member");
+      expect(events[1]?.actorLabel).toBe("Unknown user");
+    });
+
     it("applies the action filter and pagination bounds", async () => {
       const { db, prepare, bind } = mockDb([]);
 

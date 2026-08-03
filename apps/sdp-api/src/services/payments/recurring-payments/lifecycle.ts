@@ -21,11 +21,20 @@ import {
   type PaymentSubscriptionRow,
 } from "@/db/repositories";
 import { AppError, badRequest, conflict } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import { confirmSubscriptionSignature, sendSubscriptionInstructions } from "./shared";
+
+function tenantScope(input: { organizationId: string; projectId: string }) {
+  return createTenantScope({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+}
 
 function lifecycleConfirmationMessage(operation: RecurringPaymentLifecycleOperation) {
   return operation === "cancel"
@@ -198,19 +207,25 @@ async function preserveRecoverableLifecycleAttempt(input: {
       updatedAt: input.failedAt,
     });
   } catch (journalError) {
-    console.error("Failed to preserve recoverable recurring payment lifecycle attempt", {
-      error: lifecycleErrorMessage(journalError),
-      operation: input.operation,
-      recurringPaymentId: input.recurringPaymentId,
-    });
+    getLogger().error(
+      {
+        error: lifecycleErrorMessage(journalError),
+        operation: input.operation,
+        recurring_payment_id: input.recurringPaymentId,
+      },
+      "Failed to preserve recoverable recurring payment lifecycle attempt"
+    );
   }
 
-  console.error("Recurring payment lifecycle left recoverable after submission", {
-    confirmedOnChain: input.confirmedOnChain,
-    error: lifecycleErrorMessage(input.error),
-    operation: input.operation,
-    recurringPaymentId: input.recurringPaymentId,
-  });
+  getLogger().error(
+    {
+      confirmed_on_chain: input.confirmedOnChain,
+      error: lifecycleErrorMessage(input.error),
+      operation: input.operation,
+      recurring_payment_id: input.recurringPaymentId,
+    },
+    "Recurring payment lifecycle left recoverable after submission"
+  );
 }
 
 async function finalizeRecurringPaymentLifecycle(input: {
@@ -285,9 +300,9 @@ async function runRecurringPaymentLifecycle(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   operation: RecurringPaymentLifecycleOperation;
 }): Promise<PaymentRecurringPaymentRow> {
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
-  const paymentsRepo = createPaymentsRepository(input.env);
+  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
+  const paymentsRepo = createPaymentsRepository(input.env, tenantScope(input));
   const nowIso = new Date().toISOString();
 
   assertLifecyclePreconditions({ ...input, nowIso });
@@ -484,11 +499,14 @@ async function runRecurringPaymentLifecycle(input: {
         resetClaim: true,
       });
     } catch (resetError) {
-      console.error("Failed to journal/reset recurring payment lifecycle after failure", {
-        error: resetError instanceof Error ? resetError.message : String(resetError),
-        operation: input.operation,
-        recurringPaymentId: claimed.id,
-      });
+      getLogger().error(
+        {
+          error: resetError instanceof Error ? resetError.message : String(resetError),
+          operation: input.operation,
+          recurring_payment_id: claimed.id,
+        },
+        "Failed to journal/reset recurring payment lifecycle after failure"
+      );
     }
 
     throw error;
@@ -503,7 +521,7 @@ export async function cancelRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
 }): Promise<PaymentRecurringPaymentRow> {
   if (input.recurringPayment.status === "pending_activation") {
-    const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
+    const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
     const updated = await recurringRepo.updateRecurringPaymentLifecycle({
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,

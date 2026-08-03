@@ -165,6 +165,48 @@ export const tokenTransactionsResponse = paginatedResponseSchema(tokenTransactio
 export const issuanceTransactionsResponse = paginatedResponseSchema(tokenTransactionListItemSchema);
 export const tokenAllowlistListResponse = paginatedResponseSchema(tokenAllowlistEntrySchema);
 export const tokenAllowlistResponse = successResponseSchema(tokenAllowlistResponseSchema);
+export const tokenAllowlistLabelsResponse = successResponseSchema(
+  z.object({
+    labels: z.array(z.string()).openapi({
+      description: "Distinct labels used across the token's active control-list entries.",
+      example: ["Treasury", "Market maker"],
+    }),
+    total: z.number().int().openapi({
+      description: "Total active control-list entries (unfiltered), for the summary count.",
+      example: 42,
+    }),
+  })
+);
+export const tokenListFacetsResponse = successResponseSchema(
+  z.object({
+    templates: z
+      .array(
+        z.object({
+          template: z.string().openapi({ example: "stablecoin" }),
+          count: z.number().int().openapi({ example: 12 }),
+        })
+      )
+      .openapi({
+        description:
+          "Template ids present in the project with their token counts. Includes legacy ids still stored on older tokens.",
+      }),
+    deploymentStatuses: z
+      .object({
+        draft: z.number().int().openapi({ example: 3 }),
+        active: z.number().int().openapi({ example: 8 }),
+        paused: z.number().int().openapi({ example: 1 }),
+      })
+      .openapi({
+        description:
+          "Token counts per derived lifecycle state (draft until deployed, paused when the mint is paused, active otherwise).",
+      }),
+    total: z.number().int().openapi({
+      description:
+        "Total tokens in the project, unfiltered — distinguishes an empty project from an over-filtered list.",
+      example: 12,
+    }),
+  })
+);
 export const frozenAccountResponse = successResponseSchema(frozenAccountResponseSchema);
 export const frozenAccountListResponse = paginatedResponseSchema(frozenAccountSchema);
 

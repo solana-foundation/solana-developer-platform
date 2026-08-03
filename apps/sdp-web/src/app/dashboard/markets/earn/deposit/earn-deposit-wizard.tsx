@@ -26,12 +26,12 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ChangeEvent, type ReactNode, useEffect, useId, useMemo, useState } from "react";
-import { PaymentsWizardFrame } from "@/app/dashboard/payments/payments-wizard-frame";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
+import { WizardFrame } from "@/components/wizard-frame";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
@@ -2141,7 +2141,7 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
   );
 
   return (
-    <PaymentsWizardFrame
+    <WizardFrame
       steps={SETUP_PROGRESS.map((progress) => ({
         label: t(`DashboardEarn.setup.progress.${progress}` as MessageKey),
         title: t(stepMeta[progress].title),
@@ -2230,6 +2230,6 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
           />
         ) : null}
       </div>
-    </PaymentsWizardFrame>
+    </WizardFrame>
   );
 }

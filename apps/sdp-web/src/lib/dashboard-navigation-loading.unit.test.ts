@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
   resolveDashboardNavigationIntent,
   resolveDashboardNavigationTarget,
@@ -43,7 +44,6 @@ describe("dashboard loading route", () => {
     ["/dashboard/policies", "policies"],
     ["/dashboard/approvals", "approvals-list"],
     ["/dashboard/approvals/request-1", "approval-detail"],
-    ["/dashboard/members", "members"],
     ["/dashboard/settings", "settings"],
     ["/dashboard/allowlist", "allowlist"],
   ])("maps %s to its exact route skeleton", (pathname, route) => {
@@ -104,5 +104,19 @@ describe("dashboard navigation intent", () => {
         ...input,
       })
     ).toBeNull();
+  });
+});
+
+describe("dashboard navigation active state", () => {
+  it.each([
+    "/dashboard/markets/earn",
+    "/dashboard/markets/earn/deposit",
+    "/dashboard/markets/earn/strategies/strategy-1",
+  ])("keeps Markets active throughout the Earn flow at %s", (pathname) => {
+    expect(isDashboardNavItemActive(pathname, "/dashboard/markets/earn")).toBe(true);
+  });
+
+  it("does not claim unrelated dashboard routes for Markets", () => {
+    expect(isDashboardNavItemActive("/dashboard/payments", "/dashboard/markets/earn")).toBe(false);
   });
 });

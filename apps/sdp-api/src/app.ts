@@ -19,6 +19,7 @@ import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
+import { dryRunMiddleware } from "@/middleware/dry-run";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -34,6 +35,7 @@ import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
 import earn from "@/routes/earn";
 import health from "@/routes/health";
+import internalCustody from "@/routes/internal-custody";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -45,9 +47,11 @@ import payments from "@/routes/payments";
 import places from "@/routes/places";
 import playgroundInternal from "@/routes/playground-internal";
 import policies from "@/routes/policies";
+import privateChannels from "@/routes/private-channels";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
+import { getLogger } from "@/runtime/logger";
 import { isSentryEnabled, type Observability } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
@@ -167,7 +171,11 @@ function mapFeePaymentError(err: FeePaymentError): {
           "The wallet used for this payment does not have enough funds. Add funds and try again.",
       };
     case "RATE_LIMITED":
-      return { status: 429, code: err.code, message: "The signing provider is busy. Try again." };
+      return {
+        status: 429,
+        code: err.code,
+        message: "The signing provider is busy. Try again.",
+      };
     case "PROVIDER_NOT_AVAILABLE":
     case "NETWORK_ERROR":
       return {
@@ -281,6 +289,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Idempotency-Key validation + response echo (public API only)
   app.use("/v1/*", idempotencyKeyMiddleware());
+  app.use("/v1/*", dryRunMiddleware());
 
   // Request trace + duration logging
   app.use("*", requestTracingMiddleware());
@@ -350,6 +359,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/earn", earn);
   v1.route("/places", places);
   v1.route("/policies", policies);
+  v1.route("/private-channels", privateChannels);
   v1.route("/compliance", compliance);
 
   const registeredPluginNames = new Set<string>();
@@ -366,6 +376,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Dashboard-only helpers. These routes are intentionally excluded from the
   // public OpenAPI and AI discovery surfaces.
   app.route("/internal/playground", playgroundInternal);
+  app.route("/internal/dashboard/custody", internalCustody);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);
@@ -465,8 +476,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       context?: Record<string, unknown>;
       cause?: unknown;
     };
-    console.error(
-      "Unexpected error:",
+    getLogger().error(
       redactCredentialSecrets({
         requestId,
         traceId,
@@ -475,7 +485,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         stack: err.stack,
         context: solanaErr.context,
         cause: solanaErr.cause,
-      })
+      }),
+      "Unexpected error"
     );
     // SENTRY_DSN gate is the runtime-wiring decision: app-level error handling
     // shouldn't pay the cost of building a scope when no observability backend

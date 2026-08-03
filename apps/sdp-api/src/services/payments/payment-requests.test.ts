@@ -13,6 +13,8 @@ import {
 import { getDb } from "@/db";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { createTenantScope } from "@/lib/tenant-scope";
+import { rootLogger } from "@/runtime/logger";
 import { SOL_MINT } from "@/services/payment-operation.service";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -46,7 +48,10 @@ function mockSettlementSucceeds() {
 }
 
 async function createRequest(overrides?: { token?: string; expiresAt?: string }) {
-  return createPaymentRequestsRepository(env).createPaymentRequest({
+  return createPaymentRequestsRepository(
+    env,
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+  ).createPaymentRequest({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
     counterpartyId: null,
@@ -183,7 +188,7 @@ describe("reconcilePaymentRequest", () => {
   });
 
   it("best-effort returns the stored row and logs when reconcile errors unexpectedly", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
     findReferenceSpy.mockRejectedValue(new Error("rpc exploded"));
     const request = await createRequest();
 

@@ -147,7 +147,7 @@ export const listAssetProfiles = async (c: AppContext) => {
     throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
   }
 
-  const { page, pageSize, includeArchived, category } = parsed.data;
+  const { page, pageSize, includeArchived, category, tokenIds } = parsed.data;
 
   const repo = getAssetProfilesRepository(c);
   const { rows, total } = await repo.listAssetProfiles({
@@ -155,6 +155,7 @@ export const listAssetProfiles = async (c: AppContext) => {
     projectId,
     category,
     includeArchived,
+    tokenIds,
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });

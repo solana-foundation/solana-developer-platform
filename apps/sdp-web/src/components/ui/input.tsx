@@ -6,6 +6,8 @@ type InputProps = TextInputProps;
 
 const DEFAULT_ICON_CLASS = "size-5 shrink-0 text-tertiary";
 
+const FILLED_FIELD_CLASS = "[&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle";
+
 function withIconClass(node: ReactNode): ReactNode {
   if (!isValidElement<{ className?: string }>(node)) {
     return node;
@@ -15,10 +17,17 @@ function withIconClass(node: ReactNode): ReactNode {
   });
 }
 
+/**
+ * Design-system TextInput with the payments borderless filled field style
+ * applied by default; callers can override it through `className`.
+ *
+ * @param props - TextInput props; `className` merges after the filled style so conflicting utilities win.
+ * @returns The styled text input element.
+ */
 function Input({ className, size = "lg", iconLeft, iconRight, ...props }: InputProps) {
   return (
     <TextInput
-      className={stripWrapperPadding(className)}
+      className={cn(FILLED_FIELD_CLASS, stripWrapperPadding(className))}
       data-slot="input"
       size={size}
       iconLeft={withIconClass(iconLeft)}

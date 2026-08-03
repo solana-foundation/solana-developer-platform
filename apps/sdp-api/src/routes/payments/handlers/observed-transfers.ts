@@ -10,6 +10,7 @@ import type {
   PaymentTransferRow as TransferRow,
   PaymentTransferStatus as TransferStatus,
 } from "@/db/repositories/payments.repository";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import type { AppContext } from "../context";
 import * as tokenAccounts from "../token-accounts";
@@ -319,12 +320,15 @@ export async function resolveWalletTokenAccountAddresses(
   try {
     return await tokenAccounts.getSplTokenAccountAddresses(rpc, owner);
   } catch (error) {
-    console.error("listTransfers: failed to fetch token accounts for wallet history", {
-      requestId: c.get("requestId"),
-      walletId,
-      owner,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    getLogger().error(
+      {
+        requestId: c.get("requestId"),
+        walletId,
+        owner,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "listTransfers: failed to fetch token accounts for wallet history"
+    );
     return [];
   }
 }

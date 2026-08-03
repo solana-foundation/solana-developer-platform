@@ -1,4 +1,3 @@
-// biome-ignore lint/security/noSecrets: JSON-RPC method name, not a secret.
 const GET_LATEST_BLOCKHASH_METHOD = "getLatestBlockhash";
 
 const PROVIDERS = [
@@ -30,6 +29,11 @@ const PROVIDERS = [
     id: "validationcloud",
     urlKey: "SOLANA_RPC_VALIDATIONCLOUD_URL",
     apiKey: "SOLANA_RPC_VALIDATIONCLOUD_API_KEY",
+  },
+  {
+    id: "nodit",
+    urlKey: "SOLANA_RPC_NODIT_URL",
+    apiKey: "SOLANA_RPC_NODIT_API_KEY",
   },
 ];
 
@@ -144,7 +148,7 @@ function applyApiKeyTemplate(url, apiKey) {
   }
 
   if (url.includes("{API_KEY}")) {
-    return url.replaceAll("{API_KEY}", apiKey);
+    return url.replaceAll("{API_KEY}", encodeURIComponent(apiKey));
   }
 
   return url;

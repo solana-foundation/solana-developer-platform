@@ -24,9 +24,6 @@ import RecurringPaymentsLoading from "./payments/recurring/loading";
 import PaymentRequestsLoading from "./payments/requests/loading";
 import TransactionsLoading from "./payments/transactions/loading";
 
-const dashboardWorkspaceMock = vi.hoisted(() => ({
-  counterpartyTab: "overview" as "overview" | "playground",
-}));
 const navigationMock = vi.hoisted(() => ({ tab: null as null | "playground" }));
 
 vi.mock("next/navigation", async (importOriginal) => {
@@ -36,14 +33,6 @@ vi.mock("next/navigation", async (importOriginal) => {
     useRouter: () => ({ push: () => undefined }),
     useSearchParams: () =>
       new URLSearchParams(navigationMock.tab ? { tab: navigationMock.tab } : undefined),
-  };
-});
-
-vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>();
-  return {
-    ...actual,
-    useDashboardWorkspace: () => dashboardWorkspaceMock,
   };
 });
 
@@ -88,7 +77,6 @@ function renderScopedLoadingStates(): string {
 
 describe("home and payments route loading states", () => {
   afterEach(() => {
-    dashboardWorkspaceMock.counterpartyTab = "overview";
     navigationMock.tab = null;
   });
 

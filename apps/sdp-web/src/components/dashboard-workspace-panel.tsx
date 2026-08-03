@@ -15,3 +15,23 @@ export const dashboardWorkspaceOverviewPanelClassName =
 export function DashboardWorkspaceOverviewPanel({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn(dashboardWorkspaceOverviewPanelClassName, className)} {...props} />;
 }
+
+/**
+ * Full-height bordered card that list pages render inside a
+ * DashboardWorkspaceOverviewPanel: filter header, rows, and paginated footer
+ * stack in a column that stretches to the panel's height.
+ *
+ * @param props - Standard div props; `className` is merged onto the card.
+ * @returns The card element.
+ */
+export function DashboardWorkspaceCard({ className, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border-default bg-surface-raised",
+        className
+      )}
+      {...props}
+    />
+  );
+}

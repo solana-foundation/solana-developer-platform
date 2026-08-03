@@ -33,6 +33,7 @@ import Image from "next/image";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { MemoJsonView } from "@/app/dashboard/payments/wizard-summary-list";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -544,9 +545,15 @@ function TransferDetailModal({
 }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
+  const [memoJsonOpen, setMemoJsonOpen] = useState(false);
   if (!transfer) {
     return null;
   }
+
+  const closeModal = () => {
+    setMemoJsonOpen(false);
+    onClose();
+  };
 
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
   const walletAddress = isInbound ? transfer.destination : transfer.source;
@@ -576,7 +583,7 @@ function TransferDetailModal({
     <Modal
       isOpen
       ariaLabel={t("DashboardPayments.counterparty.transactionDetails")}
-      onClose={onClose}
+      onClose={closeModal}
       size="lg"
     >
       <div className="space-y-5 p-6">
@@ -653,6 +660,16 @@ function TransferDetailModal({
                 value={transfer.memo}
               />
             ) : null}
+            {Object.keys(transfer.rampsMemo).length > 0 ? (
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.memo")}
+                value={
+                  <Button type="button" size="xs" onClick={() => setMemoJsonOpen(true)}>
+                    {t("DashboardPayments.ramps.memoViewJson")}
+                  </Button>
+                }
+              />
+            ) : null}
             {transfer.settlement ? <RampSettlementRows settlement={transfer.settlement} /> : null}
             {moneygram?.referenceNumber ? (
               <DetailRow
@@ -727,6 +744,17 @@ function TransferDetailModal({
           </Button>
         ) : null}
       </div>
+
+      <Modal
+        isOpen={memoJsonOpen}
+        onClose={() => setMemoJsonOpen(false)}
+        ariaLabel={t("DashboardPayments.ramps.memoJsonTitle")}
+        size="lg"
+      >
+        <div className="p-6">
+          <MemoJsonView json={transfer.rampsMemo} />
+        </div>
+      </Modal>
     </Modal>
   );
 }

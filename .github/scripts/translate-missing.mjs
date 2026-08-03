@@ -5,6 +5,7 @@ import {
   agentHost,
   applyTranslations,
   collectMissingTranslations,
+  loadTranslationGuidance,
   translateMissingEntries,
   validateCatalogs,
 } from "./missing-translations.mjs";
@@ -19,6 +20,11 @@ const sourceLocale = process.env.I18N_SOURCE_LOCALE ?? "en";
 const dryRun = process.argv.includes("--dry-run");
 const agentUrl = process.env.TRANSLATION_AGENT_URL;
 const agentModel = process.env.TRANSLATION_AGENT_MODEL;
+const guidanceFile = path.resolve(
+  process.env.I18N_TRANSLATION_GUIDANCE ??
+    path.join(process.cwd(), ".github/translation-guidance.json")
+);
+const guidance = loadTranslationGuidance(guidanceFile);
 
 function git(args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -99,6 +105,7 @@ function summaryMarkdown({
     `- Generated strings: ${translations.length}`,
     `- Eve agent: \`${agentHost(agentUrl)}\``,
     `- Model: \`${agentModel ?? "configured by Eve"}\``,
+    "- Context: locale glossary, key namespace, and up to 6 nearby catalog entries",
     `- Requests: ${batches}`,
     `- Generated files: ${files.length === 0 ? "None" : files.map((file) => `\`${file}\``).join(", ")}`,
     "",
@@ -175,7 +182,7 @@ async function main() {
   const impactedLocales = [...new Set(inventory.missing.map((entry) => entry.locale))].sort();
   const localeClass = classifyLocales(impactedLocales);
   if (inventory.missing.length === 0) {
-    validateCatalogs({ messagesDir, sourceLocale });
+    validateCatalogs({ messagesDir, sourceLocale, guidance });
     const summary = summaryMarkdown({ missing: [], noOp: true });
     console.log(summary);
     writeStepSummary(summary);
@@ -195,6 +202,7 @@ async function main() {
 
   const result = await translateMissingEntries({
     missing: inventory.missing,
+    guidance,
     agentUrl,
     agentUsername: process.env.TRANSLATION_AGENT_USERNAME,
     agentPassword: process.env.TRANSLATION_AGENT_PASSWORD,
@@ -204,7 +212,7 @@ async function main() {
   });
 
   applyTranslations({ messagesDir, translations: result.translations });
-  validateCatalogs({ messagesDir, sourceLocale });
+  validateCatalogs({ messagesDir, sourceLocale, guidance });
 
   const messagesRelativeDir = path.relative(process.cwd(), messagesDir);
   const files = [

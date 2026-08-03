@@ -44,13 +44,14 @@ describe("getCombosForCategory", () => {
 
 describe("applyCombo / isComboActive", () => {
   it("enables a combo's settings, capacities, and access-control mode and reads back active", () => {
-    const combo = comboByKey("controlledAsset"); // freezeTransfers + permanentDelegate; kyc; allowlist
+    const combo = comboByKey("controlledAsset"); // pauseTransfers + freezeAccounts + permanentDelegate; kyc; allowlist
     const { settings, capacities, accessControl } = applyCombo(
       combo,
       {},
       createInitialCapacities()
     );
-    expect(settings.freezeTransfers).toBeDefined();
+    expect(settings.pauseTransfers).toBeDefined();
+    expect(settings.freezeAccounts).toBeDefined();
     expect(settings.permanentDelegate).toBeDefined();
     expect(capacities.kyc.enabled).toBe(true);
     expect(accessControl).toBe("allowlist");
@@ -65,7 +66,7 @@ describe("applyCombo / isComboActive", () => {
   });
 
   it("is not active until every bundled item — including the access mode — is on", () => {
-    const combo = comboByKey("gatedAccess"); // freezeTransfers; kyc, restrictTradingHours; allowlist
+    const combo = comboByKey("gatedAccess"); // pauseTransfers + freezeAccounts; kyc, restrictTradingHours; allowlist
     const { settings, capacities, accessControl } = applyCombo(
       combo,
       {},
@@ -114,10 +115,10 @@ describe("applyCombo / isComboActive", () => {
 
 describe("removeCombo", () => {
   it("preserves items still needed by another active combo", () => {
-    const controlled = comboByKey("controlledAsset"); // freezeTransfers, permanentDelegate; kyc; allowlist
-    const gated = comboByKey("gatedAccess"); // freezeTransfers; kyc, restrictTradingHours; allowlist
+    const controlled = comboByKey("controlledAsset"); // pauseTransfers + freezeAccounts + permanentDelegate; kyc; allowlist
+    const gated = comboByKey("gatedAccess"); // pauseTransfers + freezeAccounts; kyc, restrictTradingHours; allowlist
 
-    // Enable both — they share freezeTransfers, kyc, and the allowlist mode.
+    // Enable both — they share the freeze pair, kyc, and the allowlist mode.
     let state = applyCombo(controlled, {}, createInitialCapacities());
     state = applyCombo(gated, state.settings, state.capacities, state.accessControl);
     expect(isComboActive(controlled, state.settings, state.capacities, state.accessControl)).toBe(
@@ -134,7 +135,8 @@ describe("removeCombo", () => {
       [controlled],
       state.accessControl
     );
-    expect(next.settings.freezeTransfers).toBeDefined(); // kept — controlled needs it
+    expect(next.settings.pauseTransfers).toBeDefined(); // kept — controlled needs it
+    expect(next.settings.freezeAccounts).toBeDefined(); // kept — controlled needs it
     expect(next.capacities.kyc.enabled).toBe(true); // kept — controlled needs it
     expect(next.accessControl).toBe("allowlist"); // kept — controlled needs it
     expect(next.capacities.restrictTradingHours.enabled).toBe(false); // gated-only — dropped
@@ -168,7 +170,7 @@ describe("getComboConflict", () => {
   });
 
   it("returns null when the combo clashes with nothing enabled", () => {
-    // gatedAccess bundles freezeTransfers, which is incompatible with no other extension.
+    // gatedAccess bundles the freeze pair, which conflicts with no other extension.
     expect(getComboConflict(comboByKey("gatedAccess"), { nonTransferable: {} })).toBeNull();
   });
 });

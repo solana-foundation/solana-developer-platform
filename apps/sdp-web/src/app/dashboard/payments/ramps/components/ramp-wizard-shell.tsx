@@ -1,34 +1,13 @@
 "use client";
 
-import type { Counterparty, RampProviderId } from "@sdp/types";
+import type { Counterparty } from "@sdp/types";
 import { motion } from "motion/react";
-import Image from "next/image";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog";
-import { PaymentsWizardFrame } from "@/app/dashboard/payments/payments-wizard-frame";
 import { Button } from "@/components/ui/button";
+import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
-import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { CancelTransactionDialog } from "./cancel-transaction-dialog";
-
-export function PoweredByRampProvider({ provider }: { provider: RampProviderId }) {
-  const t = useTranslations();
-  const providerLabel = getRampProviderLabel(provider);
-
-  return (
-    <div className="flex items-center justify-center gap-2 text-sm text-tertiary">
-      <span>{t("DashboardPayments.poweredBy")}</span>
-      <Image
-        src={RAMP_PROVIDER_LOGOS[provider]}
-        alt=""
-        width={24}
-        height={24}
-        className="size-6 rounded-md object-contain"
-      />
-      <span className="font-medium text-secondary">{providerLabel}</span>
-    </div>
-  );
-}
 
 interface RampWizardShellProps {
   steps: readonly { label: string; title: string }[];
@@ -46,6 +25,7 @@ interface RampWizardShellProps {
   children: ReactNode;
   /** Rendered top-right, next to the step title (e.g. the "Powered by" badge). */
   header?: ReactNode;
+  summary?: ReactNode;
   footerActions?: ReactNode;
   hidePrimary?: boolean;
   /** Confirm before running the secondary action — used once a transaction is live. */
@@ -68,6 +48,7 @@ export function RampWizardShell({
   onCounterpartyCreated,
   children,
   header,
+  summary,
   footerActions,
   hidePrimary,
   confirmSecondary,
@@ -78,7 +59,7 @@ export function RampWizardShell({
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   return (
     <>
-      <PaymentsWizardFrame
+      <WizardFrame
         steps={steps}
         currentStep={stepIndex}
         progressLabel={t("DashboardPayments.counterparty.stepProgress", {
@@ -86,6 +67,7 @@ export function RampWizardShell({
           total: steps.length,
         })}
         header={header}
+        summary={summary}
         footer={
           <div className="flex items-center justify-between gap-3">
             {hideSecondary ? (
@@ -131,7 +113,7 @@ export function RampWizardShell({
             {children}
           </motion.div>
         </div>
-      </PaymentsWizardFrame>
+      </WizardFrame>
 
       <CounterpartyCreateDialog
         open={counterpartyDialogOpen}

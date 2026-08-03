@@ -1,5 +1,4 @@
 import { SigningError } from "@sdp/custody/signing";
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import { resolveRpcTarget } from "@sdp/rpc/relay";
 import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
@@ -18,16 +17,17 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
-import { resolveKoraUserId } from "@/lib/kora-user";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
   walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSigner } from "@/services/solana";
+import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { AppContext } from "../context";
 import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
 
@@ -69,7 +69,7 @@ export const signerCheck = async (c: AppContext) => {
   }
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, resolvedWalletId);
-  await enforceWalletOperationPolicy(c.env, {
+  await enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
     custodyWalletId: policyWallet?.id ?? null,
@@ -95,7 +95,7 @@ export const signerCheck = async (c: AppContext) => {
       resolvedWalletId
     );
 
-    const feePayment = createFeePaymentAdapter(c.env, resolveKoraUserId(c));
+    const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const feePayer = await feePayment.getFeePayer();
 
     const rpcTarget = await resolveRpcTarget({

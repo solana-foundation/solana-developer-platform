@@ -47,12 +47,18 @@ describe("collectFromEnv", () => {
   it("auto-fills missing secrets in each field's encoding", () => {
     const values = collectFromEnv({});
     expect(values.API_KEY_PEPPER).toMatch(HEX_64);
+    expect(values.CREDENTIAL_FINGERPRINT_PEPPER).toMatch(HEX_64);
+    expect(values.CREDENTIAL_FINGERPRINT_PEPPER).not.toBe(values.API_KEY_PEPPER);
     expect(values.POSTGRES_PASSWORD).toMatch(HEX_64);
     expect(Buffer.from(values.CUSTODY_ENCRYPTION_KEY, "base64")).toHaveLength(32);
   });
 
   it("preserves a provided secret instead of regenerating it", () => {
     expect(collectFromEnv({ API_KEY_PEPPER: "fixed" }).API_KEY_PEPPER).toBe("fixed");
+    expect(
+      collectFromEnv({ CREDENTIAL_FINGERPRINT_PEPPER: "fingerprint-fixed" })
+        .CREDENTIAL_FINGERPRINT_PEPPER
+    ).toBe("fingerprint-fixed");
   });
 
   it("emits a provided DATABASE_URL by switching to external mode", () => {
@@ -95,6 +101,7 @@ describe("collectFromEnv", () => {
       "CLERK_ISSUER",
       "CUSTODY_PRIVATE_KEY",
       "API_KEY_PEPPER",
+      "CREDENTIAL_FINGERPRINT_PEPPER",
     ]) {
       expect(env).toContain(`${key}=`);
     }

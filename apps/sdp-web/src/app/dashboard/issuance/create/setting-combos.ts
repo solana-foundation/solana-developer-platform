@@ -99,7 +99,7 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
     category: "generic",
     labelKey: cfg("comboControlledAsset"),
     descriptionKey: cfg("comboControlledAssetDescription"),
-    settings: ["freezeTransfers", "permanentDelegate"],
+    settings: ["pauseTransfers", "freezeAccounts", "permanentDelegate"],
     capacities: ["kyc"],
     // "Limited to verified holders" — the allowlist is what actually enforces it.
     accessControl: "allowlist",
@@ -109,7 +109,11 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
     category: "generic",
     labelKey: cfg("comboGatedAccess"),
     descriptionKey: cfg("comboGatedAccessDescription"),
-    settings: ["freezeTransfers"],
+    // Both halves of the former "freezeTransfers", so the preset grants exactly
+    // what it did before the split. Arguably only freezeAccounts belongs here —
+    // "gated access" is about per-holder approval, not a global pause — but
+    // narrowing it would change what existing users get from this preset.
+    settings: ["pauseTransfers", "freezeAccounts"],
     capacities: ["kyc", "restrictTradingHours"],
     // "New accounts start frozen until you approve them" — that's the allowlist.
     accessControl: "allowlist",

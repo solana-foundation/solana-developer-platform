@@ -61,9 +61,21 @@ export function splitPastedMemoRows(text: string): MemoRow[] {
 }
 
 /**
- * Validates memo rows against the quote API constraints. Row numbers in
- * the returned errors are 1-based positions in the supplied rows array so
- * they align with what the editing grid renders; fully empty rows are ignored.
+ * Normalizes a memo key for the API payload: trimmed, with whitespace runs
+ * replaced by dashes.
+ *
+ * @param key - Raw key input from the memo grid.
+ * @returns The normalized memo key.
+ */
+export function normalizeMemoKey(key: string): string {
+  return key.trim().replace(/\s+/g, "-");
+}
+
+/**
+ * Validates memo rows against the quote API constraints, comparing keys in
+ * their normalized form. Row numbers in the returned errors are 1-based
+ * positions in the supplied rows array so they align with what the editing
+ * grid renders; fully empty rows are ignored.
  *
  * @param rows - Editable memo rows to validate.
  * @returns Row-level validation errors.
@@ -74,8 +86,9 @@ export function validateMemoRows(rows: MemoRow[]): MemoRowError[] {
   const keyCounts = new Map<string, number>();
 
   for (const row of populatedRows) {
-    const currentCount = keyCounts.get(row.key);
-    keyCounts.set(row.key, currentCount === undefined ? 1 : currentCount + 1);
+    const key = normalizeMemoKey(row.key);
+    const currentCount = keyCounts.get(key);
+    keyCounts.set(key, currentCount === undefined ? 1 : currentCount + 1);
   }
 
   rows.forEach((row, index) => {
@@ -83,11 +96,12 @@ export function validateMemoRows(rows: MemoRow[]): MemoRowError[] {
       return;
     }
     const rowNumber = index + 1;
-    if (row.key.length === 0) {
+    const key = normalizeMemoKey(row.key);
+    if (key.length === 0) {
       errors.push({ row: rowNumber, code: "keyRequired" });
-    } else if (row.key.length > RAMPS_MEMO_LIMITS.maxKeyLength) {
+    } else if (key.length > RAMPS_MEMO_LIMITS.maxKeyLength) {
       errors.push({ row: rowNumber, code: "keyTooLong" });
-    } else if (keyCounts.get(row.key) !== 1) {
+    } else if (keyCounts.get(key) !== 1) {
       errors.push({ row: rowNumber, code: "keyDuplicate" });
     }
     if (row.value.length === 0) {
@@ -105,13 +119,13 @@ export function validateMemoRows(rows: MemoRow[]): MemoRowError[] {
 }
 
 /**
- * Converts populated memo rows into an API memo record.
+ * Converts populated memo rows into an API memo record with normalized keys.
  *
  * @param rows - Validated editable memo rows.
  * @returns A string-valued memo record.
  */
 export function memoRowsToRecord(rows: MemoRow[]): Record<string, string> {
   return Object.fromEntries(
-    rows.filter((row) => !isEmptyMemoRow(row)).map((row) => [row.key, row.value])
+    rows.filter((row) => !isEmptyMemoRow(row)).map((row) => [normalizeMemoKey(row.key), row.value])
   );
 }

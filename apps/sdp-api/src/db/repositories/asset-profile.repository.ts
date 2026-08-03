@@ -61,6 +61,12 @@ export interface ListAssetProfilesInput {
   projectId: string;
   category?: AssetCategory;
   includeArchived?: boolean;
+  /**
+   * Restrict to these token ids. Lets a caller hydrate exactly the tokens on the
+   * page it is rendering instead of paging the whole project's profiles. An
+   * empty array matches nothing.
+   */
+  tokenIds?: string[];
   limit: number;
   offset: number;
 }

@@ -16,6 +16,7 @@ import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
 import { registerPolicyPaths } from "./paths/policies";
+import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
 
@@ -42,6 +43,10 @@ const OPENAPI_TAG = {
   POLICIES: {
     name: "Policies",
     description: "Wallet and API-key policy-control inventory.",
+  },
+  PRIVATE_CHANNELS: {
+    name: "Private Channels",
+    description: "Connected Solana Private Channels instance and gateway health.",
   },
   COMPLIANCE: { name: "Compliance", description: "Risk and compliance screening endpoints." },
   COUNTERPARTIES: {
@@ -81,6 +86,7 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.ISSUANCE,
   OPENAPI_TAG.PAYMENTS,
   OPENAPI_TAG.POLICIES,
+  OPENAPI_TAG.PRIVATE_CHANNELS,
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
@@ -139,6 +145,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerPolicyPaths(registry);
+  registerPrivateChannelsPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
   registerAssetProfilePaths(registry);

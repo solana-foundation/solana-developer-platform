@@ -15,6 +15,7 @@ import { startCron } from "@/cron/runner";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { createNodeHttpApp } from "@/runtime/http-node";
+import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
 import { shutdown } from "@/runtime/shutdown-node";
@@ -125,7 +126,7 @@ async function main(): Promise<void> {
     port,
   });
 
-  console.log(`sdp-api listening on :${port}`);
+  getLogger().info({ port }, "sdp-api listening");
 
   let shuttingDown: Promise<void> | null = null;
   const beginShutdown = (label: string): void => {
@@ -140,7 +141,10 @@ async function main(): Promise<void> {
     // has to reason about. .unref() so the timer doesn't itself keep the
     // event loop alive if shutdown completes cleanly.
     const watchdog = setTimeout(() => {
-      console.error(`[${label}] shutdown exceeded ${shutdownTimeoutMs}ms — forcing exit`);
+      getLogger().error(
+        { label, timeout_ms: shutdownTimeoutMs },
+        "shutdown exceeded timeout — forcing exit"
+      );
       process.exit(1);
     }, shutdownTimeoutMs);
     watchdog.unref();
@@ -148,7 +152,7 @@ async function main(): Promise<void> {
       server,
       cron,
       bg,
-      log: (msg) => console.log(`[${label}] ${msg}`),
+      log: (msg) => getLogger().info({ label }, msg),
     })
       .then(() => {
         clearTimeout(watchdog);
@@ -156,7 +160,7 @@ async function main(): Promise<void> {
       })
       .catch((err: unknown) => {
         clearTimeout(watchdog);
-        console.error("Shutdown failed:", err);
+        getLogger().error({ error: err }, "Shutdown failed");
         process.exit(1);
       });
   };
@@ -173,17 +177,17 @@ async function main(): Promise<void> {
   // tolerate transient rejections from third-party libraries can opt out.
   process.on("unhandledRejection", (reason) => {
     if (fatalOnUnhandledRejection) {
-      console.error("Unhandled rejection — initiating shutdown:", reason);
+      getLogger().error({ error: reason }, "Unhandled rejection — initiating shutdown");
       beginShutdown("unhandledRejection");
       return;
     }
-    console.error("Unhandled rejection (non-fatal):", reason);
+    getLogger().error({ error: reason }, "Unhandled rejection (non-fatal)");
   });
   // uncaughtException stays fatal: V8 documents the process state as
   // potentially corrupted, so log and exit fast rather than risk a hung
   // shutdown; the container orchestrator restarts a clean process.
   process.on("uncaughtException", (err) => {
-    console.error("Uncaught exception — exiting:", err);
+    getLogger().error({ error: err }, "Uncaught exception — exiting");
     process.exit(1);
   });
 }
@@ -191,7 +195,7 @@ async function main(): Promise<void> {
 const invokedPath = process.argv[1];
 if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
   main().catch((err: unknown) => {
-    console.error("Fatal startup error:", err);
+    getLogger().error({ error: err }, "Fatal startup error");
     process.exit(1);
   });
 }

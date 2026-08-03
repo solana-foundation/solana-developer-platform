@@ -1,5 +1,6 @@
 "use client";
 
+import type { SolanaCluster } from "@sdp/types";
 import { ChevronDown, Droplets, Ellipsis, ShieldCheck } from "lucide-react";
 import { useTransition } from "react";
 import { toast } from "sonner";
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
 import { cn } from "@/lib/utils";
 
 interface WalletActionsMenuProps {
@@ -29,9 +31,14 @@ interface WalletActionsMenuProps {
   triggerClassName?: string;
 }
 
-function getDevnetExplorerUrl(signature: string): string {
-  return `https://explorer.solana.com/tx/${encodeURIComponent(signature)}?cluster=devnet`;
-}
+/**
+ * Both actions in this menu are devnet-only regardless of the project being viewed:
+ * the signer check always runs against the sandbox project, and the faucet only
+ * funds devnet. So these links are pinned to devnet rather than following
+ * `useSolanaCluster()` — using the active cluster would point a devnet signature at
+ * mainnet explorer for anyone viewing a production project.
+ */
+const ACTION_EXPLORER_CLUSTER = "devnet" satisfies SolanaCluster;
 
 function formatWalletLabel(walletLabel: string | null, walletAddress: string): string {
   const trimmed = walletLabel?.trim();
@@ -76,7 +83,7 @@ export function WalletActionsMenu({
         }));
 
         if (result.status === "success") {
-          const explorerUrl = getDevnetExplorerUrl(result.signature);
+          const explorerUrl = explorerTxUrl(result.signature, ACTION_EXPLORER_CLUSTER);
 
           toast.success(t("DashboardCustody.signerCheckSent"), {
             id: toastId,
@@ -123,7 +130,7 @@ export function WalletActionsMenu({
         );
 
         if (result.status === "success") {
-          const explorerUrl = getDevnetExplorerUrl(result.signature);
+          const explorerUrl = explorerTxUrl(result.signature, ACTION_EXPLORER_CLUSTER);
 
           toast.success(t("DashboardCustody.devnetSolRequested", { amount: result.amountSol }), {
             id: toastId,

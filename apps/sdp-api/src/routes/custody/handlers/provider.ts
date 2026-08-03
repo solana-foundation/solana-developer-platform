@@ -3,8 +3,10 @@ import { normalizePem } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";
+import { isPrivyByokProvisioningEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
@@ -16,6 +18,7 @@ import { createSigningService } from "@/services/domain/signing.service";
 import {
   assertProviderAvailable,
   getEnabledProviders,
+  getProviderAvailability,
 } from "@/services/provider-availability.service";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
 import {
@@ -33,11 +36,44 @@ type SigningInitializationResult = {
   walletId: string;
 };
 
+const EXISTING_PROVIDER_OBJECT_SELECTORS: Partial<Record<CustodyProvider, readonly string[]>> = {
+  coinbase_cdp: ["walletAddress"],
+  para: ["walletId"],
+  turnkey: ["privateKeyId"],
+  dfns: ["walletId", "signingKeyId"],
+  ibm_haven: ["walletId", "signingKeyId"],
+  anchorage: ["walletId"],
+};
+
+export function assertNoExistingProviderObjectSelector(body: unknown): void {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return;
+  }
+
+  const request = body as Record<string, unknown>;
+  if (typeof request.provider !== "string") {
+    return;
+  }
+
+  if (!Object.hasOwn(EXISTING_PROVIDER_OBJECT_SELECTORS, request.provider)) {
+    return;
+  }
+
+  const selectors = EXISTING_PROVIDER_OBJECT_SELECTORS[request.provider as CustodyProvider] ?? [];
+  const suppliedSelector = selectors.find((selector) => Object.hasOwn(request, selector));
+  if (suppliedSelector) {
+    throw badRequest(
+      `${suppliedSelector} cannot select an existing wallet when using platform-managed provider credentials`
+    );
+  }
+}
+
 export const initializeSigning = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
 
   const body = await c.req.json();
+  assertNoExistingProviderObjectSelector(body);
   const parsed = initializeSigningSchema.safeParse(body);
 
   if (!parsed.success) {
@@ -46,17 +82,9 @@ export const initializeSigning = async (c: AppContext) => {
     });
   }
 
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
 
   try {
-    await assertProviderAvailable(
-      c.env,
-      getDb(c.env),
-      actor.organizationId,
-      "custody",
-      parsed.data.provider
-    );
-
     const result = await initializeProviderConnection(
       c,
       signingService,
@@ -91,6 +119,7 @@ export const switchSigning = async (c: AppContext) => {
   const actor = resolveActor(c);
 
   const body = await c.req.json();
+  assertNoExistingProviderObjectSelector(body);
   const parsed = switchSigningSchema.safeParse(body);
 
   if (!parsed.success) {
@@ -99,18 +128,10 @@ export const switchSigning = async (c: AppContext) => {
     });
   }
 
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const auditService = new AuditService(getDb(c.env));
   const projectId = c.get("projectId");
   const targetProvider = parsed.data.provider;
-
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    actor.organizationId,
-    "custody",
-    targetProvider
-  );
 
   const existingScopeConfig = await findScopeConfigByProvider(
     c,
@@ -123,26 +144,23 @@ export const switchSigning = async (c: AppContext) => {
     let result: SigningInitializationResult;
 
     if (existingScopeConfig?.status === "active") {
+      await assertProviderAvailable(
+        c.env,
+        getDb(c.env),
+        actor.organizationId,
+        "custody",
+        targetProvider
+      );
       await signingService.setDefaultConfiguration(
         actor.organizationId,
         projectId,
         existingScopeConfig.id
       );
-
-      const preferredWallet = await getPreferredWalletForConfig(
-        getDb(c.env),
+      result = await getActiveConfigInitializationResult(
+        c,
         existingScopeConfig.id,
         existingScopeConfig.default_wallet_id
       );
-      if (!preferredWallet) {
-        throw new AppError("CONFLICT", "Active provider is missing an active wallet");
-      }
-
-      result = {
-        configId: existingScopeConfig.id,
-        publicKey: preferredWallet.publicKey,
-        walletId: preferredWallet.walletId,
-      };
 
       await logDefaultProviderChanged(c, auditService, existingScopeConfig.id, {
         projectId,
@@ -196,7 +214,7 @@ export const switchSigning = async (c: AppContext) => {
 export const getSwitchProviderOptions = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const enabledProviders = (await getEnabledProviders(c.env, getDb(c.env), actor.organizationId))
     .custody;
   const [reuseState, configurations] = await Promise.all([
@@ -251,6 +269,11 @@ async function initializeProviderConnection(
   projectId: string | undefined,
   request: InitializeSigningRequest | SwitchSigningRequest
 ): Promise<SigningInitializationResult> {
+  if (request.provider === "privy") {
+    await assertFreshPrivyLegacySetupAllowed(c, organizationId, projectId);
+  }
+  await assertProviderAvailable(env, getDb(c.env), organizationId, "custody", request.provider);
+
   switch (request.provider) {
     case "local":
       return signingService.initializeLocalSigning(organizationId, projectId, {
@@ -297,39 +320,31 @@ async function initializeProviderConnection(
     case "coinbase_cdp":
       return signingService.initializeCoinbaseCdpSigning(organizationId, projectId, {
         network: request.network,
-        walletAddress: request.walletAddress,
         accountPolicy: request.accountPolicy,
         walletLabel: request.walletLabel,
       });
     case "para":
       return signingService.initializeParaSigning(organizationId, projectId, {
         requestDelayMs: request.requestDelayMs,
-        walletId: request.walletId,
         walletLabel: request.walletLabel,
       });
     case "turnkey":
       return signingService.initializeTurnkeySigning(organizationId, projectId, {
         requestDelayMs: request.requestDelayMs,
-        privateKeyId: request.privateKeyId,
         walletLabel: request.walletLabel,
       });
     case "dfns":
       return signingService.initializeDfnsSigning(organizationId, projectId, {
         network: request.network,
-        walletId: request.walletId,
-        signingKeyId: request.signingKeyId,
         walletLabel: request.walletLabel,
       });
     case "ibm_haven":
       return signingService.initializeIbmHavenSigning(organizationId, projectId, {
         network: request.network,
-        walletId: request.walletId,
-        signingKeyId: request.signingKeyId,
         walletLabel: request.walletLabel,
       });
     case "anchorage":
       return signingService.initializeAnchorageWalletLifecycle(organizationId, projectId, {
-        walletId: request.walletId,
         walletLabel: request.walletLabel,
         network: request.network,
       });
@@ -340,6 +355,62 @@ async function initializeProviderConnection(
     default:
       throw badRequest("Unsupported provider");
   }
+}
+
+async function assertFreshPrivyLegacySetupAllowed(
+  c: AppContext,
+  organizationId: string,
+  projectId: string | undefined
+): Promise<void> {
+  if (!projectId) {
+    throw badRequest("Project scope is required");
+  }
+
+  const blockingConnection = await getDb(c.env)
+    .prepare(
+      `SELECT id
+       FROM custody_connections
+       WHERE organization_id = ?
+         AND project_id = ?
+         AND provider = 'privy'
+         AND status IN ('pending', 'checking', 'active')
+       LIMIT 1`
+    )
+    .bind(organizationId, projectId)
+    .first<{ id: string }>();
+  if (blockingConnection) {
+    throw conflict("Privy custody setup already exists for this project");
+  }
+
+  const existingConfig = await findScopeConfigByProvider(c, organizationId, projectId, "privy");
+  if (existingConfig?.status === "active") {
+    return;
+  }
+
+  const availability = await getProviderAvailability(c.env, getDb(c.env), organizationId);
+  if (availability.providers.custody.privy.entitled && isPrivyByokProvisioningEnabled(c.env)) {
+    throw forbidden("New Privy setup must use stored credentials");
+  }
+}
+
+async function getActiveConfigInitializationResult(
+  c: AppContext,
+  configId: string,
+  defaultWalletId: string | null
+): Promise<SigningInitializationResult> {
+  const preferredWallet = await getPreferredWalletForConfig(
+    getDb(c.env),
+    configId,
+    defaultWalletId
+  );
+  if (!preferredWallet) {
+    throw conflict("Active provider is missing an active wallet");
+  }
+  return {
+    configId,
+    publicKey: preferredWallet.publicKey,
+    walletId: preferredWallet.walletId,
+  };
 }
 
 async function findScopeConfigByProvider(

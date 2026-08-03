@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isAppLocale, supportedLocales } from "@/i18n/config";
-import { getMessages, translate } from "@/i18n/messages";
+import { getMessages, mergeLocalizedMessages, translate } from "@/i18n/messages";
 
 function flattenKeys(value: unknown, prefix = ""): string[] {
   if (typeof value === "string") {
@@ -36,6 +36,29 @@ describe("i18n messages", () => {
       if (locale === "en") continue;
       expect(flattenKeys(getMessages(locale)).sort()).toEqual(englishKeys);
     }
+  });
+
+  it("falls back to English while release automation catches up", () => {
+    expect(
+      mergeLocalizedMessages(
+        {
+          Home: {
+            title: "English title",
+            description: "New English-only copy",
+          },
+        },
+        {
+          Home: {
+            title: "Titre français",
+          },
+        }
+      )
+    ).toEqual({
+      Home: {
+        title: "Titre français",
+        description: "New English-only copy",
+      },
+    });
   });
 
   it("rejects missing interpolation values", () => {

@@ -1,11 +1,11 @@
 "use client";
 
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import {
   Ban,
   Check,
   CircleDollarSign,
   Coins,
-  Copy,
   FileText,
   LayoutTemplate,
   ListChecks,
@@ -21,20 +21,22 @@ import {
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
+import { buildWalletIdentityForAuthority } from "../issuance-token-fields";
+import { WalletIdentityBadge } from "../wallet-identity";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import type {
   ExtensionRow,
   ExtensionRowId,
-  PermissionControlStatus,
   PermissionRow,
   PermissionRowId,
 } from "./token-management-workspace.types";
-import { formatValue } from "./token-management-workspace.utils";
 
 interface TokenSettingsSectionProps {
   mode: "permissions" | "extensions";
   permissionRows: PermissionRow[];
   extensionRows: ExtensionRow[];
+  /** Resolves each authority address to its custody wallet for the identity badge. */
+  authorityWallets: PaymentsDashboardWallet[];
   showTitle?: boolean;
   canEditAuthorities: boolean;
   onCopy: (value: string | null) => void;
@@ -45,7 +47,7 @@ interface TokenSettingsSectionProps {
 // Token-2022 feature it represents. Keyed by the row `id` unions, so these
 // records are exhaustive: adding or renaming a row id in the workspace layer
 // fails to compile here until the icon is supplied — no silent fallback.
-const PERMISSION_ROW_ICONS: Record<PermissionRowId, LucideIcon> = {
+export const PERMISSION_ROW_ICONS: Record<PermissionRowId, LucideIcon> = {
   "mint-authority": Coins,
   "freeze-authority": Snowflake,
   "metadata-authority": FileText,
@@ -85,28 +87,6 @@ function extensionBadge(value: string): { className: string; showCheck: boolean 
   return { className: "bg-fill text-secondary", showCheck: false };
 }
 
-// Custody-control badge on each authority row: green when the authority is held
-// by an SDP custody wallet, amber when it's an external address SDP can't sign
-// for. Hidden while unknown (wallets loading) or when no authority is set.
-function ControlStatusBadge({ status }: { status?: PermissionControlStatus }) {
-  const t = useTranslations();
-  if (status !== "sdp" && status !== "external") {
-    return null;
-  }
-  const isSdp = status === "sdp";
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        isSdp ? "bg-success-bg text-success" : "bg-warning-bg text-warning"
-      }`}
-    >
-      {isSdp
-        ? t("DashboardIssuance.permissions.managedBadge")
-        : t("DashboardIssuance.permissions.externalBadge")}
-    </span>
-  );
-}
-
 function IconTile({ icon: Icon }: { icon: LucideIcon }) {
   return (
     <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-border-subtle bg-fill-subtle text-secondary min-[450px]:flex">
@@ -138,6 +118,7 @@ export function TokenSettingsSection({
   mode,
   permissionRows,
   extensionRows,
+  authorityWallets,
   showTitle = true,
   canEditAuthorities,
   onCopy,
@@ -165,8 +146,6 @@ export function TokenSettingsSection({
       {mode === "permissions" ? (
         <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
           {permissionRows.map((row) => {
-            const hasControlStatus =
-              row.controlStatus === "sdp" || row.controlStatus === "external";
             return (
               <div
                 key={row.id}
@@ -175,32 +154,28 @@ export function TokenSettingsSection({
               >
                 <IconTile icon={PERMISSION_ROW_ICONS[row.id]} />
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-[15px] font-medium text-primary">{row.title}</p>
-                    {/* Inline beside the title on desktop; on mobile the row is too
-                      narrow, so it drops below the helper text instead. */}
-                    {hasControlStatus ? (
-                      <span className="hidden sm:inline-flex">
-                        <ControlStatusBadge status={row.controlStatus} />
-                      </span>
-                    ) : null}
-                  </div>
+                  <p className="text-[15px] font-medium text-primary">{row.title}</p>
                   <p className="text-[13px] text-tertiary">{row.helper}</p>
-                  {hasControlStatus ? (
-                    <div className="mt-2 sm:hidden">
-                      <ControlStatusBadge status={row.controlStatus} />
-                    </div>
-                  ) : null}
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onCopy(row.value)}
-                    className="inline-flex items-center gap-1 rounded-full border border-border-default bg-fill-subtle px-3 py-1 text-xs text-secondary"
-                  >
-                    {formatValue(row.value, t)}
-                    {row.value ? <Copy className="h-3 w-3" /> : null}
-                  </button>
+                <div className="flex items-center gap-3">
+                  {/* Names the holder rather than showing a bare address, and carries
+                      the custody signal itself — so no separate SDP-managed /
+                      External pill beside the title. Same badge the Overview hero
+                      and the authority popovers use. */}
+                  <WalletIdentityBadge
+                    identity={buildWalletIdentityForAuthority(
+                      row.value,
+                      row.controlStatus ?? "unknown",
+                      authorityWallets,
+                      t
+                    )}
+                    onCopy={onCopy}
+                    // Fixed column from sm up so the badges — and the Edit buttons
+                    // after them — line up down the list despite ragged content
+                    // ("Treasury" vs "Held externally"). Below sm the row wraps and
+                    // the badge takes the width it needs.
+                    className="sm:w-[13.5rem] sm:shrink-0"
+                  />
                   <TokenDisabledActionTooltip
                     reason={
                       !canEditAuthorities
