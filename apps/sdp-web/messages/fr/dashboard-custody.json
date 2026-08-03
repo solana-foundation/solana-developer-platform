@@ -213,8 +213,6 @@
     "rpcProviderSaveMismatch": "Incohérence d’enregistrement du fournisseur RPC (demandé : {requested}, enregistré : {persisted}).",
     "rpcSettingsSaved": "Paramètres RPC enregistrés.",
     "failedToTestRpcProvider": "Échec du test du fournisseur RPC.",
-    "rpcTestFailed": "Échec du test RPC.",
-    "rpcTestFailedStatus": "Échec du test RPC ({status}).",
     "rpcTestMismatch": "Incohérence du test RPC (demandé : {requested}, résolu : {resolved}).",
     "rpcUpstreamReturned": "L’amont RPC a renvoyé {status} {statusText}.",
     "rpcTestPassed": "Test RPC réussi ({status} {statusText}) en {latency} ms.",
