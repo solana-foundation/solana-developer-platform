@@ -247,7 +247,9 @@ async function solanaGetBalance(rpcUrl: string, address: string): Promise<number
 
 async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
-  const maxRetries = 4;
+  // Preflight performs sequential RPC checks inside a 120-second setup hook.
+  // Keep the retry budget below that deadline while still retrying transient errors.
+  const maxRetries = 2;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
