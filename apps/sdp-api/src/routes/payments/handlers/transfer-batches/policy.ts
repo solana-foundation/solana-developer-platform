@@ -4,7 +4,7 @@ import {
   enforceWalletOperationPolicy,
   recordLegacyWalletPolicyDenial,
   walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import { type AppContext, getPaymentsRepository } from "../../context";
 import type { CreateTransferBatchInput, ResolvedBatchRequest } from "./types";
 

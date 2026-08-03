@@ -1,4 +1,3 @@
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import {
   decideRecurringPaymentUpdateTransition,
   getRecurringPaymentOperationStaleBefore,
@@ -40,6 +39,7 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { parseU64String } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
@@ -1231,7 +1231,12 @@ async function runReplacementUpdate(input: {
       subscriptionAuthorityAddress,
       { commitment: "confirmed" }
     );
-    const feePayer = await createFeePaymentAdapter(input.env).getFeePayer();
+    const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
+    });
+    const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
     subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
       env: input.env,

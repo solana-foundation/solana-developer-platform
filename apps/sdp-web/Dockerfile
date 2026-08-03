@@ -38,6 +38,7 @@ COPY apps/sdp-web/package.json ./apps/sdp-web/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
+COPY packages/sdp-policy/package.json ./packages/sdp-policy/
 # sdp-web imports @sdp/issuance/capabilities (advanced-settings catalog); pull the
 # package and its workspace deps (@sdp/payments) into the frozen-install closure.
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
@@ -58,6 +59,7 @@ COPY apps/sdp-web ./apps/sdp-web
 COPY packages/sdp-types ./packages/sdp-types
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-solana ./packages/sdp-solana
+COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-issuance ./packages/sdp-issuance
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-private-channels ./packages/sdp-private-channels

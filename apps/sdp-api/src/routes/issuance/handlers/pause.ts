@@ -7,11 +7,14 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { getTenantTokenService, requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { pauseTokenSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
 
@@ -102,7 +105,7 @@ export const pauseToken = async (c: AppContext) => {
       throw badRequest("Pause authority is not controlled by custody");
     }
 
-    const mosaic = createMosaicService(c.env, signer, "sponsored");
+    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
     const result = await mosaic.pauseToken({
       mint: mintAddress,
@@ -223,7 +226,7 @@ export const unpauseToken = async (c: AppContext) => {
       throw badRequest("Pause authority is not controlled by custody");
     }
 
-    const mosaic = createMosaicService(c.env, signer, "sponsored");
+    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
     const result = await mosaic.unpauseToken({
       mint: mintAddress,

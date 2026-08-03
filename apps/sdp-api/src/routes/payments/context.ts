@@ -1,4 +1,3 @@
-import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
 import type { Address } from "@solana/kit";
@@ -12,8 +11,8 @@ import {
   createPaymentTransferBatchesRepository,
   createPolicyRepository,
 } from "@/db/repositories";
-import { resolveKoraUserId } from "@/lib/kora-user";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { createRequestSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
@@ -67,7 +66,7 @@ export function getPolicyRepository(c: AppContext) {
 }
 
 export function getFeePayment(c: AppContext) {
-  return feePaymentAdapters.createFeePaymentAdapter(c.env, resolveKoraUserId(c));
+  return createRequestSponsorshipFeePayment(c);
 }
 
 export async function getSponsoredFeePayer(c: AppContext): Promise<Address> {

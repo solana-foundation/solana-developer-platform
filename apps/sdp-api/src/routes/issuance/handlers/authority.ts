@@ -8,9 +8,12 @@ import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
 import type { Env } from "@/types/env";
-import { getTenantTokenService, requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { updateAuthoritySchema } from "../schemas";
 import {
   type AuthorityRole,
@@ -98,7 +101,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     requestedWalletId: parsed.data.signingWalletId,
     currentAuthority: currentAuthorityRaw,
   });
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   const prepared = await mosaic.prepareUpdateAuthority({
     mint: mintAddress,
@@ -246,7 +249,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   try {
     const result = await mosaic.updateAuthority({

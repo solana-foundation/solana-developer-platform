@@ -1,4 +1,3 @@
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
@@ -28,6 +27,7 @@ import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import {
   buildSplTransferInstructions,
@@ -105,7 +105,14 @@ pay.post("/:token/tx", async (c) => {
 
   const payerSigner = createNoopSigner(payer);
   const rpc = solanaRpc.createRpc(c.env);
-  const feePayment = createFeePaymentAdapter(c.env);
+  if (!request.project_id) {
+    throw badRequest("Payment request is not eligible for sponsored fees");
+  }
+  const feePayment = await createProjectSponsorshipFeePayment(c.env, {
+    organizationId: request.organization_id,
+    projectId: request.project_id,
+    actor: { type: "wallet", id: request.wallet_id },
+  });
   const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
     feePayment.getFeePayer(),
     solanaRpc.getRecentBlockhash(rpc, "confirmed"),

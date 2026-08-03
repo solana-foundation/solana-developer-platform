@@ -14,7 +14,7 @@ import type { Env } from "@/types/env";
 import {
   enforceWalletOperationPolicy,
   WalletPolicyEnforcementService,
-} from "./policy-enforcement.service";
+} from "./enforcement.service";
 
 const baseOperation: CreateWalletOperationInput = {
   organizationId: "org_1",
@@ -607,7 +607,7 @@ describe("WalletPolicyEnforcementService", () => {
     const service = new WalletPolicyEnforcementService(repository);
 
     await expect(service.enforce(baseOperation)).rejects.toThrow(
-      "Wallet operation policy enforcement failed (evaluation write unavailable) and approval cleanup failed (approval cleanup unavailable)"
+      "Wallet operation policy enforcement failed (evaluation write unavailable) and cleanup failed (approval cleanup unavailable)"
     );
 
     expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({

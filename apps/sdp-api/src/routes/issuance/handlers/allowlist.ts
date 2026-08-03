@@ -7,11 +7,14 @@ import { AppError, badRequest, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { getTenantTokenService, requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { addAllowlistSchema, listAllowlistQuerySchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -79,7 +82,7 @@ async function syncNewAllowlistEntryOnChain(opts: {
     opts.projectId,
     opts.signingWalletId ?? undefined
   );
-  const mosaic = createMosaicService(opts.c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(opts.c, signer, "sponsored");
 
   try {
     await mosaic.addToList({ list: opts.list, wallet: opts.wallet });
@@ -106,7 +109,7 @@ async function removeExistingAllowlistEntryOnChain(opts: {
     opts.projectId,
     opts.signingWalletId ?? undefined
   );
-  const mosaic = createMosaicService(opts.c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(opts.c, signer, "sponsored");
   const removeOperation = mosaic.removeFromList({
     list: opts.list,
     wallet: opts.wallet,

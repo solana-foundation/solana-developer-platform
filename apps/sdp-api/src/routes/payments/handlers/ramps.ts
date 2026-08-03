@@ -60,7 +60,7 @@ import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
   enforceWalletOperationPolicy,
   walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   type AppContext,

@@ -1,4 +1,3 @@
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import {
   hasRecurringPaymentAdvancedPastDueAt,
   isRecurringPaymentCollectionActive,
@@ -37,6 +36,7 @@ import {
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
@@ -899,7 +899,12 @@ export async function collectRecurringPayment(input: {
       input.recurringPayment.subscription_pda,
       "subscriptionPda"
     ) as Address;
-    const feePayer = await createFeePaymentAdapter(input.env).getFeePayer();
+    const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      actor: { type: "wallet", id: input.sourceWallet.walletId },
+    });
+    const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
     const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
       payer,
