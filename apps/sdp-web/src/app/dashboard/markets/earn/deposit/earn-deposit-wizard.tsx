@@ -79,7 +79,15 @@ interface DepositLeg {
   legAmount: number;
 }
 
-const SETUP_PROGRESS = ["wallet", "profile", "curator", "review"] as const;
+// Two entry orderings share one step set. "New deposit" is wallet-first; the
+// "Explore curators" entry leads with the curator choice and then collects the
+// wallet, so both paths still gather everything a deposit needs.
+const WALLET_FIRST_ORDER = ["wallet", "profile", "curator", "review"] as const;
+const CURATOR_FIRST_ORDER = ["curator", "wallet", "profile", "review"] as const;
+
+function setupOrder(entryStep: SetupStep | undefined): readonly SetupStep[] {
+  return entryStep === "curator" ? CURATOR_FIRST_ORDER : WALLET_FIRST_ORDER;
+}
 
 const stepMeta: Record<SetupStep, { title: MessageKey; description: MessageKey }> = {
   wallet: {
@@ -189,9 +197,11 @@ function SelectionMark({ selected }: { selected: boolean }) {
 
 function SummaryRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-border-subtle py-2.5 text-sm last:border-b-0">
-      <span className="shrink-0 text-secondary">{label}</span>
-      <span className="min-w-0 text-right text-primary">{value}</span>
+    <div className="flex items-baseline justify-between gap-4 border-b border-border-subtle py-2.5 text-sm last:border-b-0">
+      {/* Label wraps before the value does, so short values like an APY range
+          never split across lines at their separator. */}
+      <span className="min-w-0 text-secondary">{label}</span>
+      <span className="shrink-0 whitespace-nowrap text-right text-primary">{value}</span>
     </div>
   );
 }
@@ -537,11 +547,18 @@ function QuestionnaireStep({
         </div>
       </section>
 
-      <div className="flex flex-col gap-3 border-t border-border-subtle pt-5 sm:flex-row sm:items-center sm:justify-between">
-        <p className="max-w-xl text-[13px] leading-5 text-tertiary">
+      <div className="flex flex-col gap-3 border-t border-border-subtle pt-5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+        <p className="max-w-md text-[13px] leading-5 text-tertiary">
           {t("DashboardEarn.setup.preferencesRankCurators")}
         </p>
-        <Button type="button" variant="ghost" size="sm" onClick={onBrowseAll}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="shrink-0 self-start whitespace-nowrap sm:self-auto"
+          iconRight={<ArrowRightIcon />}
+          onClick={onBrowseAll}
+        >
           {t("DashboardEarn.setup.browseAllCurators")}
         </Button>
       </div>
@@ -1721,6 +1738,8 @@ function VaultLiveScreen({
 interface EarnDepositWizardProps {
   initialStrategyId?: string;
   initialCuratorId?: string;
+  /** "curator" opens the curator-first ordering (the Explore curators entry). */
+  entryStep?: SetupStep;
 }
 
 interface SetupReadinessInput {
@@ -1744,18 +1763,14 @@ function getSetupReadiness({
   };
 }
 
-function nextSetupStep(step: SetupStep): SetupStep | null {
-  if (step === "wallet") return "profile";
-  if (step === "profile") return "curator";
-  if (step === "curator") return "review";
-  return null;
+function nextSetupStep(step: SetupStep, order: readonly SetupStep[]): SetupStep | null {
+  const index = order.indexOf(step);
+  return index >= 0 && index < order.length - 1 ? order[index + 1] : null;
 }
 
-function previousSetupStep(step: SetupStep): SetupStep | null {
-  if (step === "profile") return "wallet";
-  if (step === "curator") return "profile";
-  if (step === "review") return "curator";
-  return null;
+function previousSetupStep(step: SetupStep, order: readonly SetupStep[]): SetupStep | null {
+  const index = order.indexOf(step);
+  return index > 0 ? order[index - 1] : null;
 }
 
 function primaryActionLabel(
@@ -1935,7 +1950,11 @@ function SetupStepContent(props: SetupStepContentProps) {
   );
 }
 
-export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnDepositWizardProps) {
+export function EarnDepositWizard({
+  initialStrategyId,
+  initialCuratorId,
+  entryStep,
+}: EarnDepositWizardProps) {
   const t = useTranslations();
   const router = useDashboardRouter();
   const initialStrategy = MOCK_EARN_STRATEGIES.find(
@@ -1943,7 +1962,8 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
   );
   const initialCurator = CURATOR_PROGRAMS.find((program) => program.id === initialCuratorId);
 
-  const [step, setStep] = useState<SetupStep>("wallet");
+  const flowOrder = setupOrder(entryStep);
+  const [step, setStep] = useState<SetupStep>(entryStep ?? "wallet");
   const [editingFromReview, setEditingFromReview] = useState(false);
   const [postSetupScreen, setPostSetupScreen] = useState<PostSetupScreen | null>(null);
   const [provider, setProvider] = useState<WalletProvider | null>(null);
@@ -1972,7 +1992,7 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
   const strategies = fundingPlan?.strategies ?? [];
   const effectiveAllocation = fundingPlan?.strategyAllocation ?? {};
 
-  const progressStep = SETUP_PROGRESS.indexOf(step);
+  const progressStep = flowOrder.indexOf(step);
   const stepReady = getSetupReadiness({
     wallet,
     program,
@@ -2025,7 +2045,7 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
       moveTo("review");
       return;
     }
-    const nextStep = nextSetupStep(step);
+    const nextStep = nextSetupStep(step, flowOrder);
     if (nextStep) {
       moveTo(nextStep);
       return;
@@ -2041,7 +2061,7 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
       moveTo("review");
       return;
     }
-    const previousStep = previousSetupStep(step);
+    const previousStep = previousSetupStep(step, flowOrder);
     if (!previousStep) {
       router.push("/dashboard/markets/earn");
       return;
@@ -2101,14 +2121,14 @@ export function EarnDepositWizard({ initialStrategyId, initialCuratorId }: EarnD
 
   return (
     <WizardFrame
-      steps={SETUP_PROGRESS.map((progress) => ({
+      steps={flowOrder.map((progress) => ({
         label: t(`DashboardEarn.setup.progress.${progress}` as MessageKey),
         title: t(stepMeta[progress].title),
       }))}
       currentStep={progressStep}
       progressLabel={t("DashboardEarn.setup.stepProgress", {
         current: progressStep + 1,
-        total: SETUP_PROGRESS.length,
+        total: flowOrder.length,
       })}
       description={t(activeMeta.description)}
       maxWidthClassName="max-w-4xl"
