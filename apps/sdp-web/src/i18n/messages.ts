@@ -10,7 +10,9 @@ import shared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
 import frDashboardApprovals from "../../messages/fr/dashboard-approvals.json";
 import frDashboardCustody from "../../messages/fr/dashboard-custody.json";
-import frDashboardEarn from "../../messages/fr/dashboard-earn.json";
+// No fr/dashboard-earn.json: product branches ship English source only; the
+// translation bot adds localized Earn copy on the release PR. Earn keys fall
+// back to English via mergeLocalizedMessages until then.
 import frDashboardIssuance from "../../messages/fr/dashboard-issuance.json";
 import frDashboardPayments from "../../messages/fr/dashboard-payments.json";
 import frDashboardPolicies from "../../messages/fr/dashboard-policies.json";
@@ -66,7 +68,6 @@ const frCatalog = {
   ...fr,
   ...frDashboardApprovals,
   ...frDashboardCustody,
-  ...frDashboardEarn,
   ...frDashboardIssuance,
   ...frDashboardPayments,
   ...frDashboardPolicies,
