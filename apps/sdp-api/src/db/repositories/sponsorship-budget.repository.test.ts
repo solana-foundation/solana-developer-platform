@@ -3,6 +3,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { SponsorshipBudgetRepository } from "./sponsorship-budget.repository";
 
 async function insertPolicy(input: {
@@ -102,5 +103,24 @@ describe("SponsorshipBudgetRepository", () => {
     expect(migration).toContain(
       "('sbp_mainnet_project_default', 'mainnet', 'project', NULL, TRUE, 10000000, 100000000, 250000000"
     );
+  });
+
+  it("restores migration-equivalent defaults after a shared test reset", async () => {
+    await seedTestDatabase(env);
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const policies = await repository.listPolicies();
+    expect(policies.map((entry) => entry.id)).toEqual([
+      "sbp_devnet_global",
+      "sbp_devnet_org_default",
+      "sbp_devnet_project_default",
+      "sbp_mainnet_global",
+      "sbp_mainnet_org_default",
+      "sbp_mainnet_project_default",
+    ]);
+    expect(
+      await getDb(env).queryOne<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM sponsorship_budget_policy_revisions"
+      )
+    ).toEqual({ count: 6 });
   });
 });
