@@ -15,9 +15,10 @@
 import { getChannelTokenBalance } from "@sdp/private-channels";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { PrivateChannelBalance, PrivateChannelInstance } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
-import { defaultChannelMint, inferCluster, knownMintDecimals } from "./mint";
+import { inferCluster, knownMintToken, resolveChannelToken } from "./mint";
 
 /** The instance fields the balance read needs: gateway URL + a cluster hint. */
 type BalanceInstance = Pick<PrivateChannelInstance, "gatewayUrl" | "chainRpcUrl">;
@@ -39,15 +40,25 @@ export async function getChannelBalance(
 ): Promise<PrivateChannelBalance> {
   const cluster = inferCluster(instance.chainRpcUrl);
   const ownerAddress = assertValidAddress(owner, "owner");
-  const mintAddress = assertValidAddress(mint ?? defaultChannelMint(cluster), "mint");
+  const mintAddress = assertValidAddress(mint ?? resolveChannelToken(cluster).mint, "mint");
+
+  // This stays a GENERAL read: an explicitly-passed mint need not be on the
+  // instance's allowlist, unlike the write paths. The allowlist only supplies the
+  // default. A mint the catalogue does not know falls back to classic SPL, which
+  // is what every mint outside the catalogue is today.
+  const knownMint = knownMintToken(mintAddress, cluster);
+  const tokenProgram = assertValidAddress(
+    knownMint?.tokenProgram ?? SPL_TOKEN_PROGRAMS["spl-token"],
+    "tokenProgram"
+  );
 
   const { tokenAccount, balance } = await withGatewayRpc(env, instance.gatewayUrl, auth, (rpc) =>
-    getChannelTokenBalance(rpc, ownerAddress, mintAddress)
+    getChannelTokenBalance(rpc, ownerAddress, mintAddress, tokenProgram)
   );
 
   // A missing token account is a zero balance; fall back to the mint's known
   // decimals so the DTO stays accurate even before the owner is first credited.
-  const decimals = balance?.decimals ?? knownMintDecimals(mintAddress, cluster) ?? 0;
+  const decimals = balance?.decimals ?? knownMint?.decimals ?? 0;
   return {
     owner: ownerAddress,
     mint: mintAddress,

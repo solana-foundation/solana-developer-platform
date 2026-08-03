@@ -1,3 +1,4 @@
+import { inferCluster, privateChannelTokens } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
@@ -23,6 +24,11 @@ export default async function PrivateChannelsDepositPage() {
 
   const wallets = await loadSignableWallets(client);
 
+  // Derived from the instance's own RPC URL so the mint matches what the API will
+  // resolve. Empty when the instance read failed — the form then omits `mint` and
+  // lets the API default it, rather than turning a transient failure into a dead page.
+  const tokens = privateChannelTokens(inferCluster(instance.data?.chainRpcUrl ?? ""));
+
   return (
     <div className="mx-auto w-full max-w-2xl">
       <Card>
@@ -32,7 +38,7 @@ export default async function PrivateChannelsDepositPage() {
         </CardHeader>
         <CardContent>
           {wallets.ok ? (
-            <DepositForm wallets={wallets.data} />
+            <DepositForm tokens={tokens} wallets={wallets.data} />
           ) : (
             <PrivateChannelsLoadError message={wallets.error} />
           )}

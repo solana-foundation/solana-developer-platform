@@ -1,3 +1,4 @@
+import { inferCluster, privateChannelTokens } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
@@ -23,6 +24,10 @@ export default async function PrivateChannelsWithdrawPage() {
 
   const wallets = await loadSignableWallets(client);
 
+  // See the note in deposit/page.tsx: derived from the instance's own RPC URL, and
+  // empty on a failed instance read rather than blocking the form.
+  const tokens = privateChannelTokens(inferCluster(instance.data?.chainRpcUrl ?? ""));
+
   return (
     <div className="mx-auto w-full max-w-2xl">
       <Card>
@@ -32,7 +37,7 @@ export default async function PrivateChannelsWithdrawPage() {
         </CardHeader>
         <CardContent>
           {wallets.ok ? (
-            <WithdrawForm wallets={wallets.data} />
+            <WithdrawForm tokens={tokens} wallets={wallets.data} />
           ) : (
             <PrivateChannelsLoadError message={wallets.error} />
           )}

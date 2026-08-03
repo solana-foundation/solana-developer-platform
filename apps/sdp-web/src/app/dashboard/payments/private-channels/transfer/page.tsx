@@ -1,3 +1,4 @@
+import { inferCluster, privateChannelTokens } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
@@ -64,7 +65,12 @@ export default async function PrivateChannelsTransferPage() {
           {loadError ? (
             <PrivateChannelsLoadError message={loadError} />
           ) : (
-            <TransferForm channels={channels} scopeKey={scopeKey} sourceWallets={sourceWallets} />
+            <TransferForm
+              channels={channels}
+              scopeKey={scopeKey}
+              sourceWallets={sourceWallets}
+              tokens={privateChannelTokens(inferCluster(instance.data.chainRpcUrl))}
+            />
           )}
         </CardContent>
       </Card>

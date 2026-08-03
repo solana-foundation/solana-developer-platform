@@ -13,7 +13,9 @@
     "common": {
       "loadError": "Something went wrong loading this section.",
       "cancel": "Cancel",
-      "amountUsdc": "Amount (USDC)",
+      "tokenLabel": "Token",
+      "amountForToken": "Amount ({symbol})",
+      "amount": "Amount",
       "amountPlaceholder": "1.5",
       "onChainBalance": "On-chain:",
       "channelBalance": "Channel balance:",
@@ -54,7 +56,7 @@
       "verifySuccess": "Wallet {key} verified.",
       "revokeSuccess": "Verification for {key} revoked.",
       "channelBalanceTooltip": "Channel balance for mint {mint}",
-      "channelBalanceAmount": "{amount} USDC"
+      "channelBalanceAmount": "{amount} {symbol}"
     },
     "channels": {
       "title": "Channels",
