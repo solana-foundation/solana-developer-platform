@@ -250,6 +250,7 @@ async function syncRedisSettlement(
       attempt: reservation.attempt,
       reservedLamports: reservation.reservedLamports,
       actualLamports,
+      recoverMissingReservation: true,
     });
     const persisted = await repository.markRedisSettled(reservation.id, reservation.attempt);
     if (!persisted) throw new Error("Redis settlement lost its durable reservation ownership");

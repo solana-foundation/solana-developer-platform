@@ -144,6 +144,28 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(repository.markRedisSettled).toHaveBeenCalledOnce();
   });
 
+  it("finishes an expired Redis reservation without tripping the breaker", async () => {
+    const candidate = reservation({
+      status: "committed",
+      actualLamports: 3,
+      redisSettledAt: null,
+    });
+    const { repository, budgetRedis, run } = harness(candidate);
+    budgetRedis.settle.mockResolvedValueOnce(-3);
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservationId: "reservation_1",
+        attempt: 1,
+        recoverMissingReservation: true,
+      })
+    );
+    expect(repository.markRedisSettled).toHaveBeenCalledWith("reservation_1", 1);
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+  });
+
   it("charges actual fee-payer balance delta and trips the breaker on under-reservation", async () => {
     const { repository, budgetRedis, getTransaction, run } = harness(reservation());
     getTransaction.mockResolvedValueOnce({

@@ -253,6 +253,81 @@ describe("SponsorshipBudgetRedis", () => {
     );
   });
 
+  it("recovers a durably-authorized settlement after its Redis reservation expires", async () => {
+    const input = {
+      network: "devnet" as const,
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      reservationId: "reservation_expired",
+      attempt: 1,
+      amount: 5,
+      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      usage: EMPTY_USAGE,
+    };
+    await expect(budget.reserve(input)).resolves.toBe("admitted");
+    const reservationKey = "sdp:sponsorship:{devnet}:reservation:reservation_expired:1";
+    const settlementKey = "sdp:sponsorship:{devnet}:settlement:reservation_expired:1";
+    await raw.del(reservationKey);
+    const settlement = {
+      network: input.network,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      hourBucket: input.hourBucket,
+      dayBucket: input.dayBucket,
+      reservationId: input.reservationId,
+      attempt: input.attempt,
+      reservedLamports: input.amount,
+      actualLamports: 2,
+    };
+
+    await expect(budget.settle(settlement)).rejects.toThrow("counter invariant");
+    await expect(budget.settle({ ...settlement, recoverMissingReservation: true })).resolves.toBe(
+      -3
+    );
+    await expect(budget.settle({ ...settlement, recoverMissingReservation: true })).resolves.toBe(
+      0
+    );
+
+    expect(await raw.get(settlementKey)).toBe("2");
+    expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
+      "5"
+    );
+  });
+
+  it("rejects settlement when an existing reservation has the wrong amount", async () => {
+    const input = {
+      network: "devnet" as const,
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      reservationId: "reservation_mismatch",
+      attempt: 1,
+      amount: 5,
+      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      usage: EMPTY_USAGE,
+    };
+    await expect(budget.reserve(input)).resolves.toBe("admitted");
+    await raw.set("sdp:sponsorship:{devnet}:reservation:reservation_mismatch:1", "4");
+
+    await expect(
+      budget.settle({
+        network: input.network,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        hourBucket: input.hourBucket,
+        dayBucket: input.dayBucket,
+        reservationId: input.reservationId,
+        attempt: input.attempt,
+        reservedLamports: input.amount,
+        actualLamports: 2,
+        recoverMissingReservation: true,
+      })
+    ).rejects.toThrow("counter invariant");
+  });
+
   it("keeps stale callbacks from undoing a newer retry attempt", async () => {
     const input = {
       network: "devnet" as const,

@@ -109,7 +109,13 @@ if redis.call('GET', KEYS[4]) then return 0 end
 local reserved = tonumber(ARGV[1])
 local actual = tonumber(ARGV[2])
 local count = tonumber(ARGV[3])
-local owned = tonumber(redis.call('GET', KEYS[3]) or '-1')
+local owned_value = redis.call('GET', KEYS[3])
+if not owned_value then
+  if ARGV[5 + count] ~= '1' then return -2 end
+  redis.call('SET', KEYS[4], actual, 'PX', ARGV[4 + count])
+  return -3
+end
+local owned = tonumber(owned_value)
 if owned ~= reserved then return -2 end
 local delta = actual - reserved
 for key_index = 1, 2 do
@@ -279,6 +285,8 @@ export class SponsorshipBudgetRedis {
     attempt: number;
     reservedLamports: number;
     actualLamports: number;
+    /** Set only after this attempt is durably terminal in Postgres. */
+    recoverMissingReservation?: boolean;
   }): Promise<number> {
     const client = await this.getClient();
     const keys = this.keys(input);
@@ -293,6 +301,7 @@ export class SponsorshipBudgetRedis {
         this.fields(input.organizationId, input.projectId).length,
         ...this.fields(input.organizationId, input.projectId),
         this.ttlUntilNextDay(),
+        input.recoverMissingReservation ? 1 : 0,
       ]
     );
     if (Number(result) === -1 || Number(result) === -2) {
