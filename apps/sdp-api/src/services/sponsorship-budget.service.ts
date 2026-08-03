@@ -55,6 +55,7 @@ type AdmissionCancel = Parameters<SponsorshipBudgetRedis["cancel"]>[0];
 type AdmissionSettlement = Parameters<SponsorshipBudgetRedis["settle"]>[0];
 type AdmissionResult = {
   id: string;
+  attempt: number;
   replay: SponsorshipReservation | null;
   cancel: AdmissionCancel | null;
   settlement: AdmissionSettlement | null;
@@ -188,7 +189,12 @@ export class BudgetedFeePayment implements FeePaymentPort {
     }
     let persisted: boolean;
     try {
-      persisted = await this.repository.markSigned(reservation.id, encodeBase64(signed), signature);
+      persisted = await this.repository.markSigned(
+        reservation.id,
+        reservation.attempt,
+        encodeBase64(signed),
+        signature
+      );
     } catch (error) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
@@ -217,13 +223,17 @@ export class BudgetedFeePayment implements FeePaymentPort {
       if (isDeterministicProviderRejection(error)) {
         await this.releaseDeterministic(reservation, error);
       } else {
-        await this.markAmbiguous(reservation.id, error);
+        await this.markAmbiguous(reservation, error);
       }
       throw error;
     }
     let persisted: boolean;
     try {
-      persisted = await this.repository.markSubmitted(reservation.id, signature);
+      persisted = await this.repository.markSubmitted(
+        reservation.id,
+        reservation.attempt,
+        signature
+      );
     } catch (error) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
@@ -247,9 +257,14 @@ export class BudgetedFeePayment implements FeePaymentPort {
     operation: AdmissionOperation
   ): Promise<AdmissionResult> {
     const context = await this.prepareAdmission(transaction);
-    const durableReplay = await this.resolveDurableReplay(context, operation);
+    const durableReservation = await this.readReservation(context);
+    const durableReplay = this.resolveDurableReplay(context, operation, durableReservation);
     if (durableReplay) return durableReplay;
-    return this.admitAgainstCurrentPolicy(context, operation);
+    const attempt =
+      durableReservation?.status === "released"
+        ? durableReservation.attempt + 1
+        : (durableReservation?.attempt ?? 1);
+    return this.admitAgainstCurrentPolicy(context, operation, attempt);
   }
 
   private async prepareAdmission(transaction: Uint8Array): Promise<AdmissionContext> {
@@ -320,11 +335,11 @@ export class BudgetedFeePayment implements FeePaymentPort {
     };
   }
 
-  private async resolveDurableReplay(
+  private resolveDurableReplay(
     context: AdmissionContext,
-    operation: AdmissionOperation
-  ): Promise<AdmissionResult | null> {
-    const durableReplay = await this.readReservation(context);
+    operation: AdmissionOperation,
+    durableReplay: SponsorshipReservation | null
+  ): AdmissionResult | null {
     const hasOperationResponse = durableReplay
       ? reservationHasResponse(durableReplay, operation)
       : false;
@@ -333,7 +348,13 @@ export class BudgetedFeePayment implements FeePaymentPort {
       ["signed", "submitted", "committed"].includes(durableReplay.status) &&
       hasOperationResponse
     ) {
-      return { id: context.id, replay: durableReplay, cancel: null, settlement: null };
+      return {
+        id: context.id,
+        attempt: durableReplay.attempt,
+        replay: durableReplay,
+        cancel: null,
+        settlement: null,
+      };
     }
     if (durableReplay?.status === "charged_unknown") {
       throw new FeePaymentError(
@@ -346,7 +367,8 @@ export class BudgetedFeePayment implements FeePaymentPort {
 
   private async admitAgainstCurrentPolicy(
     context: AdmissionContext,
-    operation: AdmissionOperation
+    operation: AdmissionOperation,
+    reservationAttempt: number
   ): Promise<AdmissionResult> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let policies: SponsorshipBudgetPolicy[];
@@ -370,7 +392,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
           "PROVIDER_NOT_AVAILABLE"
         );
       }
-      const admission = await this.reserveBudget(context, policies);
+      const admission = await this.reserveBudget(context, policies, reservationAttempt);
       if (admission === "stale_policy" && attempt === 0) continue;
       if (admission === "denied" || admission === "stale_policy") {
         throw new FeePaymentError(
@@ -383,14 +405,20 @@ export class BudgetedFeePayment implements FeePaymentPort {
       const replay = await this.readReservation(context);
       if (admission === "duplicate") {
         if (replay && reservationHasResponse(replay, operation)) {
-          return { id: context.id, replay, cancel: null, settlement: null };
+          return {
+            id: context.id,
+            attempt: replay.attempt,
+            replay,
+            cancel: null,
+            settlement: null,
+          };
         }
         throw new FeePaymentError(
           "An identical sponsorship operation is already in progress",
           "PROVIDER_NOT_AVAILABLE"
         );
       }
-      return this.persistReservation(context, policies);
+      return this.persistReservation(context, policies, reservationAttempt);
     }
     throw new FeePaymentError(
       "Sponsorship policy changed during admission",
@@ -400,7 +428,8 @@ export class BudgetedFeePayment implements FeePaymentPort {
 
   private async reserveBudget(
     context: AdmissionContext,
-    policies: SponsorshipBudgetPolicy[]
+    policies: SponsorshipBudgetPolicy[],
+    attempt: number
   ): Promise<Awaited<ReturnType<SponsorshipBudgetRedis["reserve"]>>> {
     try {
       const usage = await this.repository.getWindowUsage({
@@ -417,6 +446,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
         hourBucket: context.hourBucket,
         dayBucket: context.dayBucket,
         reservationId: context.id,
+        attempt,
         amount: context.amount,
         policies,
         usage,
@@ -433,9 +463,10 @@ export class BudgetedFeePayment implements FeePaymentPort {
 
   private async persistReservation(
     context: AdmissionContext,
-    policies: SponsorshipBudgetPolicy[]
+    policies: SponsorshipBudgetPolicy[],
+    attempt: number
   ): Promise<AdmissionResult> {
-    const cancel = this.cancelInput(context);
+    const cancel = this.cancelInput(context, attempt);
     const reservationInput: CreateSponsorshipReservationInput = {
       id: context.id,
       network: context.network,
@@ -454,20 +485,25 @@ export class BudgetedFeePayment implements FeePaymentPort {
       policyVersions: policyVersions(policies),
     };
     try {
-      if (await this.repository.createReservation(reservationInput)) {
+      if (attempt === 1 && (await this.repository.createReservation(reservationInput))) {
         return {
           id: context.id,
+          attempt,
           replay: null,
           cancel,
-          settlement: this.settlementInput(context, 1),
+          settlement: this.settlementInput(context, attempt),
         };
       }
       const existing = await this.repository.getReservation(context.id);
-      if (existing?.status === "released") {
-        const attempt = await this.repository.reopenReleasedReservation(reservationInput);
-        if (attempt !== null) {
+      if (existing?.status === "released" && existing.attempt + 1 === attempt) {
+        const reopenedAttempt = await this.repository.reopenReleasedReservation(
+          reservationInput,
+          existing.attempt
+        );
+        if (reopenedAttempt === attempt) {
           return {
             id: context.id,
+            attempt,
             replay: null,
             cancel,
             settlement: this.settlementInput(context, attempt),
@@ -481,7 +517,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
     } catch (error) {
       let cause = error;
       try {
-        await this.compensateReservation(context);
+        await this.compensateReservation(context, attempt);
       } catch (compensationError) {
         cause = compensationError;
       }
@@ -507,7 +543,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
     }
   }
 
-  private cancelInput(context: AdmissionContext): AdmissionCancel {
+  private cancelInput(context: AdmissionContext, attempt: number): AdmissionCancel {
     return {
       network: context.network,
       organizationId: this.scope.organizationId,
@@ -515,21 +551,21 @@ export class BudgetedFeePayment implements FeePaymentPort {
       hourBucket: context.hourBucket,
       dayBucket: context.dayBucket,
       reservationId: context.id,
+      attempt,
     };
   }
 
   private settlementInput(context: AdmissionContext, attempt: number): AdmissionSettlement {
     return {
-      ...this.cancelInput(context),
-      attempt,
+      ...this.cancelInput(context, attempt),
       reservedLamports: context.amount,
       actualLamports: context.amount,
     };
   }
 
-  private async compensateReservation(context: AdmissionContext): Promise<void> {
+  private async compensateReservation(context: AdmissionContext, attempt: number): Promise<void> {
     try {
-      await this.budgetRedis.cancel(this.cancelInput(context));
+      await this.budgetRedis.cancel(this.cancelInput(context, attempt));
     } catch (compensationError) {
       await this.tripBreaker(context.network, "Redis compensation invariant failed");
       throw compensationError;
@@ -560,10 +596,14 @@ export class BudgetedFeePayment implements FeePaymentPort {
     );
   }
 
-  private async markAmbiguous(id: string, error: unknown): Promise<void> {
+  private async markAmbiguous(reservation: AdmissionResult, error: unknown): Promise<void> {
     const reason = error instanceof Error ? error.message : "Unknown Kora failure";
     try {
-      const persisted = await this.repository.markChargedUnknown(id, reason);
+      const persisted = await this.repository.markChargedUnknown(
+        reservation.id,
+        reservation.attempt,
+        reason
+      );
       if (persisted) return;
     } catch (persistenceError) {
       return this.accountingUnavailable(
@@ -587,7 +627,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
     const reason = error instanceof Error ? error.message : "Kora rejected sponsorship";
     let released: boolean;
     try {
-      released = await this.repository.markReleased(reservation.id, reason);
+      released = await this.repository.markReleased(reservation.id, reservation.attempt, reason);
     } catch (releaseError) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
@@ -608,7 +648,8 @@ export class BudgetedFeePayment implements FeePaymentPort {
     }
     try {
       await this.budgetRedis.settle({ ...reservation.settlement, actualLamports: 0 });
-      await this.repository.markRedisSettled(reservation.id);
+      const persisted = await this.repository.markRedisSettled(reservation.id, reservation.attempt);
+      if (!persisted) throw new Error("Released reservation lost its Redis settlement ownership");
     } catch (compensationError) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),

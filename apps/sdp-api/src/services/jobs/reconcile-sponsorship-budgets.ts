@@ -136,6 +136,7 @@ async function reconcileReservation(input: {
   if (!reservation.signature) {
     const persisted = await repository.markChargedUnknown(
       reservation.id,
+      reservation.attempt,
       "No signature was durably captured before reconciliation timeout"
     );
     if (!persisted) {
@@ -167,7 +168,7 @@ async function reconcileReservation(input: {
 
   if (await input.isBlockhashValid(reservation.recentBlockhash as Blockhash)) return;
   if (reservation.missCount === 0) {
-    await repository.recordReconciliationMiss(reservation.id, 0);
+    await repository.recordReconciliationMiss(reservation.id, reservation.attempt, 0);
     return;
   }
   await settleDurably(
@@ -206,6 +207,7 @@ async function settleDurably(
 ): Promise<void> {
   const settled = await repository.settleReservation(
     reservation.id,
+    reservation.attempt,
     status,
     actualLamports,
     reason
@@ -232,7 +234,8 @@ async function syncRedisSettlement(
       reservedLamports: reservation.reservedLamports,
       actualLamports,
     });
-    await repository.markRedisSettled(reservation.id);
+    const persisted = await repository.markRedisSettled(reservation.id, reservation.attempt);
+    if (!persisted) throw new Error("Redis settlement lost its durable reservation ownership");
   } catch (error) {
     await tripBreaker(
       repository,

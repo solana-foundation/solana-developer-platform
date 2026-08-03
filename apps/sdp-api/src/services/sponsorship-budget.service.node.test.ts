@@ -75,7 +75,7 @@ function harness() {
     markSubmitted: vi.fn().mockResolvedValue(true),
     markChargedUnknown: vi.fn().mockResolvedValue(true),
     markReleased: vi.fn().mockResolvedValue(true),
-    markRedisSettled: vi.fn().mockResolvedValue(undefined),
+    markRedisSettled: vi.fn().mockResolvedValue(true),
     tripGlobalBreaker: vi.fn().mockResolvedValue(null),
   };
   const budgetRedis = {
@@ -180,6 +180,7 @@ describe("BudgetedFeePayment", () => {
       code: "SIGNING_FAILED",
     });
     expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledWith(expect.any(String), 1, "rejected");
     expect(budgetRedis.settle).toHaveBeenCalledWith(
       expect.objectContaining({ actualLamports: 0, attempt: 1 })
     );
@@ -206,6 +207,11 @@ describe("BudgetedFeePayment", () => {
     vi.mocked(provider.signAndSend).mockRejectedValueOnce(new Error("request timed out"));
     await expect(feePayment.signAndSend(buildTransaction())).rejects.toThrow("timed out");
     expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
+    expect(repository.markChargedUnknown).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "request timed out"
+    );
     expect(repository.markReleased).not.toHaveBeenCalled();
     expect(budgetRedis.cancel).not.toHaveBeenCalled();
   });
@@ -324,5 +330,59 @@ describe("BudgetedFeePayment", () => {
     expect(budgetRedis.cancel).toHaveBeenCalledOnce();
     expect(repository.tripGlobalBreaker).toHaveBeenCalled();
     expect(provider.signAndSend).not.toHaveBeenCalled();
+  });
+
+  it("uses a new ownership attempt when retrying a fully released reservation", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    const released = {
+      id: "reservation_1",
+      status: "released" as const,
+      signature: null,
+      signedTransaction: null,
+      reservedLamports: 5_000,
+      actualLamports: 0,
+      attempt: 1,
+    };
+    repository.getReservation.mockResolvedValue(released);
+    repository.reopenReleasedReservation.mockResolvedValueOnce(2);
+
+    await expect(feePayment.signAndSend(buildTransaction())).resolves.toBe("signature_1");
+
+    expect(budgetRedis.reserve).toHaveBeenCalledWith(expect.objectContaining({ attempt: 2 }));
+    expect(repository.createReservation).not.toHaveBeenCalled();
+    expect(repository.reopenReleasedReservation).toHaveBeenCalledWith(expect.any(Object), 1);
+    expect(repository.markSubmitted).toHaveBeenCalledWith(expect.any(String), 2, "signature_1");
+  });
+
+  it("fails closed when a stale provider callback loses ownership to a retry", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    repository.markSubmitted.mockResolvedValueOnce(false);
+
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+
+    expect(repository.markSubmitted).toHaveBeenCalledWith(expect.any(String), 1, "signature_1");
+    expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
+      "devnet",
+      "Submitted sponsorship outcome lost its durable state transition"
+    );
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+  });
+
+  it("does not let a stale deterministic failure release a newer attempt", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAndSend).mockRejectedValueOnce(
+      new FeePaymentError("stale rejection", "SIGNING_FAILED")
+    );
+    repository.markReleased.mockResolvedValueOnce(false);
+
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+
+    expect(repository.markReleased).toHaveBeenCalledWith(expect.any(String), 1, "stale rejection");
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+    expect(repository.markRedisSettled).not.toHaveBeenCalled();
   });
 });

@@ -264,7 +264,8 @@ export class SponsorshipBudgetRepository {
   }
 
   async reopenReleasedReservation(
-    input: CreateSponsorshipReservationInput
+    input: CreateSponsorshipReservationInput,
+    expectedAttempt: number
   ): Promise<number | null> {
     const updated = await this.db.queryOne<{ attempt: number }>(
       `UPDATE sponsorship_budget_reservations SET
@@ -274,7 +275,7 @@ export class SponsorshipBudgetRepository {
          signed_transaction = NULL, attempt = attempt + 1, miss_count = 0, failure_reason = NULL,
          submitted_at = NULL, reconciled_at = NULL, redis_settled_at = NULL,
          updated_at = sdp_iso_now()
-       WHERE id = ? AND status = 'released'
+       WHERE id = ? AND status = 'released' AND attempt = ? AND redis_settled_at IS NOT NULL
        RETURNING attempt`,
       [
         input.reservedLamports,
@@ -283,6 +284,7 @@ export class SponsorshipBudgetRepository {
         JSON.stringify(input.policyVersions),
         input.providerConfigFingerprint,
         input.id,
+        expectedAttempt,
       ]
     );
     return updated?.attempt ?? null;
@@ -309,47 +311,52 @@ export class SponsorshipBudgetRepository {
     });
   }
 
-  async markSigned(id: string, signedTransaction: string, signature: string): Promise<boolean> {
+  async markSigned(
+    id: string,
+    expectedAttempt: number,
+    signedTransaction: string,
+    signature: string
+  ): Promise<boolean> {
     return (
       (await this.db.execute(
         `UPDATE sponsorship_budget_reservations
        SET status = 'signed', signed_transaction = ?, signature = ?, updated_at = sdp_iso_now()
-       WHERE id = ? AND status = 'reserved'`,
-        [signedTransaction, signature, id]
+       WHERE id = ? AND attempt = ? AND status = 'reserved'`,
+        [signedTransaction, signature, id, expectedAttempt]
       )) === 1
     );
   }
 
-  async markSubmitted(id: string, signature: string): Promise<boolean> {
+  async markSubmitted(id: string, expectedAttempt: number, signature: string): Promise<boolean> {
     return (
       (await this.db.execute(
         `UPDATE sponsorship_budget_reservations
        SET status = 'submitted', signature = ?, submitted_at = sdp_iso_now(), updated_at = sdp_iso_now()
-       WHERE id = ? AND status IN ('reserved', 'signed')`,
-        [signature, id]
+       WHERE id = ? AND attempt = ? AND status IN ('reserved', 'signed')`,
+        [signature, id, expectedAttempt]
       )) === 1
     );
   }
 
-  async markChargedUnknown(id: string, reason: string): Promise<boolean> {
+  async markChargedUnknown(id: string, expectedAttempt: number, reason: string): Promise<boolean> {
     return (
       (await this.db.execute(
         `UPDATE sponsorship_budget_reservations
        SET status = 'charged_unknown', failure_reason = ?, updated_at = sdp_iso_now()
-       WHERE id = ? AND status IN ('reserved', 'signed')`,
-        [reason.slice(0, 500), id]
+       WHERE id = ? AND attempt = ? AND status IN ('reserved', 'signed')`,
+        [reason.slice(0, 500), id, expectedAttempt]
       )) === 1
     );
   }
 
-  async markReleased(id: string, reason: string): Promise<boolean> {
+  async markReleased(id: string, expectedAttempt: number, reason: string): Promise<boolean> {
     return (
       (await this.db.execute(
         `UPDATE sponsorship_budget_reservations
        SET status = 'released', actual_lamports = 0, failure_reason = ?,
            reconciled_at = sdp_iso_now(), updated_at = sdp_iso_now()
-       WHERE id = ? AND status IN ('reserved', 'signed')`,
-        [reason.slice(0, 500), id]
+       WHERE id = ? AND attempt = ? AND status IN ('reserved', 'signed')`,
+        [reason.slice(0, 500), id, expectedAttempt]
       )) === 1
     );
   }
@@ -464,19 +471,24 @@ export class SponsorshipBudgetRepository {
     }));
   }
 
-  async recordReconciliationMiss(id: string, expectedMissCount: number): Promise<boolean> {
+  async recordReconciliationMiss(
+    id: string,
+    expectedAttempt: number,
+    expectedMissCount: number
+  ): Promise<boolean> {
     return (
       (await this.db.execute(
         `UPDATE sponsorship_budget_reservations
          SET miss_count = miss_count + 1, updated_at = sdp_iso_now()
-         WHERE id = ? AND miss_count = ? AND status IN ('signed', 'submitted')`,
-        [id, expectedMissCount]
+         WHERE id = ? AND attempt = ? AND miss_count = ? AND status IN ('signed', 'submitted')`,
+        [id, expectedAttempt, expectedMissCount]
       )) === 1
     );
   }
 
   async settleReservation(
     id: string,
+    expectedAttempt: number,
     status: "committed" | "released",
     actualLamports: number,
     reason?: string
@@ -486,18 +498,21 @@ export class SponsorshipBudgetRepository {
         `UPDATE sponsorship_budget_reservations
          SET status = ?, actual_lamports = ?, failure_reason = ?, reconciled_at = sdp_iso_now(),
              updated_at = sdp_iso_now()
-         WHERE id = ? AND status IN ('signed', 'submitted')`,
-        [status, actualLamports, reason ?? null, id]
+         WHERE id = ? AND attempt = ? AND status IN ('signed', 'submitted')`,
+        [status, actualLamports, reason ?? null, id, expectedAttempt]
       )) === 1
     );
   }
 
-  async markRedisSettled(id: string): Promise<void> {
-    await this.db.execute(
-      `UPDATE sponsorship_budget_reservations
-       SET redis_settled_at = sdp_iso_now(), updated_at = sdp_iso_now()
-       WHERE id = ? AND status IN ('committed', 'released') AND redis_settled_at IS NULL`,
-      [id]
+  async markRedisSettled(id: string, expectedAttempt: number): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE sponsorship_budget_reservations
+         SET redis_settled_at = COALESCE(redis_settled_at, sdp_iso_now()),
+             updated_at = sdp_iso_now()
+         WHERE id = ? AND attempt = ? AND status IN ('committed', 'released')`,
+        [id, expectedAttempt]
+      )) === 1
     );
   }
 

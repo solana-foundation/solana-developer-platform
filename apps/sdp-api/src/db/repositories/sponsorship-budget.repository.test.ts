@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { SponsorshipBudgetRepository } from "./sponsorship-budget.repository";
+import {
+  type CreateSponsorshipReservationInput,
+  SponsorshipBudgetRepository,
+} from "./sponsorship-budget.repository";
 
 async function insertPolicy(input: {
   id: string;
@@ -19,6 +22,26 @@ async function insertPolicy(input: {
      ) VALUES (?, 'devnet', ?, ?, TRUE, 10, ?, 1000, 1, 'test', 'seed')`,
     [input.id, input.scopeType, input.scopeId, input.hourly ?? 100]
   );
+}
+
+function reservationInput(id: string): CreateSponsorshipReservationInput {
+  return {
+    id,
+    network: "devnet",
+    productEnvironment: "sandbox",
+    organizationId: "org_1",
+    projectId: "project_1",
+    actorType: "api_key",
+    actorId: "key_1",
+    transactionDigest: "digest_1",
+    feePayer: "fee_payer_1",
+    providerConfigFingerprint: "config_1",
+    recentBlockhash: "blockhash_1",
+    reservedLamports: 5,
+    hourBucket: "2026-08-03T10:00:00.000Z",
+    dayBucket: "2026-08-03T00:00:00.000Z",
+    policyVersions: { global: 1 },
+  };
 }
 
 describe("SponsorshipBudgetRepository", () => {
@@ -122,5 +145,53 @@ describe("SponsorshipBudgetRepository", () => {
         "SELECT COUNT(*)::int AS count FROM sponsorship_budget_policy_revisions"
       )
     ).toEqual({ count: 6 });
+  });
+
+  it("reopens a released reservation exactly once and only after Redis settlement", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const input = reservationInput("reservation_retry");
+    await expect(repository.createReservation(input)).resolves.toBe(true);
+    await expect(repository.markReleased(input.id, 1, "provider rejected")).resolves.toBe(true);
+
+    await expect(repository.reopenReleasedReservation(input, 1)).resolves.toBeNull();
+    await expect(repository.markRedisSettled(input.id, 1)).resolves.toBe(true);
+    const reopened = await Promise.all([
+      repository.reopenReleasedReservation(input, 1),
+      repository.reopenReleasedReservation(input, 1),
+    ]);
+    expect(reopened.filter((attempt) => attempt === 2)).toHaveLength(1);
+    expect(reopened.filter((attempt) => attempt === null)).toHaveLength(1);
+  });
+
+  it("rejects every stale attempt mutation after a reservation is reopened", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const input = reservationInput("reservation_stale_attempt");
+    await repository.createReservation(input);
+    await repository.markReleased(input.id, 1, "provider rejected");
+    await expect(repository.markRedisSettled(input.id, 1)).resolves.toBe(true);
+    await expect(repository.reopenReleasedReservation(input, 1)).resolves.toBe(2);
+
+    await expect(repository.markSubmitted(input.id, 1, "stale_signature")).resolves.toBe(false);
+    await expect(repository.markChargedUnknown(input.id, 1, "stale timeout")).resolves.toBe(false);
+    await expect(repository.markReleased(input.id, 1, "stale rejection")).resolves.toBe(false);
+    await expect(repository.recordReconciliationMiss(input.id, 1, 0)).resolves.toBe(false);
+    await expect(
+      repository.markSigned(input.id, 2, "signed_transaction", "signature_2")
+    ).resolves.toBe(true);
+    await expect(repository.settleReservation(input.id, 1, "released", 0)).resolves.toBe(false);
+    await expect(repository.settleReservation(input.id, 2, "committed", 4)).resolves.toBe(true);
+
+    await expect(repository.markRedisSettled(input.id, 1)).resolves.toBe(false);
+    expect(
+      await getDb(env).queryOne<{
+        attempt: number;
+        status: string;
+        redis_settled_at: string | null;
+      }>(
+        `SELECT attempt, status, redis_settled_at
+         FROM sponsorship_budget_reservations WHERE id = ?`,
+        [input.id]
+      )
+    ).toEqual({ attempt: 2, status: "committed", redis_settled_at: null });
   });
 });

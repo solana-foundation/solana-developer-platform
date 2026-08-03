@@ -46,7 +46,7 @@ for i = 1, count do
   local control = redis.call('HGET', KEYS[4], control_field)
   if not control or control ~= expected_version .. ':1' then return {-3, i} end
 end
-if existing then return {2, tonumber(existing)} end
+if existing or redis.call('GET', KEYS[5]) then return {2, tonumber(existing or '0')} end
 for i = 1, count do
   local offset = 2 + ((i - 1) * 6)
   local field = ARGV[offset + 1]
@@ -109,6 +109,8 @@ if redis.call('GET', KEYS[4]) then return 0 end
 local reserved = tonumber(ARGV[1])
 local actual = tonumber(ARGV[2])
 local count = tonumber(ARGV[3])
+local owned = tonumber(redis.call('GET', KEYS[3]) or '-1')
+if owned ~= reserved then return -2 end
 local delta = actual - reserved
 for key_index = 1, 2 do
   if redis.call('EXISTS', KEYS[key_index]) == 1 then
@@ -156,6 +158,7 @@ export interface BudgetAdmissionInput {
   hourBucket: string;
   dayBucket: string;
   reservationId: string;
+  attempt: number;
   amount: number;
   policies: SponsorshipBudgetPolicy[];
   usage: { hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage };
@@ -213,7 +216,7 @@ export class SponsorshipBudgetRedis {
       client,
       "reserve",
       RESERVE_LUA,
-      [keys.hour, keys.day, keys.reservation, keys.control],
+      [keys.hour, keys.day, keys.reservation, keys.control, keys.settlement],
       args
     )) as [number, number];
     if (result[0] === 2) return "duplicate";
@@ -232,7 +235,7 @@ export class SponsorshipBudgetRedis {
       [keys.hour, keys.day, keys.reservation],
       this.fields(input.organizationId, input.projectId)
     );
-    if (result === -1) {
+    if (Number(result) === -1 || Number(result) === -2) {
       throw new Error("Sponsorship budget counter invariant violated during compensation");
     }
   }
@@ -292,7 +295,7 @@ export class SponsorshipBudgetRedis {
         this.ttlUntilNextDay(),
       ]
     );
-    if (result === -1) {
+    if (Number(result) === -1 || Number(result) === -2) {
       throw new Error("Sponsorship budget counter invariant violated during settlement");
     }
     return Number(result);
@@ -314,14 +317,14 @@ export class SponsorshipBudgetRedis {
     hourBucket: string;
     dayBucket: string;
     reservationId: string;
-    attempt?: number;
+    attempt: number;
   }) {
     const prefix = `sdp:sponsorship:{${input.network}}`;
     return {
       hour: `${prefix}:hour:${input.hourBucket}`,
       day: `${prefix}:day:${input.dayBucket}`,
-      reservation: `${prefix}:reservation:${input.reservationId}`,
-      settlement: `${prefix}:settlement:${input.reservationId}:${input.attempt ?? 1}`,
+      reservation: `${prefix}:reservation:${input.reservationId}:${input.attempt}`,
+      settlement: `${prefix}:settlement:${input.reservationId}:${input.attempt}`,
       control: `${prefix}:control`,
     };
   }

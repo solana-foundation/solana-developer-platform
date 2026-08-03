@@ -101,7 +101,7 @@ function harness(candidate: SponsorshipReconciliationReservation) {
     settleReservation: vi.fn().mockResolvedValue(true),
     markChargedUnknown: vi.fn().mockResolvedValue(true),
     tripGlobalBreaker: vi.fn().mockResolvedValue(breakerPolicy),
-    markRedisSettled: vi.fn().mockResolvedValue(undefined),
+    markRedisSettled: vi.fn().mockResolvedValue(true),
   };
   const budgetRedis = {
     settle: vi.fn().mockResolvedValue(0),
@@ -161,6 +161,7 @@ describe("reconcileSponsorshipBudgets", () => {
     );
     expect(repository.settleReservation).toHaveBeenCalledWith(
       "reservation_1",
+      1,
       "committed",
       10,
       undefined
@@ -183,6 +184,7 @@ describe("reconcileSponsorshipBudgets", () => {
     await run();
     expect(repository.settleReservation).toHaveBeenCalledWith(
       "reservation_1",
+      1,
       "committed",
       5,
       undefined
@@ -207,7 +209,7 @@ describe("reconcileSponsorshipBudgets", () => {
       "2026-08-03T10:03:00.000Z",
       250
     );
-    expect(first.repository.recordReconciliationMiss).toHaveBeenCalledWith("reservation_1", 0);
+    expect(first.repository.recordReconciliationMiss).toHaveBeenCalledWith("reservation_1", 1, 0);
     expect(first.repository.settleReservation).not.toHaveBeenCalled();
 
     const second = harness(reservation({ status: "signed", missCount: 1 }));
@@ -216,6 +218,7 @@ describe("reconcileSponsorshipBudgets", () => {
     await second.run();
     expect(second.repository.settleReservation).toHaveBeenCalledWith(
       "reservation_1",
+      1,
       "released",
       0,
       expect.stringContaining("two reconciliation passes")
@@ -229,6 +232,23 @@ describe("reconcileSponsorshipBudgets", () => {
     await run();
     expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
     expect(getTransaction).not.toHaveBeenCalled();
+  });
+
+  it("does not let a stale reconciliation snapshot settle a newer attempt in Redis", async () => {
+    const { repository, budgetRedis, run } = harness(reservation({ attempt: 1 }));
+    repository.settleReservation.mockResolvedValueOnce(false);
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(repository.settleReservation).toHaveBeenCalledWith(
+      "reservation_1",
+      1,
+      "committed",
+      3,
+      undefined
+    );
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+    expect(repository.markRedisSettled).not.toHaveBeenCalled();
   });
 
   it.each([

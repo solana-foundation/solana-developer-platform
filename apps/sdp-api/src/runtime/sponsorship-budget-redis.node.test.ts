@@ -60,6 +60,7 @@ describe("SponsorshipBudgetRedis", () => {
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "reservation_org",
+        attempt: 1,
         amount: 3,
         policies: [policy("global"), policy("organization")],
         usage: EMPTY_USAGE,
@@ -82,6 +83,7 @@ describe("SponsorshipBudgetRedis", () => {
           hourBucket: "2026-08-03T10:00:00.000Z",
           dayBucket: "2026-08-03T00:00:00.000Z",
           reservationId: `reservation_${index}`,
+          attempt: 1,
           amount: 1,
           policies,
           usage: EMPTY_USAGE,
@@ -104,6 +106,7 @@ describe("SponsorshipBudgetRedis", () => {
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "reservation_org_1",
+        attempt: 1,
         amount: 3,
         policies,
         usage: EMPTY_USAGE,
@@ -117,6 +120,7 @@ describe("SponsorshipBudgetRedis", () => {
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "reservation_org_2",
+        attempt: 1,
         amount: 4,
         policies,
         usage: {
@@ -139,6 +143,7 @@ describe("SponsorshipBudgetRedis", () => {
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_stale",
+      attempt: 1,
       amount: 1,
       policies: [policy("global", 1), policy("organization", 1)],
       usage: EMPTY_USAGE,
@@ -157,6 +162,7 @@ describe("SponsorshipBudgetRedis", () => {
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_orphan",
+      attempt: 1,
       amount: 1,
       policies: [policy("global", 1), policy("organization", 1)],
       usage: EMPTY_USAGE,
@@ -180,6 +186,7 @@ describe("SponsorshipBudgetRedis", () => {
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: `reservation_settle_${actualLamports}`,
+      attempt: 1,
       amount: 5,
       policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
       usage: EMPTY_USAGE,
@@ -200,6 +207,102 @@ describe("SponsorshipBudgetRedis", () => {
     await budget.settle(settlement);
     expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
       String(actualLamports)
+    );
+  });
+
+  it("rejects cancel and settlement from an attempt that does not own the reservation", async () => {
+    const input = {
+      network: "devnet" as const,
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      reservationId: "reservation_owned",
+      attempt: 1,
+      amount: 5,
+      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      usage: EMPTY_USAGE,
+    };
+    await expect(budget.reserve(input)).resolves.toBe("admitted");
+
+    await budget.cancel({
+      network: input.network,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      hourBucket: input.hourBucket,
+      dayBucket: input.dayBucket,
+      reservationId: input.reservationId,
+      attempt: 2,
+    });
+    await expect(
+      budget.settle({
+        network: input.network,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        hourBucket: input.hourBucket,
+        dayBucket: input.dayBucket,
+        reservationId: input.reservationId,
+        attempt: 2,
+        reservedLamports: input.amount,
+        actualLamports: 0,
+      })
+    ).rejects.toThrow("counter invariant");
+
+    expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
+      "5"
+    );
+  });
+
+  it("keeps stale callbacks from undoing a newer retry attempt", async () => {
+    const input = {
+      network: "devnet" as const,
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      reservationId: "reservation_retry",
+      attempt: 1,
+      amount: 5,
+      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      usage: EMPTY_USAGE,
+    };
+    await budget.reserve(input);
+    await budget.settle({
+      network: input.network,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      hourBucket: input.hourBucket,
+      dayBucket: input.dayBucket,
+      reservationId: input.reservationId,
+      attempt: 1,
+      reservedLamports: input.amount,
+      actualLamports: 0,
+    });
+    await expect(budget.reserve({ ...input, attempt: 2 })).resolves.toBe("admitted");
+
+    await budget.cancel({
+      network: input.network,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      hourBucket: input.hourBucket,
+      dayBucket: input.dayBucket,
+      reservationId: input.reservationId,
+      attempt: 1,
+    });
+    await budget.settle({
+      network: input.network,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      hourBucket: input.hourBucket,
+      dayBucket: input.dayBucket,
+      reservationId: input.reservationId,
+      attempt: 1,
+      reservedLamports: input.amount,
+      actualLamports: 0,
+    });
+
+    expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
+      "5"
     );
   });
 });
