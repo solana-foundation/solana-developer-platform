@@ -426,7 +426,7 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
     }),
     rules: withOpenApi(updateWalletPolicySchemaBase.shape.rules, {
       description:
-        "Rules for a new immutable wallet control profile revision. When provided, the revision is activated after validation.",
+        "Rules for the new immutable wallet control profile revision, activated after validation.",
       example: [
         {
           id: "deny-raw-signing",

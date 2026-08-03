@@ -61,7 +61,8 @@ async function getWalletPolicy(
       return {
         policy: {
           walletId,
-          destinationAllowlist: [],
+          defaultAction: "allow",
+          rules: [],
         },
         error: null,
       };
@@ -70,25 +71,25 @@ async function getWalletPolicy(
       return {
         policy: {
           walletId,
-          destinationAllowlist: [],
+          defaultAction: "allow",
+          rules: [],
         },
         error: "Wallet controls are unavailable right now.",
       };
     }
 
     const json = (await response.json()) as { data?: { policy?: PaymentWalletPolicy } };
+    const policy = json.data?.policy;
     return {
-      policy: json.data?.policy ?? {
-        walletId,
-        destinationAllowlist: [],
-      },
+      policy: policy ? policy : { walletId, defaultAction: "allow", rules: [] },
       error: null,
     };
   } catch {
     return {
       policy: {
         walletId,
-        destinationAllowlist: [],
+        defaultAction: "allow",
+        rules: [],
       },
       error: "Wallet controls are unavailable right now.",
     };

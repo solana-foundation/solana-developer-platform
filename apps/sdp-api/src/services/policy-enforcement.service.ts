@@ -6,18 +6,17 @@ import type {
   WalletOperationPolicyEvaluation,
   WalletOperationStatus,
 } from "@sdp/types";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
 import {
   type ApprovalRequestRow,
   type CreateApprovalRequestInput,
   type CreateWalletOperationInput,
-  createPolicyRepository,
+  createPostgresPolicyRepository,
   type PolicyRepository,
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, conflict, internalError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
-import { getLogger } from "@/runtime/logger";
 import {
   CustodyConfigStore,
   type CustodyWalletLookup,
@@ -38,6 +37,18 @@ export class WalletPolicyEnforcementService {
     this.foundation = new PolicyFoundationService(repository);
   }
 
+  /**
+   * Records the wallet operation, evaluates policy, and persists the
+   * evaluation outcome. Assumes the service's repository is bound to a single
+   * database transaction: any failure rolls back every write, so no orphaned
+   * operation or approval-request rows can exist. Returns for every decision
+   * — callers throw the decision error after the transaction commits so
+   * denied and pending operations keep their audit trail.
+   *
+   * @param input - The candidate wallet operation.
+   * @param legs - Per-recipient legs for batch operations.
+   * @returns The persisted operation and its policy evaluation.
+   */
   async enforce(
     input: CreateWalletOperationInput,
     legs?: BatchPolicyLeg[]
@@ -47,74 +58,44 @@ export class WalletPolicyEnforcementService {
       status: input.status ?? "created",
     });
 
+    const result = await this.foundation.evaluateWalletOperationPolicies(operation, legs);
+    const status = walletOperationStatusForDecision(result.decision);
     let approvalRequestId: string | null = null;
 
-    const { result, evaluation, updatedOperation } = await (async () => {
-      try {
-        const result = await this.foundation.evaluateWalletOperationPolicies(operation, legs);
-        const status = walletOperationStatusForDecision(result.decision);
-        if (status === "pending_approval") {
-          const approvalRequest = await this.repository.createApprovalRequest(
-            createApprovalRequestInput(operation, result)
-          );
+    if (status === "pending_approval") {
+      const approvalRequest = await this.repository.createApprovalRequest(
+        createApprovalRequestInput(operation, result)
+      );
 
-          if (!approvalRequest) {
-            throw internalError("Failed to create wallet operation approval request");
-          }
-
-          if (approvalRequest.status !== "pending") {
-            throw internalError("Wallet operation approval request is no longer pending");
-          }
-
-          approvalRequestId = approvalRequest.id;
-        }
-
-        const evaluation = await this.foundation.recordPolicyEvaluation({
-          ...createPolicyEvaluationInput(result),
-          approvalRequestId,
-        });
-        const updated = await this.repository.updateWalletOperationStatus(operation.id, status);
-
-        if (!updated) {
-          throw internalError("Failed to update wallet operation policy status");
-        }
-
-        return {
-          result,
-          evaluation,
-          updatedOperation: {
-            ...operation,
-            status: updated.status,
-            updatedAt: updated.updated_at,
-          },
-        };
-      } catch (error) {
-        if (approvalRequestId) {
-          try {
-            await markApprovalRequestAndWalletOperationFailed(
-              this.repository,
-              operation.organizationId,
-              operation.projectId,
-              approvalRequestId
-            );
-          } catch (cleanupError) {
-            throw combineEnforcementAndCleanupErrors(error, cleanupError);
-          }
-        } else {
-          await markWalletOperationFailed(this.repository, operation.id);
-        }
-        throw error;
+      if (!approvalRequest) {
+        throw internalError("Failed to create wallet operation approval request");
       }
-    })();
 
-    if (result.decision === "allow") {
-      return {
-        operation: updatedOperation,
-        evaluation,
-      };
+      if (approvalRequest.status !== "pending") {
+        throw internalError("Wallet operation approval request is no longer pending");
+      }
+
+      approvalRequestId = approvalRequest.id;
     }
 
-    throw walletOperationPolicyDecisionError(updatedOperation, evaluation);
+    const evaluation = await this.foundation.recordPolicyEvaluation({
+      ...createPolicyEvaluationInput(result),
+      approvalRequestId,
+    });
+    const updated = await this.repository.updateWalletOperationStatus(operation.id, status);
+
+    if (!updated) {
+      throw internalError("Failed to update wallet operation policy status");
+    }
+
+    return {
+      operation: {
+        ...operation,
+        status: updated.status,
+        updatedAt: updated.updated_at,
+      },
+      evaluation,
+    };
   }
 
   async approveApprovalRequest(
@@ -172,38 +153,6 @@ export class WalletPolicyEnforcementService {
   }
 }
 
-async function markWalletOperationFailed(
-  repository: PolicyRepository,
-  walletOperationId: string
-): Promise<void> {
-  try {
-    await repository.updateWalletOperationStatus(walletOperationId, "failed");
-  } catch (error) {
-    getLogger().error(
-      {
-        walletOperationId,
-        error: error instanceof Error ? error.message : String(error),
-      },
-      "Failed to mark wallet operation failed"
-    );
-  }
-}
-
-async function markApprovalRequestAndWalletOperationFailed(
-  repository: PolicyRepository,
-  organizationId: string,
-  projectId: string | null,
-  approvalRequestId: string
-): Promise<void> {
-  await repository.updateApprovalRequestStatus({
-    organizationId,
-    projectId,
-    approvalRequestId,
-    status: "failed",
-    operationStatus: "failed",
-  });
-}
-
 function requireApprovalRequestStatus<TStatus extends ApprovalRequestRow["status"]>(
   approvalRequest: ApprovalRequestRow | null,
   status: TStatus
@@ -215,17 +164,19 @@ function requireApprovalRequestStatus<TStatus extends ApprovalRequestRow["status
   return approvalRequest as (ApprovalRequestRow & { status: TStatus }) | null;
 }
 
-function combineEnforcementAndCleanupErrors(error: unknown, cleanupError: unknown): AggregateError {
-  return new AggregateError(
-    [error, cleanupError],
-    `Wallet operation policy enforcement failed (${errorMessage(error)}) and approval cleanup failed (${errorMessage(cleanupError)})`
-  );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
+/**
+ * Enforces control-profile policy for a candidate wallet operation inside a
+ * single database transaction: the operation row, any approval request, the
+ * policy evaluation, and the status update commit together or not at all.
+ * Non-allow decisions throw after the transaction commits, so denied and
+ * pending operations keep their audit trail.
+ *
+ * @param env - Worker environment.
+ * @param scope - The authenticated tenant scope.
+ * @param input - The candidate wallet operation.
+ * @param legs - Per-recipient legs for batch operations.
+ * @returns The persisted operation and evaluation when the decision is allow.
+ */
 export async function enforceWalletOperationPolicy(
   env: Env,
   scope: TenantScope,
@@ -233,17 +184,45 @@ export async function enforceWalletOperationPolicy(
   legs?: BatchPolicyLeg[]
 ): Promise<WalletOperationPolicyEnforcement> {
   assertTenantClaim(scope, input, "enforceWalletOperationPolicy");
-  const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope));
-  return service.enforce(input, legs);
+  const enforcement = await getDb(env).transaction(async (tx) => {
+    const service = new WalletPolicyEnforcementService(
+      createPostgresPolicyRepository(asTransactionalClient(tx), scope)
+    );
+    return service.enforce(input, legs);
+  });
+
+  if (enforcement.evaluation.decision === "allow") {
+    return enforcement;
+  }
+
+  throw walletOperationPolicyDecisionError(enforcement.operation, enforcement.evaluation);
+}
+
+/**
+ * Builds the wallet-operation actor for a bare API key id, for contexts that
+ * carry only the initiating key (background collections) rather than a full
+ * auth context.
+ *
+ * @param apiKeyId - The initiating API key id, if any.
+ * @returns The api_key actor, or null when no key initiated the operation.
+ */
+export function walletOperationActorFromApiKeyId(
+  apiKeyId: string | null
+): WalletOperationActor | null {
+  if (apiKeyId === null) {
+    return null;
+  }
+
+  return {
+    type: "api_key",
+    id: apiKeyId,
+    apiKeyId,
+  };
 }
 
 export function walletOperationActorFromAuth(auth: ApiKeyContext): WalletOperationActor | null {
   if (auth.apiKeyId) {
-    return {
-      type: "api_key",
-      id: auth.apiKeyId,
-      apiKeyId: auth.apiKeyId,
-    };
+    return walletOperationActorFromApiKeyId(auth.apiKeyId);
   }
 
   if (auth.userId) {

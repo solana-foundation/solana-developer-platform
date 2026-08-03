@@ -36,6 +36,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
+import { collectDestinationAllowlist, resolveMaxTransferAmount } from "@/lib/wallet-policy-rules";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -132,7 +133,8 @@ async function getWalletPolicy(
       return {
         policy: {
           walletId,
-          destinationAllowlist: [],
+          defaultAction: "allow",
+          rules: [],
         },
         error: null,
       };
@@ -145,11 +147,9 @@ async function getWalletPolicy(
     }
 
     const json = (await response.json()) as { data?: { policy?: PaymentWalletPolicy } };
+    const policy = json.data?.policy;
     return {
-      policy: json.data?.policy ?? {
-        walletId,
-        destinationAllowlist: [],
-      },
+      policy: policy ? policy : { walletId, defaultAction: "allow", rules: [] },
       error: null,
     };
   } catch {
@@ -507,11 +507,6 @@ export async function WalletBalancesSection({
 }
 
 /**
- * Distinct mints named by the profile's asset rules. The rules array is the
- * source of truth for allowed assets; destinationAllowlist and the amount caps
- * are stored separately and say nothing about which tokens are permitted.
- */
-/**
  * Mints named by an allow-action asset rule — the only rules that express an
  * allowlist, and so the only ones honest to render under "Allowed assets".
  *
@@ -561,7 +556,7 @@ const RESTRICTIVE_RULE_ACTIONS = new Set<PolicyRuleAction>([
   "review",
 ]);
 
-function policyRuleRestricts(rule: NonNullable<PaymentWalletPolicy["rules"]>[number]): boolean {
+function policyRuleRestricts(rule: PaymentWalletPolicy["rules"][number]): boolean {
   if (rule.action) {
     return RESTRICTIVE_RULE_ACTIONS.has(rule.action);
   }
@@ -589,13 +584,12 @@ function policyRuleRestricts(rule: NonNullable<PaymentWalletPolicy["rules"]>[num
 function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
   if (!policy) return false;
   return (
-    policy.destinationAllowlist.length > 0 ||
-    Boolean(policy.maxTransferAmount) ||
-    Boolean(policy.maxDailyAmount) ||
+    collectDestinationAllowlist(policy.rules).length > 0 ||
+    resolveMaxTransferAmount(policy.rules) !== null ||
     // Operations matching no rule fall through to the policy default, so a
     // non-allow default is itself a restriction.
-    (policy.defaultAction !== undefined && policy.defaultAction !== "allow") ||
-    (policy.rules ?? []).some(policyRuleRestricts)
+    policy.defaultAction !== "allow" ||
+    policy.rules.some(policyRuleRestricts)
   );
 }
 
@@ -615,7 +609,8 @@ async function WalletControlsPanel({
     ownedTokensByMintPromise,
   ]);
   const hasRestrictions = walletPolicyHasRestrictions(policy);
-  const destinationCount = policy?.destinationAllowlist.length ?? 0;
+  const destinationCount = policy ? collectDestinationAllowlist(policy.rules).length : 0;
+  const maxTransferAmount = policy ? resolveMaxTransferAmount(policy.rules) : null;
   const allowedAssets = walletPolicyAssets(policy);
   // Names assets this org issued. Without it any mint outside the well-known
   // catalogue renders as a shortened address.
@@ -643,7 +638,7 @@ async function WalletControlsPanel({
             <p className="text-sm text-error">{policyError}</p>
           ) : (
             <div className="space-y-3">
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 <WalletControlMetric
                   label={t("DashboardCustody.policyAllowedAssets")}
                   value={
@@ -660,11 +655,9 @@ async function WalletControlsPanel({
                 />
                 <WalletControlMetric
                   label={t("DashboardCustody.perTransfer")}
-                  value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
-                />
-                <WalletControlMetric
-                  label={t("DashboardCustody.daily")}
-                  value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
+                  value={
+                    maxTransferAmount !== null ? maxTransferAmount : t("DashboardCustody.noCap")
+                  }
                 />
               </div>
               {/* Named here rather than under Balances: these are the assets the

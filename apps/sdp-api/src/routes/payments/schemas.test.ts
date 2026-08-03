@@ -15,16 +15,13 @@ const VALID_DESTINATION = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 
 const tokenSchema = createTransferSchema.shape.token;
 const destinationSchema = createTransferSchema.shape.destination;
-const destinationAllowlistSchema = updateWalletPolicySchema.shape.destinationAllowlist;
 const recurringPaymentTokenSchema = createRecurringPaymentSchema.shape.token;
 
 describe("payments schema inferred types", () => {
-  it("destination and allowlist entries infer as string", () => {
+  it("destination entries infer as string", () => {
     type CreateTransfer = z.infer<typeof createTransferSchema>;
-    type UpdateWalletPolicy = z.infer<typeof updateWalletPolicySchema>;
 
     expectTypeOf<CreateTransfer["destination"]>().toEqualTypeOf<string>();
-    expectTypeOf<UpdateWalletPolicy["destinationAllowlist"]>().toEqualTypeOf<string[]>();
   });
 });
 
@@ -220,34 +217,23 @@ describe("recurring payment schema", () => {
   });
 });
 
-describe("wallet policy destinationAllowlist schema", () => {
-  it("accepts an empty array", () => {
-    expect(destinationAllowlistSchema.parse([])).toEqual([]);
+describe("update wallet policy schema", () => {
+  it("requires both defaultAction and rules", () => {
+    expect(updateWalletPolicySchema.safeParse({}).success).toBe(false);
+    expect(updateWalletPolicySchema.safeParse({ rules: [] }).success).toBe(false);
+    expect(updateWalletPolicySchema.safeParse({ defaultAction: "allow" }).success).toBe(false);
   });
 
-  it("accepts trimmed valid addresses", () => {
-    expect(destinationAllowlistSchema.parse([` ${VALID_DESTINATION} `, USDC_MINT])).toEqual([
-      VALID_DESTINATION,
-      USDC_MINT,
-    ]);
-  });
+  it("strips legacy destinationAllowlist/maxTransferAmount fields instead of honoring them", () => {
+    const parsed = updateWalletPolicySchema.parse({
+      destinationAllowlist: [VALID_DESTINATION],
+      maxTransferAmount: "5",
+      maxDailyAmount: "10",
+      defaultAction: "allow",
+      rules: [],
+    });
 
-  it("rejects an entry that is the wrong length", () => {
-    const result = destinationAllowlistSchema.safeParse([VALID_DESTINATION, "x".repeat(20)]);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain("destinationAllowlist entry must be a base58 Solana address");
-    }
-  });
-
-  it("rejects a right-length non-base58 entry", () => {
-    const result = destinationAllowlistSchema.safeParse([VALID_DESTINATION, "!".repeat(43)]);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain("destinationAllowlist entry must be a base58 Solana address");
-    }
+    expect(parsed).toEqual({ defaultAction: "allow", rules: [] });
   });
 });
 
@@ -268,14 +254,14 @@ describe("wallet policy rule schema", () => {
       },
     ] satisfies PolicyRule[];
 
-    const parsed = updateWalletPolicySchema.parse({ destinationAllowlist: [], rules });
+    const parsed = updateWalletPolicySchema.parse({ defaultAction: "allow", rules });
 
     expect(parsed.rules).toEqual(rules);
   });
 
   it("rejects invalid operation_type and asset values with field-specific errors", () => {
     const result = updateWalletPolicySchema.safeParse({
-      destinationAllowlist: [],
+      defaultAction: "allow",
       rules: [
         { kind: "operation_type", operationType: "" },
         { kind: "asset", assets: [""] },
@@ -308,7 +294,7 @@ describe("wallet policy rule schema", () => {
       { kind: "always", action: "review" },
     ] satisfies PolicyRule[];
 
-    const parsed = updateWalletPolicySchema.parse({ destinationAllowlist: [], rules });
+    const parsed = updateWalletPolicySchema.parse({ defaultAction: "allow", rules });
 
     expect(parsed.rules).toEqual(rules);
   });

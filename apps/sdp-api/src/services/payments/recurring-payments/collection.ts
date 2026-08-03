@@ -8,7 +8,6 @@ import {
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { WalletOperationActor } from "@sdp/types";
 import { type Address, createNoopSigner, type Signature } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import {
@@ -37,7 +36,10 @@ import {
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
-import { enforceWalletOperationPolicy } from "@/services/policy-enforcement.service";
+import {
+  enforceWalletOperationPolicy,
+  walletOperationActorFromApiKeyId,
+} from "@/services/policy-enforcement.service";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -715,9 +717,9 @@ export async function collectRecurringPayment(input: {
 
   const nowIso = new Date().toISOString();
   const dueAt = input.recurringPayment.next_collection_due_at;
-  const actor: WalletOperationActor | null = input.initiatedByKeyId
-    ? { type: "api_key", id: input.initiatedByKeyId, apiKeyId: input.initiatedByKeyId }
-    : null;
+  const actor = walletOperationActorFromApiKeyId(
+    input.initiatedByKeyId === undefined ? null : input.initiatedByKeyId
+  );
 
   const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
   const paymentsRepo = createPaymentsRepository(input.env, tenantScope(input));

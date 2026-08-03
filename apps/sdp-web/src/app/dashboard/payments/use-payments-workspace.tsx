@@ -13,6 +13,7 @@ import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { collectDestinationAllowlist } from "@/lib/wallet-policy-rules";
 import {
   createTransfer,
   fetchTransfers,
@@ -27,27 +28,6 @@ const PAYMENTS_WORKSPACE_WALLETS_KEY = "payments-workspace-wallets";
 const PAYMENTS_WORKSPACE_TRANSFERS_KEY = "payments-workspace-transfers";
 const PAYMENTS_WORKSPACE_WALLETS_CACHE_TTL_MS = 30_000;
 const PAYMENTS_WORKSPACE_TRANSFERS_CACHE_TTL_MS = 20_000;
-
-/**
- * Collects the effective destination allowlist from a policy's rules, mirroring
- * the policy engine's own union semantics for a "destination" rule (`allowlist`,
- * `destination`, and `destinations` all contribute).
- *
- * @param rules - Policy rules from the wallet's active control profile.
- * @returns Deduplicated allowlisted addresses across every destination rule.
- */
-function collectDestinationAllowlist(rules: PolicyRule[]): string[] {
-  const addresses = rules.flatMap((rule) =>
-    rule.kind === "destination"
-      ? [
-          ...(rule.destination ? [rule.destination] : []),
-          ...(rule.destinations ?? []),
-          ...(rule.allowlist ?? []),
-        ]
-      : []
-  );
-  return [...new Set(addresses)];
-}
 
 export interface DestinationAllowlistSectionState {
   walletId: string;

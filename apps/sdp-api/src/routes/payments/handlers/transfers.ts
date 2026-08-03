@@ -666,7 +666,6 @@ async function executePreparedPrivateTransfer(
   }
 
   for (const wallet of signerWallets.values()) {
-    // The source wallet's operation and legacy policies were enforced before preparation.
     if (wallet.walletId === operation.sourceWallet.walletId) {
       continue;
     }

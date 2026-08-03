@@ -115,7 +115,6 @@ export interface PolicyAuthoringState {
   defaultAction: AuthoringDefaultAction;
   categories: RestrictionCategory[];
   maxTransferAmount: string;
-  maxDailyAmount: string;
   assets: string[];
   destinationMode: DestinationMode;
   destinationAllowText: string;
@@ -137,7 +136,6 @@ export interface StoredPolicyDraft {
 export interface PolicyValidationErrors {
   intent?: "restriction_required";
   maxTransferAmount?: "invalid_decimal";
-  maxDailyAmount?: "invalid_decimal" | "daily_below_transaction";
   assets?: "invalid_asset";
   operations?: "invalid_operation_type";
   review?: "no_restrictions";
@@ -276,18 +274,6 @@ export function hasLimitsAndAssetsControls(
 export function isValidDecimal(value: string): boolean {
   const trimmed = value.trim();
   return trimmed === "" || (DECIMAL_PATTERN.test(trimmed) && /[1-9]/.test(trimmed));
-}
-
-function compareDecimals(left: string, right: string): number {
-  const [leftWhole, leftFraction = ""] = left.split(".");
-  const [rightWhole, rightFraction = ""] = right.split(".");
-  const scale = Math.max(leftFraction.length, rightFraction.length);
-  const multiplier = 10n ** BigInt(scale);
-  const leftFractionValue = leftFraction.padEnd(scale, "0").replace(/^0+/, "") || "0";
-  const rightFractionValue = rightFraction.padEnd(scale, "0").replace(/^0+/, "") || "0";
-  const leftValue = BigInt(leftWhole) * multiplier + BigInt(leftFractionValue);
-  const rightValue = BigInt(rightWhole) * multiplier + BigInt(rightFractionValue);
-  return leftValue === rightValue ? 0 : leftValue > rightValue ? 1 : -1;
 }
 
 export function parseDestinationText(value: string): ParsedDestinations {
@@ -445,7 +431,6 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
     defaultAction: normalizeAuthoringDefaultAction(policy.defaultAction),
     categories,
     maxTransferAmount,
-    maxDailyAmount: "",
     assets: uniqueValues(assets),
     destinationMode:
       blockDestinations.length > 0 && allowDestinations.length === 0 ? "blocklist" : "allowlist",
@@ -569,8 +554,7 @@ export function validatePolicyState(state: PolicyAuthoringState): PolicyValidati
   const categories = new Set(state.categories);
 
   const payload = buildPolicyPayload("validation", state);
-  const hasLimitsInput = categories.has("limits") && Boolean(state.maxDailyAmount.trim());
-  if (payload.defaultAction === "allow" && payload.rules.length === 0 && !hasLimitsInput) {
+  if (payload.defaultAction === "allow" && payload.rules.length === 0) {
     errors.review = "no_restrictions";
     if (state.categories.length === 0 && state.passthroughRules.length === 0) {
       errors.intent = "restriction_required";
@@ -578,16 +562,6 @@ export function validatePolicyState(state: PolicyAuthoringState): PolicyValidati
   }
 
   if (!isValidDecimal(state.maxTransferAmount)) errors.maxTransferAmount = "invalid_decimal";
-  if (!isValidDecimal(state.maxDailyAmount)) errors.maxDailyAmount = "invalid_decimal";
-  if (
-    !errors.maxTransferAmount &&
-    !errors.maxDailyAmount &&
-    state.maxTransferAmount.trim() &&
-    state.maxDailyAmount.trim() &&
-    compareDecimals(state.maxDailyAmount.trim(), state.maxTransferAmount.trim()) < 0
-  ) {
-    errors.maxDailyAmount = "daily_below_transaction";
-  }
 
   if (categories.has("assets") && state.assets.some((asset) => !isValidSolanaAddress(asset))) {
     errors.assets = "invalid_asset";
@@ -634,7 +608,6 @@ function isStoredPolicyDraft(
     hasOnlyKnownValues([state?.defaultAction], POLICY_DEFAULT_ACTIONS) &&
     hasOnlyKnownValues(state?.categories, RESTRICTION_CATEGORIES) &&
     typeof state?.maxTransferAmount === "string" &&
-    typeof state.maxDailyAmount === "string" &&
     Array.isArray(state.assets) &&
     state.assets.every((asset) => typeof asset === "string") &&
     (state.destinationMode === "allowlist" || state.destinationMode === "blocklist") &&
@@ -648,6 +621,27 @@ function isStoredPolicyDraft(
 
 export function savePolicyDraft(storage: StorageLike, draft: StoredPolicyDraft): void {
   storage.setItem(policyDraftStorageKey(draft.projectId, draft.walletId), JSON.stringify(draft));
+}
+
+/**
+ * Rebuilds the authoring state from only the fields `PolicyAuthoringState` still declares.
+ * A draft saved by an older build of this form can carry fields the current schema has
+ * since dropped (e.g. a retired daily-limit input); this discards them instead of letting
+ * them ride along in every future save.
+ */
+function sanitizeStoredPolicyState(state: PolicyAuthoringState): PolicyAuthoringState {
+  return {
+    defaultAction: state.defaultAction,
+    categories: state.categories,
+    maxTransferAmount: state.maxTransferAmount,
+    assets: state.assets,
+    destinationMode: state.destinationMode,
+    destinationAllowText: state.destinationAllowText,
+    destinationBlockText: state.destinationBlockText,
+    familyActions: state.familyActions,
+    operationTypeRules: state.operationTypeRules,
+    passthroughRules: state.passthroughRules,
+  };
 }
 
 export function loadPolicyDraft(
@@ -664,7 +658,7 @@ export function loadPolicyDraft(
       storage.removeItem(key);
       return null;
     }
-    return parsed;
+    return { ...parsed, state: sanitizeStoredPolicyState(parsed.state) };
   } catch {
     storage.removeItem(key);
     return null;

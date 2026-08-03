@@ -145,7 +145,7 @@ function evaluatePolicyScope(input: {
     input.legs === undefined
       ? []
       : evaluateBatchLegRules(revision.rules, input.operation, input.legs);
-  const ruleEvaluations = [...primaryEvaluations, ...legEvaluations];
+  const ruleEvaluations = dedupeRuleEvaluationsByRule([...primaryEvaluations, ...legEvaluations]);
   const selectedRule = selectStrictestDecision(ruleEvaluations);
 
   if (selectedRule) {
@@ -181,6 +181,8 @@ function evaluatePolicyScope(input: {
   };
 }
 
+const LEG_SCOPED_RULE_KINDS = new Set(["destination", "amount"]);
+
 /**
  * Reads a rule's kind without asserting the rule parses as a known variant.
  *
@@ -190,6 +192,29 @@ function evaluatePolicyScope(input: {
 function ruleKindOf(rule: RuntimePolicyRule): string | null {
   const kind = (rule as Record<string, unknown>).kind;
   return typeof kind === "string" ? kind : null;
+}
+
+/**
+ * Collapses per-leg evaluations of the same rule into one entry, keeping the
+ * strictest leg's evaluation so the recorded reason names the tripping leg.
+ * Prevents a large batch from serializing one full rule copy per recipient
+ * into the persisted matched_rules audit payload.
+ *
+ * @param evaluations - Primary and leg rule evaluations, in evaluation order.
+ * @returns One evaluation per distinct rule, strictest kept.
+ */
+function dedupeRuleEvaluationsByRule(evaluations: RuleEvaluation[]): RuleEvaluation[] {
+  const byRule = new Map<RuntimePolicyRule, RuleEvaluation>();
+  for (const evaluation of evaluations) {
+    const existing = byRule.get(evaluation.rule);
+    if (
+      existing === undefined ||
+      DECISION_RANK[evaluation.decision] > DECISION_RANK[existing.decision]
+    ) {
+      byRule.set(evaluation.rule, evaluation);
+    }
+  }
+  return [...byRule.values()];
 }
 
 /**
@@ -212,7 +237,7 @@ function evaluateBatchLegRules(
   return legs.flatMap((leg, index) =>
     rules.flatMap((rule) => {
       const kind = ruleKindOf(rule);
-      if (kind !== "destination" && kind !== "amount") {
+      if (kind === null || !LEG_SCOPED_RULE_KINDS.has(kind)) {
         return [];
       }
 

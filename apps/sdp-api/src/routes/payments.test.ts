@@ -366,30 +366,6 @@ async function seedAdditionalCustodyWallet(publicKey: string): Promise<void> {
     .run();
 }
 
-async function seedAdditionalWalletDestinationPolicy(
-  destinationAllowlist: string[]
-): Promise<void> {
-  const now = new Date().toISOString();
-  await getDb(env)
-    .prepare(
-      `INSERT INTO payment_wallet_policies
-         (id, custody_wallet_id, policy_type, policy, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      "pwp_additional_allowlist_test",
-      TEST_ADDITIONAL_CUSTODY_WALLET_ID,
-      "destination_allowlist",
-      JSON.stringify({
-        version: 1,
-        destinationAllowlist,
-      }),
-      now,
-      now
-    )
-    .run();
-}
-
 async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, {
@@ -398,53 +374,8 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
   });
 }
 
-async function seedWalletPolicy(params: {
-  destinationAllowlist: string[];
-  maxTransferAmount?: string;
-  maxDailyAmount?: string;
-}): Promise<void> {
-  const now = new Date().toISOString();
-
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO payment_wallet_policies
-           (id, custody_wallet_id, policy_type, policy, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "pwp_allowlist_test",
-        TEST_CUSTODY_WALLET_ID,
-        "destination_allowlist",
-        JSON.stringify({
-          version: 1,
-          destinationAllowlist: params.destinationAllowlist,
-        }),
-        now,
-        now
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO payment_wallet_policies
-           (id, custody_wallet_id, policy_type, policy, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "pwp_limits_test",
-        TEST_CUSTODY_WALLET_ID,
-        "transfer_limits",
-        JSON.stringify({
-          version: 1,
-          maxTransferAmount: params.maxTransferAmount ?? null,
-          maxDailyAmount: params.maxDailyAmount ?? null,
-        }),
-        now,
-        now
-      ),
-  ]);
-}
-
 async function seedWalletControlProfile(params: {
+  custodyWalletId: string;
   rules: PolicyRule[];
   defaultAction?: PolicyDefaultAction;
 }): Promise<void> {
@@ -455,7 +386,7 @@ async function seedWalletControlProfile(params: {
   const profile = await repo.createWalletControlProfile({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
-    custodyWalletId: TEST_CUSTODY_WALLET_ID,
+    custodyWalletId: params.custodyWalletId,
     name: "Payment controls",
     createdBy: TEST_USER.id,
   });
@@ -6066,8 +5997,6 @@ describe("Payments routes", () => {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
-          destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
-          maxTransferAmount: "5",
           defaultAction: "allow",
           rules,
         }),
@@ -6079,8 +6008,6 @@ describe("Payments routes", () => {
     const updateBody = (await updateRes.json()) as {
       data: {
         policy: {
-          destinationAllowlist: string[];
-          maxTransferAmount?: string;
           defaultAction?: string;
           rules?: unknown[];
           controlProfile?: {
@@ -6093,8 +6020,6 @@ describe("Payments routes", () => {
         };
       };
     };
-    expect(updateBody.data.policy.destinationAllowlist).toEqual([TEST_SOLANA_ADDRESSES.wallet2]);
-    expect(updateBody.data.policy.maxTransferAmount).toBe("5");
     expect(updateBody.data.policy.defaultAction).toBe("allow");
     expect(updateBody.data.policy.rules).toEqual(rules);
     expect(updateBody.data.policy.controlProfile).toMatchObject({
@@ -6129,7 +6054,6 @@ describe("Payments routes", () => {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
-          destinationAllowlist: [],
           defaultAction: "allow",
           rules: [
             {
@@ -6187,7 +6111,7 @@ describe("Payments routes", () => {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
-          destinationAllowlist: [],
+          defaultAction: "allow",
           rules: [{ kind: "operation_type", operationType: "" }],
         }),
       },
@@ -6201,91 +6125,6 @@ describe("Payments routes", () => {
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toContain("Invalid request body");
     expect(body.error.details?.errors?.rules).toContain("operationType must not be empty");
-  });
-
-  it("blocks create transfer when projected daily total exceeds maxDailyAmount", async () => {
-    await seedWalletPolicy({
-      destinationAllowlist: [],
-      maxDailyAmount: "2.0",
-    });
-
-    const now = new Date().toISOString();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO payment_transfers
-           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "xfr_existing_daily_limit",
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        TEST_WALLET_ID,
-        TEST_SOLANA_ADDRESSES.wallet1,
-        TEST_SOLANA_ADDRESSES.wallet2,
-        "SOL",
-        "1.4",
-        null,
-        "transfer",
-        "outbound",
-        "confirmed",
-        now,
-        now
-      )
-      .run();
-
-    const res = await app.request(
-      "/v1/payments/transfers",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          source: TEST_WALLET_ID,
-          destination: TEST_SOLANA_ADDRESSES.wallet3,
-          token: "SOL",
-          amount: "0.7",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("FORBIDDEN");
-
-    const transfers = await getDb(env)
-      .prepare("SELECT id FROM payment_transfers ORDER BY id ASC")
-      .all<{
-        id: string;
-      }>();
-    expect(transfers.results).toHaveLength(1);
-    expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
-
-    const operation = await getDb(env)
-      .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
-      .first<{ status: string; operation_family: string; operation_type: string }>();
-    expect(operation).toMatchObject({
-      status: "failed",
-      operation_family: "payment",
-      operation_type: "payment_transfer_execute",
-    });
-
-    const evaluations = await getDb(env)
-      .prepare("SELECT decision, reason_code FROM policy_evaluations")
-      .all<{ decision: string; reason_code: string }>();
-    expect(evaluations.results).toHaveLength(2);
-    expect(evaluations.results).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ decision: "allow" }),
-        expect.objectContaining({
-          decision: "deny",
-          reason_code: "legacy_wallet_policy_denied",
-        }),
-      ])
-    );
   });
 
   it("blocks create transfer with zero amount before creating a transfer record", async () => {
@@ -6815,7 +6654,16 @@ describe("Payments routes", () => {
       const additionalSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       await seedAdditionalCustodyWallet(additionalSigner.address);
-      await seedAdditionalWalletDestinationPolicy([TEST_SOLANA_ADDRESSES.wallet2]);
+      await seedWalletControlProfile({
+        custodyWalletId: TEST_ADDITIONAL_CUSTODY_WALLET_ID,
+        rules: [
+          {
+            id: "additional-wallet-allowlist",
+            kind: "destination",
+            allowlist: [TEST_SOLANA_ADDRESSES.wallet2],
+          },
+        ],
+      });
       await seedCachedKey({
         walletBindings: [
           { walletId: TEST_WALLET_ID, permissions: ["payments:write"] },
@@ -6863,7 +6711,16 @@ describe("Payments routes", () => {
       const additionalSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       await seedAdditionalCustodyWallet(additionalSigner.address);
-      await seedAdditionalWalletDestinationPolicy([TEST_SOLANA_ADDRESSES.wallet3]);
+      await seedWalletControlProfile({
+        custodyWalletId: TEST_ADDITIONAL_CUSTODY_WALLET_ID,
+        rules: [
+          {
+            id: "additional-wallet-allowlist",
+            kind: "destination",
+            allowlist: [TEST_SOLANA_ADDRESSES.wallet3],
+          },
+        ],
+      });
       await seedCachedKey({
         walletBindings: [
           { walletId: TEST_WALLET_ID, permissions: ["payments:write"] },
@@ -6880,9 +6737,8 @@ describe("Payments routes", () => {
         const res = await requestMagicBlockPrivateTransfer();
 
         expect(res.status).toBe(403);
-        const body = (await res.json()) as { error: { code: string; message: string } };
+        const body = (await res.json()) as { error: { code: string } };
         expect(body.error.code).toBe("FORBIDDEN");
-        expect(body.error.message).toBe("Destination address is not allowed by wallet policy");
         expect(createOrgSignerMock).not.toHaveBeenCalled();
       } finally {
         fetchSpy.mockRestore();
@@ -6965,6 +6821,7 @@ describe("Payments routes", () => {
 
     it("blocks a transfer denied by an active wallet control profile before signing", async () => {
       await seedWalletControlProfile({
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
         rules: [{ id: "small-transfer-only", kind: "amount", max: "0.5" }],
       });
 

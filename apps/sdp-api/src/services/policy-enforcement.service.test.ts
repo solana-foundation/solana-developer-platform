@@ -1,15 +1,24 @@
 import type { PolicyDefaultAction, PolicyRule } from "@sdp/types";
-import { describe, expect, it, vi } from "vitest";
-import type {
-  ActiveApiKeyControlProfileResult,
-  ActiveWalletControlProfileResult,
-  ApprovalRequestRow,
-  CreatePolicyEvaluationInput,
-  CreateWalletOperationInput,
-  PolicyRepository,
-  WalletOperationRow,
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db";
+import {
+  type ActiveWalletControlProfileResult,
+  type ApprovalRequestRow,
+  type CreatePolicyEvaluationInput,
+  type CreateWalletOperationInput,
+  createPostgresPolicyRepository,
+  type PolicyRepository,
+  type WalletOperationRow,
 } from "@/db/repositories";
+import { AppError } from "@/lib/errors";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
+import { PolicyFoundationService } from "@/services/policy-foundation.service";
+import { TEST_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_CUSTODY_CONFIG, TEST_CUSTODY_WALLET } from "@/test/fixtures/custody";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_PROJECT } from "@/test/fixtures/tokens";
+import { env } from "@/test/helpers/env";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import {
   enforceWalletOperationPolicy,
@@ -63,51 +72,12 @@ function walletProfile(
   };
 }
 
-function apiKeyProfile(
-  rules: PolicyRule[],
-  defaultAction: PolicyDefaultAction = "allow"
-): ActiveApiKeyControlProfileResult {
-  return {
-    profile: {
-      id: "akcp_1",
-      organization_id: "org_1",
-      project_id: "prj_1",
-      api_key_id: "key_1",
-      name: "API key controls",
-      status: "active",
-      active_revision_id: "akcpr_1",
-      created_by: "usr_1",
-      created_at: "2026-06-18T00:00:00.000Z",
-      updated_at: "2026-06-18T00:00:00.000Z",
-      activated_at: "2026-06-18T00:00:00.000Z",
-      archived_at: null,
-    },
-    revision: {
-      id: "akcpr_1",
-      profile_id: "akcp_1",
-      revision_number: 1,
-      rules: rules as unknown as Record<string, unknown>[],
-      default_action: defaultAction,
-      created_by: "usr_1",
-      created_at: "2026-06-18T00:00:00.000Z",
-      activated_at: "2026-06-18T00:00:00.000Z",
-    },
-  };
-}
-
 function createRepository(options: {
   walletPolicy?: ActiveWalletControlProfileResult | null;
-  apiKeyPolicy?: ActiveApiKeyControlProfileResult | null;
-  evaluationError?: Error;
-  policyEvaluationError?: Error;
-  approvalStatusUpdateError?: Error;
   existingApprovalRequestStatus?: ApprovalRequestRow["status"];
-  statusUpdateFailures?: number;
-  statusUpdateError?: Error;
 }) {
   const operations: WalletOperationRow[] = [];
   const approvalRequests: ApprovalRequestRow[] = [];
-  let statusUpdateFailuresRemaining = options.statusUpdateFailures ?? 0;
 
   const repository = {
     createWalletOperation: vi.fn(async (input: CreateWalletOperationInput) => {
@@ -138,46 +108,28 @@ function createRepository(options: {
       operations.push(row);
       return row;
     }),
-    getWalletOperationById: vi.fn(async (walletOperationId: string) => {
-      return operations.find((operation) => operation.id === walletOperationId) ?? null;
-    }),
     updateWalletOperationStatus: vi.fn(async (walletOperationId: string, status: string) => {
-      if (statusUpdateFailuresRemaining > 0) {
-        statusUpdateFailuresRemaining -= 1;
-        throw options.statusUpdateError ?? new Error("status update failed");
-      }
       const operation = operations.find((row) => row.id === walletOperationId);
       if (!operation) return null;
       operation.status = status as WalletOperationRow["status"];
       operation.updated_at = "2026-06-18T00:01:00.000Z";
       return operation;
     }),
-    createPolicyEvaluation: vi.fn(async (input: CreatePolicyEvaluationInput) => {
-      if (options.policyEvaluationError) {
-        throw options.policyEvaluationError;
-      }
-
-      return {
-        id: "peval_1",
-        wallet_operation_id: input.walletOperationId,
-        wallet_policy_revision_id: input.walletPolicyRevisionId ?? null,
-        api_key_policy_revision_id: input.apiKeyPolicyRevisionId ?? null,
-        decision: input.decision,
-        reason_code: input.reasonCode,
-        reason: input.reason ?? null,
-        matched_rules: input.matchedRules ?? [],
-        evaluation_context: input.evaluationContext,
-        requires_approval: input.requiresApproval ?? false,
-        approval_request_id: input.approvalRequestId ?? null,
-        created_at: "2026-06-18T00:00:00.000Z",
-      };
-    }),
+    createPolicyEvaluation: vi.fn(async (input: CreatePolicyEvaluationInput) => ({
+      id: "peval_1",
+      wallet_operation_id: input.walletOperationId,
+      wallet_policy_revision_id: input.walletPolicyRevisionId ?? null,
+      api_key_policy_revision_id: input.apiKeyPolicyRevisionId ?? null,
+      decision: input.decision,
+      reason_code: input.reasonCode,
+      reason: input.reason ?? null,
+      matched_rules: input.matchedRules ?? [],
+      evaluation_context: input.evaluationContext,
+      requires_approval: input.requiresApproval ?? false,
+      approval_request_id: input.approvalRequestId ?? null,
+      created_at: "2026-06-18T00:00:00.000Z",
+    })),
     createApprovalRequest: vi.fn(async (input) => {
-      const existing = approvalRequests.find(
-        (request) => request.wallet_operation_id === input.walletOperationId
-      );
-      if (existing) return existing;
-
       if (options.existingApprovalRequestStatus) {
         const row: ApprovalRequestRow = {
           id: "appr_existing",
@@ -220,51 +172,60 @@ function createRepository(options: {
       approvalRequests.push(row);
       return row;
     }),
-    updateApprovalRequestStatus: vi.fn(async (input) => {
-      if (options.approvalStatusUpdateError) {
-        throw options.approvalStatusUpdateError;
-      }
-
-      const request = approvalRequests.find(
-        (row) => row.id === input.approvalRequestId && row.organization_id === input.organizationId
-      );
-      if (!request) return null;
-      if (request.status !== "pending") return request;
-
-      request.status = input.status;
-      request.resolved_by = input.resolvedBy ?? null;
-      const resolvedAt = input.resolvedAt ?? "2026-06-18T00:02:00.000Z";
-      request.resolved_at = resolvedAt;
-      request.updated_at = resolvedAt;
-
-      const operation = operations.find((row) => row.id === request.wallet_operation_id);
-      if (
-        operation &&
-        input.operationStatus &&
-        (operation.status === "pending_approval" ||
-          (input.operationStatus === "failed" && operation.status === "created"))
-      ) {
-        operation.status = input.operationStatus;
-        operation.updated_at = request.updated_at;
-      }
-
-      return request;
-    }),
+    updateApprovalRequestStatus: vi.fn(async () => null),
     listPolicyEvaluationsForOperation: vi.fn(async () => []),
     getActiveWalletControlProfileByCustodyWalletId: vi.fn(async () => options.walletPolicy ?? null),
-    getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => options.apiKeyPolicy ?? null),
-    getApiKeyWalletPolicyBindingResolution: vi.fn(async () => {
-      if (options.evaluationError) {
-        throw options.evaluationError;
-      }
-      return {
-        total_binding_count: 0,
-        binding: null,
-      };
-    }),
+    getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => null),
+    getApiKeyWalletPolicyBindingResolution: vi.fn(async () => ({
+      total_binding_count: 0,
+      binding: null,
+    })),
   } as unknown as PolicyRepository;
 
   return repository;
+}
+
+/**
+ * Awaits a policy-enforcement promise and asserts it rejects with the
+ * transactional decision error shape (thrown only after the underlying
+ * transaction has committed).
+ *
+ * @param promise - The pending `enforceWalletOperationPolicy` call.
+ * @param code - The expected decision error code.
+ * @returns The rejected `AppError`, for reading its `details`.
+ */
+async function expectPolicyDecisionError(
+  promise: Promise<unknown>,
+  code: "FORBIDDEN" | "SIGNING_PENDING"
+): Promise<AppError> {
+  try {
+    await promise;
+  } catch (error) {
+    expect(error).toBeInstanceOf(AppError);
+    const appError = error as AppError;
+    expect(appError.code).toBe(code);
+    return appError;
+  }
+  throw new Error(`Expected policy enforcement to reject with ${code}`);
+}
+
+/**
+ * Reads a required string field off a decision error's details, failing
+ * loudly rather than defaulting when the field is missing or the wrong type.
+ *
+ * @param error - The decision error returned by `expectPolicyDecisionError`.
+ * @param key - The details field to read.
+ * @returns The field's string value.
+ */
+function requireStringDetail(error: AppError, key: string): string {
+  if (!error.details) {
+    throw new Error(`Expected policy decision error to include details.${key}`);
+  }
+  const value = error.details[key];
+  if (typeof value !== "string") {
+    throw new Error(`Expected policy decision error details.${key} to be a string`);
+  }
+  return value;
 }
 
 describe("WalletPolicyEnforcementService", () => {
@@ -280,147 +241,173 @@ describe("WalletPolicyEnforcementService", () => {
     ).rejects.toBeInstanceOf(TenantScopeViolationError);
   });
 
-  it("records default-allow operations and marks them evaluated", async () => {
-    const repository = createRepository({});
-    const service = new WalletPolicyEnforcementService(repository);
+  describe("with a mocked repository", () => {
+    it("records default-allow operations and marks them evaluated", async () => {
+      const repository = createRepository({});
+      const service = new WalletPolicyEnforcementService(repository);
 
-    const result = await service.enforce(baseOperation);
+      const result = await service.enforce(baseOperation);
 
-    expect(result.evaluation).toMatchObject({
-      walletOperationId: "wop_1",
-      decision: "allow",
-      reasonCode: "implicit_default_allow",
-    });
-    expect(result.operation).toMatchObject({
-      id: "wop_1",
-      status: "evaluated",
-    });
-    expect(repository.createWalletOperation).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "created" })
-    );
-    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "evaluated");
-  });
-
-  it("marks the operation failed when the terminal status update throws", async () => {
-    const repository = createRepository({
-      statusUpdateFailures: 1,
-      statusUpdateError: new Error("status update unavailable"),
-    });
-    const service = new WalletPolicyEnforcementService(repository);
-
-    await expect(service.enforce(baseOperation)).rejects.toThrow("status update unavailable");
-    expect(repository.updateWalletOperationStatus).toHaveBeenNthCalledWith(1, "wop_1", "evaluated");
-    expect(repository.updateWalletOperationStatus).toHaveBeenNthCalledWith(2, "wop_1", "failed");
-  });
-
-  it("throws a deterministic forbidden response for denied operations", async () => {
-    const repository = createRepository({
-      walletPolicy: walletProfile([
-        { id: "destinations", kind: "destination", allowlist: ["recipient_allowed"] },
-      ]),
-    });
-    const service = new WalletPolicyEnforcementService(repository);
-
-    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
-      code: "FORBIDDEN",
-      details: {
+      expect(result.evaluation).toMatchObject({
         walletOperationId: "wop_1",
-        policyEvaluationId: "peval_1",
+        decision: "allow",
+        reasonCode: "implicit_default_allow",
+      });
+      expect(result.operation).toMatchObject({
+        id: "wop_1",
+        status: "evaluated",
+      });
+      expect(repository.createWalletOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "created" })
+      );
+      expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "evaluated");
+    });
+
+    it("does not reuse terminal approval requests for a new pending decision", async () => {
+      const repository = createRepository({
+        walletPolicy: walletProfile([
+          { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+        ]),
+        existingApprovalRequestStatus: "failed",
+      });
+      const service = new WalletPolicyEnforcementService(repository);
+
+      await expect(service.enforce(baseOperation)).rejects.toThrow(
+        "Wallet operation approval request is no longer pending"
+      );
+
+      expect(repository.createPolicyEvaluation).not.toHaveBeenCalled();
+      expect(repository.updateApprovalRequestStatus).not.toHaveBeenCalled();
+      expect(repository.updateWalletOperationStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("enforceWalletOperationPolicy (transactional)", () => {
+    const SCOPE = createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id });
+    const baseWalletOperation: CreateWalletOperationInput = {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      actor: { type: "api_key", id: TEST_API_KEY.id, apiKeyId: TEST_API_KEY.id },
+      operationFamily: "payment",
+      operationType: "payment_transfer",
+      asset: "USDC",
+      amount: "25.00",
+      destination: "recipient_1",
+      rawPayload: { requestId: "req_1" },
+    };
+
+    let repo: PolicyRepository;
+
+    beforeAll(async () => {
+      await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    });
+
+    afterAll(async () => {
+      await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    });
+
+    beforeEach(async () => {
+      await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+      await seedEnforcementFixtures();
+      repo = createPostgresPolicyRepository(getDb(env), SCOPE);
+    });
+
+    it("throws a deterministic forbidden response for denied operations", async () => {
+      await activateWalletControlPolicy(repo, [
+        { id: "destinations", kind: "destination", allowlist: ["recipient_allowed"] },
+      ]);
+
+      const error = await expectPolicyDecisionError(
+        enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation),
+        "FORBIDDEN"
+      );
+      expect(error.details).toMatchObject({
         decision: "deny",
         reasonCode: "wallet_policy_match",
-      },
-    });
-    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");
-  });
+      });
 
-  it("pauses approval-required operations before provider execution", async () => {
-    const repository = createRepository({
-      walletPolicy: walletProfile([
+      const walletOperationId = requireStringDetail(error, "walletOperationId");
+      await expect(repo.getWalletOperationById(walletOperationId)).resolves.toMatchObject({
+        id: walletOperationId,
+        status: "failed",
+      });
+
+      const evaluations = await repo.listPolicyEvaluationsForOperation(walletOperationId);
+      expect(evaluations).toHaveLength(1);
+      expect(evaluations[0]).toMatchObject({
+        decision: "deny",
+        reason_code: "wallet_policy_match",
+      });
+    });
+
+    it("pauses approval-required operations before provider execution", async () => {
+      await activateWalletControlPolicy(repo, [
         { id: "large-payment-approval", kind: "approval", families: ["payment"] },
-      ]),
-    });
-    const service = new WalletPolicyEnforcementService(repository);
+      ]);
 
-    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
-      code: "SIGNING_PENDING",
-      details: {
-        walletOperationId: "wop_1",
-        policyEvaluationId: "peval_1",
+      const error = await expectPolicyDecisionError(
+        enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation),
+        "SIGNING_PENDING"
+      );
+      expect(error.details).toMatchObject({
         decision: "approval_required",
         requiresApproval: true,
-      },
-    });
-    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith(
-      "wop_1",
-      "pending_approval"
-    );
-    expect(repository.createApprovalRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        walletOperationId: "wop_1",
-        approvalGroupId: null,
-        requestedBy: "key_1",
-      })
-    );
-    expect(repository.createPolicyEvaluation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        approvalRequestId: "appr_1",
-      })
-    );
-  });
+      });
 
-  it("creates approval requests for manual review decisions", async () => {
-    const repository = createRepository({
-      walletPolicy: walletProfile([], "review"),
-    });
-    const service = new WalletPolicyEnforcementService(repository);
+      const walletOperationId = requireStringDetail(error, "walletOperationId");
+      const approvalRequestId = requireStringDetail(error, "approvalRequestId");
 
-    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
-      code: "SIGNING_PENDING",
-      details: {
-        walletOperationId: "wop_1",
-        decision: "review",
-        requiresApproval: false,
-        approvalRequestId: "appr_1",
-      },
+      await expect(repo.getWalletOperationById(walletOperationId)).resolves.toMatchObject({
+        status: "pending_approval",
+      });
+      await expect(
+        repo.getApprovalRequestDetail({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          approvalRequestId,
+        })
+      ).resolves.toMatchObject({
+        wallet_operation_id: walletOperationId,
+        approval_status: "pending",
+      });
     });
 
-    expect(repository.createApprovalRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        walletOperationId: "wop_1",
-        requestedBy: "key_1",
-      })
-    );
-    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith(
-      "wop_1",
-      "pending_approval"
-    );
-  });
+    it("creates approval requests for manual review decisions", async () => {
+      await activateWalletControlPolicy(repo, [], "review");
 
-  it("does not reuse terminal approval requests for a new pending decision", async () => {
-    const repository = createRepository({
-      walletPolicy: walletProfile([
-        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
-      ]),
-      existingApprovalRequestStatus: "failed",
+      const error = await expectPolicyDecisionError(
+        enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation),
+        "SIGNING_PENDING"
+      );
+      expect(error.details).toMatchObject({ decision: "review", requiresApproval: false });
+
+      const walletOperationId = requireStringDetail(error, "walletOperationId");
+      const approvalRequestId = requireStringDetail(error, "approvalRequestId");
+
+      await expect(repo.getWalletOperationById(walletOperationId)).resolves.toMatchObject({
+        status: "pending_approval",
+      });
+      await expect(
+        repo.getApprovalRequestDetail({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          approvalRequestId,
+        })
+      ).resolves.toMatchObject({ approval_status: "pending" });
     });
-    const service = new WalletPolicyEnforcementService(repository);
 
-    await expect(service.enforce(baseOperation)).rejects.toThrow(
-      "Wallet operation approval request is no longer pending"
-    );
-
-    expect(repository.createPolicyEvaluation).not.toHaveBeenCalled();
-    expect(repository.updateApprovalRequestStatus).not.toHaveBeenCalled();
-    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");
-    expect(repository.updateWalletOperationStatus).not.toHaveBeenCalledWith(
-      "wop_1",
-      "pending_approval"
-    );
-  });
-
-  it("stores provider-native approval metadata when present", async () => {
-    const repository = createRepository({
-      walletPolicy: walletProfile([
+    it("stores provider-native approval metadata when present", async () => {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO approval_groups (id, organization_id, project_id, name)
+           VALUES ('apg_1', ?, ?, 'Provider approvers')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id)
+        .run();
+      await activateWalletControlPolicy(repo, [
         {
           id: "provider-approval",
           kind: "approval",
@@ -428,223 +415,413 @@ describe("WalletPolicyEnforcementService", () => {
           action: "provider_approval_required",
           approvalGroupId: "apg_1",
         },
-      ]),
-    });
-    const service = new WalletPolicyEnforcementService(repository);
+      ]);
 
-    await expect(
-      service.enforce({
-        ...baseOperation,
-        providerExtensions: {
-          provider: "fireblocks",
-          providerReference: "fb_tx_1",
-          approvalWindow: "24h",
-        },
-      })
-    ).rejects.toMatchObject({
-      code: "SIGNING_PENDING",
-      details: {
-        decision: "provider_approval_required",
-        approvalRequestId: "appr_1",
-      },
-    });
+      const error = await expectPolicyDecisionError(
+        enforceWalletOperationPolicy(env, SCOPE, {
+          ...baseWalletOperation,
+          providerExtensions: {
+            provider: "fireblocks",
+            providerReference: "fb_tx_1",
+            approvalWindow: "24h",
+          },
+        }),
+        "SIGNING_PENDING"
+      );
+      expect(error.details).toMatchObject({ decision: "provider_approval_required" });
 
-    expect(repository.createApprovalRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        approvalGroupId: "apg_1",
+      const approvalRequestId = requireStringDetail(error, "approvalRequestId");
+      await expect(
+        repo.getApprovalRequestDetail({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          approvalRequestId,
+        })
+      ).resolves.toMatchObject({
+        approval_group_id: "apg_1",
         provider: "fireblocks",
-        providerReference: "fb_tx_1",
-        providerPayload: {
-          provider: "fireblocks",
-          providerReference: "fb_tx_1",
-          approvalWindow: "24h",
-        },
-      })
-    );
-  });
-
-  it("approves, rejects, and cancels approval requests idempotently", async () => {
-    const repository = createRepository({
-      walletPolicy: walletProfile([
-        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
-      ]),
-    });
-    const service = new WalletPolicyEnforcementService(repository);
-
-    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
-      code: "SIGNING_PENDING",
+        provider_reference: "fb_tx_1",
+      });
     });
 
-    await expect(
-      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
-    ).resolves.toMatchObject({
-      status: "approved",
-      resolved_by: "usr_approver",
-    });
-    await expect(
-      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
-    ).resolves.toMatchObject({
-      status: "approved",
-      resolved_by: "usr_approver",
-    });
-
-    const secondRepository = createRepository({
-      walletPolicy: walletProfile([
-        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
-      ]),
-    });
-    const secondService = new WalletPolicyEnforcementService(secondRepository);
-
-    await expect(secondService.enforce(baseOperation)).rejects.toMatchObject({
-      code: "SIGNING_PENDING",
-    });
-    await expect(
-      secondService.cancelApprovalRequest("org_1", "appr_1", "usr_approver")
-    ).resolves.toMatchObject({
-      status: "canceled",
-      resolved_by: "usr_approver",
-    });
-    await expect(
-      secondService.cancelApprovalRequest("org_1", "appr_1", "usr_approver")
-    ).resolves.toMatchObject({
-      status: "canceled",
-      resolved_by: "usr_approver",
-    });
-
-    const thirdRepository = createRepository({
-      walletPolicy: walletProfile([
-        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
-      ]),
-    });
-    const thirdService = new WalletPolicyEnforcementService(thirdRepository);
-
-    await expect(thirdService.enforce(baseOperation)).rejects.toMatchObject({
-      code: "SIGNING_PENDING",
-    });
-    await expect(
-      thirdService.rejectApprovalRequest("org_1", "appr_1", "usr_approver")
-    ).resolves.toMatchObject({
-      status: "rejected",
-      resolved_by: "usr_approver",
-    });
-    await expect(
-      thirdService.rejectApprovalRequest("org_1", "appr_1", "usr_approver")
-    ).resolves.toMatchObject({
-      status: "rejected",
-      resolved_by: "usr_approver",
-    });
-  });
-
-  it("rejects conflicting approval request terminal transitions", async () => {
-    const repository = createRepository({
-      walletPolicy: walletProfile([
-        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
-      ]),
-    });
-    const service = new WalletPolicyEnforcementService(repository);
-
-    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
-      code: "SIGNING_PENDING",
-    });
-    await service.cancelApprovalRequest("org_1", "appr_1", "usr_approver");
-
-    await expect(
-      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
-    ).rejects.toMatchObject({
-      code: "CONFLICT",
-      message: "Approval request is already canceled",
-    });
-
-    const secondRepository = createRepository({
-      walletPolicy: walletProfile([
-        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
-      ]),
-    });
-    const secondService = new WalletPolicyEnforcementService(secondRepository);
-
-    await expect(secondService.enforce(baseOperation)).rejects.toMatchObject({
-      code: "SIGNING_PENDING",
-    });
-    await secondService.approveApprovalRequest("org_1", "appr_1", "usr_approver");
-
-    await expect(
-      secondService.cancelApprovalRequest("org_1", "appr_1", "usr_approver")
-    ).rejects.toMatchObject({
-      code: "CONFLICT",
-      message: "Approval request is already approved",
-    });
-  });
-
-  it("fails approval requests and wallet operations together when recording the evaluation fails", async () => {
-    const repository = createRepository({
-      walletPolicy: walletProfile([
-        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
-      ]),
-      policyEvaluationError: new Error("evaluation write unavailable"),
-    });
-    const service = new WalletPolicyEnforcementService(repository);
-
-    await expect(service.enforce(baseOperation)).rejects.toThrow("evaluation write unavailable");
-
-    expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
-      organizationId: "org_1",
-      projectId: "prj_1",
-      approvalRequestId: "appr_1",
-      status: "failed",
-      operationStatus: "failed",
-    });
-    expect(repository.updateWalletOperationStatus).not.toHaveBeenCalledWith("wop_1", "failed");
-  });
-
-  it("surfaces approval cleanup failures without hiding the original error", async () => {
-    const repository = createRepository({
-      walletPolicy: walletProfile([
-        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
-      ]),
-      policyEvaluationError: new Error("evaluation write unavailable"),
-      approvalStatusUpdateError: new Error("approval cleanup unavailable"),
-    });
-    const service = new WalletPolicyEnforcementService(repository);
-
-    await expect(service.enforce(baseOperation)).rejects.toThrow(
-      "Wallet operation policy enforcement failed (evaluation write unavailable) and approval cleanup failed (approval cleanup unavailable)"
-    );
-
-    expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
-      organizationId: "org_1",
-      projectId: "prj_1",
-      approvalRequestId: "appr_1",
-      status: "failed",
-      operationStatus: "failed",
-    });
-  });
-
-  it("lets an API key policy narrow an otherwise allowed wallet operation", async () => {
-    const repository = createRepository({
-      walletPolicy: walletProfile([], "allow"),
-      apiKeyPolicy: apiKeyProfile([
+    it("lets an API key policy narrow an otherwise allowed wallet operation", async () => {
+      await activateWalletControlPolicy(repo, [], "allow");
+      await activateApiKeyControlPolicy(repo, [
         { id: "api-key-destination", kind: "destination", blocklist: ["recipient_1"] },
-      ]),
-    });
-    const service = new WalletPolicyEnforcementService(repository);
+      ]);
 
-    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
-      code: "FORBIDDEN",
-      details: {
-        decision: "deny",
-        reasonCode: "api_key_policy_match",
-      },
-    });
-    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");
-  });
+      const error = await expectPolicyDecisionError(
+        enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation),
+        "FORBIDDEN"
+      );
+      expect(error.details).toMatchObject({ decision: "deny", reasonCode: "api_key_policy_match" });
 
-  it("marks the operation failed when policy evaluation throws", async () => {
-    const repository = createRepository({
-      evaluationError: new Error("policy resolver unavailable"),
+      const walletOperationId = requireStringDetail(error, "walletOperationId");
+      await expect(repo.getWalletOperationById(walletOperationId)).resolves.toMatchObject({
+        status: "failed",
+      });
     });
-    const service = new WalletPolicyEnforcementService(repository);
 
-    await expect(service.enforce(baseOperation)).rejects.toThrow("policy resolver unavailable");
-    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");
+    it("approves, rejects, and cancels approval requests idempotently", async () => {
+      await activateWalletControlPolicy(repo, [
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]);
+      const service = new WalletPolicyEnforcementService(repo);
+
+      const approveError = await expectPolicyDecisionError(
+        enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation),
+        "SIGNING_PENDING"
+      );
+      const approveRequestId = requireStringDetail(approveError, "approvalRequestId");
+
+      await expect(
+        service.approveApprovalRequest(
+          TEST_ORG.id,
+          approveRequestId,
+          "usr_approver",
+          TEST_PROJECT.id
+        )
+      ).resolves.toMatchObject({ status: "approved", resolved_by: "usr_approver" });
+      await expect(
+        service.approveApprovalRequest(
+          TEST_ORG.id,
+          approveRequestId,
+          "usr_approver",
+          TEST_PROJECT.id
+        )
+      ).resolves.toMatchObject({ status: "approved", resolved_by: "usr_approver" });
+
+      const cancelError = await expectPolicyDecisionError(
+        enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation),
+        "SIGNING_PENDING"
+      );
+      const cancelRequestId = requireStringDetail(cancelError, "approvalRequestId");
+
+      await expect(
+        service.cancelApprovalRequest(TEST_ORG.id, cancelRequestId, "usr_approver", TEST_PROJECT.id)
+      ).resolves.toMatchObject({ status: "canceled", resolved_by: "usr_approver" });
+      await expect(
+        service.cancelApprovalRequest(TEST_ORG.id, cancelRequestId, "usr_approver", TEST_PROJECT.id)
+      ).resolves.toMatchObject({ status: "canceled", resolved_by: "usr_approver" });
+
+      const rejectError = await expectPolicyDecisionError(
+        enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation),
+        "SIGNING_PENDING"
+      );
+      const rejectRequestId = requireStringDetail(rejectError, "approvalRequestId");
+
+      await expect(
+        service.rejectApprovalRequest(TEST_ORG.id, rejectRequestId, "usr_approver", TEST_PROJECT.id)
+      ).resolves.toMatchObject({ status: "rejected", resolved_by: "usr_approver" });
+      await expect(
+        service.rejectApprovalRequest(TEST_ORG.id, rejectRequestId, "usr_approver", TEST_PROJECT.id)
+      ).resolves.toMatchObject({ status: "rejected", resolved_by: "usr_approver" });
+    });
+
+    it("rejects conflicting approval request terminal transitions", async () => {
+      await activateWalletControlPolicy(repo, [
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]);
+      const service = new WalletPolicyEnforcementService(repo);
+
+      const firstError = await expectPolicyDecisionError(
+        enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation),
+        "SIGNING_PENDING"
+      );
+      const firstRequestId = requireStringDetail(firstError, "approvalRequestId");
+      await service.cancelApprovalRequest(
+        TEST_ORG.id,
+        firstRequestId,
+        "usr_approver",
+        TEST_PROJECT.id
+      );
+
+      await expect(
+        service.approveApprovalRequest(TEST_ORG.id, firstRequestId, "usr_approver", TEST_PROJECT.id)
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        message: "Approval request is already canceled",
+      });
+
+      const secondError = await expectPolicyDecisionError(
+        enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation),
+        "SIGNING_PENDING"
+      );
+      const secondRequestId = requireStringDetail(secondError, "approvalRequestId");
+      await service.approveApprovalRequest(
+        TEST_ORG.id,
+        secondRequestId,
+        "usr_approver",
+        TEST_PROJECT.id
+      );
+
+      await expect(
+        service.cancelApprovalRequest(TEST_ORG.id, secondRequestId, "usr_approver", TEST_PROJECT.id)
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        message: "Approval request is already approved",
+      });
+    });
+
+    it("rolls back the wallet operation when policy evaluation resolution throws", async () => {
+      const before = await countWalletOperations();
+      const spy = vi
+        .spyOn(PolicyFoundationService.prototype, "evaluateWalletOperationPolicies")
+        .mockRejectedValue(new Error("policy resolver unavailable"));
+
+      try {
+        await expect(enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation)).rejects.toThrow(
+          "policy resolver unavailable"
+        );
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(await countWalletOperations()).toBe(before);
+      expect(await countApprovalRequests()).toBe(0);
+    });
+
+    it("fails approval requests and wallet operations together when recording the evaluation fails", async () => {
+      await activateWalletControlPolicy(repo, [
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]);
+
+      const before = await countWalletOperations();
+      const spy = vi
+        .spyOn(PolicyFoundationService.prototype, "recordPolicyEvaluation")
+        .mockRejectedValue(new Error("evaluation write unavailable"));
+
+      try {
+        await expect(enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation)).rejects.toThrow(
+          "evaluation write unavailable"
+        );
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(await countWalletOperations()).toBe(before);
+      expect(await countApprovalRequests()).toBe(0);
+    });
+
+    it("rolls back before any row persists when recording the wallet operation fails", async () => {
+      const before = await countWalletOperations();
+      const spy = vi
+        .spyOn(PolicyFoundationService.prototype, "recordWalletOperation")
+        .mockRejectedValue(new Error("wallet operation write unavailable"));
+
+      try {
+        await expect(enforceWalletOperationPolicy(env, SCOPE, baseWalletOperation)).rejects.toThrow(
+          "wallet operation write unavailable"
+        );
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(await countWalletOperations()).toBe(before);
+      expect(await countApprovalRequests()).toBe(0);
+    });
   });
 });
+
+/**
+ * Activates a wallet control profile revision for the shared enforcement test
+ * fixtures so `enforceWalletOperationPolicy` resolves it as the active policy.
+ *
+ * @param repo - The scoped policy repository to write through.
+ * @param rules - The revision's rules.
+ * @param defaultAction - The revision's default action when no rule matches.
+ */
+async function activateWalletControlPolicy(
+  repo: PolicyRepository,
+  rules: PolicyRule[],
+  defaultAction: PolicyDefaultAction = "allow"
+): Promise<void> {
+  const profile = await repo.createWalletControlProfile({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    custodyWalletId: TEST_CUSTODY_WALLET.id,
+    name: "Enforcement wallet controls",
+    createdBy: TEST_USER.id,
+  });
+  if (!profile) {
+    throw new Error("Expected wallet control profile to be created");
+  }
+
+  const revision = await repo.createWalletControlProfileRevision({
+    profileId: profile.id,
+    rules,
+    defaultAction,
+    createdBy: TEST_USER.id,
+  });
+  if (!revision) {
+    throw new Error("Expected wallet control profile revision to be created");
+  }
+
+  await repo.activateWalletControlProfileRevision({
+    profileId: profile.id,
+    revisionId: revision.id,
+  });
+}
+
+/**
+ * Activates an API key control profile revision for the shared enforcement
+ * test fixtures so `enforceWalletOperationPolicy` resolves it as the active
+ * policy for the fixture API key.
+ *
+ * @param repo - The scoped policy repository to write through.
+ * @param rules - The revision's rules.
+ * @param defaultAction - The revision's default action when no rule matches.
+ */
+async function activateApiKeyControlPolicy(
+  repo: PolicyRepository,
+  rules: PolicyRule[],
+  defaultAction: PolicyDefaultAction = "allow"
+): Promise<void> {
+  const profile = await repo.createApiKeyControlProfile({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    apiKeyId: TEST_API_KEY.id,
+    name: "Enforcement API key controls",
+    createdBy: TEST_USER.id,
+  });
+  if (!profile) {
+    throw new Error("Expected API key control profile to be created");
+  }
+
+  const revision = await repo.createApiKeyControlProfileRevision({
+    profileId: profile.id,
+    rules,
+    defaultAction,
+    createdBy: TEST_USER.id,
+  });
+  if (!revision) {
+    throw new Error("Expected API key control profile revision to be created");
+  }
+
+  await repo.activateApiKeyControlProfileRevision({
+    profileId: profile.id,
+    revisionId: revision.id,
+  });
+}
+
+/**
+ * Counts wallet_operations rows, for asserting a rolled-back transaction left
+ * no candidate row behind.
+ *
+ * @returns The current row count.
+ */
+async function countWalletOperations(): Promise<number> {
+  const result = await getDb(env)
+    .prepare("SELECT COUNT(*) as count FROM wallet_operations")
+    .first<{ count: number }>();
+  if (!result) {
+    throw new Error("Expected a count row from wallet_operations");
+  }
+  return result.count;
+}
+
+/**
+ * Counts approval_requests rows, for asserting a rolled-back transaction left
+ * no approval request behind.
+ *
+ * @returns The current row count.
+ */
+async function countApprovalRequests(): Promise<number> {
+  const result = await getDb(env)
+    .prepare("SELECT COUNT(*) as count FROM approval_requests")
+    .first<{ count: number }>();
+  if (!result) {
+    throw new Error("Expected a count row from approval_requests");
+  }
+  return result.count;
+}
+
+/**
+ * Seeds the organization, user, project, API key, and custody wallet the
+ * transactional enforcement tests depend on.
+ */
+async function seedEnforcementFixtures(): Promise<void> {
+  const db = getDb(env);
+
+  await db
+    .prepare(
+      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+    )
+    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+    .run();
+
+  await db
+    .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+    .bind(TEST_USER.id, TEST_USER.email)
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+       VALUES (?, ?, ?, ?, ?, 'active', ?)`
+    )
+    .bind(
+      TEST_PROJECT.id,
+      TEST_ORG.id,
+      TEST_PROJECT.name,
+      TEST_PROJECT.slug,
+      TEST_PROJECT.environment,
+      TEST_USER.id
+    )
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO api_keys (
+         id,
+         organization_id,
+         project_id,
+         created_by,
+         name,
+         key_prefix,
+         key_hash,
+         role,
+         permissions,
+         status
+       ) VALUES (?, ?, ?, ?, 'Test key', ?, 'hash_policy_enforcement', 'api_admin', '["*"]', 'active')`
+    )
+    .bind(TEST_API_KEY.id, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, TEST_API_KEY.prefix)
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO custody_configs (
+         id,
+         organization_id,
+         project_id,
+         provider,
+         config_encrypted,
+         default_wallet_id,
+         status
+       ) VALUES (?, ?, ?, 'local', 'encrypted', ?, 'active')`
+    )
+    .bind(TEST_CUSTODY_CONFIG.id, TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET.walletId)
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO custody_wallets (
+         id,
+         custody_config_id,
+         wallet_id,
+         public_key,
+         label,
+         purpose,
+         status
+       ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
+    )
+    .bind(
+      TEST_CUSTODY_WALLET.id,
+      TEST_CUSTODY_CONFIG.id,
+      TEST_CUSTODY_WALLET.walletId,
+      TEST_CUSTODY_WALLET.publicKey,
+      TEST_CUSTODY_WALLET.label,
+      TEST_CUSTODY_WALLET.purpose
+    )
+    .run();
+}
