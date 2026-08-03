@@ -182,7 +182,11 @@ describe("BudgetedFeePayment", () => {
     expect(repository.markReleased).toHaveBeenCalledOnce();
     expect(repository.markReleased).toHaveBeenCalledWith(expect.any(String), 1, "rejected");
     expect(budgetRedis.settle).toHaveBeenCalledWith(
-      expect.objectContaining({ actualLamports: 0, attempt: 1 })
+      expect.objectContaining({
+        actualLamports: 0,
+        attempt: 1,
+        detectMissingReservation: true,
+      })
     );
     expect(budgetRedis.cancel).not.toHaveBeenCalled();
     expect(repository.markChargedUnknown).not.toHaveBeenCalled();

@@ -650,7 +650,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
       await this.budgetRedis.settle({
         ...reservation.settlement,
         actualLamports: 0,
-        recoverMissingReservation: true,
+        detectMissingReservation: true,
       });
       const persisted = await this.repository.markRedisSettled(reservation.id, reservation.attempt);
       if (!persisted) throw new Error("Released reservation lost its Redis settlement ownership");

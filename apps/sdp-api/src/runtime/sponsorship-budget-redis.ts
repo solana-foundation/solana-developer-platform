@@ -65,6 +65,8 @@ for i = 1, count do
   redis.call('HINCRBY', KEYS[1], field, amount)
   redis.call('HINCRBY', KEYS[2], field, amount)
 end
+redis.call('HSET', KEYS[1], ARGV[4 + count * 6], amount)
+redis.call('HSET', KEYS[2], ARGV[4 + count * 6], amount)
 redis.call('SET', KEYS[3], amount, 'PX', ARGV[3 + count * 6])
 return {1, amount}
 `;
@@ -81,72 +83,89 @@ return 1
 `;
 
 const CANCEL_LUA = `
-local amount = tonumber(redis.call('GET', KEYS[3]) or '0')
-if amount == 0 then return 0 end
-for i = 1, #ARGV do
+local owned_value = redis.call('GET', KEYS[3])
+local hour_owned = redis.call('HGET', KEYS[1], ARGV[1])
+local day_owned = redis.call('HGET', KEYS[2], ARGV[1])
+local amount_value = owned_value or hour_owned or day_owned
+if not amount_value then return 0 end
+local amount = tonumber(amount_value)
+if hour_owned and tonumber(hour_owned) ~= amount then return -2 end
+if day_owned and tonumber(day_owned) ~= amount then return -2 end
+for i = 2, #ARGV do
   local field = ARGV[i]
   for key_index = 1, 2 do
-    if redis.call('HGET', KEYS[key_index], '__initialized:' .. field) then
+    if redis.call('HGET', KEYS[key_index], ARGV[1]) then
+      if not redis.call('HGET', KEYS[key_index], '__initialized:' .. field) then return -1 end
       local used = tonumber(redis.call('HGET', KEYS[key_index], field) or '0')
       if used < amount then return -1 end
     end
   end
 end
-for i = 1, #ARGV do
+for i = 2, #ARGV do
   local field = ARGV[i]
   for key_index = 1, 2 do
-    if redis.call('HGET', KEYS[key_index], '__initialized:' .. field) then
+    if redis.call('HGET', KEYS[key_index], ARGV[1]) then
       redis.call('HINCRBY', KEYS[key_index], field, -amount)
     end
   end
 end
+redis.call('HDEL', KEYS[1], ARGV[1])
+redis.call('HDEL', KEYS[2], ARGV[1])
 redis.call('DEL', KEYS[3])
 return amount
 `;
 
 const SETTLE_LUA = `
-if redis.call('GET', KEYS[4]) then return 0 end
+if redis.call('GET', KEYS[4]) then return {1, 0} end
 local reserved = tonumber(ARGV[1])
 local actual = tonumber(ARGV[2])
 local count = tonumber(ARGV[3])
-local owned_value = redis.call('GET', KEYS[3])
-if not owned_value then
-  if ARGV[5 + count] ~= '1' then return -2 end
-  redis.call('SET', KEYS[4], actual, 'PX', ARGV[4 + count])
-  return -3
-end
-local owned = tonumber(owned_value)
-if owned ~= reserved then return -2 end
 local delta = actual - reserved
+local owned_value = redis.call('GET', KEYS[3])
+if not owned_value and ARGV[5 + count] ~= '1' then return {0, 2} end
+if owned_value and tonumber(owned_value) ~= reserved then return {0, 2} end
+local ownership_field = ARGV[6 + count]
 for key_index = 1, 2 do
-  if redis.call('EXISTS', KEYS[key_index]) == 1 then
-    for i = 4, 3 + count do
-      if not redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then return -1 end
-    end
+  local hash_owned = redis.call('HGET', KEYS[key_index], ownership_field)
+  if hash_owned and tonumber(hash_owned) ~= reserved then return {0, 2} end
+  local should_adjust = false
+  if owned_value then
+    should_adjust = redis.call('EXISTS', KEYS[key_index]) == 1
+  else
+    should_adjust = hash_owned ~= false
   end
-end
-if delta < 0 then
-  for key_index = 1, 2 do
+  if should_adjust then
     for i = 4, 3 + count do
-      if redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then
+      if not redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then return {0, 1} end
+    end
+    if delta < 0 then
+      for i = 4, 3 + count do
         local current = tonumber(redis.call('HGET', KEYS[key_index], ARGV[i]) or '0')
-        if current < -delta then return -1 end
+        if current < -delta then return {0, 1} end
       end
     end
   end
 end
-if delta ~= 0 then
-  for key_index = 1, 2 do
-    for i = 4, 3 + count do
-      if redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then
+for key_index = 1, 2 do
+  local hash_owned = redis.call('HGET', KEYS[key_index], ownership_field)
+  local should_adjust = false
+  if owned_value then
+    should_adjust = redis.call('EXISTS', KEYS[key_index]) == 1
+  else
+    should_adjust = hash_owned ~= false
+  end
+  if should_adjust then
+    if delta ~= 0 then
+      for i = 4, 3 + count do
         redis.call('HINCRBY', KEYS[key_index], ARGV[i], delta)
       end
     end
+    redis.call('HDEL', KEYS[key_index], ownership_field)
   end
 end
 redis.call('DEL', KEYS[3])
 redis.call('SET', KEYS[4], actual, 'PX', ARGV[4 + count])
-return delta
+return {1, delta}
 `;
 
 const SCRIPT_SHA = {
@@ -217,7 +236,7 @@ export class SponsorshipBudgetRedis {
         policy.version
       );
     }
-    args.push(this.ttlUntilNextDay());
+    args.push(this.ttlUntilNextDay(), this.ownershipField(input));
     const result = (await this.runScript(
       client,
       "reserve",
@@ -239,7 +258,7 @@ export class SponsorshipBudgetRedis {
       "cancel",
       CANCEL_LUA,
       [keys.hour, keys.day, keys.reservation],
-      this.fields(input.organizationId, input.projectId)
+      [this.ownershipField(input), ...this.fields(input.organizationId, input.projectId)]
     );
     if (Number(result) === -1 || Number(result) === -2) {
       throw new Error("Sponsorship budget counter invariant violated during compensation");
@@ -285,12 +304,12 @@ export class SponsorshipBudgetRedis {
     attempt: number;
     reservedLamports: number;
     actualLamports: number;
-    /** Set only after this attempt is durably terminal in Postgres. */
-    recoverMissingReservation?: boolean;
+    /** Set only when this attempt is durably terminal in Postgres. */
+    detectMissingReservation?: boolean;
   }): Promise<number> {
     const client = await this.getClient();
     const keys = this.keys(input);
-    const result = await this.runScript(
+    const result = (await this.runScript(
       client,
       "settle",
       SETTLE_LUA,
@@ -301,13 +320,14 @@ export class SponsorshipBudgetRedis {
         this.fields(input.organizationId, input.projectId).length,
         ...this.fields(input.organizationId, input.projectId),
         this.ttlUntilNextDay(),
-        input.recoverMissingReservation ? 1 : 0,
+        input.detectMissingReservation ? 1 : 0,
+        this.ownershipField(input),
       ]
-    );
-    if (Number(result) === -1 || Number(result) === -2) {
+    )) as [number, number];
+    if (Number(result[0]) !== 1) {
       throw new Error("Sponsorship budget counter invariant violated during settlement");
     }
-    return Number(result);
+    return Number(result[1]);
   }
 
   private fields(organizationId: string, projectId: string | null): string[] {
@@ -336,6 +356,10 @@ export class SponsorshipBudgetRedis {
       settlement: `${prefix}:settlement:${input.reservationId}:${input.attempt}`,
       control: `${prefix}:control`,
     };
+  }
+
+  private ownershipField(input: { reservationId: string; attempt: number }): string {
+    return `__reservation:${input.reservationId}:${input.attempt}`;
   }
 
   private controlField(policy: SponsorshipBudgetPolicy): string {

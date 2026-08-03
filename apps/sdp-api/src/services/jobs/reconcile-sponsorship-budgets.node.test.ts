@@ -151,7 +151,7 @@ describe("reconcileSponsorshipBudgets", () => {
       redisSettledAt: null,
     });
     const { repository, budgetRedis, run } = harness(candidate);
-    budgetRedis.settle.mockResolvedValueOnce(-3);
+    budgetRedis.settle.mockResolvedValueOnce(-2);
 
     await expect(run()).resolves.toBeUndefined();
 
@@ -159,7 +159,7 @@ describe("reconcileSponsorshipBudgets", () => {
       expect.objectContaining({
         reservationId: "reservation_1",
         attempt: 1,
-        recoverMissingReservation: true,
+        detectMissingReservation: true,
       })
     );
     expect(repository.markRedisSettled).toHaveBeenCalledWith("reservation_1", 1);
