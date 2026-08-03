@@ -5,7 +5,7 @@ import { type ApiKeyContext, getAuth } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { WalletPolicyEnforcementService } from "@/services/policy-enforcement.service";
+import { WalletPolicyEnforcementService } from "@/services/policy/enforcement.service";
 import type { AppContext } from "../context";
 import { approvalRequestListQuerySchema, approvalRequestParamsSchema } from "../schemas";
 

@@ -8,7 +8,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { ApiKeyService } from "@/services/api-key.service";
-import { PolicyFoundationService } from "@/services/policy-foundation.service";
+import { ApiKeyPolicyStore } from "@/services/policy/api-key-policy.store";
+import { PostgresPolicyEnforcementStore } from "@/services/policy/enforcement.store";
+import { WalletPolicyStore } from "@/services/policy/wallet-policy.store";
 import { TEST_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_CUSTODY_CONFIG, TEST_CUSTODY_WALLET } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -22,6 +24,26 @@ import type {
   PolicyRepository,
 } from "./policy.repository";
 import { createPostgresPolicyRepository } from "./policy.repository.postgres";
+
+/**
+ * Compose the per-scope policy stores behind the flat method surface these
+ * tests were written against.
+ *
+ * @param repo - The repository under test.
+ * @returns The composed store methods.
+ */
+function policyStores(repo: PolicyRepository) {
+  const wallet = new WalletPolicyStore(repo);
+  const apiKey = new ApiKeyPolicyStore(repo);
+  const enforcement = new PostgresPolicyEnforcementStore(repo);
+  return {
+    resolveEffectiveWalletPolicy: wallet.resolveEffectiveWalletPolicy.bind(wallet),
+    resolveEffectiveApiKeyPolicy: apiKey.resolveEffectiveApiKeyPolicy.bind(apiKey),
+    resolveApiKeyWalletPolicyScope: apiKey.resolveApiKeyWalletPolicyScope.bind(apiKey),
+    upsertApiKeyWalletPolicyBinding: apiKey.upsertApiKeyWalletPolicyBinding.bind(apiKey),
+    recordWalletOperation: enforcement.createWalletOperation.bind(enforcement),
+  };
+}
 
 const SECOND_CUSTODY_WALLET = {
   id: "cw_policy_second",
@@ -69,7 +91,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("resolves implicit default allow when no customer-authored profiles exist", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
 
     await expect(
       service.resolveEffectiveWalletPolicy(TEST_CUSTODY_WALLET.id)
@@ -377,7 +399,7 @@ describe("PolicyRepository (postgres)", () => {
       ),
     ]);
 
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await expect(
       service.resolveEffectiveWalletPolicy(TEST_CUSTODY_WALLET.id)
     ).resolves.toMatchObject({
@@ -748,7 +770,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("preserves an explicit null wallet operation actor through service mapping", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
 
     const operation = await service.recordWalletOperation({
       organizationId: TEST_ORG.id,
@@ -808,7 +830,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("resolves an all-wallet API key policy binding for every in-scope wallet", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
     const { profile } = await createActiveApiKeyControlProfile(repo, {
       name: "Shared all-wallet controls",
@@ -845,7 +867,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("resolves selected-wallet API key policy bindings for multiple endpoint-scoped wallets", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
     await seedEndpointWalletPermission("akw_policy_selected_primary", TEST_CUSTODY_WALLET.walletId);
     await seedEndpointWalletPermission(
@@ -890,7 +912,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("prefers a selected per-wallet policy override over an all-wallet shared policy", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
     const shared = await createActiveApiKeyControlProfile(repo, {
       name: "Shared key controls",
@@ -935,7 +957,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("fails closed when policy bindings exist but the requested wallet has no binding", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
     const { profile } = await createActiveApiKeyControlProfile(repo, {
       name: "Primary wallet only",
@@ -961,7 +983,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("fails closed when an all-wallet policy binding would exceed selected endpoint wallet access", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
     await seedEndpointWalletPermission("akw_policy_endpoint_primary", TEST_CUSTODY_WALLET.walletId);
     const { profile } = await createActiveApiKeyControlProfile(repo, {
@@ -987,7 +1009,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("fails closed when an all-wallet policy binding is requested for another project wallet", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     await seedOtherProjectCustodyWallet();
     const { profile } = await createActiveApiKeyControlProfile(repo, {
       name: "All policy project boundary",
@@ -1012,7 +1034,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("rejects all-wallet policy bindings that reference inactive API key profiles", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
     const profile = await repo.createApiKeyControlProfile({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
@@ -1037,7 +1059,7 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("rejects all-wallet policy bindings with wallet-specific profile references", async () => {
-    const service = new PolicyFoundationService(repo);
+    const service = policyStores(repo);
 
     await expect(
       service.upsertApiKeyWalletPolicyBinding({

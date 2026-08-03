@@ -50,7 +50,7 @@ import {
   enforceWalletOperationPolicy,
   recordLegacyWalletPolicyDenial,
   walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import {
   type MagicBlockPrivateTransferOptions as MagicBlockProviderTransferOptions,
   type MagicBlockUnsignedTransaction,

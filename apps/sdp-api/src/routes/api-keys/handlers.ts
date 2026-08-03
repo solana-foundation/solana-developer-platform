@@ -27,7 +27,7 @@ import {
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";
-import { PolicyFoundationService } from "@/services/policy-foundation.service";
+import { ApiKeyPolicyStore } from "@/services/policy/api-key-policy.store";
 import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { buildApiKeyAccessSummaries } from "./access-response";
@@ -426,7 +426,7 @@ export const createApiKeyControlProfile = async (c: AppContext) => {
     });
   }
 
-  const profile = await new PolicyFoundationService(
+  const profile = await new ApiKeyPolicyStore(
     createPolicyRepository(c.env, getRequestTenantScope(c))
   ).createApiKeyControlProfile({
     organizationId: actor.organizationId,
@@ -457,7 +457,7 @@ export const createApiKeyControlProfileRevision = async (c: AppContext) => {
     });
   }
 
-  const revision = await new PolicyFoundationService(
+  const revision = await new ApiKeyPolicyStore(
     createPolicyRepository(c.env, getRequestTenantScope(c))
   ).createApiKeyControlProfileRevision({
     organizationId: actor.organizationId,
@@ -488,7 +488,7 @@ export const activateApiKeyControlProfileRevision = async (c: AppContext) => {
   const { keyId, profileId, revisionId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
-  const active = await new PolicyFoundationService(
+  const active = await new ApiKeyPolicyStore(
     createPolicyRepository(c.env, getRequestTenantScope(c))
   ).activateApiKeyControlProfileRevision({
     organizationId: actor.organizationId,
@@ -527,7 +527,7 @@ export const writeApiKeyPolicyBindings = async (c: AppContext) => {
           ...binding,
         }));
 
-  await new PolicyFoundationService(
+  await new ApiKeyPolicyStore(
     createPolicyRepository(c.env, getRequestTenantScope(c))
   ).replaceApiKeyWalletPolicyBindings({
     organizationId: actor.organizationId,
