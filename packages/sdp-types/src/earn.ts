@@ -102,9 +102,15 @@ export interface EarnStrategyRiskMetadata {
 
 export interface EarnStrategy {
   id: string;
-  provider: EarnProviderId;
+  /**
+   * Vault-infra provider id. Open string on the read model: catalogue rows
+   * persist as open TEXT and may reference a provider this deployment no
+   * longer (or does not yet) register, so dispatch always resolves fail-closed
+   * server-side. Quotes narrow to EarnProviderId — see EarnQuoteBreakdown.
+   */
+  provider: string;
   /** Provider-side identifier for the vault/strategy. */
-  providerReference?: string;
+  providerReference: string;
   name: string;
   sourceKind: EarnStrategySourceKind;
   /** Open registry — see EARN_KNOWN_UNDERLYING_SOURCES. */
@@ -170,6 +176,7 @@ export interface EarnNavPoint {
 
 /** Rate preview for a deposit or withdrawal, shared by both directions. */
 export interface EarnQuoteBreakdown {
+  /** Closed union: a quote only exists once the registry resolved the provider. */
   provider: EarnProviderId;
   strategyId: string;
   tokenMint: string;

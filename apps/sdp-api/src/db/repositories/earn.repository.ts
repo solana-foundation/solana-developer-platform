@@ -29,7 +29,13 @@ export function generateEarnNavSnapshotId(): string {
 
 export interface EarnStrategyRow {
   id: string;
-  provider: EarnProviderId;
+  /**
+   * Open TEXT column (ADR 0002): a row can outlive its provider's registry
+   * entry, so reads never narrow to EarnProviderId — all dispatch goes through
+   * the fail-closed resolveEarnProviderClient. Writes stay closed (see
+   * UpsertEarnStrategyInput).
+   */
+  provider: string;
   provider_reference: string;
   name: string;
   source_kind: EarnStrategySourceKind;
@@ -73,7 +79,8 @@ export interface EarnMovementRow {
   share_amount: string | null;
   status: EarnMovementStatus;
   transaction_signature: string | null;
-  provider: EarnProviderId | null;
+  /** Open TEXT, same drift rule as EarnStrategyRow.provider. */
+  provider: string | null;
   provider_reference: string | null;
   provider_data: Record<string, unknown>;
   external_id: string | null;

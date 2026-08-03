@@ -5,9 +5,8 @@ import type {
   EarnStrategyResponse,
   ListEarnStrategiesResponse,
 } from "@sdp/types";
-import { z } from "zod";
 import type { EarnNavSnapshotRow, EarnStrategyRow } from "@/db/repositories";
-import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
+import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { type AppContext, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
@@ -15,6 +14,7 @@ import {
   earnStrategyIdParamsSchema,
   listEarnStrategiesQuerySchema,
 } from "../schemas";
+import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 
 export function mapToEarnStrategy(row: EarnStrategyRow): EarnStrategy {
   return {
@@ -67,66 +67,43 @@ export async function requireEarnStrategy(
 }
 
 export const listEarnStrategies = async (c: AppContext) => {
-  const parsed = listEarnStrategiesQuerySchema.safeParse(c.req.query());
-
-  if (!parsed.success) {
-    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
-  }
-
-  const { page, pageSize, sourceKind, apyType, liquidityTerm } = parsed.data;
+  const query = parseQuery(c, listEarnStrategiesQuerySchema);
 
   const repo = getEarnRepository(c);
   const { rows, total } = await repo.listStrategies({
     environment: resolveSdpEnvironment(c),
-    sourceKind,
-    apyType,
-    liquidityTerm,
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
+    sourceKind: query.sourceKind,
+    apyType: query.apyType,
+    liquidityTerm: query.liquidityTerm,
+    ...pageWindow(query),
   });
 
-  const response: ListEarnStrategiesResponse = {
+  const response: ListEarnStrategiesResponse = listResponse(query, total, {
     strategies: rows.map(mapToEarnStrategy),
-    total,
-    page,
-    pageSize,
-  };
+  });
 
   return success(c, response);
 };
 
 export const getEarnStrategy = async (c: AppContext) => {
-  const params = earnStrategyIdParamsSchema.safeParse(c.req.param());
+  const { strategyId } = parseParams(c, earnStrategyIdParamsSchema);
 
-  if (!params.success) {
-    throw badRequestParams();
-  }
-
-  const strategy = await requireEarnStrategy(c, params.data.strategyId);
+  const strategy = await requireEarnStrategy(c, strategyId);
 
   const response: EarnStrategyResponse = { strategy: mapToEarnStrategy(strategy) };
   return success(c, response);
 };
 
 export const getEarnStrategyNavHistory = async (c: AppContext) => {
-  const params = earnStrategyIdParamsSchema.safeParse(c.req.param());
+  const { strategyId } = parseParams(c, earnStrategyIdParamsSchema);
+  const query = parseQuery(c, earnNavHistoryQuerySchema);
 
-  if (!params.success) {
-    throw badRequestParams();
-  }
-
-  const query = earnNavHistoryQuerySchema.safeParse(c.req.query());
-
-  if (!query.success) {
-    throw badRequestQuery({ errors: z.treeifyError(query.error) });
-  }
-
-  const strategy = await requireEarnStrategy(c, params.data.strategyId);
+  const strategy = await requireEarnStrategy(c, strategyId);
 
   const repo = getEarnRepository(c);
   const snapshots = await repo.listNavSnapshots({
     strategyId: strategy.id,
-    limit: query.data.limit,
+    limit: query.limit,
   });
 
   const response: EarnNavHistoryResponse = {

@@ -476,7 +476,8 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it("resolves earn entitlements by tier and applies earn overrides", () => {
+  it("resolves earn entitlements as override-only, regardless of tier", () => {
+    // Earn providers require manual activation: no tier grants them by default.
     const individual = resolveOrganizationProviderEntitlements({
       tier: "individual",
       providerOverrides: { earn: { veda: true } },
@@ -486,15 +487,18 @@ describe("provider-availability.service", () => {
 
     const enterprise = resolveOrganizationProviderEntitlements({ tier: "enterprise" });
     expect(enterprise.providers.earn).toEqual({
-      veda: true,
-      upshift: true,
-      perena: true,
-      ground: true,
+      veda: false,
+      upshift: false,
+      perena: false,
+      ground: false,
     });
   });
 
-  it("reports earn provider availability from entitlement plus configured credentials", async () => {
-    await setOrganizationTier("enterprise");
+  it("reports earn provider availability from override entitlement plus configured credentials", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { veda: true } } }), TEST_ORG_ID)
+      .run();
     env.VEDA_API_KEY = "veda_test_key";
 
     const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
@@ -505,14 +509,17 @@ describe("provider-availability.service", () => {
       enabled: true,
     });
     expect(availability.providers.earn.upshift).toEqual({
-      entitled: true,
+      entitled: false,
       configured: false,
       enabled: false,
     });
   });
 
   it("re-checks earn credentials for the requested mode like ramps", async () => {
-    await setOrganizationTier("enterprise");
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { veda: true } } }), TEST_ORG_ID)
+      .run();
     env.VEDA_API_KEY = "veda_production_key";
 
     await expect(
@@ -528,8 +535,9 @@ describe("provider-availability.service", () => {
   });
 
   it("assertEarnProviderConfigured gates on credentials only, ignoring entitlement (exit safety)", () => {
-    // Individual tier has zero earn providers entitled, but withdrawals must
-    // still pass as long as the provider credentials exist for the mode.
+    // No earn override is granted, so zero providers are entitled, but
+    // withdrawals must still pass as long as the provider credentials exist
+    // for the mode.
     env.VEDA_API_KEY = "veda_production_key";
 
     expect(() => assertEarnProviderConfigured(env, "veda", false)).not.toThrow();

@@ -55,6 +55,31 @@ function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
   return keys.every((key) => hasEnv(env, key));
 }
 
+/**
+ * Every earn provider shares one credential shape: `<PREFIX>_API_KEY` for
+ * production and `<PREFIX>_SANDBOX_API_KEY` for sandbox. Binding the derived
+ * keys to `keyof Env` makes a provider whose keys are missing from env.d.ts a
+ * compile error; provider-availability.drift.test.ts guards the projections
+ * (turbo.json globalEnv, scripts/secret-keys.mjs) the type system cannot see.
+ */
+function keyPairCredentialDefinition(
+  label: string,
+  envPrefix: Uppercase<EarnProviderId>
+): ProviderAvailabilityDefinition {
+  const prodKey: keyof Env = `${envPrefix}_API_KEY`;
+  const sandboxKey: keyof Env = `${envPrefix}_SANDBOX_API_KEY`;
+  return {
+    label,
+    isConfigured: (env, testMode) => {
+      const prod = hasEnv(env, prodKey);
+      const sandbox = hasEnv(env, sandboxKey);
+      if (testMode === true) return sandbox;
+      if (testMode === false) return prod;
+      return prod || sandbox;
+    },
+  };
+}
+
 const PROVIDER_AVAILABILITY_DEFINITIONS = {
   custody: {
     local: {
@@ -248,46 +273,10 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     },
   },
   earn: {
-    veda: {
-      label: "Veda",
-      isConfigured: (env, testMode) => {
-        const prod = hasEnv(env, "VEDA_API_KEY");
-        const sandbox = hasEnv(env, "VEDA_SANDBOX_API_KEY");
-        if (testMode === true) return sandbox;
-        if (testMode === false) return prod;
-        return prod || sandbox;
-      },
-    },
-    upshift: {
-      label: "Upshift",
-      isConfigured: (env, testMode) => {
-        const prod = hasEnv(env, "UPSHIFT_API_KEY");
-        const sandbox = hasEnv(env, "UPSHIFT_SANDBOX_API_KEY");
-        if (testMode === true) return sandbox;
-        if (testMode === false) return prod;
-        return prod || sandbox;
-      },
-    },
-    perena: {
-      label: "Perena",
-      isConfigured: (env, testMode) => {
-        const prod = hasEnv(env, "PERENA_API_KEY");
-        const sandbox = hasEnv(env, "PERENA_SANDBOX_API_KEY");
-        if (testMode === true) return sandbox;
-        if (testMode === false) return prod;
-        return prod || sandbox;
-      },
-    },
-    ground: {
-      label: "Ground",
-      isConfigured: (env, testMode) => {
-        const prod = hasEnv(env, "GROUND_API_KEY");
-        const sandbox = hasEnv(env, "GROUND_SANDBOX_API_KEY");
-        if (testMode === true) return sandbox;
-        if (testMode === false) return prod;
-        return prod || sandbox;
-      },
-    },
+    veda: keyPairCredentialDefinition("Veda", "VEDA"),
+    upshift: keyPairCredentialDefinition("Upshift", "UPSHIFT"),
+    perena: keyPairCredentialDefinition("Perena", "PERENA"),
+    ground: keyPairCredentialDefinition("Ground", "GROUND"),
   },
 } as const satisfies ProviderAvailabilityDefinitions;
 

@@ -9,7 +9,6 @@ import type {
   EarnStrategyStatus,
   SdpEnvironment,
 } from "@sdp/types";
-import type { EarnProviderId } from "@sdp/types/provider-access";
 import type { AppDb } from "@/db";
 import type {
   CreateEarnMovementInput,
@@ -39,7 +38,7 @@ import {
 function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
   return {
     id: row.id as string,
-    provider: row.provider as EarnProviderId,
+    provider: row.provider as string,
     provider_reference: row.provider_reference as string,
     name: row.name as string,
     source_kind: row.source_kind as EarnStrategySourceKind,
@@ -87,7 +86,7 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     share_amount: row.share_amount as string | null,
     status: row.status as EarnMovementStatus,
     transaction_signature: row.transaction_signature as string | null,
-    provider: row.provider as EarnProviderId | null,
+    provider: row.provider as string | null,
     provider_reference: row.provider_reference as string | null,
     provider_data: row.provider_data as Record<string, unknown>,
     external_id: row.external_id as string | null,
@@ -106,6 +105,44 @@ function mapNavSnapshotRow(row: Record<string, unknown>): EarnNavSnapshotRow {
     tvl: row.tvl as string | null,
     as_of: row.as_of as string,
     created_at: row.created_at as string,
+  };
+}
+
+/**
+ * Shared count+page read for the three earn list methods (same shape as the
+ * payments-family where-builder idiom). Ordering is fixed at newest-first with
+ * id as the deterministic tiebreaker — bulk catalogue syncs write many rows in
+ * the same instant, so created_at alone would make pages unstable.
+ */
+async function selectPage<Row>(
+  db: AppDb,
+  table: "earn_strategies" | "earn_positions" | "earn_movements",
+  conditions: string[],
+  bindings: unknown[],
+  window: { limit: number; offset: number },
+  mapRow: (row: Record<string, unknown>) => Row
+): Promise<{ rows: Row[]; total: number }> {
+  const where = conditions.join(" AND ");
+
+  const [page, countRow] = await Promise.all([
+    db
+      .prepare(
+        `SELECT * FROM ${table}
+           WHERE ${where}
+           ORDER BY created_at DESC, id DESC
+           LIMIT ? OFFSET ?`
+      )
+      .bind(...bindings, window.limit, window.offset)
+      .all<Record<string, unknown>>(),
+    db
+      .prepare(`SELECT COUNT(*)::int AS total FROM ${table} WHERE ${where}`)
+      .bind(...bindings)
+      .first<{ total: number }>(),
+  ]);
+
+  return {
+    rows: (page.results ?? []).map(mapRow),
+    total: countRow?.total ?? 0,
   };
 }
 
@@ -187,27 +224,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings.push(input.liquidityTerm);
       }
 
-      const where = conditions.join(" AND ");
-
-      const countRow = await db
-        .prepare(`SELECT COUNT(*) AS total FROM earn_strategies WHERE ${where}`)
-        .bind(...bindings)
-        .first<{ total: number | string }>();
-
-      const { results } = await db
-        .prepare(
-          `SELECT * FROM earn_strategies
-             WHERE ${where}
-             ORDER BY created_at DESC, id DESC
-             LIMIT ? OFFSET ?`
-        )
-        .bind(...bindings, input.limit, input.offset)
-        .all<Record<string, unknown>>();
-
-      return {
-        rows: (results ?? []).map(mapStrategyRow),
-        total: Number(countRow?.total ?? 0),
-      };
+      return selectPage(db, "earn_strategies", conditions, bindings, input, mapStrategyRow);
     },
 
     async createPosition(input: CreateEarnPositionInput) {
@@ -249,27 +266,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings.push(input.strategyId);
       }
 
-      const where = conditions.join(" AND ");
-
-      const countRow = await db
-        .prepare(`SELECT COUNT(*) AS total FROM earn_positions WHERE ${where}`)
-        .bind(...bindings)
-        .first<{ total: number | string }>();
-
-      const { results } = await db
-        .prepare(
-          `SELECT * FROM earn_positions
-             WHERE ${where}
-             ORDER BY created_at DESC, id DESC
-             LIMIT ? OFFSET ?`
-        )
-        .bind(...bindings, input.limit, input.offset)
-        .all<Record<string, unknown>>();
-
-      return {
-        rows: (results ?? []).map(mapPositionRow),
-        total: Number(countRow?.total ?? 0),
-      };
+      return selectPage(db, "earn_positions", conditions, bindings, input, mapPositionRow);
     },
 
     async createMovement(input: CreateEarnMovementInput) {
@@ -369,27 +366,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings.push(input.direction);
       }
 
-      const where = conditions.join(" AND ");
-
-      const countRow = await db
-        .prepare(`SELECT COUNT(*) AS total FROM earn_movements WHERE ${where}`)
-        .bind(...bindings)
-        .first<{ total: number | string }>();
-
-      const { results } = await db
-        .prepare(
-          `SELECT * FROM earn_movements
-             WHERE ${where}
-             ORDER BY created_at DESC, id DESC
-             LIMIT ? OFFSET ?`
-        )
-        .bind(...bindings, input.limit, input.offset)
-        .all<Record<string, unknown>>();
-
-      return {
-        rows: (results ?? []).map(mapMovementRow),
-        total: Number(countRow?.total ?? 0),
-      };
+      return selectPage(db, "earn_movements", conditions, bindings, input, mapMovementRow);
     },
 
     async insertNavSnapshot(input: InsertEarnNavSnapshotInput) {
