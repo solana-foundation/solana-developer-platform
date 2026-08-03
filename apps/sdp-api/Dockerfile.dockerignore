@@ -21,6 +21,7 @@ packages/*
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-solana
+!packages/sdp-policy
 !packages/sdp-payments
 !packages/sdp-issuance
 !packages/sdp-private-channels
