@@ -449,7 +449,7 @@ jobs:
           - name: Surfpool / Issuance Prepare
             provider: surfpool
             test_files: src/tests/issuance-prepare.test.ts
-            rpc_provider: triton
+            rpc_provider: quicknode
             custody_provider: local
           - name: Surfpool / Issuance Execute
             provider: surfpool
@@ -459,7 +459,7 @@ jobs:
           - name: Surfpool / Mosaic
             provider: surfpool
             test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-token-acl-constraints.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
-            rpc_provider: triton
+            rpc_provider: quicknode
             custody_provider: local
           - name: Surfpool / Token Flows
             provider: surfpool
