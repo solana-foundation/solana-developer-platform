@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.53.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.52.0...v0.53.0) (2026-08-04)
+
+### Features
+
+* **sdp-web:** move token/RPC actions off the playground proxy ([#1064](https://github.com/solana-foundation/solana-developer-platform/pull/1064)) ([ce25f00](https://github.com/solana-foundation/solana-developer-platform/commit/ce25f0043184f1a69f43c3f247444901e175ca7d))
+* **sdp-api:** add the Dry-Run request header (PRO-1618) ([#1050](https://github.com/solana-foundation/solana-developer-platform/pull/1050)) ([dc13fab](https://github.com/solana-foundation/solana-developer-platform/commit/dc13faba875ef08c79be136ff0b795ce92f075e5))
+* use turbopack instead of webpack ([#1043](https://github.com/solana-foundation/solana-developer-platform/pull/1043)) ([ef57340](https://github.com/solana-foundation/solana-developer-platform/commit/ef573405213bfc569707ba1d70ce06adf36ddb33))
+* **sdp-web:** PART 1 stepped tokenization-engine chooser in the deploy modal ([#1039](https://github.com/solana-foundation/solana-developer-platform/pull/1039)) ([20d7832](https://github.com/solana-foundation/solana-developer-platform/commit/20d783239447139fef559e679c5e5d3a686edb9d))
+* support solana-private-channels ([#970](https://github.com/solana-foundation/solana-developer-platform/pull/970)) ([90520ef](https://github.com/solana-foundation/solana-developer-platform/commit/90520ef093b16c24081c94dec60c49532da7011e))
+* **sdp-web:** vercel flag standardization ([#1035](https://github.com/solana-foundation/solana-developer-platform/pull/1035)) ([186bf21](https://github.com/solana-foundation/solana-developer-platform/commit/186bf215337a64c365aa892171fc0994f2472a8a))
+* **web:** sync API playground with public OpenAPI ([#936](https://github.com/solana-foundation/solana-developer-platform/pull/936)) ([4ca03ca](https://github.com/solana-foundation/solana-developer-platform/commit/4ca03cadce86f92cd78990614ec6efa4baa69b5b))
+
+### Bug Fixes
+
+* **i18n:** stop translation sync after Eve result ([#814](https://github.com/solana-foundation/solana-developer-platform/pull/814)) ([3555894](https://github.com/solana-foundation/solana-developer-platform/commit/3555894cd77d2de5ad00952c677a016245b7be66))
+* **i18n:** sign automated translation commits ([#1066](https://github.com/solana-foundation/solana-developer-platform/pull/1066)) ([10b672c](https://github.com/solana-foundation/solana-developer-platform/commit/10b672ca46b6aa62fa0ff68a655001ffa1b74ef2))
+* **api:** enforce scoped Kora sponsorship quotas ([#1030](https://github.com/solana-foundation/solana-developer-platform/pull/1030)) ([3f74b78](https://github.com/solana-foundation/solana-developer-platform/commit/3f74b78ad191a3501a85d5276aa2b54f4ba9a5d5))
+* **api:** enforce tenant-scoped data access ([#1032](https://github.com/solana-foundation/solana-developer-platform/pull/1032)) ([66ec82f](https://github.com/solana-foundation/solana-developer-platform/commit/66ec82f5fdc6a61b5985e16ab14ee698a82dbad7))
+* **ci:** stabilize Surfpool RPC setup ([#1051](https://github.com/solana-foundation/solana-developer-platform/pull/1051)) ([3d52590](https://github.com/solana-foundation/solana-developer-platform/commit/3d5259017b80f63b1005e9a43a2f514d89df8c88))
+* **deps:** remediate 32 runtime Dependabot alerts ([#1031](https://github.com/solana-foundation/solana-developer-platform/pull/1031)) ([a22bc15](https://github.com/solana-foundation/solana-developer-platform/commit/a22bc15fd98b411c298837d8ce3330b0dc474f84))
+
+### Refactors
+
+* **policy:** extract the wallet/policy engine into @sdp/policy ([#1058](https://github.com/solana-foundation/solana-developer-platform/pull/1058)) ([d923dc8](https://github.com/solana-foundation/solana-developer-platform/commit/d923dc8cb9a25b425e95d2fa67ecc1873a483953))
+
+### Maintenance
+
+* **deps:** bump the actions group with 2 updates ([#1057](https://github.com/solana-foundation/solana-developer-platform/pull/1057)) ([f222d54](https://github.com/solana-foundation/solana-developer-platform/commit/f222d544d55fda7a419ac21d38937681f5a17dfd))
+
 ## [0.52.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.51.0...v0.52.0) (2026-07-31)
 
 ### Features
