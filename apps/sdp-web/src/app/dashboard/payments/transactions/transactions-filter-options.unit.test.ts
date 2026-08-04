@@ -74,16 +74,23 @@ describe("asset options", () => {
     });
   }
 
-  it("labels each asset with its symbol while keying it by mint", async () => {
-    // The filter matches `pt.token` exactly and that column stores a mint, so the
-    // value has to be an address even though nobody should have to read one.
+  it("resolves a symbol even when the aggregate repeats the mint in `token`", async () => {
+    // This is what the API actually sends for well-known tokens: `token` carries
+    // the mint, not a symbol. An earlier version read that field directly and put
+    // a 44-character address in the filter.
     const options = await fetchTransactionFilterOptions(
       request({
         data: {
           aggregate: {
             balances: [
-              { mint: "So11111111111111111111111111111111111111112", token: "SOL" },
-              { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", token: "USDC" },
+              {
+                mint: "So11111111111111111111111111111111111111112",
+                token: "So11111111111111111111111111111111111111112",
+              },
+              {
+                mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              },
             ],
           },
         },
@@ -94,6 +101,14 @@ describe("asset options", () => {
       { id: "So11111111111111111111111111111111111111112", label: "SOL" },
       { id: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", label: "USDC" },
     ]);
+  });
+
+  it("keys by mint while labelling with a symbol the aggregate did supply", async () => {
+    const options = await fetchTransactionFilterOptions(
+      request({ data: { aggregate: { balances: [{ mint: "mint-issued", token: "ATD" }] } } })
+    );
+
+    expect(options.assets).toEqual([{ id: "mint-issued", label: "ATD" }]);
   });
 
   it("does not repeat a mint held across several wallets", async () => {
@@ -113,12 +128,20 @@ describe("asset options", () => {
     expect(options.assets).toHaveLength(1);
   });
 
-  it("falls back to the mint when the aggregate carries no symbol", async () => {
+  it("shortens an unknown mint rather than printing all 44 characters", async () => {
     const options = await fetchTransactionFilterOptions(
-      request({ data: { aggregate: { balances: [{ mint: "mint-b", token: "" }] } } })
+      request({
+        data: {
+          aggregate: {
+            balances: [{ mint: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", token: "" }],
+          },
+        },
+      })
     );
 
-    expect(options.assets).toEqual([{ id: "mint-b", label: "mint-b" }]);
+    expect(options.assets).toHaveLength(1);
+    expect(options.assets[0].id).toBe("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
+    expect(options.assets[0].label.length).toBeLessThan(20);
   });
 
   it("leaves the filter usable when the aggregate fails", async () => {

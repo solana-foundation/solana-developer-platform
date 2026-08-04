@@ -1,4 +1,5 @@
 import type { ListCounterpartiesResponse, PaymentsDashboardWalletsEnvelope } from "@sdp/types";
+import { resolveTransferTokenLabel } from "@/app/dashboard/payments/payments-overview.utils";
 
 export interface TransactionFilterOptions {
   wallets: Array<{ id: string; label: string }>;
@@ -47,6 +48,21 @@ export async function fetchTransactionFilterOptions(
       })
     : null;
 
+  // `balance.token` is not a symbol — the aggregate returns the mint there for
+  // well-known tokens, which is why the home card runs it through the same
+  // resolver rather than rendering it directly. Skipping that step put a
+  // 44-character address in the filter.
+  const balances = aggregateBody?.data?.aggregate?.balances ?? [];
+  const symbolsByMint = Object.fromEntries(
+    balances.filter((balance) => balance?.mint).map((balance) => [balance.mint, balance.token])
+  );
+  const assetOptions = balances
+    .filter((balance) => Boolean(balance?.mint))
+    .map((balance) => ({
+      id: balance.mint,
+      label: resolveTransferTokenLabel(balance.mint, symbolsByMint) ?? balance.mint,
+    }));
+
   const [walletsBody, firstCounterpartiesBody] = await Promise.all([
     readJson<PaymentsDashboardWalletsEnvelope>(walletsResponse),
     readJson<{ data?: ListCounterpartiesResponse }>(firstCounterpartiesResponse),
@@ -90,10 +106,6 @@ export async function fetchTransactionFilterOptions(
         label: counterparty.displayName,
       }))
     ),
-    assets: uniqueOptions(
-      (aggregateBody?.data?.aggregate?.balances ?? [])
-        .filter((balance) => Boolean(balance?.mint))
-        .map((balance) => ({ id: balance.mint, label: balance.token || balance.mint }))
-    ),
+    assets: uniqueOptions(assetOptions),
   };
 }
