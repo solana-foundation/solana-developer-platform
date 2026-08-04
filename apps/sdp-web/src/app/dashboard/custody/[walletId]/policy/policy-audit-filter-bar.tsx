@@ -160,20 +160,25 @@ export function PolicyAuditFilterBar({ filters }: { filters: PolicyAuditFilters 
 }
 
 /**
- * Audit list footer: the shared PaginatedFooter driven by the URL's `page`
- * param, so page changes re-render the server list.
+ * Audit list footer: the shared PaginatedFooter, navigating by rewriting the
+ * URL's `page`/`pageSize` params so page changes re-render the server list.
  *
  * @param props.filters - The filters currently applied, parsed from the URL.
+ * @param props.page - The page the server actually rendered; local date
+ *   filtering clamps out-of-range URL pages, so this can differ from
+ *   `filters.page`.
  * @param props.pageCount - Total number of pages.
  * @param props.summary - Localized "x–y of z" summary from the server.
  * @returns The footer element.
  */
 export function PolicyAuditPaginatedFooter({
   filters,
+  page,
   pageCount,
   summary,
 }: {
   filters: PolicyAuditFilters;
+  page: number;
   pageCount: number;
   summary: string;
 }) {
@@ -181,7 +186,7 @@ export function PolicyAuditPaginatedFooter({
   return (
     <PaginatedFooter
       className="mt-auto"
-      page={filters.page}
+      page={page}
       pageCount={pageCount}
       onPageChange={(page) => apply({ page })}
       summary={summary}

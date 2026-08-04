@@ -248,6 +248,7 @@ export function PolicyAuditList({
 
             <PolicyAuditPaginatedFooter
               filters={filters}
+              page={result.page}
               pageCount={pageCount}
               summary={t("DashboardCustody.policyAuditRange", {
                 from: rangeStart,
