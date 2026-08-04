@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createCommitOnBranch } from "../.github/scripts/github-commit-on-branch.mjs";
 import {
   applyTranslations,
   collectMissingTranslations,
@@ -14,10 +15,19 @@ import {
 
 const guidance = {
   default: {
-    principles: ["Translate meaning, not English word order."],
+    context: {
+      product: "Solana Developer Platform",
+      audience: "Web3 developers",
+    },
+    instructions: ["Translate meaning, not English word order."],
   },
   locales: {
     fr: {
+      context: {
+        localeName: "français (France)",
+        convention: "Established Web3 terms are commonly retained in English.",
+      },
+      instructions: ["Address the user with vous."],
       terminology: [{ source: "token", preferred: "Token", avoid: "jeton" }],
       forbiddenTerms: [
         {
@@ -160,8 +170,18 @@ test("uses the Eve structured session API and preserves placeholders", async () 
         const request = JSON.parse(options.body);
         assert.equal(request.outputSchema.properties.translations.minItems, 1);
         const message = JSON.parse(request.message);
-        assert.deepEqual(message.guidance.general, guidance.default);
-        assert.deepEqual(message.guidance.locale, guidance.locales.fr);
+        assert.deepEqual(message.guidance.context, {
+          general: guidance.default.context,
+          locale: guidance.locales.fr.context,
+        });
+        assert.deepEqual(message.guidance.instructions, {
+          general: guidance.default.instructions,
+          locale: guidance.locales.fr.instructions,
+          terminology: guidance.locales.fr.terminology,
+        });
+        assert.equal("context" in message, false);
+        assert.equal("instructions" in message, false);
+        assert.equal("forbiddenTerms" in message.guidance.instructions, false);
         assert.equal(message.translations[0].context.nearby[0].translation, "Bienvenue");
         return {
           ok: true,
@@ -190,6 +210,117 @@ test("uses the Eve structured session API and preserves placeholders", async () 
 
   assert.equal(result.batches, 1);
   assert.equal(result.translations[0].value, "Bonjour {name}");
+});
+
+test("returns when Eve completes a result without closing the stream", {
+  timeout: 1_000,
+}, async () => {
+  const missing = [
+    {
+      locale: "fr",
+      sourceFile: "en.json",
+      targetFile: "fr.json",
+      key: "Home.title",
+      source: "Hello {name}",
+    },
+  ];
+  let streamCancelled = false;
+  const body = new ReadableStream({
+    start(controller) {
+      const event = new TextEncoder().encode(
+        `${JSON.stringify({
+          type: "result.completed",
+          data: {
+            result: {
+              translations: [{ file: "en.json", key: "Home.title", translation: "Bonjour {name}" }],
+            },
+          },
+        })}\n`
+      );
+      const midpoint = Math.floor(event.length / 2);
+      controller.enqueue(event.slice(0, midpoint));
+      controller.enqueue(event.slice(midpoint));
+    },
+    cancel() {
+      streamCancelled = true;
+    },
+  });
+
+  const result = await translateMissingEntries({
+    missing,
+    agentUrl: "https://translation.example.test",
+    agentUsername: "test-user",
+    agentPassword: "test-password",
+    maxRetries: 0,
+    fetchImpl: async (url) =>
+      url.endsWith("/eve/v1/session")
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({ sessionId: "session-1" }),
+          }
+        : {
+            ok: true,
+            status: 200,
+            body,
+            text: () => new Promise(() => {}),
+          },
+  });
+
+  assert.equal(result.translations[0].value, "Bonjour {name}");
+  assert.equal(streamCancelled, true);
+});
+
+test("cancels the stream when Eve reports a failure", { timeout: 1_000 }, async () => {
+  const missing = [
+    {
+      locale: "fr",
+      sourceFile: "en.json",
+      targetFile: "fr.json",
+      key: "Home.title",
+      source: "Hello {name}",
+    },
+  ];
+  let streamCancelled = false;
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        new TextEncoder().encode(
+          `${JSON.stringify({
+            type: "turn.failed",
+            data: { message: "model unavailable" },
+          })}\n`
+        )
+      );
+    },
+    cancel() {
+      streamCancelled = true;
+    },
+  });
+
+  await assert.rejects(
+    translateMissingEntries({
+      missing,
+      agentUrl: "https://translation.example.test",
+      agentUsername: "test-user",
+      agentPassword: "test-password",
+      maxRetries: 0,
+      fetchImpl: async (url) =>
+        url.endsWith("/eve/v1/session")
+          ? {
+              ok: true,
+              status: 200,
+              json: async () => ({ sessionId: "session-1" }),
+            }
+          : {
+              ok: true,
+              status: 200,
+              body,
+            },
+    }),
+    /Translation agent failed: model unavailable/
+  );
+  assert.equal(streamCancelled, true);
 });
 
 test("rejects an Eve result that changes placeholders", async () => {
@@ -302,4 +433,78 @@ test("preserves ICU selectors and markup while allowing translated branch text",
 
   assert.deepEqual(extractPlaceholderTokens(source), extractPlaceholderTokens(translation));
   assert.notDeepEqual(extractPlaceholderTokens(source), extractPlaceholderTokens(changedSelector));
+});
+
+test("creates translation commits through GitHub without overriding the app identity", async () => {
+  let request;
+  const encodedContents = Buffer.from('{"test":true}').toString("base64");
+  const commit = await createCommitOnBranch({
+    repository: "solana-foundation/solana-developer-platform",
+    branch: "codex/release-main",
+    expectedHeadOid: "abc123",
+    headline: "chore(i18n): translate missing release strings",
+    additions: [{ path: "apps/sdp-web/messages/fr.json", contents: encodedContents }],
+    token: "test-token",
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            data: {
+              createCommitOnBranch: {
+                commit: { oid: "def456", url: "https://github.test/commit/def456" },
+              },
+            },
+          }),
+      };
+    },
+  });
+
+  assert.equal(commit.oid, "def456");
+  assert.equal(request.url, "https://api.github.com/graphql");
+  assert.equal(request.options.headers.Authorization, "Bearer test-token");
+  const input = JSON.parse(request.options.body).variables.input;
+  assert.deepEqual(input, {
+    branch: {
+      repositoryNameWithOwner: "solana-foundation/solana-developer-platform",
+      branchName: "codex/release-main",
+    },
+    expectedHeadOid: "abc123",
+    message: { headline: "chore(i18n): translate missing release strings" },
+    fileChanges: {
+      additions: [{ path: "apps/sdp-web/messages/fr.json", contents: encodedContents }],
+    },
+  });
+  assert.equal("author" in input, false);
+  assert.equal("committer" in input, false);
+});
+
+test("surfaces GraphQL commit errors returned with HTTP 200", async () => {
+  await assert.rejects(
+    createCommitOnBranch({
+      repository: "solana-foundation/solana-developer-platform",
+      branch: "codex/release-main",
+      expectedHeadOid: "stale-head",
+      headline: "chore(i18n): translate missing release strings",
+      additions: [],
+      token: "test-token",
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ errors: [{ message: "Expected head oid mismatch" }] }),
+      }),
+    }),
+    /Expected head oid mismatch/
+  );
+});
+
+test("translation workflow does not push a locally created commit", () => {
+  const workflow = fs.readFileSync(
+    path.resolve(import.meta.dirname, "../.github/workflows/release-please.yml"),
+    "utf8"
+  );
+
+  assert.doesNotMatch(workflow, /git push origin HEAD:codex\/release-main/);
 });

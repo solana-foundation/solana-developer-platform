@@ -1,6 +1,7 @@
 import type { WalletControlProfileRevisionHistory, WalletPolicyEvaluationDetail } from "@sdp/types";
-import { ChevronLeft, ChevronRight, History } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
+import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { UserAvatar } from "@/components/user-avatar";
 import { formatDisplayLabel } from "@/lib/utils";
 import {
   buildPolicyAuditSearchParams,
@@ -31,6 +33,7 @@ import {
   policyActor,
   shortIdentifier,
 } from "./policy-audit.shared";
+import { RevisionHistoryDrawer } from "./revision-history-drawer";
 
 const REASON_CODES = [
   "implicit_default_allow",
@@ -51,6 +54,7 @@ export function PolicyAuditList({
   filters,
   revisionHistory,
   apiKeyNames,
+  userNames,
   locale,
   t,
 }: {
@@ -60,13 +64,13 @@ export function PolicyAuditList({
   filters: PolicyAuditFilters;
   revisionHistory: WalletControlProfileRevisionHistory;
   apiKeyNames: Record<string, string>;
+  userNames: Record<string, string>;
   locale: string;
   t: PolicyTranslate;
 }) {
   const encodedWalletId = encodeURIComponent(walletId);
   const policyHref = `/dashboard/wallets/${encodedWalletId}/policy`;
   const auditHref = `${policyHref}/audit`;
-  const revisionsHref = `${policyHref}/revisions`;
   const pageCount = Math.max(1, Math.ceil(result.total / result.pageSize));
   const rangeStart = result.total === 0 ? 0 : (result.page - 1) * result.pageSize + 1;
   const rangeEnd = Math.min(result.page * result.pageSize, result.total);
@@ -83,12 +87,10 @@ export function PolicyAuditList({
               {t("DashboardCustody.policyAuditWalletHistoryDescription")}
             </p>
           </div>
-          <Button asChild variant="outline" size="sm">
-            <Link href={revisionsHref}>
-              <History className="size-4" />
-              {t("DashboardCustody.policyAuditRevisionHistory")}
-            </Link>
-          </Button>
+          <RevisionHistoryDrawer
+            walletId={walletId}
+            preloaded={{ history: revisionHistory, userNames }}
+          />
         </div>
 
         <form action={auditHref} className="space-y-4 border-y border-border-default py-4">
@@ -265,7 +267,7 @@ export function PolicyAuditList({
                       filters,
                       result.page
                     );
-                    const actor = policyActor(evaluation, apiKeyNames);
+                    const actor = policyActor(evaluation, apiKeyNames, userNames);
                     const appliedRevision = formatRevisionReference(
                       revisionHistory,
                       evaluation.policyRevisions.wallet.evaluatedRevisionId,
@@ -297,18 +299,34 @@ export function PolicyAuditList({
                           </span>
                         </AuditCell>
                         <AuditCell>
-                          <p
-                            className="min-w-0 truncate"
-                            data-policy-audit-actor
-                            title={actor.value || undefined}
-                          >
-                            {actor.type === "api_key" && !actor.name
-                              ? shortIdentifier(actor.id ?? actor.value)
-                              : actor.value || "-"}
-                          </p>
+                          <div className="flex min-w-0 items-center gap-2">
+                            {actor.type === "actor" && actor.name ? (
+                              <UserAvatar name={actor.name} className="size-5 text-[9px]" />
+                            ) : null}
+                            <p
+                              className="min-w-0 truncate"
+                              data-policy-audit-actor
+                              title={actor.value || undefined}
+                            >
+                              {actor.type === "api_key" && !actor.name
+                                ? shortIdentifier(actor.id ?? actor.value)
+                                : actor.value || "-"}
+                            </p>
+                          </div>
                           {actor.id && actor.name ? (
-                            <p className="mt-1 text-xs text-tertiary" title={actor.id}>
+                            <p
+                              className="mt-1 flex items-center gap-1 text-xs text-tertiary"
+                              title={actor.id}
+                            >
                               {shortIdentifier(actor.id)}
+                              <WalletMetadataCopyButton
+                                value={actor.id}
+                                label={t(
+                                  actor.type === "api_key"
+                                    ? "DashboardCustody.policyAuditApiKeyId"
+                                    : "DashboardCustody.policyAuditUserId"
+                                )}
+                              />
                             </p>
                           ) : null}
                         </AuditCell>

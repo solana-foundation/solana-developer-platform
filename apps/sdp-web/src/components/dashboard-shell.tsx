@@ -51,7 +51,6 @@ import {
   WalletDetailSkeleton,
   WalletPolicyAuditDetailSkeleton,
   WalletPolicyAuditListSkeleton,
-  WalletPolicyRevisionsSkeleton,
   WalletPolicySkeleton,
   WalletSetupSkeleton,
   WalletsOverviewSkeleton,
@@ -141,8 +140,6 @@ function resolvePageLoadingComponent(
       return WalletPolicyAuditListSkeleton;
     case "wallet-policy-audit-detail":
       return WalletPolicyAuditDetailSkeleton;
-    case "wallet-policy-revisions":
-      return WalletPolicyRevisionsSkeleton;
     case "issuance-overview":
       return IssuancePageSkeleton;
     case "issuance-create":

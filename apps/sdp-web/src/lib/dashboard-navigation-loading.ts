@@ -28,7 +28,6 @@ export type DashboardLoadingRoute =
   | "wallet-policy"
   | "wallet-policy-audit-list"
   | "wallet-policy-audit-detail"
-  | "wallet-policy-revisions"
   | "issuance-overview"
   | "issuance-create"
   | "issuance-detail"
@@ -75,7 +74,6 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
   if (suffix.length < 1) return null;
   if (suffix[1] !== "policy") return "wallet-detail";
   if (suffix.length === 2) return "wallet-policy";
-  if (suffix[2] === "revisions" && suffix.length === 3) return "wallet-policy-revisions";
   if (suffix[2] === "audit" && suffix.length === 3) return "wallet-policy-audit-list";
   if (suffix[2] === "audit" && suffix.length === 4) return "wallet-policy-audit-detail";
   return null;
