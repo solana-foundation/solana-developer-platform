@@ -49,7 +49,7 @@ export function CodeBlock({
       dir="ltr"
       tabIndex={-1}
       className={cn(
-        "relative overflow-hidden rounded-xl bg-surface-raised text-sm shadow-ring",
+        "relative overflow-hidden rounded-xl border border-border-subtle bg-surface-raised text-sm",
         className
       )}
       {...props}
