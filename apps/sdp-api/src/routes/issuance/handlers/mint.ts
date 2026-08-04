@@ -253,21 +253,22 @@ export const prepareMint = async (c: AppContext) => {
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
-  // For allowlist tokens with on-chain ABL, sync the destination wallet to
-  // the on-chain list (and DB mirror) before preparing the mint tx so the
-  // SDK's permissionless-thaw can succeed when the client submits.
-  const addedToAllowlist = ablListAddress
-    ? await syncDestinationToOnChainAllowlist({
-        c,
-        tokenService,
-        mosaic,
-        tokenId,
-        ablListAddress,
-        destinationRaw: parsed.data.mint.destination,
-        destination,
-        addedBy: auth.id,
-      })
-    : false;
+  // Preparation must not mutate on-chain compliance state. A destination that
+  // is not already on the ABL can only be added by the execute route after its
+  // wallet-operation policy and approval gate have run.
+  if (ablListAddress) {
+    const existingStatus = await tokenService.getAllowlistEntryStatusByAddress(
+      tokenId,
+      parsed.data.mint.destination
+    );
+    if (existingStatus === "revoked") {
+      throw new AppError("DESTINATION_REVOKED");
+    }
+    const listAddress = assertValidAddress(ablListAddress, "ablListAddress");
+    if (!(await mosaic.isWalletOnList(listAddress, destination))) {
+      throw new AppError("NOT_ON_TOKEN_ALLOWLIST");
+    }
+  }
 
   const prepared = await mosaic.prepareMintTo({
     mint: mintAddress,
@@ -335,7 +336,7 @@ export const prepareMint = async (c: AppContext) => {
       destination: parsed.data.mint.destination,
       amount: parsed.data.mint.amount,
       mode: "prepare",
-      addedToAllowlist,
+      addedToAllowlist: false,
     },
   });
 

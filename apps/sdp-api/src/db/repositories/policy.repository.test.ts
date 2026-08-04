@@ -90,6 +90,24 @@ describe("PolicyRepository (postgres)", () => {
     repo = createPostgresPolicyRepository(getDb(env), TEST_SCOPE);
   });
 
+  it("resolves a project API key creator from an organization-scoped approval check", async () => {
+    const organizationRepo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: null })
+    );
+    const foreignOrganizationRepo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: "org_policy_foreign", projectId: null })
+    );
+
+    await expect(organizationRepo.getApiKeyCreatorUserId(TEST_API_KEY.id)).resolves.toBe(
+      TEST_USER.id
+    );
+    await expect(
+      foreignOrganizationRepo.getApiKeyCreatorUserId(TEST_API_KEY.id)
+    ).resolves.toBeNull();
+  });
+
   it("resolves implicit default allow when no customer-authored profiles exist", async () => {
     const service = policyStores(repo);
 

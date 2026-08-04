@@ -3537,11 +3537,9 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(200);
     });
 
-    // When an allowlist token has on-chain ABL active (ablListAddress populated),
-    // mint to a fresh destination auto-adds the wallet to the on-chain list and
-    // mirrors it into token_allowlists, instead of rejecting with
-    // NOT_ON_TOKEN_ALLOWLIST. Without this, the SDK's permissionless-thaw step
-    // fails because the destination ATA is frozen and not on the on-chain list.
+    // The execute route may auto-add a destination to an on-chain ABL after
+    // policy enforcement. The prepare route is deliberately read-only and only
+    // succeeds when the destination is already on-chain.
     describe("on-chain allowlist auto-add on mint", () => {
       const ablList = TEST_SOLANA_ADDRESSES.wallet3;
       const signerAddress = TEST_SOLANA_ADDRESSES.wallet2;
@@ -3568,7 +3566,7 @@ describe("Issuance Routes", () => {
           .run();
       };
 
-      it("auto-adds destination to on-chain allowlist on prepare mint", async () => {
+      it("rejects prepare mint without mutating an absent on-chain allowlist entry", async () => {
         await seedAblListAddress();
 
         const createOrgSignerSpy = vi
@@ -3600,13 +3598,11 @@ describe("Issuance Routes", () => {
             env
           );
 
-          expect(res.status).toBe(200);
-          expect(addToListSpy).toHaveBeenCalledTimes(1);
-          expect(addToListSpy).toHaveBeenCalledWith({
-            list: ablList,
-            wallet: freshDestination,
-          });
-          expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as { error: { code: string } };
+          expect(body.error.code).toBe("NOT_ON_TOKEN_ALLOWLIST");
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(prepareMintToSpy).not.toHaveBeenCalled();
 
           const entry = await getDb(env)
             .prepare(
@@ -3614,26 +3610,7 @@ describe("Issuance Routes", () => {
             )
             .bind(allowlistTokenId, freshDestination)
             .first<{ id: string }>();
-          expect(entry?.id).toMatch(/^tal_/);
-
-          const body = (await res.json()) as { data: { transaction: { id: string } } };
-          const transactionId = body.data.transaction.id;
-          const audit = await getDb(env)
-            .prepare(
-              `SELECT metadata FROM audit_logs
-               WHERE action = 'mint' AND resource_type = 'token_transaction'
-                 AND resource_id = ?
-               LIMIT 1`
-            )
-            .bind(transactionId)
-            .first<{ metadata: string }>();
-          expect(audit).not.toBeNull();
-          const meta = JSON.parse(audit?.metadata ?? "{}") as {
-            mode: string;
-            addedToAllowlist: boolean;
-          };
-          expect(meta.mode).toBe("prepare");
-          expect(meta.addedToAllowlist).toBe(true);
+          expect(entry).toBeNull();
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
@@ -3642,21 +3619,18 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("reports addedToAllowlist when the on-chain add errors but membership is confirmed", async () => {
+      it("prepares for an existing on-chain entry without mutating the DB mirror", async () => {
         await seedAblListAddress();
 
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
           .mockResolvedValueOnce({ address: signerAddress } as never);
-        // First check (before add) sees the wallet absent; the recheck after the
-        // add error sees it present — the transient-error / TOCTOU recovery path.
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
-          .mockResolvedValueOnce(false)
           .mockResolvedValueOnce(true);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
-          .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
+          .mockResolvedValueOnce(undefined as never);
         const prepareMintToSpy = vi
           .spyOn(MosaicService.prototype, "prepareMintTo")
           .mockResolvedValueOnce(mockPreparedMint as never);
@@ -3678,7 +3652,7 @@ describe("Issuance Routes", () => {
           );
 
           expect(res.status).toBe(200);
-          expect(addToListSpy).toHaveBeenCalledTimes(1);
+          expect(addToListSpy).not.toHaveBeenCalled();
           expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
 
           const entry = await getDb(env)
@@ -3687,7 +3661,7 @@ describe("Issuance Routes", () => {
             )
             .bind(allowlistTokenId, freshDestination)
             .first<{ id: string }>();
-          expect(entry?.id).toMatch(/^tal_/);
+          expect(entry).toBeNull();
 
           const body = (await res.json()) as { data: { transaction: { id: string } } };
           const transactionId = body.data.transaction.id;
@@ -3705,7 +3679,7 @@ describe("Issuance Routes", () => {
             addedToAllowlist: boolean;
           };
           expect(meta.mode).toBe("prepare");
-          expect(meta.addedToAllowlist).toBe(true);
+          expect(meta.addedToAllowlist).toBe(false);
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
@@ -3726,9 +3700,9 @@ describe("Issuance Routes", () => {
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockResolvedValueOnce(undefined as never);
-        const prepareMintToSpy = vi
-          .spyOn(MosaicService.prototype, "prepareMintTo")
-          .mockResolvedValueOnce(mockPreparedMint as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
 
         // First call: simulate a parallel request having beaten us to the INSERT
         // — we don't own the row. Second call (the re-assert) succeeds, modeling
@@ -3750,7 +3724,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -3767,12 +3741,12 @@ describe("Issuance Routes", () => {
           expect(res.status).toBe(200);
           expect(addToListSpy).toHaveBeenCalledTimes(1);
           expect(addAllowlistEntryStrictSpy).toHaveBeenCalledTimes(2);
-          expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
-          prepareMintToSpy.mockRestore();
+          mintToSpy.mockRestore();
           addAllowlistEntryStrictSpy.mockRestore();
         }
       });
@@ -4406,13 +4380,13 @@ describe("Issuance Routes", () => {
           .spyOn(MosaicService.prototype, "addToList")
           .mockRejectedValueOnce(new Error("RPC confirmation timeout"))
           .mockResolvedValueOnce(undefined as never);
-        const prepareMintToSpy = vi
-          .spyOn(MosaicService.prototype, "prepareMintTo")
-          .mockResolvedValueOnce(mockPreparedMint as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
 
         try {
           const failedRes = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -4440,7 +4414,7 @@ describe("Issuance Routes", () => {
           // Retry on the same address with the on-chain add succeeding must
           // not be blocked by a stale "revoked" row from the prior rollback.
           const retryRes = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -4466,7 +4440,7 @@ describe("Issuance Routes", () => {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
-          prepareMintToSpy.mockRestore();
+          mintToSpy.mockRestore();
         }
       });
 
@@ -4498,11 +4472,11 @@ describe("Issuance Routes", () => {
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(false);
         const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
-        const prepareMintToSpy = vi.spyOn(MosaicService.prototype, "prepareMintTo");
+        const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -4530,13 +4504,13 @@ describe("Issuance Routes", () => {
 
           // The mint must not have proceeded any further on-chain.
           expect(addToListSpy).not.toHaveBeenCalled();
-          expect(prepareMintToSpy).not.toHaveBeenCalled();
+          expect(mintToSpy).not.toHaveBeenCalled();
         } finally {
           statusSpy.mockRestore();
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
-          prepareMintToSpy.mockRestore();
+          mintToSpy.mockRestore();
         }
       });
     });
