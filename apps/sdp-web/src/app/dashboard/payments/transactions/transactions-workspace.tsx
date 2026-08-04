@@ -18,6 +18,7 @@ import {
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
+import { DateRangePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
@@ -117,14 +118,16 @@ function AssetFilter({ value, onChange }: { value: string; onChange: (value: str
 function FieldWithLabel({
   htmlFor,
   label,
+  className,
   children,
 }: {
   htmlFor?: string;
   label: string;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="min-w-0">
+    <div className={cn("min-w-0", className)}>
       {htmlFor ? (
         <label htmlFor={htmlFor} className="mb-1 block text-tertiary text-xs">
           {label}
@@ -283,29 +286,18 @@ function AdvancedFilters({
         ))}
       </SelectFilter>
       <AssetFilter value={assetValue} onChange={onAssetChange} />
-      {/* Every Select in this grid names itself through its "All …" option. The
-          date inputs only had an invisible aria-label, so they read as two
-          unexplained dd/mm/yyyy boxes. Visible captions put them on the same
-          footing without changing what they accept. */}
+      {/* The range keeps the API's separate from/to values while presenting one
+          connected selection, so users cannot accidentally invert the dates. */}
       <FieldWithLabel
-        htmlFor="transactions-from"
-        label={t("DashboardPayments.transactions.fromDate")}
+        htmlFor="transactions-date-range"
+        label={t("Shared.SharedComponents.dateRange")}
+        className="xl:col-span-2"
       >
-        <Input
-          id="transactions-from"
-          type="date"
-          value={filters.from ?? ""}
-          onChange={(event) => updateFilters({ from: event.target.value || undefined })}
-          max={filters.to || undefined}
-        />
-      </FieldWithLabel>
-      <FieldWithLabel htmlFor="transactions-to" label={t("DashboardPayments.transactions.toDate")}>
-        <Input
-          id="transactions-to"
-          type="date"
-          value={filters.to ?? ""}
-          onChange={(event) => updateFilters({ to: event.target.value || undefined })}
-          min={filters.from || undefined}
+        <DateRangePicker
+          id="transactions-date-range"
+          from={filters.from ?? ""}
+          to={filters.to ?? ""}
+          onChange={(from, to) => updateFilters({ from: from || undefined, to: to || undefined })}
         />
       </FieldWithLabel>
       {/* Spans the row so the switch is not mistaken for another dropdown.
