@@ -435,12 +435,9 @@ function RawDataDetails({
       <AnimatePresence>
         {open ? (
           <HeightReveal key="raw-rule-data">
-            <JsonCodeBlock
-              value={value}
-              title={filename}
-              className="mt-3"
-              viewportClassName="max-h-96"
-            />
+            <div className="pt-3">
+              <JsonCodeBlock value={value} title={filename} viewportClassName="max-h-96" />
+            </div>
           </HeightReveal>
         ) : null}
       </AnimatePresence>
