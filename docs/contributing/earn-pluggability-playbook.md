@@ -67,7 +67,8 @@ not by hand-maintained inserts.
 
 **Add.** Nothing manual on the happy path: the catalogue-sync cron
 (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`, hourly, registered in
-`cron/runner.ts` behind `EARN_ENABLED`) calls each provider's
+`cron/runner.ts` behind `isEarnEnabled` — `MARKETS_ENABLED` **and**
+`EARN_ENABLED`, both off by default) calls each provider's
 `listStrategies` per environment, validates every snapshot against the
 provider's `declaredSupport` (fail-closed — out-of-envelope snapshots are
 warn-logged and skipped, not persisted), and upserts via `upsertStrategy`
@@ -79,9 +80,13 @@ being a `NOT_IMPLEMENTED` stub) never sinks the others' pass.
 
 ```bash
 pnpm -C apps/sdp-api db:seed:earn                            # sandbox catalogue + NAV history
-pnpm -C apps/sdp-api db:seed:earn -- --environment production
+pnpm -C apps/sdp-api db:seed:earn -- --days 30               # longer NAV history
 pnpm -C apps/sdp-api db:seed:earn -- --clean                 # remove seeded rows again
 ```
+
+The seed is **local-development only**: it refuses any non-local
+`DATABASE_URL` and only ever writes `sandbox` fixtures (there is no
+`--environment production` — passing it exits with an error).
 
 The script (`apps/sdp-api/scripts/seed-earn-demo.ts`) writes through the same
 `upsertStrategy`/`insertNavSnapshot` API and declared-support validation the
@@ -203,6 +208,12 @@ provider actually offers it.
 Doppler before anything can talk to Ground's sandbox — until it does, the
 provider is `configured: false` and every call fails closed with
 `PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't care).
+
+**Reaching Earn at all needs both module flags:** `MARKETS_ENABLED` (parent)
+and `EARN_ENABLED` (child) are off by default in *every* environment, local dev
+included — there is no development default-on. Without both, `/v1/earn` answers
+403 and the dashboard segment `notFound()`s. Set them for `sdp-api` **and**
+`sdp-web` (same unprefixed names; see each app's `.env.local.example`).
 
 ## 5. Custodian seam — "add Anchorage/Fireblocks to Earn"
 

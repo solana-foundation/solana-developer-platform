@@ -6,6 +6,9 @@ reintroduce fixture modules. Data flows: BFF proxies
 
 ## Module map
 
+- `layout.tsx` — the `earn()` flag gate (`notFound()`); `../layout.tsx` gates the
+  whole Markets module the same way. Pages hold no flag checks — add new Earn
+  routes under this segment and they inherit both gates.
 - `earn-workspace.tsx` — overview: portfolio stat strip (total / earned /
   withdrawable), positions grouped by curator (compact disclosure rows),
   curator-grid onboarding hero (only when no program exists), withdraw entry.
@@ -26,6 +29,12 @@ reintroduce fixture modules. Data flows: BFF proxies
 
 ## Rules
 
+- **Flags: declare in `src/flags.ts`, gate by segment.** `markets`
+  (`MARKETS_ENABLED`) and `earn` (`EARN_ENABLED`) are `flagDefault(..., false)`
+  declarations next to the `privateChannels` precedent, resolved in the
+  dashboard layout and enforced only by the segment layouts above. A bespoke env
+  helper, a `process.env` read, or a `NEXT_PUBLIC_*` twin is wrong (the deleted
+  `lib/earn-feature.ts` was all three).
 - **i18n: English only.** Edit `messages/en/dashboard-earn.json`; NEVER touch
   `messages/fr/*` (CI Translation Catalog Policy fails the branch).
 - **Solana-only surface**: only Solana deposit addresses/destinations render.
@@ -35,3 +44,11 @@ reintroduce fixture modules. Data flows: BFF proxies
 - Provider-unconfigured (503) must degrade to the quiet notice, never crash.
 - Tests: vitest; mock the BFF fetch layer (see earn-workspace.unit.test.tsx),
   not internals. Run: `pnpm exec vitest run src/app/dashboard/markets/earn`.
+
+## Running this locally
+
+The web app alone shows nothing useful: the module needs the API, Postgres,
+Redis, the flags, and (for live data) a Ground sandbox key. Full runbook —
+ports, env, catalogue data, org entitlement, troubleshooting table:
+`packages/sdp-earn/CLAUDE.md` → "Local development". Ground's on-chain flow and
+the custody boundary (SDP never signs): `packages/sdp-earn/README.md`.

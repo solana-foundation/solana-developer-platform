@@ -10,8 +10,8 @@ curators, or new vaults) is a contained, checklist-driven change.
 Companion docs:
 
 - [ADR 0002 — Earn provider pluggability](../../docs/decisions/0002-earn-provider-pluggability.md)
-  (the invariants; includes dated addenda for the backend hardening and the
-  Ground portfolio-wallet integration)
+  (the invariants; includes dated addenda for the backend hardening, the
+  Ground portfolio-wallet integration, and the Markets/Earn flag hierarchy)
 - [Earn V1 data flow](../../docs/architecture/earn-v1-data-flow.md) (sequence
   diagrams for catalogue sync, program upsert, funding, withdrawal)
 - [Earn pluggability playbook](../../docs/contributing/earn-pluggability-playbook.md)
@@ -60,6 +60,104 @@ Credentials: `GROUND_SANDBOX_API_KEY` (sandbox) / `GROUND_API_KEY`
 present every call **fails closed** with `PROVIDER_NOT_CONFIGURED` before any
 network request, and the dashboard shows a quiet "provider key not configured"
 state.
+
+## Ground portfolio wallets: keys, on-chain flow, and what SDP does not do
+
+This is the part to understand before touching deposits or withdrawals.
+
+### What a portfolio wallet is
+
+One Ground portfolio wallet = one org's shared Earn program (SDP stores the
+handle in `earn_provider_wallets`). It is an **on-chain custodial address** that
+holds both idle stablecoins and the yield-bearing positions bought with them.
+Its **private keys live in Turnkey**, and Ground signs against the wallet's
+configured Turnkey policies — Ground states it never holds raw signing keys.
+Ground provisions **per-chain deposit addresses**; SDP surfaces only the Solana
+one (`solana_devnet` in sandbox, `solana` in production).
+
+### The on-chain contract stack
+
+| Component | Role |
+|---|---|
+| **Portfolio Wallet** | Holds cash + yield positions; the address customers fund |
+| **MasterRouter** | Executes allocation and withdrawal actions |
+| **AdapterRegistry** | Maps an approved yield source to its adapter |
+| **Protocol Adapters** | Direct DeFi integrations (Morpho, Kamino, Aave, …) |
+| **Ground RWA Vaults** | RWA sources; **async**, and they issue a wallet-specific *non-transferable* Ground receipt rather than the underlying instrument |
+
+### Deposits are two-phase (this is why `cash` exists)
+
+1. A customer sends USDC/USDT on Solana to the wallet's deposit address —
+   an ordinary SPL transfer, initiated from **their** custody (Fireblocks,
+   Anchorage, …). SDP builds and signs nothing.
+2. Ground detects it and the funds land as **cash** in the portfolio wallet.
+3. A **later Ground-managed rebalance** deploys that cash per the strategy
+   weights: `Portfolio Wallet → MasterRouter → AdapterRegistry → Protocol
+   Adapter → protocol` (the yield-bearing token stays in the portfolio wallet),
+   or `→ Ground RWA Vault → RWA provider` for RWA sources.
+
+So a fresh deposit legitimately shows as **cash, not yet earning**, until the
+rebalance runs. Our `EarnPortfolioPositionKind` values map directly onto these
+real on-chain states:
+
+| Position kind | On-chain meaning |
+|---|---|
+| `cash` | Received, not yet deployed (awaiting rebalance) |
+| `yield_source` | Deployed into a yield source; token held by the wallet |
+| `bridge` | Mid-flight across a CCTP domain |
+| `external_payout` | Leaving toward a withdrawal destination |
+| `unknown` | Forward-compatible fallback (never guess) |
+
+### Cross-chain: token lanes are preserved
+
+Ground never converts between USDC and USDT. USDC may bridge **within CCTP
+domains**; USDT stays on Ethereum. That is why USDT is production-only in our
+declared support, and why `bridge` is a first-class position kind. SDP's product
+surface stays Solana-only — the other chains are provider plumbing.
+
+### Withdrawals unwind in reverse — and need an approval we have NOT built
+
+Redemption reverses the flow: vaults settle, the wallet claims stablecoin, and
+Ground pays out to the destination address. Payout legs may settle at different
+times, and **each leg requires its own approval**.
+
+> **Known gap.** Ground's approval model is customer-controlled Turnkey signing:
+> *"Ground does not stamp the Turnkey approval for you."* The customer's signer
+> produces the stamp off Ground's servers via
+> `GET /v2/turnkey/activities/pending` →
+> `POST /v2/turnkey/activity-approval-request` → local stamp →
+> `POST /v2/turnkey/activities/{activityId}/vote`.
+> **`GroundEarnClient` implements none of those.** We submit
+> `POST …/withdrawals` and poll status, so a submitted withdrawal may park in
+> pending approval. Ground's docs do not say whether customer-side signing is
+> mandatory or only applies when signing keys are configured, nor what a new
+> wallet defaults to. Resolve empirically — create a sandbox wallet, submit a
+> withdrawal, observe — before anyone relies on the exit path.
+
+### Custody boundary (say this out loud to customers)
+
+SDP never holds keys, never signs, and never constructs a transfer in V1.
+Funding is customer-initiated from their own custody to a stable address they
+whitelist once; withdrawals return to a Solana address they control. **While
+deployed, funds sit in Ground's Turnkey-managed wallet, not the customer's
+custodian** — that is inherent to an omnibus portfolio-wallet product and is a
+compliance decision for mandates that require assets to stay with a qualified
+custodian. Future work (documented in ADR 0002) is initiating the funding
+transfer in-flow via the customer's connected Fireblocks workspace; Anchorage is
+lifecycle-only in SDP's signing registry today and would need adapter work.
+
+## Rollout gating (pre-release)
+
+Earn is the child in a two-level module flag hierarchy: `MARKETS_ENABLED`
+(parent — the whole Markets module) and `EARN_ENABLED` (child — the Earn
+sub-module). Earn needs **both**, and both default to **false** everywhere, so
+a deployed environment stays dark until it is switched on. `sdp-api` and
+`sdp-web` read the same unprefixed names; there is no `NEXT_PUBLIC_*` twin.
+API-side the hierarchy is owned by `isEarnEnabled`
+(`apps/sdp-api/src/lib/feature-flags.ts`); web-side the two flags declared in
+`apps/sdp-web/src/flags.ts` gate the nested route segments
+(`dashboard/markets/layout.tsx` → `markets/earn/layout.tsx`). The flags are
+module visibility, not the provider on/off lever — see the ADR 0002 addendum.
 
 ## Architecture: where everything lives
 
@@ -119,6 +217,65 @@ apps/sdp-web/src/app/
                                    helpers. All live data — no mocks.
   api/dashboard/markets/earn/      BFF proxies to /v1/earn/*.
 ```
+
+## Catalogue data: the sync cron vs the dev seed
+
+Two things write `earn_strategies`, and only one of them is a production path.
+
+### The sync cron — the production path
+
+`apps/sdp-api/src/cron/earn-catalogue-sync.ts`
+
+- **What it does:** walks every client in `EARN_PROVIDER_CLIENTS`, calls
+  `listStrategies` per environment (sandbox + production), validates each row
+  against the provider's declared support, and upserts on
+  `(provider, provider_reference, environment)`.
+- **When it runs:** hourly (`EARN_CATALOGUE_SYNC_CRON = "0 * * * *"`), and it is
+  **registered only when the Markets/Earn flag gate passes** (`isEarnEnabled` in
+  `cron/runner.ts`) — so it is completely inert in a flag-off environment.
+- **Failure behaviour:** per-provider isolation. `NOT_IMPLEMENTED` and
+  `PROVIDER_NOT_CONFIGURED` are info-level skips (that is the normal state for
+  the stub providers); any other error is logged for that provider and never
+  sinks the others.
+- **Adding a provider needs no cron change** — it is registry-driven.
+- **To change cadence:** edit `EARN_CATALOGUE_SYNC_CRON`.
+- **Known limitations:** the sync re-asserts `status = 'active'` for any row the
+  provider still lists, so a hand-paused-but-still-listed strategy reverts on the
+  next pass; and rows a provider *delists* keep their last status (there is no
+  deactivation-of-missing-rows pass yet).
+
+### The dev seed — local development only
+
+`apps/sdp-api/scripts/seed-earn-demo.ts` (`pnpm -C apps/sdp-api db:seed:earn`)
+
+- **Local only, enforced.** It refuses any `DATABASE_URL` whose host is not
+  `localhost` / `127.0.0.1` / `::1`, and it only ever writes `sandbox` fixtures
+  (the old `--environment production` flag is gone and now exits with an error).
+  It is never run by CI or any deploy.
+- **Why it exists:** browse a populated catalogue without a Ground API key and
+  without waiting for the cron; deterministic data for demos and UI work.
+- **What it seeds:** 10 fixtures whose ids/names/APYs/liquidity/curators mirror
+  Ground's real sandbox catalogue (so local dev looks like production), plus NAV
+  history, plus exactly one **paused** row (`ground-jtrsy-usdc-vault`) that
+  exercises the ADR 0002 exit-safety split — deposits blocked, withdrawals still
+  quotable.
+- **Fixtures are labelled, never confused with real data:** every seeded row
+  carries the `seed-demo-` `provider_reference` prefix and
+  `riskMetadata.seedFixture`. `--clean` deletes **only** prefixed rows, so it can
+  never remove a row the live cron synced.
+- **Commands**
+
+  ```bash
+  DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm -C apps/sdp-api db:seed:earn
+  DATABASE_URL=... pnpm -C apps/sdp-api db:seed:earn -- --days 30   # longer NAV history
+  DATABASE_URL=... pnpm -C apps/sdp-api db:seed:earn -- --clean     # remove the fixtures
+  ```
+
+  Idempotent: re-running upserts in place (ids stay stable, no duplicates).
+- **When *not* to use it:** never against a shared or deployed database. If you
+  have a Ground sandbox key, prefer the real cron path — and note that running
+  both leaves near-twin rows in your local DB (same names, different reference
+  prefix); `--clean` removes the fixtures and leaves the synced rows.
 
 ## Invariants (do not break)
 

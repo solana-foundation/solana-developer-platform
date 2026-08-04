@@ -172,3 +172,36 @@ capability slots in without burdening providers that lack it.
 
 Operational checklists (provider / vault / category / custodian) live in the
 [Earn pluggability playbook](../contributing/earn-pluggability-playbook.md).
+
+## Addendum — 2026-08-04 Markets/Earn flag hierarchy
+
+The single `EARN_ENABLED` switch listed under enable/disable above is now a
+two-level hierarchy, because Earn ships as a sub-module of Markets and the
+whole module has to be able to go dark in one move:
+
+- **Parent and child.** `MARKETS_ENABLED` gates the entire Markets module;
+  `EARN_ENABLED` gates the Earn sub-module inside it. Earn requires **both**,
+  so clearing the parent darkens every Markets surface at once. Both default to
+  **false** everywhere — Markets is pre-release and must stay dark in deployed
+  environments until explicitly switched on.
+- **One name per flag, shared by both apps.** `sdp-api` and `sdp-web` read the
+  same unprefixed variable names (the `PRIVATE_CHANNELS_ENABLED` pattern — the
+  other sub-module flag). There is no `NEXT_PUBLIC_*` twin: the bespoke web
+  helper that used one (`apps/sdp-web/src/lib/earn-feature.ts`) is deleted,
+  along with its `development` default-on behavior.
+- **API: the hierarchy lives in one function.** `isEarnEnabled`
+  (`apps/sdp-api/src/lib/feature-flags.ts`) requires `isMarketsEnabled(env)`
+  before it reads `EARN_ENABLED`. Callers (`routes/earn/index.ts`,
+  `cron/runner.ts`) hand it `env` and check nothing else — a second Markets
+  check at a call site is drift, not defence in depth.
+- **Web: declared flags, gated by route segment.** Both flags are declared in
+  `apps/sdp-web/src/flags.ts` (`markets` / `earn`, `flagDefault(..., false)`),
+  resolved server-side in the dashboard layout, and enforced by `notFound()` in
+  segment layouts — `dashboard/markets/layout.tsx` wrapping
+  `markets/earn/layout.tsx`, so segment nesting reproduces the hierarchy and
+  pages hold no flag checks.
+- **Not an exit-safety lever.** These flags are pre-release module visibility:
+  with the parent off, `/v1/earn` 403s reads and withdrawals alike. They are
+  not how you stop a provider that holds customer funds — that remains the
+  org entitlement override, which by the invariants above keeps money-out
+  working.

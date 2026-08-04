@@ -34,7 +34,10 @@ invariants.
 
 ## Conventions
 
-- `EARN_ENABLED` flag gates the whole family (index.ts).
+- `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
+  Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so
+  clearing that one flag darkens every Markets API surface. Both default off.
+  Never re-check Markets in a handler; the hierarchy lives in `isEarnEnabled`.
 - Zod schemas in schemas.ts; parse/paginate/envelope helpers in
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for
@@ -42,6 +45,10 @@ invariants.
 - Provider ids from DB rows are open strings — always dispatch via
   `resolveEarnProviderClient`.
 - Catalogue writes happen ONLY via the sync cron
-  (`src/cron/earn-catalogue-sync.ts`) and the dev seed (`db:seed:earn`).
+  (`src/cron/earn-catalogue-sync.ts` — the production path) and the dev seed
+  (`db:seed:earn` — local only, refuses non-local databases). Cadence, failure
+  behaviour, and which to use: `packages/sdp-earn/README.md` → "Catalogue data".
+- Whole-stack local setup (ports, flags, Ground key, entitlement, troubleshooting):
+  `packages/sdp-earn/CLAUDE.md` → "Local development".
 - Tests: vitest; stub `EARN_PROVIDER_CLIENTS.<id>` methods with `vi.spyOn`;
   repository tests use testcontainers.
