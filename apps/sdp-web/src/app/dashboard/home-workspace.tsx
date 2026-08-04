@@ -26,7 +26,9 @@ import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "./activity-format-utils";
 import { buildHomeBalanceBreakdown, countHeldTokens } from "./home-balance-breakdown";
+import { resolveHomeHeroState } from "./home-first-run";
 import type { HomeActivityExplorerRef, HomeActivityRow } from "./home-page.data";
+import { HomeQuickActions } from "./home-quick-actions";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { fetchHomeActivity } from "./home-workspace.data";
 import {
@@ -301,6 +303,7 @@ function BalanceHero({
   totalBalance,
   totalBalanceError,
   totalBalanceHint,
+  hasPricedValue,
   todaysVolume,
   todaysVolumeError,
   walletCount,
@@ -313,6 +316,7 @@ function BalanceHero({
   totalBalance: number | null;
   totalBalanceError: string | null;
   totalBalanceHint: string | null;
+  hasPricedValue: boolean;
   todaysVolume: number | null;
   todaysVolumeError: string | null;
   walletCount: number;
@@ -329,14 +333,31 @@ function BalanceHero({
         <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
           <div className="min-w-0 space-y-2">
             <p className="text-[15px] text-tertiary">{t("Shared.homeWorkspace.totalBalance")}</p>
-            <p className="text-[38px] leading-none font-medium tracking-[-0.03em] text-primary tabular-nums sm:text-[46px]">
-              {totalBalanceError
-                ? t("Shared.homeWorkspace.unavailable")
-                : formatCurrencyAmount(totalBalance, locale)}
-            </p>
+            {/* An organization holding only its own issued tokens has no price feed
+                for anything it owns. Formatting that as currency printed $0.00 next
+                to real holdings, which reads as a broken number rather than an
+                absent one. */}
+            {totalBalanceError ? (
+              <p className="text-[38px] leading-none font-medium tracking-[-0.03em] text-primary tabular-nums sm:text-[46px]">
+                {t("Shared.homeWorkspace.unavailable")}
+              </p>
+            ) : hasPricedValue ? (
+              <p className="text-[38px] leading-none font-medium tracking-[-0.03em] text-primary tabular-nums sm:text-[46px]">
+                {formatCurrencyAmount(totalBalance, locale)}
+              </p>
+            ) : (
+              <>
+                <p className="text-[22px] leading-tight font-medium tracking-[-0.02em] text-primary">
+                  {t("Shared.homeWorkspace.heroUnpricedTitle")}
+                </p>
+                <p className="text-sm text-tertiary">
+                  {t("Shared.homeWorkspace.heroUnpricedBody")}
+                </p>
+              </>
+            )}
             {totalBalanceError ? (
               <p className="text-sm text-destructive-strong">{totalBalanceError}</p>
-            ) : totalBalanceHint ? (
+            ) : totalBalanceHint && hasPricedValue ? (
               <p className="text-sm text-tertiary">{totalBalanceHint}</p>
             ) : null}
           </div>
@@ -444,6 +465,10 @@ export function HomeWorkspace({
   );
   const isWalletEmptyState = wallets.length === 0;
   const heldTokenCount = countHeldTokens(balances);
+  // Not `wallets.length === 0`: onboarding provisions a wallet before it completes,
+  // so a freshly onboarded organization already has one and fell through to the
+  // populated hero holding nothing.
+  const heroState = resolveHomeHeroState({ walletCount, balances, totalBalance });
   const totalBalanceHint = isWalletEmptyState
     ? t("Shared.homeWorkspace.createFirstWalletBalances")
     : totalBalance === null
@@ -472,13 +497,16 @@ export function HomeWorkspace({
   return (
     <div className="w-full space-y-8 py-2">
       <SectionEntry>
-        {isWalletEmptyState ? (
+        {heroState.kind === "first_run" ? (
           <FirstRunPanel canCreateWallet={dashboardAccess.capabilities.canManageCustody} />
+        ) : heroState.kind === "provisioned_empty" ? (
+          <HomeQuickActions capabilities={dashboardAccess.capabilities} />
         ) : (
           <BalanceHero
             totalBalance={totalBalance}
             totalBalanceError={totalBalanceError}
             totalBalanceHint={totalBalanceHint}
+            hasPricedValue={heroState.hasPricedValue}
             todaysVolume={todaysVolume}
             todaysVolumeError={todaysVolumeError}
             walletCount={walletCount}
