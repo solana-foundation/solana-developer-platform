@@ -44,7 +44,7 @@ import {
   type PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
-import { inferCluster, knownMintDecimals } from "@/services/private-channels/mint";
+import { inferCluster, knownMintToken } from "@/services/private-channels/mint";
 import { emitWithdrawalEvent } from "@/services/private-channels/withdraw-events";
 import type { Env } from "@/types/env";
 
@@ -303,14 +303,23 @@ async function reconcileReleaseGroup(
   }
 
   const cluster = inferCluster(group.instance.chain_rpc_url);
-  const decimals = knownMintDecimals(group.mint, cluster) ?? 6;
   const mint = address(group.mint);
 
-  // The release transfers FROM the instance escrow's classic-Token ATA on devnet.
+  // Content matching needs this mint's own scale AND its owning token program: the
+  // program seeds every ATA below, so guessing it would scan an address that never
+  // receives the release. Every mint SDP writes comes from the instance allowlist,
+  // so the catalogue resolves it; a row predating that (or a mint an operator
+  // allowlisted out of band) falls back to what all such rows are — classic SPL at
+  // six decimals.
+  const knownMint = knownMintToken(group.mint, cluster);
+  const decimals = knownMint?.decimals ?? 6;
+  const tokenProgram = address(knownMint?.tokenProgram ?? TOKEN_PROGRAM_ADDRESS);
+
+  // The release transfers FROM the instance escrow's ATA for this mint on devnet.
   const [vaultAta] = await findAssociatedTokenPda({
     owner: address(group.instance.escrow_instance_addr),
     mint,
-    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    tokenProgram,
   });
 
   const rpc = solanaRpc.createRpc(env, { rpcUrl: group.instance.chain_rpc_url });
@@ -335,7 +344,7 @@ async function reconcileReleaseGroup(
     const [destinationAta] = await findAssociatedTokenPda({
       owner: address(withdrawal.destination),
       mint,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenProgram,
     });
     const wantBaseUnits = parseDecimalAmount(withdrawal.amount, decimals);
 

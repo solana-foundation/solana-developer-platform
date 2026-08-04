@@ -2,9 +2,11 @@ import { auth } from "@clerk/nextjs/server";
 import type { OrganizationRpcProvider } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { isDeveloperControlsEnabled } from "@/lib/developer-controls";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
@@ -48,7 +50,11 @@ export default async function SettingsPage({
 }) {
   const membersPage = resolveMembersPage((await searchParams).membersPage);
 
-  const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
+  const [t, { userId, orgId, orgRole }, assetProfilesEnabled] = await Promise.all([
+    getTranslations(),
+    auth(),
+    assetProfiles(),
+  ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -179,7 +185,19 @@ export default async function SettingsPage({
 
       {/* Not permission-gated: the colour theme is a per-device personal preference,
           not organization state, so every role gets to set it. */}
-      <AppearanceSection />
+      {/* The asset-header controls tune a surface that is itself still behind the
+          asset-profiles flag, and they are ours to tune rather than a customer
+          setting — so they only appear where both hold. */}
+      <AppearanceSection
+        showAssetHeaderControls={
+          assetProfilesEnabled &&
+          isDeveloperControlsEnabled({
+            nodeEnvironment: process.env.NODE_ENV,
+            sdpEnvironment: process.env.NEXT_PUBLIC_SDP_ENVIRONMENT,
+            vercelEnvironment: process.env.VERCEL_ENV,
+          })
+        }
+      />
     </div>
   );
 }

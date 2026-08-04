@@ -23,6 +23,7 @@ const member: PrivateChannelUserDto = {
   userId: "user_sender",
   email: "sender@example.com",
   name: "Sender",
+  projectRole: "admin",
   verifiedWalletCount: 1,
   invitedAt: "2026-07-28T00:00:00.000Z",
   channels: [

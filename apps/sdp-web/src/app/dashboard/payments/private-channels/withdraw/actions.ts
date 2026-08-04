@@ -13,6 +13,8 @@ import { getAmountError } from "../amount-validation";
 export interface CreateWithdrawalInput {
   walletId: string;
   amount: string;
+  /** Selected token mint; forwarded as-is for the API to validate. */
+  mint?: string;
   destination?: string;
 }
 
@@ -45,6 +47,7 @@ export async function createWithdrawalAction(
     const withdrawal = await createPrivateChannelWithdrawal(client, {
       walletId: input.walletId,
       amount: input.amount,
+      ...(input.mint ? { mint: input.mint } : {}),
       ...(input.destination ? { destination: input.destination } : {}),
     });
     revalidatePath("/dashboard/payments/private-channels/withdraw");

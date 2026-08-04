@@ -7,15 +7,38 @@ import {
   type RampCurrencyLimit,
 } from "@sdp/types/payment-rails";
 
-let activeIso4217Currencies: Set<string> | undefined;
+let icuModernCurrencies: Set<string> | undefined;
 let countryDisplayNames: Intl.DisplayNames | undefined;
 
-function getActiveIso4217Currencies(): Set<string> {
-  if (activeIso4217Currencies === undefined) {
-    activeIso4217Currencies = new Set(Intl.supportedValuesOf("currency"));
+function getIcuModernCurrencies(): Set<string> {
+  if (icuModernCurrencies === undefined) {
+    icuModernCurrencies = new Set(Intl.supportedValuesOf("currency"));
   }
-  return activeIso4217Currencies;
+  return icuModernCurrencies;
 }
+
+/**
+ * Codes ICU still reports as modern currencies that no region tenders any more.
+ * `Intl.supportedValuesOf("currency")` answers "does CLDR carry this code", not
+ * "is this money" — it keeps a code for years past withdrawal — which is how
+ * currencies nobody can transact reached the pickers.
+ *
+ * Dates are when the last issuing region stopped tendering, per CLDR
+ * supplemental currencyData: cldr-json/cldr-core/supplemental/currencyData.json.
+ * Recheck after an ICU bump — a code is dead there when every region entry for
+ * it carries a `_to` date or is marked non-tender.
+ */
+const RETIRED_ISO_4217_CODES: ReadonlySet<string> = new Set([
+  "ANG", // to 2025-06-30 - Netherlands Antillean guilder, succeeded by XCG
+  "BGN", // to 2026-01-31 - Bulgarian lev, succeeded by EUR
+  "CUC", // to 2021-06-01 - Cuban convertible peso, succeeded by CUP
+  "HRK", // to 2023-01-14 - Croatian kuna, succeeded by EUR
+  "SLL", // to 2023-12-31 - Sierra Leonean leone, redenominated as SLE
+  "SVC", // to 2001-01-01 - Salvadoran colon, succeeded by USD
+  "ZWL", // to 2024-08-31 - Zimbabwean dollar, succeeded by ZWG
+  "XDR", // non-tender - IMF special drawing rights
+  "XSU", // non-tender - ALBA sucre, unit of account only
+]);
 
 function getCountryDisplayNames(): Intl.DisplayNames {
   if (countryDisplayNames === undefined) {
@@ -46,9 +69,14 @@ export const UNREPORTED_COUNTRY_SUPPORT = {
   coverage: "unreported",
 } as const satisfies RampCountrySupport;
 
+/** True only for currencies a counterparty can still be paid in today. */
 export function isActiveIso4217CurrencyCode(value: string): boolean {
   const normalized = value.trim().toUpperCase();
-  return /^[A-Z]{3}$/.test(normalized) && getActiveIso4217Currencies().has(normalized);
+  return (
+    /^[A-Z]{3}$/.test(normalized) &&
+    !RETIRED_ISO_4217_CODES.has(normalized) &&
+    getIcuModernCurrencies().has(normalized)
+  );
 }
 
 export function isIso3166Alpha2CountryCode(value: string): boolean {

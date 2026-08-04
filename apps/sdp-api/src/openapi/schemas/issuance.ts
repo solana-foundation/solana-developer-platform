@@ -889,6 +889,11 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
         "Whether transfers are restricted to allowlisted accounts. Only accepted while the token is undeployed (pending, no mint address); returns 400 after deployment.",
       example: true,
     }),
+    maxSupply: withOpenApi(updateTokenSchemaBase.shape.maxSupply, {
+      description:
+        "Updated maximum supply as a string (UI units); null removes the cap. Enforced by SDP at mint time while it holds the mint authority, so it is rejected with 400 once the supply is locked on-chain (mint authority revoked), and cannot be set below the already-minted supply.",
+      example: "1000000",
+    }),
   })
   .openapi({ description: "Update token request body." });
 
