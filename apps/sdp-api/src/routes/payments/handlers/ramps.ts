@@ -58,6 +58,7 @@ import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
+  approvedWalletOperationAttemptId,
   approvedWalletOperationId,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
@@ -270,7 +271,8 @@ async function enforceRampWalletOperationPolicy(
         ...(input.rawPayload ?? {}),
       },
     },
-    approvedWalletOperationId(c)
+    approvedWalletOperationId(c),
+    approvedWalletOperationAttemptId(c)
   );
 }
 

@@ -35,12 +35,16 @@ export async function enforceWalletOperationPolicy(
   env: Env,
   scope: TenantScope,
   input: CreateWalletOperationInput,
-  approvedOperationId?: string
+  approvedOperationId?: string,
+  approvedOperationAttemptId?: string
 ): Promise<WalletOperationPolicyEnforcement> {
   assertTenantClaim(scope, input, "enforceWalletOperationPolicy");
   const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope));
   if (approvedOperationId) {
-    return service.resumeApprovedOperation(approvedOperationId, input);
+    if (!approvedOperationAttemptId) {
+      throw new AppError("FORBIDDEN", "Approved wallet operation attempt is unavailable");
+    }
+    return service.resumeApprovedOperation(approvedOperationId, approvedOperationAttemptId, input);
   }
   return service.enforce(input);
 }
@@ -69,10 +73,17 @@ export class WalletPolicyEnforcementService {
 
   async resumeApprovedOperation(
     walletOperationId: string,
+    executionAttemptId: string,
     input: CreateWalletOperationInput
   ): Promise<WalletOperationPolicyEnforcement> {
     const operation = await this.repository.getWalletOperationById(walletOperationId);
-    if (operation?.status !== "executing" || operation.execution_started_at === null) {
+    if (
+      operation?.status !== "executing" ||
+      operation.execution_started_at === null ||
+      operation.execution_attempt_id !== executionAttemptId ||
+      !operation.execution_lease_expires_at ||
+      operation.execution_lease_expires_at <= new Date().toISOString()
+    ) {
       throw new AppError("FORBIDDEN", "Wallet operation approval is not executable");
     }
 

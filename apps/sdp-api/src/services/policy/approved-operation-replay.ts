@@ -2,13 +2,18 @@ import type { Permission } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
-import type { PolicyRepository, WalletOperationRow } from "@/db/repositories";
+import {
+  createPolicyRepository,
+  type PolicyRepository,
+  type WalletOperationRow,
+} from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 const REPLAY_HEADER = "x-sdp-approved-operation-replay";
+const EXECUTION_HEARTBEAT_MS = 30_000;
 const capabilities = new Map<
   string,
   { operationId: string; executionAttemptId: string; path: string }
@@ -35,6 +40,12 @@ export function walletOperationExecutionRequest(
 
 export function approvedWalletOperationId(c: Context<{ Bindings: Env }>): string | undefined {
   return c.get("approvedWalletOperationId");
+}
+
+export function approvedWalletOperationAttemptId(
+  c: Context<{ Bindings: Env }>
+): string | undefined {
+  return c.get("approvedWalletOperationAttemptId");
 }
 
 export async function tryApprovedOperationReplayAuth(
@@ -111,6 +122,7 @@ export async function tryApprovedOperationReplayAuth(
   }
 
   c.set("approvedWalletOperationId", capability.operationId);
+  c.set("approvedWalletOperationAttemptId", capability.executionAttemptId);
   return true;
 }
 
@@ -176,12 +188,12 @@ async function loadActiveApiKey(
 export async function executeApprovedWalletOperation(
   env: Env,
   repository: PolicyRepository,
-  operation: WalletOperationRow
-): Promise<void> {
+  operation: Pick<WalletOperationRow, "id" | "project_id">
+): Promise<boolean> {
   const executionAttemptId = crypto.randomUUID();
   const claimed = await repository.claimWalletOperationExecution(operation.id, executionAttemptId);
   if (!claimed) {
-    return;
+    return false;
   }
 
   let request: WalletOperationExecutionRequest;
@@ -194,11 +206,12 @@ export async function executeApprovedWalletOperation(
       status: "failed",
       error: errorMessage(error),
     });
-    return;
+    return true;
   }
 
   const token = crypto.randomUUID();
   capabilities.set(token, { operationId: operation.id, executionAttemptId, path: request.path });
+  const heartbeat = startExecutionLeaseHeartbeat(repository, operation.id, executionAttemptId);
   let response: Response;
   try {
     const [{ createApp }, { nodeObservability }] = await Promise.all([
@@ -218,20 +231,23 @@ export async function executeApprovedWalletOperation(
         method: request.method,
         headers,
         body: JSON.stringify(request.body),
+        signal: heartbeat.signal,
       }),
       env
     );
     capabilities.delete(token);
   } catch (error) {
     capabilities.delete(token);
+    await heartbeat.stop();
     await repository.completeWalletOperationExecution({
       walletOperationId: operation.id,
       executionAttemptId,
       status: "failed",
       error: errorMessage(error),
     });
-    return;
+    return true;
   }
+  await heartbeat.stop();
 
   const payload = await readResponsePayload(response);
   if (response.ok && response.status !== 202) {
@@ -241,7 +257,7 @@ export async function executeApprovedWalletOperation(
       status: "completed",
       result: payload,
     });
-    return;
+    return true;
   }
 
   const error = responseError(payload, response.status);
@@ -256,6 +272,80 @@ export async function executeApprovedWalletOperation(
     { walletOperationId: operation.id, status: response.status, error },
     "Approved wallet operation execution failed"
   );
+  return true;
+}
+
+export async function recoverApprovedWalletOperations(env: Env, limit = 25): Promise<number> {
+  const rows = await getDb(env)
+    .prepare(
+      `SELECT wo.id, wo.organization_id, wo.project_id
+       FROM wallet_operations wo
+       WHERE wo.status = 'executing'
+         AND (wo.execution_lease_expires_at IS NULL OR wo.execution_lease_expires_at <= ?)
+         AND EXISTS (
+           SELECT 1 FROM approval_requests ar
+           WHERE ar.wallet_operation_id = wo.id AND ar.status = 'approved'
+         )
+       ORDER BY wo.updated_at ASC, wo.id ASC
+       LIMIT ?`
+    )
+    .bind(new Date().toISOString(), limit)
+    .all<{ id: string; organization_id: string; project_id: string | null }>();
+
+  let recovered = 0;
+  for (const operation of rows.results) {
+    const repository = createPolicyRepository(
+      env,
+      createTenantScope({
+        organizationId: operation.organization_id,
+        projectId: operation.project_id,
+      })
+    );
+    if (await executeApprovedWalletOperation(env, repository, operation)) {
+      recovered += 1;
+    }
+  }
+  return recovered;
+}
+
+function startExecutionLeaseHeartbeat(
+  repository: PolicyRepository,
+  walletOperationId: string,
+  executionAttemptId: string
+) {
+  const controller = new AbortController();
+  let renewal: Promise<void> | null = null;
+  const timer = setInterval(() => {
+    if (renewal) {
+      return;
+    }
+    renewal = repository
+      .renewWalletOperationExecutionLease(walletOperationId, executionAttemptId)
+      .then((renewed) => {
+        if (!renewed) {
+          controller.abort(new Error("Approved-operation execution lease was lost"));
+        }
+      })
+      .catch((error) => {
+        getLogger().error(
+          { walletOperationId, executionAttemptId, error: errorMessage(error) },
+          "Approved wallet operation lease renewal failed"
+        );
+        controller.abort(error);
+      })
+      .finally(() => {
+        renewal = null;
+      });
+  }, EXECUTION_HEARTBEAT_MS);
+  timer.unref?.();
+
+  return {
+    signal: controller.signal,
+    async stop() {
+      clearInterval(timer);
+      await renewal;
+    },
+  };
 }
 
 function readExecutionRequest(operation: WalletOperationRow): WalletOperationExecutionRequest {

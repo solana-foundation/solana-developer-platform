@@ -1,7 +1,10 @@
 import type { Token } from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { approvedWalletOperationId } from "@/services/policy/approved-operation-replay";
+import {
+  approvedWalletOperationAttemptId,
+  approvedWalletOperationId,
+} from "@/services/policy/approved-operation-replay";
 import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
@@ -55,6 +58,7 @@ export async function enforceIssuanceWalletOperationPolicy(
         ...(input.rawPayload ?? {}),
       },
     },
-    approvedWalletOperationId(c)
+    approvedWalletOperationId(c),
+    approvedWalletOperationAttemptId(c)
   );
 }

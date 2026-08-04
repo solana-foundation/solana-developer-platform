@@ -33,6 +33,7 @@ import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -6392,12 +6393,7 @@ describe("Payments routes", () => {
       .bind(walletOperationId)
       .run();
 
-    const recoveredResponse = await app.request(
-      `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
-      { method: "POST", headers },
-      env
-    );
-    expect(recoveredResponse.status).toBe(200);
+    expect(await recoverApprovedWalletOperations(env)).toBe(1);
     const recovered = await repository.getWalletOperationById(walletOperationId);
     expect(recovered).toMatchObject({
       status: "completed",

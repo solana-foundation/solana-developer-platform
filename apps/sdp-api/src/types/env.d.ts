@@ -285,6 +285,7 @@ declare module "hono" {
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;
     approvedWalletOperationId?: string;
+    approvedWalletOperationAttemptId?: string;
     apiKey?: {
       id: string;
       organizationId: string;

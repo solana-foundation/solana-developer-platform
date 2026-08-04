@@ -47,6 +47,7 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import {
+  approvedWalletOperationAttemptId,
   approvedWalletOperationId,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
@@ -259,7 +260,8 @@ async function enforcePaymentTransferOperationPolicy(
       },
       rawPayload: input.rawPayload,
     },
-    approvedWalletOperationId(c)
+    approvedWalletOperationId(c),
+    approvedWalletOperationAttemptId(c)
   );
 }
 

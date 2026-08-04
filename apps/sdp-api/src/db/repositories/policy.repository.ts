@@ -587,6 +587,10 @@ export interface PolicyRepository {
     walletOperationId: string,
     executionAttemptId: string
   ): Promise<WalletOperationRow | null>;
+  renewWalletOperationExecutionLease(
+    walletOperationId: string,
+    executionAttemptId: string
+  ): Promise<boolean>;
   completeWalletOperationExecution(
     input: CompleteWalletOperationExecutionInput
   ): Promise<WalletOperationRow | null>;

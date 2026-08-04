@@ -1,6 +1,7 @@
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { assertWalletPolicyAllowsTransferWithRows } from "@/services/payments/wallet-policy";
 import {
+  approvedWalletOperationAttemptId,
   approvedWalletOperationId,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
@@ -61,7 +62,8 @@ export async function enforceBatchPolicies(
         executionRequest: walletOperationExecutionRequest(c, input),
       },
     },
-    approvedWalletOperationId(c)
+    approvedWalletOperationId(c),
+    approvedWalletOperationAttemptId(c)
   );
 
   try {

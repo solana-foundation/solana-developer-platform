@@ -21,6 +21,7 @@ import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import {
+  approvedWalletOperationAttemptId,
   approvedWalletOperationId,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
@@ -93,7 +94,14 @@ export const signerCheck = async (c: AppContext) => {
     },
   };
   const approvedOperationId = approvedWalletOperationId(c);
-  await enforceWalletOperationPolicy(c.env, policyScope, policyInput, approvedOperationId);
+  const attemptId = approvedWalletOperationAttemptId(c);
+  await enforceWalletOperationPolicy(
+    c.env,
+    policyScope,
+    policyInput,
+    approvedOperationId,
+    attemptId
+  );
 
   try {
     const signer = await createOrgSigner(

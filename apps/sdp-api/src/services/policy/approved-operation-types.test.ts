@@ -48,7 +48,7 @@ describe("approved wallet-operation type resumption", () => {
       execution_error: null,
       execution_result: null,
       execution_attempt_id: "attempt_1",
-      execution_lease_expires_at: "2026-08-04T00:10:00.000Z",
+      execution_lease_expires_at: "2099-08-04T00:10:00.000Z",
       execution_attempts: 1,
       created_at: "2026-08-04T00:00:00.000Z",
       updated_at: "2026-08-04T00:01:00.000Z",
@@ -85,6 +85,7 @@ describe("approved wallet-operation type resumption", () => {
 
     const result = await new WalletPolicyEnforcementService(repository).resumeApprovedOperation(
       operation.id,
+      "attempt_1",
       input
     );
 
