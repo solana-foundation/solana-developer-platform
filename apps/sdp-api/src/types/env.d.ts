@@ -277,7 +277,9 @@ export interface Env {
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
 
-  // Earn backend feature flag
+  // Markets module gate (parent) and its Earn sub-module gate (child). Earn
+  // needs both; clearing MARKETS_ENABLED dark-launches the whole module.
+  MARKETS_ENABLED?: string;
   EARN_ENABLED?: string;
 
   // Earn vault-infra provider configuration

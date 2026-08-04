@@ -19,7 +19,6 @@ import {
   DASHBOARD_SIDE_NAV_HREFS,
   isDashboardNavItemActive,
 } from "@/lib/dashboard-navigation-loading";
-import { isEarnUiEnabled } from "@/lib/earn-feature";
 import { cn } from "@/lib/utils";
 
 type MoreItem = { label: string; href: string; icon?: LucideIcon; external?: boolean };
@@ -31,17 +30,23 @@ type MoreGroup = { title: string; items: MoreItem[] };
  * The payments sub-actions are deliberately absent: the Payments tab already opens
  * a page carrying its own sub-navigation, so repeating Transactions, Pay, Deposit
  * and the rest here would be a second copy of a menu the destination already has.
- * Earn stays here because Markets does not have a dedicated bottom-bar destination.
+ * Earn stays here because Markets does not have a dedicated bottom-bar destination;
+ * it needs the Markets module flag as well as its own, matching the sidebar group.
  */
 function getMoreGroups(
   t: ReturnType<typeof useTranslations>,
-  options: { canReadApprovals: boolean; canManageOrgSettings: boolean }
+  options: {
+    canReadApprovals: boolean;
+    canManageOrgSettings: boolean;
+    earnEnabled: boolean;
+    marketsEnabled: boolean;
+  }
 ): MoreGroup[] {
   return [
     {
       title: t("Shared.dashboardShell.manage"),
       items: [
-        ...(isEarnUiEnabled()
+        ...(options.marketsEnabled && options.earnEnabled
           ? [
               {
                 label: t("Shared.dashboardShell.earn"),
@@ -137,15 +142,24 @@ export function DashboardMoreSheet({
   pathname,
   canReadApprovals,
   canManageOrgSettings,
+  earnEnabled,
+  marketsEnabled,
   onClose,
 }: {
   pathname: string;
   canReadApprovals: boolean;
   canManageOrgSettings: boolean;
+  earnEnabled: boolean;
+  marketsEnabled: boolean;
   onClose: () => void;
 }) {
   const t = useTranslations();
-  const groups = getMoreGroups(t, { canReadApprovals, canManageOrgSettings });
+  const groups = getMoreGroups(t, {
+    canReadApprovals,
+    canManageOrgSettings,
+    earnEnabled,
+    marketsEnabled,
+  });
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

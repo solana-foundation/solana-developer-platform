@@ -50,6 +50,7 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const VEDA_SANDBOX_KEY = "veda-sandbox-test-api-key";
 
+let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
 let originalVedaSandboxApiKey: string | undefined;
 
@@ -189,8 +190,11 @@ function postEarn(path: string, body: Record<string, unknown>) {
 }
 
 beforeEach(async () => {
+  originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
   originalVedaSandboxApiKey = env.VEDA_SANDBOX_API_KEY;
+  // Earn is a Markets sub-module, so both gates have to be on to reach a route.
+  env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   // Sandbox credentials so the provider-configured gates pass; provider HTTP
   // itself is stubbed per-test via EARN_PROVIDER_CLIENTS spies.
@@ -200,6 +204,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
   env.VEDA_SANDBOX_API_KEY = originalVedaSandboxApiKey;
   await clearTestDatabase(env);
@@ -209,6 +214,19 @@ afterEach(async () => {
 describe("Earn routes — feature flag gate", () => {
   it("returns 403 for /v1/earn routes while EARN_ENABLED is unset", async () => {
     env.EARN_ENABLED = undefined;
+    await seedAuth();
+
+    const res = await getEarn("/v1/earn/strategies");
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.message).toContain("Earn is not enabled");
+  });
+
+  it("returns 403 while MARKETS_ENABLED is off even though EARN_ENABLED is on", async () => {
+    // Regression: the parent Markets gate must kill the sub-module's routes.
+    env.MARKETS_ENABLED = undefined;
     await seedAuth();
 
     const res = await getEarn("/v1/earn/strategies");

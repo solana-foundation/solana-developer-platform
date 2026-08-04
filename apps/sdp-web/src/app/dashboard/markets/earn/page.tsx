@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { isEarnUiEnabled } from "@/lib/earn-feature";
 import { EarnWorkspace } from "./earn-workspace";
 
 export const dynamic = "force-dynamic";
@@ -13,10 +12,6 @@ export const dynamic = "force-dynamic";
  * earn-program-data.ts for the client seam).
  */
 export default async function EarnPage() {
-  if (!isEarnUiEnabled()) {
-    redirect("/dashboard");
-  }
-
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());

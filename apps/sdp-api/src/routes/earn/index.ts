@@ -24,7 +24,9 @@ import {
 const earn = new Hono<{ Bindings: Env }>();
 
 // Gate the whole family behind the Earn feature flag until it is ready for
-// prime time. Off by default; enable per-environment via EARN_ENABLED.
+// prime time. Off by default; enable per-environment with EARN_ENABLED plus its
+// parent MARKETS_ENABLED — isEarnEnabled owns that hierarchy, so no separate
+// markets check belongs here.
 async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
   if (!isEarnEnabled(c.env)) {
     throw new AppError("FORBIDDEN", "Earn is not enabled for this environment");

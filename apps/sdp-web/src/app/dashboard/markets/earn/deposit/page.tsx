@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { isEarnUiEnabled } from "@/lib/earn-feature";
 import { EarnDepositWizard } from "./earn-deposit-wizard";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +10,6 @@ interface EarnDepositPageProps {
 }
 
 export default async function EarnDepositPage({ searchParams }: EarnDepositPageProps) {
-  if (!isEarnUiEnabled()) {
-    redirect("/dashboard");
-  }
-
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());

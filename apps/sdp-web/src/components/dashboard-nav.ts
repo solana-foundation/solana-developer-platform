@@ -22,7 +22,6 @@ import {
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
 } from "@/lib/dashboard-navigation-loading";
-import { isEarnUiEnabled } from "@/lib/earn-feature";
 
 export type SubNavItem = {
   label: string;
@@ -115,14 +114,35 @@ export function getPaymentsActions(
   ];
 }
 
+/** Each Markets sub-module carries its own flag, so the group's children are whatever is enabled. */
+export function getMarketsActions(
+  t: ReturnType<typeof useTranslations>,
+  earnEnabled: boolean
+): SubNavItem[] {
+  return [
+    ...(earnEnabled
+      ? [
+          {
+            label: t("Shared.dashboardShell.earn"),
+            href: DASHBOARD_SIDE_NAV_HREFS.markets,
+          },
+        ]
+      : []),
+  ];
+}
+
 export function getNavSections(
   t: ReturnType<typeof useTranslations>,
   options: {
     canReadApprovals: boolean;
+    earnEnabled: boolean;
+    marketsEnabled: boolean;
     pendingApprovalCount: number | null;
     privateChannelsEnabled: boolean;
   }
 ): NavSection[] {
+  const marketsActions = getMarketsActions(t, options.earnEnabled);
+
   return [
     {
       title: t("Shared.dashboardShell.create"),
@@ -154,18 +174,16 @@ export function getNavSections(
           children: getPaymentsActions(t, options.privateChannelsEnabled),
           subnavKey: "payments",
         },
-        ...(isEarnUiEnabled()
+        // The group needs both flags: markets off hides the module, and an
+        // empty children array means no sub-module is enabled — a Markets entry
+        // with nothing under it would lead nowhere.
+        ...(options.marketsEnabled && marketsActions.length > 0
           ? [
               {
                 label: t("Shared.dashboardShell.markets"),
                 href: DASHBOARD_SIDE_NAV_HREFS.markets,
                 icon: TrendingUpIcon,
-                children: [
-                  {
-                    label: t("Shared.dashboardShell.earn"),
-                    href: DASHBOARD_SIDE_NAV_HREFS.markets,
-                  },
-                ],
+                children: marketsActions,
                 subnavKey: "markets" as const,
               },
             ]

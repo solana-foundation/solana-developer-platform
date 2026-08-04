@@ -91,6 +91,7 @@ const WITHDRAWAL: EarnPortfolioWithdrawal = {
   createdAt: "2026-08-03T00:00:00.000Z",
 };
 
+let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
 let originalGroundSandboxApiKey: string | undefined;
 
@@ -207,8 +208,11 @@ function requestEarn(method: string, path: string, body?: Record<string, unknown
 }
 
 beforeEach(async () => {
+  originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
   originalGroundSandboxApiKey = env.GROUND_SANDBOX_API_KEY;
+  // Earn is a Markets sub-module, so both gates have to be on to reach a route.
+  env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   // Sandbox credentials so the provider-configured gates pass; provider HTTP
   // itself is stubbed per-test via EARN_PROVIDER_CLIENTS spies.
@@ -218,6 +222,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
   env.GROUND_SANDBOX_API_KEY = originalGroundSandboxApiKey;
   await clearTestDatabase(env);

@@ -459,11 +459,15 @@ function DashboardSidebarContent({
 export function DashboardShell({
   assetProfilesEnabled,
   children,
+  earnEnabled,
+  marketsEnabled,
   onboardingStatus,
   privateChannelsEnabled,
 }: {
   assetProfilesEnabled: boolean;
   children: ReactNode;
+  earnEnabled: boolean;
+  marketsEnabled: boolean;
   onboardingStatus: OrganizationOnboardingStatus | null;
   privateChannelsEnabled: boolean;
 }) {
@@ -508,6 +512,8 @@ export function DashboardShell({
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
+    earnEnabled,
+    marketsEnabled,
     pendingApprovalCount,
     privateChannelsEnabled,
   });
@@ -793,6 +799,8 @@ export function DashboardShell({
             pathname={shellPathname}
             canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
             canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
+            earnEnabled={earnEnabled}
+            marketsEnabled={marketsEnabled}
             onClose={() => setMoreSheetOpen(false)}
           />
         ) : null}
