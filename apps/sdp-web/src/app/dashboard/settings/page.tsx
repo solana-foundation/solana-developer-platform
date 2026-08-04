@@ -133,10 +133,12 @@ export default async function SettingsPage({
       // Same shape the wallet setup route already reads. A failure here leaves the
       // section rendering its empty state rather than taking the page down with it.
       try {
+        // `fetch` already unwraps the `data` envelope (sdp-api.ts:155-157), so
+        // reaching for `.data` here yields undefined and silently empties the list.
         const payload = await trace.step("fetch_custody_configs", () =>
-          apiClient.fetch<{ data: CustodyConfigListResponse }>("/v1/wallets/configs")
+          apiClient.fetch<CustodyConfigListResponse>("/v1/wallets/configs")
         );
-        custodyConfigs = payload.data?.configs ?? [];
+        custodyConfigs = payload.configs ?? [];
       } catch {
         custodyConfigs = [];
       }
