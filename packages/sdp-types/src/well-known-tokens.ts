@@ -332,3 +332,36 @@ export function wellKnownDecimals(
   const token: WellKnownToken = WELL_KNOWN_TOKENS[symbol];
   return token.mints[cluster]?.decimals;
 }
+
+/**
+ * Every stored form a token may appear as, given one of them.
+ *
+ * `payment_transfers.token` is not written consistently: the same asset appears
+ * as a mint address on some rows and as a bare symbol on others, including within
+ * a single transfer type. An exact match on either form therefore silently drops
+ * the rows written the other way, so a filter has to accept both.
+ *
+ * @param token - A mint address or a well-known symbol.
+ * @returns The distinct forms to match, always including the input itself.
+ */
+export function tokenFilterAliases(token: string): string[] {
+  const trimmed = token.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const aliases = new Set<string>([trimmed]);
+
+  const byMint = WELL_KNOWN_TOKEN_BY_MINT.get(trimmed);
+  if (byMint) {
+    aliases.add(byMint.symbol);
+  }
+
+  if (isWellKnownTokenSymbol(trimmed)) {
+    for (const mint of Object.values(WELL_KNOWN_TOKENS[trimmed].mints)) {
+      aliases.add(mint.address);
+    }
+  }
+
+  return [...aliases];
+}

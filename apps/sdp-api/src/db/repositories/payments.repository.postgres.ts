@@ -1,3 +1,4 @@
+import { tokenFilterAliases } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import type {
@@ -94,7 +95,11 @@ function buildTransferListWhere(params: ListTransfersInput): {
     values.push(...transferScopeValues, searchPattern, ...counterpartyScopeValues, searchPattern);
   }
 
-  addEquals("pt.token", params.token);
+  // `pt.token` is not written consistently — the same asset appears as a mint on
+  // some rows and as a bare symbol on others, including within one transfer type.
+  // Matching a single form silently dropped every row written the other way, so a
+  // filter for SOL missed its mint rows and vice versa.
+  addIn("pt.token", params.token ? tokenFilterAliases(params.token) : undefined);
   addEquals("pt.direction", params.direction);
   addIn("pt.status", params.statuses);
   addIn("pt.type", params.types);
