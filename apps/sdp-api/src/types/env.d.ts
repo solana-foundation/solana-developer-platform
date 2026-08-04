@@ -276,6 +276,21 @@ export interface Env {
   STRIPE_SECRET_KEY?: string;
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+
+  // Markets module gate (parent) and its Earn sub-module gate (child). Earn
+  // needs both; clearing MARKETS_ENABLED dark-launches the whole module.
+  MARKETS_ENABLED?: string;
+  EARN_ENABLED?: string;
+
+  // Earn vault-infra provider configuration
+  VEDA_API_KEY?: string;
+  VEDA_SANDBOX_API_KEY?: string;
+  UPSHIFT_API_KEY?: string;
+  UPSHIFT_SANDBOX_API_KEY?: string;
+  PERENA_API_KEY?: string;
+  PERENA_SANDBOX_API_KEY?: string;
+  GROUND_API_KEY?: string;
+  GROUND_SANDBOX_API_KEY?: string;
 }
 
 // Extend Hono's context with our bindings
