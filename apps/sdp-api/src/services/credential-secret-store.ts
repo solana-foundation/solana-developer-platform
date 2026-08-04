@@ -434,8 +434,11 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
   }
 }
 
-export function createCredentialSecretStore(env: Env): CredentialSecretStore {
-  const backend = resolveCredentialSecretStoreBackend(env);
+export function createCredentialSecretStore(
+  env: Env,
+  persistedBackend?: CredentialSecretStorageBackend
+): CredentialSecretStore {
+  const backend = persistedBackend ?? resolveCredentialSecretStoreBackend(env);
 
   if (backend === "gcp_secret_manager") {
     return new GcpSecretManagerCredentialSecretStore({

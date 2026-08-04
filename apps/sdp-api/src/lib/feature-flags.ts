@@ -30,8 +30,6 @@ export function isPrivateChannelsEnabled(env: Pick<Env, "PRIVATE_CHANNELS_ENABLE
   return isTruthyFlag(env.PRIVATE_CHANNELS_ENABLED);
 }
 
-export function isPrivyByokProvisioningEnabled(
-  env: Pick<Env, "PRIVY_BYOK_PROVISIONING_ENABLED">
-): boolean {
-  return isTruthyFlag(env.PRIVY_BYOK_PROVISIONING_ENABLED);
+export function isPrivyByokEnabled(env: Pick<Env, "PRIVY_BYOK_ENABLED">): boolean {
+  return isTruthyFlag(env.PRIVY_BYOK_ENABLED);
 }
