@@ -3,6 +3,14 @@ import type { ListCounterpartiesResponse, PaymentsDashboardWalletsEnvelope } fro
 export interface TransactionFilterOptions {
   wallets: Array<{ id: string; label: string }>;
   counterparties: Array<{ id: string; label: string }>;
+  /**
+   * Held tokens, keyed by mint.
+   *
+   * The asset filter matches `pt.token` exactly and that column stores a mint, so
+   * the value has to be an address — but nobody should have to read or type one.
+   * The label carries the symbol; the id carries the mint.
+   */
+  assets: Array<{ id: string; label: string }>;
 }
 
 const COUNTERPARTY_PAGE_SIZE = 100;
@@ -24,12 +32,21 @@ function uniqueOptions(options: Array<{ id: string; label: string }>) {
 export async function fetchTransactionFilterOptions(
   request: FilterOptionsRequest = fetch
 ): Promise<TransactionFilterOptions> {
-  const [walletsResponse, firstCounterpartiesResponse] = await Promise.all([
+  const [walletsResponse, firstCounterpartiesResponse, aggregateResponse] = await Promise.all([
     request("/api/dashboard/wallets?view=summary", { cache: "no-store" }),
     request(`/api/dashboard/counterparty?page=1&pageSize=${COUNTERPARTY_PAGE_SIZE}`, {
       cache: "no-store",
     }),
+    request("/api/dashboard/wallets/aggregate", { cache: "no-store" }),
   ]);
+  // Assets are a convenience, not a requirement: a failure here leaves the select
+  // empty rather than taking the whole filter bar down with it.
+  const aggregateBody = aggregateResponse.ok
+    ? ((await aggregateResponse.json()) as {
+        data?: { aggregate?: { balances?: Array<{ mint: string; token: string }> } };
+      })
+    : null;
+
   const [walletsBody, firstCounterpartiesBody] = await Promise.all([
     readJson<PaymentsDashboardWalletsEnvelope>(walletsResponse),
     readJson<{ data?: ListCounterpartiesResponse }>(firstCounterpartiesResponse),
@@ -72,6 +89,11 @@ export async function fetchTransactionFilterOptions(
         id: counterparty.id,
         label: counterparty.displayName,
       }))
+    ),
+    assets: uniqueOptions(
+      (aggregateBody?.data?.aggregate?.balances ?? [])
+        .filter((balance) => Boolean(balance?.mint))
+        .map((balance) => ({ id: balance.mint, label: balance.token || balance.mint }))
     ),
   };
 }
