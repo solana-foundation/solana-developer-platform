@@ -29,7 +29,7 @@ export function walletOperationExecutionRequest(
     method: "POST",
     path: c.req.path,
     body,
-    idempotencyKey: c.req.header("Idempotency-Key") ?? `approval-${crypto.randomUUID()}`,
+    idempotencyKey: c.req.header?.("Idempotency-Key") ?? `approval-${crypto.randomUUID()}`,
   };
 }
 

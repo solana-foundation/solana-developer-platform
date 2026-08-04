@@ -73,29 +73,27 @@ export const signerCheck = async (c: AppContext) => {
   }
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, resolvedWalletId);
-  await enforceWalletOperationPolicy(
-    c.env,
-    getRequestTenantScope(c),
-    {
-      organizationId: auth.organizationId,
-      projectId: auth.projectId,
-      custodyWalletId: policyWallet?.id ?? null,
-      walletId: resolvedWalletId,
-      apiKeyId: auth.apiKeyId,
-      actor: walletOperationActorFromAuth(auth),
-      operationFamily: "raw_sign",
-      operationType: "custody_signer_check",
-      context: {
-        memo,
-      },
-      rawPayload: {
-        requestedWalletId: parsed.data.walletId ?? null,
-        memo,
-        executionRequest: walletOperationExecutionRequest(c, parsed.data),
-      },
+  const policyScope = getRequestTenantScope(c);
+  const policyInput = {
+    organizationId: auth.organizationId,
+    projectId: auth.projectId,
+    custodyWalletId: policyWallet?.id ?? null,
+    walletId: resolvedWalletId,
+    apiKeyId: auth.apiKeyId,
+    actor: walletOperationActorFromAuth(auth),
+    operationFamily: "raw_sign" as const,
+    operationType: "custody_signer_check" as const,
+    context: {
+      memo,
     },
-    approvedWalletOperationId(c)
-  );
+    rawPayload: {
+      requestedWalletId: parsed.data.walletId ?? null,
+      memo,
+      executionRequest: walletOperationExecutionRequest(c, parsed.data),
+    },
+  };
+  const approvedOperationId = approvedWalletOperationId(c);
+  await enforceWalletOperationPolicy(c.env, policyScope, policyInput, approvedOperationId);
 
   try {
     const signer = await createOrgSigner(
