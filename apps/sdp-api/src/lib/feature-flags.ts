@@ -33,3 +33,14 @@ export function isPrivateChannelsEnabled(env: Pick<Env, "PRIVATE_CHANNELS_ENABLE
 export function isPrivyByokEnabled(env: Pick<Env, "PRIVY_BYOK_ENABLED">): boolean {
   return isTruthyFlag(env.PRIVY_BYOK_ENABLED);
 }
+
+export function isMarketsEnabled(env: Pick<Env, "MARKETS_ENABLED">): boolean {
+  return isTruthyFlag(env.MARKETS_ENABLED);
+}
+
+// Earn is a sub-module of Markets, so the parent flag gates it: clearing
+// MARKETS_ENABLED disables every Markets API surface in one move. Callers must
+// not add a second markets check — this hierarchy is the single source of truth.
+export function isEarnEnabled(env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED">): boolean {
+  return isMarketsEnabled(env) && isTruthyFlag(env.EARN_ENABLED);
+}

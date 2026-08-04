@@ -10,7 +10,11 @@
  */
 
 import { type ScheduledTask, schedule } from "node-cron";
-import { isPrivateChannelsEnabled, isRecurringPaymentCollectionEnabled } from "@/lib/feature-flags";
+import {
+  isEarnEnabled,
+  isPrivateChannelsEnabled,
+  isRecurringPaymentCollectionEnabled,
+} from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
@@ -18,6 +22,7 @@ import {
   APPROVED_WALLET_OPERATIONS_CRON,
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
+import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSync } from "./earn-catalogue-sync";
 import { PENDING_DEPOSITS_CRON, runPendingDepositsReconciliation } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
 import {
@@ -134,6 +139,21 @@ export function startCron(deps: CronDeps): CronHandle | null {
           return;
         }
         runPendingWithdrawalsReconciliation({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        });
+      })
+    );
+  }
+
+  if (isEarnEnabled(deps.env)) {
+    tasks.push(
+      schedule(EARN_CATALOGUE_SYNC_CRON, () => {
+        if (stopping) {
+          return;
+        }
+        runEarnCatalogueSync({
           env: deps.env,
           bg: deps.bg,
           observability: deps.observability,

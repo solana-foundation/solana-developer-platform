@@ -1,0 +1,349 @@
+import { resolveEarnProviderClient, supportsPortfolioWallets } from "@sdp/earn";
+import { notImplemented } from "@sdp/earn/errors";
+import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
+import type {
+  EarnPortfolioAllocationInput,
+  EarnPortfolioDepositsPage,
+  EarnPortfolioWalletSnapshot,
+  EarnPortfolioWithdrawal,
+  EarnPortfolioWithdrawalPreview,
+  EarnPortfolioYield,
+} from "@sdp/types";
+import type { EarnProviderId } from "@sdp/types/provider-access";
+import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import type { EarnProviderWalletRow } from "@/db/repositories";
+import { getAuth } from "@/lib/auth";
+import { resolveCreatorUserId } from "@/lib/creator";
+import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
+import {
+  assertEarnProviderConfigured,
+  assertProviderAvailable,
+} from "@/services/provider-availability.service";
+import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
+import {
+  earnProgramDepositsQuerySchema,
+  earnProgramQuerySchema,
+  earnProgramUpsertSchema,
+  earnProgramWithdrawalCreateSchema,
+  earnProgramWithdrawalParamsSchema,
+  earnProgramWithdrawalPreviewSchema,
+} from "../schemas";
+import { parseBody, parseParams, parseQuery } from "./shared";
+
+/**
+ * The shared earn "program": ONE provider-managed portfolio wallet per
+ * (organization, environment, provider). PUT is idempotent create-or-update —
+ * first call provisions the provider wallet and persists the link row, later
+ * calls rewrite the wallet's strategy weights. Balances/positions are never
+ * persisted; every read is a live provider fetch.
+ *
+ * Gate asymmetry (ADR 0002 exit safety): PUT is money-in and takes the full
+ * entitled+configured availability gate; withdrawal endpoints only require
+ * provider credentials so disabling a provider can never trap funds; plain
+ * reads also only require credentials (they hit the provider's API).
+ */
+
+// Response envelopes (route-owned until a second surface needs them in @sdp/types).
+export interface EarnProgram {
+  provider: string;
+  label: string | null;
+  createdAt: string;
+  wallet: EarnPortfolioWalletSnapshot;
+  /**
+   * Yield metrics, absent when the provider's yield endpoint fails. Balances
+   * are the load-bearing part of this response, so a yield outage degrades the
+   * headline rate rather than the whole program view.
+   */
+  yield?: EarnPortfolioYield;
+}
+
+export interface EarnProgramResponse {
+  program: EarnProgram;
+}
+
+export interface EarnProgramUpsertResponse extends EarnProgramResponse {
+  created: boolean;
+}
+
+export type EarnProgramDepositsResponse = EarnPortfolioDepositsPage;
+
+export interface EarnProgramWithdrawalPreviewResponse {
+  preview: EarnPortfolioWithdrawalPreview;
+}
+
+export interface EarnProgramWithdrawalResponse {
+  withdrawal: EarnPortfolioWithdrawal;
+}
+
+function mapProgram(
+  row: EarnProviderWalletRow,
+  wallet: EarnPortfolioWalletSnapshot,
+  portfolioYield?: EarnPortfolioYield
+): EarnProgram {
+  return {
+    provider: row.provider,
+    label: row.label,
+    createdAt: row.created_at,
+    wallet,
+    ...(portfolioYield ? { yield: portfolioYield } : {}),
+  };
+}
+
+/**
+ * Wallet snapshot + yield in one round trip each, fetched together because the
+ * dashboard renders them as one view. Yield is best-effort: the rate is a
+ * headline nicety, while balances and positions are what the page is for.
+ */
+async function loadProgramState(
+  c: AppContext,
+  client: EarnPortfolioWalletProvider,
+  providerWalletRef: string
+): Promise<{ wallet: EarnPortfolioWalletSnapshot; portfolioYield?: EarnPortfolioYield }> {
+  const runtime = earnRuntime(c);
+  const [wallet, yieldResult] = await Promise.all([
+    client.getPortfolioWallet(runtime, { providerWalletRef }),
+    client.getPortfolioYield(runtime, { providerWalletRef }).catch((error: unknown) => {
+      getLogger().warn(
+        { err: error, providerWalletRef },
+        "earn program yield lookup failed; serving balances without a rate"
+      );
+      return undefined;
+    }),
+  ]);
+  return { wallet, portfolioYield: yieldResult };
+}
+
+/**
+ * Capability gate: the portfolio-wallet contract is optional per provider, so
+ * narrow via the method-presence guard — never by matching provider ids — and
+ * fail with a clean 501 for providers that only implement the vault contract.
+ */
+function requirePortfolioClient(provider: EarnProviderId): EarnPortfolioWalletProvider {
+  const client = resolveEarnProviderClient(provider);
+  if (!supportsPortfolioWallets(client)) {
+    throw notImplemented(client.provider, "portfolio wallets");
+  }
+  return client;
+}
+
+async function requireProgramWallet(
+  c: AppContext,
+  provider: EarnProviderId
+): Promise<EarnProviderWalletRow> {
+  const row = await getEarnRepository(c).getProviderWallet({
+    organizationId: getAuth(c).organizationId,
+    environment: resolveSdpEnvironment(c),
+    provider,
+  });
+
+  if (!row) {
+    throw notFound("Earn program");
+  }
+
+  return row;
+}
+
+/**
+ * Allocation targets must reference catalogue rows the sync currently lists as
+ * active for this provider+environment — the cron re-asserts `active` on every
+ * listed source, so anything else is either unknown or no longer depositable.
+ */
+async function assertKnownYieldSources(
+  c: AppContext,
+  provider: EarnProviderId,
+  allocations: EarnPortfolioAllocationInput
+): Promise<void> {
+  const requested = new Set<string>();
+  for (const group of Object.values(allocations)) {
+    for (const { yieldSourceId } of group ?? []) {
+      requested.add(yieldSourceId);
+    }
+  }
+
+  const repo = getEarnRepository(c);
+  const environment = resolveSdpEnvironment(c);
+  const known = new Set<string>();
+  const pageSize = 200;
+  // The repository has no provider filter, so page the (small) environment
+  // catalogue and match provider rows in memory.
+  for (let offset = 0; ; offset += pageSize) {
+    const { rows, total } = await repo.listStrategies({ environment, limit: pageSize, offset });
+    for (const row of rows) {
+      if (row.provider === provider) {
+        known.add(row.provider_reference);
+      }
+    }
+    if (rows.length === 0 || offset + pageSize >= total) {
+      break;
+    }
+  }
+
+  const unknown = [...requested].filter((id) => !known.has(id));
+  if (unknown.length > 0) {
+    throw badRequest(`Unknown or inactive yield sources for provider ${provider}`, {
+      unknownYieldSourceIds: unknown,
+    });
+  }
+}
+
+export const upsertEarnProgram = async (c: AppContext) => {
+  const body = await parseBody(c, earnProgramUpsertSchema);
+  const client = requirePortfolioClient(body.provider);
+  const auth = getAuth(c);
+  const environment = resolveSdpEnvironment(c);
+
+  // Money-in gate: full entitlement + mode-specific credential check.
+  await assertProviderAvailable(
+    c.env,
+    getDb(c.env),
+    auth.organizationId,
+    "earn",
+    client.provider,
+    environment === "sandbox"
+  );
+  await assertKnownYieldSources(c, client.provider, body.allocations);
+
+  const repo = getEarnRepository(c);
+  const existing = await repo.getProviderWallet({
+    organizationId: auth.organizationId,
+    environment,
+    provider: client.provider,
+  });
+
+  let row = existing;
+  if (row) {
+    await client.updatePortfolioStrategy(earnRuntime(c), {
+      providerWalletRef: row.provider_wallet_ref,
+      allocations: body.allocations,
+    });
+  } else {
+    if (!auth.projectId) {
+      throw internalError("Could not resolve project scope");
+    }
+    const createdWallet = await client.createPortfolioWallet(earnRuntime(c), {
+      label: body.label ?? `sdp-earn-${auth.organizationId}-${environment}`,
+      allocations: body.allocations,
+    });
+
+    try {
+      row = await repo.insertProviderWallet({
+        organizationId: auth.organizationId,
+        projectId: auth.projectId,
+        environment,
+        provider: client.provider,
+        providerWalletRef: createdWallet.providerWalletRef,
+        label: body.label ?? null,
+        createdBy: await resolveCreatorUserId(c),
+      });
+    } catch (err) {
+      if (isPostgresUniqueViolation(err)) {
+        // Concurrent first-PUT race: another request won the unique
+        // (org, environment, provider) slot. The losing provider wallet holds
+        // no funds (nothing can be deposited before a ref is returned).
+        throw conflict("Earn program was provisioned concurrently; retry to update its strategy");
+      }
+      throw err;
+    }
+    if (!row) {
+      throw internalError("Failed to persist earn program wallet");
+    }
+  }
+
+  const { wallet, portfolioYield } = await loadProgramState(c, client, row.provider_wallet_ref);
+
+  const response: EarnProgramUpsertResponse = {
+    program: mapProgram(row, wallet, portfolioYield),
+    created: !existing,
+  };
+  return success(c, response, existing ? 200 : 201);
+};
+
+export const getEarnProgram = async (c: AppContext) => {
+  const { provider } = parseQuery(c, earnProgramQuerySchema);
+  const client = requirePortfolioClient(provider);
+  const row = await requireProgramWallet(c, provider);
+
+  const testMode = resolveSdpEnvironment(c) === "sandbox";
+  assertEarnProviderConfigured(c.env, client.provider, testMode);
+
+  const { wallet, portfolioYield } = await loadProgramState(c, client, row.provider_wallet_ref);
+
+  const response: EarnProgramResponse = { program: mapProgram(row, wallet, portfolioYield) };
+  return success(c, response);
+};
+
+export const listEarnProgramDeposits = async (c: AppContext) => {
+  const query = parseQuery(c, earnProgramDepositsQuerySchema);
+  const client = requirePortfolioClient(query.provider);
+  const row = await requireProgramWallet(c, query.provider);
+
+  const testMode = resolveSdpEnvironment(c) === "sandbox";
+  assertEarnProviderConfigured(c.env, client.provider, testMode);
+
+  const response: EarnProgramDepositsResponse = await client.listPortfolioDeposits(earnRuntime(c), {
+    providerWalletRef: row.provider_wallet_ref,
+    ...(query.cursor !== undefined && { cursor: query.cursor }),
+  });
+
+  return success(c, response);
+};
+
+export const previewEarnProgramWithdrawal = async (c: AppContext) => {
+  const body = await parseBody(c, earnProgramWithdrawalPreviewSchema);
+  const client = requirePortfolioClient(body.provider);
+  const row = await requireProgramWallet(c, body.provider);
+
+  // Money-out path: credentials only, never the entitlement gate.
+  assertEarnProviderConfigured(c.env, client.provider, resolveSdpEnvironment(c) === "sandbox");
+
+  const preview = await client.previewPortfolioWithdrawal(earnRuntime(c), {
+    providerWalletRef: row.provider_wallet_ref,
+    amountUsd: body.amountUsd,
+    token: body.token,
+  });
+
+  const response: EarnProgramWithdrawalPreviewResponse = { preview };
+  return success(c, response);
+};
+
+export const createEarnProgramWithdrawal = async (c: AppContext) => {
+  const body = await parseBody(c, earnProgramWithdrawalCreateSchema);
+  const client = requirePortfolioClient(body.provider);
+  const row = await requireProgramWallet(c, body.provider);
+
+  // Money-out path: credentials only, never the entitlement gate.
+  assertEarnProviderConfigured(c.env, client.provider, resolveSdpEnvironment(c) === "sandbox");
+
+  const withdrawal = await client.createPortfolioWithdrawal(earnRuntime(c), {
+    providerWalletRef: row.provider_wallet_ref,
+    // Caller-owned keys pass through verbatim (provider dedupes on them);
+    // server-minted keys make bare requests safe without extra client work.
+    requestId: body.requestId ?? crypto.randomUUID(),
+    amountUsd: body.amountUsd,
+    token: body.token,
+    destinationAddress: body.destinationAddress,
+  });
+
+  const response: EarnProgramWithdrawalResponse = { withdrawal };
+  return success(c, response, 201);
+};
+
+export const getEarnProgramWithdrawal = async (c: AppContext) => {
+  const { withdrawalRef } = parseParams(c, earnProgramWithdrawalParamsSchema);
+  const { provider } = parseQuery(c, earnProgramQuerySchema);
+  const client = requirePortfolioClient(provider);
+  const row = await requireProgramWallet(c, provider);
+
+  assertEarnProviderConfigured(c.env, client.provider, resolveSdpEnvironment(c) === "sandbox");
+
+  const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
+    providerWalletRef: row.provider_wallet_ref,
+    withdrawalRef,
+  });
+
+  const response: EarnProgramWithdrawalResponse = { withdrawal };
+  return success(c, response);
+};

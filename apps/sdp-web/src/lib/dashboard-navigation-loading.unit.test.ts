@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
   resolveDashboardNavigationIntent,
   resolveDashboardNavigationTarget,
@@ -33,6 +34,9 @@ describe("dashboard loading route", () => {
     ["/dashboard/payments/recurring", "recurring-payments"],
     ["/dashboard/payments/recurring/create", "recurring-payment-create"],
     ["/dashboard/payments/recurring/payment-1", "recurring-payment-detail"],
+    ["/dashboard/markets/earn", "earn-overview"],
+    ["/dashboard/markets/earn/deposit", "earn-deposit"],
+    ["/dashboard/markets/earn/strategies/strategy-1", "earn-strategy-detail"],
     ["/dashboard/api-keys", "api-keys-list"],
     ["/dashboard/api-keys/new", "api-key-new"],
     ["/dashboard/api-keys/key-1/edit", "api-key-edit"],
@@ -99,5 +103,19 @@ describe("dashboard navigation intent", () => {
         ...input,
       })
     ).toBeNull();
+  });
+});
+
+describe("dashboard navigation active state", () => {
+  it.each([
+    "/dashboard/markets/earn",
+    "/dashboard/markets/earn/deposit",
+    "/dashboard/markets/earn/strategies/strategy-1",
+  ])("keeps Markets active throughout the Earn flow at %s", (pathname) => {
+    expect(isDashboardNavItemActive(pathname, "/dashboard/markets/earn")).toBe(true);
+  });
+
+  it("does not claim unrelated dashboard routes for Markets", () => {
+    expect(isDashboardNavItemActive("/dashboard/payments", "/dashboard/markets/earn")).toBe(false);
   });
 });
