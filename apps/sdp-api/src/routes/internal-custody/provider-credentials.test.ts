@@ -203,6 +203,7 @@ type StoredConnection = {
   provider: string;
   provider_credential_id: string;
   status: string;
+  setup_metadata: Record<string, unknown>;
   last_check_status: string | null;
   last_check_at: string | null;
   last_check_failure_code: string | null;
@@ -212,7 +213,7 @@ async function getConnectionForCredential(credentialId: string): Promise<StoredC
   const connection = await getDb(env)
     .prepare(
       `SELECT id, project_id, provider, provider_credential_id, status,
-              last_check_status, last_check_at, last_check_failure_code
+              setup_metadata, last_check_status, last_check_at, last_check_failure_code
        FROM custody_connections
        WHERE provider_credential_id = ?`
     )
@@ -267,7 +268,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     deploymentMode: env.SDP_DEPLOYMENT_MODE,
     backend: env.CREDENTIAL_SECRET_STORE_BACKEND,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
-    provisioningFlag: env.PRIVY_BYOK_PROVISIONING_ENABLED,
+    provisioningFlag: env.PRIVY_BYOK_ENABLED,
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
   };
 
@@ -278,7 +279,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = testEncryptionKey();
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = "true";
+    env.PRIVY_BYOK_ENABLED = "true";
     env.CREDENTIAL_FINGERPRINT_PEPPER = "test-credential-fingerprint-pepper-for-unit-tests";
   });
 
@@ -287,7 +288,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.SDP_DEPLOYMENT_MODE = original.deploymentMode;
     env.CREDENTIAL_SECRET_STORE_BACKEND = original.backend;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = original.provisioningFlag;
+    env.PRIVY_BYOK_ENABLED = original.provisioningFlag;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
     await clearTestDatabase(env);
     await clearKVStores(env);
@@ -297,6 +298,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
     const response = await submit(app, token, {
       key: "submit-privy-credentials-1",
+      body: { ...VALID_BODY, walletLabel: "  Treasury Wallet  " },
     });
 
     expect(response.status).toBe(201);
@@ -339,6 +341,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       provider: "privy",
       provider_credential_id: body.data.providerCredential.id,
       status: "pending",
+      setup_metadata: { pendingWalletLabel: "Treasury Wallet" },
     });
     const defaults = await getDb(env)
       .prepare("SELECT COUNT(*) AS count FROM custody_scope_defaults")
@@ -453,6 +456,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         fields: { ...VALID_BODY.fields, walletLabel: "Must not be accepted" },
       },
     ],
+    ["blank wallet label", { ...VALID_BODY, walletLabel: "   " }],
+    ["long wallet label", { ...VALID_BODY, walletLabel: "x".repeat(101) }],
     ["blank normalized app ID", { ...VALID_BODY, fields: { ...VALID_BODY.fields, appId: "   " } }],
     [
       "blank normalized label",
@@ -530,7 +535,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       appSecret: " exact secret ",
     });
 
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = undefined;
+    env.PRIVY_BYOK_ENABLED = undefined;
     await getDb(env)
       .prepare(
         `UPDATE organizations
@@ -584,7 +589,19 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     ]);
   });
 
-  it("rejects same-key payload reuse before another secret write", async () => {
+  it.each([
+    [
+      "credential secret",
+      {
+        ...VALID_BODY,
+        fields: {
+          ...VALID_BODY.fields,
+          appSecret: "different secret",
+        },
+      },
+    ],
+    ["wallet label", { ...VALID_BODY, walletLabel: "Different wallet" }],
+  ])("rejects same-key %s reuse before another secret write", async (_field, changedBody) => {
     const { app, token } = buildApp();
     expect(
       (
@@ -596,13 +613,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     const response = await submit(app, token, {
       key: "same-key-different-payload",
-      body: {
-        ...VALID_BODY,
-        fields: {
-          ...VALID_BODY.fields,
-          appSecret: "different secret",
-        },
-      },
+      body: changedBody,
     });
 
     expect(response.status).toBe(409);
@@ -629,7 +640,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   });
 
   it("denies an unseen key before constructing the secret store when the flag is off", async () => {
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = undefined;
+    env.PRIVY_BYOK_ENABLED = undefined;
     const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
     const { app, token } = buildApp();
 
@@ -658,6 +669,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
     const first = await submit(app, token, {
       key: "replacement-v1",
+      body: { ...VALID_BODY, walletLabel: "First wallet" },
     });
     const firstBody = (await first.json()) as {
       data: {
@@ -675,6 +687,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "replacement-v2",
       body: {
         provider: "privy",
+        walletLabel: "Corrected wallet",
         fields: {
           credentialLabel: "Corrected organization credential",
           scope: "organization",
@@ -703,6 +716,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       id: connectionId,
       provider_credential_id: replacementBody.data.providerCredential.id,
       status: "pending",
+      setup_metadata: { pendingWalletLabel: "Corrected wallet" },
       last_check_status: null,
       last_check_at: null,
       last_check_failure_code: null,
@@ -743,6 +757,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     const oldReplay = await submit(app, token, {
       key: "replacement-v1",
+      body: { ...VALID_BODY, walletLabel: "First wallet" },
     });
     expect(oldReplay.status).toBe(201);
     expect(await oldReplay.json()).toEqual({
@@ -757,6 +772,43 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         timestamp: expect.any(String),
       },
     });
+  });
+
+  it("clears the pending wallet label when replacement omits walletLabel", async () => {
+    const { app, token } = buildApp();
+    const first = await submit(app, token, {
+      key: "replacement-clear-label-v1",
+      body: { ...VALID_BODY, walletLabel: "First wallet" },
+    });
+    const firstBody = (await first.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+    const firstCredentialId = firstBody.data.providerCredential.id;
+    const connectionId = (await getConnectionForCredential(firstCredentialId)).id;
+    await markInitialValidationFailed(getDb(env), {
+      credentialId: firstCredentialId,
+      connectionId,
+    });
+
+    const replacement = await submit(app, token, {
+      key: "replacement-clear-label-v2",
+      body: {
+        ...VALID_BODY,
+        fields: {
+          ...VALID_BODY.fields,
+          appId: "replacement-app-id",
+          appSecret: "replacement secret",
+        },
+      },
+    });
+    expect(replacement.status).toBe(201);
+    const replacementBody = (await replacement.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+
+    const connection = await getConnectionForCredential(replacementBody.data.providerCredential.id);
+    expect(connection.id).toBe(connectionId);
+    expect(connection.setup_metadata).toEqual({});
   });
 
   it.each([
@@ -828,25 +880,16 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       label: "a failed connection with a default wallet",
       key: "failed-default-wallet",
       arrange: async (db, ids) => {
-        const custodyConfigId = "cust_rejected_replacement";
         const walletId = "cwal_rejected_replacement";
         await markInitialValidationFailed(db, ids);
         await db.batch([
           db
             .prepare(
-              `INSERT INTO custody_configs (
-                 id, organization_id, project_id, provider, config_encrypted,
-                 encryption_version, status
-               ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'inactive')`
-            )
-            .bind(custodyConfigId, ORGANIZATION_ID, PROJECT_ID),
-          db
-            .prepare(
               `INSERT INTO custody_wallets (
-                 id, custody_config_id, wallet_id, public_key, label, status
+                 id, custody_connection_id, wallet_id, public_key, label, status
                ) VALUES (?, ?, 'privy-wallet-1', 'wallet-public-key-1', 'Default', 'active')`
             )
-            .bind(walletId, custodyConfigId),
+            .bind(walletId, ids.connectionId),
           db
             .prepare(
               `UPDATE custody_connections

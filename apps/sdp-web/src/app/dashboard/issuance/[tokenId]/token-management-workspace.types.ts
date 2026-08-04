@@ -34,13 +34,6 @@ export interface ActionExecutionInput {
   body?: unknown;
 }
 
-export interface ExecuteRouteResponse {
-  ok?: boolean;
-  status?: number;
-  body?: unknown;
-  error?: string;
-}
-
 export interface ActionExecutionResult {
   ok: boolean;
   message: string;

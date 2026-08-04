@@ -131,7 +131,7 @@ async function seedBlockingConnection(): Promise<void> {
 
 describe("legacy Privy setup admission", () => {
   const original = {
-    flag: env.PRIVY_BYOK_PROVISIONING_ENABLED,
+    flag: env.PRIVY_BYOK_ENABLED,
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
@@ -142,13 +142,13 @@ describe("legacy Privy setup admission", () => {
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedActor();
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = "true";
+    env.PRIVY_BYOK_ENABLED = "true";
     env.PRIVY_APP_ID = undefined;
     env.PRIVY_APP_SECRET = undefined;
   });
 
   afterEach(async () => {
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = original.flag;
+    env.PRIVY_BYOK_ENABLED = original.flag;
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
@@ -195,7 +195,7 @@ describe("legacy Privy setup admission", () => {
     "initialize",
     "switch",
   ] as const)("returns the stored-connection conflict from /%s even after flag rollback", async (path) => {
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = "false";
+    env.PRIVY_BYOK_ENABLED = "false";
     await seedBlockingConnection();
 
     const response = await request(path);
@@ -265,7 +265,7 @@ describe("legacy Privy setup admission", () => {
   });
 
   it("keeps fresh legacy initialization when stored setup is disabled", async () => {
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = "false";
+    env.PRIVY_BYOK_ENABLED = "false";
     env.PRIVY_APP_ID = "legacy-app-id";
     env.PRIVY_APP_SECRET = "legacy-app-secret";
     env.CUSTODY_ENCRYPTION_KEY = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";

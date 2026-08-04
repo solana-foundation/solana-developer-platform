@@ -221,8 +221,6 @@
     "rpcProviderSaveMismatch": "RPC provider save mismatch (requested {requested}, persisted {persisted}).",
     "rpcSettingsSaved": "RPC settings saved.",
     "failedToTestRpcProvider": "Failed to test RPC provider.",
-    "rpcTestFailed": "RPC test failed.",
-    "rpcTestFailedStatus": "RPC test failed ({status}).",
     "rpcTestMismatch": "RPC test mismatch (requested {requested}, resolved {resolved}).",
     "rpcUpstreamReturned": "RPC upstream returned {status} {statusText}.",
     "rpcTestPassed": "RPC test passed ({status} {statusText}) in {latency}ms.",
