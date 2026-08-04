@@ -790,6 +790,9 @@
     "apiKeyClearBindingsConfirmationRequired": "Confirmez Supprimer les liaisons avant d'enregistrer cette modification de liaison.",
     "policyAssetsInWallet": "Dans ce Wallet",
     "policyAssetsCommon": "Tokens courants",
-    "policyAssetsIssued": "Vos Tokens"
+    "policyAssetsIssued": "Vos Tokens",
+    "policyAuditUserId": "ID d'utilisateur",
+    "policyRevisionsChanges": "Modifications",
+    "policyRevisionsNoMessage": "Aucun message de révision"
   }
 }
