@@ -126,7 +126,12 @@ positions and movements FK into it, and history must survive wind-down.
 every registration point is filled — the type errors are the checklist, and
 two tests guard the registration points the compiler can't see.
 
-| Step | File | What you add |
+**Ground is the worked example** for every step below — its files are the
+copyable precedent (`ground` id, `GroundEarnClient`, `GROUND_API_KEY` /
+`GROUND_SANDBOX_API_KEY`), and it is the first client past the stub: a live
+`listStrategies` plus the portfolio-wallet capability (§4b).
+
+| Step | File | What you add (Ground precedent) |
 |---|---|---|
 | 1. Declare the id | `packages/sdp-types/src/provider-access.ts` | Append to `EARN_PROVIDERS`. Earn entitlements are override-only (`createBooleanRecord(EARN_PROVIDERS, [])`): every org gets the provider disabled until an explicit `providerOverrides.earn.<id>` — there is no tier-default list to join. |
 | 2. Client class | `packages/sdp-earn/src/providers/<id>/client.ts` | Subclass `StubEarnClient` (`packages/sdp-earn/src/providers/stub.ts`) carrying only the `provider` literal and `declaredSupport`. Every operation throws `NOT_IMPLEMENTED` until you override it — the integration lands method-by-method, with `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) as the HTTP core. |
@@ -152,6 +157,52 @@ fallbacks (missing config throws `PROVIDER_NOT_CONFIGURED`; unknown ids fail
 closed through `resolveEarnProviderClient`), HTTP in the provider and DB in
 the handler, and provider ids are never reused — retirement means deprecating
 strategies and draining positions first, then removing the id.
+
+## 4b. Implementing the portfolio-wallet capability
+
+Some providers front a *portfolio* wallet (one wallet, weighted allocations
+across yield sources) rather than per-strategy deposits. That surface is an
+**optional** extension of the base contract — implement it only when the
+provider actually offers it.
+
+1. **Implement the full interface, or none of it.**
+   `EarnPortfolioWalletProvider` (`packages/sdp-earn/src/types.ts`) extends
+   `EarnVaultProvider` with eight methods: `createPortfolioWallet`,
+   `getPortfolioWallet`, `updatePortfolioStrategy`, `listPortfolioDeposits`,
+   `previewPortfolioWithdrawal`, `createPortfolioWithdrawal`,
+   `getPortfolioWithdrawal`, `createPortfolioAddressBookEntry`. Callers
+   detect the capability with `supportsPortfolioWallets`
+   (`@sdp/earn/capabilities`) — an all-or-nothing method-presence guard, so a
+   partial implementation is treated as unsupported.
+2. **Speak the shared DTOs.** Wire shapes live in `@sdp/types/earn`
+   (`EarnPortfolioWalletSnapshot`, `EarnPortfolioDeposit(sPage)`,
+   `EarnPortfolioWithdrawal(Preview)`, statuses, tokens). Map provider
+   statuses into the neutral unions (Ground: `idle` → `ready`, any
+   `*_active`/unknown → `busy`); all USD amounts are decimal strings in the
+   contract — convert to the provider's wire format only at the HTTP
+   boundary.
+3. **Solana-only surface.** Expose only the wallet's Solana deposit address
+   for the environment (devnet rail in sandbox, mainnet in production) and
+   pin withdrawal/preview destination chains the same way, even if the
+   provider is multi-chain internally.
+4. **Idempotency.** Withdrawal `requestId` is caller-owned and passed
+   verbatim; create/update may generate a UUIDv4 when omitted. A provider
+   requestId-conflict error surfaces as `CONFLICT`.
+5. **Persistence.** One shared wallet per org+environment+provider:
+   `earn_provider_wallets` (migration `0035`), via
+   `EarnRepository.getProviderWallet` / `insertProviderWallet` — the unique
+   constraint makes double-provisioning a first-writer-wins race, not a
+   duplicate.
+6. **Tests.** No-network fetch-stub harness, same pattern as
+   `packages/sdp-earn/src/fetch.test.ts`; Ground's
+   `providers/ground/client.test.ts` covers mappings, filtering, pagination,
+   error taxonomy, requestId behavior, and the capability guard —
+   `capabilities.test.ts` is the guard's own suite.
+
+**Live sandbox runs need a key:** `GROUND_SANDBOX_API_KEY` must exist in
+Doppler before anything can talk to Ground's sandbox — until it does, the
+provider is `configured: false` and every call fails closed with
+`PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't care).
 
 ## 5. Custodian seam — "add Anchorage/Fireblocks to Earn"
 

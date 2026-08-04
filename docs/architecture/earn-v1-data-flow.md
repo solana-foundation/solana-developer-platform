@@ -125,12 +125,68 @@ pending redemption, settles on the provider's T+n webhook (or poll).
 | OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public `/v1/earn` reference when flag flips | ⏸ deliberately deferred |
 
 **Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
-(today `StubEarnClient` subclasses carrying `provider` + `declaredSupport`,
-filled in method-by-method), the catalogue-sync cron
+(Ground is live — see below; the rest remain `StubEarnClient` subclasses
+carrying `provider` + `declaredSupport`, filled in method-by-method), the
+portfolio-wallet capability (`EarnPortfolioWalletProvider` +
+`supportsPortfolioWallets` in `@sdp/earn/capabilities`), the
+`earn_provider_wallets` table (migration `0035`, one shared wallet per
+org+environment+provider), the catalogue-sync cron
 (`cron/earn-catalogue-sync.ts`) + dev seed (`db:seed:earn` →
-`scripts/seed-earn-demo.ts`), the NAV cron task, earn webhook processors, the
-execution endpoints + `/movements/:id/submit`, and the dashboard's swap from
-mock fixtures to the BFF (single seam: `earn-mock-data.ts`).
+`scripts/seed-earn-demo.ts`), the NAV cron task, earn webhook processors, and
+the execution endpoints + `/movements/:id/submit`.
+
+## Ground — the first live provider (portfolio-wallet flow)
+
+The dashboard's mock seam (`earn-mock-data.ts`) is replaced by a live path
+built on `GroundEarnClient` (`@sdp/earn/providers/ground/client`), which
+implements `EarnPortfolioWalletProvider`. Auth is a Bearer key from env
+(`GROUND_SANDBOX_API_KEY` / `GROUND_API_KEY`); a missing key fails closed
+with `PROVIDER_NOT_CONFIGURED` before any request leaves the process.
+
+```mermaid
+flowchart LR
+    GY["Ground GET /v2/wallets/yield-sources"] -->|hourly cron| SYNC["earn-catalogue-sync"]
+    SYNC -->|declared-support validated| ES[("earn_strategies")]
+    ES --> CAT["GET /v1/earn/strategies"]
+
+    PROG["PUT/GET /v1/earn/program"] --> EPW[("earn_provider_wallets")]
+    PROG -->|create wallet / update strategy / snapshot| GW["Ground /v2/wallets"]
+
+    FUND["Solana deposit address<br/>(from wallet snapshot)"] -.->|user sends USDC/USDT| GW
+    GW -->|GET deposits (poll)| DEP["deposit tracking"]
+
+    WD["portfolio withdrawal<br/>(amountUsd + token + solana dest)"] --> GW
+```
+
+- **Catalogue.** Cron calls Ground's cursor-paginated
+  `GET /v2/wallets/yield-sources`; each source maps to a strategy snapshot
+  (apyBps→decimal, redeem policy→instant/delayed, curator derived from known
+  ids → `morpho-<curator>-<token>` convention → protocol fallback,
+  dominant-allocation rwa/defi classification, tvl/utilization into
+  `riskMetadata`). Only `mode === "active"` sources are listed — `buy_only`
+  would trap funds — and deposit tokens without a known cluster mint are
+  skipped. Rows land in `earn_strategies` via the standard sync.
+- **Program (shared wallet).** One Ground wallet per org+environment,
+  recorded in `earn_provider_wallets`. First curator selection creates the
+  wallet (`POST /v2/wallets`, idempotent via UUIDv4 requestId, polled from
+  `creating` to `ready`); later selections replace the strategy
+  (`PATCH /v2/wallets/{id}/strategy`). Positions and balances are read live
+  from the wallet snapshot and grouped by curator for display — no SDP-side
+  position ledger for the portfolio surface.
+- **Funding.** The wallet snapshot exposes its Solana deposit address
+  (`solana_devnet` sandbox / `solana` production); users fund by sending
+  USDC/USDT there. Deposits are tracked via Ground's cursor-paginated
+  deposits API. No custody signing in V1.
+- **Withdrawals.** Portfolio-level: preview
+  (`POST .../withdrawal-preview`) then create
+  (`POST .../withdrawals`, caller-owned requestId — a 409
+  `request_id_conflict` surfaces as `CONFLICT`), pinned to the environment's
+  Solana rail, then status-polled `processing → completed | failed`.
+  Destination whitelisting is available as an explicit address-book call,
+  not folded into the withdrawal flow.
+- **Settlement signal: polling, for now.** Ground offers Stripe-style
+  HMAC-signed webhooks; wiring them into the existing webhook dispatch is
+  future work — V1 polls deposit and withdrawal status.
 
 ## Open infra decisions (mirror of the V1 decision list)
 
@@ -138,7 +194,8 @@ mock fixtures to the BFF (single seam: `earn-mock-data.ts`).
    share-price read via RPC relay (trustless, needs per-vault program
    knowledge) vs both with drift alerting. Cadence + retention for snapshots.
 2. **Settlement signal** — webhook-primary with poll backstop (ramps pattern,
-   assumed above) vs poll-only for providers without webhooks.
+   assumed above) vs poll-only for providers without webhooks. *Resolved for
+   Ground V1: poll-only; its HMAC webhooks are future work (see above).*
 3. **Compliance hook** — do RWA deposits require a compliance-provider check
    (Genius-compliant tokens need app whitelisting — JOLT/B-reserves)?
 4. **Policy engine scope** — which of whitelist/buffer/limits/timelocks land in

@@ -129,5 +129,46 @@ stands, these tighten how it is enforced:
   the rest of Earn (`packages/sdp-earn/src/types.ts`; sole producer
   `apps/sdp-api/src/routes/earn/context.ts`).
 
+## Addendum — 2026-08-03 Ground goes live (portfolio-wallet capability)
+
+Ground is the first provider to move past the stub: a live `listStrategies`
+plus a **portfolio-wallet capability** that extends — never widens — the base
+contract. The pluggability decision holds; this records how an *optional*
+capability slots in without burdening providers that lack it.
+
+- **Optional capability, all-or-nothing guard.** `EarnPortfolioWalletProvider`
+  (`packages/sdp-earn/src/types.ts`) extends `EarnVaultProvider` with the
+  portfolio surface (wallet create/get, strategy update, deposits page,
+  withdrawal preview/create/status, address-book entry). Callers never probe
+  individual methods: `supportsPortfolioWallets`
+  (`@sdp/earn/capabilities`) is a type guard that requires the *entire*
+  method set, so a half-implemented capability is invisible rather than a
+  runtime landmine. Providers that don't opt in keep the exact base contract
+  — zero added lift, per the original decision.
+- **Shared-wallet-per-org model.** One provider wallet per
+  `(organization, environment, provider)` — DB-enforced by the unique
+  constraint in migration `0035_earn_provider_wallets.sql` and read/written
+  through `EarnRepository.getProviderWallet`/`insertProviderWallet`.
+  Choosing a curator applies preset weights to the shared wallet's strategy
+  (create on first use, `updatePortfolioStrategy` afterwards); positions are
+  read live from the provider and grouped by curator for display.
+- **Solana-only surface.** The snapshot exposes only the wallet's Solana
+  deposit address (`solana_devnet` sandbox / `solana` production);
+  withdrawals and previews pin `destinationChain` to the environment's Solana
+  rail. Yield sources on other chains remain valid catalogue entries — the
+  provider routes internally; their chain is metadata.
+- **Funding is deposit-address, not custody signing.** V1 funds the wallet by
+  surfacing its Solana deposit address and tracking deposits via the
+  provider's deposits API — no SDP-side transaction building or signing.
+- **Exit safety preserved.** Portfolio withdrawals gate on
+  *configured*, not *available*: a missing API key fails closed with
+  `PROVIDER_NOT_CONFIGURED` before any request, while a commercial
+  disablement (entitlement off) still lets money out. `buy_only` yield
+  sources are excluded from the catalogue outright — listing one would let
+  deposits into a source that can't sell, i.e. trap funds.
+- **Declared support narrowed.** Ground's `declaredSupport` is now
+  USDC/USDT (USDG dropped); deposit tokens with no known cluster mint are
+  skipped, so USDT is effectively production-only.
+
 Operational checklists (provider / vault / category / custodian) live in the
 [Earn pluggability playbook](../contributing/earn-pluggability-playbook.md).
