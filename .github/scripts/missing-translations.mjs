@@ -575,7 +575,9 @@ async function requestTranslations({
   const body = {
     message: JSON.stringify({
       targetLocale: locale,
-      ...localePromptConfig(guidance, locale),
+      // Preserve the guidance envelope so a release remains compatible while
+      // the independently deployed Eve prompt rolls forward.
+      guidance: localePromptConfig(guidance, locale),
       translations: entries.map(({ sourceFile, key, source, context }) => ({
         file: sourceFile,
         key,

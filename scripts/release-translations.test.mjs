@@ -170,17 +170,18 @@ test("uses the Eve structured session API and preserves placeholders", async () 
         const request = JSON.parse(options.body);
         assert.equal(request.outputSchema.properties.translations.minItems, 1);
         const message = JSON.parse(request.message);
-        assert.deepEqual(message.context, {
+        assert.deepEqual(message.guidance.context, {
           general: guidance.default.context,
           locale: guidance.locales.fr.context,
         });
-        assert.deepEqual(message.instructions, {
+        assert.deepEqual(message.guidance.instructions, {
           general: guidance.default.instructions,
           locale: guidance.locales.fr.instructions,
           terminology: guidance.locales.fr.terminology,
         });
-        assert.equal("guidance" in message, false);
-        assert.equal("forbiddenTerms" in message.instructions, false);
+        assert.equal("context" in message, false);
+        assert.equal("instructions" in message, false);
+        assert.equal("forbiddenTerms" in message.guidance.instructions, false);
         assert.equal(message.translations[0].context.nearby[0].translation, "Bienvenue");
         return {
           ok: true,
