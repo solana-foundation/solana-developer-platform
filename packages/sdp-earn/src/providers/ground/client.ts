@@ -1,6 +1,5 @@
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
-  EARN_KNOWN_CURATOR_LABELS,
   EARN_PORTFOLIO_DEPOSIT_STATUSES,
   EARN_PORTFOLIO_POSITION_KINDS,
   EARN_PORTFOLIO_TOKENS,
@@ -235,21 +234,39 @@ function classifySourceKind(
 }
 
 /**
- * Curator is data, not code (ADR 0002): match a known curator id in the
- * source id/name, then fall back to the `morpho-<curator>-<token>` naming
- * convention (open string — a new curator needs no code change), then to the
- * protocol.
+ * Curator houses Ground names inside a yield-source id, e.g.
+ * `morpho-steakhouse-usdc` or `kamino-gauntlet-frontier-usdc`. This is Ground's
+ * naming vocabulary, deliberately NOT `EARN_KNOWN_CURATOR_LABELS`: that
+ * registry is display-only, so adding a label there can never change what this
+ * derives (a Morpho-hosted vault must resolve to the house curating it, not to
+ * Morpho). A new house here is a one-line change; a house we don't list still
+ * resolves through the convention or protocol fallback below.
+ */
+const GROUND_CURATOR_HOUSES = [
+  "gauntlet",
+  "steakhouse",
+  "smokehouse",
+  "sentora",
+  "allez",
+  "rockawayx",
+  "august",
+] as const;
+
+/**
+ * Curator is data, not code (ADR 0002): match a curator house named in the
+ * source id/name, then the `<protocol>-<curator>-<token>` convention (open
+ * string — an unlisted curator still resolves), then the hosting protocol.
  */
 function deriveCurator(source: GroundYieldSource): string | undefined {
   const id = source.id.toLowerCase();
   const idTokens = id.split(/[^a-z0-9]+/);
   const name = source.name.toLowerCase();
-  for (const curator of Object.keys(EARN_KNOWN_CURATOR_LABELS)) {
+  for (const curator of GROUND_CURATOR_HOUSES) {
     if (idTokens.includes(curator) || name.includes(curator)) {
       return curator;
     }
   }
-  const conventional = /^morpho-([a-z0-9-]+)-(?:usdc|usdt)$/.exec(id);
+  const conventional = /^(?:morpho|kamino)-([a-z0-9]+)-(?:usdc|usdt)$/.exec(id);
   if (conventional) {
     return conventional[1];
   }

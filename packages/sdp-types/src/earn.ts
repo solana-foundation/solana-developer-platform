@@ -77,10 +77,32 @@ export type EarnKnownUnderlyingSource = (typeof EARN_KNOWN_UNDERLYING_SOURCES)[n
  * is a data change — zero code, zero migration. This registry only maps known
  * ids to display labels; unknown ids render as-is.
  */
+/**
+ * Display labels ONLY — never a matching vocabulary. Order is irrelevant and
+ * adding an entry can never change how any provider derives a curator: that
+ * derivation is provider-specific and keeps its own vocabulary (Ground's lives
+ * in `@sdp/earn` providers/ground/client.ts). Keeping the two apart is what
+ * makes "onboarding a curator is a data change" literally true.
+ */
 export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
+  // Curator houses.
   gauntlet: "Gauntlet",
   steakhouse: "Steakhouse Financial",
   sentora: "Sentora",
+  smokehouse: "Smokehouse",
+  morpho: "Morpho",
+  allez: "Allez Labs",
+  rockawayx: "RockawayX",
+  august: "August",
+  superstate: "Superstate",
+  // Ids Ground reports when a protocol or fund curates its own vaults;
+  // `g<ticker>` is Ground's own wrapper of a Superstate fund.
+  kamino: "Kamino",
+  maple: "Maple",
+  centrifuge: "Centrifuge",
+  aave_v3: "Aave V3",
+  gustb: "Superstate USTB",
+  guscc: "Superstate USCC",
 };
 
 export function earnCuratorLabel(curator: string): string {
