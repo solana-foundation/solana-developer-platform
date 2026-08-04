@@ -255,7 +255,15 @@ function redeemLiquidity(
   return { liquidityTerm: "delayed", redemptionDelayDays };
 }
 
-const RWA_ALLOCATION_TYPE = /treasur|t.?bill|clo|rwa|bond|credit|note/i;
+/**
+ * Allocation types that mark a sleeve as real-world assets. `fund` belongs here:
+ * Ground's tokenized-fund vaults (Superstate USTB, Janus Henderson JAAA/JTRSY)
+ * report their holding as `type: "fund"`, so without it a pure RWA product
+ * classifies as `defi` and the dashboard's backing filter hides it from the
+ * RWA view. Ground's documented values are treasury, reserve, market, loan,
+ * liquidity, rwa and fund — the rest legitimately read as DeFi.
+ */
+const RWA_ALLOCATION_TYPE = /treasur|t.?bill|clo|rwa|bond|credit|note|fund/i;
 
 /**
  * A Ground source is a basket of allocations; classify by the dominant side
