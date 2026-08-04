@@ -1,0 +1,16 @@
+---
+title: Idempotency
+description: Prevent duplicate operations by sending an Idempotency-Key header on mutation requests.
+---
+
+Include an `Idempotency-Key` header on mutation requests to prevent duplicates. If a request times out or your client retries, replaying the same key returns the original result instead of performing the operation twice.
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/transfers \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Idempotency-Key: 8a2f6c1e-9d4b-4f3a-b7e5-2c8d9f0a1b3c" \
+  -H "Content-Type: application/json" \
+  -d '{ ... }'
+```
+
+Use a unique key per logical operation (a UUID works well) and reuse the same key for retries of that operation.

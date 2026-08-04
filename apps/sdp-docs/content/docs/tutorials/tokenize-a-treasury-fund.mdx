@@ -66,7 +66,7 @@ Hit [faucet.solana.com](https://faucet.solana.com) on Devnet, paste the wallet's
 
 Wire two HTTP clients (Developer + Admin) against `https://api.solana.com` with Bearer auth.
 
-```javascript
+```javascript title="sdp-client.js"
 const BASE = "https://api.solana.com";
 
 class SdpError extends Error {
@@ -116,7 +116,7 @@ const sdpAdmin = new SdpClient(process.env.SDP_ADMIN_API_KEY);
 
 Confirm the setup by listing wallets:
 
-```javascript
+```javascript title="list-wallets.js"
 const { data } = await sdp.get("/v1/wallets");
 console.log(`Custody wallets configured: ${data.wallets.length}`);
 ```
@@ -150,7 +150,7 @@ SDP does not expose Token-2022 transfer hooks. The permanent-delegate + frozen-b
 
 Here is the create call:
 
-```javascript
+```javascript title="create-token.js"
 const { data } = await sdp.post("/v1/issuance/tokens", {
   template: "tokenized-security",
   name: "Pilot Treasury Fund",
@@ -176,7 +176,7 @@ console.log(token.id, token.status);
 
 The response echoes the auto-set defaults so a design-time compliance review can confirm them:
 
-```json
+```json title="response.json"
 {
   "data": {
     "token": {
@@ -212,7 +212,7 @@ Every state-mutating execute endpoint in SDP supports an `Idempotency-Key` HTTP 
 
 The header is how you make network-level retries safe for irreversible operations like deploy, mint, burn, seize, and force-burn. Extend the `SdpClient` from Section 2 (keep the `SdpError` class declared there; only the `SdpClient` body changes):
 
-```javascript
+```javascript title="sdp-client.js"
 import { randomUUID } from "node:crypto";
 
 class SdpClient {
@@ -257,7 +257,7 @@ Generate the key into a `const` once per operation, before the call. If a retry 
 
 Every execute endpoint with an irreversible side effect has a sibling `/prepare` endpoint that simulates the on-chain transaction without sending it. Prepare returns `simulation.success`, `simulation.error`, and `simulation.logs`: the human-readable Token-2022 program output a Solana node would emit. When execute returns an opaque 500, prepare with the same body surfaces the actual on-chain error in `simulation.error` and the failing instruction in `simulation.logs`. The pattern generalizes: every execute endpoint in SDP that has a `/prepare` sibling supports this diagnostic flow, and Sections 6 and 7 reuse it.
 
-```javascript
+```javascript title="deploy-prepare.js"
 const tokenId = "<token id from Section 3>";
 
 const prepared = await sdp.post(
@@ -276,7 +276,7 @@ console.log(`Simulation passed: ${simulation.unitsConsumed} CU`);
 
 A clean simulation:
 
-```json
+```json title="response.json"
 {
   "data": {
     "simulation": {
@@ -293,7 +293,7 @@ A clean simulation:
 
 With prepare clean, the execute call is the actual on-chain transaction. Pass an `Idempotency-Key` so that if the network drops the response and you retry, you replay the original deploy result rather than producing a second on-chain transaction.
 
-```javascript
+```javascript title="deploy-token.js"
 const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/deploy`,
@@ -307,7 +307,7 @@ console.log(token.mintAddress, token.status);
 
 The response carries the four on-chain authorities and the live mint:
 
-```json
+```json title="response.json"
 {
   "data": {
     "token": {
@@ -370,7 +370,7 @@ SDP enforces compliance in two layers.
 
 The allowlist is your KYC'd cap table for this token. Your transfer agent feeds approved wallet addresses into it; you maintain the list on-chain.
 
-```js
+```js title="add-allowlist.js"
 await sdp.post(`/v1/issuance/tokens/${tokenId}/allowlist`, {
   address: holderAddress,
   label: "Institutional Holder A",
@@ -391,7 +391,7 @@ Compliance frameworks expect cap-table revocation, not destructive deletion. Use
 
 Your transfer agent runs the primary KYC pipeline. Your pre-allowlist screening is defense in depth, catching addresses the transfer agent's process might miss.
 
-```js
+```js title="screen-address.js"
 await sdp.post("/v1/compliance/address-screenings", {
   address: holderAddress,
   network: "solana",
@@ -407,7 +407,7 @@ As of 2026-05-22, Chainalysis credentials are broken in production sandbox and t
 
 **Freeze** is the surgical lever. It halts on-chain operations against a single investor's token account. Use it for sanctioned holders, court-ordered holds, or short-term incident response.
 
-```js
+```js title="freeze-account.js"
 await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/freeze`, {
   accountAddress: holderAddress,
   reason: "Court order 2026-CIV-1284 - account hold pending review",
@@ -442,7 +442,7 @@ The `pausable` extension's authority lives outside this enum and routes to your 
 
 Update an authority with `POST /v1/issuance/tokens/{tokenId}/authority`. If a key is compromised, revoke the role permanently:
 
-```js
+```js title="revoke-authority.js"
 await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/authority`, {
   authority: { role: "mint", newAuthority: null },
 });
@@ -460,7 +460,7 @@ You have an allowlisted holder with a zero balance. Two operations move them thr
 
 When the holder's fiat lands in your custody bank, treasury operations computes the token quantity at the published NAV and mints to the holder's allowlisted address. SDP derives the holder's Associated Token Account (ATA) from the holder address and the mint, and deposits the new supply there. The `memo` field is optional in the API (max 256 chars) but it is the audit-trail anchor; always include one tied to your internal subscription identifier.
 
-```javascript
+```javascript title="mint-subscription.js"
 const subscriptionKey = idempotencyKey("mint-subscription");
 const subscription = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint`,
@@ -480,7 +480,7 @@ console.log(transaction.id, transaction.status, tokenAccount);
 
 The response carries the transaction record and the ATA address:
 
-```json
+```json title="response.json"
 {
   "data": {
     "transaction": {
@@ -509,7 +509,7 @@ Yield accrues daily off-chain in your treasury accounting system. Monthly distri
 
 For a holder with a 1000 PTFND subscription and a published rate of 4.5% APY:
 
-```javascript
+```javascript title="mint-dividend.js"
 // Compute in integer cents and basis points — float math on money
 // (e.g. 1000 * 0.045 / 12) accumulates rounding artifacts.
 const holderCents = 1000 * 100;
@@ -538,7 +538,7 @@ The pro rata calculation runs in treasury operations. SDP mints the calculated a
 
 Pull the transactions history to confirm both records landed with their memos. The endpoint is paginated; a complete audit-trail fetch iterates until `meta.hasMore` is `false`.
 
-```javascript
+```javascript title="fetch-transactions.js"
 async function fetchAllTransactions(tokenId) {
   const all = [];
   let page = 1;
@@ -570,7 +570,7 @@ You have a holder with 1003.75 PTFND from Section 6. Now exercise the failure su
 
 A compliance event has occurred: the screening provider flags the holder, the transfer agent requests a hold, or a court order arrives. The Admin client issues the freeze. SDP derives the holder's ATA from the wallet address you pass in and freezes it at the Token-2022 layer.
 
-```javascript
+```javascript title="freeze-account.js"
 const frozen = await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
   {
@@ -585,7 +585,7 @@ console.log(frozenAccount.id, frozenAccount.accountAddress, frozenAccount.signat
 
 The `reason` field is your audit anchor. Tie it to a legal or operational identifier (court order, OFAC SDN match, internal incident ticket) so the compliance officer can trace each freeze back to its basis. The response carries the `frz_*` id and the derived ATA address:
 
-```json
+```json title="response.json"
 {
   "data": {
     "frozenAccount": {
@@ -607,7 +607,7 @@ The same `frz_*` id is reused if you refreeze later; SDP tracks one record per h
 
 Try to deliver the next monthly dividend. With the ATA frozen, the mint should not land. Use the same `sdp.post` shape from Section 6.
 
-```javascript
+```javascript title="mint-blocked.js"
 const blockedMintKey = idempotencyKey("mint-blocked");
 try {
   await sdp.post(
@@ -632,7 +632,7 @@ The response is HTTP 500 with `error.code: "INTERNAL_ERROR"` and `error.message:
 
 Call `/mint/prepare` with the same body. Prepare simulates the transaction without executing and returns the on-chain reason the execute call hid.
 
-```javascript
+```javascript title="mint-prepare.js"
 const diagnosis = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint/prepare`,
   {
@@ -651,7 +651,7 @@ simulation.logs.forEach(log => console.log("  " + log));
 
 The diagnostic response carries everything execute swallowed:
 
-```json
+```json title="response.json"
 {
   "data": {
     "simulation": {
@@ -675,7 +675,7 @@ This is the runbook step. When execute returns opaque, call its prepare sibling 
 
 The compliance event is resolved. Issue the unfreeze and retry the mint.
 
-```javascript
+```javascript title="unfreeze-account.js"
 const unfrozen = await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/unfreeze`,
   { accountAddress: holderAddress }

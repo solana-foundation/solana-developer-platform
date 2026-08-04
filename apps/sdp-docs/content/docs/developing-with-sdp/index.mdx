@@ -1,0 +1,24 @@
+---
+title: Overview
+description: The interfaces, environments, and conventions you build against.
+---
+
+SDP exposes two interfaces that connect to the same backend:
+
+- **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
+- **REST API** — programmatic access for backend integrations. Authenticate with an API key in the `Authorization` header.
+
+Everything the dashboard does is available through the API. Build against the API for automation and integrations; use the dashboard to set up your organization, inspect state, and perform one-off operations.
+
+## Environments
+
+| Environment  | Network      | API key prefix |
+| ------------ | ------------ | -------------- |
+| `sandbox`    | devnet       | `sk_test_`     |
+| `production` | mainnet-beta | `sk_live_`     |
+
+Both environments expose identical APIs. Develop and test against sandbox, then switch to production by swapping your API key.
+
+## Signing modes
+
+Most transaction endpoints support Execute (SDP signs and submits) or Prepare (SDP builds the transaction, you sign). See [Prepare vs Execute](/docs/guides/prepare-vs-execute).

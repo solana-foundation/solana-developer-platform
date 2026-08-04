@@ -37,7 +37,7 @@ The **Deploy** button appears in the token header and in the fund management pan
 
 You need the `tokenId` returned when you created the token. If you don't have it, list your tokens:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..."
 ```
@@ -73,13 +73,13 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 
 **Execute mode** — SDP signs and submits:
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
   -H "Authorization: Bearer sk_test_..." \
   -H "Idempotency-Key: deploy-acme-001"
 ```
 
-```typescript
+```typescript title="deploy-token.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy",
   {
@@ -96,7 +96,7 @@ const { data } = await res.json();
 
 **Prepare mode** — returns an unsigned transaction:
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/prepare \
   -H "Authorization: Bearer sk_test_..."
 ```
@@ -128,14 +128,14 @@ The token status badge changes from `Not deployed` to the onchain mint address. 
 
 The deploy response includes the confirmed state:
 
-```typescript
+```typescript title="deploy-token.ts"
 // data.token.status      — "active"
 // data.token.mintAddress — e.g., "AcMeXYZ..."
 ```
 
 Fetch the token at any time to verify:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
   -H "Authorization: Bearer sk_test_..."
 ```

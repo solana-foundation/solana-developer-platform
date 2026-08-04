@@ -62,7 +62,7 @@ BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
 
 BVNK is the only provider that currently accepts the `bvnkCompliance` field on the ramp request — an object of the form `{ "partyDetails": [...] }` carrying compliance party records used to satisfy travel-rule and KYC sharing requirements. The exact shape of each party record is provider-defined; see BVNK's compliance docs for the field schema.
 
-```json
+```json title="request.json"
 {
   "provider": "bvnk",
   "destinationWallet": "wal_...",

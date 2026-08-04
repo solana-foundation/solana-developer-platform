@@ -28,7 +28,7 @@ devnet RPC endpoint from your provider before treating this flow as reliable.
 
 From the directory where the installer placed `compose.yml` and `.env`:
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose up -d
 docker compose ps
@@ -80,7 +80,7 @@ The signing step generates a local Solana signer in the browser and shows the
 public key to fund on devnet. Save the generated file as `~/sdp/.env`, then
 restart the stack:
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose up -d
 ```
@@ -103,7 +103,7 @@ show the organization and project context instead of onboarding errors.
 
 If the dashboard loads but organization state does not appear, check the API logs:
 
-```bash
+```bash title="Terminal"
 docker compose logs -f sdp-api
 ```
 
@@ -121,7 +121,7 @@ named `Devnet local wallet`.
 
 If you prefer the API path, use an admin key from the dashboard:
 
-```bash
+```bash title="Terminal"
 curl -X POST http://localhost:8787/v1/wallets/initialize \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -154,7 +154,7 @@ Save the full key when the dashboard shows it. SDP only displays it once.
 
 Use the new key against your self-hosted API:
 
-```bash
+```bash title="Terminal"
 export SDP_API_KEY="sk_test_..."
 
 curl "http://localhost:8787/v1/wallets?view=summary" \

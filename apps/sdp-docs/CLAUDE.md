@@ -99,7 +99,7 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 
 | Class | Element |
 |---|---|
-| `.launch-docs-title` | H1, ABC Diatype, clamp(36px, 6vw, 56px), weight 700 |
+| `.launch-docs-title` | H1, ABC Diatype, clamp(32px, 4.5vw, 40px), weight 700 |
 | `.launch-docs-description` | Subtitle `<p>`, ABC Diatype 18px, max-width 720px, margin-bottom 36px |
 | `.launch-docs-body` | Content wrapper, Inter, `--launch-text` color |
 | `.launch-mdx-heading` | Base heading style (ABC Diatype, bold, ink color) |
@@ -123,7 +123,11 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 
 ### Navigation node icons (`navigation-node.tsx`)
 
-The current sidebar does not render per-page icons. Page and folder links are text-only; only the folder expand/collapse chevron uses an icon (`ChevronDown` / `ChevronRight` from Lucide). If you want to reintroduce keyword-based icon mapping, add it to `NavigationNode` in `src/components/docs-shell/navigation-node.tsx`.
+Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` (e.g. `icon: BookOpen`) in a page's MDX frontmatter or a folder's `meta.json`; the loader in `src/lib/source.ts` resolves the name against `lucide-react` exports (unknown names throw at build time) and `NavigationNode` renders it before the label via `.launch-docs-nav-icon`. Pages without an `icon` stay text-only. The folder expand/collapse chevron (`ChevronDown` / `ChevronRight`) is unrelated and always shown.
+
+### Search
+
+⌘K search works out of the box: `RootProvider` (root `layout.tsx`) provides the Fumadocs search dialog + hotkey, backed by the Orama route at `src/app/api/search/route.ts` (`createFromSource(source)`). The sidebar header has a "Search docs" trigger button (`.launch-docs-sidebar-search`). Only `content/docs/` MDX is indexed — JSX-rendered content like `DocsHome` is not.
 
 ---
 

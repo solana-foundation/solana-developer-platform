@@ -316,7 +316,7 @@ const run = async () => {
       "tutorials/end-to-end-payment-flow",
       "---Integrations---",
       "reference/provider-onboarding",
-      "reference/ai-consumption",
+      "reference/docs-for-ai",
       "reference/postman-collection",
       "---API---",
       ...apiPages,

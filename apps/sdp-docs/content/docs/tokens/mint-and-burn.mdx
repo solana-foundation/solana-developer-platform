@@ -38,7 +38,7 @@ The **Fund management** panel shows the current supply with two primary actions:
 
 All supply operations share this URL pattern:
 
-```
+```text title="Endpoints"
 POST /v1/issuance/tokens/{tokenId}/mint
 POST /v1/issuance/tokens/{tokenId}/burn
 POST /v1/issuance/tokens/{tokenId}/force-burn
@@ -83,7 +83,7 @@ Once confirmed, the mint appears in the Transactions table with a `confirmed` st
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -97,7 +97,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   }'
 ```
 
-```typescript
+```typescript title="mint-tokens.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
   {
@@ -161,7 +161,7 @@ For **Force burn** (requires `tokens:admin`), use the Compliance tab instead of 
 
 **Burn from a controlled account:**
 
-```typescript
+```typescript title="burn-tokens.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
   method: "POST",
   headers: {
@@ -177,7 +177,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
 
 **Force-burn from any holder** (requires `tokens:admin`):
 
-```typescript
+```typescript title="force-burn-tokens.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
   method: "POST",
   headers: {
@@ -216,7 +216,7 @@ Reload the token detail page if the displayed supply value appears stale.
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh \
   -H "Authorization: Bearer sk_test_..."
 ```

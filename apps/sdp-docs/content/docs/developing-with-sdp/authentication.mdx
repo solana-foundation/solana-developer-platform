@@ -1,0 +1,15 @@
+---
+title: Authentication
+description: Authenticate API requests with project-scoped API keys.
+---
+
+Every API request carries an API key in the `Authorization` header:
+
+```bash title="Terminal"
+curl https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+Key prefixes tell you which environment a key belongs to: `sk_test_` keys are sandbox, `sk_live_` keys are production.
+
+Keys are project-scoped — a key can only reach the wallets, tokens, and payments of the project it was issued for. See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys) for creating, rotating, and revoking keys.

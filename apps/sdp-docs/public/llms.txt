@@ -7,7 +7,7 @@
 - API: https://api.solana.com
 - Interactive API docs: https://api.solana.com/docs
 - OpenAPI: https://api.solana.com/openapi.json
-- AI guide: https://platform.solana.com/docs/reference/ai-consumption
+- AI guide: https://platform.solana.com/docs/reference/docs-for-ai
 
 ## Supported surfaces
 - Wallets and custody
@@ -19,10 +19,10 @@
 - Asset profiles and public token metadata
 
 ## Start here
-- [Introduction](https://platform.solana.com/docs/introduction): What SDP is, what it provides, and how it works.
-- [Set Up Your Organization](https://platform.solana.com/docs/guides/setup-organization): Create and configure your SDP organization through the dashboard.
+- [What is SDP?](https://platform.solana.com/docs/introduction): Putting institutional-grade capital markets at your fingertips. Issue, move, and manage regulated assets on Solana.
+- [Set Up Your Organization & Projects](https://platform.solana.com/docs/guides/setup-organization): Create your SDP organization and organize your work into projects.
 - [Set Up Wallets](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
-- [Manage API Keys](https://platform.solana.com/docs/guides/manage-api-keys): Create, rotate, and revoke API keys with role-based access and environment scoping.
+- [Manage API Keys](https://platform.solana.com/docs/developing-with-sdp/manage-api-keys): Create, rotate, and revoke API keys with role-based access and environment scoping.
 - [Tokenize an Asset](https://platform.solana.com/docs/guides/tokenize-an-asset): Map a real-world tokenization use case to the right SDP template, authorities, and API flow.
 - [Create a Token](https://platform.solana.com/docs/guides/create-a-token): Define a new token using templates or custom configuration.
 - [Deploy a Token](https://platform.solana.com/docs/guides/deploy-a-token): Deploy a created token to the Solana blockchain.
@@ -32,7 +32,7 @@
 - [Issuance Token Types](https://platform.solana.com/docs/reference/issuance-token-types): How to choose a token template, and the default controls each one applies.
 - [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
 - [Infrastructure Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add an infrastructure provider integration to SDP through the self-service contribution process.
-- [AI Consumption](https://platform.solana.com/docs/reference/ai-consumption): Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
+- [Documentation for AI](https://platform.solana.com/docs/reference/docs-for-ai): Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
 - [Postman Collection](https://platform.solana.com/docs/reference/postman-collection): Download the public SDP API Postman collection generated from the OpenAPI contract.
 - [API Reference](https://platform.solana.com/docs/reference/api): Endpoint index from the repository OpenAPI spec.
 - [Health](https://platform.solana.com/docs/reference/api/health): Service health and readiness endpoints.
@@ -45,7 +45,7 @@
 - [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
 
 ## AI guide
-- [AI Consumption](https://platform.solana.com/docs/reference/ai-consumption): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.
+- [Docs for AI](https://platform.solana.com/docs/reference/docs-for-ai): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.
 
 ## Machine-readable resources
 - [llms.txt](https://platform.solana.com/docs/ai/llms.txt)
