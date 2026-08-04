@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { OrganizationRpcProvider } from "@sdp/types";
+import type { CustodyConfigSummary, OrganizationRpcProvider } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { assetProfiles } from "@/flags";
@@ -12,6 +12,7 @@ import { createTimedTrace } from "@/lib/request-tracing";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
 import { AppearanceSection } from "./appearance-section";
 import { MembersSection } from "./members-section";
+import { OrganizationCustodySettingsSection } from "./organization-custody-settings-section";
 import { OrganizationRpcSettingsForm } from "./organization-rpc-settings-form";
 
 type OrganizationSettings = {
@@ -27,6 +28,11 @@ type Organization = {
 type OnboardingStatusResponse = {
   linked: boolean;
   organization: Organization | null;
+};
+
+type CustodyConfigListResponse = {
+  configs: CustodyConfigSummary[];
+  defaultConfigId: string | null;
 };
 
 type ProjectListResponse = {
@@ -69,6 +75,7 @@ export default async function SettingsPage({
   let isLinked = true;
   let loadError = false;
   let enabledRpcProviders: OrganizationRpcProvider[] = [];
+  let custodyConfigs: CustodyConfigSummary[] = [];
 
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
@@ -122,6 +129,17 @@ export default async function SettingsPage({
       } catch {
         enabledRpcProviders = ["default"];
       }
+
+      // Same shape the wallet setup route already reads. A failure here leaves the
+      // section rendering its empty state rather than taking the page down with it.
+      try {
+        const payload = await trace.step("fetch_custody_configs", () =>
+          apiClient.fetch<{ data: CustodyConfigListResponse }>("/v1/wallets/configs")
+        );
+        custodyConfigs = payload.data?.configs ?? [];
+      } catch {
+        custodyConfigs = [];
+      }
     }
 
     trace.log({
@@ -161,11 +179,14 @@ export default async function SettingsPage({
             ) : null}
 
             {!loadError && organization ? (
-              <OrganizationRpcSettingsForm
-                organization={organization}
-                canManageSettings={dashboardAccess.capabilities.canManageOrgSettings}
-                enabledProviders={enabledRpcProviders}
-              />
+              <>
+                <OrganizationRpcSettingsForm
+                  organization={organization}
+                  canManageSettings={dashboardAccess.capabilities.canManageOrgSettings}
+                  enabledProviders={enabledRpcProviders}
+                />
+                <OrganizationCustodySettingsSection configs={custodyConfigs} />
+              </>
             ) : null}
 
             {!loadError && !organization && !isLinked ? (

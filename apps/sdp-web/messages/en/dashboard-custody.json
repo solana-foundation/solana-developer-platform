@@ -480,7 +480,7 @@
     "onboardingDescription": "Choose the infrastructure your organization will use.",
     "onboardingChooseRpc": "Choose your RPC provider",
     "onboardingChooseCustody": "Choose your custody provider",
-    "onboardingProvidersChangeLater": "You can change providers at any time in Settings.",
+    "onboardingProvidersChangeLater": "You can connect more providers later in Settings.",
     "onboardingNoRpcProviders": "No RPC providers are available for this organization in the current environment. Contact your SDP administrator before continuing.",
     "onboardingNoCustodyProviders": "No custody providers are available for this organization in the current environment. Contact your SDP administrator before continuing.",
     "onboardingFinish": "Finish setup",
@@ -784,6 +784,10 @@
     "apiKeyClearBindingsConfirmationRequired": "Confirm Clear bindings before saving this binding change.",
     "policyAssetsInWallet": "In this wallet",
     "policyAssetsCommon": "Common tokens",
-    "policyAssetsIssued": "Your tokens"
+    "policyAssetsIssued": "Your tokens",
+    "settingsCustodyTitle": "Custody providers",
+    "settingsCustodyDescription": "Providers connected to this organization. Connecting another does not move existing wallets.",
+    "settingsCustodyEmpty": "No custody provider is connected yet.",
+    "settingsCustodyConnect": "Connect a provider"
   }
 }
