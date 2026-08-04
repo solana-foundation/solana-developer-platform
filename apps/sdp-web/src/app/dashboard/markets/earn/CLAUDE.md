@@ -84,13 +84,17 @@ apply the change twice), and switching strategy mints a fresh one (reusing a key
 with a different payload is a provider conflict). Dropping either half
 reintroduces a double-submit that fires two provider mutations.
 
-### The funding wallet
+### The funding wallet is session-only, deliberately
 
-Selected by `custody_wallets.id` (NOT the provider-side `walletId`) because that
-is what `PUT /v1/earn/program` persists as `fundingWalletId`. It records where
-stablecoins are sent FROM and where withdrawals return — there is still no API
-to move funds from an SDP wallet into the program, so never imply a transfer
-happens. The API verifies the wallet belongs to the caller's org.
+Step 1 picks the wallet that stablecoins are sent FROM, keyed by
+`custody_wallets.id`. It is **not persisted**, and that was a decision, not an
+omission: `PUT /v1/earn/program` has no source-wallet field, and no API moves
+funds from an SDP wallet into the program. A `funding_wallet_id` column was
+built and reverted — its only consumer was preselecting the wallet on a return
+visit, and provenance is already answered better by the deposit's own on-chain
+`fromAddress`. Bring it back when something consumes it; defaulting the withdraw
+modal's destination is the natural trigger. Until then the choice shapes the
+funding instructions and nothing else — never imply a transfer happens.
 
 ### Conditions with no first-class data source
 

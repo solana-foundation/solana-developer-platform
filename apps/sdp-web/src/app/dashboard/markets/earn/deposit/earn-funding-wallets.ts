@@ -10,12 +10,11 @@ import { portfolioTokenForMint } from "../earn-program-presentation";
  *
  * Earn's program wallet is provisioned and custodied by the provider (Ground),
  * so an SDP wallet is never the program itself — it is where the stablecoins are
- * sent FROM, and the address a withdrawal returns to. The choice is persisted:
- * `PUT /v1/earn/program` takes `fundingWalletId` (`custody_wallets.id`) and
- * `GET /v1/earn/program` returns it, so a reload can restore the selection. What
- * still does NOT exist is any API that MOVES funds from an SDP wallet into the
- * program — funding remains a transfer the operator makes to the provider's
- * Solana address, so no surface may imply SDP performs it.
+ * sent FROM. The selection is deliberately NOT persisted: `PUT /v1/earn/program`
+ * has no source-wallet field and no API moves funds from an SDP wallet into the
+ * program, so recording it would only look like state that means something.
+ * Funding is a transfer the operator makes to the provider's Solana address; the
+ * choice here shapes the instructions for that, and nothing else.
  */
 
 /**

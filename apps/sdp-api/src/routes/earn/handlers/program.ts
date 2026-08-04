@@ -50,12 +50,6 @@ import { parseBody, parseParams, parseQuery } from "./shared";
 export interface EarnProgram {
   provider: string;
   label: string | null;
-  /**
-   * The org's own custody wallet that funds this program and receives its
-   * withdrawals, or null when none was recorded. Never where the funds sit —
-   * the provider custodies the program wallet (`wallet.providerWalletRef`).
-   */
-  fundingWalletId: string | null;
   createdAt: string;
   wallet: EarnPortfolioWalletSnapshot;
   /**
@@ -92,7 +86,6 @@ function mapProgram(
   return {
     provider: row.provider,
     label: row.label,
-    fundingWalletId: row.funding_wallet_id,
     createdAt: row.created_at,
     wallet,
     ...(portfolioYield ? { yield: portfolioYield } : {}),
@@ -214,20 +207,6 @@ export const upsertEarnProgram = async (c: AppContext) => {
   await assertKnownYieldSources(c, client.provider, body.allocations);
 
   const repo = getEarnRepository(c);
-
-  // A caller-supplied wallet id must be one of this org's own wallets. There is
-  // no FK that can express this (custody_wallets scopes to an org through
-  // custody_configs), so it is checked here before anything is persisted.
-  if (body.fundingWalletId) {
-    const owned = await repo.organizationOwnsCustodyWallet({
-      organizationId: auth.organizationId,
-      custodyWalletId: body.fundingWalletId,
-    });
-    if (!owned) {
-      throw badRequest("fundingWalletId is not a wallet in this organization");
-    }
-  }
-
   const existing = await repo.getProviderWallet({
     organizationId: auth.organizationId,
     environment,
@@ -244,24 +223,6 @@ export const upsertEarnProgram = async (c: AppContext) => {
       // means the client accepted non-idempotent behaviour (see the schema).
       requestId: body.requestId,
     });
-
-    // Only touch the funding wallet when the caller said something about it:
-    // `undefined` leaves the recorded one alone, `null` clears it. Persisted
-    // after the provider call so a failed strategy change leaves the row as it
-    // was, and only when it actually differs.
-    if (body.fundingWalletId !== undefined && body.fundingWalletId !== row.funding_wallet_id) {
-      const updated = await repo.setProviderWalletFundingWallet({
-        id: row.id,
-        fundingWalletId: body.fundingWalletId ?? null,
-      });
-      // No row back means the UPDATE matched nothing. Falling through would
-      // answer 200 with the OLD funding wallet, i.e. report a write that did
-      // not happen.
-      if (!updated) {
-        throw internalError("Failed to persist the earn program funding wallet");
-      }
-      row = updated;
-    }
   } else {
     if (!auth.projectId) {
       throw internalError("Could not resolve project scope");
@@ -283,7 +244,6 @@ export const upsertEarnProgram = async (c: AppContext) => {
         provider: client.provider,
         providerWalletRef: createdWallet.providerWalletRef,
         label: body.label ?? null,
-        fundingWalletId: body.fundingWalletId ?? null,
         createdBy: await resolveCreatorUserId(c),
       });
     } catch (err) {

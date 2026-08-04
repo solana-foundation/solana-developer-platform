@@ -196,11 +196,10 @@ export function EarnDepositWizard({
 
   const [step, setStep] = useState<DepositStep>("wallet");
   /**
-   * `null` until the reader picks, or until the program's recorded funding
-   * wallet loads — switching strategy on an existing program should not make
-   * them re-choose a wallet they already chose.
+   * Session-only: nothing persists the funding wallet, so a later visit asks
+   * again. It shapes the funding instructions; it never moves money.
    */
-  const [walletOverride, setWalletOverride] = useState<string | null>(null);
+  const [walletId, setWalletId] = useState<string | null>(null);
   const [profile, setProfile] = useState<EarnDepositProfile | null>(null);
   const [filters, setFilters] = useState<EarnStrategyFilters | null>(null);
   const [strategyId, setStrategyId] = useState<string | null>(initialStrategyId ?? null);
@@ -216,9 +215,6 @@ export function EarnDepositWizard({
     [activeFilters, liveStrategies]
   );
 
-  const persistedWalletId =
-    programState?.kind === "active" ? programState.program.fundingWalletId : null;
-  const walletId = walletOverride ?? persistedWalletId;
   const selectedWallet = (wallets ?? []).find((wallet) => wallet.id === walletId);
   const selectedStrategy: EarnStrategy | undefined = liveStrategies.find(
     (strategy) => strategy.id === strategyId
@@ -292,9 +288,6 @@ export function EarnDepositWizard({
     const result = await upsertEarnProgram({
       allocations,
       requestId: requestIdFor(selectedStrategy.id),
-      // Recorded on the program so the funding wallet survives a reload and the
-      // overview can name it. Server-side it is verified to belong to this org.
-      fundingWalletId: walletId,
     });
     setSubmitting(false);
     if (!result.ok) {
@@ -436,7 +429,7 @@ export function EarnDepositWizard({
             fireblocksEnabled={fireblocksEnabled}
             hasError={Boolean(walletsError)}
             isLoading={walletsLoading}
-            onSelect={setWalletOverride}
+            onSelect={setWalletId}
             selectedWalletId={walletId}
             wallets={wallets ?? []}
           />

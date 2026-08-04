@@ -147,7 +147,6 @@ describe("EarnWorkspace with an active program", () => {
       program: {
         provider: "ground",
         label: "Treasury earn",
-        fundingWalletId: null,
         createdAt: TIMESTAMP,
         yield: { currentApy: "0.058", earnedUsd: "1250.75", positions: [] },
         wallet: {

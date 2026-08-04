@@ -28,12 +28,6 @@ export const EARN_PORTFOLIO_PROVIDER: EarnProviderId = "ground";
 export interface EarnProgram {
   provider: string;
   label: string | null;
-  /**
-   * The org's custody wallet that funds this program (`custody_wallets.id`), or
-   * null when none was recorded. Never where the funds sit — the provider
-   * custodies the program wallet.
-   */
-  fundingWalletId: string | null;
   createdAt: string;
   wallet: EarnPortfolioWalletSnapshot;
   /** Absent when the provider's yield lookup failed — render no rate, not 0%. */
@@ -114,11 +108,6 @@ export interface EarnProgramUpsertInput {
    * a different payload.
    */
   requestId?: string;
-  /**
-   * The org's custody wallet that funds the program (`custody_wallets.id`).
-   * Omit to leave a recorded one untouched; send `null` to clear it.
-   */
-  fundingWalletId?: string | null;
 }
 
 export interface EarnProgramUpsertResult {
