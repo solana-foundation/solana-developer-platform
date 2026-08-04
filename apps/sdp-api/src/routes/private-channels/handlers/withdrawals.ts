@@ -83,6 +83,7 @@ export async function createPrivateChannelWithdrawal(c: AppContext) {
       userId,
       wallet,
       amount: parsed.data.amount,
+      mint: parsed.data.mint,
       destination,
       gatewayAuth,
     });
