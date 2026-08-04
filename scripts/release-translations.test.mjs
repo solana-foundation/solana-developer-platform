@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createCommitOnBranch } from "../.github/scripts/github-commit-on-branch.mjs";
 import {
   applyTranslations,
   collectMissingTranslations,
@@ -302,4 +303,78 @@ test("preserves ICU selectors and markup while allowing translated branch text",
 
   assert.deepEqual(extractPlaceholderTokens(source), extractPlaceholderTokens(translation));
   assert.notDeepEqual(extractPlaceholderTokens(source), extractPlaceholderTokens(changedSelector));
+});
+
+test("creates translation commits through GitHub without overriding the app identity", async () => {
+  let request;
+  const encodedContents = Buffer.from('{"test":true}').toString("base64");
+  const commit = await createCommitOnBranch({
+    repository: "solana-foundation/solana-developer-platform",
+    branch: "codex/release-main",
+    expectedHeadOid: "abc123",
+    headline: "chore(i18n): translate missing release strings",
+    additions: [{ path: "apps/sdp-web/messages/fr.json", contents: encodedContents }],
+    token: "test-token",
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            data: {
+              createCommitOnBranch: {
+                commit: { oid: "def456", url: "https://github.test/commit/def456" },
+              },
+            },
+          }),
+      };
+    },
+  });
+
+  assert.equal(commit.oid, "def456");
+  assert.equal(request.url, "https://api.github.com/graphql");
+  assert.equal(request.options.headers.Authorization, "Bearer test-token");
+  const input = JSON.parse(request.options.body).variables.input;
+  assert.deepEqual(input, {
+    branch: {
+      repositoryNameWithOwner: "solana-foundation/solana-developer-platform",
+      branchName: "codex/release-main",
+    },
+    expectedHeadOid: "abc123",
+    message: { headline: "chore(i18n): translate missing release strings" },
+    fileChanges: {
+      additions: [{ path: "apps/sdp-web/messages/fr.json", contents: encodedContents }],
+    },
+  });
+  assert.equal("author" in input, false);
+  assert.equal("committer" in input, false);
+});
+
+test("surfaces GraphQL commit errors returned with HTTP 200", async () => {
+  await assert.rejects(
+    createCommitOnBranch({
+      repository: "solana-foundation/solana-developer-platform",
+      branch: "codex/release-main",
+      expectedHeadOid: "stale-head",
+      headline: "chore(i18n): translate missing release strings",
+      additions: [],
+      token: "test-token",
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ errors: [{ message: "Expected head oid mismatch" }] }),
+      }),
+    }),
+    /Expected head oid mismatch/
+  );
+});
+
+test("translation workflow does not push a locally created commit", () => {
+  const workflow = fs.readFileSync(
+    path.resolve(import.meta.dirname, "../.github/workflows/release-please.yml"),
+    "utf8"
+  );
+
+  assert.doesNotMatch(workflow, /git push origin HEAD:codex\/release-main/);
 });
