@@ -1,12 +1,14 @@
 # Audit ledger operations
 
-SDP's `audit_logs` table is an append-only, SHA-256-linked security ledger. PostgreSQL seals every request and system-worker event at insertion time, serializes concurrent writers, rejects updates, deletes, and production truncation, and exposes a full-chain verifier. Audit write failures propagate to callers; they are never logged and ignored.
+SDP's `audit_logs` table is an append-only, SHA-256-linked security ledger. PostgreSQL seals every request and system-worker event at insertion time, serializes concurrent writers, rejects updates, deletes, and production truncation, and exposes a full-chain verifier. Every sealed row also writes an append-only record to `audit_ledger_anchors`, so deletion of the newest rows or complete truncation cannot masquerade as a valid shorter chain.
+
+Ordinary required audit writes fail closed. Irreversible issuance operations use two append-only events: a durable intent is required before any provider/on-chain side effect, followed by an outcome. If the outcome write fails after the side effect, the API does not return a misleading retryable failure; the unresolved intent remains durable, emits a structured error, and makes verification fail after a 15-minute reconciliation window.
 
 This implements the application-side controls for threat `SDP-022` and Linear issue `HOO-996`.
 
 ## Runtime database contract
 
-The API and scheduled workers must connect with a PostgreSQL role that is `NOSUPERUSER` and `NOBYPASSRLS`. Row-level security is forced on the table and only `SELECT` and `INSERT` policies exist. The mutation and truncate triggers are a second independent barrier.
+The API and scheduled workers must connect with a PostgreSQL role that is `NOSUPERUSER` and `NOBYPASSRLS`. Row-level security is forced on both ledger tables and only `SELECT` and `INSERT` policies exist. Separate mutation and truncate triggers are a second barrier. The API cannot append a new event if the ledger head differs from the anchored head.
 
 Never use the migration/admin credential as `DATABASE_URL` for an API or worker runtime. A superuser or `BYPASSRLS` role is intentionally reported as unsafe by the verification command.
 
@@ -18,7 +20,7 @@ Run with the ordinary API runtime secret:
 pnpm --filter @sdp/api audit:ledger verify
 ```
 
-The command exits nonzero if the chain is invalid or the connected runtime role can bypass the database controls. Store its JSON output in the deployment/operations log. `headHash` is the immutable checkpoint to compare on the next run and to copy to an external incident or change record before privileged maintenance.
+The command exits nonzero if the chain/anchor set is invalid, a critical intent is stale and unresolved, or the connected runtime role can bypass the database controls. Store its JSON output in the deployment/operations log. `headHash` is the immutable checkpoint to compare on the next run and to copy to an external incident or change record before privileged maintenance.
 
 Verify:
 
@@ -52,5 +54,7 @@ On a verification failure:
 4. Identify the first invalid sequence reported by the command.
 5. Restore only from a known-good snapshot under an incident record.
 6. Re-run verification, append a post-recovery checkpoint, and rotate any database credential capable of bypassing row security.
+
+If `unresolvedCriticalIntents` is nonzero, first reconcile the target transaction from the intent's nested `target` metadata against the issuance transaction record and Solana signature state. Append the missing outcome only after the result is proven. Do not repeat an irreversible operation merely because its outcome record is missing.
 
 Do not repair hashes in place. Recomputing them would destroy the evidence this control exists to preserve.

@@ -250,6 +250,13 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   }
 
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "update_authority",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: { tokenId, role, newAuthority, mode: "execute" },
+  });
 
   try {
     const result = await mosaic.updateAuthority({
@@ -283,23 +290,19 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       await tokenService.updateTokenAuthorities(tokenId, updates);
     }
 
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "update_authority",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
+    await auditService.completeCritical(c, auditIntent, {
       metadata: {
-        tokenId,
-        role,
-        newAuthority,
         signature: result.signature,
         slot: result.slot.toString(),
-        mode: "execute",
       },
     });
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: error instanceof Error ? error.message : "Unknown error",

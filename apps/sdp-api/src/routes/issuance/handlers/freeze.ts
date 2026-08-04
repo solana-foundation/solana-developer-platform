@@ -231,6 +231,18 @@ export const freezeAccount = async (c: AppContext) => {
 
   // Execute freeze on Solana first (Token ACL-aware via Mosaic)
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "freeze",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      accountAddress: tokenAccount,
+      tokenAccountAddress: tokenAccount,
+      reason: parsed.data.reason,
+    },
+  });
 
   try {
     const result = await mosaic.freezeAccount({
@@ -260,17 +272,10 @@ export const freezeAccount = async (c: AppContext) => {
       },
     });
 
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "freeze",
+    await auditService.completeCritical(c, auditIntent, {
       resourceType: "frozen_account",
       resourceId: frozenAccount.id,
       metadata: {
-        tokenId,
-        accountAddress: tokenAccount,
-        tokenAccountAddress: tokenAccount,
-        reason: parsed.data.reason,
         signature: result.signature,
         slot: result.slot.toString(),
       },
@@ -284,6 +289,10 @@ export const freezeAccount = async (c: AppContext) => {
     };
     return created(c, response);
   } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
     if (error instanceof Error && error.message === "ACCOUNT_ALREADY_FROZEN") {
       await tokenService.updateTransaction(tx.id, {
         status: "failed",
@@ -435,6 +444,17 @@ export const unfreezeAccount = async (c: AppContext) => {
 
   // Execute thaw on Solana first (Token ACL-aware via Mosaic)
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "unfreeze",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      accountAddress: tokenAccount,
+      tokenAccountAddress: tokenAccount,
+    },
+  });
 
   try {
     const result = await mosaic.thawAccount({
@@ -451,16 +471,10 @@ export const unfreezeAccount = async (c: AppContext) => {
       slot: Number(result.slot),
     });
 
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "unfreeze",
+    await auditService.completeCritical(c, auditIntent, {
       resourceType: "frozen_account",
       resourceId: frozenAccount.id,
       metadata: {
-        tokenId,
-        accountAddress: tokenAccount,
-        tokenAccountAddress: tokenAccount,
         signature: result.signature,
         slot: result.slot.toString(),
       },
@@ -474,6 +488,10 @@ export const unfreezeAccount = async (c: AppContext) => {
     };
     return success(c, response);
   } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
     if (error instanceof Error && error.message === "ACCOUNT_NOT_FROZEN") {
       await tokenService.updateTransaction(tx.id, {
         status: "failed",

@@ -63,6 +63,7 @@ const POSTGRES_TEST_TABLES = [
   "api_keys",
   "projects",
   "invitations",
+  "audit_ledger_anchors",
   "audit_logs",
   "auth_organization_identities",
   "auth_user_identities",

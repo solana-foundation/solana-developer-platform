@@ -98,4 +98,76 @@ describe("tamper-evident audit ledger", () => {
       firstInvalidSequence: 1,
     });
   });
+
+  it("detects privileged deletion of the newest ledger entries", async () => {
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "retained_prefix",
+    });
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "deleted_tail",
+    });
+
+    try {
+      await db.execute("ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation");
+      await db.execute("DELETE FROM audit_logs WHERE ledger_sequence = 2");
+    } finally {
+      await db.execute("ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation");
+    }
+
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: false,
+      checkedEntries: 1,
+      firstInvalidSequence: 2,
+    });
+  });
+
+  it("detects privileged truncation of the audit ledger", async () => {
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "before_truncate",
+    });
+
+    try {
+      await db.execute("ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_truncate");
+      await db.execute("TRUNCATE audit_logs");
+    } finally {
+      await db.execute("ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_truncate");
+    }
+
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: false,
+      checkedEntries: 0,
+      firstInvalidSequence: 1,
+    });
+  });
+
+  it("fails integrity verification for a stale unresolved critical intent", async () => {
+    await db
+      .prepare(
+        `INSERT INTO audit_logs (
+           id, action, resource_type, resource_id, metadata, status, created_at
+         ) VALUES (?, 'maintenance', 'audit_ledger', ?, ?, 'success', ?)`
+      )
+      .bind(
+        "aud_stale_intent",
+        "aint_stale",
+        JSON.stringify({
+          auditPhase: "intent",
+          target: { action: "mint", resourceType: "token_transaction", resourceId: "tx_stale" },
+        }),
+        "2026-01-01T00:00:00.000Z"
+      )
+      .run();
+
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: false,
+      unresolvedCriticalIntents: 1,
+      firstInvalidSequence: 1,
+    });
+  });
 });

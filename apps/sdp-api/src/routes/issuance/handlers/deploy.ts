@@ -140,8 +140,8 @@ async function persistRecoveredMint(params: {
  * Record the bookkeeping for a non-custodial deploy that has already landed
  * on-chain — by the time this runs, `setTokenDeployed` has flipped the token to
  * `active` and recorded the mint, which is irreversible. Stamps the initial
- * permanent delegate, writes the transaction row for audit parity with the
- * custodial path, and logs the audit event.
+ * permanent delegate and writes the transaction row for parity with the
+ * custodial path. The caller owns the pre-admitted audit intent and outcome.
  *
  * Isolated in its own try/catch: a secondary DB failure here must NOT surface as
  * a 500. A retry would hit confirmDeploy's `status !== "pending"` guard and 400
@@ -151,7 +151,6 @@ async function persistRecoveredMint(params: {
  * the already-deployed token row.
  */
 async function recordConfirmedDeploy(params: {
-  c: AppContext;
   tokenService: TokenService;
   organizationId: string;
   initiatedByKeyId: string;
@@ -166,7 +165,6 @@ async function recordConfirmedDeploy(params: {
   deployedToken: Awaited<ReturnType<TokenService["setTokenDeployed"]>>;
 }): Promise<Awaited<ReturnType<TokenService["setTokenDeployed"]>>> {
   const {
-    c,
     tokenService,
     organizationId,
     initiatedByKeyId,
@@ -215,21 +213,6 @@ async function recordConfirmedDeploy(params: {
         mintAddress: mint,
         mintAuthority: custodyAddress,
         freezeAuthority,
-        ablListAddress: listAddress ?? null,
-      },
-    });
-
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "deploy",
-      resourceType: "token",
-      resourceId: tokenId,
-      metadata: {
-        mode: "confirm",
-        mintAddress: mint,
-        signature,
-        slot: slot.toString(),
-        template: token.template,
         ablListAddress: listAddress ?? null,
       },
     });
@@ -350,8 +333,17 @@ export const deployToken = async (c: AppContext) => {
   // Hoisted so the catch block can persist the mint authority if createToken
   // fails after the mint is already live on-chain (see MintMetadataUpdateError).
   let custodyAddress: Address | undefined;
+  const auditService = new AuditService(getDb(c.env));
+  let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
 
   try {
+    auditIntent = await auditService.beginCritical(c, {
+      action: "deploy",
+      resourceType: "token",
+      resourceId: tokenId,
+      metadata: { template: token.template, aclMode, feePayment, mode: "execute" },
+    });
+
     // Resolve the signing wallet inside the try: it can throw, and now that we
     // hold the deploy claim (status=deploying) any failure before the mint lands
     // must release it (catch below) — otherwise the draft is stranded in
@@ -437,26 +429,28 @@ export const deployToken = async (c: AppContext) => {
       },
     });
 
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "deploy",
-      resourceType: "token",
-      resourceId: tokenId,
+    await auditService.completeCritical(c, auditIntent, {
       metadata: {
         mintAddress: result.mint,
         signature: result.signature,
         slot: result.slot.toString(),
-        template: token.template,
         ablListAddress: result.listAddress,
-        aclMode,
-        feePayment,
       },
     });
 
     const response: TokenResponse = { token: updatedToken };
     return success(c, response);
   } catch (error) {
+    if (auditIntent) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: {
+          error: error instanceof Error ? error.message : "Unknown error",
+          mintAddress:
+            error instanceof MintMetadataUpdateError ? (error.result.mint ?? null) : null,
+        },
+      });
+    }
     // The mint was created on-chain but the metadata-URI follow-up failed. The
     // create is irreversible, so record the mint (marking the token active)
     // before surfacing the error — otherwise a retry generates a new keypair
@@ -782,35 +776,59 @@ export const confirmDeploy = async (c: AppContext) => {
       ? await deriveAblListAddress(custodyAddress, mint)
       : undefined;
 
-  // setTokenDeployed flips the token to `active` and records the mint — this is
-  // the irreversible commit point. Everything after it is bookkeeping; see
-  // recordConfirmedDeploy for why a failure there must not 500.
-  const deployedToken = await tokenService.setTokenDeployed(
-    tokenId,
-    mint,
-    custodyAddress,
-    freezeAuthority,
-    listAddress
-  );
-
-  const updatedToken = await recordConfirmedDeploy({
-    c,
-    tokenService,
-    organizationId: auth.organizationId,
-    initiatedByKeyId: auth.id,
-    token,
-    tokenId,
-    mint,
-    custodyAddress,
-    freezeAuthority,
-    listAddress,
-    signature: parsed.data.signature,
-    slot: status.slot,
-    deployedToken,
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "deploy",
+    resourceType: "token",
+    resourceId: tokenId,
+    metadata: {
+      mode: "confirm",
+      mintAddress: mint,
+      signature,
+      slot: status.slot.toString(),
+      template: token.template,
+      ablListAddress: listAddress ?? null,
+    },
   });
 
-  const response: TokenResponse = { token: updatedToken };
-  return success(c, response);
+  try {
+    // setTokenDeployed flips the token to `active` and records the mint — this
+    // is the irreversible commit point. The durable intent above must exist
+    // before this write; later bookkeeping/outcome failures cannot make the
+    // already-confirmed deployment look retryable.
+    const deployedToken = await tokenService.setTokenDeployed(
+      tokenId,
+      mint,
+      custodyAddress,
+      freezeAuthority,
+      listAddress
+    );
+
+    const updatedToken = await recordConfirmedDeploy({
+      tokenService,
+      organizationId: auth.organizationId,
+      initiatedByKeyId: auth.id,
+      token,
+      tokenId,
+      mint,
+      custodyAddress,
+      freezeAuthority,
+      listAddress,
+      signature: parsed.data.signature,
+      slot: status.slot,
+      deployedToken,
+    });
+
+    await auditService.completeCritical(c, auditIntent);
+    const response: TokenResponse = { token: updatedToken };
+    return success(c, response);
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
+    throw error;
+  }
 };
 
 /**

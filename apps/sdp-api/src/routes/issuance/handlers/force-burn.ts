@@ -199,6 +199,19 @@ export const executeForceBurn = async (c: AppContext) => {
   }
 
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "force_burn",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      source: parsed.data.forceBurn.source,
+      amount: parsed.data.forceBurn.amount,
+      delegateAuthority: permanentDelegateRaw,
+      mode: "execute",
+    },
+  });
 
   try {
     const result = await mosaic.forceBurn({
@@ -217,24 +230,19 @@ export const executeForceBurn = async (c: AppContext) => {
 
     await tokenService.updateSupply(tokenId, parsed.data.forceBurn.amount, "burn");
 
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "force_burn",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
+    await auditService.completeCritical(c, auditIntent, {
       metadata: {
-        tokenId,
-        source: parsed.data.forceBurn.source,
-        amount: parsed.data.forceBurn.amount,
-        delegateAuthority: permanentDelegateRaw,
         signature: result.signature,
         slot: result.slot.toString(),
-        mode: "execute",
       },
     });
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: error instanceof Error ? error.message : "Unknown error",

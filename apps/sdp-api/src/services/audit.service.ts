@@ -99,11 +99,22 @@ export interface SystemAuditLogEntry extends AuditLogEntry {
   requestId?: string;
 }
 
+/**
+ * Durable admission evidence written before an irreversible operation starts.
+ * The public audit feed continues to expose only the eventual outcome event;
+ * intents are maintenance records for operators and integrity monitoring.
+ */
+export interface AuditIntent {
+  id: string;
+  entry: AuditLogEntry;
+}
+
 export interface AuditLedgerIntegrity {
   valid: boolean;
   checkedEntries: number;
   firstInvalidSequence: number | null;
   headHash: string | null;
+  unresolvedCriticalIntents: number;
 }
 
 /**
@@ -207,12 +218,85 @@ export class AuditService {
     });
   }
 
+  /**
+   * Admit an irreversible operation only after its intent is durable.
+   *
+   * If this write fails, the caller must not invoke the provider/KMS/on-chain
+   * side effect. If the later outcome write fails, the immutable unresolved
+   * intent remains visible to verification and reconciliation instead of
+   * turning an already-completed operation into a misleading 500 response.
+   */
+  async beginCritical(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<AuditIntent> {
+    const intentId = `aint_${crypto.randomUUID()}`;
+    await this.log(c, {
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: intentId,
+      metadata: {
+        auditPhase: "intent",
+        target: {
+          action: entry.action,
+          resourceType: entry.resourceType,
+          resourceId: entry.resourceId ?? null,
+          metadata: entry.metadata ? redactCredentialSecrets(entry.metadata) : null,
+        },
+      },
+      status: "success",
+    });
+    return { id: intentId, entry };
+  }
+
+  /**
+   * Append the outcome for a previously admitted critical operation.
+   *
+   * A failed outcome insert is deliberately not rethrown: the provider action
+   * may already be irreversible. The durable intent prevents silent omission,
+   * while this structured error and the unresolved-intent verification gate
+   * page operators for reconciliation.
+   */
+  async completeCritical(
+    c: Context<{ Bindings: Env }>,
+    intent: AuditIntent,
+    outcome: Partial<
+      Pick<AuditLogEntry, "action" | "resourceType" | "resourceId" | "metadata" | "status">
+    > = {}
+  ): Promise<boolean> {
+    try {
+      await this.log(c, {
+        ...intent.entry,
+        ...outcome,
+        metadata: {
+          ...intent.entry.metadata,
+          ...outcome.metadata,
+          auditPhase: "outcome",
+          auditIntentId: intent.id,
+        },
+        status: outcome.status ?? "success",
+      });
+      return true;
+    } catch (error) {
+      getLogger().error(
+        {
+          event: "audit_critical_outcome_persistence_failed",
+          auditIntentId: intent.id,
+          targetAction: intent.entry.action,
+          targetResourceType: intent.entry.resourceType,
+          targetResourceId: intent.entry.resourceId ?? null,
+          error: redactCredentialSecrets(error),
+        },
+        "Critical operation outcome was not persisted; durable audit intent requires reconciliation"
+      );
+      return false;
+    }
+  }
+
   /** Verify every immutable link and return the current externally anchorable head. */
   async verifyIntegrity(): Promise<AuditLedgerIntegrity> {
     const result = await this.db
       .prepare(
         `SELECT valid, checked_entries, first_invalid_sequence,
-                encode(head_hash, 'hex') AS head_hash
+                encode(head_hash, 'hex') AS head_hash,
+                unresolved_critical_intents
          FROM sdp_verify_audit_ledger()`
       )
       .first<{
@@ -220,6 +304,7 @@ export class AuditService {
         checked_entries: number;
         first_invalid_sequence: number | null;
         head_hash: string | null;
+        unresolved_critical_intents: number;
       }>();
 
     if (!result) {
@@ -231,6 +316,7 @@ export class AuditService {
       checkedEntries: result.checked_entries,
       firstInvalidSequence: result.first_invalid_sequence,
       headHash: result.head_hash,
+      unresolvedCriticalIntents: result.unresolved_critical_intents,
     };
   }
 

@@ -67,6 +67,7 @@ describe("AuditService", () => {
       checked_entries: 42,
       first_invalid_sequence: null,
       head_hash: "abc123",
+      unresolved_critical_intents: 0,
     }));
     const db = { prepare: vi.fn(() => ({ first })) };
 
@@ -75,7 +76,65 @@ describe("AuditService", () => {
       checkedEntries: 42,
       firstInvalidSequence: null,
       headHash: "abc123",
+      unresolvedCriticalIntents: 0,
     });
+  });
+
+  it("persists a critical intent before appending its outcome", async () => {
+    const run = vi.fn(async () => 1);
+    const bind = vi.fn((..._args: unknown[]) => ({ run }));
+    const db = { prepare: vi.fn(() => ({ bind })) };
+    const context = {
+      get: (key: string) =>
+        key === "apiKey" ? { id: "ak_123", organizationId: "org_123" } : "req_123",
+      req: { header: () => null },
+    };
+    const audit = new AuditService(db as never);
+
+    const intent = await audit.beginCritical(context as never, {
+      action: "mint",
+      resourceType: "token_transaction",
+      resourceId: "tx_123",
+      metadata: { tokenId: "tok_123" },
+    });
+    await expect(
+      audit.completeCritical(context as never, intent, {
+        metadata: { signature: "sig_123" },
+      })
+    ).resolves.toBe(true);
+
+    const intentMetadata = JSON.parse(String(bind.mock.calls[0]?.[7])) as Record<string, unknown>;
+    const outcomeMetadata = JSON.parse(String(bind.mock.calls[1]?.[7])) as Record<string, unknown>;
+    expect(intentMetadata).toMatchObject({
+      auditPhase: "intent",
+      target: { action: "mint", resourceId: "tx_123" },
+    });
+    expect(outcomeMetadata).toMatchObject({
+      auditPhase: "outcome",
+      auditIntentId: intent.id,
+      tokenId: "tok_123",
+      signature: "sig_123",
+    });
+  });
+
+  it("keeps a completed operation successful when its durable intent exists", async () => {
+    const run = vi
+      .fn<() => Promise<number>>()
+      .mockResolvedValueOnce(1)
+      .mockRejectedValueOnce(new Error("audit outcome unavailable"));
+    const db = { prepare: vi.fn(() => ({ bind: () => ({ run }) })) };
+    const context = {
+      get: () => null,
+      req: { header: () => null },
+    };
+    const audit = new AuditService(db as never);
+    const intent = await audit.beginCritical(context as never, {
+      action: "freeze",
+      resourceType: "token_transaction",
+      resourceId: "tx_456",
+    });
+
+    await expect(audit.completeCritical(context as never, intent)).resolves.toBe(false);
   });
 
   describe("getForAsset", () => {

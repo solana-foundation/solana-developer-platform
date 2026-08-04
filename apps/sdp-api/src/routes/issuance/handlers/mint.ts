@@ -434,6 +434,19 @@ export const executeMint = async (c: AppContext) => {
     });
   }
 
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "mint",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      destination: parsed.data.mint.destination,
+      amount: parsed.data.mint.amount,
+      mode: "execute",
+    },
+  });
+
   try {
     const result = await mosaic.mintTo({
       mint: mintAddress,
@@ -447,19 +460,10 @@ export const executeMint = async (c: AppContext) => {
     // Update token supply
     await tokenService.updateSupply(tokenId, parsed.data.mint.amount, "mint");
 
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "mint",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
+    await auditService.completeCritical(c, auditIntent, {
       metadata: {
-        tokenId,
-        destination: parsed.data.mint.destination,
-        amount: parsed.data.mint.amount,
         signature: result.signature,
         slot: result.slot.toString(),
-        mode: "execute",
         addedToAllowlist,
       },
     });
@@ -477,6 +481,10 @@ export const executeMint = async (c: AppContext) => {
       tokenAccount: result.tokenAccount,
     });
   } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
     // Update transaction as failed
     await tokenService.updateTransaction(tx.id, {
       status: "failed",

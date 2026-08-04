@@ -94,6 +94,14 @@ export const pauseToken = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "pause",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: { tokenId, mode: "execute" },
+  });
+
   try {
     const signer = await createOrgSigner(
       c.env,
@@ -120,13 +128,8 @@ export const pauseToken = async (c: AppContext) => {
       slot: Number(result.slot),
     });
 
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "pause",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
+    await auditService.completeCritical(c, auditIntent, {
       metadata: {
-        tokenId,
         signature: result.signature,
         slot: result.slot.toString(),
       },
@@ -134,6 +137,10 @@ export const pauseToken = async (c: AppContext) => {
 
     return success(c, { transaction: confirmedTx });
   } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
     if (error instanceof Error && error.message === MINT_ALREADY_PAUSED_ERROR) {
       await tokenService.updateTransaction(tx.id, {
         status: "failed",
@@ -215,6 +222,14 @@ export const unpauseToken = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "unpause",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: { tokenId, mode: "execute" },
+  });
+
   try {
     const signer = await createOrgSigner(
       c.env,
@@ -241,13 +256,8 @@ export const unpauseToken = async (c: AppContext) => {
       slot: Number(result.slot),
     });
 
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "unpause",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
+    await auditService.completeCritical(c, auditIntent, {
       metadata: {
-        tokenId,
         signature: result.signature,
         slot: result.slot.toString(),
       },
@@ -255,6 +265,10 @@ export const unpauseToken = async (c: AppContext) => {
 
     return success(c, { transaction: confirmedTx });
   } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
     if (error instanceof Error && error.message === MINT_NOT_PAUSED_ERROR) {
       await tokenService.updateTransaction(tx.id, {
         status: "failed",

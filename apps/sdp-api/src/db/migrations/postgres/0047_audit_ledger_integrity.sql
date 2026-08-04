@@ -120,21 +120,58 @@ ALTER TABLE audit_logs
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_logs_ledger_sequence
   ON audit_logs(ledger_sequence);
 
+-- Keep a separately protected terminal record for every sealed ledger entry.
+-- The audit hash chain alone can prove that retained rows were not edited, but
+-- it cannot distinguish a valid prefix from a ledger whose newest rows were
+-- deleted. These append-only anchors make a missing suffix (or an empty ledger)
+-- observable without trusting the mutable audit_logs table as its own head.
+CREATE TABLE IF NOT EXISTS audit_ledger_anchors (
+  ledger_sequence BIGINT PRIMARY KEY,
+  entry_hash BYTEA NOT NULL,
+  anchored_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+
+INSERT INTO audit_ledger_anchors (ledger_sequence, entry_hash)
+SELECT ledger_sequence, entry_hash
+FROM audit_logs
+ON CONFLICT (ledger_sequence) DO NOTHING;
+
 CREATE OR REPLACE FUNCTION sdp_seal_audit_log_insert()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
+DECLARE
+  anchored_sequence BIGINT;
+  anchored_hash BYTEA;
+  ledger_sequence BIGINT;
+  ledger_hash BYTEA;
 BEGIN
   -- Serialize before allocating the sequence so chain order is deterministic
   -- even when request and worker writers race.
   PERFORM pg_advisory_xact_lock(hashtext('sdp:audit-ledger'));
 
-  NEW.ledger_sequence := nextval('audit_logs_ledger_sequence_seq');
-  SELECT entry_hash
-  INTO NEW.previous_entry_hash
-  FROM audit_logs
-  ORDER BY ledger_sequence DESC
+  -- Derive the next sequence from the independently anchored head instead of
+  -- nextval(). PostgreSQL sequences are not transactional, so nextval() would
+  -- leave a permanent gap after a rolled-back audit insert.
+  SELECT max(a.ledger_sequence),
+         (array_agg(a.entry_hash ORDER BY a.ledger_sequence DESC))[1]
+  INTO anchored_sequence, anchored_hash
+  FROM audit_ledger_anchors a;
+
+  SELECT a.ledger_sequence, a.entry_hash
+  INTO ledger_sequence, ledger_hash
+  FROM audit_logs a
+  ORDER BY a.ledger_sequence DESC
   LIMIT 1;
+
+  IF ledger_sequence IS DISTINCT FROM anchored_sequence
+     OR ledger_hash IS DISTINCT FROM anchored_hash THEN
+    RAISE EXCEPTION 'audit ledger head diverges from its append-only anchor'
+      USING ERRCODE = '55000';
+  END IF;
+
+  NEW.ledger_sequence := COALESCE(anchored_sequence, 0) + 1;
+  NEW.previous_entry_hash := anchored_hash;
 
   NEW.entry_hash := sdp_audit_log_hash(
     NEW.ledger_sequence,
@@ -158,6 +195,17 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION sdp_anchor_audit_log_insert()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO audit_ledger_anchors (ledger_sequence, entry_hash)
+  VALUES (NEW.ledger_sequence, NEW.entry_hash);
+  RETURN NEW;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION sdp_reject_audit_log_mutation()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -171,7 +219,7 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  RAISE EXCEPTION 'audit_logs is append-only; % is forbidden', TG_OP
+  RAISE EXCEPTION '% is append-only; % is forbidden', TG_TABLE_NAME, TG_OP
     USING ERRCODE = '42501';
 END;
 $$;
@@ -182,6 +230,12 @@ BEFORE INSERT ON audit_logs
 FOR EACH ROW
 EXECUTE FUNCTION sdp_seal_audit_log_insert();
 
+DROP TRIGGER IF EXISTS audit_logs_anchor_insert ON audit_logs;
+CREATE TRIGGER audit_logs_anchor_insert
+AFTER INSERT ON audit_logs
+FOR EACH ROW
+EXECUTE FUNCTION sdp_anchor_audit_log_insert();
+
 DROP TRIGGER IF EXISTS audit_logs_reject_row_mutation ON audit_logs;
 CREATE TRIGGER audit_logs_reject_row_mutation
 BEFORE UPDATE OR DELETE ON audit_logs
@@ -191,6 +245,18 @@ EXECUTE FUNCTION sdp_reject_audit_log_mutation();
 DROP TRIGGER IF EXISTS audit_logs_reject_truncate ON audit_logs;
 CREATE TRIGGER audit_logs_reject_truncate
 BEFORE TRUNCATE ON audit_logs
+FOR EACH STATEMENT
+EXECUTE FUNCTION sdp_reject_audit_log_mutation();
+
+DROP TRIGGER IF EXISTS audit_ledger_anchors_reject_row_mutation ON audit_ledger_anchors;
+CREATE TRIGGER audit_ledger_anchors_reject_row_mutation
+BEFORE UPDATE OR DELETE ON audit_ledger_anchors
+FOR EACH STATEMENT
+EXECUTE FUNCTION sdp_reject_audit_log_mutation();
+
+DROP TRIGGER IF EXISTS audit_ledger_anchors_reject_truncate ON audit_ledger_anchors;
+CREATE TRIGGER audit_ledger_anchors_reject_truncate
+BEFORE TRUNCATE ON audit_ledger_anchors
 FOR EACH STATEMENT
 EXECUTE FUNCTION sdp_reject_audit_log_mutation();
 
@@ -205,21 +271,38 @@ CREATE POLICY audit_logs_select ON audit_logs FOR SELECT USING (true);
 DROP POLICY IF EXISTS audit_logs_insert ON audit_logs;
 CREATE POLICY audit_logs_insert ON audit_logs FOR INSERT WITH CHECK (true);
 
+ALTER TABLE audit_ledger_anchors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_ledger_anchors FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS audit_ledger_anchors_select ON audit_ledger_anchors;
+CREATE POLICY audit_ledger_anchors_select ON audit_ledger_anchors FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS audit_ledger_anchors_insert ON audit_ledger_anchors;
+CREATE POLICY audit_ledger_anchors_insert
+  ON audit_ledger_anchors FOR INSERT WITH CHECK (true);
+
 CREATE OR REPLACE FUNCTION sdp_verify_audit_ledger()
 RETURNS TABLE(
   valid BOOLEAN,
   checked_entries BIGINT,
   first_invalid_sequence BIGINT,
-  head_hash BYTEA
+  head_hash BYTEA,
+  unresolved_critical_intents BIGINT
 )
 LANGUAGE plpgsql
 STABLE
 AS $$
 DECLARE
   audit_row RECORD;
+  anchor_row RECORD;
   expected_previous BYTEA := NULL;
   expected_hash BYTEA;
   checked_count BIGINT := 0;
+  anchored_count BIGINT := 0;
+  anchored_last_sequence BIGINT := NULL;
+  anchored_head BYTEA := NULL;
+  unresolved_count BIGINT := 0;
+  first_unresolved_sequence BIGINT := NULL;
 BEGIN
   FOR audit_row IN
     SELECT * FROM audit_logs ORDER BY ledger_sequence ASC
@@ -244,7 +327,17 @@ BEGIN
 
     IF audit_row.previous_entry_hash IS DISTINCT FROM expected_previous
        OR audit_row.entry_hash IS DISTINCT FROM expected_hash THEN
-      RETURN QUERY SELECT false, checked_count, audit_row.ledger_sequence, expected_previous;
+      RETURN QUERY SELECT false, checked_count, audit_row.ledger_sequence, expected_previous, 0::BIGINT;
+      RETURN;
+    END IF;
+
+    SELECT ledger_sequence, entry_hash
+    INTO anchor_row
+    FROM audit_ledger_anchors
+    WHERE ledger_sequence = audit_row.ledger_sequence;
+
+    IF NOT FOUND OR anchor_row.entry_hash IS DISTINCT FROM audit_row.entry_hash THEN
+      RETURN QUERY SELECT false, checked_count, audit_row.ledger_sequence, expected_previous, 0::BIGINT;
       RETURN;
     END IF;
 
@@ -252,6 +345,51 @@ BEGIN
     expected_previous := audit_row.entry_hash;
   END LOOP;
 
-  RETURN QUERY SELECT true, checked_count, NULL::BIGINT, expected_previous;
+  -- Detect a valid remaining prefix, complete audit_logs truncation, or extra
+  -- forged anchors. The anchor set is append-only under a separately enforced
+  -- trigger/RLS boundary, so its count and terminal hash are the expected head.
+  SELECT count(*)::BIGINT, max(ledger_sequence),
+         (array_agg(entry_hash ORDER BY ledger_sequence DESC))[1]
+  INTO anchored_count, anchored_last_sequence, anchored_head
+  FROM audit_ledger_anchors;
+
+  IF anchored_count IS DISTINCT FROM checked_count
+     OR anchored_last_sequence IS DISTINCT FROM
+        (CASE WHEN checked_count = 0 THEN NULL ELSE checked_count END)
+     OR anchored_head IS DISTINCT FROM expected_previous THEN
+    RETURN QUERY SELECT false, checked_count, checked_count + 1, expected_previous, 0::BIGINT;
+    RETURN;
+  END IF;
+
+  -- A critical intent is written before its irreversible side effect. Its
+  -- matching outcome is normally appended in the same request. An intent that
+  -- remains unresolved beyond the grace window is durable evidence of an
+  -- ambiguous result and must fail the operational integrity gate.
+  WITH valid_metadata AS (
+    SELECT ledger_sequence, resource_id, created_at,
+           CASE
+             WHEN metadata IS NOT NULL AND pg_input_is_valid(metadata, 'jsonb')
+             THEN metadata::jsonb
+             ELSE NULL
+           END AS metadata
+    FROM audit_logs
+  ), unresolved AS (
+    SELECT intent.ledger_sequence
+    FROM valid_metadata intent
+    WHERE intent.metadata ->> 'auditPhase' = 'intent'
+      AND intent.created_at::timestamptz < statement_timestamp() - interval '15 minutes'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM valid_metadata outcome
+        WHERE outcome.metadata ->> 'auditPhase' = 'outcome'
+          AND outcome.metadata ->> 'auditIntentId' = intent.resource_id
+      )
+  )
+  SELECT count(*)::BIGINT, min(ledger_sequence)
+  INTO unresolved_count, first_unresolved_sequence
+  FROM unresolved;
+
+  RETURN QUERY SELECT unresolved_count = 0, checked_count,
+    first_unresolved_sequence, expected_previous, unresolved_count;
 END;
 $$;

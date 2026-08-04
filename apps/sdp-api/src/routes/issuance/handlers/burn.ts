@@ -298,6 +298,18 @@ export const executeBurn = async (c: AppContext) => {
   if (replayed) {
     return success(c, { transaction: tx });
   }
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "burn",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      source: parsed.data.burn.source,
+      amount: parsed.data.burn.amount,
+      mode: "execute",
+    },
+  });
   try {
     // Get custody signer (via 3-tier resolution)
     const signer = await createOrgSigner(
@@ -335,24 +347,23 @@ export const executeBurn = async (c: AppContext) => {
     // Update token supply
     await tokenService.updateSupply(tokenId, parsed.data.burn.amount, "burn");
 
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "burn",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
+    await auditService.completeCritical(c, auditIntent, {
       metadata: {
-        tokenId,
-        source: parsed.data.burn.source,
-        amount: parsed.data.burn.amount,
         signature: result.signature,
         slot: result.slot.toString(),
-        mode: "execute",
       },
     });
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: {
+        error:
+          toBurnOperationAppError(error)?.message ??
+          (error instanceof Error ? error.message : "Unknown error"),
+      },
+    });
     // Update transaction as failed
     await tokenService.updateTransaction(tx.id, {
       status: "failed",

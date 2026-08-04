@@ -226,6 +226,20 @@ export const executeSeize = async (c: AppContext) => {
   }
 
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "seize",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      source: parsed.data.seize.source,
+      destination: parsed.data.seize.destination,
+      amount: parsed.data.seize.amount,
+      delegateAuthority: permanentDelegateRaw,
+      mode: "execute",
+    },
+  });
 
   try {
     const result = await mosaic.forceTransfer({
@@ -243,25 +257,19 @@ export const executeSeize = async (c: AppContext) => {
       slot: Number(result.slot),
     });
 
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "seize",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
+    await auditService.completeCritical(c, auditIntent, {
       metadata: {
-        tokenId,
-        source: parsed.data.seize.source,
-        destination: parsed.data.seize.destination,
-        amount: parsed.data.seize.amount,
-        delegateAuthority: permanentDelegateRaw,
         signature: result.signature,
         slot: result.slot.toString(),
-        mode: "execute",
       },
     });
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: error instanceof Error ? error.message : "Unknown error",

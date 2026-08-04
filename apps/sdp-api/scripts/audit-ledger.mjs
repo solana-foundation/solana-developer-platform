@@ -32,7 +32,8 @@ function parseOptions(args) {
 async function inspect(client) {
   const integrity = await client.query(`
     SELECT valid, checked_entries, first_invalid_sequence,
-           encode(head_hash, 'hex') AS head_hash
+           encode(head_hash, 'hex') AS head_hash,
+           unresolved_critical_intents
     FROM sdp_verify_audit_ledger()
   `);
   const protection = await client.query(`
@@ -41,22 +42,29 @@ async function inspect(client) {
            role.rolbypassrls,
            ledger.relrowsecurity,
            ledger.relforcerowsecurity,
+           anchors.relrowsecurity AS anchors_rowsecurity,
+           anchors.relforcerowsecurity AS anchors_forcerowsecurity,
            owner.rolname AS table_owner,
            (
              SELECT count(*)::integer
              FROM pg_trigger
-             WHERE tgrelid = ledger.oid
+             WHERE tgrelid IN (ledger.oid, anchors.oid)
                AND tgname IN (
                  'audit_logs_seal_insert',
+                 'audit_logs_anchor_insert',
                  'audit_logs_reject_row_mutation',
-                 'audit_logs_reject_truncate'
+                 'audit_logs_reject_truncate',
+                 'audit_ledger_anchors_reject_row_mutation',
+                 'audit_ledger_anchors_reject_truncate'
                )
                AND tgenabled <> 'D'
            ) AS enabled_security_triggers
     FROM pg_class AS ledger
+    CROSS JOIN pg_class AS anchors
     JOIN pg_roles AS role ON role.rolname = current_user
     JOIN pg_roles AS owner ON owner.oid = ledger.relowner
     WHERE ledger.oid = 'audit_logs'::regclass
+      AND anchors.oid = 'audit_ledger_anchors'::regclass
   `);
 
   const result = integrity.rows[0];
@@ -67,7 +75,9 @@ async function inspect(client) {
       !posture.rolbypassrls &&
       posture.relrowsecurity &&
       posture.relforcerowsecurity &&
-      posture.enabled_security_triggers === 3
+      posture.anchors_rowsecurity &&
+      posture.anchors_forcerowsecurity &&
+      posture.enabled_security_triggers === 6
   );
 
   return {
@@ -77,6 +87,7 @@ async function inspect(client) {
       ? Number(result.first_invalid_sequence)
       : null,
     headHash: result?.head_hash ?? null,
+    unresolvedCriticalIntents: Number(result?.unresolved_critical_intents ?? 0),
     runtimeRoleProtected,
     runtimeRole: posture?.runtime_role ?? null,
     tableOwner: posture?.table_owner ?? null,
@@ -84,6 +95,8 @@ async function inspect(client) {
     bypassRls: posture?.rolbypassrls ?? null,
     rowSecurity: posture?.relrowsecurity ?? null,
     forceRowSecurity: posture?.relforcerowsecurity ?? null,
+    anchorsRowSecurity: posture?.anchors_rowsecurity ?? null,
+    anchorsForceRowSecurity: posture?.anchors_forcerowsecurity ?? null,
     enabledSecurityTriggers: posture?.enabled_security_triggers ?? 0,
   };
 }
