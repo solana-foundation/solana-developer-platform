@@ -72,7 +72,7 @@
     "@solana/subscriptions": "0.3.0",
     "@solana/token-acl-gate-sdk": "0.2.0",
     "@solana/transactions": "catalog:",
-    "hono": "^4.12.27",
+    "hono": "^4.12.34",
     "ioredis": "^5.11.1",
     "jose": "^6.2.3",
     "nanoid": "^5.1.11",
