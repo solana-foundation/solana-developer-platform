@@ -8,12 +8,7 @@ import { createPublicOpenApiDocument } from "../src/openapi/spec";
 
 type JsonRecord = Record<string, unknown>;
 type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-type PlaygroundModule =
-  | "wallets"
-  | "payments"
-  | "counterparties"
-  | "issuance"
-  | "private-channels";
+type PlaygroundModule = "wallets" | "payments" | "counterparties" | "issuance" | "private-channels";
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
 const TAG_TO_MODULE = new Map<string, PlaygroundModule>([

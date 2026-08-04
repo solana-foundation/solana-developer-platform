@@ -1,4 +1,7 @@
-import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "@/app/dashboard/playground-api-data";
+import {
+  fetchActiveApiKeys,
+  resolvePlaygroundApiBaseUrl,
+} from "@/app/dashboard/playground-api-data";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";
 import { PrivateChannelsPlayground } from "./private-channels-playground";

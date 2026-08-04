@@ -15,14 +15,16 @@ describe("buildPrivateChannelsPlaygroundEndpointConfigs", () => {
     // by hand so they're both auditable and human-readable in the form.
     const configs = buildPrivateChannelsPlaygroundEndpointConfigs(t);
 
-    expect(configs.find(({ id }) => id === "get-private-channel-deposit")?.pathFields[0]?.label)
-      .toBe("{id}");
+    expect(
+      configs.find(({ id }) => id === "get-private-channel-deposit")?.pathFields[0]?.label
+    ).toBe("{id}");
     expect(
       configs.find(({ id }) => id === "list-private-channel-transfer-recipients")?.pathFields[0]
         ?.label
     ).toBe("{channelId}");
-    expect(configs.find(({ id }) => id === "verify-private-channel-wallet")?.pathFields[0]?.label)
-      .toBe("{walletId}");
+    expect(
+      configs.find(({ id }) => id === "verify-private-channel-wallet")?.pathFields[0]?.label
+    ).toBe("{walletId}");
   });
 
   it("preloads the sandbox constants on the connect form so it works out of the box", () => {

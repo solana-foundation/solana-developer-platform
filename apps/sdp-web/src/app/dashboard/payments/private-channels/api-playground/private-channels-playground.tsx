@@ -21,10 +21,7 @@ interface PrivateChannelsPlaygroundProps {
   apiKeys: PrivateChannelsApiKeyOption[];
 }
 
-export function PrivateChannelsPlayground({
-  apiBaseUrl,
-  apiKeys,
-}: PrivateChannelsPlaygroundProps) {
+export function PrivateChannelsPlayground({ apiBaseUrl, apiKeys }: PrivateChannelsPlaygroundProps) {
   const t = useTranslations();
   const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
 
