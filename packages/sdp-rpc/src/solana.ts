@@ -582,6 +582,10 @@ export async function getSignatureStatuses(
 
 export interface ParsedInstruction {
   programId: string;
+  /** Ordered account addresses for non-parsed program instructions. */
+  accounts?: string[];
+  /** Base58-encoded instruction data for non-parsed program instructions. */
+  data?: string | null;
   /** Present only for instructions the RPC could decode (e.g. spl-token-2022). */
   parsedType: string | null;
   /** Decoded instruction fields, when available. */
@@ -597,6 +601,8 @@ export interface ParsedTransaction {
 
 interface RawParsedInstruction {
   programId?: string;
+  accounts?: string[];
+  data?: string;
   parsed?: { type?: string; info?: Record<string, unknown> };
 }
 
@@ -613,6 +619,8 @@ interface RawGetTransactionResponse {
 
 const toParsedInstruction = (ix: RawParsedInstruction): ParsedInstruction => ({
   programId: ix.programId ?? "",
+  accounts: ix.accounts ?? [],
+  data: ix.data ?? null,
   parsedType: ix.parsed?.type ?? null,
   info: ix.parsed?.info ?? null,
 });

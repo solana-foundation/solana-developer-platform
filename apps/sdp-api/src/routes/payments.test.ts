@@ -9,6 +9,7 @@ import {
   type TokenStatus,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
+import { getBase58Codec } from "@solana/codecs";
 import type { Address, Signature } from "@solana/kit";
 import {
   address,
@@ -43,6 +44,7 @@ const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
+const getTransactionMock = vi.spyOn(solanaRpc, "getTransaction");
 const sendAndConfirmTransactionMock = vi.spyOn(solanaRpc, "sendAndConfirmTransaction");
 const getSignaturesForAddressMock = vi.spyOn(solanaRpc, "getSignaturesForAddress");
 const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
@@ -731,6 +733,88 @@ async function activateRecurringPaymentForTest(headers: Record<string, string>) 
   return activateBody.data.recurringPayment;
 }
 
+async function recurringCollectionTransactionForSignature(signature: Signature) {
+  const row = await getDb(env)
+    .prepare(
+      `SELECT t.source_address,
+              t.token,
+              t.amount,
+              r.plan_pda,
+              r.subscription_pda,
+              r.destination_address,
+              r.destination_token_account,
+              s.subscription_authority_address,
+              s.subscriber_token_account
+         FROM payment_transfers t
+         JOIN payment_recurring_payments r
+           ON r.id = t.provider_data->>'recurringPaymentId'
+          AND r.organization_id = t.organization_id
+          AND r.project_id = t.project_id
+         JOIN payment_subscriptions s
+           ON s.id = r.subscription_id
+          AND s.organization_id = r.organization_id
+          AND s.project_id = r.project_id
+        WHERE t.signature = ?`
+    )
+    .bind(signature)
+    .first<{
+      source_address: string;
+      token: string;
+      amount: string;
+      plan_pda: string;
+      subscription_pda: string;
+      destination_address: string;
+      destination_token_account: string | null;
+      subscription_authority_address: string;
+      subscriber_token_account: string;
+    }>();
+  if (!row) {
+    return null;
+  }
+
+  const [derivedDestinationTokenAccount] = await findAssociatedTokenPda({
+    owner: address(row.destination_address),
+    tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+    mint: address(row.token),
+  });
+  const destinationTokenAccount = row.destination_token_account ?? derivedDestinationTokenAccount;
+
+  const amountBaseUnits = BigInt(row.amount.replace(".", "").padEnd(8, "0"));
+  const instructionData = subscriptionsProgram
+    .getTransferSubscriptionInstructionDataEncoder()
+    .encode({
+      transferData: {
+        amount: amountBaseUnits,
+        delegator: address(row.source_address),
+        mint: address(row.token),
+      },
+    });
+  return {
+    slot: 100n,
+    err: null,
+    instructions: [
+      {
+        programId: subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,
+        accounts: [
+          row.subscription_pda,
+          row.plan_pda,
+          row.subscription_authority_address,
+          row.subscriber_token_account,
+          destinationTokenAccount,
+          row.source_address,
+          row.token,
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "3Hnj4BYoDgtpBuqXfiy7Y8cNa3jXaNd4oqgSXBzkMcH7",
+          subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,
+        ],
+        data: getBase58Codec().decode(instructionData),
+        parsedType: null,
+        info: null,
+      },
+    ],
+  } satisfies solanaRpc.ParsedTransaction;
+}
+
 describe("Payments routes", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -755,6 +839,9 @@ describe("Payments routes", () => {
       confirmationStatus: "confirmed",
       err: null,
     });
+    getTransactionMock.mockImplementation(async (_rpc, signature) =>
+      recurringCollectionTransactionForSignature(signature)
+    );
     sendAndConfirmTransactionMock.mockResolvedValue({
       signature:
         "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Awaited<
@@ -2346,7 +2433,11 @@ describe("Payments routes", () => {
         dueAt,
         now,
         "processing",
-        JSON.stringify({ recurringPaymentId: activated.id }),
+        JSON.stringify({
+          recurringPaymentId: activated.id,
+          subscriptionId: activated.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         now,
         now
       )
@@ -2489,13 +2580,14 @@ describe("Payments routes", () => {
            signature,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
       )
       .bind(
         transferId,
         TEST_ORG.id,
         TEST_PROJECT.id,
         TEST_WALLET_ID,
+        activated.id,
         sourceSigner.address,
         TEST_SOLANA_ADDRESSES.wallet2,
         DEVNET_USDC_MINT,
@@ -2503,7 +2595,11 @@ describe("Payments routes", () => {
         "transfer",
         "outbound",
         "confirmed",
-        JSON.stringify({ recurringPaymentId: activated.id }),
+        JSON.stringify({
+          recurringPaymentId: activated.id,
+          subscriptionId: activated.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         collectionSignature,
         now,
         now
@@ -2695,6 +2791,96 @@ describe("Payments routes", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
+  it("does not advance billing when the confirmed pull amount differs", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const collectionSignature =
+      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      )
+      .mockResolvedValueOnce(collectionSignature);
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.subscriptionId)
+      .run();
+    getTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
+      const transaction = await recurringCollectionTransactionForSignature(signature);
+      if (!transaction) {
+        return null;
+      }
+      const instruction = transaction.instructions[0];
+      if (!instruction?.data) {
+        throw new Error("Expected recurring-payment transfer instruction data");
+      }
+      const decoded = subscriptionsProgram
+        .getTransferSubscriptionInstructionDataDecoder()
+        .decode(getBase58Codec().encode(instruction.data));
+      const alteredData = subscriptionsProgram
+        .getTransferSubscriptionInstructionDataEncoder()
+        .encode({
+          transferData: {
+            ...decoded.transferData,
+            amount: decoded.transferData.amount + 1n,
+          },
+        });
+      return {
+        ...transaction,
+        instructions: [
+          {
+            ...instruction,
+            data: getBase58Codec().decode(alteredData),
+          },
+        ],
+      };
+    });
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(collectRes.status).toBe(409);
+    const collectBody = (await collectRes.json()) as { error: { message: string } };
+    expect(collectBody.error.message).toContain("does not prove");
+    const recurringPayment = await getDb(env)
+      .prepare("SELECT next_collection_due_at FROM payment_recurring_payments WHERE id = ?")
+      .bind(activated.id)
+      .first<{ next_collection_due_at: string }>();
+    expect(recurringPayment?.next_collection_due_at).toBe(dueAt);
+    const attempt = await getDb(env)
+      .prepare(
+        "SELECT status FROM payment_subscription_collection_attempts WHERE subscription_id = ?"
+      )
+      .bind(activated.subscriptionId)
+      .first<{ status: string }>();
+    expect(attempt?.status).toBe("processing");
+  });
+
   it("recovers submitted recurring payment collection attempts", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
@@ -2763,13 +2949,14 @@ describe("Payments routes", () => {
            signature,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
       )
       .bind(
         transferId,
         TEST_ORG.id,
         TEST_PROJECT.id,
         TEST_WALLET_ID,
+        recurringPaymentId,
         sourceSigner.address,
         TEST_SOLANA_ADDRESSES.wallet2,
         DEVNET_USDC_MINT,
@@ -2777,7 +2964,11 @@ describe("Payments routes", () => {
         "transfer",
         "outbound",
         "processing",
-        JSON.stringify({ recurringPaymentId }),
+        JSON.stringify({
+          recurringPaymentId,
+          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         submittedSignature,
         now,
         now
@@ -2814,7 +3005,11 @@ describe("Payments routes", () => {
         now,
         "processing",
         null,
-        JSON.stringify({ recurringPaymentId }),
+        JSON.stringify({
+          recurringPaymentId,
+          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         now,
         now
       )
@@ -2940,13 +3135,14 @@ describe("Payments routes", () => {
            signature,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
       )
       .bind(
         transferId,
         TEST_ORG.id,
         TEST_PROJECT.id,
         TEST_WALLET_ID,
+        recurringPaymentId,
         sourceSigner.address,
         TEST_SOLANA_ADDRESSES.wallet2,
         DEVNET_USDC_MINT,
@@ -2954,7 +3150,11 @@ describe("Payments routes", () => {
         "transfer",
         "outbound",
         "confirmed",
-        JSON.stringify({ recurringPaymentId }),
+        JSON.stringify({
+          recurringPaymentId,
+          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         submittedSignature,
         now,
         now
@@ -2991,7 +3191,11 @@ describe("Payments routes", () => {
         now,
         "confirmed",
         submittedSignature,
-        JSON.stringify({ recurringPaymentId }),
+        JSON.stringify({
+          recurringPaymentId,
+          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         now,
         now
       )
@@ -3098,13 +3302,14 @@ describe("Payments routes", () => {
            signature,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
       )
       .bind(
         transferId,
         TEST_ORG.id,
         TEST_PROJECT.id,
         TEST_WALLET_ID,
+        recurringPaymentId,
         sourceSigner.address,
         TEST_SOLANA_ADDRESSES.wallet2,
         DEVNET_USDC_MINT,
@@ -3112,7 +3317,11 @@ describe("Payments routes", () => {
         "transfer",
         "outbound",
         "processing",
-        JSON.stringify({ recurringPaymentId }),
+        JSON.stringify({
+          recurringPaymentId,
+          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         null,
         staleAt,
         staleAt
@@ -3149,7 +3358,11 @@ describe("Payments routes", () => {
         now,
         "processing",
         null,
-        JSON.stringify({ recurringPaymentId }),
+        JSON.stringify({
+          recurringPaymentId,
+          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         staleAt,
         staleAt
       )
@@ -3370,13 +3583,14 @@ describe("Payments routes", () => {
            signature,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, NULL, ?, ?)`
+         ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, NULL, ?, ?)`
       )
       .bind(
         transferId,
         TEST_ORG.id,
         TEST_PROJECT.id,
         TEST_WALLET_ID,
+        recurringPaymentId,
         sourceSigner.address,
         TEST_SOLANA_ADDRESSES.wallet2,
         DEVNET_USDC_MINT,
@@ -3384,7 +3598,11 @@ describe("Payments routes", () => {
         "transfer",
         "outbound",
         "processing",
-        JSON.stringify({ recurringPaymentId }),
+        JSON.stringify({
+          recurringPaymentId,
+          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         now,
         now
       )
@@ -3528,13 +3746,14 @@ describe("Payments routes", () => {
            signature,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
       )
       .bind(
         transferId,
         TEST_ORG.id,
         TEST_PROJECT.id,
         TEST_WALLET_ID,
+        recurringPaymentId,
         sourceSigner.address,
         TEST_SOLANA_ADDRESSES.wallet2,
         DEVNET_USDC_MINT,
@@ -3542,7 +3761,11 @@ describe("Payments routes", () => {
         "transfer",
         "outbound",
         "processing",
-        JSON.stringify({ recurringPaymentId }),
+        JSON.stringify({
+          recurringPaymentId,
+          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         submittedSignature,
         now,
         now
@@ -3704,13 +3927,14 @@ describe("Payments routes", () => {
            signature,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
       )
       .bind(
         transferId,
         TEST_ORG.id,
         TEST_PROJECT.id,
         TEST_WALLET_ID,
+        recurringPaymentId,
         sourceSigner.address,
         TEST_SOLANA_ADDRESSES.wallet2,
         DEVNET_USDC_MINT,
@@ -3718,7 +3942,11 @@ describe("Payments routes", () => {
         "transfer",
         "outbound",
         "confirmed",
-        JSON.stringify({ recurringPaymentId }),
+        JSON.stringify({
+          recurringPaymentId,
+          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
+          collectionDueAt: dueAt,
+        }),
         submittedSignature,
         now,
         now
@@ -3787,10 +4015,10 @@ describe("Payments routes", () => {
     expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt).getTime()).toBe(
       new Date(dueAt).getTime() + 24 * 60 * 60 * 1000
     );
-    expect(confirmTransactionMock).not.toHaveBeenCalledWith(
+    expect(confirmTransactionMock).toHaveBeenCalledWith(
       expect.anything(),
       submittedSignature,
-      expect.anything()
+      expect.objectContaining({ commitment: "confirmed" })
     );
     const attempt = await getDb(env)
       .prepare("SELECT status, error FROM payment_subscription_collection_attempts WHERE id = ?")
@@ -4746,7 +4974,7 @@ describe("Payments routes", () => {
     expect(subscriptionBody.error.message).toContain("Counterparty not found");
   });
 
-  it("requires plan wallet access when mutating subscriptions and collection attempts", async () => {
+  it("does not expose client-controlled subscription or collection-attempt state", async () => {
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -4790,6 +5018,24 @@ describe("Payments routes", () => {
     expect(planRes.status).toBe(201);
     const planBody = (await planRes.json()) as { data: { subscriptionPlan: { id: string } } };
 
+    const forgedSubscriptionRes = await app.request(
+      "/v1/payments/subscriptions",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          planId: planBody.data.subscriptionPlan.id,
+          counterpartyId: counterpartyBody.data.counterparty.id,
+          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+          authorizationSignature: "client-controlled-signature",
+          nextCollectionDueAt: new Date().toISOString(),
+          status: "active",
+        }),
+      },
+      env
+    );
+    expect(forgedSubscriptionRes.status).toBe(400);
+
     const subscriptionRes = await app.request(
       "/v1/payments/subscriptions",
       {
@@ -4799,7 +5045,6 @@ describe("Payments routes", () => {
           planId: planBody.data.subscriptionPlan.id,
           counterpartyId: counterpartyBody.data.counterparty.id,
           subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
-          status: "active",
         }),
       },
       env
@@ -4808,10 +5053,6 @@ describe("Payments routes", () => {
     const subscriptionBody = (await subscriptionRes.json()) as {
       data: { subscription: { id: string } };
     };
-
-    await seedCachedKey({
-      walletBindings: [{ walletId: "wal_other_wallet", permissions: ["payments:write"] }],
-    });
 
     const updateSubscriptionRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionBody.data.subscription.id}`,
@@ -4822,7 +5063,7 @@ describe("Payments routes", () => {
       },
       env
     );
-    expect(updateSubscriptionRes.status).toBe(403);
+    expect(updateSubscriptionRes.status).toBe(404);
 
     const attemptRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionBody.data.subscription.id}/collection-attempts`,
@@ -4833,7 +5074,7 @@ describe("Payments routes", () => {
       },
       env
     );
-    expect(attemptRes.status).toBe(403);
+    expect(attemptRes.status).toBe(404);
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
@@ -5187,25 +5428,23 @@ describe("Payments routes", () => {
       env
     );
 
-    expect(activateSubscriptionRes.status).toBe(200);
-    const activateSubscriptionBody = (await activateSubscriptionRes.json()) as {
-      data: {
-        subscription: {
-          id: string;
-          authorizationSignature: string | null;
-          currentPeriodStartAt: string | null;
-          nextCollectionDueAt: string | null;
-          status: string;
-        };
-      };
-    };
-    expect(activateSubscriptionBody.data.subscription).toMatchObject({
-      id: subscriptionId,
-      authorizationSignature: "sig_subscription_authorization_test",
-      currentPeriodStartAt,
-      nextCollectionDueAt,
-      status: "active",
-    });
+    expect(activateSubscriptionRes.status).toBe(404);
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_subscriptions
+            SET authorization_signature = ?,
+                current_period_start_at = ?,
+                next_collection_due_at = ?,
+                status = 'active'
+          WHERE id = ?`
+      )
+      .bind(
+        "sig_subscription_authorization_test",
+        currentPeriodStartAt,
+        nextCollectionDueAt,
+        subscriptionId
+      )
+      .run();
 
     const dueSubscriptionsRes = await app.request(
       `/v1/payments/subscriptions?status=active&dueBefore=${encodeURIComponent("2026-02-02T00:00:00.000Z")}`,
@@ -5278,8 +5517,7 @@ describe("Payments routes", () => {
       "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
     ]);
 
-    mockTokenSupplyDecimalsOnce();
-    const prepareCollectionRes = await app.request(
+    const amountOverrideRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-collection`,
       {
         method: "POST",
@@ -5288,6 +5526,18 @@ describe("Payments routes", () => {
           amount: "10.50",
           receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3,
         }),
+      },
+      env
+    );
+    expect(amountOverrideRes.status).toBe(400);
+
+    mockTokenSupplyDecimalsOnce();
+    const prepareCollectionRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}/prepare-collection`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }),
       },
       env
     );
@@ -5327,43 +5577,7 @@ describe("Payments routes", () => {
       env
     );
 
-    expect(attemptRes.status).toBe(201);
-    const attemptBody = (await attemptRes.json()) as {
-      data: {
-        collectionAttempt: {
-          id: string;
-          subscriptionId: string;
-          amount: string;
-          token: string;
-          status: string;
-          signature: string | null;
-          metadata: Record<string, unknown>;
-        };
-      };
-    };
-    expect(attemptBody.data.collectionAttempt).toMatchObject({
-      subscriptionId,
-      amount: "10.50",
-      token: DEVNET_USDC_MINT,
-      status: "processing",
-      signature: "sig_collection_attempt_test",
-      metadata: { source: "api-lifecycle-test" },
-    });
-
-    const duplicateAttemptRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/collection-attempts`,
-      {
-        method: "POST",
-        headers: jsonHeaders,
-        body: JSON.stringify({
-          dueAt: nextCollectionDueAt,
-          signature: "sig_collection_attempt_test",
-          status: "processing",
-        }),
-      },
-      env
-    );
-    expect(duplicateAttemptRes.status).toBe(409);
+    expect(attemptRes.status).toBe(404);
 
     const attemptsRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/collection-attempts?status=processing`,
@@ -5380,14 +5594,8 @@ describe("Payments routes", () => {
         total: number;
       };
     };
-    expect(attemptsBody.data.collectionAttempts).toEqual([
-      expect.objectContaining({
-        id: attemptBody.data.collectionAttempt.id,
-        subscriptionId,
-        status: "processing",
-      }),
-    ]);
-    expect(attemptsBody.data.total).toBe(1);
+    expect(attemptsBody.data.collectionAttempts).toEqual([]);
+    expect(attemptsBody.data.total).toBe(0);
   });
 
   it("falls back to a zero SOL balance when RPC balance lookups fail", async () => {
