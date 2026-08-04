@@ -5,7 +5,7 @@ import type {
   PrivateChannelDto,
   PrivateChannelUserDto,
 } from "@sdp/types";
-import { Loader2Icon, PlusIcon, XIcon } from "lucide-react";
+import { Loader2Icon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
@@ -74,7 +75,7 @@ export function MembersTable({ members, channels, eligibleProjectMembers }: Prop
           <TableHeader>
             <TableRow>
               <TableHead>{t("DashboardPrivateChannels.members.columnEmail")}</TableHead>
-              <TableHead>{t("DashboardPrivateChannels.members.columnName")}</TableHead>
+              <TableHead>{t("DashboardPrivateChannels.members.columnRole")}</TableHead>
               <TableHead>{t("DashboardPrivateChannels.members.columnVerifiedWallets")}</TableHead>
               <TableHead>{t("DashboardPrivateChannels.members.columnChannels")}</TableHead>
               <TableHead className="text-right">
@@ -138,7 +139,24 @@ function MemberRow({
     <TableRow>
       <TableCell className="break-all text-sm">{member.email}</TableCell>
       <TableCell className="text-sm">
-        {member.name ?? <span className="text-secondary">—</span>}
+        {member.projectRole ? (
+          <span className="capitalize">{member.projectRole}</span>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex items-center gap-1 text-destructive-strong">
+                <TriangleAlertIcon className="size-4" aria-hidden />
+                <span aria-hidden>—</span>
+                <span className="sr-only">
+                  {t("DashboardPrivateChannels.members.roleRevokedTooltip")}
+                </span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {t("DashboardPrivateChannels.members.roleRevokedTooltip")}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </TableCell>
       <TableCell>
         <WalletCountBadge count={member.verifiedWalletCount} />
@@ -161,8 +179,16 @@ function MemberRow({
         </div>
       </TableCell>
       <TableCell className="text-right">
-        <Button type="button" variant="ghost" size="sm" onClick={onDelete} disabled={pending}>
-          {t("DashboardPrivateChannels.members.delete")}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={onDelete}
+          disabled={pending}
+          aria-label={t("DashboardPrivateChannels.members.delete")}
+          title={t("DashboardPrivateChannels.members.delete")}
+        >
+          <Trash2Icon />
         </Button>
       </TableCell>
     </TableRow>
