@@ -52,7 +52,7 @@ import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
-import { defaultChannelMint, inferCluster, knownMintDecimals } from "./mint";
+import { inferCluster, resolveChannelToken } from "./mint";
 import { describeTxError } from "./tx-error";
 import { confirmAndPersistWithdrawal } from "./withdraw-confirm";
 import { emitWithdrawalEvent } from "./withdraw-events";
@@ -73,6 +73,8 @@ export interface CreateChannelWithdrawalInput {
   wallet: CustodyWallet;
   /** UI decimal amount (e.g. "1.5"). */
   amount: string;
+  /** Mint to withdraw; must be on the instance's allowlist. Defaults to its first entry. */
+  mint?: string;
   /** Devnet address that receives the operator's release; defaults to the owner. */
   destination?: string;
   /**
@@ -96,6 +98,8 @@ async function broadcastWithdrawal(
     projectId: string;
     wallet: CustodyWallet;
     mint: Address;
+    /** Program owning the mint; seeds the burn's `tokenAccount` derivation. */
+    tokenProgram: Address;
     destination: Address;
     amountBaseUnits: bigint;
     gatewayAuth: SpcAuthContext;
@@ -114,9 +118,13 @@ async function broadcastWithdrawal(
     throw badRequest("Resolved signing wallet does not match the withdrawal wallet");
   }
 
+  // `tokenProgram` is passed explicitly rather than left to the generated client's
+  // classic-SPL default: it is an ATA seed, so the default would burn from the
+  // wrong `tokenAccount` for a token-2022 mint.
   const burnIx = await getWithdrawFundsInstructionAsync({
     user: signer,
     mint: input.mint,
+    tokenProgram: input.tokenProgram,
     amount: input.amountBaseUnits,
     destination: input.destination,
   });
@@ -149,8 +157,7 @@ export async function createChannelWithdrawal(
   const { instance, organizationId, projectId, wallet } = input;
 
   const cluster = inferCluster(instance.chainRpcUrl);
-  const mint = defaultChannelMint(cluster);
-  const decimals = knownMintDecimals(mint, cluster) ?? 6;
+  const { mint, decimals, tokenProgram } = resolveChannelToken(cluster, input.mint);
   const owner = wallet.publicKey;
   const destination = input.destination ?? owner;
 
@@ -197,6 +204,7 @@ export async function createChannelWithdrawal(
       projectId,
       wallet,
       mint: address(mint),
+      tokenProgram: address(tokenProgram),
       destination: address(destination),
       amountBaseUnits,
       gatewayAuth: input.gatewayAuth,

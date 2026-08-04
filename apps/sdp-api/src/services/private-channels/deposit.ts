@@ -53,7 +53,7 @@ import type { Env } from "@/types/env";
 import type { SpcAuthContext } from "./auth/gateway-auth";
 import { confirmAndPersistDeposit } from "./deposit-confirm";
 import { emitDepositEvent } from "./deposit-events";
-import { defaultChannelMint, inferCluster, knownMintDecimals } from "./mint";
+import { inferCluster, resolveChannelToken } from "./mint";
 import { describeTxError } from "./tx-error";
 
 /** The instance fields the deposit needs. */
@@ -72,6 +72,8 @@ export interface CreateChannelDepositInput {
   wallet: CustodyWallet;
   /** UI decimal amount (e.g. "1.5"). */
   amount: string;
+  /** Mint to deposit; must be on the instance's allowlist. Defaults to its first entry. */
+  mint?: string;
   /** Address credited in the channel; defaults to the depositor. */
   recipient?: string;
   /**
@@ -94,6 +96,8 @@ async function broadcastDeposit(
     projectId: string;
     wallet: CustodyWallet;
     mint: Address;
+    /** Program owning the mint; seeds the escrow's `userAta`/`instanceAta` derivation. */
+    tokenProgram: Address;
     recipient: Address;
     amountBaseUnits: bigint;
   }
@@ -111,11 +115,15 @@ async function broadcastDeposit(
   // TODO(gasless): `payer` should be the sponsored fee payer once the escrow
   // program is allow-listed on Kora — for now the custody wallet pays (see the
   // module-level note). payer === user, so the wallet signs once for both.
+  // `tokenProgram` is passed explicitly rather than left to the generated client's
+  // classic-SPL default: it is an ATA seed, so the default would derive the wrong
+  // `userAta`/`instanceAta` for a token-2022 mint.
   const depositIx = await getDepositInstructionAsync({
     payer: signer,
     user: signer,
     instance: address(input.instance.escrowInstanceAddr),
     mint: input.mint,
+    tokenProgram: input.tokenProgram,
     amount: input.amountBaseUnits,
     recipient: input.recipient,
   });
@@ -157,8 +165,7 @@ export async function createChannelDeposit(
   }
 
   const cluster = inferCluster(instance.chainRpcUrl);
-  const mint = defaultChannelMint(cluster);
-  const decimals = knownMintDecimals(mint, cluster) ?? 6;
+  const { mint, decimals, tokenProgram } = resolveChannelToken(cluster, input.mint);
   const depositor = wallet.publicKey;
   const recipient = input.recipient ?? depositor;
 
@@ -202,6 +209,7 @@ export async function createChannelDeposit(
       projectId,
       wallet,
       mint: address(mint),
+      tokenProgram: address(tokenProgram),
       recipient: address(recipient),
       amountBaseUnits,
     });

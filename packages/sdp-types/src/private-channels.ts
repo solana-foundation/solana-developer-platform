@@ -1,8 +1,80 @@
 // Private Channels: SDP-side connection metadata for a Solana Private Channels
 // (SPC) instance. One record per project.
 
+import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
+import {
+  SPL_TOKEN_PROGRAMS,
+  WELL_KNOWN_TOKENS,
+  wellKnownDecimals,
+  wellKnownMint,
+} from "./well-known-tokens";
+
 /** Per-instance RBAC fact: `"jwt"` = gateway enforces JWT-gated reads, `"none"` = open. */
 export type PrivateChannelAuthMode = "none" | "jwt";
+
+/**
+ * Symbols a private-channel instance accepts, in display order.
+ *
+ * USDC-only today. The escrow program keeps its own on-chain allowlist (the
+ * `allowedMint` PDA, managed by the operator via `allowMint`), so adding a symbol
+ * here only makes SDP offer it — the deposit still fails until the operator
+ * allowlists that mint on the instance.
+ *
+ * This is the single source of truth for the token selector, the amount label,
+ * the balance reads, and the API's mint validation.
+ */
+export const PRIVATE_CHANNEL_TOKEN_SYMBOLS = [
+  "USDC",
+] as const satisfies readonly WellKnownTokenSymbol[];
+
+/** One allowed token, resolved for a specific cluster. */
+export interface PrivateChannelToken {
+  symbol: string;
+  mint: string;
+  /** This mint's own decimals — see the note on `WellKnownTokenMint`. */
+  decimals: number;
+  /**
+   * Address of the token program that owns the mint (spl-token or token-2022).
+   * Seeds every associated-token-account derivation, so it must travel with the
+   * mint rather than being assumed.
+   */
+  tokenProgram: string;
+}
+
+/**
+ * Infer the Solana cluster from an instance's chain RPC URL. The persisted
+ * instance stores no explicit cluster, and the sandbox is devnet, so an
+ * unrecognized URL is treated as devnet.
+ *
+ * Lives here rather than in the API so the web derives the cluster the SAME way
+ * the API does. `useSolanaCluster()` resolves from the selected project's
+ * environment instead, which can disagree with the instance's own RPC URL.
+ */
+export function inferCluster(chainRpcUrl: string): SolanaCluster {
+  return /mainnet/i.test(chainRpcUrl) ? "mainnet-beta" : "devnet";
+}
+
+/**
+ * The allowed tokens for one cluster, in allowlist order. Symbols not deployed
+ * on the cluster are skipped rather than guessed at from the other cluster.
+ */
+export function privateChannelTokens(cluster: SolanaCluster): PrivateChannelToken[] {
+  return PRIVATE_CHANNEL_TOKEN_SYMBOLS.flatMap((symbol) => {
+    const mint = wellKnownMint(symbol, cluster);
+    const decimals = wellKnownDecimals(symbol, cluster);
+    if (mint === undefined || decimals === undefined) {
+      return [];
+    }
+    return [
+      {
+        symbol: WELL_KNOWN_TOKENS[symbol].symbol,
+        mint,
+        decimals,
+        tokenProgram: SPL_TOKEN_PROGRAMS[WELL_KNOWN_TOKENS[symbol].tokenProgram],
+      },
+    ];
+  });
+}
 
 /**
  * User-editable connection fields. These populate the connect form and are

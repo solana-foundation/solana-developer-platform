@@ -34,8 +34,9 @@ export const createChannelBodySchema = z.object({
 
 /**
  * Query params for `GET /balance`: `owner` (a `walletId` from GET /v1/wallets, a
- * wallet public key, or a raw Solana address) and an optional `mint` (defaults to
- * the instance cluster's USDC mint).
+ * wallet public key, or a raw Solana address) and an optional `mint`, which
+ * defaults to the instance's first allowed token. Unlike the write bodies below,
+ * this accepts ANY mint — it is a general read.
  */
 export const balanceQuerySchema = z.object({
   owner: z.string().min(1),
@@ -45,12 +46,16 @@ export const balanceQuerySchema = z.object({
 /**
  * Body for `POST /deposits`. `walletId` is the source custody wallet (a `walletId`
  * from GET /v1/wallets or its public key); `amount` is a decimal string; optional
+ * `mint` must be one the instance allows, defaulting to its first; optional
  * `recipient` (walletId or address) is credited in the channel, defaulting to the
  * depositor.
  */
 export const createDepositBodySchema = z.object({
   walletId: z.string().min(1),
-  amount: z.string().min(1),
+  // Shares the transfer body's amount rules so a malformed or over-scaled amount is
+  // a 400 here rather than an AmountError thrown deeper, which maps to a 500.
+  amount: privateChannelTransferAmountSchema,
+  mint: z.string().min(1).optional(),
   recipient: z.string().min(1).optional(),
 });
 
@@ -62,12 +67,15 @@ export const depositIdParamSchema = z.object({
 /**
  * Body for `POST /withdrawals`. `walletId` is the custody wallet whose channel-chain
  * balance is burned (a `walletId` from GET /v1/wallets or its public key); `amount`
- * is a decimal string; optional `destination` (address) receives the operator's
- * devnet USDC release, defaulting to the owner wallet.
+ * is a decimal string; optional `mint` must be one the instance allows, defaulting
+ * to its first; optional `destination` (address) receives the operator's devnet
+ * release, defaulting to the owner wallet.
  */
 export const createWithdrawalBodySchema = z.object({
   walletId: z.string().min(1),
-  amount: z.string().min(1),
+  // See the note on the deposit body: same rules, same reason.
+  amount: privateChannelTransferAmountSchema,
+  mint: z.string().min(1).optional(),
   destination: z.string().min(1).optional(),
 });
 
@@ -81,11 +89,15 @@ export const transferChannelIdParamSchema = z.object({
   channelId: z.string().min(1),
 });
 
-/** Body for `POST /channels/:channelId/transfers`. */
+/**
+ * Body for `POST /channels/:channelId/transfers`. Optional `mint` must be one the
+ * instance allows, defaulting to its first.
+ */
 export const createTransferBodySchema = z.object({
   walletId: z.string().min(1),
   recipientVerifiedWalletId: z.string().min(1),
   amount: privateChannelTransferAmountSchema,
+  mint: z.string().min(1).optional(),
 });
 
 /** Path param for `GET /transfers/:id`. */

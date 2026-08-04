@@ -1,6 +1,10 @@
 "use client";
 
-import type { CustodyWalletSummary, PrivateChannelWithdrawal } from "@sdp/types";
+import type {
+  CustodyWalletSummary,
+  PrivateChannelToken,
+  PrivateChannelWithdrawal,
+} from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
@@ -22,8 +26,15 @@ function walletLabel(wallet: CustodyWalletSummary): string {
   return wallet.label ? `${wallet.label} (${short})` : short;
 }
 
-export function WithdrawForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
+export function WithdrawForm({
+  tokens,
+  wallets,
+}: {
+  tokens: PrivateChannelToken[];
+  wallets: CustodyWalletSummary[];
+}) {
   const [walletId, setWalletId] = useState<string>(wallets[0]?.walletId ?? "");
+  const [mint, setMint] = useState<string>(tokens[0]?.mint ?? "");
   const [amount, setAmount] = useState("");
   const [showAmountError, setShowAmountError] = useState(false);
   const [destination, setDestination] = useState("");
@@ -42,13 +53,13 @@ export function WithdrawForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
     }
     let active = true;
     setBalances({ channel: null, onChain: null });
-    fetchWalletBalancesAction(walletId).then((result) => {
+    fetchWalletBalancesAction(walletId, mint || undefined).then((result) => {
       if (active) setBalances(result);
     });
     return () => {
       active = false;
     };
-  }, [walletId, refetchKey]);
+  }, [walletId, mint, refetchKey]);
 
   if (withdrawal) {
     return (
@@ -83,6 +94,9 @@ export function WithdrawForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
 
   const amountErrorKey = showAmountError ? getAmountError(amount) : null;
   const amountError = amountErrorKey ? t(amountErrorKey) : null;
+  // Falls back to the first token so a `mint` left over from a changed token list
+  // cannot leave the label and the payload disagreeing.
+  const selectedToken = tokens.find((token) => token.mint === mint) ?? tokens[0];
 
   const submit = () => {
     setShowAmountError(true);
@@ -95,6 +109,7 @@ export function WithdrawForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
       const result = await createWithdrawalAction({
         walletId,
         amount: amount.trim(),
+        mint: selectedToken?.mint,
         destination: destination.trim() || undefined,
       });
       if (result.ok) {
@@ -131,11 +146,29 @@ export function WithdrawForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
         </p>
       </div>
 
+      {tokens.length > 0 && (
+        <div className="space-y-1.5">
+          <Label>{t("DashboardPrivateChannels.common.tokenLabel")}</Label>
+          <Select
+            ariaLabel={t("DashboardPrivateChannels.common.tokenLabel")}
+            onValueChange={(value) => setMint(value ?? "")}
+            value={mint}
+          >
+            {tokens.map((token) => (
+              <SelectItem key={token.mint} value={token.mint}>
+                {token.symbol}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
+      )}
+
       <AmountField
         balances={balances}
         error={amountError}
         id="withdraw-amount"
         spends="channel"
+        symbol={selectedToken?.symbol ?? ""}
         onBlur={() => setShowAmountError(true)}
         onChange={setAmount}
         value={amount}

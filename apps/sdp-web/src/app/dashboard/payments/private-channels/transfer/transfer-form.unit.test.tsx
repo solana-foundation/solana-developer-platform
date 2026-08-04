@@ -6,6 +6,7 @@ import type {
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
 } from "@sdp/types";
+import { privateChannelTokens } from "@sdp/types";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
@@ -106,8 +107,14 @@ function I18nWrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderForm(props: ComponentProps<typeof TransferForm>) {
-  return render(<TransferForm {...props} />, { wrapper: I18nWrapper });
+/** The real devnet allowlist, so the fixture cannot drift from the shipped list. */
+const tokens = privateChannelTokens("devnet");
+
+function renderForm(
+  props: Omit<ComponentProps<typeof TransferForm>, "tokens"> &
+    Partial<Pick<ComponentProps<typeof TransferForm>, "tokens">>
+) {
+  return render(<TransferForm tokens={tokens} {...props} />, { wrapper: I18nWrapper });
 }
 
 const channels: PrivateChannelMembershipChannelDto[] = [
@@ -448,6 +455,7 @@ describe("TransferForm", () => {
         channels={nextChannels}
         scopeKey="org_two:project_two:instance_two"
         sourceWallets={nextSourceWallets}
+        tokens={tokens}
       />
     );
 
