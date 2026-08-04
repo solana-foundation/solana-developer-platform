@@ -12,6 +12,7 @@ import {
   ReceiptTextIcon,
   RepeatIcon,
   ShieldCheckIcon,
+  TrendingUpIcon,
   UsersIcon,
   VenetianMaskIcon,
   WalletIcon,
@@ -37,6 +38,8 @@ export type NavItem = {
   badge?: number;
   external?: boolean;
   children?: SubNavItem[];
+  /** Marks the children as a collapsible disclosure group (chevron + persisted open state). */
+  subnavKey?: DashboardSubnavKey;
 };
 
 export type NavSection = {
@@ -44,10 +47,25 @@ export type NavSection = {
   items: NavItem[];
 };
 
-export const PAYMENTS_SUBNAV_IDS = {
-  desktop: "payments-subnav-desktop",
-  mobile: "payments-subnav-mobile",
+/**
+ * Collapsible sidebar groups. Every group behaves identically: chevron
+ * toggle, open state persisted per group, and open-by-default when the
+ * current route lives under `pathPrefix`.
+ */
+export const DASHBOARD_SUBNAV_GROUPS = {
+  payments: { pathPrefix: "/dashboard/payments" },
+  markets: { pathPrefix: "/dashboard/markets" },
 } as const;
+
+export type DashboardSubnavKey = keyof typeof DASHBOARD_SUBNAV_GROUPS;
+
+export function dashboardSubnavId(key: DashboardSubnavKey, variant: "desktop" | "mobile"): string {
+  return `${key}-subnav-${variant}`;
+}
+
+export function dashboardSubnavStorageKey(key: DashboardSubnavKey): string {
+  return `sdp.dashboard.${key}-subnav-open`;
+}
 
 export function getPaymentsActions(
   t: ReturnType<typeof useTranslations>,
@@ -96,14 +114,35 @@ export function getPaymentsActions(
   ];
 }
 
+/** Each Markets sub-module carries its own flag, so the group's children are whatever is enabled. */
+export function getMarketsActions(
+  t: ReturnType<typeof useTranslations>,
+  earnEnabled: boolean
+): SubNavItem[] {
+  return [
+    ...(earnEnabled
+      ? [
+          {
+            label: t("Shared.dashboardShell.earn"),
+            href: DASHBOARD_SIDE_NAV_HREFS.markets,
+          },
+        ]
+      : []),
+  ];
+}
+
 export function getNavSections(
   t: ReturnType<typeof useTranslations>,
   options: {
     canReadApprovals: boolean;
+    earnEnabled: boolean;
+    marketsEnabled: boolean;
     pendingApprovalCount: number | null;
     privateChannelsEnabled: boolean;
   }
 ): NavSection[] {
+  const marketsActions = getMarketsActions(t, options.earnEnabled);
+
   return [
     {
       title: t("Shared.dashboardShell.create"),
@@ -133,7 +172,22 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.payments,
           icon: ArrowLeftRightIcon,
           children: getPaymentsActions(t, options.privateChannelsEnabled),
+          subnavKey: "payments",
         },
+        // The group needs both flags: markets off hides the module, and an
+        // empty children array means no sub-module is enabled — a Markets entry
+        // with nothing under it would lead nowhere.
+        ...(options.marketsEnabled && marketsActions.length > 0
+          ? [
+              {
+                label: t("Shared.dashboardShell.markets"),
+                href: DASHBOARD_SIDE_NAV_HREFS.markets,
+                icon: TrendingUpIcon,
+                children: marketsActions,
+                subnavKey: "markets" as const,
+              },
+            ]
+          : []),
         {
           label: t("Shared.dashboardShell.apiKeys"),
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,

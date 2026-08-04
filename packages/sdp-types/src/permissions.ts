@@ -15,6 +15,10 @@ export const PERMISSIONS = [
   "payments:read",
   "payments:write",
 
+  // Earn permissions
+  "earn:read",
+  "earn:write",
+
   // Counterparty permissions
   "counterparties:read",
   "counterparties:write",
@@ -84,6 +88,8 @@ export const ORGANIZATION_ROLES = {
       "tokens:admin",
       "payments:read",
       "payments:write",
+      "earn:read",
+      "earn:write",
       "counterparties:read",
       "counterparties:write",
       "wallets:read",
@@ -111,6 +117,8 @@ export const ORGANIZATION_ROLES = {
       "tokens:write",
       "payments:read",
       "payments:write",
+      "earn:read",
+      "earn:write",
       "counterparties:read",
       "counterparties:write",
       "wallets:read",
@@ -148,6 +156,8 @@ export const API_KEY_ROLES = {
       "tokens:write",
       "payments:read",
       "payments:write",
+      "earn:read",
+      "earn:write",
       "counterparties:read",
       "counterparties:write",
       "wallets:read",
@@ -162,6 +172,7 @@ export const API_KEY_ROLES = {
     permissions: [
       "tokens:read",
       "payments:read",
+      "earn:read",
       "counterparties:read",
       "wallets:read",
       "compliance:read",
@@ -241,6 +252,8 @@ export const PROJECT_ROLES = {
       "tokens:write",
       "payments:read",
       "payments:write",
+      "earn:read",
+      "earn:write",
       "counterparties:read",
       "counterparties:write",
       "wallets:read",

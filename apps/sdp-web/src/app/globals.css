@@ -96,6 +96,31 @@ html body[data-scroll-locked] {
   scrollbar-color: gray transparent;
 }
 
+/* Smooth open/close for <details> disclosure panels (e.g. Earn card drawers).
+   Progressive enhancement: browsers without `::details-content` /
+   `interpolate-size` support keep the instant native toggle. */
+details.sdp-collapse {
+  interpolate-size: allow-keywords;
+}
+
+details.sdp-collapse::details-content {
+  block-size: 0;
+  overflow-y: clip;
+  transition:
+    block-size 250ms ease,
+    content-visibility 250ms allow-discrete;
+}
+
+details.sdp-collapse[open]::details-content {
+  block-size: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  details.sdp-collapse::details-content {
+    transition: none;
+  }
+}
+
 /* Chrome autofill: defer its box-shadow via long transition so field background shows through. */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
