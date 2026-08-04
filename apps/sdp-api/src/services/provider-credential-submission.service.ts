@@ -5,7 +5,7 @@ import { type DatabaseClient, getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, forbidden, internalError, providerUnavailable } from "@/lib/errors";
-import { isPrivyByokProvisioningEnabled } from "@/lib/feature-flags";
+import { isPrivyByokEnabled } from "@/lib/feature-flags";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -30,6 +30,7 @@ const PROVISIONING_DISABLED_MESSAGE =
 
 interface SubmitPrivyCredentialInput {
   provider: "privy";
+  walletLabel?: string;
   fields: {
     credentialLabel: string;
     scope: "organization" | "project";
@@ -38,7 +39,7 @@ interface SubmitPrivyCredentialInput {
   };
 }
 
-interface SafeProviderCredential {
+export interface SafeProviderCredential {
   id: string;
   provider: "privy";
   label: string;
@@ -223,10 +224,7 @@ async function enforceProvisioningGate(
     context.db,
     context.organizationId
   );
-  if (
-    !availability.providers.custody.privy.entitled ||
-    !isPrivyByokProvisioningEnabled(context.c.env)
-  ) {
+  if (!availability.providers.custody.privy.entitled || !isPrivyByokEnabled(context.c.env)) {
     const lateReplay = await resolveLateReplay({
       ...context,
       fingerprint,
@@ -489,6 +487,7 @@ async function persistConnection(
       projectId: submission.projectId,
       providerCredentialId: submission.providerCredentialId,
       providerCredentialScopeKey: providerCredential.scope_key,
+      pendingWalletLabel: submission.input.walletLabel,
       createdBy: submission.userId,
     });
     return;
@@ -499,6 +498,7 @@ async function persistConnection(
     expectedProviderCredentialId: lockedPlan.currentCredential.id,
     providerCredentialId: submission.providerCredentialId,
     providerCredentialScopeKey: providerCredential.scope_key,
+    pendingWalletLabel: submission.input.walletLabel,
   });
   if (!updated) {
     throw new SetupConflict(lockedPlan.connection.id);
@@ -628,6 +628,7 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
         projectId: params.projectId,
       },
       provider: params.input.provider,
+      walletLabel: params.input.walletLabel,
       fields: params.input.fields,
     })
   );
@@ -765,7 +766,7 @@ function mapSubmissionResult(
   };
 }
 
-function mapProviderCredential(row: ProviderCredentialRow): SafeProviderCredential {
+export function mapProviderCredential(row: ProviderCredentialRow): SafeProviderCredential {
   const storedMetadata = parsePostgresJsonOr<Record<string, unknown>>(row.display_metadata, {});
   const appIdSuffix =
     typeof storedMetadata.appIdSuffix === "string" ? storedMetadata.appIdSuffix : undefined;

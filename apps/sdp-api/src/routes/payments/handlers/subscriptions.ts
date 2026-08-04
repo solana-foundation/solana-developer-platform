@@ -50,6 +50,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   normalizePaymentToken,
@@ -328,7 +329,7 @@ async function getSubscriptionWithPlan(
 async function requireActiveCounterparty(c: AppContext, counterpartyId: string): Promise<void> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const repo = createCounterpartiesRepository(c.env);
+  const repo = createCounterpartiesRepository(c.env, getRequestTenantScope(c));
   const counterparty = await repo.getCounterpartyById({
     counterpartyId,
     organizationId: auth.organizationId,

@@ -4,8 +4,9 @@ import { SigningError } from "@sdp/custody/signing";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";
-import { isPrivyByokProvisioningEnabled } from "@/lib/feature-flags";
+import { isPrivyByokEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
@@ -81,7 +82,7 @@ export const initializeSigning = async (c: AppContext) => {
     });
   }
 
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
 
   try {
     const result = await initializeProviderConnection(
@@ -127,7 +128,7 @@ export const switchSigning = async (c: AppContext) => {
     });
   }
 
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const auditService = new AuditService(getDb(c.env));
   const projectId = c.get("projectId");
   const targetProvider = parsed.data.provider;
@@ -213,7 +214,7 @@ export const switchSigning = async (c: AppContext) => {
 export const getSwitchProviderOptions = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const enabledProviders = (await getEnabledProviders(c.env, getDb(c.env), actor.organizationId))
     .custody;
   const [reuseState, configurations] = await Promise.all([
@@ -387,7 +388,7 @@ async function assertFreshPrivyLegacySetupAllowed(
   }
 
   const availability = await getProviderAvailability(c.env, getDb(c.env), organizationId);
-  if (availability.providers.custody.privy.entitled && isPrivyByokProvisioningEnabled(c.env)) {
+  if (availability.providers.custody.privy.entitled && isPrivyByokEnabled(c.env)) {
     throw forbidden("New Privy setup must use stored credentials");
   }
 }

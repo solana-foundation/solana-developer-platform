@@ -60,7 +60,9 @@ export function createFeePaymentAdapter(env: FeePaymentEnv, userId?: string): Fe
 
 /**
  * Create a Kora adapter from environment configuration.
- * Pass `userId` (via `resolveKoraUserId(c)`) to forward it to Kora as `user_id`.
+ * SDP application callers must pass the server-derived identity from their
+ * owned sponsorship boundary. Missing identities share one conservative
+ * fallback bucket rather than bypassing Kora usage tracking.
  */
 export function createKoraAdapter(env: FeePaymentEnv, userId?: string): KoraAdapter {
   // Get RPC URL from env or use default based on network
@@ -76,6 +78,7 @@ export function createKoraAdapter(env: FeePaymentEnv, userId?: string): KoraAdap
   const config: KoraAdapterConfig = {
     rpcUrl,
     apiKey: env.KORA_API_KEY,
+    identityTokenAudience: env.KORA_CLOUD_RUN_AUDIENCE,
     timeoutMs: env.KORA_TIMEOUT_MS ? Number.parseInt(env.KORA_TIMEOUT_MS, 10) : undefined,
     userId,
   };

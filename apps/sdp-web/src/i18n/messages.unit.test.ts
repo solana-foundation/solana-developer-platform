@@ -61,6 +61,27 @@ describe("i18n messages", () => {
     });
   });
 
+  it("keeps catalogs free of ICU syntax translate cannot render", () => {
+    // translate only substitutes {name}. An ICU construct such as
+    // {count, plural, one {#} other {#}} matches nothing, throws nothing, and
+    // reaches the user verbatim, so no catalog may contain one.
+    for (const locale of supportedLocales) {
+      const messages = getMessages(locale) as unknown;
+      const offenders = flattenKeys(messages).filter((key) => {
+        const value = key.split(".").reduce<unknown>((carry, segment) => {
+          return carry && typeof carry === "object"
+            ? (carry as Record<string, unknown>)[segment]
+            : undefined;
+        }, messages);
+        return (
+          typeof value === "string" && /\{\s*\w+\s*,\s*(plural|select|selectordinal)\b/.test(value)
+        );
+      });
+
+      expect(offenders).toEqual([]);
+    }
+  });
+
   it("rejects missing interpolation values", () => {
     expect(() => translate(getMessages("en"), "DashboardCustody.rotateKey")).toThrow(
       "Missing interpolation value hours for DashboardCustody.rotateKey"

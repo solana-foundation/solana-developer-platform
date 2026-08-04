@@ -17,7 +17,7 @@ import {
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { BvnkBankFundingDetails, SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
-import { createCounterpartiesRepository } from "@/db/repositories";
+import { createSystemCounterpartiesRepository } from "@/db/repositories";
 import type {
   CounterpartiesRepository,
   CounterpartyRow,
@@ -185,7 +185,7 @@ async function handleProviderOnrampSettlementWebhook(
   if (event.status !== "COMPLETED" || !event.customerReference || !event.walletId) {
     return;
   }
-  const repo = createCounterpartiesRepository(c.env);
+  const repo = createSystemCounterpartiesRepository(c.env);
   const counterparty = await repo.findActiveCounterpartyByBvnkCustomerReference(
     event.customerReference
   );
@@ -311,7 +311,8 @@ async function provisionPendingBvnkOnramps(
         reloadedCounterparty,
         reloadedCounterparty.project_id,
         readBvnkCustomer(reloadedCounterparty.provider_data),
-        entry.request
+        entry.request,
+        repo
       );
     } catch (error) {
       await updateBvnkOnrampPaymentRuleState(repo, reloadedCounterparty, key, {
@@ -335,7 +336,7 @@ async function handleProviderOnrampCounterpartyRequirementWebhook(
     }
   >
 ): Promise<void> {
-  const repo = createCounterpartiesRepository(c.env);
+  const repo = createSystemCounterpartiesRepository(c.env);
 
   switch (event.kind) {
     case "bvnk:customers:status-change":
@@ -398,7 +399,7 @@ async function handleProviderOfframpCounterpartyRequirementWebhook(
   }
   const walletStatus = event.walletStatus;
 
-  const repo = createCounterpartiesRepository(c.env);
+  const repo = createSystemCounterpartiesRepository(c.env);
   const wallet = parseBvnkOfframpWalletName(event.walletName);
   const counterparty = await repo.findActiveCounterpartyById(wallet.counterpartyId);
   if (!counterparty) {

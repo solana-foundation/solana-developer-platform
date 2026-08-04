@@ -305,6 +305,8 @@ export interface PrivateChannelUserDto {
   userId: string;
   email: string;
   name: string | null;
+  /** Per-project role; null once the user's project_members row is removed. */
+  projectRole: string | null;
   /** How many wallets this member has verified with the connected instance. */
   verifiedWalletCount: number;
   invitedAt: string;

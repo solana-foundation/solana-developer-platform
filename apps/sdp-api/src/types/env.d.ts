@@ -45,7 +45,7 @@ export interface Env {
   GCP_SECRET_MANAGER_PROJECT_ID?: string;
   GCP_SECRET_MANAGER_SECRET_PREFIX?: string;
   GCP_SECRET_MANAGER_API_BASE_URL?: string;
-  PRIVY_BYOK_PROVISIONING_ENABLED?: string;
+  PRIVY_BYOK_ENABLED?: string;
 
   // Application secrets
   API_KEY_PEPPER?: string;
@@ -188,6 +188,7 @@ export interface Env {
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
+  KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
@@ -282,6 +283,7 @@ declare module "hono" {
   interface ContextVariableMap {
     // API key auth context set by middleware
     projectId?: string;
+    projectEnvironment?: ApiKeyEnvironment;
     apiKey?: {
       id: string;
       organizationId: string;

@@ -7,11 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   createPaymentsRepository,
-  createPaymentTransferBatchesRepository,
+  createSystemPaymentTransferBatchesRepository,
 } from "@/db/repositories";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -1809,7 +1810,7 @@ describe("payment transfer batches", () => {
     };
     expect(body.data.transfers).toHaveLength(2);
 
-    const repository = createPaymentTransferBatchesRepository(env);
+    const repository = createSystemPaymentTransferBatchesRepository(env);
     await Promise.all([
       repository.settleTransferBatch({
         transferId: body.data.transfers[0].id,
@@ -1879,7 +1880,7 @@ describe("payment transfer batches", () => {
     expect(body.data.transfers).toHaveLength(1);
     const transferId = body.data.transfers[0].id;
 
-    const repository = createPaymentTransferBatchesRepository(env);
+    const repository = createSystemPaymentTransferBatchesRepository(env);
     await repository.settleTransferBatch({
       transferId,
       organizationId: TEST_ORG.id,
@@ -1907,7 +1908,10 @@ describe("payment transfer batches", () => {
     expect(transferRow?.status).toBe("finalized");
     expect(Number(transferRow?.slot)).toBe(500);
 
-    const guarded = await createPaymentsRepository(env).updateTransfer({
+    const guarded = await createPaymentsRepository(
+      env,
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    ).updateTransfer({
       transferId,
       status: "confirmed",
       expectedStatus: "processing",

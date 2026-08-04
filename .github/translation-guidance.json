@@ -1,8 +1,10 @@
 {
   "default": {
-    "product": "Solana Developer Platform",
-    "audience": "Web3 developers and institutional finance operators",
-    "principles": [
+    "context": {
+      "product": "Solana Developer Platform",
+      "audience": "Web3 developers and institutional finance operators"
+    },
+    "instructions": [
       "Translate the product meaning, not the English sentence word for word.",
       "Prefer concise, natural interface copy over formal or literary language.",
       "Keep product names, protocol names, code, identifiers, placeholders, and URLs unchanged.",
@@ -11,8 +13,15 @@
   },
   "locales": {
     "fr": {
-      "localeName": "français (France)",
-      "voice": [
+      "context": {
+        "localeName": "français (France)",
+        "audience": "French-speaking Web3 developers and institutional finance operators",
+        "conventions": [
+          "French Web3 practitioners commonly retain established English product terms.",
+          "Standard French financial vocabulary is preferred when it is familiar to practitioners."
+        ]
+      },
+      "instructions": [
         "Use natural professional French and address the user with vous.",
         "Keep established Web3 terms in English when French practitioners normally use the English term.",
         "Use French financial vocabulary when it is genuinely standard, such as actif and contrepartie."

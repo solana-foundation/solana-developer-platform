@@ -1,16 +1,18 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { badRequest } from "@/lib/errors";
-import { created } from "@/lib/response";
+import { created, success } from "@/lib/response";
 import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { checkProviderCredential } from "@/services/provider-credential-check.service";
 import { submitProviderCredential } from "@/services/provider-credential-submission.service";
 import type { Env } from "@/types/env";
 
 const privyCredentialSubmissionSchema = z
   .object({
     provider: z.literal("privy"),
+    walletLabel: z.string().trim().min(1).max(100).optional(),
     fields: z
       .object({
         credentialLabel: z.string().trim().min(1),
@@ -44,6 +46,10 @@ internalCustody.post("/provider-credentials", async (c) => {
 
   const result = await submitProviderCredential(c, parsed.data, idempotencyKey);
   return created(c, result);
+});
+
+internalCustody.post("/provider-credentials/:providerCredentialId/check", async (c) => {
+  return success(c, await checkProviderCredential(c, c.req.param("providerCredentialId")));
 });
 
 export default internalCustody;

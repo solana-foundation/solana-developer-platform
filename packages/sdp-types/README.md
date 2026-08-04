@@ -14,7 +14,7 @@ This package provides:
 
 This package is **internal only** and not published to npm. If you're building an SDP client library, use the **public REST API** instead:
 
-- **API Endpoint**: `https://platform.solana.com/api` (or `http://localhost:8787` locally)
+- **API Endpoint**: `https://api.solana.com` (or `http://localhost:8787` locally)
 - **OpenAPI Spec**: Available at `/openapi.json`
 - **Public Docs**: https://platform.solana.com/docs
 

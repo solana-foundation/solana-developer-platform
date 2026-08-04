@@ -8,14 +8,18 @@ import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
-import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { updateAuthoritySchema } from "../schemas";
 import {
   type AuthorityRole,
+  createResolvedAuthoritySigner,
   resolveAuthoritySigner,
+  resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
@@ -58,7 +62,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -99,7 +103,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     requestedWalletId: parsed.data.signingWalletId,
     currentAuthority: currentAuthorityRaw,
   });
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   const prepared = await mosaic.prepareUpdateAuthority({
     mint: mintAddress,
@@ -167,7 +171,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -195,7 +199,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     throw badRequest("Current authority is not available for this token");
   }
 
-  const { signer, walletId } = await resolveAuthoritySigner({
+  const { walletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
     token,
@@ -247,7 +251,13 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const signer = await createResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    walletId,
+    currentAuthority: currentAuthorityRaw,
+  });
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   try {
     const result = await mosaic.updateAuthority({

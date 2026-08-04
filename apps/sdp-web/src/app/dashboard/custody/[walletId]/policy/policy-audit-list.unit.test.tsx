@@ -4,9 +4,14 @@ import type {
   WalletPolicyEvaluationDetail,
 } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getMessages, translate } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 import type { PolicyTranslate } from "./policy-audit.shared";
 import { PolicyAuditDetail } from "./policy-audit-detail";
 import { PolicyAuditList } from "./policy-audit-list";
@@ -111,16 +116,19 @@ const wallet: CustodyWalletByIdResponse["wallet"] = {
 describe("policy audit presentation", () => {
   it("contains a long actor and the longest decision inside fixed desktop columns", () => {
     const html = renderToStaticMarkup(
-      <PolicyAuditList
-        walletId="wallet-1"
-        walletLabel="Mobile overflow proof signer"
-        result={{ evaluations: [evaluation], total: 1, page: 1, pageSize: 25 }}
-        filters={{ page: 1 }}
-        revisionHistory={revisionHistory}
-        apiKeyNames={{}}
-        locale="en-US"
-        t={t}
-      />
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <PolicyAuditList
+          walletId="wallet-1"
+          walletLabel="Mobile overflow proof signer"
+          result={{ evaluations: [evaluation], total: 1, page: 1, pageSize: 25 }}
+          filters={{ page: 1 }}
+          revisionHistory={revisionHistory}
+          apiKeyNames={{}}
+          userNames={{}}
+          locale="en-US"
+          t={t}
+        />
+      </I18nProvider>
     );
 
     expect(html).toContain('data-policy-audit-actor="true"');
@@ -139,6 +147,7 @@ describe("policy audit presentation", () => {
           evaluation={evaluation}
           revisionHistory={revisionHistory}
           apiKeyNames={{}}
+          userNames={{}}
           neighbors={{ previous: null, next: null }}
           filters={{ page: 1 }}
           tab="decision"

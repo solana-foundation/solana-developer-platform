@@ -31,6 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
+import { createTenantScope } from "@/lib/tenant-scope";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -447,7 +448,10 @@ async function seedWalletControlProfile(params: {
   rules: PolicyRule[];
   defaultAction?: PolicyDefaultAction;
 }): Promise<void> {
-  const repo = createPostgresPolicyRepository(getDb(env));
+  const repo = createPostgresPolicyRepository(
+    getDb(env),
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+  );
   const profile = await repo.createWalletControlProfile({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
@@ -6021,6 +6025,11 @@ describe("Payments routes", () => {
   });
 
   it("activates immutable wallet control profile revisions from wallet policy updates", async () => {
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+      .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
+      .run();
+
     const rules = [
       {
         id: "deny-raw-signing",

@@ -527,6 +527,15 @@ export const FIELDS: EnvField[] = [
     pattern: /^https?:\/\//,
     visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
   },
+  {
+    key: "KORA_CLOUD_RUN_AUDIENCE",
+    section: "fee",
+    kind: "url",
+    label: "Private Kora Cloud Run audience",
+    pattern: /^https?:\/\//,
+    visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
+    help: "Optional. Fetches a Google service identity token for a private Kora Cloud Run service while retaining Kora API-key authentication.",
+  },
 
   // Secrets (auto-generated locally)
   {
@@ -661,7 +670,7 @@ export const FIELDS: EnvField[] = [
     help: "Development is always enabled. This setting controls production only.",
   },
   {
-    key: "PRIVY_BYOK_PROVISIONING_ENABLED",
+    key: "PRIVY_BYOK_ENABLED",
     section: "advanced",
     kind: "select",
     label: "Privy stored-credential provisioning",
