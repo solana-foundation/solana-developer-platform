@@ -3,6 +3,14 @@ import type {
   EarnDepositTokenSymbol,
   EarnLiquidityTerm,
   EarnMovementStatus,
+  EarnPortfolioAllocationInput,
+  EarnPortfolioDepositsPage,
+  EarnPortfolioTargetAllocations,
+  EarnPortfolioToken,
+  EarnPortfolioWalletSnapshot,
+  EarnPortfolioWalletStatus,
+  EarnPortfolioWithdrawal,
+  EarnPortfolioWithdrawalPreview,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   SdpEnvironment,
@@ -193,4 +201,125 @@ export interface EarnVaultProvider {
     ctx: EarnRuntimeContext,
     input: EarnMovementStatusInput
   ): Promise<EarnMovementStatusResult>;
+}
+
+export interface EarnPortfolioWalletCreateInput {
+  label: string;
+  allocations: EarnPortfolioAllocationInput;
+  /** Idempotency key (UUIDv4) forwarded to the provider; generated when omitted. */
+  requestId?: string;
+}
+
+export interface EarnPortfolioWalletCreateResult {
+  providerWalletRef: string;
+  status: EarnPortfolioWalletStatus;
+}
+
+export interface EarnPortfolioWalletRefInput {
+  providerWalletRef: string;
+}
+
+export interface EarnPortfolioStrategyUpdateInput {
+  providerWalletRef: string;
+  allocations: EarnPortfolioAllocationInput;
+  /** Idempotency key (UUIDv4) forwarded to the provider; generated when omitted. */
+  requestId?: string;
+}
+
+export interface EarnPortfolioStrategyUpdateResult {
+  /** Provider-confirmed weights the wallet will rebalance toward. */
+  allocations: EarnPortfolioTargetAllocations;
+}
+
+export interface EarnPortfolioDepositsInput {
+  providerWalletRef: string;
+  cursor?: string;
+}
+
+export interface EarnPortfolioWithdrawalPreviewInput {
+  providerWalletRef: string;
+  /** USD amount as a decimal string. */
+  amountUsd: string;
+  token: EarnPortfolioToken;
+}
+
+export interface EarnPortfolioWithdrawalCreateInput {
+  providerWalletRef: string;
+  /**
+   * Idempotency key (UUIDv4), REQUIRED here unlike the create/update inputs:
+   * a withdrawal retry without a stable key can double-send funds, so the
+   * caller (which owns the retry loop) must own the key.
+   */
+  requestId: string;
+  /** USD amount as a decimal string. */
+  amountUsd: string;
+  token: EarnPortfolioToken;
+  /** Solana address for this environment's cluster — the only rail SDP surfaces. */
+  destinationAddress: string;
+}
+
+export interface EarnPortfolioWithdrawalStatusInput {
+  providerWalletRef: string;
+  withdrawalRef: string;
+}
+
+export interface EarnPortfolioAddressBookEntryInput {
+  /** Solana address to whitelist as a withdrawal destination. */
+  address: string;
+  label: string;
+}
+
+export interface EarnPortfolioAddressBookEntryResult {
+  entryRef: string;
+}
+
+/**
+ * Optional capability: managed portfolio wallets (one omnibus wallet whose
+ * funds spread across yield sources by a target strategy). Declared the same
+ * way ramp providers declare optional operations — a provider opts in by
+ * implementing the methods, and callers discover it via
+ * `supportsPortfolioWallets` (see capabilities.ts) instead of dispatching on
+ * provider ids, so the next portfolio provider is a client change only.
+ * Chain rails are implicit: SDP is Solana-only, so deposit addresses and
+ * withdrawal destinations always ride the environment's Solana cluster.
+ */
+export interface EarnPortfolioWalletProvider extends EarnVaultProvider {
+  createPortfolioWallet(
+    ctx: EarnRuntimeContext,
+    input: EarnPortfolioWalletCreateInput
+  ): Promise<EarnPortfolioWalletCreateResult>;
+  getPortfolioWallet(
+    ctx: EarnRuntimeContext,
+    input: EarnPortfolioWalletRefInput
+  ): Promise<EarnPortfolioWalletSnapshot>;
+  updatePortfolioStrategy(
+    ctx: EarnRuntimeContext,
+    input: EarnPortfolioStrategyUpdateInput
+  ): Promise<EarnPortfolioStrategyUpdateResult>;
+  listPortfolioDeposits(
+    ctx: EarnRuntimeContext,
+    input: EarnPortfolioDepositsInput
+  ): Promise<EarnPortfolioDepositsPage>;
+  previewPortfolioWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnPortfolioWithdrawalPreviewInput
+  ): Promise<EarnPortfolioWithdrawalPreview>;
+  createPortfolioWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnPortfolioWithdrawalCreateInput
+  ): Promise<EarnPortfolioWithdrawal>;
+  getPortfolioWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnPortfolioWithdrawalStatusInput
+  ): Promise<EarnPortfolioWithdrawal>;
+  /**
+   * Whitelist a withdrawal destination in the provider's address book.
+   * Providers may enforce (or later enable) destination whitelisting; exposing
+   * it on the contract lets the API pre-register destinations instead of
+   * folding an implicit write into the withdrawal flow.
+   */
+  createPortfolioAddressBookEntry(
+    ctx: EarnRuntimeContext,
+    input: EarnPortfolioAddressBookEntryInput
+  ): Promise<EarnPortfolioAddressBookEntryResult>;
 }

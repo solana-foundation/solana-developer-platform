@@ -190,6 +190,163 @@ export interface EarnQuoteBreakdown {
   expiresAt?: string;
 }
 
+/**
+ * Portfolio wallets — provider-neutral wire contracts.
+ *
+ * Some vault-infra providers front a managed multi-source portfolio (one
+ * omnibus wallet whose funds are spread across yield sources by a target
+ * strategy) instead of per-strategy vault positions. SDP keeps ONE shared
+ * portfolio wallet per (organization, environment); choosing a curator
+ * rewrites that wallet's strategy weights. All USD figures are decimal
+ * strings; allocation weights are percent on the way in (what strategies are
+ * authored in) and basis points on the way out (what providers report back).
+ */
+
+/** Deposit tokens a portfolio strategy is keyed by (provider-neutral lowercase). */
+export const EARN_PORTFOLIO_TOKENS = ["usdc", "usdt"] as const;
+export type EarnPortfolioToken = (typeof EARN_PORTFOLIO_TOKENS)[number];
+
+/** One authored strategy weight: percent of the token's funds, 0–100 in 0.1 steps. */
+export interface EarnPortfolioAllocation {
+  yieldSourceId: string;
+  pct: number;
+}
+
+/** Desired strategy per deposit token; tokens omitted keep their current allocation. */
+export type EarnPortfolioAllocationInput = Partial<
+  Record<EarnPortfolioToken, EarnPortfolioAllocation[]>
+>;
+
+/** One provider-confirmed strategy weight, in basis points of the token's funds. */
+export interface EarnPortfolioTargetWeight {
+  yieldSourceId: string;
+  weightBps: number;
+}
+
+export type EarnPortfolioTargetAllocations = Partial<
+  Record<EarnPortfolioToken, EarnPortfolioTargetWeight[]>
+>;
+
+/**
+ * Neutral wallet lifecycle. `busy` covers every provider-side workflow state
+ * (withdrawal/rebalance in flight) where funds stay visible but strategy
+ * mutations should wait; unmapped provider statuses normalize to it.
+ */
+export const EARN_PORTFOLIO_WALLET_STATUSES = ["creating", "ready", "busy", "failed"] as const;
+export type EarnPortfolioWalletStatus = (typeof EARN_PORTFOLIO_WALLET_STATUSES)[number];
+
+/** Wallet balances in USD decimal strings. */
+export interface EarnPortfolioBalance {
+  totalUsd: string;
+  withdrawableUsd: string;
+  reservedUsd: string;
+  earnedUsd: string;
+}
+
+/**
+ * Where a slice of the portfolio currently sits. `bridge`/`external_payout`
+ * are funds in transit between sources or out to a destination; unmapped
+ * provider kinds normalize to `unknown` rather than being dropped, so the
+ * position list always sums to the wallet total.
+ */
+export const EARN_PORTFOLIO_POSITION_KINDS = [
+  "yield_source",
+  "cash",
+  "bridge",
+  "external_payout",
+  "unknown",
+] as const;
+export type EarnPortfolioPositionKind = (typeof EARN_PORTFOLIO_POSITION_KINDS)[number];
+
+export interface EarnPortfolioPosition {
+  kind: EarnPortfolioPositionKind;
+  label: string;
+  /** USD decimal string. */
+  valueUsd: string;
+  /** Share of the wallet total, 0–100. */
+  pct?: number;
+  /** Set for `yield_source` positions; joins back to the strategy catalogue. */
+  yieldSourceId?: string;
+  token?: EarnPortfolioToken;
+}
+
+/** Live provider read of the shared wallet; never persisted, always fetched. */
+export interface EarnPortfolioWalletSnapshot {
+  providerWalletRef: string;
+  status: EarnPortfolioWalletStatus;
+  /** Raw provider status string, for diagnostics/detail display. */
+  providerStatus?: string;
+  /**
+   * Funding address on the Solana rail for this environment. The only rail
+   * SDP surfaces; absent while the wallet is still `creating`.
+   */
+  solanaDepositAddress?: string;
+  balance: EarnPortfolioBalance;
+  positions: EarnPortfolioPosition[];
+  allocations: EarnPortfolioTargetAllocations;
+}
+
+export const EARN_PORTFOLIO_DEPOSIT_STATUSES = ["processing", "completed", "failed"] as const;
+export type EarnPortfolioDepositStatus = (typeof EARN_PORTFOLIO_DEPOSIT_STATUSES)[number];
+
+/** One on-chain deposit detected against the wallet's funding address. */
+export interface EarnPortfolioDeposit {
+  id: string;
+  /** USD decimal string. */
+  amountUsd: string;
+  token: EarnPortfolioToken;
+  status: EarnPortfolioDepositStatus;
+  fromAddress?: string;
+  transactionSignature?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface EarnPortfolioDepositsPage {
+  deposits: EarnPortfolioDeposit[];
+  nextCursor: string | null;
+}
+
+export const EARN_PORTFOLIO_WITHDRAWAL_STATUSES = [
+  "processing",
+  "completed",
+  "partially_completed",
+  "failed",
+  "cancelled",
+] as const;
+export type EarnPortfolioWithdrawalStatus = (typeof EARN_PORTFOLIO_WITHDRAWAL_STATUSES)[number];
+
+/** A portfolio-level withdrawal to a Solana destination address. */
+export interface EarnPortfolioWithdrawal {
+  withdrawalRef: string;
+  status: EarnPortfolioWithdrawalStatus;
+  /** USD decimal strings. */
+  amountRequestedUsd?: string;
+  amountPaidUsd?: string;
+  feeUsd?: string;
+  token?: EarnPortfolioToken;
+  destinationAddress: string;
+  failureReason?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+/** Provider settlement-time estimate, ISO-8601 durations. */
+export interface EarnPortfolioProcessingEstimate {
+  basis: "elapsed_seconds" | "banking_days";
+  typicalMinDuration: string;
+  typicalMaxDuration: string;
+}
+
+export interface EarnPortfolioWithdrawalPreview {
+  /** USD decimal strings. */
+  amountRequestedUsd?: string;
+  feeUsd: string;
+  withdrawableUsd: string;
+  totalUsdAfterWithdrawal: string;
+  processingEstimate?: EarnPortfolioProcessingEstimate;
+}
+
 // API response envelopes (mirrors the asset-profiles response naming).
 export interface EarnStrategyResponse {
   strategy: EarnStrategy;
