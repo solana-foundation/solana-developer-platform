@@ -142,6 +142,7 @@ describe("OpenAPI spec", () => {
       "Issuance",
       "Payments",
       "Policies",
+      "Private Channels",
       "Compliance",
       "Counterparties",
       "Asset Profiles",

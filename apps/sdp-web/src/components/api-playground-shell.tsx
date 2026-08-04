@@ -820,14 +820,22 @@ export function ApiPlaygroundShell({
                 </span>
               </span>
             </div>
+            {/* Transparent overlay — the styled row above shows the active
+                endpoint. Setting bg/color here so the native option popup
+                inherits themed colors; without them dark mode falls back to
+                white-on-white via the browser's default popup styling. */}
             <select
               aria-label={t("Shared.SharedComponents.selectApiEndpoint")}
-              className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-xl opacity-0"
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-xl bg-surface-raised text-primary opacity-0"
               value={activeEndpoint.id}
               onChange={(event) => updateEndpointInUrl(event.currentTarget.value)}
             >
               {endpoints.map((endpoint) => (
-                <option key={endpoint.id} value={endpoint.id}>
+                <option
+                  key={endpoint.id}
+                  value={endpoint.id}
+                  className="bg-surface-raised text-primary"
+                >
                   {endpoint.method} {endpoint.title}
                 </option>
               ))}

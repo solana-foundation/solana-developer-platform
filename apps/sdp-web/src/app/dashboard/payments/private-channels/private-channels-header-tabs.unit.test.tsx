@@ -36,6 +36,7 @@ describe("PrivateChannelsHeaderTabs", () => {
       "Withdraw",
       "Members",
       "Events",
+      "API Playground",
       "Instance",
     ]);
   });

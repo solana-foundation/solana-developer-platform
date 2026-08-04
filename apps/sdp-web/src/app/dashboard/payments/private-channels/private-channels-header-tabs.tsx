@@ -54,6 +54,14 @@ const TABS = [
     requiresActive: false,
   },
   {
+    id: "api-playground",
+    labelKey: "DashboardPrivateChannels.tabs.apiPlayground",
+    href: "/dashboard/payments/private-channels/api-playground",
+    // Always visible: the /instance endpoints are what the operator needs
+    // before an instance is connected.
+    requiresActive: false,
+  },
+  {
     id: "instance",
     labelKey: "DashboardPrivateChannels.tabs.instance",
     href: "/dashboard/payments/private-channels/instance",

@@ -1,7 +1,12 @@
 import type { ApiPlaygroundEndpointConfig } from "@/components/api-playground-shell";
 import generatedCatalog from "./api-playground-catalog.generated.json";
 
-type PlaygroundModule = "wallets" | "payments" | "counterparties" | "issuance";
+type PlaygroundModule =
+  | "wallets"
+  | "payments"
+  | "counterparties"
+  | "issuance"
+  | "private-channels";
 
 interface GeneratedPlaygroundCatalog {
   modules: Record<PlaygroundModule, ApiPlaygroundEndpointConfig[]>;
