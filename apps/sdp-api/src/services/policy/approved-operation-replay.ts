@@ -9,7 +9,10 @@ import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 const REPLAY_HEADER = "x-sdp-approved-operation-replay";
-const capabilities = new Map<string, { operationId: string; path: string }>();
+const capabilities = new Map<
+  string,
+  { operationId: string; executionAttemptId: string; path: string }
+>();
 
 export interface WalletOperationExecutionRequest {
   method: "POST";
@@ -52,9 +55,13 @@ export async function tryApprovedOperationReplayAuth(
   const operation = await db
     .prepare(
       `SELECT * FROM wallet_operations
-       WHERE id = ? AND status = 'executing' AND execution_started_at IS NOT NULL`
+       WHERE id = ?
+         AND status = 'executing'
+         AND execution_started_at IS NOT NULL
+         AND execution_attempt_id = ?
+         AND execution_lease_expires_at > ?`
     )
-    .bind(capability.operationId)
+    .bind(capability.operationId, capability.executionAttemptId, new Date().toISOString())
     .first<Record<string, unknown>>();
   if (!operation) {
     throw new AppError("FORBIDDEN", "Approved wallet operation is not executable");
@@ -171,7 +178,8 @@ export async function executeApprovedWalletOperation(
   repository: PolicyRepository,
   operation: WalletOperationRow
 ): Promise<void> {
-  const claimed = await repository.claimWalletOperationExecution(operation.id);
+  const executionAttemptId = crypto.randomUUID();
+  const claimed = await repository.claimWalletOperationExecution(operation.id, executionAttemptId);
   if (!claimed) {
     return;
   }
@@ -182,6 +190,7 @@ export async function executeApprovedWalletOperation(
   } catch (error) {
     await repository.completeWalletOperationExecution({
       walletOperationId: operation.id,
+      executionAttemptId,
       status: "failed",
       error: errorMessage(error),
     });
@@ -189,7 +198,7 @@ export async function executeApprovedWalletOperation(
   }
 
   const token = crypto.randomUUID();
-  capabilities.set(token, { operationId: operation.id, path: request.path });
+  capabilities.set(token, { operationId: operation.id, executionAttemptId, path: request.path });
   let response: Response;
   try {
     const [{ createApp }, { nodeObservability }] = await Promise.all([
@@ -217,6 +226,7 @@ export async function executeApprovedWalletOperation(
     capabilities.delete(token);
     await repository.completeWalletOperationExecution({
       walletOperationId: operation.id,
+      executionAttemptId,
       status: "failed",
       error: errorMessage(error),
     });
@@ -227,6 +237,7 @@ export async function executeApprovedWalletOperation(
   if (response.ok && response.status !== 202) {
     await repository.completeWalletOperationExecution({
       walletOperationId: operation.id,
+      executionAttemptId,
       status: "completed",
       result: payload,
     });
@@ -236,6 +247,7 @@ export async function executeApprovedWalletOperation(
   const error = responseError(payload, response.status);
   await repository.completeWalletOperationExecution({
     walletOperationId: operation.id,
+    executionAttemptId,
     status: "failed",
     result: payload,
     error,

@@ -186,6 +186,9 @@ export interface WalletOperationRow {
   execution_completed_at: string | null;
   execution_error: string | null;
   execution_result: Record<string, unknown> | null;
+  execution_attempt_id: string | null;
+  execution_lease_expires_at: string | null;
+  execution_attempts: number;
   created_at: string;
   updated_at: string;
 }
@@ -447,6 +450,7 @@ export interface UpdateApprovalRequestStatusInput {
 
 export interface CompleteWalletOperationExecutionInput {
   walletOperationId: string;
+  executionAttemptId: string;
   status: "completed" | "failed";
   result?: Record<string, unknown> | null;
   error?: string | null;
@@ -579,7 +583,10 @@ export interface PolicyRepository {
     walletOperationId: string,
     status: WalletOperationStatus
   ): Promise<WalletOperationRow | null>;
-  claimWalletOperationExecution(walletOperationId: string): Promise<WalletOperationRow | null>;
+  claimWalletOperationExecution(
+    walletOperationId: string,
+    executionAttemptId: string
+  ): Promise<WalletOperationRow | null>;
   completeWalletOperationExecution(
     input: CompleteWalletOperationExecutionInput
   ): Promise<WalletOperationRow | null>;

@@ -492,6 +492,10 @@ function mapWalletOperationRow(row: Record<string, unknown>): WalletOperationRow
       row.execution_result === null || row.execution_result === undefined
         ? null
         : asPostgresJsonObject(row.execution_result),
+    execution_attempt_id: (row.execution_attempt_id as string | null | undefined) ?? null,
+    execution_lease_expires_at:
+      (row.execution_lease_expires_at as string | null | undefined) ?? null,
+    execution_attempts: Number(row.execution_attempts ?? 0),
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -1934,29 +1938,48 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       return row ? mapWalletOperationRow(row) : null;
     },
 
-    async claimWalletOperationExecution(walletOperationId: string) {
+    async claimWalletOperationExecution(walletOperationId: string, executionAttemptId: string) {
       if (!(await tenantOwnsRow(db, scope, "wallet_operations", walletOperationId))) {
         return null;
       }
       const now = new Date().toISOString();
+      const leaseExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
       const row = await db
         .prepare(
           `UPDATE wallet_operations wo
            SET execution_started_at = ?,
+               execution_attempt_id = ?,
+               execution_lease_expires_at = ?,
+               execution_attempts = execution_attempts + 1,
+               execution_completed_at = NULL,
+               execution_result = NULL,
                execution_error = NULL,
                updated_at = ?
            WHERE wo.id = ?
              AND wo.organization_id = ?
              AND wo.project_id IS NOT DISTINCT FROM ?
              AND wo.status = 'executing'
-             AND wo.execution_started_at IS NULL
+             AND (
+               wo.execution_started_at IS NULL
+               OR wo.execution_lease_expires_at IS NULL
+               OR wo.execution_lease_expires_at <= ?
+             )
              AND EXISTS (
                SELECT 1 FROM approval_requests ar
                WHERE ar.wallet_operation_id = wo.id AND ar.status = 'approved'
              )
            RETURNING *`
         )
-        .bind(now, now, walletOperationId, scope.organizationId, scope.projectId)
+        .bind(
+          now,
+          executionAttemptId,
+          leaseExpiresAt,
+          now,
+          walletOperationId,
+          scope.organizationId,
+          scope.projectId,
+          now
+        )
         .first<Record<string, unknown>>();
 
       return row ? mapWalletOperationRow(row) : null;
@@ -1971,12 +1994,14 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
                execution_completed_at = ?,
                execution_result = ?::jsonb,
                execution_error = ?,
+               execution_lease_expires_at = NULL,
                updated_at = ?
            WHERE id = ?
              AND organization_id = ?
              AND project_id IS NOT DISTINCT FROM ?
              AND status = 'executing'
              AND execution_started_at IS NOT NULL
+             AND execution_attempt_id = ?
            RETURNING *`
         )
         .bind(
@@ -1987,7 +2012,8 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
           now,
           input.walletOperationId,
           scope.organizationId,
-          scope.projectId
+          scope.projectId,
+          input.executionAttemptId
         )
         .first<Record<string, unknown>>();
 

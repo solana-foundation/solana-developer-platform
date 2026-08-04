@@ -6334,6 +6334,85 @@ describe("Payments routes", () => {
     expect(Number(transferCount?.count ?? 0)).toBe(1);
   });
 
+  it("recovers an expired execution claim with a fenced retry", async () => {
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-recovery",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+    };
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+    const repository = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    await repository.updateApprovalRequestStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      approvalRequestId,
+      status: "approved",
+      operationStatus: "executing",
+      resolvedBy: TEST_API_KEY.id,
+    });
+    const interrupted = await repository.claimWalletOperationExecution(
+      walletOperationId,
+      "interrupted-attempt"
+    );
+    expect(interrupted?.execution_attempts).toBe(1);
+    await getDb(env)
+      .prepare(
+        `UPDATE wallet_operations
+         SET execution_lease_expires_at = '2000-01-01T00:00:00.000Z'
+         WHERE id = ?`
+      )
+      .bind(walletOperationId)
+      .run();
+
+    const recoveredResponse = await app.request(
+      `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+      { method: "POST", headers },
+      env
+    );
+    expect(recoveredResponse.status).toBe(200);
+    const recovered = await repository.getWalletOperationById(walletOperationId);
+    expect(recovered).toMatchObject({
+      status: "completed",
+      execution_attempts: 2,
+      execution_error: null,
+      execution_lease_expires_at: null,
+    });
+    expect(recovered?.execution_attempt_id).not.toBe("interrupted-attempt");
+
+    const transferCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+      .first<{ count: number | string }>();
+    expect(Number(transferCount?.count ?? 0)).toBe(1);
+  });
+
   it("requires the configured approval-group member to approve execution", async () => {
     const approvalGroupId = "apg_payment_execution";
     const sessionId = "ses_payment_approver";
