@@ -27,6 +27,10 @@ export function generateEarnNavSnapshotId(): string {
   return `earn_nav_${crypto.randomUUID()}`;
 }
 
+export function generateEarnProviderWalletId(): string {
+  return `earn_provider_wallet_${crypto.randomUUID()}`;
+}
+
 export interface EarnStrategyRow {
   id: string;
   /**
@@ -97,6 +101,27 @@ export interface EarnNavSnapshotRow {
   tvl: string | null;
   as_of: string;
   created_at: string;
+}
+
+/**
+ * Link to the ONE provider-managed wallet an organization shares per
+ * environment (UNIQUE (organization_id, environment, provider) in
+ * 0035_earn_provider_wallets.sql). project_id records the provisioning
+ * project only — it is not part of the wallet's scope.
+ */
+export interface EarnProviderWalletRow {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  environment: SdpEnvironment;
+  /** Open TEXT, same drift rule as EarnStrategyRow.provider. */
+  provider: string;
+  /** Provider-side wallet identifier (e.g. Ground wallet UUID). */
+  provider_wallet_ref: string;
+  label: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Catalogue sync upsert, keyed on (provider, provider_reference, environment). */
@@ -201,6 +226,16 @@ export interface InsertEarnNavSnapshotInput {
   asOf: string;
 }
 
+export interface InsertEarnProviderWalletInput {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+  provider: EarnProviderId;
+  providerWalletRef: string;
+  label: string | null;
+  createdBy: string;
+}
+
 export interface EarnRepository {
   upsertStrategy(input: UpsertEarnStrategyInput): Promise<EarnStrategyRow | null>;
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
@@ -230,4 +265,12 @@ export interface EarnRepository {
 
   insertNavSnapshot(input: InsertEarnNavSnapshotInput): Promise<EarnNavSnapshotRow | null>;
   listNavSnapshots(params: { strategyId: string; limit: number }): Promise<EarnNavSnapshotRow[]>;
+
+  /** The org's single shared wallet for a provider+environment, if provisioned. */
+  getProviderWallet(params: {
+    organizationId: string;
+    environment: SdpEnvironment;
+    provider: EarnProviderId;
+  }): Promise<EarnProviderWalletRow | null>;
+  insertProviderWallet(input: InsertEarnProviderWalletInput): Promise<EarnProviderWalletRow | null>;
 }

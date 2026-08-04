@@ -8,8 +8,10 @@ import type {
   CreateEarnMovementInput,
   EarnMovementRow,
   EarnPositionRow,
+  EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
+  InsertEarnProviderWalletInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
@@ -40,6 +42,7 @@ describe("EarnRepository (postgres)", () => {
     await db.prepare("DELETE FROM earn_movements").run();
     await db.prepare("DELETE FROM earn_positions").run();
     await db.prepare("DELETE FROM earn_strategies").run();
+    await db.prepare("DELETE FROM earn_provider_wallets").run();
     await db.prepare("DELETE FROM projects").run();
 
     await db
@@ -350,6 +353,133 @@ describe("EarnRepository (postgres)", () => {
       });
       expect(total).toBe(1);
       expect(rows.map((row) => row.id)).toEqual([withdrawal.id]);
+    });
+  });
+
+  describe("provider wallets (earn_provider_wallets)", () => {
+    const GROUND_WALLET_REF = "1b6d5a1e-8f4c-4c1a-9e2b-3d7f6a8c9e01";
+    const OTHER_ORG = {
+      id: "org_earn_repo_other",
+      name: "Sibling Org",
+      slug: "org-earn-repo-other",
+    };
+    const OTHER_ORG_PROJECT_ID = "prj_earn_repo_other_org";
+
+    async function seedProviderWallet(
+      overrides: Partial<InsertEarnProviderWalletInput> = {}
+    ): Promise<EarnProviderWalletRow> {
+      const row = await repo.insertProviderWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        environment: "sandbox",
+        provider: "ground",
+        providerWalletRef: GROUND_WALLET_REF,
+        label: null,
+        createdBy: TEST_USER.id,
+        ...overrides,
+      });
+      if (!row) {
+        throw new Error("failed to seed provider wallet");
+      }
+      return row;
+    }
+
+    async function seedSiblingOrg(): Promise<void> {
+      const db = getDb(env);
+      await db
+        .prepare(
+          "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+        )
+        .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Sibling Org Project', ?, 'sandbox', 'active', ?)`
+        )
+        .bind(OTHER_ORG_PROJECT_ID, OTHER_ORG.id, OTHER_ORG_PROJECT_ID, TEST_USER.id)
+        .run();
+    }
+
+    it("round-trips the shared wallet link through getProviderWallet", async () => {
+      const inserted = await seedProviderWallet({ label: "Shared Ground portfolio" });
+      expect(inserted.id).toMatch(/^earn_provider_wallet_/);
+
+      const fetched = await repo.getProviderWallet({
+        organizationId: TEST_ORG.id,
+        environment: "sandbox",
+        provider: "ground",
+      });
+
+      expect(fetched).toEqual(inserted);
+      expect(fetched?.provider_wallet_ref).toBe(GROUND_WALLET_REF);
+      expect(fetched?.label).toBe("Shared Ground portfolio");
+      expect(fetched?.project_id).toBe(TEST_PROJECT_ID);
+      expect(fetched?.created_by).toBe(TEST_USER.id);
+    });
+
+    it("returns null when the org has no wallet for that provider+environment", async () => {
+      await seedProviderWallet();
+
+      await expect(
+        repo.getProviderWallet({
+          organizationId: TEST_ORG.id,
+          environment: "production",
+          provider: "ground",
+        })
+      ).resolves.toBeNull();
+      await expect(
+        repo.getProviderWallet({
+          organizationId: TEST_ORG.id,
+          environment: "sandbox",
+          provider: "veda",
+        })
+      ).resolves.toBeNull();
+    });
+
+    it("enforces ONE shared wallet per org+environment+provider", async () => {
+      await seedProviderWallet();
+
+      // Rejected even from a different project with a different provider-side
+      // ref: the wallet is org-scoped, project_id is provisioning context only.
+      await expect(
+        seedProviderWallet({
+          projectId: OTHER_PROJECT_ID,
+          providerWalletRef: "2c7e6b2f-9a5d-4d2b-8f3c-4e8a7b9d0f12",
+        })
+      ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
+
+      // The sibling environment and sibling providers stay open.
+      await expect(seedProviderWallet({ environment: "production" })).resolves.toMatchObject({
+        environment: "production",
+      });
+      await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
+        provider: "veda",
+      });
+    });
+
+    it("scopes lookups to the organization", async () => {
+      await seedSiblingOrg();
+      const ours = await seedProviderWallet();
+      const theirs = await seedProviderWallet({
+        organizationId: OTHER_ORG.id,
+        projectId: OTHER_ORG_PROJECT_ID,
+        providerWalletRef: "3d8f7c30-ab6e-4e3c-9a4d-5f9b8c0e1a23",
+      });
+      expect(theirs.id).not.toBe(ours.id);
+
+      for (const [organizationId, expected] of [
+        [TEST_ORG.id, ours],
+        [OTHER_ORG.id, theirs],
+      ] as const) {
+        const fetched = await repo.getProviderWallet({
+          organizationId,
+          environment: "sandbox",
+          provider: "ground",
+        });
+        expect(fetched?.id).toBe(expected.id);
+        expect(fetched?.provider_wallet_ref).toBe(expected.provider_wallet_ref);
+      }
     });
   });
 

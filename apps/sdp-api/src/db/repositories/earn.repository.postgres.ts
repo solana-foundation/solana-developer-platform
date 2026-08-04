@@ -16,9 +16,11 @@ import type {
   EarnMovementRow,
   EarnNavSnapshotRow,
   EarnPositionRow,
+  EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
   InsertEarnNavSnapshotInput,
+  InsertEarnProviderWalletInput,
   ListEarnMovementsInput,
   ListEarnMovementsResult,
   ListEarnPositionsInput,
@@ -32,6 +34,7 @@ import {
   generateEarnMovementId,
   generateEarnNavSnapshotId,
   generateEarnPositionId,
+  generateEarnProviderWalletId,
   generateEarnStrategyId,
 } from "./earn.repository";
 
@@ -91,6 +94,21 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     provider_data: row.provider_data as Record<string, unknown>,
     external_id: row.external_id as string | null,
     redemption_available_at: row.redemption_available_at as string | null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
+
+function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletRow {
+  return {
+    id: row.id as string,
+    organization_id: row.organization_id as string,
+    project_id: row.project_id as string,
+    environment: row.environment as SdpEnvironment,
+    provider: row.provider as string,
+    provider_wallet_ref: row.provider_wallet_ref as string,
+    label: row.label as string | null,
+    created_by: row.created_by as string,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -401,6 +419,43 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         .all<Record<string, unknown>>();
 
       return (results ?? []).map(mapNavSnapshotRow);
+    },
+
+    async getProviderWallet(params) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_provider_wallets
+             WHERE organization_id = ? AND environment = ? AND provider = ?`
+        )
+        .bind(params.organizationId, params.environment, params.provider)
+        .first<Record<string, unknown>>();
+      return row ? mapProviderWalletRow(row) : null;
+    },
+
+    async insertProviderWallet(input: InsertEarnProviderWalletInput) {
+      const id = generateEarnProviderWalletId();
+
+      const row = await db
+        .prepare(
+          `INSERT INTO earn_provider_wallets (
+             id, organization_id, project_id, environment,
+             provider, provider_wallet_ref, label, created_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           RETURNING *`
+        )
+        .bind(
+          id,
+          input.organizationId,
+          input.projectId,
+          input.environment,
+          input.provider,
+          input.providerWalletRef,
+          input.label,
+          input.createdBy
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapProviderWalletRow(row) : null;
     },
   };
 }
