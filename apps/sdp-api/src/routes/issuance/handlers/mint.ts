@@ -9,7 +9,9 @@ import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import {
+  approvedWalletOperationId,
   beginApprovedWalletOperationEffect,
+  reserveMintSupplyAtApprovedEffectBoundary,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
 import { createOrgSigner } from "@/services/solana";
@@ -30,24 +32,6 @@ import { buildIdempotencyMetadata } from "./idempotency";
 import { enforceIssuanceWalletOperationPolicy } from "./policy";
 
 type AppContext = Context<{ Bindings: Env }>;
-
-export async function reserveMintSupplyAtApprovedEffectBoundary(
-  c: AppContext,
-  tokenService: Pick<TokenService, "reserveMintSupply">,
-  tokenId: string,
-  amountBaseUnits: string
-): Promise<string> {
-  // The approved-operation fence must win before the supply reservation. If the
-  // replay lost its lease, the pre-submit hook aborts and recovery may retry; a
-  // reservation taken first would then be retained even though this attempt was
-  // never submitted, double-counting the recovered mint.
-  await beginApprovedWalletOperationEffect(c);
-  const reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits);
-  if (reservedSupply === null) {
-    throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
-  }
-  return reservedSupply;
-}
 
 type AllowlistInsertArgs = {
   tokenId: string;
@@ -515,7 +499,6 @@ export const executeMint = async (c: AppContext) => {
       async () => {
         reservedSupply = await reserveMintSupplyAtApprovedEffectBoundary(
           c,
-          tokenService,
           tokenId,
           amountBaseUnits.toString()
         );
@@ -573,10 +556,19 @@ export const executeMint = async (c: AppContext) => {
         "Mint failed after it was submitted and its supply reserved; the reservation is kept because the transaction may still land. Refresh the token's supply to reconcile."
       );
     }
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    // A failed approved replay with no reservation never crossed this mint's
+    // submission boundary. Drop the pending record so a recovered attempt can
+    // reuse its durable idempotency key instead of replaying a stale failure.
+    const removedPreEffectReplay =
+      reservedSupply === null && approvedWalletOperationId(c)
+        ? await tokenService.deleteUnsubmittedTransaction(tx.id)
+        : false;
+    if (!removedPreEffectReplay) {
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
     throw error;
   }
 };

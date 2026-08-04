@@ -15,9 +15,9 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
-import { reserveMintSupplyAtApprovedEffectBoundary } from "@/routes/issuance/handlers/mint";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { rootLogger } from "@/runtime/logger";
+import { reserveMintSupplyAtApprovedEffectBoundary } from "@/services/policy/approved-operation-replay";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -34,25 +34,6 @@ import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 
 // Check if running in mock mode (no RPC access)
 const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";
-
-it("does not reserve mint supply when the approved-operation effect fence rejects", async () => {
-  const reserveMintSupply = vi.fn(async () => "200");
-  const incompleteReplayContext = {
-    get(key: string) {
-      return key === "approvedWalletOperationId" ? "wop_lost_lease" : undefined;
-    },
-  } as never;
-
-  await expect(
-    reserveMintSupplyAtApprovedEffectBoundary(
-      incompleteReplayContext,
-      { reserveMintSupply },
-      "tok_lost_lease",
-      "100"
-    )
-  ).rejects.toMatchObject({ code: "FORBIDDEN" });
-  expect(reserveMintSupply).not.toHaveBeenCalled();
-});
 
 async function seedIssuedToken(
   overrides: Partial<typeof TEST_ACTIVE_TOKEN> = {}
@@ -349,6 +330,128 @@ describe("Issuance Routes", () => {
 
     // Cache API key in KV
     await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
+  });
+
+  describe("approved mint submission boundary", () => {
+    async function seedExecutingMintOperation(params: {
+      id: string;
+      attemptId: string;
+      leaseExpiresAt: string;
+    }) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO wallet_operations
+             (id, organization_id, project_id, wallet_id, api_key_id, source,
+              operation_family, operation_type, raw_payload, status,
+              execution_started_at, execution_attempt_id, execution_lease_expires_at,
+              execution_attempts)
+           VALUES (?, ?, ?, ?, ?, 'api', 'issuance', 'issuance_mint_execute',
+                   '{}'::jsonb, 'executing', ?, ?, ?, 1)`
+        )
+        .bind(
+          params.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          "wallet_approved_mint_boundary",
+          TEST_PROJECT_API_KEY.id,
+          new Date().toISOString(),
+          params.attemptId,
+          params.leaseExpiresAt
+        )
+        .run();
+    }
+
+    function approvedMintContext(operationId: string, attemptId: string) {
+      const values: Record<string, unknown> = {
+        apiKey: TEST_PROJECT_CACHED_KEY,
+        projectId: TEST_PROJECT.id,
+        approvedWalletOperationId: operationId,
+        approvedWalletOperationAttemptId: attemptId,
+      };
+      return {
+        env,
+        get(key: string) {
+          return values[key];
+        },
+      } as never;
+    }
+
+    it("does not reserve supply after the approved execution lease expires", async () => {
+      const token = await seedIssuedToken({ id: "tok_approved_mint_expired" });
+      await getDb(env)
+        .prepare(
+          "UPDATE issued_tokens SET total_supply_cached = '100', max_supply = '1000' WHERE id = ?"
+        )
+        .bind(token.id)
+        .run();
+      await seedExecutingMintOperation({
+        id: "wop_approved_mint_expired",
+        attemptId: "attempt_approved_mint_expired",
+        leaseExpiresAt: "2000-01-01T00:00:00.000Z",
+      });
+
+      await expect(
+        reserveMintSupplyAtApprovedEffectBoundary(
+          approvedMintContext("wop_approved_mint_expired", "attempt_approved_mint_expired"),
+          token.id,
+          "200"
+        )
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: "Approved-operation execution lease was lost",
+      });
+
+      const state = await getDb(env)
+        .prepare(
+          `SELECT token.total_supply_cached, operation.execution_effect_started_at
+           FROM issued_tokens token
+           CROSS JOIN wallet_operations operation
+           WHERE token.id = ? AND operation.id = ?`
+        )
+        .bind(token.id, "wop_approved_mint_expired")
+        .first<{ total_supply_cached: string; execution_effect_started_at: string | null }>();
+      expect(state).toEqual({
+        total_supply_cached: "100",
+        execution_effect_started_at: null,
+      });
+    });
+
+    it("rolls back the effect fence when the atomic cap reservation is refused", async () => {
+      const token = await seedIssuedToken({ id: "tok_approved_mint_capped" });
+      await getDb(env)
+        .prepare(
+          "UPDATE issued_tokens SET total_supply_cached = '900', max_supply = '1000' WHERE id = ?"
+        )
+        .bind(token.id)
+        .run();
+      await seedExecutingMintOperation({
+        id: "wop_approved_mint_capped",
+        attemptId: "attempt_approved_mint_capped",
+        leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+      });
+
+      await expect(
+        reserveMintSupplyAtApprovedEffectBoundary(
+          approvedMintContext("wop_approved_mint_capped", "attempt_approved_mint_capped"),
+          token.id,
+          "200"
+        )
+      ).rejects.toMatchObject({ code: "MAX_SUPPLY_EXCEEDED" });
+
+      const state = await getDb(env)
+        .prepare(
+          `SELECT token.total_supply_cached, operation.execution_effect_started_at
+           FROM issued_tokens token
+           CROSS JOIN wallet_operations operation
+           WHERE token.id = ? AND operation.id = ?`
+        )
+        .bind(token.id, "wop_approved_mint_capped")
+        .first<{ total_supply_cached: string; execution_effect_started_at: string | null }>();
+      expect(state).toEqual({
+        total_supply_cached: "900",
+        execution_effect_started_at: null,
+      });
+    });
   });
 
   describe("GET /v1/issuance/tokens/{tokenId}/transactions", () => {

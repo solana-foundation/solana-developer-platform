@@ -1,15 +1,17 @@
 import type { Permission } from "@sdp/types";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { asTransactionalClient, type DatabaseClient, getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import {
   createPolicyRepository,
+  createPostgresPolicyRepository,
   type PolicyRepository,
   type WalletOperationRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { createTenantScope, getRequestTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
+import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
 const REPLAY_HEADER = "x-sdp-approved-operation-replay";
@@ -74,6 +76,62 @@ export async function beginApprovedWalletOperationEffect(
   if (!began) {
     throw new AppError("FORBIDDEN", "Approved-operation execution lease was lost");
   }
+}
+
+/**
+ * Commit an approved replay's effect fence and its final local pre-submit
+ * mutation together. Without the shared transaction, a lease can expire after
+ * the mutation commits but before the fence is written, leaving state that a
+ * recovered attempt would apply a second time.
+ *
+ * Normal requests run the mutation directly without an execution fence.
+ */
+async function runApprovedWalletOperationEffectTransaction<T>(
+  c: Context<{ Bindings: Env }>,
+  mutation: (db: DatabaseClient) => Promise<T>
+): Promise<T> {
+  const operationId = approvedWalletOperationId(c);
+  const executionAttemptId = approvedWalletOperationAttemptId(c);
+  if (!operationId && !executionAttemptId) {
+    return mutation(getDb(c.env));
+  }
+  if (!operationId || !executionAttemptId) {
+    throw new AppError("FORBIDDEN", "Approved-operation execution context is incomplete");
+  }
+
+  const scope = getRequestTenantScope(c);
+  return getDb(c.env).transaction(async (transaction) => {
+    const db = asTransactionalClient(transaction);
+    const repository = createPostgresPolicyRepository(db, scope);
+    const began = await repository.beginWalletOperationExecutionEffect(
+      operationId,
+      executionAttemptId
+    );
+    if (!began) {
+      throw new AppError("FORBIDDEN", "Approved-operation execution lease was lost");
+    }
+    return mutation(db);
+  });
+}
+
+/**
+ * Reserve mint supply at the approved replay's external-effect boundary. The
+ * reservation and execution fence share one transaction so neither can survive
+ * without the other.
+ */
+export async function reserveMintSupplyAtApprovedEffectBoundary(
+  c: Context<{ Bindings: Env }>,
+  tokenId: string,
+  amountBaseUnits: string
+): Promise<string> {
+  return runApprovedWalletOperationEffectTransaction(c, async (db) => {
+    const tokenService = new TokenService(db, getRequestTenantScope(c));
+    const reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits);
+    if (reservedSupply === null) {
+      throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+    }
+    return reservedSupply;
+  });
 }
 
 export async function tryApprovedOperationReplayAuth(
