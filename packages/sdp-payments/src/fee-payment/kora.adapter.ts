@@ -15,7 +15,19 @@ import { KoraClient, type KoraClientOptions } from "@solana/kora";
 import type { FeePaymentPort } from "./port";
 import { FeePaymentError } from "./port";
 
-type SignRequest = { transaction: string; user_id: string };
+type SignRequest = {
+  transaction: string;
+  user_id: string;
+  signer_key: string;
+  respond_after?: "sent";
+};
+
+type KoraConfigurationResponse = {
+  validation_config?: {
+    max_allowed_lamports?: number | string;
+    fee_payer_policy?: unknown;
+  };
+};
 
 interface KoraClientTransport {
   getPayerSigner(): Promise<{
@@ -32,6 +44,7 @@ interface KoraClientTransport {
     fee_token: string;
   }): Promise<{ fee_in_lamports: number | string }>;
   getSupportedTokens(): Promise<{ tokens: string[] }>;
+  getConfig?(): Promise<KoraConfigurationResponse>;
 }
 
 export type KoraAdapterConfig = KoraClientOptions & {
@@ -148,7 +161,7 @@ export class KoraAdapter implements FeePaymentPort {
       const base64Tx = encodeBase64(transaction);
 
       const { signed_transaction } = await this.client.signTransaction(
-        this.buildSignRequest(base64Tx)
+        await this.buildSignRequest(base64Tx)
       );
 
       return decodeBase64(signed_transaction);
@@ -172,7 +185,7 @@ export class KoraAdapter implements FeePaymentPort {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const { signature: submittedSignature, signed_transaction } =
-          await this.client.signAndSendTransaction(this.buildSignRequest(base64Tx));
+          await this.client.signAndSendTransaction(await this.buildSignRequest(base64Tx, true));
 
         if (submittedSignature) {
           return submittedSignature as Signature;
@@ -235,13 +248,52 @@ export class KoraAdapter implements FeePaymentPort {
     }
   }
 
+  async getSponsorshipConfiguration(): Promise<import("./port").SponsorshipProviderConfiguration> {
+    if (!this.client.getConfig) {
+      throw new FeePaymentError(
+        "Kora does not expose getConfig; sponsorship admission cannot fail closed",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    try {
+      const [signerAddress, response] = await Promise.all([
+        this.getFeePayer(),
+        this.client.getConfig(),
+      ]);
+      const value = response.validation_config?.max_allowed_lamports;
+      if (value === undefined) {
+        throw new Error("Kora getConfig omitted validation_config.max_allowed_lamports");
+      }
+      const maxAllowedLamports = BigInt(value);
+      if (maxAllowedLamports < 0n) {
+        throw new Error("Kora returned a negative max_allowed_lamports");
+      }
+      return {
+        signerAddress,
+        maxAllowedLamports,
+        feePayerMayTransferLamports: policyMaySpendLamports(
+          response.validation_config?.fee_payer_policy
+        ),
+        feePayerPolicy: response.validation_config?.fee_payer_policy,
+      };
+    } catch (error) {
+      if (error instanceof FeePaymentError) throw error;
+      throw this.wrapError(error, "Failed to read Kora sponsorship configuration");
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Private Methods
   // ═══════════════════════════════════════════════════════════════════════════
 
   /** Always attach a quota identity to signing requests. */
-  private buildSignRequest(transaction: string): { transaction: string; user_id: string } {
-    return { transaction, user_id: this.userId };
+  private async buildSignRequest(transaction: string, send = false): Promise<SignRequest> {
+    return {
+      transaction,
+      user_id: this.userId,
+      signer_key: await this.getFeePayer(),
+      ...(send ? { respond_after: "sent" as const } : {}),
+    };
   }
 
   private async resolveFeeToken(): Promise<string> {
@@ -302,6 +354,82 @@ function decodeBase64(base64: string): Uint8Array {
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+// Pinned to Kora's complete fee-payer authority schema. Managed sponsorship
+// assumes zero additional lamport outflow only when every authority is present
+// and explicitly disabled; schema drift therefore fails closed.
+const ZERO_OUTFLOW_FEE_PAYER_POLICY = {
+  system: {
+    allow_transfer: false,
+    allow_assign: false,
+    allow_create_account: false,
+    allow_allocate: false,
+    nonce: {
+      allow_initialize: false,
+      allow_advance: false,
+      allow_authorize: false,
+      allow_withdraw: false,
+    },
+  },
+  spl_token: {
+    allow_transfer: false,
+    allow_burn: false,
+    allow_close_account: false,
+    allow_approve: false,
+    allow_revoke: false,
+    allow_set_authority: false,
+    allow_mint_to: false,
+    allow_initialize_mint: false,
+    allow_initialize_account: false,
+    allow_initialize_multisig: false,
+    allow_freeze_account: false,
+    allow_thaw_account: false,
+  },
+  token_2022: {
+    allow_transfer: false,
+    allow_burn: false,
+    allow_close_account: false,
+    allow_approve: false,
+    allow_revoke: false,
+    allow_set_authority: false,
+    allow_mint_to: false,
+    allow_initialize_mint: false,
+    allow_initialize_account: false,
+    allow_initialize_multisig: false,
+    allow_freeze_account: false,
+    allow_thaw_account: false,
+  },
+} as const;
+
+/** Only the complete pinned policy with every authority false proves zero outflow. */
+function policyMaySpendLamports(policy: unknown): boolean {
+  return !matchesPinnedFalsePolicy(policy, ZERO_OUTFLOW_FEE_PAYER_POLICY);
+}
+
+function matchesPinnedFalsePolicy(policy: unknown, schema: unknown): boolean {
+  if (schema === false) return policy === false;
+  if (
+    policy === null ||
+    typeof policy !== "object" ||
+    Array.isArray(policy) ||
+    schema === null ||
+    typeof schema !== "object" ||
+    Array.isArray(schema)
+  ) {
+    return false;
+  }
+  const actual = policy as Record<string, unknown>;
+  const expected = schema as Record<string, unknown>;
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    actualKeys.some((key, index) => key !== expectedKeys[index])
+  ) {
+    return false;
+  }
+  return expectedKeys.every((key) => matchesPinnedFalsePolicy(actual[key], expected[key]));
 }
 
 function extractRpcErrorCode(error: unknown): number | undefined {
@@ -399,6 +527,10 @@ class AuthorizedKoraClient implements KoraClientTransport {
     return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["getSupportedTokens"]>>>(
       "getSupportedTokens"
     );
+  }
+
+  getConfig() {
+    return this.rpcRequest<KoraConfigurationResponse>("getConfig");
   }
 
   private async rpcRequest<T>(method: string, params?: unknown): Promise<T> {

@@ -68,6 +68,7 @@ const FIRST_SIGNATURE =
 const SECOND_SIGNATURE =
   "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV";
 const TEST_TOKEN_ACCOUNT = TEST_SOLANA_ADDRESSES.wallet3;
+const originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
 
 function mockSourceTokenAccountRpc(params: {
   mint: string;
@@ -306,6 +307,8 @@ async function seedCryptoWalletCounterpartyAccount(params: {
 describe("payment transfer batches", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    // These route tests mock the legacy fee-payment adapter directly.
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
 
     createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({
@@ -341,6 +344,7 @@ describe("payment transfer batches", () => {
   });
 
   afterEach(async () => {
+    env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     await clearTestDatabase(env);
     await clearKVStores(env);
   });

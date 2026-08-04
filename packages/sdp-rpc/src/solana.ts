@@ -14,8 +14,10 @@ import {
   type createSolanaRpc,
   createSolanaRpcFromTransport,
   createSolanaRpcSubscriptions,
+  getTransactionDecoder,
   type RpcTransport,
   type Signature,
+  type TransactionMessageBytesBase64,
 } from "@solana/kit";
 import { getSolanaConfig } from "./config";
 import { solanaRpcError } from "./errors";
@@ -233,6 +235,23 @@ export async function isBlockhashValid(
 ): Promise<boolean> {
   const response = await rpc.isBlockhashValid(blockhash, { commitment }).send();
 
+  return response.value;
+}
+
+/** Estimate only the Solana network fee from the exact compiled message. */
+export async function getTransactionNetworkFee(
+  rpc: SolanaRpc,
+  transaction: Uint8Array,
+  commitment: Commitment = "confirmed"
+): Promise<bigint> {
+  const { messageBytes } = getTransactionDecoder().decode(transaction);
+  const message = Buffer.from(new Uint8Array(messageBytes)).toString(
+    "base64"
+  ) as TransactionMessageBytesBase64;
+  const response = await rpc.getFeeForMessage(message, { commitment }).send();
+  if (response.value === null) {
+    throw solanaRpcError("Solana RPC could not price the transaction message");
+  }
   return response.value;
 }
 
@@ -591,6 +610,9 @@ export interface ParsedInstruction {
 export interface ParsedTransaction {
   slot: bigint;
   err: unknown | null;
+  fee?: bigint;
+  preBalances?: readonly bigint[];
+  postBalances?: readonly bigint[];
   /** Top-level + inner instructions flattened, in no particular order. */
   instructions: ParsedInstruction[];
 }
@@ -604,6 +626,9 @@ interface RawGetTransactionResponse {
   slot: bigint;
   meta: {
     err: unknown | null;
+    fee: bigint;
+    preBalances: readonly bigint[];
+    postBalances: readonly bigint[];
     innerInstructions?: Array<{ instructions?: RawParsedInstruction[] }> | null;
   } | null;
   transaction: {
@@ -651,6 +676,9 @@ export async function getTransaction(
   return {
     slot: response.slot,
     err: response.meta?.err ?? null,
+    fee: response.meta?.fee ?? 0n,
+    preBalances: response.meta?.preBalances ?? [],
+    postBalances: response.meta?.postBalances ?? [],
     instructions: [...topLevel, ...inner].map(toParsedInstruction),
   };
 }

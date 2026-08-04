@@ -8,6 +8,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
+import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 
 export async function runCronJob(): Promise<void> {
@@ -21,7 +22,9 @@ export async function runCronJob(): Promise<void> {
 
   initNodeSentry(getSentryOptions(env));
 
-  const work = () => trackPendingTransfers(env);
+  const work = async () => {
+    await Promise.all([trackPendingTransfers(env), reconcileSponsorshipBudgets(env)]);
+  };
   try {
     await (isSentryEnabled(env)
       ? nodeObservability.withMonitor(PENDING_TRANSFERS_MONITOR, work, {

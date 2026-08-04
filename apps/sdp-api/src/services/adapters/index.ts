@@ -5,16 +5,6 @@
  * Adapters implement ports to connect domain to infrastructure.
  */
 
-// Fee payment adapters (gasless transactions)
-export {
-  createFeePaymentAdapter,
-  createKoraAdapter,
-  createNativeAdapter,
-  type FeePaymentProviderType,
-  KoraAdapter,
-  KoraClient,
-  NativeAdapter,
-} from "@sdp/payments/fee-payment";
 // Signing adapters (custody providers via @solana/keychain)
 export {
   createSigningAdapter,
