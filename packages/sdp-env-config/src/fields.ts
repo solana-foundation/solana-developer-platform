@@ -670,7 +670,7 @@ export const FIELDS: EnvField[] = [
     help: "Development is always enabled. This setting controls production only.",
   },
   {
-    key: "PRIVY_BYOK_PROVISIONING_ENABLED",
+    key: "PRIVY_BYOK_ENABLED",
     section: "advanced",
     kind: "select",
     label: "Privy stored-credential provisioning",

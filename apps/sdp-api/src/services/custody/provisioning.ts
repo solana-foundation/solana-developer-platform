@@ -38,6 +38,11 @@ export type { ProvisionFireblocksResult };
 export type ProvisionPrivyOptions = CustodyProvisionPrivyOptions;
 export type { ProvisionPrivyResult };
 
+export interface PrivyCredentialAuthentication {
+  appId: string;
+  appSecret: string;
+}
+
 export type ProvisionCoinbaseCdpOptions = CustodyProvisionCoinbaseCdpOptions & {
   network?: "solana" | "solana-devnet";
 };
@@ -80,13 +85,14 @@ export async function provisionFireblocksVaultAccount(
 
 export async function provisionPrivyWallet(
   env: Env,
-  options: ProvisionPrivyOptions
+  options: ProvisionPrivyOptions,
+  authentication?: PrivyCredentialAuthentication
 ): Promise<ProvisionPrivyResult> {
   return provisionPrivyWalletInCustody(
     createRuntime(),
     {
-      appId: env.PRIVY_APP_ID,
-      appSecret: env.PRIVY_APP_SECRET,
+      appId: authentication?.appId ?? env.PRIVY_APP_ID,
+      appSecret: authentication?.appSecret ?? env.PRIVY_APP_SECRET,
       apiBaseUrl: env.PRIVY_API_BASE_URL,
     },
     options
