@@ -17,6 +17,10 @@ import {
   parseTransferInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
+import {
+  parseTransferCheckedInstruction,
+  TOKEN_2022_PROGRAM_ADDRESS,
+} from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CreatePrivateChannelTransferInput,
@@ -30,7 +34,7 @@ import type { Env } from "@/types/env";
 import type { SpcAuthContext } from "./auth/gateway-auth";
 import * as gatewayAuthService from "./auth/gateway-auth";
 import * as balanceService from "./balance";
-import { buildClassicTransferInstructions, createChannelTransfer } from "./transfer";
+import { buildTokenTransferInstructions, createChannelTransfer } from "./transfer";
 import * as transferEvents from "./transfer-events";
 
 const TEST_ENV = {} as Env;
@@ -180,11 +184,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("buildClassicTransferInstructions", () => {
+describe("buildTokenTransferInstructions", () => {
   it("builds an idempotent destination ATA create before a classic SPL transfer", async () => {
-    const built = await buildClassicTransferInstructions({
+    const built = await buildTokenTransferInstructions({
       signer: senderSigner,
       mint: MINT,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      decimals: 6,
       recipient,
       amountBaseUnits: 1_250_000n,
     });
@@ -201,20 +207,69 @@ describe("buildClassicTransferInstructions", () => {
 
     expect(built.sourceTokenAccount).toBe(expectedSource);
     expect(built.destinationTokenAccount).toBe(expectedDestination);
-    expect(built.instructions.map((instruction) => instruction.programAddress)).toEqual([
-      ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
-      TOKEN_PROGRAM_ADDRESS,
-    ]);
+    expect(built.instructions[0].programAddress).toBe(ASSOCIATED_TOKEN_PROGRAM_ADDRESS);
+    expect(built.instructions[1].programAddress).toBe(TOKEN_PROGRAM_ADDRESS);
 
     const createAta = parseCreateAssociatedTokenIdempotentInstruction(built.instructions[0]);
     expect(createAta.accounts.payer.address).toBe(senderSigner.address);
     expect(createAta.accounts.ata.address).toBe(expectedDestination);
 
-    const transfer = parseTransferInstruction(built.instructions[1]);
+    // Classic stays on plain `Transfer`: SPC validates instruction encoding against
+    // a program allowlist, so the path already proven to pass must not change.
+    // The builder returns a union of the two programs' instruction shapes, and the
+    // branded `Address` literals don't narrow by comparison — so the cast is to the
+    // parser's own input type, guarded by the programAddress assertion above.
+    const transfer = parseTransferInstruction(
+      built.instructions[1] as Parameters<typeof parseTransferInstruction>[0]
+    );
     expect(transfer.accounts.source.address).toBe(expectedSource);
     expect(transfer.accounts.destination.address).toBe(expectedDestination);
     expect(transfer.accounts.authority.address).toBe(senderSigner.address);
     expect(transfer.data.amount).toBe(1_250_000n);
+  });
+
+  it("derives token-2022 ATAs under that program and uses TransferChecked", async () => {
+    const built = await buildTokenTransferInstructions({
+      signer: senderSigner,
+      mint: MINT,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+      decimals: 6,
+      recipient,
+      amountBaseUnits: 1_250_000n,
+    });
+    const [expectedSource] = await findAssociatedTokenPda({
+      owner: senderSigner.address,
+      mint: MINT,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+    });
+    const [expectedDestination] = await findAssociatedTokenPda({
+      owner: recipient,
+      mint: MINT,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+    });
+
+    // The whole point of threading the program: the same (owner, mint) derives a
+    // DIFFERENT account under token-2022, so a classic assumption reads an address
+    // that holds nothing.
+    const [classicSource] = await findAssociatedTokenPda({
+      owner: senderSigner.address,
+      mint: MINT,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+    expect(expectedSource).not.toBe(classicSource);
+
+    expect(built.sourceTokenAccount).toBe(expectedSource);
+    expect(built.destinationTokenAccount).toBe(expectedDestination);
+    expect(built.instructions[1].programAddress).toBe(TOKEN_2022_PROGRAM_ADDRESS);
+
+    const transfer = parseTransferCheckedInstruction(
+      built.instructions[1] as Parameters<typeof parseTransferCheckedInstruction>[0]
+    );
+    expect(transfer.accounts.source.address).toBe(expectedSource);
+    expect(transfer.accounts.destination.address).toBe(expectedDestination);
+    expect(transfer.accounts.mint.address).toBe(MINT);
+    expect(transfer.data.amount).toBe(1_250_000n);
+    expect(transfer.data.decimals).toBe(6);
   });
 });
 

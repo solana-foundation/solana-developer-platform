@@ -7,8 +7,25 @@ import { cn } from "@/lib/utils";
 
 type SelectSize = "lg" | "xl";
 
+/**
+ * Maps an input size variant to the shared DS trigger height/radius/padding
+ * classes, so selects and date pickers rendered side by side stay identical.
+ *
+ * @param size - The input size variant.
+ * @returns The trigger sizing class list.
+ */
+function triggerSizeClassName(size: SelectSize): string {
+  return size === "xl"
+    ? "h-[var(--input-height-xl)] rounded-[var(--input-radius-xl)] px-[var(--input-padding-x-xl)]"
+    : "h-[var(--input-height-lg)] rounded-[var(--input-radius-lg)] px-[var(--input-padding-x-lg)]";
+}
+
 interface UiSelectProps {
   ariaLabel?: string;
+  /** Form field name; renders a hidden input so the value submits with a native form. */
+  name?: string;
+  /** Initial value for uncontrolled (form) usage. */
+  defaultValue?: string;
   value?: string | null;
   onValueChange?: (value: string | null) => void;
   placeholder?: string;
@@ -29,10 +46,20 @@ interface UiSelectItemProps {
   disabled?: boolean;
 }
 
+/**
+ * Maps item values to their rendered labels for the trigger display.
+ * Matches children structurally (string `value` prop) rather than by
+ * `child.type === SelectItem`: element type identity does not survive the
+ * RSC boundary, so the nominal check fails when Select is rendered from a
+ * server component.
+ *
+ * @param children - The Select children to scan.
+ * @returns Value-to-label map passed to the base-ui Select root.
+ */
 function collectItemLabels(children: ReactNode): Record<string, ReactNode> {
   const items: Record<string, ReactNode> = {};
   for (const child of Children.toArray(children)) {
-    if (isValidElement<UiSelectItemProps>(child) && child.type === SelectItem) {
+    if (isValidElement<UiSelectItemProps>(child) && typeof child.props.value === "string") {
       items[child.props.value] = child.props.children;
     }
   }
@@ -41,6 +68,8 @@ function collectItemLabels(children: ReactNode): Record<string, ReactNode> {
 
 function Select({
   ariaLabel,
+  name,
+  defaultValue,
   value,
   onValueChange,
   placeholder,
@@ -56,7 +85,9 @@ function Select({
   return (
     <BaseSelect.Root
       items={items}
-      value={value == null || value === "" ? null : value}
+      name={name}
+      defaultValue={defaultValue}
+      value={value === undefined ? undefined : value === "" ? null : value}
       onValueChange={(next) => onValueChange?.(next)}
       disabled={disabled}
     >
@@ -65,9 +96,7 @@ function Select({
         className={cn(
           "group/select relative flex w-full cursor-pointer items-center gap-2 text-left",
           disabled && "pointer-events-none opacity-40",
-          size === "xl"
-            ? "h-[var(--input-height-xl)] rounded-[var(--input-radius-xl)] px-[var(--input-padding-x-xl)]"
-            : "h-[var(--input-height-lg)] rounded-[var(--input-radius-lg)] px-[var(--input-padding-x-lg)]",
+          triggerSizeClassName(size),
           className
         )}
       >
@@ -125,4 +154,4 @@ function SelectItem({ value, children, className, disabled }: UiSelectItemProps)
   );
 }
 
-export { Select, SelectItem };
+export { Select, SelectItem, triggerSizeClassName };

@@ -425,16 +425,32 @@ export function createPostgresPaymentsRepository(
         extraValues: [input.transferId, [...input.fromStatuses]],
       });
 
-      const amountClause = input.amount === undefined ? "" : ", amount = ?";
-      const amountValues = input.amount === undefined ? [] : [input.amount];
+      const assignments = ["status = ?", "updated_at = ?"];
+      const assignmentValues: unknown[] = [input.toStatus, input.updatedAt];
+      if (input.amount !== undefined) {
+        assignments.push("amount = ?");
+        assignmentValues.push(input.amount);
+      }
+      if (input.fiatAmount !== undefined) {
+        assignments.push("fiat_amount = ?");
+        assignmentValues.push(input.fiatAmount);
+      }
+      if (input.providerData !== undefined) {
+        assignments.push("provider_data = provider_data || ?::jsonb");
+        assignmentValues.push(JSON.stringify(input.providerData));
+      }
+      if (input.error !== undefined) {
+        assignments.push("error = ?");
+        assignmentValues.push(input.error);
+      }
       const row = await db
         .prepare(
           `UPDATE payment_transfers
-           SET status = ?, updated_at = ?${amountClause}
+           SET ${assignments.join(", ")}
            WHERE ${scope.where}
            RETURNING *`
         )
-        .bind(input.toStatus, input.updatedAt, ...amountValues, ...scope.values)
+        .bind(...assignmentValues, ...scope.values)
         .first<Record<string, unknown>>();
 
       return row ? mapTransferRow(row) : null;

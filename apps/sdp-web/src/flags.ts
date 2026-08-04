@@ -116,3 +116,29 @@ export const privateChannels = flag<boolean, DashboardFlagEntities>({
     { value: true, label: "Enabled" },
   ],
 });
+
+export const markets = flag<boolean, DashboardFlagEntities>({
+  key: "markets",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("MARKETS_ENABLED", false),
+  description:
+    "Show the Markets module — Earn today, further market workspaces later. Off hides every Markets surface at once, whatever the sub-module flags say.",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
+export const earn = flag<boolean, DashboardFlagEntities>({
+  key: "earn",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("EARN_ENABLED", false),
+  description:
+    "Show the Earn workspace (curator programs, allocations, deposits, withdrawals). A sub-module of Markets, so it also requires the markets flag.",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});

@@ -278,6 +278,27 @@ function getCounterpartyRoutePageConfig(
   return null;
 }
 
+function getEarnRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/markets/earn/deposit") {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.earnNewDeposit"),
+      backHref: "/dashboard/markets/earn",
+      backLabel: t("Shared.dashboardShell.backToEarn"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname === "/dashboard/markets/earn" || pathname.startsWith("/dashboard/markets/earn/")) {
+    return {
+      title: t("Shared.dashboardShell.earn"),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  return null;
+}
+
 function getWalletRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
@@ -480,6 +501,10 @@ export function getDashboardPageConfig(
   const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname, t);
   if (counterpartyRouteConfig) {
     return counterpartyRouteConfig;
+  }
+  const earnRouteConfig = getEarnRoutePageConfig(pathname, t);
+  if (earnRouteConfig) {
+    return earnRouteConfig;
   }
   if (pathname === "/dashboard/payments") {
     return {

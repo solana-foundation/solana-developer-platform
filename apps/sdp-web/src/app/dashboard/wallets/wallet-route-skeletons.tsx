@@ -1,31 +1,14 @@
-import { ChevronRight } from "lucide-react";
 import { WalletActivitySkeleton } from "@/app/dashboard/custody/wallet-activity-skeleton";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  DashboardWorkspaceCard,
+  DashboardWorkspaceOverviewPanel,
+} from "@/components/dashboard-workspace-panel";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { cn } from "@/lib/utils";
 
 const THREE_ITEMS = ["one", "two", "three"] as const;
 const FOUR_ITEMS = ["one", "two", "three", "four"] as const;
 const FIVE_ITEMS = ["one", "two", "three", "four", "five"] as const;
-const AUDIT_COLUMNS = [
-  ["decision", "w-[160px]"],
-  ["operation", "w-[195px]"],
-  ["amount", "w-[145px]"],
-  ["destination", "w-[145px]"],
-  ["actor", "w-[170px]"],
-  ["revision", "w-[120px]"],
-  ["evaluated", "w-[170px]"],
-  ["open", "w-12"],
-] as const;
-
 function Pulse({ className }: { className?: string }) {
   return <SkeletonBlock className={cn("motion-reduce:animate-none", className)} />;
 }
@@ -346,115 +329,39 @@ function AuditHeaderSkeleton() {
   );
 }
 
-function MobileAuditRowsSkeleton() {
-  return (
-    <div
-      className="divide-y divide-border-default border-y border-border-default lg:hidden"
-      data-loading-mobile-rows
-    >
-      {FIVE_ITEMS.map((row) => (
-        <div
-          key={row}
-          className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 py-4"
-          data-loading-mobile-row
-        >
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2" data-loading-mobile-badges>
-              <Pulse className="h-6 w-16 rounded-full" />
-              <Pulse className="h-6 w-20 rounded-full" />
-            </div>
-            <div className="mt-3" data-loading-mobile-operation>
-              <Pulse className="h-4 w-48 max-w-full" />
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2" data-loading-mobile-metadata>
-              {FOUR_ITEMS.map((item) => (
-                <div key={item} className="min-w-0 space-y-1">
-                  <Pulse className="h-3 w-20 max-w-full" />
-                  <Pulse className="h-3 w-24 max-w-full" />
-                </div>
-              ))}
-            </div>
-          </div>
-          <ChevronRight
-            aria-hidden="true"
-            className="mt-1 size-4 text-tertiary"
-            data-loading-mobile-chevron
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function DesktopAuditTableSkeleton() {
-  return (
-    <div className="hidden lg:block" data-loading-desktop-table>
-      <Table className="min-w-0 [&_table]:min-w-[1040px] [&_table]:table-fixed">
-        <TableHeader>
-          <TableRow>
-            {AUDIT_COLUMNS.map(([column, width]) => (
-              <TableHead key={column} className={width}>
-                <Pulse className="h-3 w-16" />
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {FIVE_ITEMS.map((row) => (
-            <TableRow key={row}>
-              <TableCell className="px-4 py-3">
-                <Pulse className="h-6 w-16 rounded-full" />
-              </TableCell>
-              <TableCell className="space-y-2 px-4 py-3">
-                <Pulse className="h-4 w-32" />
-                <Pulse className="h-5 w-20 rounded-full" />
-              </TableCell>
-              {FIVE_ITEMS.map((column) => (
-                <TableCell
-                  key={column}
-                  className={cn("px-4 py-3", column === "three" && "overflow-hidden")}
-                  data-loading-desktop-actor-cell={column === "three" || undefined}
-                >
-                  <Pulse className="h-4 w-24" />
-                </TableCell>
-              ))}
-              <TableCell className="px-2 py-3">
-                <Pulse className="size-4 rounded-sm" />
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-}
-
 export function WalletPolicyAuditListSkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel>
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
       <LoadingRegion
         layout="wallet-policy-audit-list"
-        className="mx-auto w-full max-w-[1500px] space-y-6"
+        className="flex w-full flex-1 flex-col gap-4"
       >
         <AuditHeaderSkeleton />
-        <section className="space-y-4 border-y border-border-default py-4">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[repeat(4,minmax(150px,1fr))_auto]">
-            {FOUR_ITEMS.map((filter) => (
-              <div key={filter} className="space-y-2">
-                <Pulse className="h-3 w-24" />
-                <Pulse className="h-9 w-full rounded-lg" />
+        <DashboardWorkspaceCard>
+          <div
+            className="grid gap-3 border-b border-border-default p-3 md:grid-cols-2 xl:grid-cols-5"
+            data-loading-audit-filters
+          >
+            {FIVE_ITEMS.map((filter) => (
+              <div key={filter} className="space-y-1.5">
+                <Pulse className="h-3 w-20" />
+                <Pulse className="h-10 w-full rounded-lg" />
               </div>
             ))}
-            <div className="flex items-end gap-2">
-              <div data-loading-filter-apply>
-                <Pulse className="h-9 w-20 rounded-lg" />
-              </div>
-            </div>
           </div>
-          <Pulse className="h-4 w-28" />
-        </section>
-        <MobileAuditRowsSkeleton />
-        <DesktopAuditTableSkeleton />
+          <div className="flex-1 space-y-3 p-4" data-loading-audit-rows>
+            {FIVE_ITEMS.map((row) => (
+              <Pulse key={row} className="h-10 w-full rounded-lg" />
+            ))}
+          </div>
+          <div
+            className="mt-auto flex items-center justify-between border-t border-border-default p-4"
+            data-loading-audit-footer
+          >
+            <Pulse className="h-10 w-44 rounded-lg" />
+            <Pulse className="h-8 w-40 rounded-lg" />
+          </div>
+        </DashboardWorkspaceCard>
       </LoadingRegion>
     </DashboardWorkspaceOverviewPanel>
   );
