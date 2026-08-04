@@ -35,6 +35,8 @@ export interface PrivateChannelUserWithIdentityRow extends PrivateChannelUserRow
   user_name: string | null;
   /** Number of wallets this member has verified (from private_channel_verified_wallets). */
   verified_wallet_count: number;
+  /** Per-project role; null once the user's project_members row is removed. */
+  project_role: string | null;
 }
 
 export interface PrivateChannelMembershipRow {

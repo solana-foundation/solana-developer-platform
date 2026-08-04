@@ -106,19 +106,33 @@ function renderOverviewWithLongAddresses(): string {
 }
 
 describe("issuance detail mobile layout", () => {
-  it("prefers natural token ID breakpoints before emergency wrapping in both settled headers", () => {
+  it("keeps the full token ID reachable without letting it set either header's width", () => {
     const markup = renderHeaders();
-    const tokenIdValueClasses = [
-      ...markup.matchAll(/<span class="([^"]*)" data-token-id-value/g),
-    ].map((match) => match[1] ?? "");
+    // className, then any remaining attributes, then the rendered value.
+    const tokenIdValues = [
+      ...markup.matchAll(/<span class="([^"]*)" data-token-id-value([^>]*)>([^<]*)</g),
+    ].map((match) => ({
+      className: match[1] ?? "",
+      attributes: match[2] ?? "",
+      text: (match[3] ?? "").trim(),
+    }));
 
     expect(markup.match(/data-testid="token-id-row"/g)).toHaveLength(2);
-    expect(tokenIdValueClasses).toHaveLength(2);
-    expect(tokenIdValueClasses.every((className) => className.includes("min-w-0"))).toBe(true);
-    expect(
-      tokenIdValueClasses.every((className) => className.includes("[overflow-wrap:anywhere]"))
-    ).toBe(true);
-    expect(tokenIdValueClasses.some((className) => className.includes("break-all"))).toBe(false);
+    expect(tokenIdValues).toHaveLength(2);
+
+    // The legacy header prints the id whole, so it needs somewhere to break: at the
+    // dashes first, anywhere only if that isn't enough, never mid-segment by default.
+    const [legacy, assetProfile] = tokenIdValues;
+    expect(legacy?.text).toBe(TOKEN_ID);
+    expect(legacy?.className).toContain("min-w-0");
+    expect(legacy?.className).toContain("[overflow-wrap:anywhere]");
+    expect(legacy?.className).not.toContain("break-all");
+
+    // The asset-profile header elides the middle instead, like the address it sits
+    // beside — one line at any width, whole value on hover and on the clipboard.
+    expect(assetProfile?.text).toBe("tok_d106fe22…0529");
+    expect(assetProfile?.attributes).toContain(`title="${TOKEN_ID}"`);
+    expect(assetProfile?.className).not.toContain("[overflow-wrap:anywhere]");
   });
 
   it("contains long overview addresses while exposing their full values", () => {

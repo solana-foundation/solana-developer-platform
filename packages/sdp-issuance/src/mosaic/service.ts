@@ -525,8 +525,19 @@ export class MosaicService {
    * - Creating ATA if needed (idempotent)
    * - Permissionless thaw for sRFC-37 tokens (if account is frozen)
    * - Decimal conversion (amount is decimal, e.g., 100 for 100 tokens)
+   *
+   * `onBeforeSubmit` runs once the transaction is built and signed, immediately
+   * before it is handed to the cluster — the last moment at which nothing can have
+   * landed. Anything that fails earlier (building, resolving the token account,
+   * signing) definitively never reached the chain; anything that fails later may
+   * have landed anyway. A caller that must take an irreversible step for this mint —
+   * counting it against a supply cap — takes it here, and a throw from the hook
+   * aborts the submission rather than leaving that step to be guessed at afterwards.
    */
-  async mintTo(options: MintToOptions): Promise<MosaicTransactionResult> {
+  async mintTo(
+    options: MintToOptions,
+    onBeforeSubmit?: () => Promise<void>
+  ): Promise<MosaicTransactionResult> {
     const fallbackFeePayer =
       options.feePayer === this.signer.address ? this.signer : options.feePayer;
     const feePayer = await this.resolveFeePayer(fallbackFeePayer);
@@ -543,7 +554,7 @@ export class MosaicService {
     );
 
     const tokenAccountInfo = await resolveTokenAccount(this.rpc, options.destination, options.mint);
-    const result = await this.signAndSubmit(fullTx);
+    const result = await this.signAndSubmit(fullTx, onBeforeSubmit);
 
     return {
       ...result,
@@ -1188,7 +1199,16 @@ export class MosaicService {
     };
   }
 
-  private async signAndSubmit(fullTx: FullTransaction): Promise<MosaicTransactionResult> {
+  /**
+   * `onBeforeSubmit` is the point of no return: everything above the call is still
+   * revocable, everything below it may land whatever happens next. Both submit paths
+   * run it in the same place, so a caller cannot end up gated on one and not the
+   * other.
+   */
+  private async signAndSubmit(
+    fullTx: FullTransaction,
+    onBeforeSubmit?: () => Promise<void>
+  ): Promise<MosaicTransactionResult> {
     const feePayment = this.feePayment;
     if (feePayment) {
       // Two-signer flow: custody signs locally, Kora adds fee payer + submits
@@ -1196,6 +1216,7 @@ export class MosaicService {
       const txEncoder = getTransactionEncoder();
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
 
+      await onBeforeSubmit?.();
       const signature = await feePayment.signAndSend(txBytes);
       return this.confirmSubmitted(signature);
     }
@@ -1204,6 +1225,7 @@ export class MosaicService {
     const signedTx = await signTransactionMessageWithSigners(fullTx);
     const encoded = getBase64EncodedWireTransaction(signedTx);
 
+    await onBeforeSubmit?.();
     const signature = await this.rpc
       .sendTransaction(encoded, {
         skipPreflight: false,

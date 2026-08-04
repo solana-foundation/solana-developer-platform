@@ -1,8 +1,9 @@
-import type {
-  PolicyDecision,
-  WalletControlProfileRevisionHistory,
-  WalletOperationStatus,
-  WalletPolicyEvaluationDetail,
+import {
+  type PolicyDecision,
+  type WalletControlProfileRevisionHistory,
+  type WalletOperationStatus,
+  type WalletPolicyEvaluationDetail,
+  WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
@@ -109,7 +110,9 @@ export function formatOperation(evaluation: WalletPolicyEvaluationDetail): strin
 
 export function formatAssetAmount(evaluation: WalletPolicyEvaluationDetail, empty: string): string {
   const { amount, asset } = evaluation.walletOperation;
-  const displayAsset = asset ? shortIdentifier(asset, 5) : null;
+  const displayAsset = asset
+    ? (WELL_KNOWN_TOKEN_BY_MINT.get(asset)?.symbol ?? shortIdentifier(asset, 5))
+    : null;
   if (amount && displayAsset) return `${amount} ${displayAsset}`;
   return amount ?? displayAsset ?? empty;
 }

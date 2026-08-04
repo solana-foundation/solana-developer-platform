@@ -14,6 +14,8 @@ export interface CreateTransferInput {
   walletId: string;
   recipientVerifiedWalletId: string;
   amount: string;
+  /** Selected token mint; forwarded as-is for the API to validate. */
+  mint?: string;
 }
 
 /**
@@ -64,6 +66,7 @@ export async function createTransferAction(
       walletId: input.walletId,
       recipientVerifiedWalletId: input.recipientVerifiedWalletId,
       amount: input.amount.trim(),
+      ...(input.mint ? { mint: input.mint } : {}),
     });
     return { ok: true, transfer };
   } catch (error) {

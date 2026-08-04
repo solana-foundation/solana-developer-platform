@@ -22,6 +22,13 @@ import type {
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
+
+// How long a mint can still land after SDP last touched its row. A Solana blockhash
+// is valid for ~150 slots (roughly 60-90s), so a transaction older than this can no
+// longer be submitted; five minutes leaves generous room for a slow signer without
+// letting an abandoned mint hold the supply record hostage.
+const MINT_IN_FLIGHT_WINDOW_MS = 5 * 60 * 1000;
 
 // Escapes LIKE/ILIKE wildcards so operator-supplied search text matches
 // literally (mirrors the payments/policy repositories' `ESCAPE '\'` idiom).
@@ -176,6 +183,11 @@ export interface UpdateTokenInput {
   signingWalletId?: string | null;
   /** Only accepted while the token is undeployed (enforced by the route handler). */
   requiresAllowlist?: boolean;
+  /**
+   * Whole-token decimal string, or null to uncap. Only accepted while the supply
+   * is not yet locked on-chain (enforced by the route handler).
+   */
+  maxSupply?: string | null;
 }
 
 export interface CreateTokenTransactionInput {
@@ -196,6 +208,13 @@ export interface UpdateTokenTransactionInput {
   blockTime?: string;
   fee?: number;
   error?: string;
+  /**
+   * Attached only after the mint's supply reservation is admitted: a serialized
+   * transaction in the row is readable through the transactions API and, in the
+   * wallet-authority flow, submittable by whoever reads it — so a row must never
+   * carry one the cap refused.
+   */
+  serializedTx?: string;
   params?: Record<string, unknown>;
 }
 
@@ -887,6 +906,16 @@ export class TokenService {
       values.push(input.requiresAllowlist ? 1 : 0);
     }
 
+    // The supply the cap was validated against, kept so the write can be guarded
+    // on that same read — see the guards below.
+    let supplyAtCapCheck: string | null = null;
+    if (input.maxSupply !== undefined) {
+      const resolved = await this._resolveMaxSupplyBaseUnits(input, existing);
+      supplyAtCapCheck = resolved.supplyBaseUnits;
+      updates.push("max_supply = ?");
+      values.push(resolved.maxSupplyBaseUnits);
+    }
+
     if (updates.length === 0) {
       return existing;
     }
@@ -911,12 +940,31 @@ export class TokenService {
       input.imageUrl !== undefined ||
       input.status !== undefined;
 
+    // Same race, one step later in the lifecycle: the cap is only meaningful
+    // while the mint authority still exists, and a concurrent lock-supply can
+    // revoke it between the handler's read and this write.
+    const requiresUnlockedSupplyGuard =
+      input.maxSupply !== undefined && Boolean(existing.mintAddress);
+
     const whereConditions = ["id = ?"];
     const whereValues: (string | null)[] = [tokenId];
     if (requiresUndeployedGuard) {
       whereConditions.push("status = 'pending'", "mint_address IS NULL");
     } else if (requiresStableDeploymentGuard) {
       whereConditions.push("status <> 'deploying'");
+    }
+    if (requiresUnlockedSupplyGuard) {
+      whereConditions.push("is_mintable = 1", "mint_authority IS NOT NULL");
+    }
+    // And the same race one step further out: the cap was checked against a supply
+    // read, and a mint landing in this window is exactly what makes that read
+    // stale. Guarding on it means losing to a mint costs a 409 the operator can
+    // retry against the real supply, rather than storing a cap below what was just
+    // minted. (COALESCE because the column is nullable, and NULL never equals a
+    // bound value.)
+    if (supplyAtCapCheck !== null) {
+      whereConditions.push("COALESCE(total_supply_cached, '0') = ?");
+      whereValues.push(supplyAtCapCheck);
     }
     if (expectedDeploymentState) {
       whereConditions.push("status = ?", "mint_address IS NOT DISTINCT FROM ?");
@@ -935,15 +983,16 @@ export class TokenService {
       .run();
 
     // The row existed at the top-of-method read, so a guarded 0-row result means
-    // it was deployed during the window — surface a 409 rather than a 404.
+    // the lifecycle moved on during the window — surface a 409 rather than a 404.
     if (
-      (requiresUndeployedGuard || requiresStableDeploymentGuard || expectedDeploymentState) &&
+      (requiresUndeployedGuard ||
+        requiresStableDeploymentGuard ||
+        requiresUnlockedSupplyGuard ||
+        supplyAtCapCheck !== null ||
+        expectedDeploymentState) &&
       rowsAffected === 0
     ) {
-      throw new AppError(
-        "CONFLICT",
-        "Token deployment state changed while this update was in flight; re-fetch and retry"
-      );
+      throw new AppError("CONFLICT", await this._describeUpdateConflict(existing));
     }
 
     const updated = await this._getTokenById(tokenId);
@@ -952,6 +1001,111 @@ export class TokenService {
     }
 
     return updated;
+  }
+
+  /**
+   * The `max_supply` column value for an update: base units, or null to uncap.
+   *
+   * Mirrors `createToken`'s parse — precision is checked against the effective
+   * decimals, which a pre-deploy update may be changing in the same request —
+   * and additionally refuses a cap the token has already outgrown, since minting
+   * can only ever push the total further past it.
+   *
+   * Returns the supply it compared against, in base units, so the caller can
+   * guard the write on that same read: a mint landing in between is exactly what
+   * would make a cap that passed this check wrong by the time it is stored. Read
+   * from the column rather than round-tripped through `existing.totalSupply`,
+   * which is formatted for display and would not compare byte-for-byte.
+   */
+  private async _resolveMaxSupplyBaseUnits(
+    input: UpdateTokenInput,
+    existing: Token
+  ): Promise<{ maxSupplyBaseUnits: string | null; supplyBaseUnits: string | null }> {
+    // Clearing a cap depends on no supply at all — uncapping can never conflict
+    // with a mint — so it neither reads one nor gets guarded on one.
+    if (!input.maxSupply) {
+      return { maxSupplyBaseUnits: null, supplyBaseUnits: null };
+    }
+
+    const decimals = input.decimals ?? existing.decimals;
+    let baseUnits: bigint;
+    try {
+      baseUnits = parseDecimalAmount(input.maxSupply, decimals);
+    } catch {
+      throw badRequest("Invalid maxSupply for this token's decimals", {
+        errors: {
+          maxSupply: [`Must be a number with at most ${decimals} decimal place(s)`],
+        },
+      });
+    }
+
+    // Only compared for deployed tokens: their decimals are immutable (so both
+    // sides share a scale) and a draft has no minted supply to undercut.
+    if (!existing.mintAddress) {
+      return { maxSupplyBaseUnits: baseUnits.toString(), supplyBaseUnits: null };
+    }
+
+    // The recorded supply counts every mint SDP has admitted — settled ones, and
+    // reservations for ones that could still land, executed or prepared — because
+    // `reserveMintSupply` runs before any transaction can reach the chain. So a cap
+    // at or above this figure cannot be outrun by an in-flight mint, and the
+    // supply-unchanged guard on the write catches one admitted in this window: the
+    // reservation and the cap change contend for the same row, and whichever
+    // commits second sees the other.
+    const supplyBaseUnits = await this._getCachedSupplyBaseUnits(existing.id);
+    if (baseUnits < BigInt(supplyBaseUnits)) {
+      throw badRequest("maxSupply cannot be below the already-minted supply", {
+        errors: {
+          maxSupply: [
+            `Must be at least the current supply of ${formatDecimalAmount(supplyBaseUnits, decimals)}`,
+          ],
+        },
+      });
+    }
+
+    return { maxSupplyBaseUnits: baseUnits.toString(), supplyBaseUnits };
+  }
+
+  /**
+   * The cached supply exactly as stored, for comparing against and then guarding
+   * on. Anything that isn't a base-unit integer reads as `0`, so a malformed
+   * cache can't make a cap check throw from inside a bigint parse.
+   */
+  private async _getCachedSupplyBaseUnits(tokenId: string): Promise<string> {
+    const tenant = this.tenantTokenScope();
+    const row = await this.db
+      .prepare(
+        `SELECT COALESCE(total_supply_cached, '0') AS supply
+         FROM issued_tokens
+         WHERE id = ?${tenant.clause}`
+      )
+      .bind(tokenId, ...tenant.values)
+      .first<{ supply: string }>();
+    const supply = row?.supply ?? "0";
+    return /^\d+$/.test(supply) ? supply : "0";
+  }
+
+  /**
+   * Why a guarded update matched no rows. The row existed at the top-of-method
+   * read, so something moved it out from under one of the guards in the window —
+   * re-read to name which, since a `maxSupply` update carries three of them and
+   * an operator retrying deserves to know what actually changed.
+   */
+  private async _describeUpdateConflict(before: Token): Promise<string> {
+    const after = await this._getTokenById(before.id);
+    if (!after) {
+      return "Token was deleted while this update was in flight; re-fetch and retry";
+    }
+    if (after.mintAddress && !before.mintAddress) {
+      return "Token was deployed while this update was in flight; re-fetch and retry";
+    }
+    if (before.mintAddress && (!after.mintAuthority || !after.isMintable)) {
+      return "Token supply was locked on-chain while this update was in flight; re-fetch and retry";
+    }
+    if (after.totalSupply !== before.totalSupply) {
+      return "Token supply changed while this update was in flight; re-fetch and retry";
+    }
+    return "Token changed while this update was in flight; re-fetch and retry";
   }
 
   /**
@@ -1137,68 +1291,245 @@ export class TokenService {
     return updated;
   }
 
+  /**
+   * Count a mint against the cap, atomically, before it can reach the chain —
+   * executed mints at the moment of submission, prepared mints before the
+   * serialized transaction is handed to the client.
+   *
+   * This — not the handler's read of a cached total — is where the cap is
+   * enforced. Two requests that each check a cached supply in their own process
+   * both pass and both land; two conditional UPDATEs against the same row cannot,
+   * because the row lock serializes them and the second one adds to what the first
+   * committed. A cap change touches the same row, so it serializes here too: it
+   * either lands first (and this reservation fails against the lower cap) or
+   * second (and it fails its own "not below the minted supply" check). The
+   * recorded supply can no longer end up above the persisted cap.
+   *
+   * The reservation *is* the count: nothing adds to it when the transaction
+   * settles, and nothing hands it back when the send fails — a send can fail
+   * ambiguously, and giving the headroom back to a transaction that lands anyway is
+   * how two mints end up above the cap. Only `setSupplyFromBaseUnits`, reading the
+   * mint account itself, lowers the record, and only once the mint can no longer
+   * land.
+   *
+   * @returns the recorded supply after reserving, or null if the cap refused it.
+   */
+  async reserveMintSupply(tokenId: string, deltaBaseUnits: string): Promise<string | null> {
+    const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
+    const row = await this.db
+      .prepare(
+        `UPDATE issued_tokens
+         SET total_supply_cached = (COALESCE(total_supply_cached, '0')::numeric + ?::numeric)::text,
+             total_supply_updated_at = ?,
+             updated_at = ?
+         WHERE id = ?${tenant.clause}
+           AND (max_supply IS NULL
+                OR COALESCE(total_supply_cached, '0')::numeric + ?::numeric <= max_supply::numeric)
+         RETURNING total_supply_cached`
+      )
+      .bind(deltaBaseUnits, now, now, tokenId, ...tenant.values, deltaBaseUnits)
+      .first<{ total_supply_cached: string }>();
+    return row?.total_supply_cached ?? null;
+  }
+
+  /**
+   * Record a supply change that has already settled on-chain — today, a burn.
+   *
+   * A cache write, not an admission check: the balance is enforced against the
+   * authority's token account before the burn is sent, and re-checking a cached
+   * total here could only report a settled burn as failed or leave the cache
+   * ahead of the chain. Mints do not come through here at all; they are counted by
+   * `reserveMintSupply` before they can reach the chain, because a cap cannot be
+   * enforced after the fact — SPL has no cap of its own and a settled mint cannot
+   * be taken back.
+   */
   async updateSupply(tokenId: string, delta: string, operation: "mint" | "burn"): Promise<void> {
     const token = await this._getTokenById(tokenId);
     if (!token) {
       throw new Error("TOKEN_NOT_FOUND");
     }
 
-    const currentSupply = parseDecimalAmount(token.totalSupply, token.decimals);
-    const deltaAmount = parseDecimalAmount(delta, token.decimals);
-    let newSupply: bigint;
+    const deltaBaseUnits = parseDecimalAmount(delta, token.decimals).toString();
+    await this._applySupplyDelta(
+      tokenId,
+      deltaBaseUnits,
+      operation === "mint" ? "add" : "subtract"
+    );
+  }
 
-    if (operation === "mint") {
-      newSupply = currentSupply + deltaAmount;
-
-      // Check max supply
-      if (token.maxSupply) {
-        const maxSupply = parseDecimalAmount(token.maxSupply, token.decimals);
-        if (newSupply > maxSupply) {
-          throw new Error("MAX_SUPPLY_EXCEEDED");
-        }
-      }
-    } else {
-      newSupply = currentSupply - deltaAmount;
-      if (newSupply < 0n) {
-        throw new Error("INSUFFICIENT_SUPPLY");
-      }
-    }
-
+  /**
+   * Move the cached supply by a base-unit delta, in one statement.
+   *
+   * The arithmetic belongs in SQL. Reading the total, changing it in memory and
+   * writing the sum back lost one of every concurrent pair — and the cache then
+   * stayed short for good, which let admission pass mints the cap should have
+   * refused. One UPDATE takes the row lock, so each change applies to whatever the
+   * other left behind. Subtraction clamps at zero rather than recording a negative
+   * supply: the operation happened, and a cache that was already behind reality is
+   * not a reason to write nonsense.
+   */
+  private async _applySupplyDelta(
+    tokenId: string,
+    deltaBaseUnits: string,
+    direction: "add" | "subtract"
+  ): Promise<void> {
+    const expression =
+      direction === "add"
+        ? "(COALESCE(total_supply_cached, '0')::numeric + ?::numeric)::text"
+        : "GREATEST(COALESCE(total_supply_cached, '0')::numeric - ?::numeric, 0)::text";
     const now = new Date().toISOString();
     const tenant = this.tenantMutationScope();
     await this.db
       .prepare(
         `UPDATE issued_tokens
-         SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ?
+         SET total_supply_cached = ${expression},
+             total_supply_updated_at = ?,
+             updated_at = ?
          WHERE id = ?${tenant.clause}`
       )
-      .bind(newSupply.toString(), now, now, tokenId, ...tenant.values)
+      .bind(deltaBaseUnits, now, now, tokenId, ...tenant.values)
       .run();
   }
 
+  /**
+   * Reconcile the recorded supply against what the mint itself reports.
+   *
+   * The chain is the authority on what has settled — but not on what is about to.
+   * A mint SDP admits is counted before it can reach the chain
+   * (`reserveMintSupply`) and the mint account will not show it until it lands, so
+   * overwriting inside that window put the record back below the reservation and
+   * handed the same headroom to the next mint: both then settled, together above
+   * the cap.
+   *
+   * What that protects is a quantity, not a flag. The floor a refresh must respect
+   * is the on-chain total plus what the mints that could still land could still
+   * add — each unsettled mint row carries its amount — and the record may come
+   * down to that floor at once. A hold that only asked "is anything in flight?"
+   * kept everything above the floor too, and on a busy token the window never
+   * reopened: reservations whose transactions had expired unsubmittable leaked
+   * forever, until the cap refused mints for supply that did not exist. Upward is
+   * never held — an on-chain total above the record came from outside SDP and has
+   * to start refusing mints at once. One statement, so a mint cannot start between
+   * the check and the write.
+   *
+   * "Could still land" deliberately includes mints recorded as failed: a send that
+   * fails ambiguously (a timeout on a transaction the cluster accepted anyway) keeps
+   * its reservation because nobody can yet say otherwise, and the age bound is what
+   * finally settles it — after which this reads the answer off the chain. A mint
+   * that already landed counts twice for the length of the window (once in the
+   * chain total, once as its row); the floor is deliberately an upper bound, and
+   * the excess falls away as rows settle or age out.
+   */
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
       throw new Error("INVALID_SUPPLY");
     }
 
     const now = new Date().toISOString();
-    const tenant = this.tenantMutationScope();
-    const rowsAffected = await this.db
+    const tenantRead = this.tenantTokenScope("tok");
+    const tenantWrite = this.tenantTokenScope("issued_tokens");
+    const since = new Date(Date.now() - MINT_IN_FLIGHT_WINDOW_MS).toISOString();
+    const applied = await this.db
       .prepare(
-        `UPDATE issued_tokens
-         SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ?
-         WHERE id = ?${tenant.clause}`
+        `WITH live AS (
+           SELECT COALESCE(SUM(CASE
+             WHEN t.operation_params::jsonb ->> 'amount' ~ '^\\d+(\\.\\d+)?$'
+               THEN trunc(
+                 (t.operation_params::jsonb ->> 'amount')::numeric
+                   * (10::numeric ^ tok.decimals),
+                 0
+               )
+             ELSE 0
+           END), 0) AS reserved
+           FROM issuance_transactions t
+           JOIN issued_tokens tok ON tok.id = t.token_id
+           WHERE t.token_id = ? AND t.type = 'mint'
+             AND t.status IN ('pending', 'processing', 'failed')
+             AND t.updated_at >= ?
+         ),
+         resolved AS (
+           SELECT
+             GREATEST(
+               ?::numeric,
+               LEAST(
+                 COALESCE(tok.total_supply_cached, '0')::numeric,
+                 ?::numeric + live.reserved
+               )
+             ) AS supply,
+             live.reserved AS reserved
+           FROM issued_tokens tok, live
+           WHERE tok.id = ?${tenantRead.clause}
+         )
+         UPDATE issued_tokens
+         SET total_supply_cached = resolved.supply::text,
+             total_supply_updated_at = CASE
+               WHEN resolved.supply = ?::numeric THEN ?
+               ELSE issued_tokens.total_supply_updated_at
+             END,
+             updated_at = ?
+         FROM resolved
+         WHERE issued_tokens.id = ?${tenantWrite.clause}
+         RETURNING issued_tokens.total_supply_cached, resolved.reserved::text AS live_reserved`
       )
-      .bind(supplyBaseUnits, now, now, tokenId, ...tenant.values)
-      .run();
+      .bind(
+        tokenId,
+        since,
+        supplyBaseUnits,
+        supplyBaseUnits,
+        tokenId,
+        ...tenantRead.values,
+        supplyBaseUnits,
+        now,
+        now,
+        tokenId,
+        ...tenantWrite.values
+      )
+      .first<{ total_supply_cached: string; live_reserved: string }>();
 
-    if (rowsAffected === 0) {
+    if (!applied) {
       throw new Error("TOKEN_NOT_FOUND");
     }
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
+    }
+
+    // Held above the reading, so the figure on screen is SDP's own count and its
+    // "as of" stamp stays where it was — the next refresh past the window is what
+    // finishes the reconciliation.
+    if (applied && applied.total_supply_cached !== supplyBaseUnits) {
+      getLogger().warn(
+        {
+          event: "token_supply_refresh_deferred",
+          tokenId,
+          onChainSupplyBaseUnits: supplyBaseUnits,
+          recordedSupplyBaseUnits: applied.total_supply_cached,
+          liveReservedBaseUnits: applied.live_reserved,
+        },
+        "SDP's recorded supply is above the on-chain total by what in-flight mints could still add; kept the difference so no reservation is handed out twice. Refresh again once they settle."
+      );
+    }
+
+    // Reservations keep SDP's own mints under the cap, so a total above it means
+    // supply came from somewhere SDP does not admit — a mint authority used
+    // outside the platform.
+    // Worth saying out loud: the only other trace is a supply figure quietly larger
+    // than the cap beside it, and no further mints will be admitted.
+    if (updated.maxSupply) {
+      const maxSupply = parseDecimalAmount(updated.maxSupply, updated.decimals);
+      if (BigInt(supplyBaseUnits) > maxSupply) {
+        getLogger().warn(
+          {
+            event: "token_supply_exceeds_max_supply",
+            tokenId,
+            onChainSupplyBaseUnits: supplyBaseUnits,
+            maxSupplyBaseUnits: maxSupply.toString(),
+          },
+          "On-chain supply is above the token's configured max supply; it was not minted through SDP's cap. No further mints are admitted until the cap is raised."
+        );
+      }
     }
 
     return updated;
@@ -1359,6 +1690,11 @@ export class TokenService {
     if (input.error !== undefined) {
       updates.push("error = ?");
       values.push(input.error);
+    }
+
+    if (input.serializedTx !== undefined) {
+      updates.push("serialized_tx = ?");
+      values.push(input.serializedTx);
     }
 
     if (input.params !== undefined) {

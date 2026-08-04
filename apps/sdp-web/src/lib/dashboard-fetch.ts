@@ -3,7 +3,7 @@ export type DashboardFetchResult<T> =
   | { ok: false; error: string; status: number | null; body: unknown };
 
 interface DashboardFetchOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   signal?: AbortSignal;
 }
