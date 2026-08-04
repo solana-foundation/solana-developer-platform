@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.54.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.53.0...v0.54.0) (2026-08-04)
+
+### Features
+
+* **i18n:** add per-locale translation context ([#1074](https://github.com/solana-foundation/solana-developer-platform/pull/1074)) ([1ec2837](https://github.com/solana-foundation/solana-developer-platform/commit/1ec283769f235b64cb0dcd323ecfac6b2eb244f1))
+* **sdp-web:** open policy revision history in a drawer ([#1071](https://github.com/solana-foundation/solana-developer-platform/pull/1071)) ([3c44fa9](https://github.com/solana-foundation/solana-developer-platform/commit/3c44fa9530950986c4f47dbea263bc72bf5afb0d))
+* HOO-770 Check Privy connection and provision wallet ([#1040](https://github.com/solana-foundation/solana-developer-platform/pull/1040)) ([f0e6dff](https://github.com/solana-foundation/solana-developer-platform/commit/f0e6dff23cdc11d19ffb289966301df4fe799519))
+
+### Documentation
+
+* correct public API endpoint URL in @sdp/types README ([#1062](https://github.com/solana-foundation/solana-developer-platform/pull/1062)) ([430788e](https://github.com/solana-foundation/solana-developer-platform/commit/430788ea28dda06b7b7859651ead3416e9663793))
+
+### Maintenance
+
+* **deps:** bump hono from 4.12.29 to 4.12.34 ([#1068](https://github.com/solana-foundation/solana-developer-platform/pull/1068)) ([246a9fc](https://github.com/solana-foundation/solana-developer-platform/commit/246a9fca52f5d85964e4817220a1938a215f3fdb))
+
 ## [0.53.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.52.0...v0.53.0) (2026-08-04)
 
 ### Features
