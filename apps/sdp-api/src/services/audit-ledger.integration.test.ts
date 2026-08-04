@@ -104,6 +104,11 @@ describe("tamper-evident audit ledger", () => {
   });
 
   it("repairs an exact post-commit checkpoint lag before the next write", async () => {
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "checkpointed_predecessor",
+    });
     checkpoint.rejectNextCompareAndSet();
     await expect(
       audit.logSystem({
@@ -122,9 +127,31 @@ describe("tamper-evident audit ledger", () => {
     ).resolves.toBeUndefined();
     await expect(audit.verifyIntegrity()).resolves.toMatchObject({
       valid: true,
-      checkedEntries: 2,
+      checkedEntries: 3,
       externalCheckpointMatches: true,
     });
+  });
+
+  it("does not recreate a missing checkpoint from sequence one", async () => {
+    checkpoint.rejectNextCompareAndSet();
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "unanchored_first_row",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "must_not_adopt_first_row",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+    expect(
+      await db.queryOne<{ count: number }>("SELECT count(*)::integer AS count FROM audit_logs")
+    ).toMatchObject({ count: 1 });
   });
 
   it("blocks update and delete, including for records past retention review", async () => {

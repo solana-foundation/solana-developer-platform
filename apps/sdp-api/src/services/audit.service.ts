@@ -170,7 +170,12 @@ function checkpointForHead(head: AuditLedgerHead | null): string | null {
 }
 
 function previousCheckpointForHead(head: AuditLedgerHead): string | null | undefined {
-  if (head.ledger_sequence === 1) return null;
+  // A missing external checkpoint is ambiguous for a non-empty ledger: it can
+  // mean either a first-row post-commit crash or deletion of Redis plus every
+  // PostgreSQL suffix after sequence one. Runtime code must never establish
+  // trust from PostgreSQL alone; first-time bootstrap is an explicit operator
+  // action with a separately approved head.
+  if (head.ledger_sequence === 1) return undefined;
   if (!head.previous_entry_hash) return undefined;
   return serializeCheckpoint({
     sequence: head.ledger_sequence - 1,

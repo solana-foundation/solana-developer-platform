@@ -45,13 +45,13 @@ function usage() {
   return `Usage:
   pnpm --filter @sdp/api audit:ledger verify
   pnpm --filter @sdp/api audit:ledger checkpoint --operator <identity> --reason <reason> [--ticket <id>]
+  pnpm --filter @sdp/api audit:ledger bootstrap --expected-sequence <n> --expected-head-hash <sha256> --operator <identity> --reason <reason> [--ticket <id>]
 
 DATABASE_URL and REDIS_URL must identify the ordinary API runtime stores, not admin connections.`;
 }
 
-function parseOptions(args) {
+function parseOptions(args, allowed) {
   const values = {};
-  const allowed = new Set(["operator", "reason", "ticket"]);
   for (let index = 0; index < args.length; index += 2) {
     const option = args[index];
     const value = args[index + 1];
@@ -67,8 +67,11 @@ function parseOptions(args) {
   return values;
 }
 
-async function inspect(client, redis) {
-  const externalCheckpoint = await redis.get(EXTERNAL_CHECKPOINT_KEY);
+async function inspect(client, redis, approvedCheckpoint) {
+  const externalCheckpoint =
+    approvedCheckpoint === undefined
+      ? await redis.get(EXTERNAL_CHECKPOINT_KEY)
+      : approvedCheckpoint;
   const parsedCheckpoint = parseCheckpoint(externalCheckpoint);
   const integrity = await client.query(
     `
@@ -155,17 +158,6 @@ async function inspect(client, redis) {
   };
 }
 
-async function initializeExternalCheckpoint(redis, report) {
-  if (report.externalCheckpointMatches) return;
-  if (report.externalCheckpoint !== null || report.expectedCheckpoint === null) {
-    throw new Error("Refusing to overwrite a divergent external audit-ledger checkpoint");
-  }
-  const initialized = await redis.set(EXTERNAL_CHECKPOINT_KEY, report.expectedCheckpoint, "NX");
-  if (initialized !== "OK") {
-    throw new Error("External audit-ledger checkpoint changed during initialization");
-  }
-}
-
 async function appendCheckpoint(client, redis, options) {
   // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
   await client.query("SELECT pg_advisory_lock(hashtext($1))", [AUDIT_LEDGER_SESSION_LOCK_KEY]);
@@ -177,8 +169,6 @@ async function appendCheckpoint(client, redis, options) {
         "Refusing to checkpoint an invalid ledger or through an unsafe database role"
       );
     }
-    await initializeExternalCheckpoint(redis, before);
-
     await client.query("BEGIN");
     transactionOpen = true;
     const inserted = await client.query(
@@ -236,9 +226,55 @@ async function appendCheckpoint(client, redis, options) {
   }
 }
 
+async function bootstrapExternalCheckpoint(client, redis, options) {
+  if (!/^\d+$/.test(options.expectedSequence ?? "")) {
+    throw new Error("bootstrap requires a positive decimal --expected-sequence");
+  }
+  const expectedSequence = Number(options.expectedSequence);
+  if (!Number.isSafeInteger(expectedSequence) || expectedSequence < 1) {
+    throw new Error("bootstrap --expected-sequence is outside the supported range");
+  }
+  if (!/^[0-9a-f]{64}$/.test(options.expectedHeadHash ?? "")) {
+    throw new Error("bootstrap requires a lowercase SHA-256 --expected-head-hash");
+  }
+
+  const approvedCheckpoint = serializeCheckpoint(expectedSequence, options.expectedHeadHash);
+  // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+  await client.query("SELECT pg_advisory_lock(hashtext($1))", [AUDIT_LEDGER_SESSION_LOCK_KEY]);
+  try {
+    if ((await redis.get(EXTERNAL_CHECKPOINT_KEY)) !== null) {
+      throw new Error("Refusing to bootstrap an audit ledger that already has a checkpoint");
+    }
+    // The expected values are supplied from the protected deployment approval,
+    // never derived here from the database being trusted. Passing them through
+    // the full verifier proves the sealed chain and anchors end at that exact
+    // independently reviewed head.
+    const report = await inspect(client, redis, approvedCheckpoint);
+    if (
+      !report.databaseLedgerValid ||
+      !report.runtimeRoleProtected ||
+      !report.externalCheckpointMatches ||
+      report.checkedEntries !== expectedSequence ||
+      report.headHash !== options.expectedHeadHash
+    ) {
+      throw new Error("Approved bootstrap checkpoint does not match a valid protected ledger");
+    }
+
+    const initialized = await redis.set(EXTERNAL_CHECKPOINT_KEY, approvedCheckpoint, "NX");
+    if (initialized !== "OK") {
+      throw new Error("External audit-ledger checkpoint changed during bootstrap");
+    }
+  } finally {
+    await client
+      // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+      .query("SELECT pg_advisory_unlock(hashtext($1))", [AUDIT_LEDGER_SESSION_LOCK_KEY])
+      .catch(() => {});
+  }
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
-  if (!command || !["verify", "checkpoint"].includes(command)) {
+  if (!command || !["verify", "checkpoint", "bootstrap"].includes(command)) {
     throw new Error(usage());
   }
 
@@ -253,10 +289,24 @@ async function main() {
   await Promise.all([client.connect(), redis.ping()]);
   try {
     if (command === "checkpoint") {
-      const options = parseOptions(args);
+      const options = parseOptions(args, new Set(["operator", "reason", "ticket"]));
       if (!options.operator?.trim() || !options.reason?.trim()) {
         throw new Error(`checkpoint requires --operator and --reason.\n\n${usage()}`);
       }
+      await appendCheckpoint(client, redis, options);
+    } else if (command === "bootstrap") {
+      const options = parseOptions(
+        args,
+        new Set(["operator", "reason", "ticket", "expected-sequence", "expected-head-hash"])
+      );
+      if (!options.operator?.trim() || !options.reason?.trim()) {
+        throw new Error(`bootstrap requires --operator and --reason.\n\n${usage()}`);
+      }
+      await bootstrapExternalCheckpoint(client, redis, {
+        ...options,
+        expectedSequence: options["expected-sequence"],
+        expectedHeadHash: options["expected-head-hash"],
+      });
       await appendCheckpoint(client, redis, options);
     } else if (args.length > 0) {
       throw new Error(`verify does not accept options.\n\n${usage()}`);

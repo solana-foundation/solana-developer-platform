@@ -162,8 +162,9 @@ describe("AuditService", () => {
 
   it("repairs one committed-row lag before admitting the next insert", async () => {
     const { db, queryOne, checkpoint } = createAuditWriter();
-    vi.mocked(checkpoint.compareAndSet).mockResolvedValueOnce(false);
     const audit = new AuditService(db as never, checkpoint);
+    await audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" });
+    vi.mocked(checkpoint.compareAndSet).mockResolvedValueOnce(false);
 
     await expect(
       audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
@@ -172,16 +173,33 @@ describe("AuditService", () => {
       audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
     ).resolves.toBeUndefined();
 
-    expect(insertedCalls(queryOne)).toHaveLength(2);
+    expect(insertedCalls(queryOne)).toHaveLength(3);
     expect(checkpoint.compareAndSet).toHaveBeenNthCalledWith(
-      2,
+      3,
       AUDIT_LEDGER_CHECKPOINT_KEY,
-      null,
-      JSON.stringify({ sequence: 1, headHash: hashForSequence(1) })
-    );
-    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBe(
+      JSON.stringify({ sequence: 1, headHash: hashForSequence(1) }),
       JSON.stringify({ sequence: 2, headHash: hashForSequence(2) })
     );
+    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBe(
+      JSON.stringify({ sequence: 3, headHash: hashForSequence(3) })
+    );
+  });
+
+  it("never adopts sequence one when the external checkpoint is missing", async () => {
+    const { db, queryOne, checkpoint } = createAuditWriter();
+    vi.mocked(checkpoint.compareAndSet).mockResolvedValueOnce(false);
+    const audit = new AuditService(db as never, checkpoint);
+
+    await expect(
+      audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
+    ).rejects.toBeInstanceOf(AuditPersistenceError);
+    await expect(
+      audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
+    ).rejects.toBeInstanceOf(AuditPersistenceError);
+
+    expect(insertedCalls(queryOne)).toHaveLength(1);
+    expect(checkpoint.compareAndSet).toHaveBeenCalledTimes(1);
+    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBeNull();
   });
 
   it("fails closed instead of repairing a checkpoint more than one row behind", async () => {
