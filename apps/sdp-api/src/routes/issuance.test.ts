@@ -3482,6 +3482,80 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("leaves the audit intent unresolved when mint succeeds before bookkeeping fails", async () => {
+        await seedAblListAddress();
+
+        const idempotencyKey = `idem_${crypto.randomUUID()}`;
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
+        const updateSupplySpy = vi
+          .spyOn(TokenService.prototype, "updateSupply")
+          .mockRejectedValueOnce(new Error("supply bookkeeping unavailable"));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                "Idempotency-Key": idempotencyKey,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(500);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+
+          const db = getDb(env);
+          const transaction = await db
+            .prepare(
+              "SELECT id, status FROM issuance_transactions WHERE idempotency_key = ? LIMIT 1"
+            )
+            .bind(idempotencyKey)
+            .first<{ id: string; status: string }>();
+          expect(transaction?.status).toBe("pending");
+
+          const intent = await db
+            .prepare(
+              `SELECT resource_id FROM audit_logs
+               WHERE action = 'maintenance' AND resource_type = 'audit_ledger'
+                 AND metadata::jsonb #>> '{target,resourceId}' = ?
+               ORDER BY ledger_sequence DESC LIMIT 1`
+            )
+            .bind(transaction?.id)
+            .first<{ resource_id: string }>();
+          expect(intent?.resource_id).toMatch(/^aint_/);
+
+          const outcome = await db
+            .prepare(
+              `SELECT id FROM audit_logs
+               WHERE metadata::jsonb ->> 'auditIntentId' = ?
+               LIMIT 1`
+            )
+            .bind(intent?.resource_id)
+            .first<{ id: string }>();
+          expect(outcome).toBeNull();
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+          updateSupplySpy.mockRestore();
+        }
+      });
+
       it("skips on-chain allowlist sync on prepare mint when destination already on list", async () => {
         await seedAblListAddress();
 

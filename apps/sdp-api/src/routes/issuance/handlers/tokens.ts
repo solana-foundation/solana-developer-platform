@@ -243,6 +243,7 @@ export const updateToken = async (c: AppContext) => {
 
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
+  let authoritativeEffectCompleted = false;
 
   try {
     const metadataPatch = getOnChainMetadataPatch(parsed.data);
@@ -290,6 +291,7 @@ export const updateToken = async (c: AppContext) => {
         updateAuthority: signer,
         feePayer: signer,
       });
+      authoritativeEffectCompleted = true;
 
       metadataUpdateSignature = result?.signature ?? null;
       metadataUpdateSlot = result ? result.slot.toString() : null;
@@ -299,6 +301,7 @@ export const updateToken = async (c: AppContext) => {
       status: existing.status,
       mintAddress: existing.mintAddress,
     });
+    authoritativeEffectCompleted = true;
 
     await auditService.completeCritical(c, auditIntent, {
       metadata: {
@@ -311,7 +314,7 @@ export const updateToken = async (c: AppContext) => {
     const response: TokenResponse = { token };
     return success(c, response);
   } catch (error) {
-    if (auditIntent) {
+    if (auditIntent && !authoritativeEffectCompleted) {
       await auditService.completeCritical(c, auditIntent, {
         status: "failure",
         metadata: { error: error instanceof Error ? error.message : "Unknown error" },

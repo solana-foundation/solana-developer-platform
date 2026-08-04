@@ -446,6 +446,7 @@ export const executeMint = async (c: AppContext) => {
       mode: "execute",
     },
   });
+  let onChainEffectCompleted = false;
 
   try {
     const result = await mosaic.mintTo({
@@ -455,6 +456,7 @@ export const executeMint = async (c: AppContext) => {
       mintAuthority: signer.address,
       feePayer: signer.address,
     });
+    onChainEffectCompleted = true;
 
     // Update transaction with confirmation
     // Update token supply
@@ -481,15 +483,16 @@ export const executeMint = async (c: AppContext) => {
       tokenAccount: result.tokenAccount,
     });
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
-      status: "failure",
-      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
-    });
-    // Update transaction as failed
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
     throw error;
   }
 };

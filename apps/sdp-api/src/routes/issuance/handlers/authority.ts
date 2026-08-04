@@ -265,6 +265,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: { tokenId, role, newAuthority, mode: "execute" },
   });
+  let onChainEffectCompleted = false;
 
   try {
     const result = await mosaic.updateAuthority({
@@ -274,6 +275,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       newAuthority,
       feePayer: signer,
     });
+    onChainEffectCompleted = true;
 
     const updatedTx = await tokenService.updateTransaction(tx.id, {
       status: "confirmed",
@@ -307,14 +309,16 @@ export const executeUpdateAuthority = async (c: AppContext) => {
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
-      status: "failure",
-      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
-    });
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
     throw error;
   }
 };

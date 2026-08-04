@@ -240,6 +240,7 @@ export const executeSeize = async (c: AppContext) => {
       mode: "execute",
     },
   });
+  let onChainEffectCompleted = false;
 
   try {
     const result = await mosaic.forceTransfer({
@@ -250,6 +251,7 @@ export const executeSeize = async (c: AppContext) => {
       permanentDelegate: signer,
       feePayer: signer,
     });
+    onChainEffectCompleted = true;
 
     const updatedTx = await tokenService.updateTransaction(tx.id, {
       status: "confirmed",
@@ -266,14 +268,16 @@ export const executeSeize = async (c: AppContext) => {
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
-      status: "failure",
-      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
-    });
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
     throw error;
   }
 };

@@ -101,6 +101,7 @@ export const pauseToken = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: { tokenId, mode: "execute" },
   });
+  let onChainEffectCompleted = false;
 
   try {
     const signer = await createOrgSigner(
@@ -120,6 +121,7 @@ export const pauseToken = async (c: AppContext) => {
       pauseAuthority: signer,
       feePayer: signer,
     });
+    onChainEffectCompleted = true;
 
     await tokenService.updateToken(tokenId, { status: "paused" });
     const confirmedTx = await tokenService.updateTransaction(tx.id, {
@@ -137,21 +139,23 @@ export const pauseToken = async (c: AppContext) => {
 
     return success(c, { transaction: confirmedTx });
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
-      status: "failure",
-      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
-    });
-    if (error instanceof Error && error.message === MINT_ALREADY_PAUSED_ERROR) {
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      if (error instanceof Error && error.message === MINT_ALREADY_PAUSED_ERROR) {
+        await tokenService.updateTransaction(tx.id, {
+          status: "failed",
+          error: error.message,
+        });
+        throw badRequest("Token is already paused");
+      }
       await tokenService.updateTransaction(tx.id, {
         status: "failed",
-        error: error.message,
+        error: error instanceof Error ? error.message : "Unknown error",
       });
-      throw badRequest("Token is already paused");
     }
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
     throw error;
   }
 };
@@ -229,6 +233,7 @@ export const unpauseToken = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: { tokenId, mode: "execute" },
   });
+  let onChainEffectCompleted = false;
 
   try {
     const signer = await createOrgSigner(
@@ -248,6 +253,7 @@ export const unpauseToken = async (c: AppContext) => {
       pauseAuthority: signer,
       feePayer: signer,
     });
+    onChainEffectCompleted = true;
 
     await tokenService.updateToken(tokenId, { status: "active" });
     const confirmedTx = await tokenService.updateTransaction(tx.id, {
@@ -265,21 +271,23 @@ export const unpauseToken = async (c: AppContext) => {
 
     return success(c, { transaction: confirmedTx });
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
-      status: "failure",
-      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
-    });
-    if (error instanceof Error && error.message === MINT_NOT_PAUSED_ERROR) {
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      if (error instanceof Error && error.message === MINT_NOT_PAUSED_ERROR) {
+        await tokenService.updateTransaction(tx.id, {
+          status: "failed",
+          error: error.message,
+        });
+        throw badRequest("Token is not paused");
+      }
       await tokenService.updateTransaction(tx.id, {
         status: "failed",
-        error: error.message,
+        error: error instanceof Error ? error.message : "Unknown error",
       });
-      throw badRequest("Token is not paused");
     }
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
     throw error;
   }
 };

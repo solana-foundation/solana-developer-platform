@@ -321,6 +321,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
       mode: token.ablListAddress ? "on-chain" : "database",
     },
   });
+  let authoritativeEffectCompleted = false;
 
   try {
     // For on-chain lists, confirm authoritative removal before publishing the
@@ -336,17 +337,21 @@ export const removeAllowlistEntry = async (c: AppContext) => {
         list: assertValidAddress(token.ablListAddress, "ablListAddress"),
         wallet: assertValidAddress(entry.address, "address"),
       });
+      authoritativeEffectCompleted = true;
     }
 
     await tokenService.revokeAllowlistEntry(entryId);
+    authoritativeEffectCompleted = true;
     await auditService.completeCritical(c, auditIntent);
 
     return noContent(c);
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
-      status: "failure",
-      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
-    });
+    if (!authoritativeEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+    }
     throw error;
   }
 };

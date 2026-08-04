@@ -243,12 +243,14 @@ export const freezeAccount = async (c: AppContext) => {
       reason: parsed.data.reason,
     },
   });
+  let onChainEffectCompleted = false;
 
   try {
     const result = await mosaic.freezeAccount({
       tokenAccount,
       feePayer: signer.address,
     });
+    onChainEffectCompleted = true;
 
     // Record in database after successful on-chain operation
     const frozenAccount = await tokenService.freezeAccount({
@@ -289,25 +291,27 @@ export const freezeAccount = async (c: AppContext) => {
     };
     return created(c, response);
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
-      status: "failure",
-      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
-    });
-    if (error instanceof Error && error.message === "ACCOUNT_ALREADY_FROZEN") {
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      if (error instanceof Error && error.message === "ACCOUNT_ALREADY_FROZEN") {
+        await tokenService.updateTransaction(tx.id, {
+          status: "failed",
+          error: error.message,
+        });
+        throw new AppError("ACCOUNT_FROZEN", "Account is already frozen");
+      }
+
+      const mappedError = toFreezeOperationAppError(error, accessControlMode);
       await tokenService.updateTransaction(tx.id, {
         status: "failed",
-        error: error.message,
+        error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
       });
-      throw new AppError("ACCOUNT_FROZEN", "Account is already frozen");
-    }
-
-    const mappedError = toFreezeOperationAppError(error, accessControlMode);
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
-    });
-    if (mappedError) {
-      throw mappedError;
+      if (mappedError) {
+        throw mappedError;
+      }
     }
     throw error;
   }
@@ -455,12 +459,14 @@ export const unfreezeAccount = async (c: AppContext) => {
       tokenAccountAddress: tokenAccount,
     },
   });
+  let onChainEffectCompleted = false;
 
   try {
     const result = await mosaic.thawAccount({
       tokenAccount,
       feePayer: signer.address,
     });
+    onChainEffectCompleted = true;
 
     // Update database record after successful on-chain operation
     const frozenAccount = await tokenService.unfreezeAccount(tokenId, tokenAccount, auth.id);
@@ -488,25 +494,27 @@ export const unfreezeAccount = async (c: AppContext) => {
     };
     return success(c, response);
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
-      status: "failure",
-      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
-    });
-    if (error instanceof Error && error.message === "ACCOUNT_NOT_FROZEN") {
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      if (error instanceof Error && error.message === "ACCOUNT_NOT_FROZEN") {
+        await tokenService.updateTransaction(tx.id, {
+          status: "failed",
+          error: error.message,
+        });
+        throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
+      }
+
+      const mappedError = toFreezeOperationAppError(error, accessControlMode);
       await tokenService.updateTransaction(tx.id, {
         status: "failed",
-        error: error.message,
+        error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
       });
-      throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
-    }
-
-    const mappedError = toFreezeOperationAppError(error, accessControlMode);
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
-    });
-    if (mappedError) {
-      throw mappedError;
+      if (mappedError) {
+        throw mappedError;
+      }
     }
     throw error;
   }

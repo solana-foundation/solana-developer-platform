@@ -310,6 +310,7 @@ export const executeBurn = async (c: AppContext) => {
       mode: "execute",
     },
   });
+  let onChainEffectCompleted = false;
   try {
     // Get custody signer (via 3-tier resolution)
     const signer = await createOrgSigner(
@@ -336,6 +337,7 @@ export const executeBurn = async (c: AppContext) => {
       amount: mosaicAmount,
       authority: signer,
     });
+    onChainEffectCompleted = true;
 
     // Update transaction with confirmation
     const updatedTx = await tokenService.updateTransaction(tx.id, {
@@ -356,21 +358,22 @@ export const executeBurn = async (c: AppContext) => {
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
-      status: "failure",
-      metadata: {
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: {
+          error:
+            toBurnOperationAppError(error)?.message ??
+            (error instanceof Error ? error.message : "Unknown error"),
+        },
+      });
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
         error:
           toBurnOperationAppError(error)?.message ??
           (error instanceof Error ? error.message : "Unknown error"),
-      },
-    });
-    // Update transaction as failed
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error:
-        toBurnOperationAppError(error)?.message ??
-        (error instanceof Error ? error.message : "Unknown error"),
-    });
+      });
+    }
 
     const appError = toBurnOperationAppError(error);
     if (appError) {
