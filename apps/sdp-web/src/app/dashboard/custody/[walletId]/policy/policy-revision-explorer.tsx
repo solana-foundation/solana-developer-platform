@@ -436,7 +436,12 @@ function RawDataDetails({
         {open ? (
           <HeightReveal key="raw-rule-data">
             <div className="pt-3">
-              <JsonCodeBlock value={value} title={filename} viewportClassName="max-h-96" />
+              <JsonCodeBlock
+                value={value}
+                title={filename}
+                className="border border-border-subtle shadow-none"
+                viewportClassName="max-h-96"
+              />
             </div>
           </HeightReveal>
         ) : null}
