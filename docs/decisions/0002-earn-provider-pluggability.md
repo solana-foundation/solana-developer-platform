@@ -68,9 +68,10 @@ Independent switches, all runtime-safe:
   organization requires an explicit `providerOverrides.earn.<id>` (manual
   activation), unlike ramps which are on by default.
 - **Strategy status:** `active | paused | deprecated` gates individual
-  strategies without touching the provider. Catalogue sync re-asserts
-  `active` for references the provider still lists, so the durable removal
-  path is provider delisting — see the playbook's vault checklist.
+  strategies without touching the provider, and an operator stop is durable —
+  catalogue sync cannot overwrite `paused`/`deprecated`, so an emergency pause
+  holds until the status is deliberately written back. See the playbook's vault
+  checklist.
 - **Feature flag:** the whole `/v1/earn` family sits behind `EARN_ENABLED`.
 
 ### Invariants that make disabling safe
@@ -98,7 +99,7 @@ Independent switches, all runtime-safe:
   reads untouched, and requires no deploy.
 - Deviation to note: the strategy catalogue is platform-global (carries an
   `environment` column) rather than org/project-scoped — see the header of
-  migration `0034_earn.sql`.
+  migration `0048_earn.sql`.
 
 ## Addendum — 2026-08-03 backend hardening
 
@@ -147,7 +148,7 @@ capability slots in without burdening providers that lack it.
   — zero added lift, per the original decision.
 - **Shared-wallet-per-org model.** One provider wallet per
   `(organization, environment, provider)` — DB-enforced by the unique
-  constraint in migration `0035_earn_provider_wallets.sql` and read/written
+  constraint in migration `0049_earn_provider_wallets.sql` and read/written
   through `EarnRepository.getProviderWallet`/`insertProviderWallet`.
   Choosing a curator applies preset weights to the shared wallet's strategy
   (create on first use, `updatePortfolioStrategy` afterwards); positions are

@@ -239,10 +239,13 @@ Two things write `earn_strategies`, and only one of them is a production path.
   sinks the others.
 - **Adding a provider needs no cron change** — it is registry-driven.
 - **To change cadence:** edit `EARN_CATALOGUE_SYNC_CRON`.
-- **Known limitations:** the sync re-asserts `status = 'active'` for any row the
-  provider still lists, so a hand-paused-but-still-listed strategy reverts on the
-  next pass; and rows a provider *delists* keep their last status (there is no
-  deactivation-of-missing-rows pass yet).
+- **An operator stop outranks the sync.** The upsert never overwrites a
+  `paused`/`deprecated` status, so an emergency pause holds until someone writes
+  the status back to `active` — a sync pass can no longer resurrect it. Metadata
+  and rates keep converging while the row is closed.
+- **Known limitation:** rows a provider *delists* keep their last status (there
+  is no deactivation-of-missing-rows pass yet), so a vault that silently
+  disappears from a provider's catalogue stays `active` until someone acts.
 
 ### The dev seed — local development only
 

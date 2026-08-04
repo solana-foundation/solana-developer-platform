@@ -21,7 +21,7 @@ const OTHER_PROJECT_ID = "prj_earn_repo_test_other";
 const TEST_WALLET_ID = "wlt_earn_repo_test";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 // Bulk catalogue syncs land many rows on one sdp_iso_now() value, so every
-// list ORDER BY carries an id tiebreaker (see 0034_earn.sql). Pinning
+// list ORDER BY carries an id tiebreaker (see 0048_earn.sql). Pinning
 // created_at reproduces that case deterministically.
 const SHARED_CREATED_AT = "2026-01-01T00:00:00.000Z";
 
@@ -169,6 +169,43 @@ describe("EarnRepository (postgres)", () => {
       expect(row.risk_metadata).toEqual({ curator: "gauntlet" });
       expect(row.status).toBe("active");
       expect(row.environment).toBe("sandbox");
+    });
+
+    it("keeps an operator pause when the sync re-upserts the source as active", async () => {
+      // The hourly catalogue sync always upserts `active` for anything the
+      // provider still lists. An emergency pause has to survive that, or it
+      // silently expires within the hour and deposits resume into a strategy
+      // stopped for an exploit or depeg.
+      await seedStrategy();
+      await repo.upsertStrategy(strategyInput({ status: "paused" }));
+
+      const resynced = await repo.upsertStrategy(
+        strategyInput({ name: "USDC Prime Vault v3", currentApy: "0.072", status: "active" })
+      );
+
+      expect(resynced?.status).toBe("paused");
+      // Metadata and rates still flow — only the status is protected.
+      expect(resynced?.name).toBe("USDC Prime Vault v3");
+      expect(resynced?.current_apy).toBe("0.072");
+    });
+
+    it("keeps a deprecation when the sync re-upserts the source as active", async () => {
+      await seedStrategy();
+      await repo.upsertStrategy(strategyInput({ status: "deprecated" }));
+
+      const resynced = await repo.upsertStrategy(strategyInput({ status: "active" }));
+
+      expect(resynced?.status).toBe("deprecated");
+    });
+
+    it("still lets the sync move an active source into a non-active status", async () => {
+      // Only paused/deprecated are sticky; the provider can still take a
+      // healthy row out of service.
+      await seedStrategy();
+
+      const resynced = await repo.upsertStrategy(strategyInput({ status: "paused" }));
+
+      expect(resynced?.status).toBe("paused");
     });
 
     it("updates in place on (provider, provider_reference, environment) with a stable id", async () => {

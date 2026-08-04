@@ -106,7 +106,7 @@ export interface EarnNavSnapshotRow {
 /**
  * Link to the ONE provider-managed wallet an organization shares per
  * environment (UNIQUE (organization_id, environment, provider) in
- * 0035_earn_provider_wallets.sql). project_id records the provisioning
+ * 0049_earn_provider_wallets.sql). project_id records the provisioning
  * project only — it is not part of the wallet's scope.
  */
 export interface EarnProviderWalletRow {

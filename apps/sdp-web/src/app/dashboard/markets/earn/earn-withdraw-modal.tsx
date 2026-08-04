@@ -248,8 +248,6 @@ export function EarnWithdrawModal({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [created, setCreated] = useState<EarnPortfolioWithdrawal | null>(null);
-  // Minted once per modal open: a retried confirm can never double-withdraw.
-  const [requestId] = useState(() => crypto.randomUUID());
 
   const withdrawable = Number(balance.withdrawableUsd);
   const amount = amountInput.trim();
@@ -257,6 +255,26 @@ export function EarnWithdrawModal({
   const amountValid = amountShapeValid && Number(amount) <= withdrawable;
   const destination = destinationInput.trim();
   const destinationValid = SOLANA_ADDRESS_PATTERN.test(destination);
+
+  /**
+   * The idempotency key identifies ONE intended withdrawal, so it is bound to
+   * the parameters that define it. Retrying an unchanged confirm reuses the key
+   * (the provider collapses the duplicate instead of paying twice); editing the
+   * amount, token, or destination after a failed attempt mints a new key, so a
+   * corrected withdrawal can never be answered with the cached result of the
+   * one the user just fixed — which would settle funds to the old address while
+   * reporting success.
+   *
+   * A ref, not `useMemo`: React may discard a memo cache and recompute, which
+   * would hand the same parameters a fresh key and reintroduce the
+   * double-withdraw risk on retry.
+   */
+  const requestSignature = `${amount}|${token}|${destination}`;
+  const requestRef = useRef<{ signature: string; id: string } | null>(null);
+  if (requestRef.current?.signature !== requestSignature) {
+    requestRef.current = { signature: requestSignature, id: crypto.randomUUID() };
+  }
+  const requestId = requestRef.current.id;
 
   useEffect(() => {
     if (submitting) contentRef.current?.focus();

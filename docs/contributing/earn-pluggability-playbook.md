@@ -34,7 +34,7 @@ longer reporting it.
 
 `source_kind`, `apy_type`, and `liquidity_term` are open TEXT in Postgres
 with no CHECK constraint, and deposit mints ride in a JSONB array (see the
-header of migration `apps/sdp-api/src/db/migrations/postgres/0034_earn.sql`);
+header of migration `apps/sdp-api/src/db/migrations/postgres/0048_earn.sql`);
 the closed unions live in code, per the ADR 0001 asset-profiles pattern.
 
 1. Add the value to the matching const array in
@@ -94,9 +94,11 @@ sync uses, so seeded rows behave exactly like synced ones; it is idempotent
 on the `seed-demo-` provider-reference prefix.
 
 **Update.** Sync-owned fields (name, APY, mints, risk metadata, ...) converge
-on the next run; manual edits to those columns get overwritten. That includes
-`status`: every pass re-asserts `active` for references the provider still
-lists — being listed is what makes a strategy depositable.
+on the next run; manual edits to those columns get overwritten. `status` is the
+exception: the upsert refuses to overwrite `paused` or `deprecated`
+(`CASE WHEN earn_strategies.status IN ('paused','deprecated') …` in
+`earn.repository.postgres.ts`), so an operator stop outranks the provider
+catalogue and cannot be undone by a sync pass.
 
 **Remove — flip status, never delete.** `EARN_STRATEGY_STATUSES` is
 `active | paused | deprecated`:
@@ -108,13 +110,14 @@ lists — being listed is what makes a strategy depositable.
 - `deprecated` — terminal wind-down. Same runtime semantics as `paused`;
   the difference is intent (the strategy will not come back).
 
-Because sync re-asserts `active`, the durable removal path is the provider
-delisting the reference first, then flipping the row's status; a manual flip
-while the provider still lists the vault only holds until the next hourly
-pass. For an immediate *and* durable stop while it is still listed, cut
-deposits at the provider gate instead: switch the org entitlement override
-off, or pull the environment credentials (kill switch) — withdrawals continue
-either way.
+Flipping the status is immediate **and** durable, even while the provider still
+lists the vault: the upsert never resurrects a `paused`/`deprecated` row, so an
+emergency stop (exploit, depeg, provider incident) holds until someone
+deliberately writes the status back to `active`. Metadata and rates keep
+converging in the meantime, so the row stays accurate while closed. Wider
+kill switches remain available when a whole provider is suspect: switch the org
+entitlement override off, or pull the environment credentials — withdrawals
+continue either way.
 
 The asymmetry is the ADR 0002 exit-safety invariant — **money out always
 beats money off**: deposits require an *active* strategy plus the full

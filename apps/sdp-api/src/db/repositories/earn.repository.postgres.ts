@@ -188,7 +188,18 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
              liquidity_term = EXCLUDED.liquidity_term,
              redemption_delay_days = EXCLUDED.redemption_delay_days,
              risk_metadata = EXCLUDED.risk_metadata,
-             status = EXCLUDED.status,
+             -- An operator pause/deprecation outranks the provider catalogue.
+             -- The hourly sync always upserts 'active' for anything a provider
+             -- still lists, so overwriting status here would silently unpause a
+             -- strategy stopped for an exploit or depeg within the hour and let
+             -- deposits resume. Reactivation is therefore deliberate: metadata
+             -- and rates keep flowing, but leaving paused/deprecated takes an
+             -- explicit status write, never a sync.
+             status = CASE
+               WHEN earn_strategies.status IN ('paused', 'deprecated')
+                 THEN earn_strategies.status
+               ELSE EXCLUDED.status
+             END,
              updated_at = sdp_iso_now()
            RETURNING *`
         )

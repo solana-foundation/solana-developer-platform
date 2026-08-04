@@ -7,7 +7,7 @@
 -- it never provisions a second wallet.
 --
 -- provider is open TEXT (no CHECK) per the ADR 0001/0002 pattern mirrored in
--- 0034_earn.sql: allowed values live in code registries in @sdp/types and a
+-- 0048_earn.sql: allowed values live in code registries in @sdp/types and a
 -- row can outlive its provider's registry entry.
 --
 -- project_id records which project provisioned the wallet (audit/context);
