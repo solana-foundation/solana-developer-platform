@@ -590,7 +590,12 @@ export function TransactionsWorkspace({
               >
                 {t("DashboardPayments.transactions.filters")}
                 {advancedFilterCount > 0 ? (
-                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[11px] text-white">
+                  // `text-white` against `bg-primary` is invisible in dark mode:
+                  // primary resolves near-white there, so the count vanished into
+                  // its own pill. `on-primary` is the paired token and flips with
+                  // the theme. Sized as a circle rather than padded, so a single
+                  // digit is not an oval.
+                  <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[11px] font-medium text-on-primary tabular-nums">
                     {advancedFilterCount}
                   </span>
                 ) : null}
