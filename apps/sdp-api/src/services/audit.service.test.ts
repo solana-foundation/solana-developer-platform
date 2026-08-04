@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { KVStore } from "@/runtime/kv";
-import { AuditPersistenceError, AuditService } from "./audit.service";
+import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditPersistenceError, AuditService } from "./audit.service";
 
 function createMemoryCheckpointStore(): KVStore {
   let value: string | null = null;
@@ -22,26 +22,58 @@ function createMemoryCheckpointStore(): KVStore {
   };
 }
 
-function createAuditWriter(options: { failAt?: number; returnNullAt?: number } = {}) {
-  let sequence = 0;
-  const queryOne = vi.fn(async (_query: string, params: readonly unknown[]) => {
-    const attempt = sequence + 1;
+function createAuditWriter(
+  options: { failAt?: number; returnNullAt?: number; commitFailAt?: number } = {}
+) {
+  let committedSequence = 0;
+  let pendingSequence: number | null = null;
+  const queryOne = vi.fn(async (query: string, params: readonly unknown[] = []) => {
+    if (query.includes("FROM audit_logs") && query.includes("ORDER BY ledger_sequence DESC")) {
+      return committedSequence === 0
+        ? null
+        : {
+            ledger_sequence: committedSequence,
+            entry_hash: `hash_${committedSequence}`,
+          };
+    }
+
+    const attempt = committedSequence + 1;
     if (options.failAt === attempt) throw new Error("database unavailable");
     if (options.returnNullAt === attempt) return null;
-    sequence = attempt;
+    pendingSequence = attempt;
     return {
-      ledger_sequence: sequence,
-      previous_entry_hash: sequence === 1 ? null : `hash_${sequence - 1}`,
-      entry_hash: `hash_${sequence}`,
+      ledger_sequence: attempt,
+      previous_entry_hash: attempt === 1 ? null : `hash_${attempt - 1}`,
+      entry_hash: `hash_${attempt}`,
       params,
     };
   });
   const db = {
-    transaction: vi.fn(async (callback: (tx: { queryOne: typeof queryOne }) => Promise<void>) =>
-      callback({ queryOne })
+    lockedTransactionWithPostCommit: vi.fn(
+      async (
+        _lockKey: string,
+        callback: (tx: { queryOne: typeof queryOne }) => Promise<unknown>,
+        afterCommit: (result: unknown) => Promise<void>
+      ) => {
+        pendingSequence = null;
+        const result = await callback({ queryOne });
+        if (pendingSequence !== null && options.commitFailAt === pendingSequence) {
+          pendingSequence = null;
+          throw new Error("commit unavailable");
+        }
+        if (pendingSequence !== null) {
+          committedSequence = pendingSequence;
+          pendingSequence = null;
+        }
+        await afterCommit(result);
+      }
     ),
   };
   return { db, queryOne, checkpoint: createMemoryCheckpointStore() };
+}
+
+function insertedCalls(queryOne: ReturnType<typeof vi.fn>) {
+  return queryOne.mock.calls.filter(([query]) => String(query).includes("INSERT INTO audit_logs"));
 }
 
 describe("AuditService", () => {
@@ -65,7 +97,7 @@ describe("AuditService", () => {
       status: "failure",
     });
 
-    const metadata = String(queryOne.mock.calls[0]?.[1]?.[7]);
+    const metadata = String(insertedCalls(queryOne)[0]?.[1]?.[7]);
     expect(metadata).toContain('"provider":"privy"');
     expect(metadata).toContain('"appSecret":"[REDACTED]"');
     expect(metadata).toContain('"authorization":"[REDACTED]"');
@@ -94,6 +126,35 @@ describe("AuditService", () => {
         resourceType: "audit_ledger",
       })
     ).rejects.toBeInstanceOf(AuditPersistenceError);
+  });
+
+  it("never advances the external checkpoint when the database commit fails", async () => {
+    const { db, checkpoint } = createAuditWriter({ commitFailAt: 1 });
+
+    await expect(
+      new AuditService(db as never, checkpoint).logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+      })
+    ).rejects.toBeInstanceOf(AuditPersistenceError);
+
+    expect(checkpoint.compareAndSet).not.toHaveBeenCalled();
+    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBeNull();
+  });
+
+  it("locks before another insert when the post-commit checkpoint update fails", async () => {
+    const { db, queryOne, checkpoint } = createAuditWriter();
+    vi.mocked(checkpoint.compareAndSet).mockResolvedValueOnce(false);
+    const audit = new AuditService(db as never, checkpoint);
+
+    await expect(
+      audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
+    ).rejects.toBeInstanceOf(AuditPersistenceError);
+    await expect(
+      audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
+    ).rejects.toBeInstanceOf(AuditPersistenceError);
+
+    expect(insertedCalls(queryOne)).toHaveLength(1);
   });
 
   it("maps integrity verification results", async () => {
@@ -142,14 +203,9 @@ describe("AuditService", () => {
       })
     ).resolves.toBe(true);
 
-    const intentMetadata = JSON.parse(String(queryOne.mock.calls[0]?.[1]?.[7])) as Record<
-      string,
-      unknown
-    >;
-    const outcomeMetadata = JSON.parse(String(queryOne.mock.calls[1]?.[1]?.[7])) as Record<
-      string,
-      unknown
-    >;
+    const writes = insertedCalls(queryOne);
+    const intentMetadata = JSON.parse(String(writes[0]?.[1]?.[7])) as Record<string, unknown>;
+    const outcomeMetadata = JSON.parse(String(writes[1]?.[1]?.[7])) as Record<string, unknown>;
     expect(intentMetadata).toMatchObject({
       auditPhase: "intent",
       target: { action: "mint", resourceId: "tx_123" },

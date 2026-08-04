@@ -1,6 +1,6 @@
 # Audit ledger operations
 
-SDP's `audit_logs` table is an append-only, SHA-256-linked security ledger. PostgreSQL seals every request and system-worker event at insertion time, serializes concurrent writers, rejects updates, deletes, and production truncation, and exposes a full-chain verifier. Every sealed row also writes an append-only record to `audit_ledger_anchors`. The API atomically advances a monotonic head checkpoint in Redis before committing the database transaction. Because that checkpoint is outside PostgreSQL's privilege boundary, even a database superuser who consistently shortens both PostgreSQL tables leaves detectable evidence.
+SDP's `audit_logs` table is an append-only, SHA-256-linked security ledger. PostgreSQL seals every request and system-worker event at insertion time, serializes concurrent writers, rejects updates, deletes, and production truncation, and exposes a full-chain verifier. Every sealed row also writes an append-only record to `audit_ledger_anchors`. The API advances a monotonic head checkpoint in Redis only after the database transaction commits. Because that checkpoint is outside PostgreSQL's privilege boundary, even a database superuser who consistently shortens both PostgreSQL tables leaves detectable evidence.
 
 Ordinary required audit writes fail closed. Irreversible issuance operations use two append-only events: a durable intent is required before any provider/on-chain side effect, followed by an outcome. If the outcome write fails after the side effect, the API does not return a misleading retryable failure; the unresolved intent remains durable, emits a structured error, and makes verification fail after a 15-minute reconciliation window.
 
@@ -12,7 +12,7 @@ The API and scheduled workers must connect with a PostgreSQL role that is `NOSUP
 
 Never use the migration/admin credential as `DATABASE_URL` for an API or worker runtime. A superuser or `BYPASSRLS` role is intentionally reported as unsafe by the verification command.
 
-The API and every worker must use the same durable Redis deployment through `REDIS_URL`. Audit writes compare-and-set `cache:audit-ledger:checkpoint:v1` from the previous ledger head to the newly sealed head while the PostgreSQL transaction is still open. A missing, stale, or unexpectedly advanced checkpoint fails closed and rolls the database insert back. Do not delete, expire, or manually rewrite this key.
+The API and every worker must use the same durable Redis deployment through `REDIS_URL`. Compliant writers hold the same PostgreSQL session advisory lock across the database commit and the Redis compare-and-set of `cache:audit-ledger:checkpoint:v1`. The database head must match Redis before insertion, and Redis advances only after the row is durable. A failed database commit therefore never moves Redis. A missing, stale, unexpectedly advanced, or post-commit-unavailable checkpoint fails closed. Do not delete, expire, or manually rewrite this key.
 
 ## Verify and anchor
 
@@ -59,7 +59,7 @@ On a verification failure:
 5. Restore only from a known-good snapshot under an incident record.
 6. Re-run verification, append a post-recovery checkpoint, and rotate any database credential capable of bypassing row security.
 
-If Redis is one sequence ahead after a confirmed PostgreSQL commit failure, keep value-moving operations stopped. Prove that the database row never committed from the transaction logs and snapshot, then restore Redis to the last verified database head under the incident record. Never automatically rewind or reseed a non-missing Redis checkpoint.
+If PostgreSQL is one sequence ahead after a post-commit Redis failure, keep value-moving operations stopped. Preserve the committed row and prove its hash and anchor from the database transaction logs and snapshot, then advance Redis to that exact committed head under the incident record. Never automatically rewind or reseed a non-missing Redis checkpoint.
 
 If `unresolvedCriticalIntents` is nonzero, first reconcile the target transaction from the intent's nested `target` metadata against the issuance transaction record and Solana signature state. Append the missing outcome only after the result is proven. Do not repeat an irreversible operation merely because its outcome record is missing.
 

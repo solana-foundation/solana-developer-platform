@@ -121,6 +121,7 @@ export interface AuditLedgerIntegrity {
 }
 
 export const AUDIT_LEDGER_CHECKPOINT_KEY = "audit-ledger:checkpoint:v1";
+export const AUDIT_LEDGER_SESSION_LOCK_KEY = "sdp:audit-ledger:external-checkpoint";
 
 interface AuditLedgerCheckpoint {
   sequence: number;
@@ -402,59 +403,100 @@ export class AuditService {
     const metadata = entry.metadata ? redactCredentialSecrets(entry.metadata) : null;
 
     try {
-      await this.db.transaction(async (tx) => {
-        const inserted = await tx.queryOne<{
-          ledger_sequence: number;
-          previous_entry_hash: string | null;
-          entry_hash: string;
-        }>(
-          `INSERT INTO audit_logs (
-             id, organization_id, user_id, api_key_id, action, resource_type,
-             resource_id, metadata, ip_address, user_agent, request_id, status
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           RETURNING ledger_sequence,
-                     encode(previous_entry_hash, 'hex') AS previous_entry_hash,
-                     encode(entry_hash, 'hex') AS entry_hash`,
-          [
-            id,
-            actor.organizationId,
-            actor.userId,
-            actor.apiKeyId,
-            entry.action,
-            entry.resourceType,
-            entry.resourceId || null,
-            metadata ? JSON.stringify(metadata) : null,
-            actor.ipAddress,
-            actor.userAgent,
-            actor.requestId,
-            entry.status || "success",
-          ]
-        );
+      const lockedTransactionWithPostCommit = this.db.lockedTransactionWithPostCommit?.bind(
+        this.db
+      );
+      if (!lockedTransactionWithPostCommit) {
+        throw new Error("Database client cannot serialize post-commit audit checkpoints");
+      }
 
-        if (!inserted) {
-          throw new Error("Audit insert returned no sealed row");
-        }
+      await lockedTransactionWithPostCommit(
+        AUDIT_LEDGER_SESSION_LOCK_KEY,
+        async (tx) => {
+          const currentHead = await tx.queryOne<{
+            ledger_sequence: number;
+            entry_hash: string;
+          }>(
+            `SELECT ledger_sequence, encode(entry_hash, 'hex') AS entry_hash
+             FROM audit_logs
+             ORDER BY ledger_sequence DESC
+             LIMIT 1`
+          );
+          const expectedCheckpoint = currentHead
+            ? serializeCheckpoint({
+                sequence: currentHead.ledger_sequence,
+                headHash: currentHead.entry_hash,
+              })
+            : null;
+          const externalCheckpoint = await checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY);
+          if (externalCheckpoint !== expectedCheckpoint) {
+            throw new Error("External audit-ledger checkpoint diverged; writes are locked");
+          }
 
-        const expectedCheckpoint =
-          inserted.ledger_sequence === 1
-            ? null
-            : serializeCheckpoint({
-                sequence: inserted.ledger_sequence - 1,
-                headHash: inserted.previous_entry_hash ?? "",
-              });
-        const nextCheckpoint = serializeCheckpoint({
-          sequence: inserted.ledger_sequence,
-          headHash: inserted.entry_hash,
-        });
-        const advanced = await checkpointStore.compareAndSet(
-          AUDIT_LEDGER_CHECKPOINT_KEY,
-          expectedCheckpoint,
-          nextCheckpoint
-        );
-        if (!advanced) {
-          throw new Error("External audit-ledger checkpoint diverged; writes are locked");
+          const inserted = await tx.queryOne<{
+            ledger_sequence: number;
+            previous_entry_hash: string | null;
+            entry_hash: string;
+          }>(
+            `INSERT INTO audit_logs (
+               id, organization_id, user_id, api_key_id, action, resource_type,
+               resource_id, metadata, ip_address, user_agent, request_id, status
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             RETURNING ledger_sequence,
+                       encode(previous_entry_hash, 'hex') AS previous_entry_hash,
+                       encode(entry_hash, 'hex') AS entry_hash`,
+            [
+              id,
+              actor.organizationId,
+              actor.userId,
+              actor.apiKeyId,
+              entry.action,
+              entry.resourceType,
+              entry.resourceId || null,
+              metadata ? JSON.stringify(metadata) : null,
+              actor.ipAddress,
+              actor.userAgent,
+              actor.requestId,
+              entry.status || "success",
+            ]
+          );
+
+          if (!inserted) {
+            throw new Error("Audit insert returned no sealed row");
+          }
+
+          const insertedPreviousCheckpoint =
+            inserted.ledger_sequence === 1
+              ? null
+              : serializeCheckpoint({
+                  sequence: inserted.ledger_sequence - 1,
+                  headHash: inserted.previous_entry_hash ?? "",
+                });
+          if (insertedPreviousCheckpoint !== expectedCheckpoint) {
+            throw new Error("Audit-ledger head changed outside the serialized writer");
+          }
+
+          return {
+            expectedCheckpoint,
+            nextCheckpoint: serializeCheckpoint({
+              sequence: inserted.ledger_sequence,
+              headHash: inserted.entry_hash,
+            }),
+          };
+        },
+        async ({ expectedCheckpoint, nextCheckpoint }) => {
+          const advanced = await checkpointStore.compareAndSet(
+            AUDIT_LEDGER_CHECKPOINT_KEY,
+            expectedCheckpoint,
+            nextCheckpoint
+          );
+          if (!advanced) {
+            throw new Error(
+              "External audit-ledger checkpoint did not advance after commit; writes are locked"
+            );
+          }
         }
-      });
+      );
     } catch (err) {
       getLogger().error({ error: redactCredentialSecrets(err) }, "Failed to write audit log");
       throw err instanceof AuditPersistenceError ? err : new AuditPersistenceError({ cause: err });

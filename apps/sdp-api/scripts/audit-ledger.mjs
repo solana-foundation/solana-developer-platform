@@ -4,6 +4,7 @@ import pg from "pg";
 
 const { Client } = pg;
 const EXTERNAL_CHECKPOINT_KEY = "cache:audit-ledger:checkpoint:v1";
+const AUDIT_LEDGER_SESSION_LOCK_KEY = "sdp:audit-ledger:external-checkpoint";
 
 const ADVANCE_CHECKPOINT_LUA = `
 local current = redis.call('GET', KEYS[1])
@@ -166,14 +167,20 @@ async function initializeExternalCheckpoint(redis, report) {
 }
 
 async function appendCheckpoint(client, redis, options) {
-  const before = await inspect(client, redis);
-  if (!before.databaseLedgerValid || !before.runtimeRoleProtected) {
-    throw new Error("Refusing to checkpoint an invalid ledger or through an unsafe database role");
-  }
-  await initializeExternalCheckpoint(redis, before);
-
-  await client.query("BEGIN");
+  // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+  await client.query("SELECT pg_advisory_lock(hashtext($1))", [AUDIT_LEDGER_SESSION_LOCK_KEY]);
+  let transactionOpen = false;
   try {
+    const before = await inspect(client, redis);
+    if (!before.databaseLedgerValid || !before.runtimeRoleProtected) {
+      throw new Error(
+        "Refusing to checkpoint an invalid ledger or through an unsafe database role"
+      );
+    }
+    await initializeExternalCheckpoint(redis, before);
+
+    await client.query("BEGIN");
+    transactionOpen = true;
     const inserted = await client.query(
       `INSERT INTO audit_logs (
          id, action, resource_type, resource_id, metadata, status
@@ -200,6 +207,9 @@ async function appendCheckpoint(client, redis, options) {
         ? null
         : serializeCheckpoint(Number(row.ledger_sequence) - 1, row.previous_entry_hash);
     const next = serializeCheckpoint(Number(row.ledger_sequence), row.entry_hash);
+    await client.query("COMMIT");
+    transactionOpen = false;
+
     const advanced = await redis.eval(
       ADVANCE_CHECKPOINT_LUA,
       1,
@@ -209,12 +219,20 @@ async function appendCheckpoint(client, redis, options) {
       next
     );
     if (advanced !== 1) {
-      throw new Error("External audit-ledger checkpoint diverged during checkpoint write");
+      throw new Error(
+        "External audit-ledger checkpoint did not advance after committed checkpoint write"
+      );
     }
-    await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    if (transactionOpen) {
+      await client.query("ROLLBACK").catch(() => {});
+    }
     throw error;
+  } finally {
+    await client
+      // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+      .query("SELECT pg_advisory_unlock(hashtext($1))", [AUDIT_LEDGER_SESSION_LOCK_KEY])
+      .catch(() => {});
   }
 }
 

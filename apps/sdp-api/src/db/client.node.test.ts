@@ -162,6 +162,80 @@ describe("database client connection management", () => {
     expect(client?.release).toHaveBeenCalledWith(undefined);
   });
 
+  it("commits before the session-locked post-commit action", async () => {
+    const events: string[] = [];
+    pgMock.poolClientQuery = async () => {
+      events.push("database");
+      return { rows: [], rowCount: 0 };
+    };
+    const db = createDatabaseClient("postgresql://node-post-commit/sdp");
+
+    const operation = db.lockedTransactionWithPostCommit?.(
+      "audit-checkpoint",
+      async (tx) => {
+        await tx.execute("INSERT INTO audit_logs (id) VALUES (?)", ["aud_1"]);
+        return "committed";
+      },
+      async (result) => {
+        expect(result).toBe("committed");
+        events.push("external");
+      }
+    );
+    if (!operation) throw new Error("locked post-commit transactions are unavailable");
+    await operation;
+
+    const client = pgMock.pools[0]?.connectedClients[0];
+    expect(client?.queries.map(([query]) => query)).toEqual([
+      expect.objectContaining({ text: "SELECT pg_advisory_lock(hashtext($1))" }),
+      "BEGIN",
+      expect.objectContaining({ text: "INSERT INTO audit_logs (id) VALUES ($1)" }),
+      "COMMIT",
+      expect.objectContaining({ text: "SELECT pg_advisory_unlock(hashtext($1))" }),
+    ]);
+    expect(events).toEqual([
+      "database",
+      "database",
+      "database",
+      "database",
+      "external",
+      "database",
+    ]);
+    expect(client?.release).toHaveBeenCalledWith(undefined);
+  });
+
+  it("does not run a post-commit action when commit fails", async () => {
+    const commitFailure = new Error("commit failed");
+    pgMock.poolClientQuery = async () => {
+      const client = pgMock.pools[0]?.connectedClients[0];
+      const latestQuery = client?.queries.at(-1)?.[0];
+      if (latestQuery === "COMMIT") throw commitFailure;
+      return { rows: [], rowCount: 0 };
+    };
+    const db = createDatabaseClient("postgresql://node-post-commit-failure/sdp");
+    const afterCommit = vi.fn();
+
+    const operation = db.lockedTransactionWithPostCommit?.(
+      "audit-checkpoint",
+      async (tx) => {
+        await tx.execute("INSERT INTO audit_logs (id) VALUES (?)", ["aud_1"]);
+      },
+      afterCommit
+    );
+    if (!operation) throw new Error("locked post-commit transactions are unavailable");
+    await expect(operation).rejects.toBe(commitFailure);
+
+    const client = pgMock.pools[0]?.connectedClients[0];
+    expect(client?.queries.map(([query]) => query)).toEqual([
+      expect.objectContaining({ text: "SELECT pg_advisory_lock(hashtext($1))" }),
+      "BEGIN",
+      expect.objectContaining({ text: "INSERT INTO audit_logs (id) VALUES ($1)" }),
+      "COMMIT",
+      "ROLLBACK",
+      expect.objectContaining({ text: "SELECT pg_advisory_unlock(hashtext($1))" }),
+    ]);
+    expect(afterCommit).not.toHaveBeenCalled();
+  });
+
   it("discards the pooled connection when rollback fails", async () => {
     const transactionFailure = new Error("write failed");
     const rollbackFailure = new Error("connection reset during rollback");
