@@ -15,6 +15,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
+import { reserveMintSupplyAtApprovedEffectBoundary } from "@/routes/issuance/handlers/mint";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { rootLogger } from "@/runtime/logger";
 import * as SolanaServices from "@/services/solana";
@@ -33,6 +34,25 @@ import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 
 // Check if running in mock mode (no RPC access)
 const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";
+
+it("does not reserve mint supply when the approved-operation effect fence rejects", async () => {
+  const reserveMintSupply = vi.fn(async () => "200");
+  const incompleteReplayContext = {
+    get(key: string) {
+      return key === "approvedWalletOperationId" ? "wop_lost_lease" : undefined;
+    },
+  } as never;
+
+  await expect(
+    reserveMintSupplyAtApprovedEffectBoundary(
+      incompleteReplayContext,
+      { reserveMintSupply },
+      "tok_lost_lease",
+      "100"
+    )
+  ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  expect(reserveMintSupply).not.toHaveBeenCalled();
+});
 
 async function seedIssuedToken(
   overrides: Partial<typeof TEST_ACTIVE_TOKEN> = {}

@@ -31,6 +31,24 @@ import { enforceIssuanceWalletOperationPolicy } from "./policy";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+export async function reserveMintSupplyAtApprovedEffectBoundary(
+  c: AppContext,
+  tokenService: Pick<TokenService, "reserveMintSupply">,
+  tokenId: string,
+  amountBaseUnits: string
+): Promise<string> {
+  // The approved-operation fence must win before the supply reservation. If the
+  // replay lost its lease, the pre-submit hook aborts and recovery may retry; a
+  // reservation taken first would then be retained even though this attempt was
+  // never submitted, double-counting the recovered mint.
+  await beginApprovedWalletOperationEffect(c);
+  const reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits);
+  if (reservedSupply === null) {
+    throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+  }
+  return reservedSupply;
+}
+
 type AllowlistInsertArgs = {
   tokenId: string;
   address: string;
@@ -495,11 +513,12 @@ export const executeMint = async (c: AppContext) => {
         feePayer: signer.address,
       },
       async () => {
-        reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
-        if (reservedSupply === null) {
-          throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
-        }
-        await beginApprovedWalletOperationEffect(c);
+        reservedSupply = await reserveMintSupplyAtApprovedEffectBoundary(
+          c,
+          tokenService,
+          tokenId,
+          amountBaseUnits.toString()
+        );
       }
     );
 
