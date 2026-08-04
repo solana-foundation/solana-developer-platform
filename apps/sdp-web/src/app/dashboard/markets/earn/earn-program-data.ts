@@ -7,6 +7,7 @@ import type {
   EarnPortfolioWalletSnapshot,
   EarnPortfolioWithdrawal,
   EarnPortfolioWithdrawalPreview,
+  EarnPortfolioYield,
   EarnProviderId,
   EarnStrategy,
   ListEarnStrategiesResponse,
@@ -29,6 +30,8 @@ export interface EarnProgram {
   label: string | null;
   createdAt: string;
   wallet: EarnPortfolioWalletSnapshot;
+  /** Absent when the provider's yield lookup failed — render no rate, not 0%. */
+  yield?: EarnPortfolioYield;
 }
 
 /**

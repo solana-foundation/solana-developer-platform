@@ -513,6 +513,84 @@ describe("GroundEarnClient.getPortfolioWallet", () => {
   });
 });
 
+describe("GroundEarnClient.getPortfolioYield", () => {
+  const groundYield = (positions: unknown[]) => ({
+    walletId: "wal_1",
+    earnedUsd: "12.500000",
+    annualizedUsd: "40.000000",
+    positions,
+  });
+
+  it("converts apyBps to decimals and blends by target allocation when nothing is deployed", async () => {
+    // The real sandbox shape for a funded-but-unrebalanced program: weights are
+    // set, deployed value is still zero. Reproduces Ground's own dashboard
+    // figure of 3.71% for a 50/50 split of 1.54% and 5.87%.
+    const fetchMock = stubGroundFetch({
+      body: groundYield([
+        {
+          yieldSourceId: "kamino-superstate-usdc",
+          name: "A",
+          apyBps: 154,
+          pct: 50,
+          deployedValueUsd: "0.000000",
+        },
+        {
+          yieldSourceId: "kamino-rockawayx-rwa-usdc",
+          name: "B",
+          apyBps: 587,
+          pct: 50,
+          deployedValueUsd: "0.000000",
+        },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    assert.equal(requestUrl(fetchMock), "https://sandbox.groundtech.co/v2/wallets/wal_1/yield");
+    assert.equal(result.earnedUsd, "12.500000");
+    assert.equal(result.annualizedUsd, "40.000000");
+    // (1.54% + 5.87%) / 2 = 3.705%, which Ground's dashboard renders as 3.71%.
+    assert.equal(result.currentApy, "0.037050");
+    assert.deepEqual(
+      result.positions.map((position) => position.apy),
+      ["0.0154", "0.0587"]
+    );
+  });
+
+  it("weights by deployed value once capital is actually deployed", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        { yieldSourceId: "a", name: "A", apyBps: 200, pct: 50, deployedValueUsd: "900.000000" },
+        { yieldSourceId: "b", name: "B", apyBps: 1000, pct: 50, deployedValueUsd: "100.000000" },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    // Deployed weighting (0.9*2% + 0.1*10% = 2.8%) — not the 6% a naive
+    // target-weight blend would report.
+    assert.equal(Number(result.currentApy).toFixed(4), "0.0280");
+  });
+
+  it("omits the rate for an all-cash program rather than reporting 0%", async () => {
+    stubGroundFetch({ body: groundYield([]) });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    assert.equal(result.currentApy, undefined);
+    assert.deepEqual(result.positions, []);
+  });
+
+  it("classifies provider failures through the shared taxonomy", async () => {
+    stubGroundFetch({ status: 503, body: { message: "yield unavailable" } });
+
+    await assert.rejects(
+      client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" }),
+      earnError("PROVIDER_UNAVAILABLE")
+    );
+  });
+});
+
 describe("GroundEarnClient.updatePortfolioStrategy", () => {
   it("PATCHes the strategy and returns the provider-confirmed bps weights", async () => {
     const fetchMock = stubGroundFetch({

@@ -7,6 +7,7 @@ import type {
   EarnPortfolioWalletSnapshot,
   EarnPortfolioWithdrawal,
   EarnPortfolioWithdrawalPreview,
+  EarnPortfolioYield,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { getDb } from "@/db";
@@ -16,6 +17,7 @@ import { getAuth } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import {
   assertEarnProviderConfigured,
   assertProviderAvailable,
@@ -50,6 +52,12 @@ export interface EarnProgram {
   label: string | null;
   createdAt: string;
   wallet: EarnPortfolioWalletSnapshot;
+  /**
+   * Yield metrics, absent when the provider's yield endpoint fails. Balances
+   * are the load-bearing part of this response, so a yield outage degrades the
+   * headline rate rather than the whole program view.
+   */
+  yield?: EarnPortfolioYield;
 }
 
 export interface EarnProgramResponse {
@@ -70,13 +78,42 @@ export interface EarnProgramWithdrawalResponse {
   withdrawal: EarnPortfolioWithdrawal;
 }
 
-function mapProgram(row: EarnProviderWalletRow, wallet: EarnPortfolioWalletSnapshot): EarnProgram {
+function mapProgram(
+  row: EarnProviderWalletRow,
+  wallet: EarnPortfolioWalletSnapshot,
+  portfolioYield?: EarnPortfolioYield
+): EarnProgram {
   return {
     provider: row.provider,
     label: row.label,
     createdAt: row.created_at,
     wallet,
+    ...(portfolioYield ? { yield: portfolioYield } : {}),
   };
+}
+
+/**
+ * Wallet snapshot + yield in one round trip each, fetched together because the
+ * dashboard renders them as one view. Yield is best-effort: the rate is a
+ * headline nicety, while balances and positions are what the page is for.
+ */
+async function loadProgramState(
+  c: AppContext,
+  client: EarnPortfolioWalletProvider,
+  providerWalletRef: string
+): Promise<{ wallet: EarnPortfolioWalletSnapshot; portfolioYield?: EarnPortfolioYield }> {
+  const runtime = earnRuntime(c);
+  const [wallet, yieldResult] = await Promise.all([
+    client.getPortfolioWallet(runtime, { providerWalletRef }),
+    client.getPortfolioYield(runtime, { providerWalletRef }).catch((error: unknown) => {
+      getLogger().warn(
+        { err: error, providerWalletRef },
+        "earn program yield lookup failed; serving balances without a rate"
+      );
+      return undefined;
+    }),
+  ]);
+  return { wallet, portfolioYield: yieldResult };
 }
 
 /**
@@ -215,12 +252,10 @@ export const upsertEarnProgram = async (c: AppContext) => {
     }
   }
 
-  const wallet = await client.getPortfolioWallet(earnRuntime(c), {
-    providerWalletRef: row.provider_wallet_ref,
-  });
+  const { wallet, portfolioYield } = await loadProgramState(c, client, row.provider_wallet_ref);
 
   const response: EarnProgramUpsertResponse = {
-    program: mapProgram(row, wallet),
+    program: mapProgram(row, wallet, portfolioYield),
     created: !existing,
   };
   return success(c, response, existing ? 200 : 201);
@@ -234,11 +269,9 @@ export const getEarnProgram = async (c: AppContext) => {
   const testMode = resolveSdpEnvironment(c) === "sandbox";
   assertEarnProviderConfigured(c.env, client.provider, testMode);
 
-  const wallet = await client.getPortfolioWallet(earnRuntime(c), {
-    providerWalletRef: row.provider_wallet_ref,
-  });
+  const { wallet, portfolioYield } = await loadProgramState(c, client, row.provider_wallet_ref);
 
-  const response: EarnProgramResponse = { program: mapProgram(row, wallet) };
+  const response: EarnProgramResponse = { program: mapProgram(row, wallet, portfolioYield) };
   return success(c, response);
 };
 

@@ -11,6 +11,7 @@ import type {
   EarnPortfolioWalletStatus,
   EarnPortfolioWithdrawal,
   EarnPortfolioWithdrawalPreview,
+  EarnPortfolioYield,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   SdpEnvironment,
@@ -296,6 +297,15 @@ export interface EarnPortfolioWalletProvider extends EarnVaultProvider {
     ctx: EarnRuntimeContext,
     input: EarnPortfolioStrategyUpdateInput
   ): Promise<EarnPortfolioStrategyUpdateResult>;
+  /**
+   * Yield metrics for the program (earned to date + the blended current rate).
+   * Separate from `getPortfolioWallet` because providers serve it from a
+   * distinct endpoint; callers that only need balances must not pay for it.
+   */
+  getPortfolioYield(
+    ctx: EarnRuntimeContext,
+    input: EarnPortfolioWalletRefInput
+  ): Promise<EarnPortfolioYield>;
   listPortfolioDeposits(
     ctx: EarnRuntimeContext,
     input: EarnPortfolioDepositsInput

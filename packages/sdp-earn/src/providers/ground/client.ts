@@ -14,6 +14,7 @@ import {
   type EarnPortfolioWalletStatus,
   type EarnPortfolioWithdrawal,
   type EarnPortfolioWithdrawalPreview,
+  type EarnPortfolioYield,
   type EarnStrategySourceKind,
   isWellKnownTokenSymbol,
   wellKnownMint,
@@ -137,6 +138,22 @@ interface GroundWallet {
   strategyAllocations?: GroundStrategyAllocations | null;
 }
 
+interface GroundWalletYieldPosition {
+  yieldSourceId: string;
+  name: string;
+  apyBps?: number | null;
+  pct?: number | null;
+  deployedValueUsd: string;
+}
+
+interface GroundWalletYield {
+  walletId: string;
+  earnedUsd: string;
+  annualizedUsd?: string | null;
+  currentBalanceUsd?: string | null;
+  positions?: GroundWalletYieldPosition[] | null;
+}
+
 interface GroundDeposit {
   id: string;
   amount: string;
@@ -190,6 +207,32 @@ function bpsToDecimalString(bps: number): string {
     .padStart(4, "0")
     .replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : String(whole);
+}
+
+/**
+ * Blend per-position rates into the program's current APY. Ground reports a
+ * rate per yield source and no wallet-level rate, so this derives one the same
+ * way their dashboard does: weight by deployed value when anything is deployed,
+ * otherwise by target allocation — a funded-but-not-yet-rebalanced program
+ * still has a meaningful forward rate. Returns undefined when no position
+ * carries weight (e.g. a program held entirely as cash), so callers render
+ * "no rate yet" rather than a misleading 0%.
+ */
+function blendPositionApy(
+  positions: readonly { apy: string; pct: number; deployedValueUsd: string }[]
+): string | undefined {
+  const deployed = positions.map((position) => Number(position.deployedValueUsd) || 0);
+  const totalDeployed = deployed.reduce((sum, value) => sum + value, 0);
+  const weights = totalDeployed > 0 ? deployed : positions.map((position) => position.pct || 0);
+  const totalWeight = weights.reduce((sum, value) => sum + value, 0);
+  if (totalWeight <= 0) {
+    return undefined;
+  }
+  const blended = positions.reduce(
+    (sum, position, index) => sum + (Number(position.apy) || 0) * (weights[index] ?? 0),
+    0
+  );
+  return (blended / totalWeight).toFixed(6);
 }
 
 /**
@@ -450,6 +493,31 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
       },
     });
     return { providerWalletRef: wallet.id, status: normalizeWalletStatus(wallet.status) };
+  }
+
+  async getPortfolioYield(
+    ctx: EarnRuntimeContext,
+    input: EarnPortfolioWalletRefInput
+  ): Promise<EarnPortfolioYield> {
+    const config = readGroundConfig(ctx);
+    const result = await providerFetchJson<GroundWalletYield>(
+      this.provider,
+      `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/yield`,
+      { method: "GET", headers: config.headers }
+    );
+    const positions = (result.positions ?? []).map((position) => ({
+      yieldSourceId: position.yieldSourceId,
+      name: position.name,
+      apy: bpsToDecimalString(position.apyBps ?? 0),
+      pct: position.pct ?? 0,
+      deployedValueUsd: position.deployedValueUsd,
+    }));
+    return {
+      currentApy: blendPositionApy(positions),
+      earnedUsd: result.earnedUsd,
+      annualizedUsd: result.annualizedUsd ?? undefined,
+      positions,
+    };
   }
 
   async getPortfolioWallet(

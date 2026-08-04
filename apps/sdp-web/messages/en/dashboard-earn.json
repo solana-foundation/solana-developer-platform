@@ -9,6 +9,7 @@
       "totalBalance": "Total balance",
       "totalEarned": "Earned to date",
       "withdrawableBalance": "Withdrawable now",
+      "currentApy": "Current APY",
       "curatorManaged": "Curator managed",
       "holdingsCount": "Holdings: {count}",
       "unknownCurator": "Unknown curator",

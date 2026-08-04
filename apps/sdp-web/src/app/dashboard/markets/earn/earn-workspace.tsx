@@ -221,28 +221,35 @@ function PositionsSection() {
 
       {program ? (
         <>
-          <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-3">
+          <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
             {[
               {
                 id: "total",
                 label: t("DashboardEarn.overview.totalBalance"),
-                value: program.wallet.balance.totalUsd,
+                value: formatUsd(program.wallet.balance.totalUsd),
               },
               {
                 id: "earned",
                 label: t("DashboardEarn.overview.totalEarned"),
-                value: program.wallet.balance.earnedUsd,
+                value: formatUsd(program.wallet.balance.earnedUsd),
               },
               {
                 id: "withdrawable",
                 label: t("DashboardEarn.overview.withdrawableBalance"),
-                value: program.wallet.balance.withdrawableUsd,
+                value: formatUsd(program.wallet.balance.withdrawableUsd),
+              },
+              {
+                id: "apy",
+                label: t("DashboardEarn.overview.currentApy"),
+                // Undefined rate (all-cash program, or a yield lookup that
+                // failed) reads as "no rate yet" — never a misleading 0%.
+                value: program.yield?.currentApy ? formatApy(program.yield.currentApy) : "—",
               },
             ].map((tile) => (
               <div key={tile.id} className="min-w-0 border-t border-border-subtle pt-3">
                 <dt className="text-xs text-tertiary">{tile.label}</dt>
                 <dd className="mt-1 text-2xl font-medium tracking-tight text-primary tabular-nums">
-                  {formatUsd(tile.value)}
+                  {tile.value}
                 </dd>
               </div>
             ))}

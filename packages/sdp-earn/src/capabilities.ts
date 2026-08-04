@@ -9,6 +9,7 @@ const PORTFOLIO_WALLET_METHODS = [
   "createPortfolioWallet",
   "getPortfolioWallet",
   "updatePortfolioStrategy",
+  "getPortfolioYield",
   "listPortfolioDeposits",
   "previewPortfolioWithdrawal",
   "createPortfolioWithdrawal",

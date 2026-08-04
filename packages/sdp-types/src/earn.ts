@@ -360,6 +360,34 @@ export interface EarnPortfolioProcessingEstimate {
   typicalMaxDuration: string;
 }
 
+/** Per-yield-source yield metrics behind a program's blended rate. */
+export interface EarnPortfolioYieldPosition {
+  yieldSourceId: string;
+  name: string;
+  /** Decimal rate (`0.0453` = 4.53%), converted from the provider's basis points. */
+  apy: string;
+  /** Target allocation percentage (0-100). */
+  pct: number;
+  deployedValueUsd: string;
+}
+
+/**
+ * Yield metrics for a program. Providers report per-position rates rather than
+ * one wallet rate, so `currentApy` is **derived**: a weighted blend of the
+ * position rates, weighted by deployed value when anything is deployed and by
+ * target allocation otherwise (a funded-but-unrebalanced program still has a
+ * meaningful forward rate). Absent when no position carries a rate — e.g. a
+ * program held entirely as cash.
+ */
+export interface EarnPortfolioYield {
+  currentApy?: string;
+  /** Cumulative yield since the program was created. */
+  earnedUsd: string;
+  /** Estimated annualized yield in USD at current rates. */
+  annualizedUsd?: string;
+  positions: EarnPortfolioYieldPosition[];
+}
+
 export interface EarnPortfolioWithdrawalPreview {
   /** USD decimal strings. */
   amountRequestedUsd?: string;
