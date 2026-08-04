@@ -6436,6 +6436,21 @@ describe("Payments routes", () => {
       .bind(walletOperationId)
       .run();
 
+    // The stale worker must lose terminal-write authority as soon as its lease
+    // expires, even before recovery replaces its attempt ID.
+    expect(
+      await repository.completeWalletOperationExecution({
+        walletOperationId,
+        executionAttemptId: "interrupted-attempt",
+        status: "failed",
+        error: "stale worker",
+      })
+    ).toBeNull();
+    expect(await repository.getWalletOperationById(walletOperationId)).toMatchObject({
+      status: "executing",
+      execution_attempt_id: "interrupted-attempt",
+    });
+
     expect(await recoverApprovedWalletOperations(env)).toBe(1);
     const recovered = await repository.getWalletOperationById(walletOperationId);
     expect(recovered).toMatchObject({

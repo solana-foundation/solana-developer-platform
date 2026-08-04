@@ -2063,6 +2063,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
              AND status = 'executing'
              AND execution_started_at IS NOT NULL
              AND execution_attempt_id = ?
+             AND execution_lease_expires_at > ?
            RETURNING *`
         )
         .bind(
@@ -2074,7 +2075,8 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
           input.walletOperationId,
           scope.organizationId,
           scope.projectId,
-          input.executionAttemptId
+          input.executionAttemptId,
+          now
         )
         .first<Record<string, unknown>>();
 
