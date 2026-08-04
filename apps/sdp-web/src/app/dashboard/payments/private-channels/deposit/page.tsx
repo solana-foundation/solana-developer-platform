@@ -18,16 +18,16 @@ export default async function PrivateChannelsDepositPage() {
 
   const client = await createSdpApiClient();
   const instance = await loadInstance(client);
-  if (instance.ok && !instance.data?.isActive) {
+  if (!instance.ok) {
+    return <PrivateChannelsLoadError message={instance.error} />;
+  }
+  if (!instance.data?.isActive) {
     redirect(PRIVATE_CHANNELS_INSTANCE_PATH);
   }
 
   const wallets = await loadSignableWallets(client);
 
-  // Derived from the instance's own RPC URL so the mint matches what the API will
-  // resolve. Empty when the instance read failed — the form then omits `mint` and
-  // lets the API default it, rather than turning a transient failure into a dead page.
-  const tokens = privateChannelTokens(inferCluster(instance.data?.chainRpcUrl ?? ""));
+  const tokens = privateChannelTokens(inferCluster(instance.data.chainRpcUrl));
 
   return (
     <div className="mx-auto w-full max-w-2xl">

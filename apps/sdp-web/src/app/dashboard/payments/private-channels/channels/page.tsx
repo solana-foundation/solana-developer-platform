@@ -16,10 +16,11 @@ export default async function PrivateChannelsChannelsPage() {
   const t = await getTranslations();
 
   const client = await createSdpApiClient();
-  // Only redirect on a *known* inactive instance. A failed lookup used to throw
-  // out of the page; now it falls through so the load error renders in place.
   const instance = await loadInstance(client);
-  if (instance.ok && !instance.data?.isActive) {
+  if (!instance.ok) {
+    return <PrivateChannelsLoadError message={instance.error} />;
+  }
+  if (!instance.data?.isActive) {
     redirect(PRIVATE_CHANNELS_INSTANCE_PATH);
   }
 

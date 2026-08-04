@@ -18,15 +18,16 @@ export default async function PrivateChannelsWithdrawPage() {
 
   const client = await createSdpApiClient();
   const instance = await loadInstance(client);
-  if (instance.ok && !instance.data?.isActive) {
+  if (!instance.ok) {
+    return <PrivateChannelsLoadError message={instance.error} />;
+  }
+  if (!instance.data?.isActive) {
     redirect(PRIVATE_CHANNELS_INSTANCE_PATH);
   }
 
   const wallets = await loadSignableWallets(client);
 
-  // See the note in deposit/page.tsx: derived from the instance's own RPC URL, and
-  // empty on a failed instance read rather than blocking the form.
-  const tokens = privateChannelTokens(inferCluster(instance.data?.chainRpcUrl ?? ""));
+  const tokens = privateChannelTokens(inferCluster(instance.data.chainRpcUrl));
 
   return (
     <div className="mx-auto w-full max-w-2xl">

@@ -28,6 +28,9 @@ export default async function PrivateChannelsTransferPage() {
   const t = await getTranslations();
   const client = await createSdpApiClient();
   const instance = await loadInstance(client);
+  if (!instance.ok) {
+    return <PrivateChannelsLoadError message={instance.error} />;
+  }
   if (!instance.data?.isActive) {
     redirect(PRIVATE_CHANNELS_INSTANCE_PATH);
   }
