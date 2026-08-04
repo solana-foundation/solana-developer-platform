@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getMessages, translate } from "@/i18n/messages";
 import {
   buildPolicyAuditSearchParams,
+  fetchMemberNames,
   fetchPolicyAuditContext,
   fetchPolicyAuditList,
   fetchPolicyEvaluationNeighbors,
@@ -16,6 +17,7 @@ import {
 import {
   decisionHeading,
   decisionLabel,
+  formatPolicyDate,
   formatRevisionReference,
   type PolicyTranslate,
   policyActor,
@@ -387,7 +389,7 @@ describe("policy audit presentation invariants", () => {
     const partial = evaluation("review", { reasonCode: "provider_mapping_partial" });
     expect(providerMappingState(partial)).toBe("partial");
 
-    const missingKey = policyActor(evaluation("allow"), {});
+    const missingKey = policyActor(evaluation("allow"), {}, {});
     expect(missingKey).toMatchObject({ type: "api_key", id: "api-key-1", name: null });
 
     const legacy = evaluation("allow", { evaluationContext: null });
@@ -404,5 +406,55 @@ describe("policy audit presentation invariants", () => {
     });
 
     expect(decisionHeading(rawSign)).toBe("Raw Sign · Custody Signer Check");
+  });
+
+  it("formats revision dates per locale and passes invalid values through", () => {
+    expect(formatPolicyDate("2026-08-01T12:00:00.000Z", "en-US")).toBe("Aug 1, 2026");
+    expect(formatPolicyDate("not-a-date", "en-US")).toBe("not-a-date");
+  });
+});
+
+describe("member directory", () => {
+  function member(id: string, name: string | null, email: string) {
+    return {
+      id: `member-${id}`,
+      role: "member",
+      status: "active",
+      createdAt: "2026-08-01T12:00:00.000Z",
+      user: { id, name, email },
+    };
+  }
+
+  it("maps member ids to canonical labels and drops unresolved members", async () => {
+    const request = vi.fn(async () =>
+      Response.json({
+        data: {
+          members: [
+            member("usr_named", "Ada Lovelace", "ada@example.com"),
+            member("usr_email_only", null, "grace@example.com"),
+            member("usr_unresolved", null, "{{user.primary_email_address.email_address}}"),
+          ],
+        },
+      })
+    );
+
+    await expect(fetchMemberNames(request)).resolves.toEqual({
+      usr_named: "Ada Lovelace",
+      usr_email_only: "grace@example.com",
+    });
+    expect(request).toHaveBeenCalledWith("/v1/members?pageSize=100");
+  });
+
+  it("returns an empty directory when the members request fails", async () => {
+    await expect(
+      fetchMemberNames(vi.fn(async () => new Response(null, { status: 500 })))
+    ).resolves.toEqual({});
+    await expect(
+      fetchMemberNames(
+        vi.fn(async () => {
+          throw new Error("network down");
+        })
+      )
+    ).resolves.toEqual({});
   });
 });

@@ -7,6 +7,8 @@ import type {
   WalletOperationStatus,
   WalletPolicyEvaluationDetail,
 } from "@sdp/types";
+import { resolveMemberIdentity } from "@/app/dashboard/settings/member-identity";
+import type { Member } from "@/app/members/actions";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 
@@ -64,6 +66,7 @@ export interface PolicyAuditContext {
   wallet: CustodyWalletMetadataResponse["wallet"];
   revisionHistory: WalletControlProfileRevisionHistory;
   apiKeyNames: Record<string, string>;
+  userNames: Record<string, string>;
 }
 
 export type PolicyRevisionContext = Pick<PolicyAuditContext, "wallet" | "revisionHistory">;
@@ -335,7 +338,7 @@ async function fetchWallet(
   return body.data.wallet;
 }
 
-async function fetchRevisionHistory(
+export async function fetchRevisionHistory(
   request: SdpApiClient["request"],
   walletId: string
 ): Promise<WalletControlProfileRevisionHistory> {
@@ -360,15 +363,45 @@ async function fetchApiKeyNames(request: SdpApiClient["request"]): Promise<Recor
   }
 }
 
+/**
+ * Maps organization member user ids to a human label via the canonical
+ * {@link resolveMemberIdentity} chain, so audit actors read as people instead
+ * of `usr_…` ids. Unresolved members are omitted rather than given a
+ * placeholder — like API key names, the labels are decorative and a miss
+ * falls back to the raw id in the UI. Fetches one 100-member page
+ * (ponytail: ids beyond it render unresolved).
+ *
+ * @param request - Authenticated SDP API request function.
+ * @returns Map of user id to display label; empty when the directory is unavailable.
+ */
+export async function fetchMemberNames(
+  request: SdpApiClient["request"]
+): Promise<Record<string, string>> {
+  try {
+    const response = await request("/v1/members?pageSize=100");
+    if (!response.ok) return {};
+    const body = (await response.json()) as { data?: { members?: Member[] } };
+    return Object.fromEntries(
+      (body.data?.members ?? []).flatMap((member) => {
+        const identity = resolveMemberIdentity(member.user, "");
+        return identity.isUnresolved ? [] : [[member.user.id, identity.label]];
+      })
+    );
+  } catch {
+    return {};
+  }
+}
+
 export async function fetchPolicyAuditContext(
   request: SdpApiClient["request"],
   walletId: string
 ): Promise<PolicyAuditContext> {
-  const [revisionContext, apiKeyNames] = await Promise.all([
+  const [revisionContext, apiKeyNames, userNames] = await Promise.all([
     fetchPolicyRevisionContext(request, walletId),
     fetchApiKeyNames(request),
+    fetchMemberNames(request),
   ]);
-  return { ...revisionContext, apiKeyNames };
+  return { ...revisionContext, apiKeyNames, userNames };
 }
 
 export async function fetchPolicyRevisionContext(
