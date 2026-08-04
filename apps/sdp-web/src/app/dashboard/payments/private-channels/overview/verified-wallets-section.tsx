@@ -1,6 +1,7 @@
 "use client";
 
 import type { CustodyWalletSummary, PrivateChannelVerifiedWalletDto } from "@sdp/types";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { CheckCircle2Icon, Loader2Icon, Trash2Icon } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
@@ -37,6 +38,11 @@ function ChannelBalance({
   t: ReturnType<typeof useTranslations>;
 }) {
   if (!balance) return null;
+  // Named from the mint the API actually reported rather than a hardcoded symbol,
+  // so the row stays truthful when the instance's allowed token is not USDC. Falls
+  // back to a shortened mint for anything outside the catalogue.
+  const known = WELL_KNOWN_TOKEN_BY_MINT.get(balance.mint);
+  const symbol = known?.symbol ?? shortKey(balance.mint);
   return (
     <span
       className="font-mono text-sm text-secondary"
@@ -46,6 +52,7 @@ function ChannelBalance({
     >
       {t("DashboardPrivateChannels.verifiedWallets.channelBalanceAmount", {
         amount: balance.uiAmount,
+        symbol,
       })}
     </span>
   );
