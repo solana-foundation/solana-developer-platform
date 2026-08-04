@@ -1,6 +1,6 @@
 "use client";
 
-import { FilterIcon, SearchIcon, XIcon } from "lucide-react";
+import { DownloadIcon, FilterIcon, LoaderCircleIcon, SearchIcon, XIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   createContext,
@@ -24,6 +24,7 @@ import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { downloadResponseBlob } from "@/lib/download";
 import { RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
@@ -139,6 +140,11 @@ function FieldWithLabel({
 function buildTransactionsHref(filters: TransactionFilters): string {
   const query = serializeTransactionFilters(filters).toString();
   return `/dashboard/payments/transactions${query ? `?${query}` : ""}`;
+}
+
+function buildTransactionsExportHref(filters: TransactionFilters): string {
+  const query = serializeTransactionFilters({ ...filters, page: 1 }).toString();
+  return `/api/dashboard/payments/transactions/export${query ? `?${query}` : ""}`;
 }
 
 function SelectFilter({
@@ -337,6 +343,8 @@ export function TransactionsWorkspace({
   const [displayFilters, setDisplayFilters] = useState(filters);
   const [searchValue, setSearchValue] = useState(filters.search ?? "");
   const [assetValue, setAssetValue] = useState(filters.asset ?? "");
+  const [csvDownloading, setCsvDownloading] = useState(false);
+  const [csvError, setCsvError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const advancedFilterCount = countActiveTransactionFilters(displayFilters);
   const hasAdvancedFilter = Boolean(
@@ -483,6 +491,34 @@ export function TransactionsWorkspace({
   };
   const sortValue = `${displayFilters.sortBy}:${displayFilters.sortDirection}`;
 
+  const downloadCsv = async () => {
+    if (csvDownloading) return;
+    setCsvDownloading(true);
+    setCsvError(null);
+
+    try {
+      const response = await fetch(buildTransactionsExportHref(displayFilters));
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: { message?: string };
+        };
+        throw new Error(
+          body.error?.message ?? t("DashboardPayments.transactions.downloadCsvFailed")
+        );
+      }
+
+      await downloadResponseBlob(response, "sdp-transactions.csv");
+    } catch (error) {
+      setCsvError(
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.transactions.downloadCsvFailed")
+      );
+    } finally {
+      setCsvDownloading(false);
+    }
+  };
+
   return (
     <TransactionFilterContext.Provider
       value={{ filters: displayFilters, isPending, clearFilters, updateFilters }}
@@ -490,7 +526,7 @@ export function TransactionsWorkspace({
       <DashboardWorkspaceOverviewPanel className="flex flex-col">
         <DashboardWorkspaceCard>
           <div className="border-b border-border-default p-3">
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto]">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto_auto]">
               <Input
                 value={searchValue}
                 onChange={(event) => updateSearchValue(event.target.value)}
@@ -567,7 +603,21 @@ export function TransactionsWorkspace({
                   </span>
                 ) : null}
               </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={csvDownloading}
+                iconLeft={
+                  csvDownloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />
+                }
+                onClick={downloadCsv}
+              >
+                {csvDownloading
+                  ? t("DashboardPayments.transactions.downloadingCsv")
+                  : t("DashboardPayments.transactions.downloadCsv")}
+              </Button>
             </div>
+            {csvError ? <p className="mt-2 text-xs text-error">{csvError}</p> : null}
             {advancedFilterCount > 0 ? (
               <div className="mt-2 flex items-center justify-between gap-3">
                 <span className="text-xs text-secondary">

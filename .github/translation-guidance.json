@@ -129,6 +129,167 @@
           "preferred": "allowlist"
         }
       ]
+    },
+    "pt": {
+      "context": {
+        "localeName": "português (Brasil)",
+        "audience": "Brazilian Portuguese-speaking Web3 developers and institutional finance operators",
+        "conventions": [
+          "Brazilian Web3 practitioners commonly retain established English product terms.",
+          "Standard Brazilian financial vocabulary is preferred when it is familiar to practitioners, such as ativo, contraparte and custódia.",
+          "SDP is grammatically feminine: a SDP, da SDP, pela SDP.",
+          "Wallet is treated as feminine (a Wallet) and Token as masculine (o Token)."
+        ]
+      },
+      "instructions": [
+        "Use natural professional Brazilian Portuguese and address the user with você.",
+        "Keep established Web3 terms in English when Brazilian practitioners normally use the English term.",
+        "Use Brazilian financial vocabulary when it is genuinely standard, such as ativo and contraparte.",
+        "Match the English form per string for enable and disable: infinitive action (ativar, desativar) versus participle state (ativado, desativado)."
+      ],
+      "terminology": [
+        {
+          "source": "token / tokens",
+          "preferred": "Token / Tokens",
+          "avoid": "ficha / fichas",
+          "note": "Token is the established Web3 product noun. Use Portuguese grammar around it."
+        },
+        {
+          "source": "wallet / wallets",
+          "preferred": "Wallet / Wallets",
+          "avoid": "carteira / carteiras",
+          "note": "Wallet is the established product noun in this dashboard."
+        },
+        {
+          "source": "mint / burn",
+          "preferred": "mint / burn",
+          "avoid": "cunhar / cunhagem",
+          "note": "Keep protocol action names recognizable; write natural Portuguese around them, for example fazer mint de Tokens."
+        },
+        {
+          "source": "allowlist / blocklist",
+          "preferred": "allowlist / blocklist",
+          "avoid": "lista branca / lista negra / lista de permissões / lista de bloqueio",
+          "note": "Keep the neutral technical terms used by the product."
+        },
+        {
+          "source": "on-chain / off-chain",
+          "preferred": "on-chain / off-chain"
+        },
+        {
+          "source": "stablecoin, API, RPC, webhook, blockchain, staking, airdrop",
+          "preferred": "Keep these established technical terms unchanged."
+        },
+        {
+          "source": "endpoint / API Playground",
+          "preferred": "endpoint / API Playground",
+          "avoid": "ponto de extremidade / área de testes da API",
+          "note": "Use the established developer-facing product terms."
+        },
+        {
+          "source": "dashboard",
+          "preferred": "Dashboard",
+          "avoid": "painel / painel de controle",
+          "note": "Dashboard is the product surface name."
+        },
+        {
+          "source": "asset / counterparty",
+          "preferred": "ativo / contraparte",
+          "note": "These have natural, standard Brazilian financial equivalents."
+        },
+        {
+          "source": "transfer / provider / quote",
+          "preferred": "transferência / provedor / cotação",
+          "note": "Use the standard Brazilian product and financial terms, including in API error copy."
+        },
+        {
+          "source": "draft / deploy",
+          "preferred": "rascunho / deploy",
+          "note": "Deploy is an established loanword in Brazilian developer Portuguese, for example fazer o deploy; draft has a natural equivalent."
+        },
+        {
+          "source": "custody",
+          "preferred": "Custody for the product category; custódia in explanatory prose",
+          "note": "Choose from context instead of forcing one translation everywhere."
+        },
+        {
+          "source": "validator / account / transaction / signature / keypair / epoch",
+          "preferred": "validador / conta / transação / assinatura / par de chaves / época",
+          "note": "Follow the solanabr/solana-glossary conventions for protocol vocabulary with standard Portuguese equivalents."
+        },
+        {
+          "source": "decimals",
+          "preferred": "decimais / casas decimais",
+          "note": "Generic noun in this product; always translate."
+        },
+        {
+          "source": "custodian",
+          "preferred": "custodiante",
+          "note": "Standard CVM/B3 vocabulary for the regulated financial role."
+        },
+        {
+          "source": "Mint Authority / Freeze Authority / Update Authority / Metadata Authority / Permanent Delegate",
+          "preferred": "Keep the whole SPL authority family in English as noun labels; verbs describing the action are written in Portuguese."
+        },
+        {
+          "source": "Token-2022 extension names (Transfer Fee, Interest Bearing, Scaled UI Amount, Transfer Hook, Non-transferable, Default Account State)",
+          "preferred": "Keep extension names in English as labels; translate their descriptions and helper text."
+        },
+        {
+          "source": "block explorer / rent / rails / ramp / on-ramp / off-ramp",
+          "preferred": "explorer / rent / rails / ramp / on-ramp / off-ramp",
+          "note": "Established loanwords in Brazilian crypto usage; Solana Explorer stays as the brand name."
+        },
+        {
+          "source": "funding account / compliance",
+          "preferred": "conta de fundos / Compliance",
+          "note": "Compliance is the established department name in Brazilian finance; keep it in English."
+        }
+      ],
+      "forbiddenTerms": [
+        {
+          "label": "carteira / carteiras",
+          "pattern": "\\bcarteiras?\\b",
+          "flags": "iu",
+          "preferred": "Wallet / Wallets"
+        },
+        {
+          "label": "ficha / fichas",
+          "pattern": "\\bfichas?\\b",
+          "flags": "iu",
+          "preferred": "Token / Tokens"
+        },
+        {
+          "label": "ponto de extremidade",
+          "pattern": "\\bpontos? de extremidade\\b",
+          "flags": "iu",
+          "preferred": "endpoint / endpoints"
+        },
+        {
+          "label": "lista branca / lista negra",
+          "pattern": "\\blistas? (?:brancas?|negras?)\\b",
+          "flags": "iu",
+          "preferred": "allowlist / blocklist"
+        },
+        {
+          "label": "lista de permissões / lista de bloqueio",
+          "pattern": "\\blistas? de (?:permiss(?:ão|ões)|bloqueios?)\\b",
+          "flags": "iu",
+          "preferred": "allowlist / blocklist"
+        },
+        {
+          "label": "allow list",
+          "pattern": "\\ballow list\\b",
+          "flags": "iu",
+          "preferred": "allowlist"
+        },
+        {
+          "label": "cunhar / cunhagem",
+          "pattern": "\\bcunh(?:ar|agem)\\b",
+          "flags": "iu",
+          "preferred": "mint"
+        }
+      ]
     }
   }
 }

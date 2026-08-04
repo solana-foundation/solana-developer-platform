@@ -29,7 +29,8 @@ function getDisplayNames(displayLocale: AppLocale): Intl.DisplayNames {
 }
 
 function localeDisplayName(locale: AppLocale, displayLocale: AppLocale): string {
-  return getDisplayNames(displayLocale).of(locale) ?? locale;
+  const name = getDisplayNames(displayLocale).of(locale) ?? locale;
+  return name.charAt(0).toLocaleUpperCase(displayLocale) + name.slice(1);
 }
 
 export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "landing" }) {
