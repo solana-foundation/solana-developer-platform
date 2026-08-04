@@ -599,6 +599,7 @@ export interface PolicyRepository {
   completeWalletOperationExecution(
     input: CompleteWalletOperationExecutionInput
   ): Promise<WalletOperationRow | null>;
+  getApiKeyCreatorUserId(apiKeyId: string): Promise<string | null>;
   isApprovalGroupMember(approvalGroupId: string, userId: string): Promise<boolean>;
   createPolicyEvaluation(input: CreatePolicyEvaluationInput): Promise<PolicyEvaluationRow | null>;
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;

@@ -83,6 +83,13 @@ function actorId(auth: ApiKeyContext): string {
   return auth.userId ?? auth.apiKeyId ?? auth.id;
 }
 
+async function actorOwnerId(
+  repository: ReturnType<typeof createPolicyRepository>,
+  principalId: string
+): Promise<string> {
+  return (await repository.getApiKeyCreatorUserId(principalId)) ?? principalId;
+}
+
 async function readApprovalRequest(c: AppContext, approvalRequestId: string) {
   const auth = getAuth(c);
   const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
@@ -115,9 +122,17 @@ async function assertCanResolveApprovalRequest(
     throw notFound("Approval request");
   }
 
+  // Treat a user and every API key they created as the same owner. Comparing
+  // only principal IDs would let one person request with a session and approve
+  // with their API key (or the reverse).
+  const resolverOwnerId = await actorOwnerId(repository, actorId(auth));
+  const requesterOwnerId = row.requested_by
+    ? await actorOwnerId(repository, row.requested_by)
+    : null;
+
   // Requesters may withdraw their own pending request, but they cannot satisfy
   // or reject the approval gate they created.
-  if (row.requested_by === actorId(auth)) {
+  if (requesterOwnerId && requesterOwnerId === resolverOwnerId) {
     if (action === "cancel") {
       return row;
     }

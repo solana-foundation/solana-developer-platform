@@ -6251,25 +6251,29 @@ describe("Payments routes", () => {
 
   it("executes an approved transfer exactly once after leaving it pending", async () => {
     const sessionId = "ses_ungrouped_payment_approver";
+    const approverUserId = "usr_ungrouped_payment_approver";
     await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(approverUserId, "ungrouped-payment-approver@example.com"),
       getDb(env)
         .prepare(
           `INSERT INTO organization_members (id, organization_id, user_id, role, status)
            VALUES (?, ?, ?, 'member', 'active')`
         )
-        .bind("om_ungrouped_payment_approver", TEST_ORG.id, TEST_USER.id),
+        .bind("om_ungrouped_payment_approver", TEST_ORG.id, approverUserId),
       getDb(env)
         .prepare(
           `INSERT INTO project_members (id, project_id, user_id, role)
            VALUES (?, ?, ?, 'admin')`
         )
-        .bind("pm_ungrouped_payment_approver", TEST_PROJECT.id, TEST_USER.id),
+        .bind("pm_ungrouped_payment_approver", TEST_PROJECT.id, approverUserId),
       getDb(env)
         .prepare(
           `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
            VALUES (?, ?, ?, 'session', ?)`
         )
-        .bind(sessionId, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+        .bind(sessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
     ]);
     await seedWalletControlProfile({
       rules: [
@@ -6532,8 +6536,13 @@ describe("Payments routes", () => {
 
   it("requires the configured approval-group member to approve execution", async () => {
     const approvalGroupId = "apg_payment_execution";
-    const sessionId = "ses_payment_approver";
+    const ownerSessionId = "ses_payment_request_owner";
+    const approverSessionId = "ses_payment_approver";
+    const approverUserId = "usr_payment_approver";
     await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(approverUserId, "payment-approver@example.com"),
       getDb(env)
         .prepare(
           `INSERT INTO organization_members (id, organization_id, user_id, role, status)
@@ -6542,16 +6551,34 @@ describe("Payments routes", () => {
         .bind("om_payment_approver", TEST_ORG.id, TEST_USER.id),
       getDb(env)
         .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'admin', 'active')`
+        )
+        .bind("om_payment_separate_approver", TEST_ORG.id, approverUserId),
+      getDb(env)
+        .prepare(
           `INSERT INTO project_members (id, project_id, user_id, role)
            VALUES (?, ?, ?, 'admin')`
         )
         .bind("pm_payment_approver", TEST_PROJECT.id, TEST_USER.id),
       getDb(env)
         .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+        )
+        .bind("pm_payment_separate_approver", TEST_PROJECT.id, approverUserId),
+      getDb(env)
+        .prepare(
           `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
            VALUES (?, ?, ?, 'session', ?)`
         )
-        .bind(sessionId, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+        .bind(ownerSessionId, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(approverSessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
       getDb(env)
         .prepare(
           `INSERT INTO approval_groups (id, organization_id, project_id, name, status, created_by)
@@ -6564,6 +6591,12 @@ describe("Payments routes", () => {
            VALUES (?, ?, ?, 'approver')`
         )
         .bind("agm_payment_approver", approvalGroupId, TEST_USER.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO approval_group_members (id, approval_group_id, user_id, role)
+           VALUES (?, ?, ?, 'approver')`
+        )
+        .bind("agm_payment_separate_approver", approvalGroupId, approverUserId),
     ]);
     await seedWalletControlProfile({
       rules: [
@@ -6597,9 +6630,14 @@ describe("Payments routes", () => {
       error: { details: { approvalRequestId: string } };
     };
     const approvalPath = `/v1/wallets/approval-requests/${pendingBody.error.details.approvalRequestId}/approve`;
-    const sessionHeaders = {
+    const ownerSessionHeaders = {
       "Content-Type": "application/json",
-      Cookie: `sdp_session=${sessionId}`,
+      Cookie: `sdp_session=${ownerSessionId}`,
+      "x-project-id": TEST_PROJECT.id,
+    };
+    const approverSessionHeaders = {
+      "Content-Type": "application/json",
+      Cookie: `sdp_session=${approverSessionId}`,
       "x-project-id": TEST_PROJECT.id,
     };
 
@@ -6610,11 +6648,24 @@ describe("Payments routes", () => {
     );
     expect(apiKeyDecision.status).toBe(403);
 
+    const ownerDecision = await app.request(
+      approvalPath,
+      {
+        method: "POST",
+        headers: ownerSessionHeaders,
+      },
+      env
+    );
+    expect(ownerDecision.status).toBe(403);
+    expect(await ownerDecision.json()).toMatchObject({
+      error: { message: "Approval requests must be decided by a different principal" },
+    });
+
     const memberDecision = await app.request(
       approvalPath,
       {
         method: "POST",
-        headers: sessionHeaders,
+        headers: approverSessionHeaders,
       },
       env
     );
@@ -6631,7 +6682,7 @@ describe("Payments routes", () => {
       "/v1/payments/transfers",
       {
         method: "POST",
-        headers: sessionHeaders,
+        headers: ownerSessionHeaders,
         body: JSON.stringify({
           source: TEST_WALLET_ID,
           destination: TEST_SOLANA_ADDRESSES.wallet2,
@@ -6647,16 +6698,25 @@ describe("Payments routes", () => {
     };
     const selfApproval = await app.request(
       `/v1/wallets/approval-requests/${selfRequestedBody.error.details.approvalRequestId}/approve`,
-      { method: "POST", headers: sessionHeaders },
+      { method: "POST", headers: ownerSessionHeaders },
       env
     );
     expect(selfApproval.status).toBe(403);
-    const selfCancel = await app.request(
-      `/v1/wallets/approval-requests/${selfRequestedBody.error.details.approvalRequestId}/cancel`,
-      { method: "POST", headers: sessionHeaders },
+    const mixedAuthSelfApproval = await app.request(
+      `/v1/wallets/approval-requests/${selfRequestedBody.error.details.approvalRequestId}/approve`,
+      { method: "POST", headers: apiHeaders },
       env
     );
-    expect(selfCancel.status).toBe(200);
+    expect(mixedAuthSelfApproval.status).toBe(403);
+    expect(await mixedAuthSelfApproval.json()).toMatchObject({
+      error: { message: "Approval requests must be decided by a different principal" },
+    });
+    const mixedAuthSelfCancel = await app.request(
+      `/v1/wallets/approval-requests/${selfRequestedBody.error.details.approvalRequestId}/cancel`,
+      { method: "POST", headers: apiHeaders },
+      env
+    );
+    expect(mixedAuthSelfCancel.status).toBe(200);
   });
 
   it("blocks create transfer when projected daily total exceeds maxDailyAmount", async () => {

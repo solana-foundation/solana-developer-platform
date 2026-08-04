@@ -375,8 +375,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
   for (const action of ["approve", "reject", "cancel"] as const) {
     const authorization =
       action === "cancel"
-        ? "The requester may cancel its own request; otherwise the resolver must be an active member of the assigned approval group, or an organization/API admin when no group is assigned."
-        : "The resolver must differ from the requester and be an active member of the assigned approval group, or an organization/API admin when no group is assigned.";
+        ? "The requester may cancel its own request; otherwise the resolver must be an active member of the assigned approval group, or an organization/API admin when no group is assigned. A user and the API keys they created are treated as the same requester."
+        : "The resolver must differ from the requester, including across a user session and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned.";
     registry.registerPath({
       method: "post",
       path: `/v1/wallets/approval-requests/{approvalRequestId}/${action}`,

@@ -2101,6 +2101,22 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       return row?.allowed === 1;
     },
 
+    async getApiKeyCreatorUserId(apiKeyId: string) {
+      const row = await db
+        .prepare(
+          `SELECT created_by
+           FROM api_keys
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
+           LIMIT 1`
+        )
+        .bind(apiKeyId, scope.organizationId, scope.projectId)
+        .first<{ created_by: string | null }>();
+
+      return row?.created_by ?? null;
+    },
+
     async createPolicyEvaluation(input: CreatePolicyEvaluationInput) {
       if (!(await tenantOwnsRow(db, scope, "wallet_operations", input.walletOperationId))) {
         return null;
