@@ -119,6 +119,12 @@ export interface EarnProviderWalletRow {
   /** Provider-side wallet identifier (e.g. Ground wallet UUID). */
   provider_wallet_ref: string;
   label: string | null;
+  /**
+   * The org's own custody wallet that funds this program (custody_wallets.id),
+   * or null when none was recorded. Never where the funds sit — the provider
+   * custodies the program wallet; this is the source/return side.
+   */
+  funding_wallet_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -233,6 +239,8 @@ export interface InsertEarnProviderWalletInput {
   provider: EarnProviderId;
   providerWalletRef: string;
   label: string | null;
+  /** custody_wallets.id; callers MUST have verified org ownership first. */
+  fundingWalletId: string | null;
   createdBy: string;
 }
 
@@ -273,4 +281,23 @@ export interface EarnRepository {
     provider: EarnProviderId;
   }): Promise<EarnProviderWalletRow | null>;
   insertProviderWallet(input: InsertEarnProviderWalletInput): Promise<EarnProviderWalletRow | null>;
+  /**
+   * Repoint an existing program at a different funding wallet (or clear it).
+   * The only mutable field on the row: provider_wallet_ref is immutable by
+   * definition and `label` is write-once at provider-creation time.
+   */
+  setProviderWalletFundingWallet(input: {
+    id: string;
+    fundingWalletId: string | null;
+  }): Promise<EarnProviderWalletRow | null>;
+  /**
+   * Whether a custody wallet belongs to the organization. custody_wallets is
+   * org-scoped only through custody_configs, so this cannot be a foreign-key
+   * constraint — every write that accepts a caller-supplied wallet id must run
+   * this first or an org could reference another org's wallet.
+   */
+  organizationOwnsCustodyWallet(params: {
+    organizationId: string;
+    custodyWalletId: string;
+  }): Promise<boolean>;
 }

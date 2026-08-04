@@ -19,6 +19,21 @@ invariants.
   later calls update strategy weights. Allocation weights validate on a 0.1
   grid summing to exactly 100 per token group, and every `yieldSourceId` must
   exist as an **active** synced strategy for that provider+environment.
+  Two optional body fields carry real invariants:
+  - `requestId` (UUIDv4) is the caller-owned idempotency key, forwarded to the
+    provider on BOTH branches. Providers replay the original response for a
+    matching payload and conflict on a mismatch, so a client must mint a NEW id
+    whenever the allocation changes. Absent ⇒ the provider client mints one per
+    call, which is NOT idempotent: a double-submit fires two mutations.
+  - `fundingWalletId` (`custody_wallets.id`, migration 0050) records the org's own
+    wallet that funds the program and receives its withdrawals — never where the
+    funds sit. `undefined` leaves a recorded wallet alone, `null` clears it.
+    Ownership is checked in the handler via `organizationOwnsCustodyWallet`
+    BEFORE any provider call: custody_wallets is org-scoped only through
+    custody_configs, so no foreign key can express it and skipping the check
+    lets one org reference another org's wallet.
+  `label` remains write-once (set at provider-creation time only);
+  `funding_wallet_id` is the one mutable column on the row.
 - `GET /program/deposits`, `POST /program/withdrawal-preview`,
   `POST /program/withdrawals`, `GET /program/withdrawals/:ref` — funding
   tracking + portfolio-level withdrawals (Solana destinations only).

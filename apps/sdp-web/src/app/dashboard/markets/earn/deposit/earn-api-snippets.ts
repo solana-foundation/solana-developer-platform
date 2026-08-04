@@ -100,7 +100,10 @@ export function earnApiSnippets({
       request: "PUT /v1/earn/program",
       code: requestSnippet({
         baseUrl,
-        body: { provider, allocations },
+        // requestId is what makes a retry safe: the provider replays the original
+        // response for a matching payload. Mint a NEW one whenever allocations
+        // change, or the reused key conflicts.
+        body: { provider, requestId: "<uuid_v4>", allocations },
         method: "PUT",
         path: "/v1/earn/program",
       }),

@@ -2,7 +2,7 @@
 
 import type { EarnPortfolioAllocationInput, EarnStrategy } from "@sdp/types";
 import { ArrowLeftIcon, ArrowRightIcon, Loader2Icon } from "lucide-react";
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
 import type { MessageKey } from "@/i18n/messages";
@@ -209,13 +209,27 @@ export function EarnDepositWizard({
     [activeFilters, liveStrategies]
   );
 
-  const selectedWallet = (wallets ?? []).find((wallet) => wallet.walletId === walletId);
+  const selectedWallet = (wallets ?? []).find((wallet) => wallet.id === walletId);
   const selectedStrategy: EarnStrategy | undefined = liveStrategies.find(
     (strategy) => strategy.id === strategyId
   );
 
   const programExists = programState?.kind === "active";
   const providerUnconfigured = programState?.kind === "unconfigured";
+
+  /**
+   * Idempotency key for the confirm, minted lazily and held per selected
+   * strategy: a retry after a failed confirm replays the SAME key so the
+   * provider cannot apply the change twice, while switching strategy mints a
+   * fresh one — reusing a key with a different payload is a provider conflict.
+   */
+  const requestIdRef = useRef<{ strategyId: string; requestId: string } | null>(null);
+  const requestIdFor = (id: string): string => {
+    if (requestIdRef.current?.strategyId !== id) {
+      requestIdRef.current = { strategyId: id, requestId: crypto.randomUUID() };
+    }
+    return requestIdRef.current.requestId;
+  };
 
   const stepReady: Record<DepositStep, boolean> = {
     wallet: walletId !== null,
@@ -265,7 +279,13 @@ export function EarnDepositWizard({
 
     setSubmitting(true);
     setSubmitError(null);
-    const result = await upsertEarnProgram({ allocations });
+    const result = await upsertEarnProgram({
+      allocations,
+      requestId: requestIdFor(selectedStrategy.id),
+      // Recorded on the program so the funding wallet survives a reload and the
+      // overview can name it. Server-side it is verified to belong to this org.
+      fundingWalletId: walletId,
+    });
     setSubmitting(false);
     if (!result.ok) {
       setSubmitError(result.error);

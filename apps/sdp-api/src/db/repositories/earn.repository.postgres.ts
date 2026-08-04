@@ -108,6 +108,7 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
     provider: row.provider as string,
     provider_wallet_ref: row.provider_wallet_ref as string,
     label: row.label as string | null,
+    funding_wallet_id: (row.funding_wallet_id as string | null) ?? null,
     created_by: row.created_by as string,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -450,8 +451,8 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         .prepare(
           `INSERT INTO earn_provider_wallets (
              id, organization_id, project_id, environment,
-             provider, provider_wallet_ref, label, created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             provider, provider_wallet_ref, label, funding_wallet_id, created_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`
         )
         .bind(
@@ -462,11 +463,44 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           input.provider,
           input.providerWalletRef,
           input.label,
+          input.fundingWalletId,
           input.createdBy
         )
         .first<Record<string, unknown>>();
 
       return row ? mapProviderWalletRow(row) : null;
+    },
+
+    async setProviderWalletFundingWallet(input) {
+      const row = await db
+        .prepare(
+          `UPDATE earn_provider_wallets
+              SET funding_wallet_id = ?, updated_at = sdp_iso_now()
+            WHERE id = ?
+            RETURNING *`
+        )
+        .bind(input.fundingWalletId, input.id)
+        .first<Record<string, unknown>>();
+
+      return row ? mapProviderWalletRow(row) : null;
+    },
+
+    async organizationOwnsCustodyWallet(params) {
+      // custody_wallets carries no organization_id; ownership lives on the
+      // config it belongs to. Deliberately ignores project scope: the earn
+      // program is org+environment scoped, so any of the org's wallets may
+      // fund it.
+      const row = await db
+        .prepare(
+          `SELECT cw.id
+             FROM custody_wallets cw
+             JOIN custody_configs cc ON cc.id = cw.custody_config_id
+            WHERE cw.id = ? AND cc.organization_id = ?`
+        )
+        .bind(params.custodyWalletId, params.organizationId)
+        .first<{ id: string }>();
+
+      return row !== null;
     },
   };
 }

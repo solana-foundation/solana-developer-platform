@@ -43,7 +43,7 @@ function WalletRow({
   wallet: CustodyWalletSummary;
 }) {
   const t = useTranslations();
-  const inputId = `earn-funding-wallet-${wallet.walletId}`;
+  const inputId = `earn-funding-wallet-${wallet.id}`;
   const nameId = `${inputId}-name`;
   const detailId = `${inputId}-detail`;
   const holdings = walletStablecoinHoldings(wallet);
@@ -56,7 +56,7 @@ function WalletRow({
       name="earn-funding-wallet"
       onSelect={onSelect}
       selected={selected}
-      value={wallet.walletId}
+      value={wallet.id}
     >
       <span className="flex items-start gap-3.5">
         <span className="min-w-0 flex-1">
@@ -150,7 +150,8 @@ export function WalletStep({
   fireblocksEnabled: boolean;
   hasError: boolean;
   isLoading: boolean;
-  onSelect: (walletId: string) => void;
+  /** Receives `custody_wallets.id` — the id the program persists. */
+  onSelect: (custodyWalletId: string) => void;
   selectedWalletId: string | null;
   wallets: readonly CustodyWalletSummary[];
 }) {
@@ -163,7 +164,7 @@ export function WalletStep({
     () => (showSearch ? wallets.filter((wallet) => matchesWalletQuery(wallet, query)) : wallets),
     [query, showSearch, wallets]
   );
-  const selectedWallet = wallets.find((wallet) => wallet.walletId === selectedWalletId);
+  const selectedWallet = wallets.find((wallet) => wallet.id === selectedWalletId);
 
   return (
     <div className="space-y-5">
@@ -209,9 +210,9 @@ export function WalletStep({
             <legend className="sr-only">{t("DashboardEarn.deposit.walletLegend")}</legend>
             {visible.map((wallet) => (
               <WalletRow
-                key={wallet.walletId}
-                onSelect={() => onSelect(wallet.walletId)}
-                selected={wallet.walletId === selectedWalletId}
+                key={wallet.id}
+                onSelect={() => onSelect(wallet.id)}
+                selected={wallet.id === selectedWalletId}
                 wallet={wallet}
               />
             ))}

@@ -19,6 +19,10 @@ reintroduce fixture modules. Data flows: BFF proxies
   `useEarnStrategies()`, program upsert, deposits, withdrawal fetchers.
   `EARN_PORTFOLIO_PROVIDER` is the single deliberate Ground pin — widening to
   multi-provider selection happens HERE, not by scattering provider ids.
+  `fetchEarnStrategies()` **pages** the catalogue: the API caps `pageSize` at
+  100 and has no provider filter, so a single request silently dropped every
+  strategy past the first page. It stops on a short page OR the reported total,
+  with a hard page cap — keep all three.
 - `earn-program-presentation.ts` — pure per-strategy helpers shared by every
   surface: token lane, settlement days, pool size, APY, curator/protocol labels,
   liquidity copy. Every one reads a field the provider actually publishes.
@@ -72,11 +76,24 @@ A filter must never exclude on a field the provider left absent (an unreported
 pool size passes every floor); the sandbox omits `tvlUsd` often enough that the
 opposite choice empties the catalogue.
 
-### Two conditions with no server state
+### Confirm is idempotent — keep it that way
 
-- **Funding wallet** is a flow-level choice: `PUT /v1/earn/program` has no
-  source-wallet field, and there is no API to move funds from an SDP wallet into
-  the program. It shapes the funding instructions only — never imply a transfer.
+The confirm sends a client-minted `requestId`, held per selected strategy in a
+ref: a retry after a failed confirm replays the SAME key (the provider cannot
+apply the change twice), and switching strategy mints a fresh one (reusing a key
+with a different payload is a provider conflict). Dropping either half
+reintroduces a double-submit that fires two provider mutations.
+
+### The funding wallet
+
+Selected by `custody_wallets.id` (NOT the provider-side `walletId`) because that
+is what `PUT /v1/earn/program` persists as `fundingWalletId`. It records where
+stablecoins are sent FROM and where withdrawals return — there is still no API
+to move funds from an SDP wallet into the program, so never imply a transfer
+happens. The API verifies the wallet belongs to the caller's org.
+
+### Conditions with no first-class data source
+
 - **The API-integration screen** keys off "the org has active API keys", resolved
   in `page.tsx`. SDP persists no organization type, so this is a proxy for a
   B2B2C/API customer, not a real flag. If an org-type field ever lands, swap the

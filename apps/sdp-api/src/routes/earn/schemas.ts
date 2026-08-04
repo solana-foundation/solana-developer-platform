@@ -133,6 +133,22 @@ export const earnProgramUpsertSchema = z.object({
   provider: earnProviderSchema,
   label: z.string().trim().min(1).max(120).optional(),
   allocations: earnProgramAllocationsSchema,
+  /**
+   * Caller-owned idempotency key (UUIDv4), forwarded to the provider so a
+   * retried confirm cannot provision a second wallet or apply a strategy twice.
+   * Same contract as the withdrawal path: the provider replays the original
+   * response for a matching payload and conflicts on a mismatch, so callers must
+   * mint a NEW id whenever the allocation changes. The server mints one per call
+   * when absent, which is not idempotent — send your own to get that guarantee.
+   */
+  requestId: z.uuidv4().optional(),
+  /**
+   * The org's own custody wallet (`custody_wallets.id`) that funds this program
+   * and receives its withdrawals. Optional: funding is a transfer to the
+   * provider's Solana address, so an SDP wallet is never required. Send `null`
+   * to clear a previously recorded one. Ownership is verified server-side.
+   */
+  fundingWalletId: z.string().trim().min(1).max(120).nullish(),
 });
 
 export const earnProgramQuerySchema = z.object({

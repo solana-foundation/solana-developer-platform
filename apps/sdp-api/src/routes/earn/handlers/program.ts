@@ -50,6 +50,12 @@ import { parseBody, parseParams, parseQuery } from "./shared";
 export interface EarnProgram {
   provider: string;
   label: string | null;
+  /**
+   * The org's own custody wallet that funds this program and receives its
+   * withdrawals, or null when none was recorded. Never where the funds sit —
+   * the provider custodies the program wallet (`wallet.providerWalletRef`).
+   */
+  fundingWalletId: string | null;
   createdAt: string;
   wallet: EarnPortfolioWalletSnapshot;
   /**
@@ -86,6 +92,7 @@ function mapProgram(
   return {
     provider: row.provider,
     label: row.label,
+    fundingWalletId: row.funding_wallet_id,
     createdAt: row.created_at,
     wallet,
     ...(portfolioYield ? { yield: portfolioYield } : {}),
@@ -207,6 +214,20 @@ export const upsertEarnProgram = async (c: AppContext) => {
   await assertKnownYieldSources(c, client.provider, body.allocations);
 
   const repo = getEarnRepository(c);
+
+  // A caller-supplied wallet id must be one of this org's own wallets. There is
+  // no FK that can express this (custody_wallets scopes to an org through
+  // custody_configs), so it is checked here before anything is persisted.
+  if (body.fundingWalletId) {
+    const owned = await repo.organizationOwnsCustodyWallet({
+      organizationId: auth.organizationId,
+      custodyWalletId: body.fundingWalletId,
+    });
+    if (!owned) {
+      throw badRequest("fundingWalletId is not a wallet in this organization");
+    }
+  }
+
   const existing = await repo.getProviderWallet({
     organizationId: auth.organizationId,
     environment,
@@ -218,7 +239,23 @@ export const upsertEarnProgram = async (c: AppContext) => {
     await client.updatePortfolioStrategy(earnRuntime(c), {
       providerWalletRef: row.provider_wallet_ref,
       allocations: body.allocations,
+      // Forwarded so a double-submitted confirm re-applies the SAME strategy
+      // change instead of firing two independent provider mutations. Absent
+      // means the client accepted non-idempotent behaviour (see the schema).
+      requestId: body.requestId,
     });
+
+    // Only touch the funding wallet when the caller said something about it:
+    // `undefined` leaves the recorded one alone, `null` clears it. Persisted
+    // after the provider call so a failed strategy change leaves the row as it
+    // was, and only when it actually differs.
+    if (body.fundingWalletId !== undefined && body.fundingWalletId !== row.funding_wallet_id) {
+      row =
+        (await repo.setProviderWalletFundingWallet({
+          id: row.id,
+          fundingWalletId: body.fundingWalletId ?? null,
+        })) ?? row;
+    }
   } else {
     if (!auth.projectId) {
       throw internalError("Could not resolve project scope");
@@ -226,6 +263,10 @@ export const upsertEarnProgram = async (c: AppContext) => {
     const createdWallet = await client.createPortfolioWallet(earnRuntime(c), {
       label: body.label ?? `sdp-earn-${auth.organizationId}-${environment}`,
       allocations: body.allocations,
+      // Same key on the create branch: without it a retried first PUT can
+      // provision a second provider wallet that the unique constraint then
+      // orphans.
+      requestId: body.requestId,
     });
 
     try {
@@ -236,6 +277,7 @@ export const upsertEarnProgram = async (c: AppContext) => {
         provider: client.provider,
         providerWalletRef: createdWallet.providerWalletRef,
         label: body.label ?? null,
+        fundingWalletId: body.fundingWalletId ?? null,
         createdBy: await resolveCreatorUserId(c),
       });
     } catch (err) {

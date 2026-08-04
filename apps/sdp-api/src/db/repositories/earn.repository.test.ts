@@ -412,6 +412,7 @@ describe("EarnRepository (postgres)", () => {
         provider: "ground",
         providerWalletRef: GROUND_WALLET_REF,
         label: null,
+        fundingWalletId: null,
         createdBy: TEST_USER.id,
         ...overrides,
       });
