@@ -200,7 +200,7 @@ function RevisionSnapshot({
           ) : null}
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-secondary">
-          <time dateTime={revision.createdAt} className="min-w-40">
+          <time dateTime={revision.createdAt} className="min-w-36">
             {formatPolicyDateTime(revision.createdAt, locale)}
           </time>
           <div className="flex min-w-0 items-center gap-2">
