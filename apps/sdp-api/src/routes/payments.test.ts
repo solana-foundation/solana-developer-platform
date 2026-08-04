@@ -6250,6 +6250,27 @@ describe("Payments routes", () => {
   });
 
   it("executes an approved transfer exactly once after leaving it pending", async () => {
+    const sessionId = "ses_ungrouped_payment_approver";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'member', 'active')`
+        )
+        .bind("om_ungrouped_payment_approver", TEST_ORG.id, TEST_USER.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+        )
+        .bind("pm_ungrouped_payment_approver", TEST_PROJECT.id, TEST_USER.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(sessionId, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+    ]);
     await seedWalletControlProfile({
       rules: [
         {
@@ -6259,16 +6280,20 @@ describe("Payments routes", () => {
         },
       ],
     });
-    const headers = {
+    const apiHeaders = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
+    };
+    const adminHeaders = {
+      Cookie: `sdp_session=${sessionId}`,
+      "x-project-id": TEST_PROJECT.id,
     };
 
     const pendingResponse = await app.request(
       "/v1/payments/transfers",
       {
         method: "POST",
-        headers,
+        headers: apiHeaders,
         body: JSON.stringify({
           source: TEST_WALLET_ID,
           destination: TEST_SOLANA_ADDRESSES.wallet2,
@@ -6291,12 +6316,26 @@ describe("Payments routes", () => {
       .first<{ count: number | string }>();
     expect(Number(beforeApproval?.count ?? 0)).toBe(0);
 
-    const approve = () =>
-      app.request(
-        `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
-        { method: "POST", headers },
-        env
-      );
+    const approvalPath = `/v1/wallets/approval-requests/${approvalRequestId}/approve`;
+    const apiKeyApproval = await app.request(
+      approvalPath,
+      { method: "POST", headers: apiHeaders },
+      env
+    );
+    expect(apiKeyApproval.status).toBe(403);
+
+    const memberApproval = await app.request(
+      approvalPath,
+      { method: "POST", headers: adminHeaders },
+      env
+    );
+    expect(memberApproval.status).toBe(403);
+    await getDb(env)
+      .prepare("UPDATE organization_members SET role = 'admin' WHERE id = ?")
+      .bind("om_ungrouped_payment_approver")
+      .run();
+
+    const approve = () => app.request(approvalPath, { method: "POST", headers: adminHeaders }, env);
     const approvedResponse = await approve();
     expect(approvedResponse.status).toBe(200);
     const approvedBody = (await approvedResponse.json()) as {
@@ -6558,6 +6597,11 @@ describe("Payments routes", () => {
       error: { details: { approvalRequestId: string } };
     };
     const approvalPath = `/v1/wallets/approval-requests/${pendingBody.error.details.approvalRequestId}/approve`;
+    const sessionHeaders = {
+      "Content-Type": "application/json",
+      Cookie: `sdp_session=${sessionId}`,
+      "x-project-id": TEST_PROJECT.id,
+    };
 
     const apiKeyDecision = await app.request(
       approvalPath,
@@ -6570,10 +6614,7 @@ describe("Payments routes", () => {
       approvalPath,
       {
         method: "POST",
-        headers: {
-          Cookie: `sdp_session=${sessionId}`,
-          "x-project-id": TEST_PROJECT.id,
-        },
+        headers: sessionHeaders,
       },
       env
     );
@@ -6585,6 +6626,37 @@ describe("Payments routes", () => {
       status: "approved",
       operation: { status: "completed" },
     });
+
+    const selfRequested = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: sessionHeaders,
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.2",
+        }),
+      },
+      env
+    );
+    expect(selfRequested.status).toBe(202);
+    const selfRequestedBody = (await selfRequested.json()) as {
+      error: { details: { approvalRequestId: string } };
+    };
+    const selfApproval = await app.request(
+      `/v1/wallets/approval-requests/${selfRequestedBody.error.details.approvalRequestId}/approve`,
+      { method: "POST", headers: sessionHeaders },
+      env
+    );
+    expect(selfApproval.status).toBe(403);
+    const selfCancel = await app.request(
+      `/v1/wallets/approval-requests/${selfRequestedBody.error.details.approvalRequestId}/cancel`,
+      { method: "POST", headers: sessionHeaders },
+      env
+    );
+    expect(selfCancel.status).toBe(200);
   });
 
   it("blocks create transfer when projected daily total exceeds maxDailyAmount", async () => {

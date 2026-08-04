@@ -84,11 +84,8 @@ describe("approved wallet-operation type resumption", () => {
       ],
     } as unknown as PolicyRepository;
 
-    const result = await new WalletPolicyEnforcementService(repository).resumeApprovedOperation(
-      operation.id,
-      "attempt_1",
-      input
-    );
+    const service = new WalletPolicyEnforcementService(repository);
+    const result = await service.resumeApprovedOperation(operation.id, "attempt_1", input);
 
     expect(result.operation).toMatchObject({
       id: operation.id,
@@ -100,5 +97,21 @@ describe("approved wallet-operation type resumption", () => {
       reasonCode: "approval_satisfied",
       requiresApproval: false,
     });
+
+    for (const mutation of [
+      { rawPayload: { tampered: true } },
+      { context: { tampered: true } },
+      { providerExtensions: { provider: "tampered" } },
+    ]) {
+      await expect(
+        service.resumeApprovedOperation(operation.id, "attempt_1", {
+          ...input,
+          ...mutation,
+        })
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: "Approved wallet operation does not match replayed action",
+      });
+    }
   });
 });

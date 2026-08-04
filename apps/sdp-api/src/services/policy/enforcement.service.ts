@@ -3,7 +3,13 @@ import {
   enforceWalletOperationPolicy as runPolicyEnforcement,
   type WalletOperationPolicyEnforcement,
 } from "@sdp/policy";
-import type { PolicyEvaluation, WalletOperationActor, WalletOperationEnvelope } from "@sdp/types";
+import type {
+  PolicyEvaluation,
+  WalletOperationActor,
+  WalletOperationContext,
+  WalletOperationEnvelope,
+  WalletOperationProviderExtensions,
+} from "@sdp/types";
 import { getDb } from "@/db";
 import {
   type ApprovalRequestRow,
@@ -97,7 +103,8 @@ export class WalletPolicyEnforcementService {
       operation.operation_type === input.operationType &&
       operation.asset === (input.asset ?? null) &&
       operation.amount === (input.amount ?? null) &&
-      operation.destination === (input.destination ?? null);
+      operation.destination === (input.destination ?? null) &&
+      jsonValuesEqual(operation.raw_payload, walletOperationRawPayload(input));
     if (!matches) {
       throw new AppError("FORBIDDEN", "Approved wallet operation does not match replayed action");
     }
@@ -120,15 +127,15 @@ export class WalletPolicyEnforcementService {
         custodyWalletId: operation.custody_wallet_id,
         walletId: operation.wallet_id,
         apiKeyId: operation.api_key_id,
-        actor: input.actor ?? null,
+        actor: storedOperationActor(operation.raw_payload),
         source: operation.source,
         operationFamily: operation.operation_family,
         operationType: operation.operation_type,
         asset: operation.asset,
         amount: operation.amount,
         destination: operation.destination,
-        context: input.context ?? {},
-        providerExtensions: input.providerExtensions ?? {},
+        context: storedOperationContext(operation.raw_payload),
+        providerExtensions: storedOperationProviderExtensions(operation.raw_payload),
         rawPayload: operation.raw_payload,
         idempotencyKey: operation.idempotency_key,
         status: operation.status,
@@ -205,6 +212,53 @@ export class WalletPolicyEnforcementService {
 
     return requireApprovalRequestStatus(approvalRequest, "rejected");
   }
+}
+
+function walletOperationRawPayload(input: CreateWalletOperationInput): Record<string, unknown> {
+  return {
+    ...(input.rawPayload ?? {}),
+    ...(input.actor !== undefined ? { actor: input.actor } : {}),
+    ...(input.context != null ? { context: input.context } : {}),
+    ...(input.providerExtensions != null ? { providerExtensions: input.providerExtensions } : {}),
+  };
+}
+
+function storedOperationContext(rawPayload: Record<string, unknown>): WalletOperationContext {
+  return isJsonObject(rawPayload.context) ? rawPayload.context : {};
+}
+
+function storedOperationActor(rawPayload: Record<string, unknown>): WalletOperationActor | null {
+  return isJsonObject(rawPayload.actor)
+    ? (rawPayload.actor as unknown as WalletOperationActor)
+    : null;
+}
+
+function storedOperationProviderExtensions(
+  rawPayload: Record<string, unknown>
+): WalletOperationProviderExtensions {
+  if (isJsonObject(rawPayload.providerExtensions)) {
+    return rawPayload.providerExtensions;
+  }
+  return typeof rawPayload.provider === "string" ? { provider: rawPayload.provider } : {};
+}
+
+function jsonValuesEqual(left: unknown, right: unknown): boolean {
+  return stableJson(left) === stableJson(right);
+}
+
+function stableJson(value: unknown): string | undefined {
+  return JSON.stringify(value, (_key, current) => {
+    if (!isJsonObject(current)) {
+      return current;
+    }
+    return Object.fromEntries(
+      Object.entries(current).sort(([left], [right]) => left.localeCompare(right))
+    );
+  });
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

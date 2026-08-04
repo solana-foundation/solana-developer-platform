@@ -102,7 +102,8 @@ async function readApprovalRequest(c: AppContext, approvalRequestId: string) {
 async function assertCanResolveApprovalRequest(
   c: AppContext,
   repository: ReturnType<typeof createPolicyRepository>,
-  approvalRequestId: string
+  approvalRequestId: string,
+  action: "approve" | "reject" | "cancel"
 ) {
   const auth = getAuth(c);
   const row = await repository.getApprovalRequestDetail({
@@ -113,14 +114,28 @@ async function assertCanResolveApprovalRequest(
   if (!row) {
     throw notFound("Approval request");
   }
-  if (!row.approval_group_id) {
+
+  // Requesters may withdraw their own pending request, but they cannot satisfy
+  // or reject the approval gate they created.
+  if (row.requested_by === actorId(auth)) {
+    if (action === "cancel") {
+      return row;
+    }
+    throw forbidden("Approval requests must be decided by a different principal");
+  }
+
+  if (row.approval_group_id) {
+    if (
+      !auth.userId ||
+      !(await repository.isApprovalGroupMember(row.approval_group_id, auth.userId))
+    ) {
+      throw forbidden("Approval request must be decided by an active approval-group member");
+    }
     return row;
   }
-  if (
-    !auth.userId ||
-    !(await repository.isApprovalGroupMember(row.approval_group_id, auth.userId))
-  ) {
-    throw forbidden("Approval request must be decided by an active approval-group member");
+
+  if (!auth.permissions.includes("org:admin") && !auth.permissions.includes("*")) {
+    throw forbidden("Ungrouped approval requests must be decided by an organization admin");
   }
   return row;
 }
@@ -162,7 +177,12 @@ export const approveApprovalRequest = async (c: AppContext) => {
   const { approvalRequestId } = parseApprovalRequestParams(c);
   const auth = getAuth(c);
   const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
-  const current = await assertCanResolveApprovalRequest(c, repository, approvalRequestId);
+  const current = await assertCanResolveApprovalRequest(
+    c,
+    repository,
+    approvalRequestId,
+    "approve"
+  );
   const approvalRequest = await new WalletPolicyEnforcementService(
     repository
   ).approveApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
@@ -186,7 +206,7 @@ export const rejectApprovalRequest = async (c: AppContext) => {
   const { approvalRequestId } = parseApprovalRequestParams(c);
   const auth = getAuth(c);
   const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
-  await assertCanResolveApprovalRequest(c, repository, approvalRequestId);
+  await assertCanResolveApprovalRequest(c, repository, approvalRequestId, "reject");
   const approvalRequest = await new WalletPolicyEnforcementService(
     repository
   ).rejectApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
@@ -204,7 +224,7 @@ export const cancelApprovalRequest = async (c: AppContext) => {
   const { approvalRequestId } = parseApprovalRequestParams(c);
   const auth = getAuth(c);
   const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
-  await assertCanResolveApprovalRequest(c, repository, approvalRequestId);
+  await assertCanResolveApprovalRequest(c, repository, approvalRequestId, "cancel");
   const approvalRequest = await new WalletPolicyEnforcementService(
     repository
   ).cancelApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
