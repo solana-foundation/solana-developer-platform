@@ -29,6 +29,7 @@ import { buildHomeBalanceBreakdown, countHeldTokens } from "./home-balance-break
 import { resolveHomeHeroState } from "./home-first-run";
 import type { HomeActivityExplorerRef, HomeActivityRow } from "./home-page.data";
 import { HomeQuickActions } from "./home-quick-actions";
+import { seriesColorForMint } from "./home-series-color";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { fetchHomeActivity } from "./home-workspace.data";
 import {
@@ -94,22 +95,10 @@ function ActivityAddress({
 }
 
 /**
- * Descending emphasis for descending share. The design system ships no categorical
- * chart palette, and a stacked allocation bar is a magnitude encoding rather than an
- * identity one, so a single neutral ramp is the right job — and it re-steps itself
- * per theme instead of needing a hand-picked dark variant.
+ * "Other" is a residual bucket, not a token, so it stays neutral rather than
+ * taking a categorical hue that would imply an identity it does not have.
  */
-const ALLOCATION_FILLS = [
-  "bg-primary",
-  "bg-secondary",
-  "bg-tertiary",
-  "bg-muted",
-  "bg-fill-strong",
-] as const;
-
-function allocationFill(index: number): string {
-  return ALLOCATION_FILLS[Math.min(index, ALLOCATION_FILLS.length - 1)];
-}
+const OTHER_SEGMENT_COLOR = "var(--fill-strong, #d4d4d4)";
 
 /**
  * Holdings by token. The aggregate already returns the per-token rows the total is
@@ -144,13 +133,13 @@ function BalanceAllocation({
     resolveTransferTokenLabel(slice.mint, symbolsByMint) ?? slice.token;
 
   const segments = [
-    ...breakdown.priced.map((slice, index) => ({
+    ...breakdown.priced.map((slice) => ({
       key: slice.mint,
       mint: slice.mint,
       label: symbolFor(slice),
       percent: slice.sharePercent,
       value: slice.usdValue ?? 0,
-      fill: allocationFill(index),
+      fill: seriesColorForMint(slice.mint),
     })),
     ...(breakdown.otherPricedCount > 0
       ? [
@@ -165,7 +154,7 @@ function BalanceAllocation({
                   }),
             percent: breakdown.otherPricedSharePercent,
             value: breakdown.otherPricedUsd,
-            fill: allocationFill(breakdown.priced.length),
+            fill: OTHER_SEGMENT_COLOR,
           },
         ]
       : []),
@@ -197,10 +186,12 @@ function BalanceAllocation({
                 onMouseLeave={() => setHovered(null)}
                 onFocus={() => setHovered(segment.key)}
                 onBlur={() => setHovered(null)}
-                style={{ width: `${Math.max(segment.percent, 1.5)}%` }}
+                style={{
+                  width: `${Math.max(segment.percent, 1.5)}%`,
+                  backgroundColor: segment.fill,
+                }}
                 className={cn(
                   "h-full rounded-full transition-opacity motion-reduce:transition-none",
-                  segment.fill,
                   hovered && hovered !== segment.key ? "opacity-35" : "opacity-100"
                 )}
               />
@@ -224,7 +215,8 @@ function BalanceAllocation({
                   ) : (
                     <span
                       aria-hidden="true"
-                      className={cn("size-6 shrink-0 rounded-full", segment.fill)}
+                      style={{ backgroundColor: segment.fill }}
+                      className="size-6 shrink-0 rounded-full"
                     />
                   )}
                   <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-primary">
