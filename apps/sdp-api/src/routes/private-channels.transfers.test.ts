@@ -432,7 +432,7 @@ describe("Private Channels — transfer access and routes", () => {
     expect(createChannelTransferMock).not.toHaveBeenCalled();
   });
 
-  it("lists verified wallets of other members in the active channel only", async () => {
+  it("lists one entry per verified wallet in the active channel, the caller's own first", async () => {
     const response = await app.request(
       `/v1/private-channels/channels/${CHANNEL_ID}/transfer-recipients`,
       { headers: sessionHeaders() },
@@ -443,18 +443,31 @@ describe("Private Channels — transfer access and routes", () => {
     const body = (await response.json()) as {
       data: {
         recipients: Array<{
+          id: string;
+          pubkey: string;
           privateChannelUserId: string;
-          wallets: Array<{ id: string; pubkey: string }>;
+          isSelf: boolean;
         }>;
       };
     };
     expect(body.data.recipients).toEqual([
       expect.objectContaining({
+        id: "pcvw-pct-actor",
+        pubkey: ACTOR_ADDRESS,
+        privateChannelUserId: ACTOR_PC_USER_ID,
+        isSelf: true,
+      }),
+      expect.objectContaining({
+        id: RECIPIENT_VERIFIED_WALLET_ID,
+        pubkey: RECIPIENT_ADDRESS,
         privateChannelUserId: RECIPIENT_PC_USER_ID,
-        wallets: [
-          { id: RECIPIENT_VERIFIED_WALLET_ID, pubkey: RECIPIENT_ADDRESS },
-          { id: OTHER_USER_VERIFIED_WALLET_ID, pubkey: OTHER_USER_ADDRESS },
-        ],
+        isSelf: false,
+      }),
+      expect.objectContaining({
+        id: OTHER_USER_VERIFIED_WALLET_ID,
+        pubkey: OTHER_USER_ADDRESS,
+        privateChannelUserId: RECIPIENT_PC_USER_ID,
+        isSelf: false,
       }),
     ]);
   });
@@ -599,6 +612,42 @@ describe("Private Channels — transfer access and routes", () => {
     });
     expect(response.status).toBe(400);
     expect(createChannelTransferMock).not.toHaveBeenCalled();
+  });
+
+  it("allows a transfer between two verified wallets owned by the same member", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO private_channel_verified_wallets
+           (id, organization_id, project_id, user_id, instance_id, wallet_id, pubkey)
+         VALUES ('pcvw-pct-actor-second', ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        ACTOR_PC_USER_ID,
+        INSTANCE_ID,
+        UNVERIFIED_WALLET_ID,
+        UNVERIFIED_ADDRESS
+      )
+      .run();
+
+    const response = await postTransfer({
+      walletId: ACTOR_WALLET_ID,
+      recipientVerifiedWalletId: "pcvw-pct-actor-second",
+      amount: "1.5",
+    });
+
+    expect(response.status).toBe(200);
+    expect(createChannelTransferMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        recipient: {
+          privateChannelUserId: ACTOR_PC_USER_ID,
+          verifiedWalletId: "pcvw-pct-actor-second",
+          pubkey: UNVERIFIED_ADDRESS,
+        },
+      })
+    );
   });
 
   it.each(UNSAFE_RECIPIENTS)("rejects the known unsafe %s address", async (_name, pubkey) => {

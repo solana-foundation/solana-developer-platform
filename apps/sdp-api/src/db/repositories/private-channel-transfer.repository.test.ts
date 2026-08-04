@@ -110,6 +110,26 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
 
     await db
       .prepare(
+        `INSERT INTO custody_configs (
+           id, organization_id, project_id, provider, config_encrypted
+         ) VALUES ('cc_pct_repo_test', ?, ?, 'local', 'encrypted-test-config')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_config_id, wallet_id, public_key, label
+         ) VALUES
+           ('cw_pct_sender', 'cc_pct_repo_test', 'wal_pct_sender', ?, 'Treasury'),
+           ('cw_pct_recipient_a', 'cc_pct_repo_test', 'wal_pct_recipient_a', ?, 'Operations'),
+           ('cw_pct_recipient_b', 'cc_pct_repo_test', 'wal_pct_recipient_b', ?, NULL)`
+      )
+      .bind(SENDER, RECIPIENT, "RecipientTwo11111111111111111111111111111111")
+      .run();
+
+    await db
+      .prepare(
         `INSERT INTO private_channel_instances (
            id, organization_id, project_id, gateway_url, chain_rpc_url,
            escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
@@ -411,7 +431,7 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
     expect(await repo.listTransfersByProject({ ...SCOPE, limit: 2 })).toHaveLength(2);
   });
 
-  it("groups eligible verified wallets by other channel member", async () => {
+  it("lists every verified wallet on the channel, one per wallet and the caller's own first", async () => {
     const recipients = await repo.listEligibleRecipients({
       ...SCOPE,
       instanceId: TEST_INSTANCE_ID,
@@ -421,19 +441,40 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
 
     expect(recipients).toEqual([
       {
+        id: "pcvw_pct_sender",
+        pubkey: SENDER,
+        walletName: "Treasury",
+        privateChannelUserId: SENDER_PC_USER_ID,
+        isSelf: true,
+      },
+      {
+        id: RECIPIENT_WALLET_A_ID,
+        pubkey: RECIPIENT,
+        walletName: "Operations",
         privateChannelUserId: RECIPIENT_PC_USER_ID,
-        userId: RECIPIENT_USER_ID,
-        email: "recipient@example.com",
-        name: "Recipient User",
-        wallets: [
-          { id: RECIPIENT_WALLET_A_ID, pubkey: RECIPIENT },
-          {
-            id: RECIPIENT_WALLET_B_ID,
-            pubkey: "RecipientTwo11111111111111111111111111111111",
-          },
-        ],
+        isSelf: false,
+      },
+      {
+        id: RECIPIENT_WALLET_B_ID,
+        pubkey: "RecipientTwo11111111111111111111111111111111",
+        walletName: null,
+        privateChannelUserId: RECIPIENT_PC_USER_ID,
+        isSelf: false,
       },
     ]);
+  });
+
+  it("excludes verified wallets of members who are not in the channel", async () => {
+    const recipients = await repo.listEligibleRecipients({
+      ...SCOPE,
+      instanceId: TEST_INSTANCE_ID,
+      channelId: CHANNEL_A_ID,
+      initiatingPrivateChannelUserId: SENDER_PC_USER_ID,
+    });
+
+    expect(
+      recipients.some((recipient) => recipient.privateChannelUserId === NON_MEMBER_PC_USER_ID)
+    ).toBe(false);
   });
 
   it("returns no recipients outside an active channel and active instance", async () => {

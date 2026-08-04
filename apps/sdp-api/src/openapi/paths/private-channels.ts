@@ -338,7 +338,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "List eligible verified-wallet transfer recipients",
     operationId: "listPrivateChannelTransferRecipients",
     description:
-      "Requires a user identity and explicit membership in the active channel. Returns only verified wallets of other members in that channel.",
+      "Requires a user identity and explicit membership in the active channel. Returns every verified wallet in that channel, one entry per wallet, including the caller's own. A transfer to the same wallet it is sent from is rejected on create.",
     security: [{ sessionCookie: [] }],
     request: {
       headers: sessionProjectScopeHeaders,
@@ -346,7 +346,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: {
-        description: "Eligible recipients grouped by member.",
+        description: "Eligible recipient wallets, the caller's own listed first.",
         content: jsonContent(successResponseSchema(privateChannelTransferRecipientListSchema)),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
