@@ -1,18 +1,59 @@
 import { describe, expect, it, vi } from "vitest";
+import type { KVStore } from "@/runtime/kv";
 import { AuditPersistenceError, AuditService } from "./audit.service";
+
+function createMemoryCheckpointStore(): KVStore {
+  let value: string | null = null;
+  return {
+    get: vi.fn(async () => value) as KVStore["get"],
+    put: vi.fn(async (_key: string, next: string) => {
+      value = next;
+    }),
+    delete: vi.fn(async () => {
+      value = null;
+    }),
+    compareAndSet: vi.fn(async (_key: string, expected: string | null, next: string) => {
+      if (value !== expected) return false;
+      value = next;
+      return true;
+    }),
+    list: vi.fn(async () => ({ keys: [] })),
+    admitSlidingWindow: vi.fn(),
+  };
+}
+
+function createAuditWriter(options: { failAt?: number; returnNullAt?: number } = {}) {
+  let sequence = 0;
+  const queryOne = vi.fn(async (_query: string, params: readonly unknown[]) => {
+    const attempt = sequence + 1;
+    if (options.failAt === attempt) throw new Error("database unavailable");
+    if (options.returnNullAt === attempt) return null;
+    sequence = attempt;
+    return {
+      ledger_sequence: sequence,
+      previous_entry_hash: sequence === 1 ? null : `hash_${sequence - 1}`,
+      entry_hash: `hash_${sequence}`,
+      params,
+    };
+  });
+  const db = {
+    transaction: vi.fn(async (callback: (tx: { queryOne: typeof queryOne }) => Promise<void>) =>
+      callback({ queryOne })
+    ),
+  };
+  return { db, queryOne, checkpoint: createMemoryCheckpointStore() };
+}
 
 describe("AuditService", () => {
   it("redacts credential-shaped metadata before persisting", async () => {
-    const run = vi.fn(async () => 1);
-    const bind = vi.fn((..._args: unknown[]) => ({ run }));
-    const db = { prepare: vi.fn(() => ({ bind })) };
+    const { db, queryOne, checkpoint } = createAuditWriter();
     const context = {
       get: (key: string) =>
         key === "apiKey" ? { id: "ak_123", organizationId: "org_123" } : "req_123",
       req: { header: () => null },
     };
 
-    await new AuditService(db as never).log(context as never, {
+    await new AuditService(db as never, checkpoint).log(context as never, {
       action: "validate_failed",
       resourceType: "provider_credential",
       resourceId: "pcred_123",
@@ -24,7 +65,7 @@ describe("AuditService", () => {
       status: "failure",
     });
 
-    const metadata = String(bind.mock.calls[0]?.[7]);
+    const metadata = String(queryOne.mock.calls[0]?.[1]?.[7]);
     expect(metadata).toContain('"provider":"privy"');
     expect(metadata).toContain('"appSecret":"[REDACTED]"');
     expect(metadata).toContain('"authorization":"[REDACTED]"');
@@ -33,28 +74,22 @@ describe("AuditService", () => {
   });
 
   it("fails closed when an audit insert fails", async () => {
-    const cause = new Error("database unavailable");
-    const run = vi.fn(async () => {
-      throw cause;
-    });
-    const db = { prepare: vi.fn(() => ({ bind: () => ({ run }) })) };
+    const { db, checkpoint } = createAuditWriter({ failAt: 1 });
 
     await expect(
-      new AuditService(db as never).logSystem({
+      new AuditService(db as never, checkpoint).logSystem({
         action: "submit",
         resourceType: "transaction",
         resourceId: "tx_123",
       })
-    ).rejects.toMatchObject({ name: "AuditPersistenceError", cause });
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
   });
 
   it("rejects a zero-row audit write", async () => {
-    const db = {
-      prepare: vi.fn(() => ({ bind: () => ({ run: vi.fn(async () => 0) }) })),
-    };
+    const { db, checkpoint } = createAuditWriter({ returnNullAt: 1 });
 
     await expect(
-      new AuditService(db as never).logSystem({
+      new AuditService(db as never, checkpoint).logSystem({
         action: "maintenance",
         resourceType: "audit_ledger",
       })
@@ -70,26 +105,30 @@ describe("AuditService", () => {
       unresolved_critical_intents: 0,
     }));
     const db = { prepare: vi.fn(() => ({ first })) };
+    const checkpoint = createMemoryCheckpointStore();
+    await checkpoint.put(
+      "audit-ledger:checkpoint:v1",
+      JSON.stringify({ sequence: 42, headHash: "abc123" })
+    );
 
-    await expect(new AuditService(db as never).verifyIntegrity()).resolves.toEqual({
+    await expect(new AuditService(db as never, checkpoint).verifyIntegrity()).resolves.toEqual({
       valid: true,
       checkedEntries: 42,
       firstInvalidSequence: null,
       headHash: "abc123",
       unresolvedCriticalIntents: 0,
+      externalCheckpointMatches: true,
     });
   });
 
   it("persists a critical intent before appending its outcome", async () => {
-    const run = vi.fn(async () => 1);
-    const bind = vi.fn((..._args: unknown[]) => ({ run }));
-    const db = { prepare: vi.fn(() => ({ bind })) };
+    const { db, queryOne, checkpoint } = createAuditWriter();
     const context = {
       get: (key: string) =>
         key === "apiKey" ? { id: "ak_123", organizationId: "org_123" } : "req_123",
       req: { header: () => null },
     };
-    const audit = new AuditService(db as never);
+    const audit = new AuditService(db as never, checkpoint);
 
     const intent = await audit.beginCritical(context as never, {
       action: "mint",
@@ -103,8 +142,14 @@ describe("AuditService", () => {
       })
     ).resolves.toBe(true);
 
-    const intentMetadata = JSON.parse(String(bind.mock.calls[0]?.[7])) as Record<string, unknown>;
-    const outcomeMetadata = JSON.parse(String(bind.mock.calls[1]?.[7])) as Record<string, unknown>;
+    const intentMetadata = JSON.parse(String(queryOne.mock.calls[0]?.[1]?.[7])) as Record<
+      string,
+      unknown
+    >;
+    const outcomeMetadata = JSON.parse(String(queryOne.mock.calls[1]?.[1]?.[7])) as Record<
+      string,
+      unknown
+    >;
     expect(intentMetadata).toMatchObject({
       auditPhase: "intent",
       target: { action: "mint", resourceId: "tx_123" },
@@ -118,16 +163,12 @@ describe("AuditService", () => {
   });
 
   it("keeps a completed operation successful when its durable intent exists", async () => {
-    const run = vi
-      .fn<() => Promise<number>>()
-      .mockResolvedValueOnce(1)
-      .mockRejectedValueOnce(new Error("audit outcome unavailable"));
-    const db = { prepare: vi.fn(() => ({ bind: () => ({ run }) })) };
+    const { db, checkpoint } = createAuditWriter({ failAt: 2 });
     const context = {
       get: () => null,
       req: { header: () => null },
     };
-    const audit = new AuditService(db as never);
+    const audit = new AuditService(db as never, checkpoint);
     const intent = await audit.beginCritical(context as never, {
       action: "freeze",
       resourceType: "token_transaction",

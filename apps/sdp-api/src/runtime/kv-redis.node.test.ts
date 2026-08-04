@@ -78,6 +78,30 @@ describe("RedisKVStore (HOO-510)", () => {
     });
   });
 
+  describe("compareAndSet", () => {
+    it("initializes only a missing key and then advances the exact value", async () => {
+      const store = new RedisKVStore(raw, "test");
+
+      expect(await store.compareAndSet("head", null, "one")).toBe(true);
+      expect(await store.compareAndSet("head", null, "unexpected")).toBe(false);
+      expect(await store.compareAndSet("head", "stale", "unexpected")).toBe(false);
+      expect(await store.compareAndSet("head", "one", "two")).toBe(true);
+      expect(await store.get("head")).toBe("two");
+    });
+
+    it("admits only one concurrent advance from the same head", async () => {
+      const store = new RedisKVStore(raw, "test");
+      await store.put("head", "one");
+
+      const results = await Promise.all(
+        Array.from({ length: 20 }, (_, index) =>
+          store.compareAndSet("head", "one", `candidate_${index}`)
+        )
+      );
+      expect(results.filter(Boolean)).toHaveLength(1);
+    });
+  });
+
   describe("list() via SCAN", () => {
     it("returns all keys for the store's prefix, with prefix stripped", async () => {
       const store = new RedisKVStore(raw, "test");

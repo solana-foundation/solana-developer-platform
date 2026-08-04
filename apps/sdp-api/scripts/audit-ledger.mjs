@@ -1,14 +1,33 @@
 import { randomUUID } from "node:crypto";
+import Redis from "ioredis";
 import pg from "pg";
 
 const { Client } = pg;
+const EXTERNAL_CHECKPOINT_KEY = "cache:audit-ledger:checkpoint:v1";
+
+const ADVANCE_CHECKPOINT_LUA = `
+local current = redis.call('GET', KEYS[1])
+if ARGV[1] == 'missing' then
+  if current ~= false then
+    return 0
+  end
+elseif current ~= ARGV[2] then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[3])
+return 1
+`;
+
+function serializeCheckpoint(sequence, headHash) {
+  return JSON.stringify({ sequence, headHash });
+}
 
 function usage() {
   return `Usage:
   pnpm --filter @sdp/api audit:ledger verify
   pnpm --filter @sdp/api audit:ledger checkpoint --operator <identity> --reason <reason> [--ticket <id>]
 
-DATABASE_URL must be the ordinary API runtime connection, not a migration/admin connection.`;
+DATABASE_URL and REDIS_URL must identify the ordinary API runtime stores, not admin connections.`;
 }
 
 function parseOptions(args) {
@@ -29,7 +48,7 @@ function parseOptions(args) {
   return values;
 }
 
-async function inspect(client) {
+async function inspect(client, redis) {
   const integrity = await client.query(`
     SELECT valid, checked_entries, first_invalid_sequence,
            encode(head_hash, 'hex') AS head_hash,
@@ -79,15 +98,27 @@ async function inspect(client) {
       posture.anchors_forcerowsecurity &&
       posture.enabled_security_triggers === 6
   );
+  const externalCheckpoint = await redis.get(EXTERNAL_CHECKPOINT_KEY);
+  const checkedEntries = Number(result?.checked_entries ?? 0);
+  const headHash = result?.head_hash ?? null;
+  const expectedCheckpoint =
+    checkedEntries === 0 || headHash === null
+      ? null
+      : serializeCheckpoint(checkedEntries, headHash);
+  const externalCheckpointMatches = externalCheckpoint === expectedCheckpoint;
 
   return {
-    valid: result?.valid === true,
-    checkedEntries: Number(result?.checked_entries ?? 0),
+    valid: result?.valid === true && externalCheckpointMatches,
+    databaseLedgerValid: result?.valid === true,
+    checkedEntries,
     firstInvalidSequence: result?.first_invalid_sequence
       ? Number(result.first_invalid_sequence)
       : null,
-    headHash: result?.head_hash ?? null,
+    headHash,
     unresolvedCriticalIntents: Number(result?.unresolved_critical_intents ?? 0),
+    externalCheckpointMatches,
+    externalCheckpoint,
+    expectedCheckpoint,
     runtimeRoleProtected,
     runtimeRole: posture?.runtime_role ?? null,
     tableOwner: posture?.table_owner ?? null,
@@ -101,6 +132,70 @@ async function inspect(client) {
   };
 }
 
+async function initializeExternalCheckpoint(redis, report) {
+  if (report.externalCheckpointMatches) return;
+  if (report.externalCheckpoint !== null || report.expectedCheckpoint === null) {
+    throw new Error("Refusing to overwrite a divergent external audit-ledger checkpoint");
+  }
+  const initialized = await redis.set(EXTERNAL_CHECKPOINT_KEY, report.expectedCheckpoint, "NX");
+  if (initialized !== "OK") {
+    throw new Error("External audit-ledger checkpoint changed during initialization");
+  }
+}
+
+async function appendCheckpoint(client, redis, options) {
+  const before = await inspect(client, redis);
+  if (!before.databaseLedgerValid || !before.runtimeRoleProtected) {
+    throw new Error("Refusing to checkpoint an invalid ledger or through an unsafe database role");
+  }
+  await initializeExternalCheckpoint(redis, before);
+
+  await client.query("BEGIN");
+  try {
+    const inserted = await client.query(
+      `INSERT INTO audit_logs (
+         id, action, resource_type, resource_id, metadata, status
+       ) VALUES ($1, 'maintenance', 'audit_ledger', $2, $3, 'success')
+       RETURNING ledger_sequence,
+                 encode(previous_entry_hash, 'hex') AS previous_entry_hash,
+                 encode(entry_hash, 'hex') AS entry_hash`,
+      [
+        `aud_${randomUUID()}`,
+        options.ticket?.trim() || "operator_checkpoint",
+        JSON.stringify({
+          operator: options.operator.trim(),
+          reason: options.reason.trim(),
+          ticket: options.ticket?.trim() || null,
+        }),
+      ]
+    );
+    const row = inserted.rows[0];
+    if (!row) {
+      throw new Error("Checkpoint audit insert returned no sealed row");
+    }
+    const expected =
+      Number(row.ledger_sequence) === 1
+        ? null
+        : serializeCheckpoint(Number(row.ledger_sequence) - 1, row.previous_entry_hash);
+    const next = serializeCheckpoint(Number(row.ledger_sequence), row.entry_hash);
+    const advanced = await redis.eval(
+      ADVANCE_CHECKPOINT_LUA,
+      1,
+      EXTERNAL_CHECKPOINT_KEY,
+      expected === null ? "missing" : "present",
+      expected ?? "",
+      next
+    );
+    if (advanced !== 1) {
+      throw new Error("External audit-ledger checkpoint diverged during checkpoint write");
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  }
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (!command || !["verify", "checkpoint"].includes(command)) {
@@ -108,51 +203,32 @@ async function main() {
   }
 
   const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (!databaseUrl) {
-    throw new Error(`DATABASE_URL is required.\n\n${usage()}`);
+  const redisUrl = process.env.REDIS_URL?.trim();
+  if (!databaseUrl || !redisUrl) {
+    throw new Error(`DATABASE_URL and REDIS_URL are required.\n\n${usage()}`);
   }
 
   const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
+  const redis = new Redis(redisUrl, { maxRetriesPerRequest: 3 });
+  await Promise.all([client.connect(), redis.ping()]);
   try {
     if (command === "checkpoint") {
       const options = parseOptions(args);
       if (!options.operator?.trim() || !options.reason?.trim()) {
         throw new Error(`checkpoint requires --operator and --reason.\n\n${usage()}`);
       }
-
-      const before = await inspect(client);
-      if (!before.valid || !before.runtimeRoleProtected) {
-        throw new Error(
-          "Refusing to checkpoint an invalid ledger or through an unsafe database role"
-        );
-      }
-
-      await client.query(
-        `INSERT INTO audit_logs (
-           id, action, resource_type, resource_id, metadata, status
-         ) VALUES ($1, 'maintenance', 'audit_ledger', $2, $3, 'success')`,
-        [
-          `aud_${randomUUID()}`,
-          options.ticket?.trim() || "operator_checkpoint",
-          JSON.stringify({
-            operator: options.operator.trim(),
-            reason: options.reason.trim(),
-            ticket: options.ticket?.trim() || null,
-          }),
-        ]
-      );
+      await appendCheckpoint(client, redis, options);
     } else if (args.length > 0) {
       throw new Error(`verify does not accept options.\n\n${usage()}`);
     }
 
-    const report = await inspect(client);
+    const report = await inspect(client, redis);
     console.log(JSON.stringify(report, null, 2));
     if (!report.valid || !report.runtimeRoleProtected) {
       process.exitCode = 1;
     }
   } finally {
-    await client.end().catch(() => {});
+    await Promise.allSettled([client.end(), redis.quit()]);
   }
 }
 

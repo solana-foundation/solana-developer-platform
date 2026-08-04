@@ -1,14 +1,58 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import type { KVStore, SlidingWindowAdmission, SlidingWindowOptions } from "@/runtime/kv";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { AuditService } from "./audit.service";
 
+class MemoryCheckpointStore implements KVStore {
+  private value: string | null = null;
+
+  reset() {
+    this.value = null;
+  }
+
+  get(_key: string): Promise<string | null>;
+  get<T>(_key: string, _type: "json"): Promise<T | null>;
+  async get<T>(_key: string, type?: "json"): Promise<string | T | null> {
+    if (this.value === null) return null;
+    return type === "json" ? (JSON.parse(this.value) as T) : this.value;
+  }
+
+  async put(_key: string, value: string): Promise<void> {
+    this.value = value;
+  }
+
+  async delete(): Promise<void> {
+    this.value = null;
+  }
+
+  async compareAndSet(_key: string, expected: string | null, value: string): Promise<boolean> {
+    if (this.value !== expected) return false;
+    this.value = value;
+    return true;
+  }
+
+  async list() {
+    return { keys: [] };
+  }
+
+  async admitSlidingWindow(
+    _currentKey: string,
+    _previousKey: string,
+    _options: SlidingWindowOptions
+  ): Promise<SlidingWindowAdmission> {
+    throw new Error("not implemented by audit checkpoint test store");
+  }
+}
+
 describe("tamper-evident audit ledger", () => {
   const db = getDb(env);
-  const audit = new AuditService(db);
+  const checkpoint = new MemoryCheckpointStore();
+  const audit = new AuditService(db, checkpoint);
 
   beforeEach(async () => {
+    checkpoint.reset();
     await seedTestDatabase(env);
   });
 
@@ -143,6 +187,39 @@ describe("tamper-evident audit ledger", () => {
       valid: false,
       checkedEntries: 0,
       firstInvalidSequence: 1,
+    });
+  });
+
+  it("detects a privileged actor shortening both PostgreSQL ledger tables", async () => {
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "retained_prefix",
+    });
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "deleted_from_both_tables",
+    });
+
+    try {
+      await db.execute("ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation");
+      await db.execute(
+        "ALTER TABLE audit_ledger_anchors DISABLE TRIGGER audit_ledger_anchors_reject_row_mutation"
+      );
+      await db.execute("DELETE FROM audit_logs WHERE ledger_sequence = 2");
+      await db.execute("DELETE FROM audit_ledger_anchors WHERE ledger_sequence = 2");
+    } finally {
+      await db.execute("ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation");
+      await db.execute(
+        "ALTER TABLE audit_ledger_anchors ENABLE TRIGGER audit_ledger_anchors_reject_row_mutation"
+      );
+    }
+
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: false,
+      checkedEntries: 1,
+      externalCheckpointMatches: false,
     });
   });
 

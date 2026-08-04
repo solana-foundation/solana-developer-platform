@@ -6,6 +6,8 @@
  */
 
 import { getDb } from "@/db";
+import { createKVStoreSet } from "@/runtime/kv-redis";
+import { AUDIT_LEDGER_CHECKPOINT_KEY } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 const POSTGRES_TEST_TABLES = [
@@ -80,6 +82,7 @@ async function truncateAllTables(env: Env): Promise<void> {
     await db
       .prepare(`TRUNCATE TABLE ${POSTGRES_TEST_TABLES.join(", ")} RESTART IDENTITY CASCADE`)
       .run();
+    await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
   } catch (error) {
     throw new Error(
       "Postgres schema is not bootstrapped. Run `pnpm db:postgres:up` and `pnpm --filter @sdp/api db:postgres:bootstrap` first.",
