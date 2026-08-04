@@ -2,10 +2,11 @@
  * Token Service Unit Tests
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb, type PreparedStatement } from "@/db";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
@@ -302,6 +303,372 @@ describe("TokenService", () => {
     });
   });
 
+  describe("maxSupply concurrency", () => {
+    // A deployed, still-mintable token: cap and minted supply in base units.
+    async function insertCappedToken(
+      id: string,
+      supplyBaseUnits: string,
+      maxSupplyBaseUnits: string | null
+    ): Promise<void> {
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (
+            id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+            name, symbol, decimals, total_supply_cached, max_supply, is_mintable,
+            freeze_authority_enabled, allowlist_enabled, status, created_by
+          ) VALUES (?, ?, ?, 'Capped11111111111111111111111111111111111111', 'Auth111111111111111111111111111111111111111',
+            NULL, 'Capped Token', 'CAP', 6, ?, ?, 1, 1, 0, 'active', ?)`
+        )
+        .bind(
+          id,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          supplyBaseUnits,
+          maxSupplyBaseUnits,
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+    }
+
+    const storedSupply = (id: string) =>
+      db
+        .prepare(
+          "SELECT total_supply_cached, total_supply_updated_at, max_supply FROM issued_tokens WHERE id = ?"
+        )
+        .bind(id)
+        .first<{
+          total_supply_cached: string;
+          total_supply_updated_at: string | null;
+          max_supply: string | null;
+        }>();
+
+    it("admits concurrent mints only up to the cap", async () => {
+      // The check each handler makes against its own read of the cached supply
+      // passes for both of these; the reservation is the same row twice, so the
+      // database has to pick one.
+      await insertCappedToken("tok_cap_concurrent", "0", "1000000000");
+
+      const reservations = await Promise.all([
+        tokenService.reserveMintSupply("tok_cap_concurrent", "600000000"),
+        tokenService.reserveMintSupply("tok_cap_concurrent", "600000000"),
+      ]);
+
+      expect(reservations.filter((value) => value !== null)).toHaveLength(1);
+      expect((await storedSupply("tok_cap_concurrent"))?.total_supply_cached).toBe("600000000");
+    });
+
+    it("counts every concurrent reservation that fits", async () => {
+      // Read-modify-write lost one of each concurrent pair here, and the cache
+      // stayed short for good — which then let admission pass mints the cap should
+      // have refused. Ten at once must add up to exactly ten.
+      await insertCappedToken("tok_cap_no_lost_update", "0", "1000000000");
+
+      const reservations = await Promise.all(
+        Array.from({ length: 10 }, () =>
+          tokenService.reserveMintSupply("tok_cap_no_lost_update", "100000000")
+        )
+      );
+
+      expect(reservations.every((value) => value !== null)).toBe(true);
+      expect((await storedSupply("tok_cap_no_lost_update"))?.total_supply_cached).toBe(
+        "1000000000"
+      );
+    });
+
+    it("reserves without limit when the token has no cap", async () => {
+      await insertCappedToken("tok_cap_uncapped", "5", null);
+
+      await expect(
+        tokenService.reserveMintSupply("tok_cap_uncapped", "999999999999")
+      ).resolves.toBe("1000000000004");
+    });
+
+    it("will not let a refresh erase a reservation the chain cannot see yet", async () => {
+      // The window the mint account is blind to: reserved, sent, not settled. An
+      // overwrite here would put the record back to 0 and hand the same 600 of
+      // headroom to the next mint, and both would land above the cap.
+      await insertCappedToken("tok_cap_refresh_inflight", "0", "1000000000");
+      await tokenService.reserveMintSupply("tok_cap_refresh_inflight", "600000000");
+      await insertMintTransaction("tok_cap_refresh_inflight", "pending", {
+        prepared: false,
+        amount: "600",
+      });
+      const before = await storedSupply("tok_cap_refresh_inflight");
+
+      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_inflight", "0");
+
+      const row = await storedSupply("tok_cap_refresh_inflight");
+      expect(row?.total_supply_cached).toBe("600000000");
+      // The reading was not taken, so its "as of" stamp does not move either.
+      expect(row?.total_supply_updated_at).toBe(before?.total_supply_updated_at);
+      await expect(
+        tokenService.reserveMintSupply("tok_cap_refresh_inflight", "600000000")
+      ).resolves.toBeNull();
+    });
+
+    it("holds the reservation of a mint that failed ambiguously", async () => {
+      // A send that times out during confirmation is recorded as failed while the
+      // cluster may still accept it, so its row keeps counting until it cannot.
+      await insertCappedToken("tok_cap_refresh_failed", "0", "1000000000");
+      await tokenService.reserveMintSupply("tok_cap_refresh_failed", "600000000");
+      await insertMintTransaction("tok_cap_refresh_failed", "failed", {
+        prepared: false,
+        amount: "600",
+      });
+
+      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_failed", "0");
+
+      expect((await storedSupply("tok_cap_refresh_failed"))?.total_supply_cached).toBe("600000000");
+    });
+
+    it("reconciles down once the mint can no longer land", async () => {
+      // Past the blockhash's life the question is settled: the mint account is the
+      // whole truth, so the headroom a never-submitted mint held comes back.
+      await insertCappedToken("tok_cap_refresh_expired", "0", "1000000000");
+      await tokenService.reserveMintSupply("tok_cap_refresh_expired", "600000000");
+      await insertMintTransaction("tok_cap_refresh_expired", "pending", {
+        prepared: false,
+        ageMs: 10 * 60 * 1000,
+      });
+
+      const refreshed = await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_expired", "0");
+
+      expect(refreshed.totalSupply).toBe("0");
+      expect(
+        (await storedSupply("tok_cap_refresh_expired"))?.total_supply_updated_at
+      ).not.toBeNull();
+      await expect(
+        tokenService.reserveMintSupply("tok_cap_refresh_expired", "1000000000")
+      ).resolves.not.toBeNull();
+    });
+
+    it("reclaims an abandoned reservation even while newer mints are in flight", async () => {
+      // The leak: an abandoned 900k reservation whose transaction expired long ago,
+      // and a live 10-token mint keeping the token busy. A hold that asks only
+      // "is anything in flight?" never reopens on a busy token, so the 900k stays
+      // recorded forever and minting is denied at the cap for supply that does not
+      // exist. What a refresh must protect is a quantity, not a flag: the chain
+      // total plus what live mints could still add — here 0 + 10 tokens — and
+      // everything recorded above that line is reclaimable now.
+      await insertCappedToken("tok_cap_refresh_leak", "900010000000", "1000000000000");
+      await insertMintTransaction("tok_cap_refresh_leak", "pending", {
+        amount: "900000",
+        ageMs: 10 * 60 * 1000,
+      });
+      await insertMintTransaction("tok_cap_refresh_leak", "pending", { amount: "10" });
+
+      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_leak", "0");
+
+      const row = await storedSupply("tok_cap_refresh_leak");
+      // The live mint's 10 tokens are still protected; the abandoned 900k is gone.
+      expect(row?.total_supply_cached).toBe("10000000");
+      // And the headroom the leak was holding is mintable again.
+      await expect(
+        tokenService.reserveMintSupply("tok_cap_refresh_leak", "990000000000")
+      ).resolves.not.toBeNull();
+    });
+
+    it("takes a higher on-chain total even while a mint is in flight", async () => {
+      // Only the downward half waits. Supply above what SDP counted came from
+      // outside SDP, and the cap has to start refusing against it immediately.
+      await insertCappedToken("tok_cap_refresh_higher", "600000000", "2000000000");
+      await insertMintTransaction("tok_cap_refresh_higher", "pending", { prepared: false });
+
+      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_higher", "1500000000");
+
+      expect((await storedSupply("tok_cap_refresh_higher"))?.total_supply_cached).toBe(
+        "1500000000"
+      );
+    });
+
+    it("says so when a refresh finds more supply on-chain than the cap allows", async () => {
+      // Reservations keep SDP's own mints under the cap, so this means supply came
+      // from somewhere SDP does not admit — an authority used outside the platform,
+      // or a prepared transaction submitted after its cap was lowered.
+      await insertCappedToken("tok_cap_refresh_over", "0", "1000000000");
+      const warn = vi.spyOn(getLogger(), "warn");
+
+      try {
+        await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_over", "1500000000");
+
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: "token_supply_exceeds_max_supply",
+            tokenId: "tok_cap_refresh_over",
+            onChainSupplyBaseUnits: "1500000000",
+            maxSupplyBaseUnits: "1000000000",
+          }),
+          expect.any(String)
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("records a settled burn rather than a negative supply", async () => {
+      // The on-chain balance check is what bounds a burn; a cached total that
+      // already lagged reality is not a reason to reject the write.
+      await insertCappedToken("tok_cap_settled_burn", "100000000", null);
+
+      await expect(
+        tokenService.updateSupply("tok_cap_settled_burn", "500", "burn")
+      ).resolves.toBeUndefined();
+
+      expect((await storedSupply("tok_cap_settled_burn"))?.total_supply_cached).toBe("0");
+    });
+
+    it("refuses a cap that a mint outran between the check and the write", async () => {
+      await insertCappedToken("tok_cap_lost_race", "500000000", "1000000000");
+      const originalPrepare = db.prepare.bind(db);
+
+      // Lands the mint inside the window the guard exists for: after the cap has
+      // been checked against the stored supply, before the new cap is written. A
+      // 1200 cap is legal against 500 minted and illegal against the 1500 this
+      // leaves behind, so an unguarded write would persist a cap the token has
+      // already outgrown.
+      let injected = false;
+      db.prepare = ((query: string) => {
+        const statement = originalPrepare(query);
+        if (injected || !query.includes("COALESCE(total_supply_cached")) {
+          return statement;
+        }
+        injected = true;
+        return {
+          ...statement,
+          bind: (...args: unknown[]) => {
+            const bound = statement.bind(...args);
+            return {
+              ...bound,
+              first: async (columnName?: string) => {
+                const result = await bound.first(columnName);
+                await originalPrepare(
+                  "UPDATE issued_tokens SET total_supply_cached = ? WHERE id = ?"
+                )
+                  .bind("1500000000", "tok_cap_lost_race")
+                  .run();
+                return result;
+              },
+            } as PreparedStatement;
+          },
+        } as PreparedStatement;
+      }) as typeof db.prepare;
+
+      try {
+        await expect(
+          tokenService.updateToken("tok_cap_lost_race", { maxSupply: "1200" })
+        ).rejects.toMatchObject({
+          code: "CONFLICT",
+          message: expect.stringContaining("supply changed while this update was in flight"),
+        });
+      } finally {
+        db.prepare = originalPrepare as typeof db.prepare;
+      }
+
+      expect(injected, "supply read was intercepted").toBe(true);
+      // The cap the race would have persisted is not there, and the mint is.
+      const row = await storedSupply("tok_cap_lost_race");
+      expect(row?.max_supply).toBe("1000000000");
+      expect(row?.total_supply_cached).toBe("1500000000");
+    });
+
+    // A mint transaction row. `prepared` is what `POST /mint/prepare` leaves
+    // behind: a serialized transaction handed to a client who may submit it at any
+    // point until its blockhash expires. `amount` is the decimal amount the real
+    // handlers always store in the row's params — it is what tells the refresh how
+    // much this mint could still add to the chain.
+    async function insertMintTransaction(
+      tokenId: string,
+      status: "pending" | "confirmed" | "failed",
+      {
+        prepared = true,
+        ageMs = 0,
+        amount,
+      }: { prepared?: boolean; ageMs?: number; amount?: string } = {}
+    ): Promise<void> {
+      const at = new Date(Date.now() - ageMs).toISOString();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+            id, token_id, organization_id, type, status, serialized_tx, operation_params,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, 'mint', ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          `txn_${tokenId}_${status}_${prepared ? "prepared" : "executed"}_${ageMs}`,
+          tokenId,
+          TEST_ORG.id,
+          status,
+          prepared ? "c2VyaWFsaXplZA==" : null,
+          JSON.stringify(amount === undefined ? {} : { amount }),
+          at,
+          at
+        )
+        .run();
+    }
+
+    it("protects an outstanding prepared mint through its reservation", async () => {
+      // A prepared mint is reserved before the serialized transaction leaves SDP,
+      // so the cap change needs no knowledge of its row: the reservation is in the
+      // recorded supply, and the "not below the already-minted supply" check reads
+      // it there. 500 settled + 600 reserved = 1100, so a cap of 1000 undercuts the
+      // mint the client may still submit.
+      await insertCappedToken("tok_cap_prepared_reserved", "500000000", "2000000000");
+      await tokenService.reserveMintSupply("tok_cap_prepared_reserved", "600000000");
+      await insertMintTransaction("tok_cap_prepared_reserved", "pending");
+
+      await expect(
+        tokenService.updateToken("tok_cap_prepared_reserved", { maxSupply: "1000" })
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: expect.stringContaining("already-minted supply"),
+      });
+
+      expect((await storedSupply("tok_cap_prepared_reserved"))?.max_supply).toBe("2000000000");
+    });
+
+    it("lets the cap change over an outstanding prepared mint it does not undercut", async () => {
+      // The old marker check refused every cap edit for the length of the window,
+      // whether or not the edit conflicted with anything. Room for the reservation
+      // is the actual requirement: 500 + 600 fit under 1200.
+      await insertCappedToken("tok_cap_prepared_fits", "500000000", "2000000000");
+      await tokenService.reserveMintSupply("tok_cap_prepared_fits", "600000000");
+      await insertMintTransaction("tok_cap_prepared_fits", "pending");
+
+      const updated = await tokenService.updateToken("tok_cap_prepared_fits", {
+        maxSupply: "1200",
+      });
+
+      expect(updated.maxSupply).toBe("1200");
+    });
+
+    it("does not gate the cap on transaction rows, settled or executing", async () => {
+      // Every admitted mint lives in the recorded supply — an executing mint since
+      // its pre-submission reservation, a settled one for good. Its rows carry no
+      // extra information for the cap, so they must not block the edit.
+      await insertCappedToken("tok_cap_rows_ignored", "500000000", "2000000000");
+      await insertMintTransaction("tok_cap_rows_ignored", "confirmed");
+      await insertMintTransaction("tok_cap_rows_ignored", "failed");
+      await insertMintTransaction("tok_cap_rows_ignored", "pending", { prepared: false });
+
+      const updated = await tokenService.updateToken("tok_cap_rows_ignored", {
+        maxSupply: "1000",
+      });
+
+      expect(updated.maxSupply).toBe("1000");
+    });
+
+    it("does not guard an uncapping request on the supply", async () => {
+      // Clearing a cap cannot conflict with a mint, so a supply that moved in the
+      // window is not a reason to make the operator retry.
+      await insertCappedToken("tok_cap_cleared", "500000000", "1000000000");
+
+      const updated = await tokenService.updateToken("tok_cap_cleared", { maxSupply: null });
+
+      expect(updated.maxSupply).toBeNull();
+      expect((await storedSupply("tok_cap_cleared"))?.max_supply).toBeNull();
+    });
+  });
+
   describe("deploy claim lifecycle (beginTokenDeploy / releaseTokenDeploy)", () => {
     async function insertToken(
       id: string,
@@ -475,6 +842,7 @@ describe("TokenService", () => {
         ["tok_foreign_release", "deploying"],
         ["tok_foreign_deployed", "pending"],
         ["tok_foreign_supply", "active"],
+        ["tok_foreign_reserve", "active"],
         ["tok_foreign_child", "active"],
       ] as const) {
         await insertToken(id, { projectId: foreignProjectId, status });
@@ -517,6 +885,7 @@ describe("TokenService", () => {
       await expect(scoped.setSupplyFromBaseUnits("tok_foreign_supply", "999")).rejects.toThrow(
         "TOKEN_NOT_FOUND"
       );
+      await expect(scoped.reserveMintSupply("tok_foreign_reserve", "999")).resolves.toBeNull();
 
       // Child resources must enforce the same boundary even when a caller has
       // only a globally unique entry/transaction id.
@@ -578,12 +947,13 @@ describe("TokenService", () => {
         .prepare(
           `SELECT id, mint_address, total_supply_cached
            FROM issued_tokens
-           WHERE id IN ('tok_foreign_deployed', 'tok_foreign_supply')
+           WHERE id IN ('tok_foreign_deployed', 'tok_foreign_reserve', 'tok_foreign_supply')
            ORDER BY id`
         )
         .all<{ id: string; mint_address: string | null; total_supply_cached: string }>();
       expect(rows.results).toEqual([
         { id: "tok_foreign_deployed", mint_address: null, total_supply_cached: "0" },
+        { id: "tok_foreign_reserve", mint_address: null, total_supply_cached: "0" },
         { id: "tok_foreign_supply", mint_address: null, total_supply_cached: "0" },
       ]);
 

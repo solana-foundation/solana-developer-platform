@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Label } from "@/components/ui/label";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { getDetailSections } from "../../../create/asset-details-config";
@@ -33,10 +34,8 @@ import {
 } from "../../../create/form-primitives";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
 import { MetadataJsonPanel, MetadataJsonToggle } from "../../../create/metadata-json";
-import {
-  findWalletByWalletId,
-  getSignerWalletOptionLabel,
-} from "../../token-management-workspace.utils";
+import { buildWalletIdentityForSigner } from "../../../issuance-token-fields";
+import { WalletIdentityBadge } from "../../../wallet-identity";
 import type { AssetProfileForm } from "../use-asset-profile-form";
 import type { TokenOperations } from "../use-token-operations";
 
@@ -63,7 +62,7 @@ export function DetailsTab({
   ops: TokenOperations;
 }) {
   const t = useTranslations();
-  const { draft, updateDraft, saving, errors, showErrors } = form;
+  const { draft, updateDraft, saving, errors, showErrors, supplyLocked } = form;
   const [jsonOpen, setJsonOpen] = useState(false);
   const sections = getDetailSections(draft.assetCategory, draft.assetType);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
@@ -87,10 +86,12 @@ export function DetailsTab({
   // the token is on-chain and stay editable only while it's a draft.
   const isDeployed = Boolean(token.mintAddress);
 
-  const signerWallet = findWalletByWalletId(ops.authorityWallets, draft.signingWalletId);
-  const signerLabel = signerWallet
-    ? getSignerWalletOptionLabel(signerWallet, t)
-    : draft.signingWalletId || t("DashboardIssuance.assetDetails.projectDefaultSigner");
+  // null while the authority wallets are in flight — see the skeleton below.
+  const signerIdentity = buildWalletIdentityForSigner(
+    draft.signingWalletId,
+    ops.authorityWallets,
+    t
+  );
 
   return (
     <div className="space-y-4">
@@ -109,54 +110,81 @@ export function DetailsTab({
         description={t("DashboardIssuance.assetDetails.aboutDescription")}
         icon={Tag}
       >
-        <div className="grid items-start gap-4 sm:grid-cols-2">
-          <TextField
-            label={t("DashboardIssuance.forms.name")}
-            required
-            disabled={saving}
-            value={draft.name}
-            onChange={(value) => updateDraft({ name: value })}
-            placeholder={t("DashboardIssuance.assetDetails.namePlaceholder")}
-            error={nameError}
-          />
-          <div className="grid grid-cols-2 items-start gap-4">
-            {isDeployed ? (
-              <>
-                <ReadOnlyField
-                  label={t("DashboardIssuance.create.symbol")}
-                  value={token.symbol}
-                  lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
-                />
-                <ReadOnlyField
-                  label={t("DashboardIssuance.create.decimals")}
-                  value={String(token.decimals)}
-                  lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
-                />
-              </>
-            ) : (
-              <>
-                <TextField
-                  label={t("DashboardIssuance.create.symbol")}
-                  required
-                  disabled={saving}
-                  value={draft.symbol}
-                  onChange={(value) => updateDraft({ symbol: value })}
-                  placeholder={t("DashboardIssuance.assetDetails.symbolPlaceholder")}
-                  error={symbolError}
-                />
-                <TextField
-                  label={t("DashboardIssuance.create.decimals")}
-                  required
-                  type="number"
-                  disabled={saving}
-                  value={draft.decimals}
-                  onChange={(value) => updateDraft({ decimals: value })}
-                  placeholder={t("DashboardIssuance.create.decimalsPlaceholder")}
-                  error={decimalsError}
-                />
-              </>
-            )}
+        {/* Name plus the three mint parameters in one flat grid, so every cell is
+            filled at every width: stacked on mobile, 2×2 on tablet, and a single
+            row at lg where the name takes the double-width cell. A nested pair
+            for symbol/decimals would leave max supply orphaned on its own row. */}
+        <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="lg:col-span-2">
+            <TextField
+              label={t("DashboardIssuance.forms.name")}
+              required
+              disabled={saving}
+              value={draft.name}
+              onChange={(value) => updateDraft({ name: value })}
+              placeholder={t("DashboardIssuance.assetDetails.namePlaceholder")}
+              error={nameError}
+            />
           </div>
+          {isDeployed ? (
+            <>
+              <ReadOnlyField
+                label={t("DashboardIssuance.create.symbol")}
+                value={token.symbol}
+                lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
+              />
+              <ReadOnlyField
+                label={t("DashboardIssuance.create.decimals")}
+                value={String(token.decimals)}
+                lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
+              />
+            </>
+          ) : (
+            <>
+              <TextField
+                label={t("DashboardIssuance.create.symbol")}
+                required
+                disabled={saving}
+                value={draft.symbol}
+                onChange={(value) => updateDraft({ symbol: value })}
+                placeholder={t("DashboardIssuance.assetDetails.symbolPlaceholder")}
+                error={symbolError}
+              />
+              <TextField
+                label={t("DashboardIssuance.create.decimals")}
+                required
+                type="number"
+                disabled={saving}
+                value={draft.decimals}
+                onChange={(value) => updateDraft({ decimals: value })}
+                placeholder={t("DashboardIssuance.create.decimalsPlaceholder")}
+                error={decimalsError}
+              />
+            </>
+          )}
+          {/* The cap lives on the token row, not in issuance_metadata, and SDP
+              enforces it at mint time — so it stays editable for as long as SDP
+              can enforce it, i.e. until lock-supply revokes the mint authority.
+              The hint states both halves of that (who enforces it, and that it
+              can be made permanent); "blank = unlimited" is left to the
+              placeholder so the copy stays as short as its neighbours'. */}
+          {supplyLocked ? (
+            <ReadOnlyField
+              label={t("DashboardIssuance.assetDetails.maxSupply")}
+              value={token.maxSupply ?? t("DashboardIssuance.assetDetails.maxSupplyUnlimited")}
+              lockReason={t("DashboardIssuance.assetDetails.maxSupplyLockedReason")}
+            />
+          ) : (
+            <TextField
+              label={t("DashboardIssuance.assetDetails.maxSupply")}
+              disabled={saving}
+              value={draft.maxSupply}
+              onChange={(value) => updateDraft({ maxSupply: value })}
+              placeholder={t("DashboardIssuance.assetDetails.maxSupplyPlaceholder")}
+              help={t("DashboardIssuance.assetDetails.maxSupplyEnforcementHint")}
+              error={fieldError("maxSupply")}
+            />
+          )}
         </div>
         <div className="mt-4 grid gap-1.5">
           <Label htmlFor="asset-description">
@@ -260,12 +288,26 @@ export function DetailsTab({
         description={t("DashboardIssuance.assetDetails.operationalDescription")}
         icon={SlidersHorizontal}
       >
-        <div className="grid items-start gap-4 sm:grid-cols-2">
-          <ReadOnlyField
-            label={t("DashboardIssuance.assetDetails.signingWallet")}
-            value={signerLabel}
-            lockReason={t("DashboardIssuance.assetDetails.signingWalletLockReason")}
-          />
+        {/* Same card the Operations forms show for a locked signer, so the wallet
+            SDP signs with looks the same wherever you meet it — named, linked to its
+            wallet page, with both identifiers copyable — instead of a read-only field
+            repeating the shortened key twice. Full width rather than the half-width
+            field grid the other sections use: the card holds whole 44-char
+            identifiers, and half a column forces them to wrap. */}
+        <div className="grid gap-1.5">
+          <Label>{t("DashboardIssuance.assetDetails.signingWallet")}</Label>
+          {signerIdentity ? (
+            // Read-only surface — no unsaved state to protect, so the wallet page
+            // opens in place.
+            <WalletIdentityBadge variant="card" walletLink="same-tab" identity={signerIdentity} />
+          ) : (
+            // Authority wallets still loading: the pinned walletId alone would render
+            // as "Signer unavailable", which is a claim, not a pending state.
+            <SkeletonBlock className="h-[7.5rem] rounded-[12px]" />
+          )}
+          <p className="text-xs text-tertiary">
+            {t("DashboardIssuance.assetDetails.signingWalletLockReason")}
+          </p>
         </div>
       </FormCard>
     </div>

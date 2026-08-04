@@ -192,7 +192,8 @@ export const privateChannelBalanceQuerySchema = z.object({
     }),
   mint: solanaAddressSchema.optional().openapi({
     param: { name: "mint", in: "query" },
-    description: "Token mint to read. Defaults to the instance cluster's USDC mint.",
+    description:
+      "Token mint to read. Any mint is accepted here — this is a general read. Defaults to the instance's first allowed token.",
   }),
 });
 
@@ -256,10 +257,14 @@ export const createPrivateChannelDepositBodySchema = z
       description: "Source custody wallet (walletId or public key).",
       example: "wlt_…",
     }),
-    amount: z
-      .string()
-      .min(1)
-      .openapi({ description: "Decimal amount to deposit.", example: "1.5" }),
+    amount: withOpenApi(privateChannelTransferAmountSchema, {
+      description: "Positive decimal amount with at most six fractional digits.",
+      example: "1.5",
+    }),
+    mint: solanaAddressSchema.optional().openapi({
+      description:
+        "Token mint to deposit. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
+    }),
     recipient: z.string().min(1).optional().openapi({
       description: "Address/walletId to credit in the channel. Defaults to the depositor.",
     }),
@@ -361,10 +366,14 @@ export const createPrivateChannelWithdrawalBodySchema = z
       description: "Custody wallet to burn from (walletId or public key).",
       example: "wlt_…",
     }),
-    amount: z
-      .string()
-      .min(1)
-      .openapi({ description: "Decimal amount to withdraw.", example: "1.5" }),
+    amount: withOpenApi(privateChannelTransferAmountSchema, {
+      description: "Positive decimal amount with at most six fractional digits.",
+      example: "1.5",
+    }),
+    mint: solanaAddressSchema.optional().openapi({
+      description:
+        "Token mint to withdraw. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
+    }),
     destination: z.string().min(1).optional().openapi({
       description: "Devnet address/walletId to release to. Defaults to the owner wallet.",
     }),
@@ -442,8 +451,12 @@ export const createPrivateChannelTransferBodySchema = z
       example: "pcvw_9f1c...",
     }),
     amount: withOpenApi(privateChannelTransferAmountSchema, {
-      description: "Positive decimal USDC amount with at most six fractional digits.",
+      description: "Positive decimal amount with at most six fractional digits.",
       example: "1.5",
+    }),
+    mint: solanaAddressSchema.optional().openapi({
+      description:
+        "Token mint to transfer. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
     }),
   })
   .openapi({ description: "Create a verified member-to-member channel transfer." });

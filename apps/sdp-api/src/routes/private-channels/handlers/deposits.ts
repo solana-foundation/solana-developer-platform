@@ -84,6 +84,7 @@ export async function createPrivateChannelDeposit(c: AppContext) {
       userId,
       wallet,
       amount: parsed.data.amount,
+      mint: parsed.data.mint,
       recipient,
       gatewayAuth,
     });

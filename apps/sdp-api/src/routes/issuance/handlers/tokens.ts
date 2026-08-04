@@ -241,6 +241,17 @@ export const updateToken = async (c: AppContext) => {
     throw badRequest("symbol and decimals cannot be changed after deployment");
   }
 
+  // SPL carries no supply cap, so SDP enforces it at mint time — which it can
+  // only do while it holds the mint authority. Once that authority is revoked
+  // (lock-supply), the total can never change again and neither can the cap.
+  if (
+    parsed.data.maxSupply !== undefined &&
+    existing.mintAddress &&
+    (!existing.isMintable || !existing.mintAuthority)
+  ) {
+    throw badRequest("maxSupply cannot be changed after the supply is locked on-chain");
+  }
+
   try {
     const metadataPatch = getOnChainMetadataPatch(parsed.data);
     const shouldUpdateMetadataOnChain =

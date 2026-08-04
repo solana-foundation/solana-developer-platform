@@ -17,7 +17,9 @@ import {
 import { updateAuthoritySchema } from "../schemas";
 import {
   type AuthorityRole,
+  createResolvedAuthoritySigner,
   resolveAuthoritySigner,
+  resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
@@ -197,7 +199,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     throw badRequest("Current authority is not available for this token");
   }
 
-  const { signer, walletId } = await resolveAuthoritySigner({
+  const { walletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
     token,
@@ -249,6 +251,12 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
+  const signer = await createResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    walletId,
+    currentAuthority: currentAuthorityRaw,
+  });
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   try {

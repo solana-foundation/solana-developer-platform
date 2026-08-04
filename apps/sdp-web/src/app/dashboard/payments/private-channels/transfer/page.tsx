@@ -1,3 +1,4 @@
+import { inferCluster, privateChannelTokens } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
@@ -27,6 +28,9 @@ export default async function PrivateChannelsTransferPage() {
   const t = await getTranslations();
   const client = await createSdpApiClient();
   const instance = await loadInstance(client);
+  if (!instance.ok) {
+    return <PrivateChannelsLoadError message={instance.error} />;
+  }
   if (!instance.data?.isActive) {
     redirect(PRIVATE_CHANNELS_INSTANCE_PATH);
   }
@@ -64,7 +68,12 @@ export default async function PrivateChannelsTransferPage() {
           {loadError ? (
             <PrivateChannelsLoadError message={loadError} />
           ) : (
-            <TransferForm channels={channels} scopeKey={scopeKey} sourceWallets={sourceWallets} />
+            <TransferForm
+              channels={channels}
+              scopeKey={scopeKey}
+              sourceWallets={sourceWallets}
+              tokens={privateChannelTokens(inferCluster(instance.data.chainRpcUrl))}
+            />
           )}
         </CardContent>
       </Card>

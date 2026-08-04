@@ -1,6 +1,6 @@
 "use client";
 
-import type { CustodyWalletSummary, PrivateChannelDeposit } from "@sdp/types";
+import type { CustodyWalletSummary, PrivateChannelDeposit, PrivateChannelToken } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
@@ -22,8 +22,15 @@ function walletLabel(wallet: CustodyWalletSummary): string {
   return wallet.label ? `${wallet.label} (${short})` : short;
 }
 
-export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
+export function DepositForm({
+  tokens,
+  wallets,
+}: {
+  tokens: PrivateChannelToken[];
+  wallets: CustodyWalletSummary[];
+}) {
   const [walletId, setWalletId] = useState<string>(wallets[0]?.walletId ?? "");
+  const [mint, setMint] = useState<string>(tokens[0]?.mint ?? "");
   const [amount, setAmount] = useState("");
   const [showAmountError, setShowAmountError] = useState(false);
   const [recipient, setRecipient] = useState("");
@@ -42,13 +49,13 @@ export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
     }
     let active = true;
     setBalances({ channel: null, onChain: null });
-    fetchWalletBalancesAction(walletId).then((result) => {
+    fetchWalletBalancesAction(walletId, mint || undefined).then((result) => {
       if (active) setBalances(result);
     });
     return () => {
       active = false;
     };
-  }, [walletId, refetchKey]);
+  }, [walletId, mint, refetchKey]);
 
   if (deposit) {
     return (
@@ -83,6 +90,9 @@ export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
 
   const amountErrorKey = showAmountError ? getAmountError(amount) : null;
   const amountError = amountErrorKey ? t(amountErrorKey) : null;
+  // Falls back to the first token so a `mint` left over from a changed token list
+  // cannot leave the label and the payload disagreeing.
+  const selectedToken = tokens.find((token) => token.mint === mint) ?? tokens[0];
 
   const submit = () => {
     setShowAmountError(true);
@@ -95,6 +105,7 @@ export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
       const result = await createDepositAction({
         walletId,
         amount: amount.trim(),
+        mint: selectedToken?.mint,
         recipient: recipient.trim() || undefined,
       });
       if (result.ok) {
@@ -131,11 +142,29 @@ export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
         </p>
       </div>
 
+      {tokens.length > 0 && (
+        <div className="space-y-1.5">
+          <Label>{t("DashboardPrivateChannels.common.tokenLabel")}</Label>
+          <Select
+            ariaLabel={t("DashboardPrivateChannels.common.tokenLabel")}
+            onValueChange={(value) => setMint(value ?? "")}
+            value={mint}
+          >
+            {tokens.map((token) => (
+              <SelectItem key={token.mint} value={token.mint}>
+                {token.symbol}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
+      )}
+
       <AmountField
         balances={balances}
         error={amountError}
         id="deposit-amount"
         spends="onChain"
+        symbol={selectedToken?.symbol ?? ""}
         onBlur={() => setShowAmountError(true)}
         onChange={setAmount}
         value={amount}

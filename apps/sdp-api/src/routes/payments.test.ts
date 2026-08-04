@@ -521,6 +521,51 @@ async function seedCounterparty(params?: {
   return id;
 }
 
+async function seedRampEventTransfer(params: {
+  id: string;
+  provider: "coinbase" | "moneygram";
+  providerReference: string;
+  type: "onramp" | "offramp";
+  amount?: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO payment_transfers (
+         id, organization_id, project_id, wallet_id, source_address, destination_address,
+         token, amount, memo, type, direction, status, provider, provider_reference,
+         delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+         initiated_by_key_id, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      params.id,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_WALLET_ID,
+      params.type === "offramp" ? TEST_SOLANA_ADDRESSES.wallet1 : null,
+      params.type === "onramp" ? TEST_SOLANA_ADDRESSES.wallet2 : null,
+      "USDC",
+      params.amount ?? "25",
+      null,
+      params.type,
+      params.type === "onramp" ? "inbound" : "outbound",
+      "pending",
+      params.provider,
+      params.providerReference,
+      "hosted",
+      "USD",
+      "25",
+      {},
+      null,
+      null,
+      null,
+      now,
+      now
+    )
+    .run();
+}
+
 async function seedCryptoWalletCounterpartyAccount(params: {
   counterpartyId: string;
   address: string;
@@ -8464,5 +8509,125 @@ describe("Payments routes", () => {
 
       expect(res.status).toBe(404);
     });
+  });
+
+  it("keeps browser ramp terminal callbacks advisory", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    await seedRampEventTransfer({
+      id: "xfr_coinbase_advisory",
+      provider: "coinbase",
+      providerReference: "coinbase_order_advisory",
+      type: "onramp",
+    });
+    await seedRampEventTransfer({
+      id: "xfr_moneygram_advisory",
+      provider: "moneygram",
+      providerReference: "moneygram_session_advisory",
+      type: "onramp",
+    });
+
+    const coinbase = await app.request(
+      "/v1/payments/ramps/coinbase/events",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ kind: "committed", orderId: "coinbase_order_advisory" }),
+      },
+      env
+    );
+    const moneygram = await app.request(
+      "/v1/payments/ramps/moneygram/events",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          kind: "onramp_completed",
+          sessionId: "moneygram_session_advisory",
+          transactionId: "moneygram_transaction_advisory",
+          status: "COMPLETED",
+          amount: 25,
+        }),
+      },
+      env
+    );
+
+    expect(coinbase.status).toBe(200);
+    expect(moneygram.status).toBe(200);
+    const rows = await getDb(env)
+      .prepare(
+        `SELECT id, status, provider_data
+         FROM payment_transfers
+         WHERE id IN ('xfr_coinbase_advisory', 'xfr_moneygram_advisory')
+         ORDER BY id`
+      )
+      .all<{ id: string; status: string; provider_data: Record<string, unknown> }>();
+    expect(rows.results).toHaveLength(2);
+    for (const row of rows.results) {
+      expect(row.status).toBe("pending");
+      expect(row.provider_data).toMatchObject({ clientEvent: { advisory: true } });
+    }
+  });
+
+  it("rejects a MoneyGram crypto leg whose amount does not match the session", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    await seedRampEventTransfer({
+      id: "xfr_moneygram_amount_guard",
+      provider: "moneygram",
+      providerReference: "moneygram_session_amount_guard",
+      type: "offramp",
+      amount: "25",
+    });
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, source_address, destination_address,
+           token, amount, type, direction, status, signature, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        "xfr_moneygram_wrong_amount_leg",
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet1,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        "USDC",
+        "24",
+        "transfer",
+        "outbound",
+        "confirmed",
+        "moneygram-wrong-amount-signature",
+        now,
+        now
+      )
+      .run();
+
+    const response = await app.request(
+      "/v1/payments/ramps/moneygram/events",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          kind: "signed",
+          sessionId: "moneygram_session_amount_guard",
+          cryptoTransferId: "xfr_moneygram_wrong_amount_leg",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_moneygram_amount_guard")
+      .first<{ status: string }>();
+    expect(transfer?.status).toBe("pending");
   });
 });

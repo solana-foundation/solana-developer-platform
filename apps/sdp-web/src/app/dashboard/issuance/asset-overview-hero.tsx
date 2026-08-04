@@ -246,9 +246,9 @@ const MARK_GLYPH_LIFT = "-translate-y-px";
 // opaque (see sdp-theme.css), so nothing behind a mark reaches it.
 const MARK_FILL_OPAQUE = "fill-fill-opaque";
 
-// The popover's role chip pins 24px at every width: it shares that popup's grid with
-// the wallet badge's 24px provider avatar, not with the hero's tile row.
-const CHIP_BOX = "h-6 w-6";
+// The popover title's role glyph: bare, no shield — the trigger already drew the
+// silhouette, and in the title the icon is an echo of it, not another authority mark.
+// Pinned at every width because it lives in the popup, not the hero's tile row.
 const CHIP_GLYPH = "size-3.5";
 
 // The 10px chip the Control tile states its policies with: a footnote to the marks
@@ -429,7 +429,7 @@ function StandaloneAccessBadge({
 // popup shape as the authority marks — not an action, so it keeps the arrow cursor and
 // dims on hover rather than ringing, and stays a button only to be keyboard-reachable.
 function AccessMark({
-  icon,
+  icon: Icon,
   glyph,
   label,
   detail,
@@ -449,7 +449,7 @@ function AccessMark({
         className="inline-flex cursor-default outline-none transition-opacity hover:opacity-80 focus-visible:opacity-80"
       >
         <AuthorityShieldMark
-          icon={icon}
+          icon={Icon}
           glyph={glyph}
           fill={MARK_FILL_OPAQUE}
           className="text-secondary"
@@ -461,21 +461,14 @@ function AccessMark({
         <Popover.Positioner side="top" align="center" sideOffset={8} className="z-30">
           <Popover.Popup className="w-[236px] overflow-hidden rounded-xl border border-border-default bg-surface-raised outline-none">
             {/* Built to the authority popover's pattern, down to the width and the
-                chip echoing the trigger's glyph — these marks sit in the same tile row,
+                bare glyph echoing the trigger's — these marks sit in the same tile row,
                 so their popups should be the same object. */}
             <div className="px-3 py-2.5">
               <div className="flex items-center justify-center gap-2">
-                {/* The shield's mass sits above the middle of its box, so the name
-                    takes the same 1px nudge the glyph inside it does. */}
-                <p className="min-w-0 -translate-y-px truncate text-[12px] leading-snug font-medium text-primary">
+                <p className="min-w-0 truncate text-[12px] leading-snug font-medium text-primary">
                   {label}
                 </p>
-                <AuthorityShieldMark
-                  icon={icon}
-                  box={CHIP_BOX}
-                  glyph={CHIP_GLYPH}
-                  className="text-secondary"
-                />
+                <Icon className={cn("shrink-0 text-secondary", CHIP_GLYPH)} />
               </div>
               <p className="mt-2 text-[11px] leading-snug text-secondary">{detail}</p>
             </div>
@@ -620,17 +613,14 @@ const AUTHORITY_SHIELD_PATH =
 // masking would trim the glyph's lower corners where the shield tapers to its point.
 function AuthorityShieldMark({
   icon: Icon,
-  box = MARK_BOX,
   glyph = MARK_GLYPH,
   lift = MARK_GLYPH_LIFT,
   fill = "fill-fill",
   className,
 }: {
   icon: LucideIcon;
-  /** Footprint and glyph size. Default to the authority row's own step, which the
-   *  access tile's marks take as well; the popover's role chip is the one caller that
-   *  overrides them — see CHIP_BOX for why it doesn't follow the row. */
-  box?: string;
+  /** Glyph size. Defaults to the authority row's own step, which the access tile's
+   *  marks take as well — they only override it for optically outsized icons. */
   glyph?: string;
   /** The lift off the shield's taper. It is the one part of this mark that does NOT
    *  scale with `box` — a whole pixel is 4% of the 24px box it was drawn for and 6% of
@@ -645,7 +635,11 @@ function AuthorityShieldMark({
 }) {
   return (
     <span
-      className={cn("relative inline-flex shrink-0 items-center justify-center", box, className)}
+      className={cn(
+        "relative inline-flex shrink-0 items-center justify-center",
+        MARK_BOX,
+        className
+      )}
     >
       <svg
         viewBox="0 0 24 24"
@@ -770,25 +764,17 @@ function AuthorityGlyphIcon({
                 so the old separate status line is redundant — "Held externally" /
                 "Not set" are the badge's own name line. */}
             <div className="px-3 py-2.5">
-              {/* Titles the popup; the chip echoes the trigger's glyph so the two
-                  connect. Centred as a pair, chip trailing: the role name is what the
-                  popup is for, so it holds the centre and the chip reads as the echo
-                  it is — leading, it would take that position and title the popup
-                  itself. */}
+              {/* Titles the popup; the bare glyph echoes the trigger's so the two
+                  connect — no shield around it, the trigger already drew that and in
+                  the title the icon is an echo, not another mark. Centred as a pair,
+                  glyph trailing: the role name is what the popup is for, so it holds
+                  the centre and the glyph reads as the echo it is — leading, it would
+                  take that position and title the popup itself. */}
               <div className="flex items-center justify-center gap-2">
-                {/* The shield tapers to a point, so its mass sits above the middle
-                    of its box — the same reason the glyph inside it is nudged up a
-                    pixel. The label takes that nudge too, otherwise it reads as
-                    sitting low against the shape. */}
-                <p className="min-w-0 -translate-y-px truncate text-[12px] leading-snug font-medium text-primary">
+                <p className="min-w-0 truncate text-[12px] leading-snug font-medium text-primary">
                   {label}
                 </p>
-                <AuthorityShieldMark
-                  icon={Icon}
-                  box={CHIP_BOX}
-                  glyph={CHIP_GLYPH}
-                  className={authorityControlColor(control)}
-                />
+                <Icon className={cn("shrink-0", CHIP_GLYPH, authorityControlColor(control))} />
               </div>
               <div className="mt-2">
                 <WalletIdentityBadge identity={identity} onCopy={onCopy} />
