@@ -375,7 +375,7 @@ test.describe
       expect(await pageGeometry()).toEqual(mobileBaseline);
     });
 
-    test("wallet policy history routes preserve navigation", async ({ browser, page }) => {
+    test("wallet policy history opens the revision drawer", async ({ browser, page }) => {
       const { projectId, wallet } = await bootstrapWalletRouteFixture(browser, {
         labelPrefix: "Wallet Policy Routes",
         withPolicy: true,
@@ -385,25 +385,32 @@ test.describe
       const walletHref = `/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`;
       const policyHref = `${walletHref}/policy`;
       const auditHref = `${policyHref}/audit`;
-      const revisionsHref = `${policyHref}/revisions`;
+      const revisionTrigger = page.getByRole("button", { name: "Revision history" });
+      const drawer = page.getByRole("dialog", { name: "Revision history" });
 
       await page.goto(policyHref, { waitUntil: "domcontentloaded" });
       await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
-      await expect(page.locator(`a[href="${revisionsHref}"]`)).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
+      await expect(revisionTrigger).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+
+      await revisionTrigger.click();
+      await expect(drawer).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(page).toHaveURL(/[?&]revision=/, { timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(page).toHaveURL(new RegExp(`${policyHref.replaceAll("/", "\\/")}\\?`));
+
+      await page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(page).not.toHaveURL(/[?&]revision=/);
+
+      await page.goto(`${policyHref}?revision=latest`, { waitUntil: "domcontentloaded" });
+      await expect(drawer).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden({ timeout: E2E_POLL_TIMEOUT_MS });
 
       await page.locator(`a[href="${auditHref}"]`).click();
       await expect(page).toHaveURL(new RegExp(`${auditHref.replaceAll("/", "\\/")}$`));
-      await expect(page.locator(`a[href="${revisionsHref}"]`)).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
-
-      await page.locator(`a[href="${revisionsHref}"]`).click();
-      await expect(page).toHaveURL(new RegExp(`${revisionsHref.replaceAll("/", "\\/")}$`));
-      await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
+      await expect(page.getByRole("button", { name: "Revision history" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
     });
