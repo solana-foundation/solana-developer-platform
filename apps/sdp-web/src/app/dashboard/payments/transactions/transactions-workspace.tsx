@@ -588,17 +588,11 @@ export function TransactionsWorkspace({
                 aria-controls="payments-transaction-advanced-filters"
                 onClick={() => setFiltersOpen((open) => !open)}
               >
+                {/* No count badge here: "N active" renders directly below on the
+                    same condition, so the badge repeated it in a less useful form —
+                    a bare number, crowded against the button edge, next to a line
+                    that says what the number actually means and offers to clear it. */}
                 {t("DashboardPayments.transactions.filters")}
-                {advancedFilterCount > 0 ? (
-                  // `text-white` against `bg-primary` is invisible in dark mode:
-                  // primary resolves near-white there, so the count vanished into
-                  // its own pill. `on-primary` is the paired token and flips with
-                  // the theme. Sized as a circle rather than padded, so a single
-                  // digit is not an oval.
-                  <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[11px] font-medium text-on-primary tabular-nums">
-                    {advancedFilterCount}
-                  </span>
-                ) : null}
               </Button>
               <Button
                 type="button"
