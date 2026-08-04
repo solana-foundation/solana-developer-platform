@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.53.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.53.0...v0.53.1) (2026-08-04)
+
+### Maintenance
+
+* **deps:** bump hono from 4.12.29 to 4.12.34 ([#1068](https://github.com/solana-foundation/solana-developer-platform/pull/1068)) ([246a9fc](https://github.com/solana-foundation/solana-developer-platform/commit/246a9fca52f5d85964e4817220a1938a215f3fdb))
+
 ## [0.53.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.52.0...v0.53.0) (2026-08-04)
 
 ### Features
