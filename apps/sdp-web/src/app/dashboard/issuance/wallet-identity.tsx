@@ -27,6 +27,24 @@ export function shortenAddress(address: string, lead = 5, tail = 4): string {
     : address;
 }
 
+// SDP ids are a type prefix plus a uuid ("tok_5485045c-16e5-48c9-851f-e7e7814b487e"),
+// so shortening one like an address spends the whole lead on characters every id of
+// that type shares. Keep the prefix whole — it says what the id names — and take the
+// middle out of the uuid instead: the first group, which is what anyone reads to tell
+// two ids apart, plus a tail to check a copied value against.
+const PREFIXED_ID_LEAD = 8;
+const PREFIXED_ID_TAIL = 4;
+
+export function shortenPrefixedId(
+  id: string,
+  lead = PREFIXED_ID_LEAD,
+  tail = PREFIXED_ID_TAIL
+): string {
+  const prefixEnd = id.indexOf("_") + 1;
+  const prefix = id.slice(0, prefixEnd);
+  return `${prefix}${shortenAddress(id.slice(prefixEnd), lead, tail)}`;
+}
+
 // A `managed` badge spends its detail line on "Provider · key", so the key is
 // clipped hard. The states that show an address alone have the whole line to
 // themselves — spend it, since more characters is exactly what you need when
@@ -453,10 +471,21 @@ function CompactCopyButton({
 
 // ── Card ─────────────────────────────────────────────────────────────────────
 // The full-size panel used where a wallet is the subject of the screen rather
-// than a field on it: the locked signer select, and the authority modal's current
-// / selected panels. Copy is self-contained here (clipboard + toast) because every
-// card call site relies on that, unlike the compact badge which is always embedded
-// in a surface that already owns a copy handler.
+// than a field on it: the locked signer select, the Details tab's signing wallet,
+// and the authority modal's current / selected panels. Copy is self-contained here
+// (clipboard + toast) because every card call site relies on that, unlike the
+// compact badge which is always embedded in a surface that already owns a copy
+// handler.
+//
+// Density: the card carries at most an eyebrow, a title and two labelled key rows,
+// each caption stacked above its value, and it is the tallest thing in every form it
+// sits in — a signer select, or the Operational section of a tab that is otherwise a
+// grid of 40px fields. So every line is set as tight as the type allows (≈1.45× on
+// the 15px title, ≈1.33× on the 12px values) and the gaps are the smallest that still
+// group each caption with its value and hold the pair off the title. Kept as shared
+// constants so the four states that render key rows can't drift apart on spacing.
+const CARD_TITLE_CLASS = "text-[15px] leading-[22px] font-semibold tracking-[-0.1px] text-primary";
+const CARD_KEY_BLOCK_CLASS = "mt-2";
 
 function IdentityCard({
   identity,
@@ -481,11 +510,11 @@ function IdentityCard({
             walletId={identity.walletId}
             target={walletLink}
             title={identity.name}
-            className="text-[15px] leading-6 font-semibold tracking-[-0.1px] text-primary"
+            className={CARD_TITLE_CLASS}
           >
             {identity.name}
           </WalletNameLink>
-          <div className="mt-2.5 space-y-2">
+          <div className={cn(CARD_KEY_BLOCK_CLASS, "space-y-1.5")}>
             <CardKeyRow
               icon={Wallet}
               label={t("DashboardIssuance.wallet.walletId")}
@@ -537,7 +566,7 @@ function IdentityCard({
           <CardTitle className="text-warning">
             {t("DashboardIssuance.overview.signerUnavailable")}
           </CardTitle>
-          <div className="mt-2.5">
+          <div className={CARD_KEY_BLOCK_CLASS}>
             <CardKeyRow
               icon={Wallet}
               label={t("DashboardIssuance.wallet.walletId")}
@@ -561,7 +590,7 @@ function IdentityCard({
             ? t("DashboardIssuance.overview.authorityExternal")
             : t("DashboardIssuance.wallet.customAddress")}
         </CardTitle>
-        <div className="mt-2.5">
+        <div className={CARD_KEY_BLOCK_CLASS}>
           <CardKeyRow
             icon={KeyRound}
             label={t("DashboardIssuance.wallet.publicKey")}
@@ -587,7 +616,7 @@ function CardShell({
       data-testid={testId}
       className={cn(
         WALLET_HOVER_GROUP,
-        "flex items-start gap-3 rounded-[12px] border border-border-default bg-fill-subtle px-4 py-3",
+        "flex items-start gap-3 rounded-[12px] border border-border-default bg-fill-subtle px-4 py-2.5",
         className
       )}
     >
@@ -615,16 +644,7 @@ function CardEyebrow({ children }: { children: ReactNode }) {
 }
 
 function CardTitle({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <p
-      className={cn(
-        "text-[15px] leading-6 font-semibold tracking-[-0.1px] text-primary",
-        className
-      )}
-    >
-      {children}
-    </p>
-  );
+  return <p className={cn(CARD_TITLE_CLASS, className)}>{children}</p>;
 }
 
 function CardKeyRow({
@@ -638,12 +658,19 @@ function CardKeyRow({
 }) {
   return (
     <div>
-      <p className="flex items-center gap-1.5 text-[11px] leading-4 font-medium tracking-[0.04em] text-tertiary uppercase">
-        <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      {/* Caption and value carry no margin between them at all: both lines are set to
+          just clear their own glyphs (13px around the 10px caption and its icon, 16px
+          around the 12px value), and that half-leading is the whole gap. Anything more
+          and the caption stops reading as belonging to the value under it.
+          Size-wise the caption is a step under the provider eyebrow at 11px: that one
+          labels the card, these only label the two values inside it. Tracking opens up
+          as the size drops — uppercase at 10px needs it back to stay legible. */}
+      <p className="flex items-center gap-1.5 text-[10px] leading-[13px] font-medium tracking-[0.05em] text-tertiary uppercase">
+        <Icon className="h-2.5 w-2.5 shrink-0" aria-hidden />
         {label}
       </p>
-      <div className="mt-1 flex items-center gap-0.5">
-        <p className="min-w-0 break-all text-xs leading-5 text-primary">{value}</p>
+      <div className="flex items-center gap-0.5">
+        <p className="min-w-0 break-all text-xs leading-4 text-primary">{value}</p>
         <CardCopyButton value={value} label={label} />
       </div>
     </div>
@@ -670,7 +697,11 @@ function CardCopyButton({ value, label }: { value: string; label: string }) {
       // size has to be spelled as `size-*`: the variant carries a
       // `[&_svg:not([class*='size-'])]:size-3` rule that would otherwise outrank it.
       size="icon-xs"
-      className="shrink-0 text-tertiary"
+      // …and the negative margin keeps that 24px target while letting the value's own
+      // 16px line, not the button, set the row height. What it overhangs shows only as
+      // the hover fill, and only at the end of the value — several characters of
+      // address to the right of the caption it would otherwise reach into.
+      className="-my-1 shrink-0 text-tertiary"
       onClick={() => void handleCopy()}
       aria-label={t("DashboardIssuance.wallet.copy", { label })}
       title={t("DashboardIssuance.wallet.copy", { label })}
