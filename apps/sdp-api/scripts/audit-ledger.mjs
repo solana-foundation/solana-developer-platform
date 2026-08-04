@@ -22,6 +22,24 @@ function serializeCheckpoint(sequence, headHash) {
   return JSON.stringify({ sequence, headHash });
 }
 
+function parseCheckpoint(value) {
+  if (value === null) return { sequence: 0, headHash: null };
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      Number.isSafeInteger(parsed.sequence) &&
+      parsed.sequence > 0 &&
+      typeof parsed.headHash === "string" &&
+      /^[0-9a-f]{64}$/.test(parsed.headHash)
+    ) {
+      return parsed;
+    }
+  } catch {
+    // Invalid external state is represented by an impossible sequence below.
+  }
+  return { sequence: -1, headHash: null };
+}
+
 function usage() {
   return `Usage:
   pnpm --filter @sdp/api audit:ledger verify
@@ -49,12 +67,17 @@ function parseOptions(args) {
 }
 
 async function inspect(client, redis) {
-  const integrity = await client.query(`
+  const externalCheckpoint = await redis.get(EXTERNAL_CHECKPOINT_KEY);
+  const parsedCheckpoint = parseCheckpoint(externalCheckpoint);
+  const integrity = await client.query(
+    `
     SELECT valid, checked_entries, first_invalid_sequence,
            encode(head_hash, 'hex') AS head_hash,
            unresolved_critical_intents
-    FROM sdp_verify_audit_ledger()
-  `);
+    FROM sdp_verify_audit_ledger($1, $2)
+  `,
+    [parsedCheckpoint.sequence, parsedCheckpoint.headHash]
+  );
   const protection = await client.query(`
     SELECT current_user AS runtime_role,
            role.rolsuper,
@@ -98,7 +121,6 @@ async function inspect(client, redis) {
       posture.anchors_forcerowsecurity &&
       posture.enabled_security_triggers === 6
   );
-  const externalCheckpoint = await redis.get(EXTERNAL_CHECKPOINT_KEY);
   const checkedEntries = Number(result?.checked_entries ?? 0);
   const headHash = result?.head_hash ?? null;
   const expectedCheckpoint =

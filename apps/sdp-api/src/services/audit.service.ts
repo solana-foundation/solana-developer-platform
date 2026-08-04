@@ -131,6 +131,24 @@ function serializeCheckpoint(checkpoint: AuditLedgerCheckpoint): string {
   return JSON.stringify(checkpoint);
 }
 
+function parseCheckpoint(value: string | null): AuditLedgerCheckpoint {
+  if (value === null) return { sequence: 0, headHash: "" };
+  try {
+    const parsed = JSON.parse(value) as Partial<AuditLedgerCheckpoint>;
+    if (
+      Number.isSafeInteger(parsed.sequence) &&
+      Number(parsed.sequence) > 0 &&
+      typeof parsed.headHash === "string" &&
+      /^[0-9a-f]{64}$/.test(parsed.headHash)
+    ) {
+      return { sequence: Number(parsed.sequence), headHash: parsed.headHash };
+    }
+  } catch {
+    // Invalid external state is represented by an impossible sequence below.
+  }
+  return { sequence: -1, headHash: "" };
+}
+
 /**
  * A security-sensitive action must never look successful when its audit record
  * was not persisted. Callers receive this error instead of silently continuing.
@@ -322,13 +340,21 @@ export class AuditService {
 
   /** Verify every immutable link and return the current externally anchorable head. */
   async verifyIntegrity(): Promise<AuditLedgerIntegrity> {
+    if (!this.checkpointStore) {
+      throw new AuditPersistenceError({
+        cause: new Error("Integrity verification requires the external checkpoint store"),
+      });
+    }
+    const externalCheckpoint = await this.checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY);
+    const parsedCheckpoint = parseCheckpoint(externalCheckpoint);
     const result = await this.db
       .prepare(
         `SELECT valid, checked_entries, first_invalid_sequence,
                 encode(head_hash, 'hex') AS head_hash,
                 unresolved_critical_intents
-         FROM sdp_verify_audit_ledger()`
+         FROM sdp_verify_audit_ledger(?, NULLIF(?, ''))`
       )
+      .bind(parsedCheckpoint.sequence, parsedCheckpoint.headHash)
       .first<{
         valid: boolean;
         checked_entries: number;
@@ -341,13 +367,6 @@ export class AuditService {
       throw new AuditPersistenceError();
     }
 
-    if (!this.checkpointStore) {
-      throw new AuditPersistenceError({
-        cause: new Error("Integrity verification requires the external checkpoint store"),
-      });
-    }
-
-    const externalCheckpoint = await this.checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY);
     const expectedCheckpoint =
       result.checked_entries === 0 || result.head_hash === null
         ? null

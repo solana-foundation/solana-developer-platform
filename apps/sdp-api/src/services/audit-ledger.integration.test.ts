@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import type { KVStore, SlidingWindowAdmission, SlidingWindowOptions } from "@/runtime/kv";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { AuditService } from "./audit.service";
+import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditService } from "./audit.service";
 
 class MemoryCheckpointStore implements KVStore {
   private value: string | null = null;
@@ -240,6 +240,19 @@ describe("tamper-evident audit ledger", () => {
         "2026-01-01T00:00:00.000Z"
       )
       .run();
+    const staleIntentHead = await db.queryOne<{ ledger_sequence: number; head_hash: string }>(
+      `SELECT ledger_sequence, encode(entry_hash, 'hex') AS head_hash
+       FROM audit_logs
+       ORDER BY ledger_sequence DESC
+       LIMIT 1`
+    );
+    await checkpoint.put(
+      AUDIT_LEDGER_CHECKPOINT_KEY,
+      JSON.stringify({
+        sequence: staleIntentHead?.ledger_sequence,
+        headHash: staleIntentHead?.head_hash,
+      })
+    );
 
     await expect(audit.verifyIntegrity()).resolves.toMatchObject({
       valid: false,

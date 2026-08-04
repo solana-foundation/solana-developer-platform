@@ -281,7 +281,13 @@ DROP POLICY IF EXISTS audit_ledger_anchors_insert ON audit_ledger_anchors;
 CREATE POLICY audit_ledger_anchors_insert
   ON audit_ledger_anchors FOR INSERT WITH CHECK (true);
 
-CREATE OR REPLACE FUNCTION sdp_verify_audit_ledger()
+-- Verification deliberately requires the independently stored Redis head.
+-- PostgreSQL must never be able to certify a shortened prefix using only data
+-- from its own privilege boundary.
+CREATE OR REPLACE FUNCTION sdp_verify_audit_ledger(
+  p_external_sequence BIGINT,
+  p_external_head_hash TEXT
+)
 RETURNS TABLE(
   valid BOOLEAN,
   checked_entries BIGINT,
@@ -357,6 +363,12 @@ BEGIN
      OR anchored_last_sequence IS DISTINCT FROM
         (CASE WHEN checked_count = 0 THEN NULL ELSE checked_count END)
      OR anchored_head IS DISTINCT FROM expected_previous THEN
+    RETURN QUERY SELECT false, checked_count, checked_count + 1, expected_previous, 0::BIGINT;
+    RETURN;
+  END IF;
+
+  IF p_external_sequence IS DISTINCT FROM checked_count
+     OR p_external_head_hash IS DISTINCT FROM encode(expected_previous, 'hex') THEN
     RETURN QUERY SELECT false, checked_count, checked_count + 1, expected_previous, 0::BIGINT;
     RETURN;
   END IF;

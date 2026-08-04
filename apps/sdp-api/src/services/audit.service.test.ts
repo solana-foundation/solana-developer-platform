@@ -104,7 +104,7 @@ describe("AuditService", () => {
       head_hash: "abc123",
       unresolved_critical_intents: 0,
     }));
-    const db = { prepare: vi.fn(() => ({ first })) };
+    const db = { prepare: vi.fn(() => ({ bind: () => ({ first }) })) };
     const checkpoint = createMemoryCheckpointStore();
     await checkpoint.put(
       "audit-ledger:checkpoint:v1",
