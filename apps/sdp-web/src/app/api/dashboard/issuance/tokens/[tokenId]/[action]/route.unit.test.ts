@@ -23,9 +23,14 @@ describe("POST /api/dashboard/issuance/tokens/[tokenId]/[action]", () => {
     vi.clearAllMocks();
   });
 
-  it("returns 404 for an unsupported action without proxying", async () => {
+  it.each([
+    "not-a-real-action",
+    "__proto__",
+    "constructor",
+    "toString",
+  ])("returns 404 for unsupported action %s without proxying", async (action) => {
     const response = await POST(tokenActionRequest(), {
-      params: Promise.resolve({ tokenId: "tok_1", action: "not-a-real-action" }),
+      params: Promise.resolve({ tokenId: "tok_1", action }),
     });
 
     expect(response.status).toBe(404);
