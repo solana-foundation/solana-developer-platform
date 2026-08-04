@@ -602,6 +602,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         throw counterpartyNotProvisioned("mural", "onramp");
       }
       quote = muralOnrampQuote({ account, fiatCurrency: input.fiatCurrency });
+      transferProviderData = { mural: { accountId: account.id } };
       break;
     }
     case "moneygram": {
