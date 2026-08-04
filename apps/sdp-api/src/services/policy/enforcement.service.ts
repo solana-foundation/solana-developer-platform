@@ -34,10 +34,14 @@ import { PostgresPolicyEnforcementStore } from "./enforcement.store";
 export async function enforceWalletOperationPolicy(
   env: Env,
   scope: TenantScope,
-  input: CreateWalletOperationInput
+  input: CreateWalletOperationInput,
+  approvedOperationId?: string
 ): Promise<WalletOperationPolicyEnforcement> {
   assertTenantClaim(scope, input, "enforceWalletOperationPolicy");
   const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope));
+  if (approvedOperationId) {
+    return service.resumeApprovedOperation(approvedOperationId, input);
+  }
   return service.enforce(input);
 }
 
@@ -61,6 +65,80 @@ export class WalletPolicyEnforcementService {
     }
 
     throw walletOperationPolicyDecisionError(enforcement.operation, enforcement.evaluation);
+  }
+
+  async resumeApprovedOperation(
+    walletOperationId: string,
+    input: CreateWalletOperationInput
+  ): Promise<WalletOperationPolicyEnforcement> {
+    const operation = await this.repository.getWalletOperationById(walletOperationId);
+    if (operation?.status !== "executing" || operation.execution_started_at === null) {
+      throw new AppError("FORBIDDEN", "Wallet operation approval is not executable");
+    }
+
+    const matches =
+      operation.organization_id === input.organizationId &&
+      operation.project_id === input.projectId &&
+      operation.custody_wallet_id === (input.custodyWalletId ?? null) &&
+      operation.wallet_id === input.walletId &&
+      operation.api_key_id === (input.apiKeyId ?? null) &&
+      operation.operation_family === input.operationFamily &&
+      operation.operation_type === input.operationType &&
+      operation.asset === (input.asset ?? null) &&
+      operation.amount === (input.amount ?? null) &&
+      operation.destination === (input.destination ?? null);
+    if (!matches) {
+      throw new AppError("FORBIDDEN", "Approved wallet operation does not match replayed action");
+    }
+
+    const evaluations = await this.repository.listPolicyEvaluationsForOperation(walletOperationId);
+    const original = evaluations.at(-1);
+    if (
+      !original?.requires_approval ||
+      !original.approval_request_id ||
+      !original.evaluation_context
+    ) {
+      throw new AppError("FORBIDDEN", "Wallet operation has no satisfied approval gate");
+    }
+
+    return {
+      operation: {
+        id: operation.id,
+        organizationId: operation.organization_id,
+        projectId: operation.project_id,
+        custodyWalletId: operation.custody_wallet_id,
+        walletId: operation.wallet_id,
+        apiKeyId: operation.api_key_id,
+        actor: input.actor ?? null,
+        source: operation.source,
+        operationFamily: operation.operation_family,
+        operationType: operation.operation_type,
+        asset: operation.asset,
+        amount: operation.amount,
+        destination: operation.destination,
+        context: input.context ?? {},
+        providerExtensions: input.providerExtensions ?? {},
+        rawPayload: operation.raw_payload,
+        idempotencyKey: operation.idempotency_key,
+        status: operation.status,
+        createdAt: operation.created_at,
+        updatedAt: operation.updated_at,
+      },
+      evaluation: {
+        id: original.id,
+        walletOperationId: original.wallet_operation_id,
+        walletPolicyRevisionId: original.wallet_policy_revision_id,
+        apiKeyPolicyRevisionId: original.api_key_policy_revision_id,
+        decision: "allow",
+        reasonCode: "approval_satisfied",
+        reason: "Required approval was granted",
+        matchedRules: original.matched_rules,
+        evaluationContext: original.evaluation_context,
+        requiresApproval: false,
+        approvalRequestId: original.approval_request_id,
+        createdAt: original.created_at,
+      },
+    };
   }
 
   async approveApprovalRequest(

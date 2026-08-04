@@ -21,6 +21,10 @@ import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import {
+  approvedWalletOperationId,
+  walletOperationExecutionRequest,
+} from "@/services/policy/approved-operation-replay";
+import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
   walletOperationActorFromAuth,
@@ -69,23 +73,29 @@ export const signerCheck = async (c: AppContext) => {
   }
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, resolvedWalletId);
-  await enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
-    organizationId: auth.organizationId,
-    projectId: auth.projectId,
-    custodyWalletId: policyWallet?.id ?? null,
-    walletId: resolvedWalletId,
-    apiKeyId: auth.apiKeyId,
-    actor: walletOperationActorFromAuth(auth),
-    operationFamily: "raw_sign",
-    operationType: "custody_signer_check",
-    context: {
-      memo,
+  await enforceWalletOperationPolicy(
+    c.env,
+    getRequestTenantScope(c),
+    {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      custodyWalletId: policyWallet?.id ?? null,
+      walletId: resolvedWalletId,
+      apiKeyId: auth.apiKeyId,
+      actor: walletOperationActorFromAuth(auth),
+      operationFamily: "raw_sign",
+      operationType: "custody_signer_check",
+      context: {
+        memo,
+      },
+      rawPayload: {
+        requestedWalletId: parsed.data.walletId ?? null,
+        memo,
+        executionRequest: walletOperationExecutionRequest(c, parsed.data),
+      },
     },
-    rawPayload: {
-      requestedWalletId: parsed.data.walletId ?? null,
-      memo,
-    },
-  });
+    approvedWalletOperationId(c)
+  );
 
   try {
     const signer = await createOrgSigner(

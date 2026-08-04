@@ -8,6 +8,7 @@ import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
+import { walletOperationExecutionRequest } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -223,6 +224,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       role,
       currentAuthority: currentAuthorityRaw,
       newAuthority,
+      executionRequest: walletOperationExecutionRequest(c, parsed.data),
     },
   });
 

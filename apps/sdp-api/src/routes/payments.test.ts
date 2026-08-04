@@ -6248,6 +6248,188 @@ describe("Payments routes", () => {
     expect(body.error.details?.errors?.rules).toContain("operationType must not be empty");
   });
 
+  it("executes an approved transfer exactly once after leaving it pending", async () => {
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-execution",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+    };
+
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    expect(pendingResponse.status).toBe(202);
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+    expect(approvalRequestId).toMatch(/^appr_/);
+    expect(walletOperationId).toMatch(/^wop_/);
+
+    const beforeApproval = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+      .first<{ count: number | string }>();
+    expect(Number(beforeApproval?.count ?? 0)).toBe(0);
+
+    const approve = () =>
+      app.request(
+        `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+        { method: "POST", headers },
+        env
+      );
+    const approvedResponse = await approve();
+    expect(approvedResponse.status).toBe(200);
+    const approvedBody = (await approvedResponse.json()) as {
+      data: {
+        approvalRequest: {
+          status: string;
+          operation: {
+            status: string;
+            executionStartedAt: string | null;
+            executionCompletedAt: string | null;
+            executionError: string | null;
+          };
+        };
+      };
+    };
+    expect(approvedBody.data.approvalRequest).toMatchObject({
+      status: "approved",
+      operation: {
+        status: "completed",
+        executionError: null,
+      },
+    });
+    expect(approvedBody.data.approvalRequest.operation.executionStartedAt).toBeTruthy();
+    expect(approvedBody.data.approvalRequest.operation.executionCompletedAt).toBeTruthy();
+
+    const transfers = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers")
+      .all<{ status: string }>();
+    expect(transfers.results).toEqual([{ status: "confirmed" }]);
+
+    const replayedApproval = await approve();
+    expect(replayedApproval.status).toBe(200);
+    const transferCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+      .first<{ count: number | string }>();
+    expect(Number(transferCount?.count ?? 0)).toBe(1);
+  });
+
+  it("requires the configured approval-group member to approve execution", async () => {
+    const approvalGroupId = "apg_payment_execution";
+    const sessionId = "ses_payment_approver";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'admin', 'active')`
+        )
+        .bind("om_payment_approver", TEST_ORG.id, TEST_USER.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+        )
+        .bind("pm_payment_approver", TEST_PROJECT.id, TEST_USER.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(sessionId, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO approval_groups (id, organization_id, project_id, name, status, created_by)
+           VALUES (?, ?, ?, 'Payment approvers', 'active', ?)`
+        )
+        .bind(approvalGroupId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO approval_group_members (id, approval_group_id, user_id, role)
+           VALUES (?, ?, ?, 'approver')`
+        )
+        .bind("agm_payment_approver", approvalGroupId, TEST_USER.id),
+    ]);
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "group-approve-payment-execution",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+          approvalGroupId,
+        },
+      ],
+    });
+    const apiHeaders = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+    };
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: apiHeaders,
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string } };
+    };
+    const approvalPath = `/v1/wallets/approval-requests/${pendingBody.error.details.approvalRequestId}/approve`;
+
+    const apiKeyDecision = await app.request(
+      approvalPath,
+      { method: "POST", headers: apiHeaders },
+      env
+    );
+    expect(apiKeyDecision.status).toBe(403);
+
+    const memberDecision = await app.request(
+      approvalPath,
+      {
+        method: "POST",
+        headers: {
+          Cookie: `sdp_session=${sessionId}`,
+          "x-project-id": TEST_PROJECT.id,
+        },
+      },
+      env
+    );
+    expect(memberDecision.status).toBe(200);
+    const memberBody = (await memberDecision.json()) as {
+      data: { approvalRequest: { status: string; operation: { status: string } } };
+    };
+    expect(memberBody.data.approvalRequest).toMatchObject({
+      status: "approved",
+      operation: { status: "completed" },
+    });
+  });
+
   it("blocks create transfer when projected daily total exceeds maxDailyAmount", async () => {
     await seedWalletPolicy({
       destinationAllowlist: [],

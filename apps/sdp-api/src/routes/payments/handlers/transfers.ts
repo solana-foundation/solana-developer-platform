@@ -47,6 +47,10 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import {
+  approvedWalletOperationId,
+  walletOperationExecutionRequest,
+} from "@/services/policy/approved-operation-replay";
+import {
   enforceWalletOperationPolicy,
   recordLegacyWalletPolicyDenial,
   walletOperationActorFromAuth,
@@ -233,25 +237,30 @@ async function enforcePaymentTransferOperationPolicy(
     rawPayload?: Record<string, unknown>;
   }
 ) {
-  return enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
-    organizationId: scope.auth.organizationId,
-    projectId: scope.auth.projectId,
-    custodyWalletId: operation.sourceWallet.id,
-    walletId: operation.sourceWallet.walletId,
-    apiKeyId: scope.auth.apiKeyId,
-    actor: walletOperationActorFromAuth(scope.auth),
-    operationFamily: "payment",
-    operationType: input.operationType,
-    asset: operation.token,
-    amount: operation.amount,
-    destination: operation.destinationAddress,
-    context: {
-      sourceAddress: operation.sourceAddress,
-      memo: input.memo ?? null,
-      privateTransfer: input.privateTransfer ?? false,
+  return enforceWalletOperationPolicy(
+    c.env,
+    getRequestTenantScope(c),
+    {
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+      custodyWalletId: operation.sourceWallet.id,
+      walletId: operation.sourceWallet.walletId,
+      apiKeyId: scope.auth.apiKeyId,
+      actor: walletOperationActorFromAuth(scope.auth),
+      operationFamily: "payment",
+      operationType: input.operationType,
+      asset: operation.token,
+      amount: operation.amount,
+      destination: operation.destinationAddress,
+      context: {
+        sourceAddress: operation.sourceAddress,
+        memo: input.memo ?? null,
+        privateTransfer: input.privateTransfer ?? false,
+      },
+      rawPayload: input.rawPayload,
     },
-    rawPayload: input.rawPayload,
-  });
+    approvedWalletOperationId(c)
+  );
 }
 
 async function updateTransferRecord(
@@ -932,6 +941,7 @@ export async function createTransfer(c: AppContext) {
       destination: parsed.data.destination,
       token: parsed.data.token,
       amount: parsed.data.amount,
+      executionRequest: walletOperationExecutionRequest(c, parsed.data),
     },
   });
   try {

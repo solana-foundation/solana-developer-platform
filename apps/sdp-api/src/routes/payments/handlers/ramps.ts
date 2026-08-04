@@ -58,6 +58,10 @@ import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
+  approvedWalletOperationId,
+  walletOperationExecutionRequest,
+} from "@/services/policy/approved-operation-replay";
+import {
   enforceWalletOperationPolicy,
   walletOperationActorFromAuth,
 } from "@/services/policy/enforcement.service";
@@ -244,25 +248,30 @@ async function enforceRampWalletOperationPolicy(
     rawPayload?: Record<string, unknown>;
   }
 ) {
-  return enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
-    organizationId: input.scope.auth.organizationId,
-    projectId: input.scope.auth.projectId,
-    custodyWalletId: input.wallet.id,
-    walletId: input.wallet.walletId,
-    apiKeyId: input.scope.auth.apiKeyId,
-    actor: walletOperationActorFromAuth(input.scope.auth),
-    operationFamily: "ramp",
-    operationType: input.operationType,
-    asset: input.asset,
-    amount: input.amount ?? null,
-    destination: input.destination ?? null,
-    providerExtensions: { provider: input.provider },
-    rawPayload: {
-      provider: input.provider,
-      counterpartyId: input.counterpartyId,
-      ...(input.rawPayload ?? {}),
+  return enforceWalletOperationPolicy(
+    c.env,
+    getRequestTenantScope(c),
+    {
+      organizationId: input.scope.auth.organizationId,
+      projectId: input.scope.auth.projectId,
+      custodyWalletId: input.wallet.id,
+      walletId: input.wallet.walletId,
+      apiKeyId: input.scope.auth.apiKeyId,
+      actor: walletOperationActorFromAuth(input.scope.auth),
+      operationFamily: "ramp",
+      operationType: input.operationType,
+      asset: input.asset,
+      amount: input.amount ?? null,
+      destination: input.destination ?? null,
+      providerExtensions: { provider: input.provider },
+      rawPayload: {
+        provider: input.provider,
+        counterpartyId: input.counterpartyId,
+        ...(input.rawPayload ?? {}),
+      },
     },
-  });
+    approvedWalletOperationId(c)
+  );
 }
 
 function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus {
@@ -545,6 +554,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       fiatCurrency: input.fiatCurrency,
       fiatAmount: input.fiatAmount,
       cryptoToken: input.cryptoToken,
+      executionRequest: walletOperationExecutionRequest(c, input),
     },
   });
 
@@ -718,6 +728,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       fiatCurrency: input.fiatCurrency,
       cryptoToken: input.cryptoToken,
       cryptoAmount: input.cryptoAmount,
+      executionRequest: walletOperationExecutionRequest(c, input),
     },
   });
 

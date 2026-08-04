@@ -182,6 +182,10 @@ export interface WalletOperationRow {
   raw_payload: Record<string, unknown>;
   idempotency_key: string | null;
   status: WalletOperationStatus;
+  execution_started_at: string | null;
+  execution_completed_at: string | null;
+  execution_error: string | null;
+  execution_result: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -271,6 +275,9 @@ export interface ApprovalRequestDetailRow {
   amount: string | null;
   destination: string | null;
   operation_status: WalletOperationStatus;
+  operation_execution_started_at: string | null;
+  operation_execution_completed_at: string | null;
+  operation_execution_error: string | null;
   operation_created_at: string;
   operation_updated_at: string;
   policy_evaluation_id: string | null;
@@ -438,6 +445,13 @@ export interface UpdateApprovalRequestStatusInput {
   resolvedAt?: string;
 }
 
+export interface CompleteWalletOperationExecutionInput {
+  walletOperationId: string;
+  status: "completed" | "failed";
+  result?: Record<string, unknown> | null;
+  error?: string | null;
+}
+
 export interface ListApprovalRequestDetailsInput {
   organizationId: string;
   projectId: string | null;
@@ -565,6 +579,11 @@ export interface PolicyRepository {
     walletOperationId: string,
     status: WalletOperationStatus
   ): Promise<WalletOperationRow | null>;
+  claimWalletOperationExecution(walletOperationId: string): Promise<WalletOperationRow | null>;
+  completeWalletOperationExecution(
+    input: CompleteWalletOperationExecutionInput
+  ): Promise<WalletOperationRow | null>;
+  isApprovalGroupMember(approvalGroupId: string, userId: string): Promise<boolean>;
   createPolicyEvaluation(input: CreatePolicyEvaluationInput): Promise<PolicyEvaluationRow | null>;
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;
   listWalletPolicyEvaluationAudits(

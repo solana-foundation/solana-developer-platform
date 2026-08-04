@@ -132,6 +132,10 @@ function createRepository(options: {
         },
         idempotency_key: input.idempotencyKey ?? null,
         status: input.status ?? "created",
+        execution_started_at: null,
+        execution_completed_at: null,
+        execution_error: null,
+        execution_result: null,
         created_at: "2026-06-18T00:00:00.000Z",
         updated_at: "2026-06-18T00:00:00.000Z",
       };

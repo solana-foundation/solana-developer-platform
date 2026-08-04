@@ -8,6 +8,7 @@ import { success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
+import { walletOperationExecutionRequest } from "@/services/policy/approved-operation-replay";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
@@ -405,6 +406,7 @@ export const executeMint = async (c: AppContext) => {
       destination: parsed.data.mint.destination,
       amount: parsed.data.mint.amount,
       memo: parsed.data.mint.memo ?? null,
+      executionRequest: walletOperationExecutionRequest(c, parsed.data),
     },
   });
 
