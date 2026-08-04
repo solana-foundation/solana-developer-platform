@@ -36,18 +36,25 @@
  * environment's cluster, never hand-typed. No share mints are seeded: a
  * fabricated mint address would point at an account that exists on no cluster.
  *
- * The catalogue is fixtures; the PROGRAM LINKS are not. The seed also points
- * each local organization at one of the team's real Ground **sandbox** portfolio
- * wallets (SEED_PROVIDER_WALLETS), so the dashboard opens onto a live program —
- * real balances, real positions, a real Solana deposit address — instead of the
- * empty onboarding state a fresh install shows. Consequences worth knowing:
- *   - those wallets are SHARED, so funding one, updating its allocation through
- *     the wizard, or withdrawing from it changes what teammates see;
+ * The catalogue is fixtures; the PROGRAM LINK is not. The seed also points the
+ * primary local organization at ONE of the team's real Ground **sandbox**
+ * portfolio wallets (SEED_PROVIDER_WALLET), so the dashboard opens onto a live
+ * program — real allocation, real forward APY, a real Solana deposit address —
+ * instead of the empty onboarding state a fresh install shows. Consequences
+ * worth knowing:
+ *   - one org gets one program, mirroring the UNIQUE (organization_id,
+ *     environment, provider) product model; other local orgs are left unlinked
+ *     rather than handed a sibling wallet that stands in for another org;
+ *   - that wallet is SHARED with teammates, so funding it, updating its
+ *     allocation through the wizard, or withdrawing from it changes what they
+ *     see;
  *   - the seed only records the local link — it never calls Ground;
  *   - an organization that already has a program keeps it (the seed never
  *     repoints a wallet a developer created through the wizard);
+ *   - but a link THIS SEED made follows the primary org on a re-run, so seeding
+ *     before your first Clerk sign-in is recoverable — see seedProviderWallets;
  *   - `--clean` removes only links labelled SEED_WALLET_LABEL and leaves the
- *     Ground wallets themselves untouched.
+ *     Ground wallet itself untouched.
  *
  * Idempotent: strategies upsert on (provider, provider_reference, environment)
  * so re-running updates exactly those rows in place (ids stay stable, positions
@@ -74,7 +81,7 @@ import {
   wellKnownMint,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
-import { type AppDb, closeDatabasePools, createDatabaseClient } from "@/db";
+import { type AppDb, asTransactionalClient, closeDatabasePools, createDatabaseClient } from "@/db";
 import type { EarnRepository, InsertEarnNavSnapshotInput } from "@/db/repositories";
 import { createPostgresEarnRepository } from "@/db/repositories";
 
@@ -105,41 +112,63 @@ const DAY_MS = 86_400_000;
 const SEED_WALLET_LABEL = "Seeded sandbox wallet (local dev)";
 
 /**
- * THESE ARE REAL GROUND SANDBOX PORTFOLIO WALLETS — actual provider resources
- * that exist in Ground's sandbox, not fixtures and not invented ids. Every
- * `ref` below is a live `POST /v2/wallets` wallet the team provisioned; the
- * dashboard fetches its true balance, positions, allocations, and Solana
- * deposit address straight from Ground. Sandbox only — never add a production
- * wallet ref here.
+ * THIS IS A REAL GROUND SANDBOX PORTFOLIO WALLET — an actual provider resource
+ * that exists in Ground's sandbox, not a fixture and not an invented id. It is
+ * a live `POST /v2/wallets` wallet the team provisioned; the dashboard fetches
+ * its true balance, positions, allocations, and Solana deposit address straight
+ * from Ground. Sandbox only — never put a production wallet ref here.
  *
- * They are linked so local dev opens onto a live program instead of an empty
- * onboarding screen. Ordered best-demo-first: whichever local organizations
- * exist get them in this order.
+ * ONE wallet, linked to ONE organization — the local mirror of the product
+ * model. SDP maps each organization to exactly one Ground portfolio wallet
+ * (`earn_provider_wallets` UNIQUE (organization_id, environment, provider),
+ * migration 0049): choosing a curator re-weights that wallet, it never
+ * provisions a second one. Note this is SDP's model, NOT a Ground limit —
+ * Ground has no concept of an SDP organization, and one Ground account can hold
+ * many portfolio wallets (all SDP orgs share a single account per environment;
+ * `readGroundConfig` resolves one API key, never a per-org credential). Sibling
+ * wallets in the team's sandbox account therefore stand in for OTHER
+ * organizations, so the seed must not hand them to yours.
  *
- * These are live provider resources, not fixtures:
- *   - the dashboard reads their real balances, positions, and deposit address;
- *   - they are SANDBOX only — never a production wallet ref;
- *   - they are SHARED, so state you change here (funding, a strategy update
+ * It is linked so local dev opens onto a live program instead of an empty
+ * onboarding screen. Live provider resource, not a fixture:
+ *   - the dashboard reads its real balance, allocation, and deposit address;
+ *   - SANDBOX only — never a production wallet ref;
+ *   - it is SHARED, so state you change here (funding, a strategy update
  *     through the wizard, a withdrawal) is state your teammates also see.
  * Nothing here writes to Ground; the seed only records the link locally.
+ *
+ * Why THIS wallet: it is the one whose every value is reachable through SDP's
+ * own surface. Its allocation is three Kamino USDC sources, so the overview
+ * renders a real forward APY blended from target weights (`blendPositionApy`
+ * weights by target when nothing is deployed yet), and you fund it yourself by
+ * sending devnet USDC to its Solana deposit address — which exercises the actual
+ * two-phase deposit. It reads $0 until you do, and that is the point: a zero you
+ * can act on beats a balance you cannot.
+ *
+ * DELIBERATELY NOT the sandbox's funded wallets, and this is measured, not
+ * assumed. Their balances sit as USDT cash on a non-Solana rail, and Ground
+ * enforces the lane split at the API:
+ *
+ *     USDC -> solana_devnet      409  insufficient_funds (lane withdrawable 0)
+ *     USDT -> solana_devnet      400  "destinationChain must be one of: ..."
+ *     USDT -> <its own rail>     200  withdrawable 5.000000
+ *
+ * So a funded wallet makes the dashboard show a withdrawable balance that SDP
+ * cannot withdraw: `balance.withdrawableUsd` is a wallet-level total, the exit
+ * is per-lane, and the withdraw modal caps on the total. Seeding that wallet
+ * hands every developer a program whose money is unreachable and whose "max"
+ * button 409s — which reads as an SDP bug and is not one. Verified against
+ * Ground's sandbox on 2026-08-04.
+ *
+ * Keep this ref on the Solana rail. The surface is Solana-only (ADR 0002
+ * invariant 5) and a seeded wallet must not imply otherwise — which is also why
+ * `mapPosition` synthesizes position labels rather than passing the provider's
+ * chain-bearing ones through.
  */
-const SEED_PROVIDER_WALLETS: readonly { ref: string; note: string }[] = [
-  {
-    ref: "49b0483c-490a-4435-80b0-6c83bee2b206",
-    // Funded and allocated: $5 sitting as cash awaiting the provider rebalance,
-    // over a 50/50 USDC split. The most useful default — it shows the two-phase
-    // deposit (received, not yet earning) that a fresh wallet cannot.
-    note: "funded, cash awaiting rebalance, 50/50 USDC allocation",
-  },
-  {
-    ref: "eed99909-b2d4-4f01-af32-461e500d292d",
-    note: "allocated across three Kamino sources, unfunded ($0)",
-  },
-  {
-    ref: "6e43116e-9d6c-4b1a-9ccb-fc3dadcbc125",
-    note: "funded ($5) but held entirely as cash — no allocation yet",
-  },
-];
+const SEED_PROVIDER_WALLET: { ref: string; note: string } = {
+  ref: "eed99909-b2d4-4f01-af32-461e500d292d",
+  note: "three-source Kamino USDC allocation, $0 until you deposit devnet USDC",
+};
 
 // ── Fixture catalogue ───────────────────────────────────────────────────────
 // Ten of Ground's sandbox yield sources, trimmed to a spread the dashboard
@@ -393,12 +422,24 @@ interface LocalOrganization {
 }
 
 /**
- * Local organizations that can hold a program, ordered so the developer's own
- * Clerk-backed org comes before the `db:seed:local` test fixture — the wallet
- * with the richest state should land where the dashboard actually looks.
+ * The single local organization that gets the seeded program: the developer's
+ * own Clerk-backed org, ordered ahead of the `db:seed:local` test fixture, since
+ * the dashboard only ever looks at the org you are signed into.
+ *
+ * Returns at most one row. Other local orgs are left without a program on
+ * purpose — a sibling org's program is a wallet of its own in Ground, and this
+ * seed has exactly one ref to give.
+ *
+ * The ordering is **fully deterministic**, which matters more than the sort key
+ * itself: because the seeded link follows whichever org this returns, an
+ * ambiguous ORDER BY would let two runs disagree and bounce the program between
+ * orgs, leaving the dashboard on an empty onboarding screen every other run.
+ * `created_at` is TEXT and is written per-second, so two orgs provisioned in the
+ * same second tie on it — and a multi-project or multi-member org yields several
+ * rows for one org. Every remaining key is therefore broken by id.
  */
-async function findLocalOrganizations(db: AppDb): Promise<LocalOrganization[]> {
-  return db.queryMany<LocalOrganization>(
+async function findPrimaryLocalOrganization(db: AppDb): Promise<LocalOrganization | undefined> {
+  const organizations = await db.queryMany<LocalOrganization>(
     `SELECT o.id AS "organizationId",
             p.id AS "projectId",
             m.user_id AS "createdBy",
@@ -410,59 +451,79 @@ async function findLocalOrganizations(db: AppDb): Promise<LocalOrganization[]> {
          ON m.organization_id = o.id
       WHERE o.status = 'active'
       GROUP BY o.id, p.id, m.user_id, o.slug, o.created_at
-      ORDER BY (o.id = 'org_test123456789'), o.created_at DESC`,
+      ORDER BY (o.id = 'org_test123456789'), o.created_at DESC,
+               o.id ASC, p.id ASC, m.user_id ASC
+      LIMIT 1`,
     [SEED_ENVIRONMENT]
   );
+  return organizations[0];
 }
 
 /**
- * Links the shared sandbox wallets to local organizations. Never repoints an
- * existing link: a program a developer created through the wizard is theirs, and
- * silently swapping its provider wallet would strand it.
+ * Links the shared sandbox wallet to the primary local organization — one org,
+ * one program, mirroring the UNIQUE (organization_id, environment, provider)
+ * product model.
+ *
+ * Never repoints a program a developer created through the wizard: that link is
+ * theirs and silently swapping its provider wallet would strand it. A link this
+ * seed made (identified by SEED_WALLET_LABEL) is a different matter — it MOVES
+ * to follow the primary org.
+ *
+ * Why moving matters, and the ordering trap it removes: on a fresh machine the
+ * only organization is the `db:seed:local` test fixture, so an early
+ * `db:seed:earn` lands the program there. Signing into Clerk then provisions
+ * your real org, which becomes primary — and without the move, re-running the
+ * seed would leave the program stranded on the test org while the dashboard you
+ * are actually looking at shows an empty onboarding screen forever. Re-running
+ * the seed after first sign-in now just works.
  */
 async function seedProviderWallets(
   repo: EarnRepository,
   db: AppDb
-): Promise<{ linked: number; kept: number; unused: number }> {
-  const organizations = await findLocalOrganizations(db);
-  let linked = 0;
-  let kept = 0;
+): Promise<{ linked: number; kept: number; moved: boolean; skipped: boolean }> {
+  const organization = await findPrimaryLocalOrganization(db);
+  if (!organization) {
+    return { linked: 0, kept: 0, moved: false, skipped: true };
+  }
 
-  for (const [index, wallet] of SEED_PROVIDER_WALLETS.entries()) {
-    const organization = organizations[index];
-    if (!organization) break;
+  const existing = await repo.getProviderWallet({
+    organizationId: organization.organizationId,
+    environment: SEED_ENVIRONMENT,
+    provider: SEED_PROVIDER,
+  });
+  if (existing) {
+    console.log(`  ${organization.slug}: kept existing program (${existing.provider_wallet_ref})`);
+    return { linked: 0, kept: 1, moved: false, skipped: false };
+  }
 
-    const existing = await repo.getProviderWallet({
-      organizationId: organization.organizationId,
-      environment: SEED_ENVIRONMENT,
-      provider: SEED_PROVIDER,
-    });
-    if (existing) {
-      console.log(
-        `  ${organization.slug}: kept existing program (${existing.provider_wallet_ref})`
-      );
-      kept += 1;
-      continue;
-    }
-
-    await repo.insertProviderWallet({
+  // The move is one transaction: the delete and the insert must land together or
+  // not at all. Committing the delete on its own would leave no program link if
+  // the insert then failed, putting the dashboard back on the empty onboarding
+  // screen — the exact state this function exists to prevent.
+  const moved = await db.transaction(async (tx) => {
+    const txRepo = createPostgresEarnRepository(asTransactionalClient(tx));
+    // Only ever removes rows this seed created; a wizard-made link carries a
+    // different label and is left alone.
+    const removed = await tx.execute(
+      "DELETE FROM earn_provider_wallets WHERE environment = ? AND provider = ? AND label = ?",
+      [SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL]
+    );
+    await txRepo.insertProviderWallet({
       organizationId: organization.organizationId,
       projectId: organization.projectId,
       environment: SEED_ENVIRONMENT,
       provider: SEED_PROVIDER,
-      providerWalletRef: wallet.ref,
+      providerWalletRef: SEED_PROVIDER_WALLET.ref,
       label: SEED_WALLET_LABEL,
       createdBy: organization.createdBy,
     });
-    console.log(`  ${organization.slug}: linked ${wallet.ref} — ${wallet.note}`);
-    linked += 1;
-  }
+    return removed > 0;
+  });
 
-  return {
-    linked,
-    kept,
-    unused: Math.max(0, SEED_PROVIDER_WALLETS.length - organizations.length),
-  };
+  console.log(
+    `  ${organization.slug}: ${moved ? "moved" : "linked"} ${SEED_PROVIDER_WALLET.ref} — ${SEED_PROVIDER_WALLET.note}`
+  );
+  return { linked: 1, kept: 0, moved, skipped: false };
 }
 
 async function seedStrategy(
@@ -618,13 +679,17 @@ async function main(): Promise<void> {
     summarize();
     console.log(`  catalogue now holds ${total} ${SEED_ENVIRONMENT} strategies in total.`);
 
-    console.log("\nLinking shared Ground sandbox programs (live provider state):");
+    console.log("\nLinking the shared Ground sandbox program (live provider state):");
     const wallets = await seedProviderWallets(repo, db);
-    if (wallets.linked === 0 && wallets.kept === 0) {
+    if (wallets.skipped) {
       console.log("  no local organization found — run db:seed:local first, or sign in once.");
-    }
-    if (wallets.unused > 0) {
-      console.log(`  ${wallets.unused} spare sandbox wallet(s) unused (one program per org).`);
+    } else {
+      console.log("  one organization, one program — other local orgs stay unlinked by design.");
+      if (wallets.moved) {
+        console.log(
+          "  (moved the seeded link off a previous org to follow the one you sign into.)"
+        );
+      }
     }
   } finally {
     await closeDatabasePools().catch(() => {});
