@@ -39,11 +39,6 @@ function readMuralData(transfer: PaymentTransferRow): Record<string, unknown> {
   return mural as Record<string, unknown>;
 }
 
-function readMuralAccountId(transfer: PaymentTransferRow): string | undefined {
-  const accountId = readMuralData(transfer).accountId;
-  return typeof accountId === "string" && accountId.length > 0 ? accountId : undefined;
-}
-
 function readMuralWebhookPublicKey(
   env: Record<string, string | undefined>,
   environment: SdpEnvironment
@@ -63,26 +58,51 @@ function readMuralWebhookPublicKey(
 }
 
 async function findMuralOnrampTransfer(
+  c: AppContext,
   payments: PaymentsRepository,
   counterparty: CounterpartyRow,
   accountId: string,
   statuses: PaymentTransferStatus[]
 ): Promise<PaymentTransferRow | undefined> {
-  const { rows } = await payments.listTransfers({
-    organizationId: counterparty.organization_id,
-    projectId: counterparty.project_id,
-    counterpartyId: counterparty.id,
-    types: ["onramp"],
-    statuses,
-    provider: "mural",
-    limit: 100,
-    offset: 0,
-  });
-  const matches = rows.filter((row) => readMuralAccountId(row) === accountId);
+  const matches = await getDb(c.env)
+    .prepare(
+      `SELECT id
+       FROM payment_transfers
+       WHERE organization_id = ?
+         AND project_id IS NOT DISTINCT FROM ?
+         AND counterparty_id = ?
+         AND provider = 'mural'
+         AND type = 'onramp'
+         AND status = ANY(?)
+         AND provider_data->'mural'->>'accountId' = ?
+       ORDER BY id
+       LIMIT 2`
+    )
+    .bind(
+      counterparty.organization_id,
+      counterparty.project_id,
+      counterparty.id,
+      statuses,
+      accountId
+    )
+    .all<{ id: string }>();
   // Mural's account_credited event has no quote/transfer reference. Refuse to
   // guess when multiple live quotes share an account; a single signed event
   // must never settle more than one transfer through replay or ordering.
-  return matches.length === 1 && rows.length < 100 ? matches[0] : undefined;
+  if (matches.results.length !== 1) {
+    return undefined;
+  }
+  const match = matches.results[0];
+  if (!match) {
+    return undefined;
+  }
+  return (
+    (await payments.getTransferById({
+      transferId: match.id,
+      organizationId: counterparty.organization_id,
+      projectId: counterparty.project_id,
+    })) ?? undefined
+  );
 }
 
 async function handleAccountCredited(
@@ -118,7 +138,7 @@ async function handleAccountCredited(
   if (replay) {
     return;
   }
-  const transfer = await findMuralOnrampTransfer(payments, counterparty, event.accountId, [
+  const transfer = await findMuralOnrampTransfer(c, payments, counterparty, event.accountId, [
     "awaiting_payment",
   ]);
   if (!transfer) {

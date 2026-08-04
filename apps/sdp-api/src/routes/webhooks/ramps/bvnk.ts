@@ -1,4 +1,3 @@
-import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import { readRecord, readString } from "@sdp/payments/json";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
@@ -205,33 +204,50 @@ async function handleProviderOnrampSettlementWebhook(
   }
   const paymentAmount = event.amount;
   const payments = createSystemPaymentsRepository(c.env);
-  const { rows } = await payments.listTransfers({
-    organizationId: counterparty.organization_id,
-    projectId: counterparty.project_id,
-    counterpartyId: counterparty.id,
-    provider: "bvnk",
-    types: ["onramp"],
-    statuses: ["pending", "awaiting_payment", "settling"],
-    limit: 100,
-    offset: 0,
-  });
-  const matches = rows.filter((transfer) => {
-    const bvnk = readRecord(transfer.provider_data.bvnk);
-    return (
-      readString(bvnk?.fundingWalletId) === event.walletId &&
-      transfer.fiat_amount !== null &&
-      compareDecimalAmounts(transfer.fiat_amount, paymentAmount) === 0
-    );
-  });
+  const matches = await getDb(c.env)
+    .prepare(
+      `SELECT id
+       FROM payment_transfers
+       WHERE organization_id = ?
+         AND project_id IS NOT DISTINCT FROM ?
+         AND counterparty_id = ?
+         AND provider = 'bvnk'
+         AND type = 'onramp'
+         AND status IN ('pending', 'awaiting_payment', 'settling')
+         AND provider_data->'bvnk'->>'fundingWalletId' = ?
+         AND fiat_amount IS NOT NULL
+         AND fiat_amount::numeric = ?::numeric
+       ORDER BY id
+       LIMIT 2`
+    )
+    .bind(
+      counterparty.organization_id,
+      counterparty.project_id,
+      counterparty.id,
+      event.walletId,
+      paymentAmount
+    )
+    .all<{ id: string }>();
   // BVNK pay-in events do not carry the SDP quote id. Only a unique active
   // wallet+amount match is safe; choosing the newest row can settle the wrong quote.
-  if (matches.length !== 1) {
+  if (matches.results.length !== 1) {
     getLogger().warn(
-      `[bvnk webhook] refusing ambiguous pay-in settlement customer=${event.customerReference} wallet=${event.walletId} matches=${matches.length}`
+      `[bvnk webhook] refusing ambiguous pay-in settlement customer=${event.customerReference} wallet=${event.walletId} matches=${matches.results.length}`
     );
     return;
   }
-  const transfer = matches[0];
+  const match = matches.results[0];
+  if (!match) {
+    return;
+  }
+  const transfer = await payments.getTransferById({
+    transferId: match.id,
+    organizationId: counterparty.organization_id,
+    projectId: counterparty.project_id,
+  });
+  if (!transfer) {
+    return;
+  }
   await payments.updateTransferStatusGuarded({
     transferId: transfer.id,
     organizationId: transfer.organization_id,

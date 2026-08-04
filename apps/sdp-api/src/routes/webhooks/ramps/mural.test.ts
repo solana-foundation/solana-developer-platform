@@ -235,6 +235,46 @@ describe("MuralWebhookProcessor.process", () => {
     expect(await transferStatus("xfr_mural_ambiguous_b")).toBe("awaiting_payment");
   });
 
+  it("finds an exact account match beyond one hundred newer candidates", async () => {
+    await seedTransfer("xfr_mural_complete_set_match");
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_transfers
+         SET created_at = '2026-08-03T00:00:00.000Z'
+         WHERE id = 'xfr_mural_complete_set_match'`
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, counterparty_id,
+           destination_address, token, type, direction, status, provider,
+           provider_reference, delivery_mode, fiat_currency, fiat_amount,
+           provider_data, created_at, updated_at
+         )
+         SELECT
+           'xfr_mural_decoy_' || candidate,
+           ?, ?, ?, ?, 'destination', 'USDC', 'onramp', 'inbound',
+           'awaiting_payment', 'mural', 'quote_mural_decoy_' || candidate,
+           'manual_instructions', 'USD', '100',
+           jsonb_build_object('mural', jsonb_build_object('accountId', 'decoy_' || candidate)),
+           '2026-08-04T00:00:00.000Z', '2026-08-04T00:00:00.000Z'
+         FROM generate_series(1, 100) AS candidate`
+      )
+      .bind(organizationId, projectId, "wallet_mural_webhook_test", counterpartyId)
+      .run();
+
+    await processor.process(appContext, "sandbox", {
+      kind: "account_credited",
+      organizationId: muralOrganizationId,
+      accountId,
+      tokenAmount: 99,
+      deliveryId: "delivery_mural_complete_set_match",
+    });
+
+    expect(await transferStatus("xfr_mural_complete_set_match")).toBe("completed");
+  });
+
   it("refuses an organization reference associated with multiple tenants", async () => {
     await getDb(env)
       .prepare(
