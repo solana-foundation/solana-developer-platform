@@ -9,8 +9,14 @@ import { Button } from "@/components/ui/button";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { fundableStrategies } from "./deposit/earn-deposit-model";
 import { formatApy, formatUsd } from "./earn-format";
-import { type EarnProgram, useEarnProgram, useEarnStrategies } from "./earn-program-data";
+import {
+  EARN_PORTFOLIO_PROVIDER,
+  type EarnProgram,
+  useEarnProgram,
+  useEarnStrategies,
+} from "./earn-program-data";
 import {
   settlementDays,
   strategyApy,
@@ -280,7 +286,14 @@ function StartSection() {
     return null;
   }
 
-  const fundable = (strategies ?? []).filter((strategy) => strategy.status === "active");
+  // Exactly what the deposit flow will offer: the pinned provider's active rows
+  // that map to a fundable stablecoin lane. Counting anything else makes the
+  // hero promise options the flow then filters away.
+  const fundable = fundableStrategies(
+    (strategies ?? []).filter(
+      (strategy) => strategy.provider === EARN_PORTFOLIO_PROVIDER && strategy.status === "active"
+    )
+  );
   const apys = fundable
     .map((strategy) => strategyApy(strategy))
     .filter((apy): apy is number => apy !== undefined);

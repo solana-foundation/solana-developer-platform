@@ -34,6 +34,9 @@ const data = vi.hoisted(() => ({
 vi.mock("./earn-program-data", () => ({
   useEarnProgram: () => data.program,
   useEarnStrategies: () => data.strategies,
+  // The workspace also reads the provider pin, so the hero counts exactly what
+  // the deposit flow will offer rather than every synced row.
+  EARN_PORTFOLIO_PROVIDER: "ground",
 }));
 
 import { EarnWorkspace } from "./earn-workspace";

@@ -13,7 +13,7 @@ import {
   useLiquidityLabel,
 } from "../earn-program-presentation";
 import { StepNote, StepNotice, StepSection, SummaryRow } from "./earn-deposit-chrome";
-import { shortenAddress } from "./earn-funding-wallets";
+import { shortenAddress, walletDisplayName } from "./earn-funding-wallets";
 
 export function ReviewStep({
   onEditStrategy,
@@ -39,7 +39,7 @@ export function ReviewStep({
   const poolUsd = strategyPoolUsd(strategy);
   const sourceLabel = strategySourceLabel(strategy);
   const curatorLabel = strategyCuratorLabel(strategy);
-  const walletLabel = wallet?.label?.trim() || t("DashboardEarn.deposit.walletUnnamed");
+  const walletLabel = walletDisplayName(wallet, t("DashboardEarn.deposit.walletUnnamed"));
 
   return (
     <div className="space-y-4">

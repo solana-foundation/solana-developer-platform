@@ -19,15 +19,12 @@ import {
   EARN_CONNECT_WALLET_HREF,
   matchesWalletQuery,
   shortenAddress,
+  walletDisplayName,
   walletStablecoinHoldings,
 } from "./earn-funding-wallets";
 
 /** Above this many wallets a search field is worth the extra chrome. */
 const SEARCH_THRESHOLD = 6;
-
-function walletName(wallet: CustodyWalletSummary, fallback: string): string {
-  return wallet.label?.trim() || fallback;
-}
 
 /**
  * One funding-wallet row. Per SDP wallet-card grammar the user-set name is the
@@ -62,7 +59,7 @@ function WalletRow({
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-base font-medium tracking-tight text-primary" id={nameId}>
-              {walletName(wallet, t("DashboardEarn.deposit.walletUnnamed"))}
+              {walletDisplayName(wallet, t("DashboardEarn.deposit.walletUnnamed"))}
             </span>
             {/* Not a Badge: Badge is status-only in this design system, and
                 "default wallet" is a label. */}
@@ -229,7 +226,7 @@ export function WalletStep({
       <SelectionAnnouncement>
         {selectedWallet
           ? t("DashboardEarn.deposit.selectedWalletAnnouncement", {
-              wallet: walletName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed")),
+              wallet: walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed")),
             })
           : ""}
       </SelectionAnnouncement>

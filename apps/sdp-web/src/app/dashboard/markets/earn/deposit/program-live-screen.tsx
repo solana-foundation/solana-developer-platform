@@ -12,7 +12,7 @@ import { useCopy } from "@/lib/use-copy";
 import { formatApy, formatUsd } from "../earn-format";
 import { useEarnProgram, useEarnProgramDeposits } from "../earn-program-data";
 import { strategyToken, useLiquidityLabel } from "../earn-program-presentation";
-import { StepNotice, SummaryRow } from "./earn-deposit-chrome";
+import { SKELETON_ROW_IDS, StepNotice, StepSection, SummaryRow } from "./earn-deposit-chrome";
 import { OutcomeFrame } from "./earn-deposit-outcome";
 import { shortenAddress } from "./earn-funding-wallets";
 
@@ -34,8 +34,6 @@ const DEPOSIT_STATUS_BADGES: Record<
   completed: { variant: "success", key: "DashboardEarn.deposit.depositStatusCompleted" },
   failed: { variant: "danger", key: "DashboardEarn.deposit.depositStatusFailed" },
 };
-
-const SKELETON_ROW_IDS = ["one", "two", "three"];
 
 function DepositAddressCard({ address, token }: { address: string; token: string }) {
   const t = useTranslations();
@@ -229,13 +227,8 @@ export function ProgramLiveScreen({
           {address ? <RecentDepositsCard /> : null}
         </div>
 
-        <aside className="h-fit overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
-          <div className="border-b border-border-subtle bg-fill-subtle px-4 py-3">
-            <h3 className="text-sm font-medium text-primary">
-              {t("DashboardEarn.deposit.liveSummaryTitle")}
-            </h3>
-          </div>
-          <div className="px-4 py-2">
+        <aside className="h-fit">
+          <StepSection title={t("DashboardEarn.deposit.liveSummaryTitle")}>
             <SummaryRow label={t("DashboardEarn.deposit.liveStrategy")} value={strategy.name} />
             <SummaryRow
               label={t("DashboardEarn.deposit.reviewAccess")}
@@ -263,7 +256,7 @@ export function ProgramLiveScreen({
                   : formatApy(strategy.currentApy)
               }
             />
-          </div>
+          </StepSection>
         </aside>
       </div>
     </OutcomeFrame>

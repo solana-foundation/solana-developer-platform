@@ -250,11 +250,17 @@ export const upsertEarnProgram = async (c: AppContext) => {
     // after the provider call so a failed strategy change leaves the row as it
     // was, and only when it actually differs.
     if (body.fundingWalletId !== undefined && body.fundingWalletId !== row.funding_wallet_id) {
-      row =
-        (await repo.setProviderWalletFundingWallet({
-          id: row.id,
-          fundingWalletId: body.fundingWalletId ?? null,
-        })) ?? row;
+      const updated = await repo.setProviderWalletFundingWallet({
+        id: row.id,
+        fundingWalletId: body.fundingWalletId ?? null,
+      });
+      // No row back means the UPDATE matched nothing. Falling through would
+      // answer 200 with the OLD funding wallet, i.e. report a write that did
+      // not happen.
+      if (!updated) {
+        throw internalError("Failed to persist the earn program funding wallet");
+      }
+      row = updated;
     }
   } else {
     if (!auth.projectId) {

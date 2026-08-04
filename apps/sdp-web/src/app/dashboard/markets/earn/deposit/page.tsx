@@ -53,7 +53,6 @@ export default async function EarnDepositPage({ searchParams }: EarnDepositPageP
 
   const resolved = searchParams ? await searchParams : undefined;
   const initialStrategyId = firstParam(resolved, "strategy");
-  const initialWalletId = firstParam(resolved, "from");
 
   let apiKeys: EarnApiKeyView[] = [];
   let fireblocksEnabled = false;
@@ -93,7 +92,6 @@ export default async function EarnDepositPage({ searchParams }: EarnDepositPageP
       apiKeys={apiKeys}
       fireblocksEnabled={fireblocksEnabled}
       initialStrategyId={initialStrategyId}
-      initialWalletId={initialWalletId}
     />
   );
 }

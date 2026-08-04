@@ -11,7 +11,8 @@ import { cn } from "@/lib/utils";
  * expressed by a border plus a single check mark rather than colour or shadow.
  */
 
-const SKELETON_ROW_IDS = ["one", "two", "three"];
+/** Stable keys for placeholder rows; shared so each surface does not re-declare them. */
+export const SKELETON_ROW_IDS = ["one", "two", "three"];
 
 /** Selection affordance shared by every choosable row and card in the flow. */
 export function SelectionMark({ selected }: { selected: boolean }) {
@@ -111,18 +112,6 @@ export function SummaryRow({ label, value }: { label: ReactNode; value: ReactNod
       <span className="min-w-0 text-secondary">{label}</span>
       <span className="shrink-0 text-right whitespace-nowrap text-primary">{value}</span>
     </div>
-  );
-}
-
-/** A compact fact tile used inside strategy and profile cards. */
-export function FactTile({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <span className="min-w-0 rounded-xl bg-fill-subtle px-3 py-2.5">
-      <span className="block text-[11px] font-medium tracking-[0.04em] text-tertiary uppercase">
-        {label}
-      </span>
-      <span className="mt-1 block text-[13px] leading-5 font-medium text-primary">{value}</span>
-    </span>
   );
 }
 

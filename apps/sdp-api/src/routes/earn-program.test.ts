@@ -69,6 +69,7 @@ async function seedCustodyWallet(params: {
   projectId: string | null;
   configId: string;
   walletId: string;
+  walletStatus?: "active" | "inactive";
 }): Promise<void> {
   await seedTestCustodySetup(
     env,
@@ -91,7 +92,7 @@ async function seedCustodyWallet(params: {
       publicKey: SOLANA_DESTINATION,
       label: "Treasury Ops",
       purpose: null,
-      status: "active",
+      status: params.walletStatus ?? "active",
       createdAt: "2026-08-03T00:00:00.000Z",
     }
   );
@@ -467,6 +468,74 @@ describe("Earn program — PUT create-or-update", () => {
     expect(createWallet).not.toHaveBeenCalled();
   });
 
+  it("refuses a foreign funding wallet on the UPDATE branch too, before touching the provider", async () => {
+    // The create branch has its own refusal test; this pins the branch an
+    // existing program takes, where the guard is just as load-bearing.
+    await seedAuth();
+    await seedGroundStrategy();
+    await seedProgramWallet();
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug, "enterprise", "active")
+      .run();
+    await seedCustodyWallet({
+      organizationId: OTHER_ORG.id,
+      projectId: null,
+      configId: OTHER_ORG_WALLET.configId,
+      walletId: OTHER_ORG_WALLET.id,
+    });
+    const updateStrategy = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy");
+
+    const res = await requestEarn("PUT", "/v1/earn/program", {
+      provider: "ground",
+      allocations: VALID_ALLOCATIONS,
+      fundingWalletId: OTHER_ORG_WALLET.id,
+    });
+
+    expect(res.status).toBe(400);
+    expect(updateStrategy).not.toHaveBeenCalled();
+  });
+
+  it("refuses a deactivated wallet of its own organization", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    await seedCustodyWallet({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      configId: "ccfg_earn_inactive",
+      walletId: "cwlt_earn_inactive",
+      walletStatus: "inactive",
+    });
+    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+
+    const res = await requestEarn("PUT", "/v1/earn/program", {
+      provider: "ground",
+      allocations: VALID_ALLOCATIONS,
+      fundingWalletId: "cwlt_earn_inactive",
+    });
+
+    expect(res.status).toBe(400);
+    expect(createWallet).not.toHaveBeenCalled();
+  });
+
+  it("rejects a whitespace-only or over-length fundingWalletId", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+
+    for (const fundingWalletId of ["   ", "c".repeat(121)]) {
+      const res = await requestEarn("PUT", "/v1/earn/program", {
+        provider: "ground",
+        allocations: VALID_ALLOCATIONS,
+        fundingWalletId,
+      });
+      // Trim happens in the schema, so spaces collapse to "" and fail min(1)
+      // rather than reaching the ownership check as a truthy id.
+      expect(res.status).toBe(400);
+    }
+    expect(createWallet).not.toHaveBeenCalled();
+  });
+
   it("rejects a requestId that is not a UUIDv4", async () => {
     await seedAuth();
     await seedGroundStrategy();
@@ -570,6 +639,27 @@ describe("Earn program — live reads", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("NOT_FOUND");
+  });
+
+  it("returns the recorded funding wallet so a reload can restore the selection", async () => {
+    await seedAuth();
+    await seedCustodyWallet({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      configId: FUNDING_WALLET.configId,
+      walletId: FUNDING_WALLET.id,
+    });
+    const row = await seedProgramWallet();
+    await createPostgresEarnRepository(getDb(env)).setProviderWalletFundingWallet({
+      id: row.id,
+      fundingWalletId: FUNDING_WALLET.id,
+    });
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWallet").mockResolvedValue(WALLET_SNAPSHOT);
+
+    const res = await requestEarn("GET", "/v1/earn/program?provider=ground");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { program: { fundingWalletId: string | null } } };
+    expect(body.data.program.fundingWalletId).toBe(FUNDING_WALLET.id);
   });
 
   it("serves the live provider snapshot for an existing program", async () => {

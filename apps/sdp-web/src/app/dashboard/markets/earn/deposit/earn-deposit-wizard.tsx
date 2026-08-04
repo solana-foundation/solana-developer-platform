@@ -26,7 +26,7 @@ import {
   singleStrategyAllocation,
   visibleStrategies,
 } from "./earn-deposit-model";
-import { useEarnFundingWallets } from "./earn-funding-wallets";
+import { useEarnFundingWallets, walletDisplayName } from "./earn-funding-wallets";
 import { type EarnApiKeyView, IntegrationScreen } from "./integration-screen";
 import { ProfileStep } from "./profile-step";
 import { ProgramLiveScreen } from "./program-live-screen";
@@ -65,12 +65,15 @@ const STEP_META: Record<
 
 const EARN_DASHBOARD_PATH = "/dashboard/markets/earn";
 
-/** Copy naming what the step still needs, so a disabled button is never mute. */
-const STEP_PENDING_LABEL: Record<DepositStep, MessageKey> = {
+/**
+ * Copy naming what a step still needs, so a disabled button is never mute.
+ * Review is absent on purpose: its label is always the confirm verb, chosen by
+ * whether a program already exists rather than by readiness.
+ */
+const STEP_PENDING_LABEL: Record<Exclude<DepositStep, "review">, MessageKey> = {
   wallet: "DashboardEarn.deposit.selectWallet",
   profile: "DashboardEarn.deposit.selectProfile",
   strategy: "DashboardEarn.deposit.selectStrategy",
-  review: "DashboardEarn.deposit.confirmCreate",
 };
 
 /**
@@ -83,7 +86,7 @@ function DepositOutcome({
   apiKeys,
   fundingWalletLabel,
   onDone,
-  onSkipIntegration,
+  onIntegrationDone,
   outcome,
   strategy,
 }: {
@@ -91,7 +94,7 @@ function DepositOutcome({
   apiKeys: readonly EarnApiKeyView[];
   fundingWalletLabel: string | undefined;
   onDone: () => void;
-  onSkipIntegration: () => void;
+  onIntegrationDone: () => void;
   outcome: Outcome;
   strategy: EarnStrategy;
 }) {
@@ -101,8 +104,7 @@ function DepositOutcome({
         allocations={outcome.allocations}
         apiBaseUrl={apiBaseUrl}
         apiKeys={apiKeys}
-        onContinue={onSkipIntegration}
-        onSkip={onSkipIntegration}
+        onDone={onIntegrationDone}
         provider={EARN_PORTFOLIO_PROVIDER}
         withdrawalToken={strategyToken(strategy) ?? "usdc"}
       />
@@ -157,9 +159,10 @@ export interface EarnDepositWizardProps {
   apiBaseUrl: string | null;
   /** Whether the org may actually provision a Fireblocks wallet today. */
   fireblocksEnabled: boolean;
-  /** Preselects a funding wallet (`?from=`), e.g. returning from wallet setup. */
-  initialWalletId?: string;
-  /** Preselects a strategy (`?strategy=`) from an Earn dashboard deep link. */
+  /**
+   * Preselects a strategy from `?strategy=`, so a link can drop the reader
+   * straight onto one. Kept deliberately: it is the flow's only deep-link entry.
+   */
   initialStrategyId?: string;
 }
 
@@ -167,7 +170,6 @@ export function EarnDepositWizard({
   apiBaseUrl,
   apiKeys,
   fireblocksEnabled,
-  initialWalletId,
   initialStrategyId,
 }: EarnDepositWizardProps) {
   const t = useTranslations();
@@ -193,7 +195,12 @@ export function EarnDepositWizard({
   );
 
   const [step, setStep] = useState<DepositStep>("wallet");
-  const [walletId, setWalletId] = useState<string | null>(initialWalletId ?? null);
+  /**
+   * `null` until the reader picks, or until the program's recorded funding
+   * wallet loads — switching strategy on an existing program should not make
+   * them re-choose a wallet they already chose.
+   */
+  const [walletOverride, setWalletOverride] = useState<string | null>(null);
   const [profile, setProfile] = useState<EarnDepositProfile | null>(null);
   const [filters, setFilters] = useState<EarnStrategyFilters | null>(null);
   const [strategyId, setStrategyId] = useState<string | null>(initialStrategyId ?? null);
@@ -209,6 +216,9 @@ export function EarnDepositWizard({
     [activeFilters, liveStrategies]
   );
 
+  const persistedWalletId =
+    programState?.kind === "active" ? programState.program.fundingWalletId : null;
+  const walletId = walletOverride ?? persistedWalletId;
   const selectedWallet = (wallets ?? []).find((wallet) => wallet.id === walletId);
   const selectedStrategy: EarnStrategy | undefined = liveStrategies.find(
     (strategy) => strategy.id === strategyId
@@ -329,11 +339,11 @@ export function EarnDepositWizard({
         apiKeys={apiKeys}
         fundingWalletLabel={
           selectedWallet
-            ? selectedWallet.label?.trim() || t("DashboardEarn.deposit.walletUnnamed")
+            ? walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))
             : undefined
         }
         onDone={() => router.push(EARN_DASHBOARD_PATH)}
-        onSkipIntegration={() => setOutcome({ screen: "live", created: outcome.created })}
+        onIntegrationDone={() => setOutcome({ screen: "live", created: outcome.created })}
         outcome={outcome}
         strategy={selectedStrategy}
       />
@@ -390,10 +400,9 @@ export function EarnDepositWizard({
           <SummaryRow
             label={t("DashboardEarn.deposit.reviewWallet")}
             value={
-              selectedWallet?.label?.trim() ??
-              (selectedWallet
-                ? t("DashboardEarn.deposit.walletUnnamed")
-                : t("DashboardEarn.deposit.notSelected"))
+              selectedWallet
+                ? walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))
+                : t("DashboardEarn.deposit.notSelected")
             }
           />
           <SummaryRow
@@ -427,7 +436,7 @@ export function EarnDepositWizard({
             fireblocksEnabled={fireblocksEnabled}
             hasError={Boolean(walletsError)}
             isLoading={walletsLoading}
-            onSelect={setWalletId}
+            onSelect={setWalletOverride}
             selectedWalletId={walletId}
             wallets={wallets ?? []}
           />

@@ -8,7 +8,7 @@ import { CodeBlock } from "@/components/ui/code-block";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { type EarnSnippet, earnApiSnippets } from "./earn-api-snippets";
-import { StepNote, SummaryRow } from "./earn-deposit-chrome";
+import { StepNote, StepSection, SummaryRow } from "./earn-deposit-chrome";
 import { OutcomeFrame } from "./earn-deposit-outcome";
 
 /** Minimal view of an active API key — never the secret, only its prefix. */
@@ -36,16 +36,16 @@ export function IntegrationScreen({
   allocations,
   apiBaseUrl,
   apiKeys,
-  onContinue,
-  onSkip,
+  onDone,
   provider,
   withdrawalToken,
 }: {
   allocations: EarnPortfolioAllocationInput;
   apiBaseUrl: string;
   apiKeys: readonly EarnApiKeyView[];
-  onContinue: () => void;
-  onSkip: () => void;
+  /** Both footer actions land here — this screen is informational, so skipping
+   *  and continuing are the same transition. */
+  onDone: () => void;
   provider: string;
   withdrawalToken: string;
 }) {
@@ -61,10 +61,10 @@ export function IntegrationScreen({
       eyebrow={t("DashboardEarn.deposit.integrationEyebrow")}
       footer={
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between [&>button]:w-full sm:[&>button]:w-auto">
-          <Button onClick={onSkip} type="button" variant="secondary">
+          <Button onClick={onDone} type="button" variant="secondary">
             {t("DashboardEarn.deposit.integrationSkip")}
           </Button>
-          <Button onClick={onContinue} type="button">
+          <Button onClick={onDone} type="button">
             {t("DashboardEarn.deposit.integrationContinue")}
           </Button>
         </div>
@@ -72,23 +72,16 @@ export function IntegrationScreen({
       title={t("DashboardEarn.deposit.integrationTitle")}
     >
       <div className="space-y-5">
-        <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
-          <div className="border-b border-border-subtle bg-fill-subtle px-4 py-3">
-            <h3 className="text-sm font-medium text-primary">
-              {t("DashboardEarn.deposit.integrationKeys")}
-            </h3>
-          </div>
-          <div className="px-4 py-2">
-            <SummaryRow label={t("DashboardEarn.deposit.integrationBaseUrl")} value={apiBaseUrl} />
-            {apiKeys.map((apiKey) => (
-              <SummaryRow
-                key={apiKey.id}
-                label={apiKey.name}
-                value={`${apiKey.keyPrefix}… · ${apiKey.environment}`}
-              />
-            ))}
-          </div>
-        </section>
+        <StepSection title={t("DashboardEarn.deposit.integrationKeys")}>
+          <SummaryRow label={t("DashboardEarn.deposit.integrationBaseUrl")} value={apiBaseUrl} />
+          {apiKeys.map((apiKey) => (
+            <SummaryRow
+              key={apiKey.id}
+              label={apiKey.name}
+              value={`${apiKey.keyPrefix}… · ${apiKey.environment}`}
+            />
+          ))}
+        </StepSection>
 
         <StepNote
           body={t("DashboardEarn.deposit.integrationAuthNote")}

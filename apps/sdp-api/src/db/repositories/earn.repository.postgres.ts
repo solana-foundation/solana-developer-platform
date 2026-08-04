@@ -490,12 +490,21 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // config it belongs to. Deliberately ignores project scope: the earn
       // program is org+environment scoped, so any of the org's wallets may
       // fund it.
+      //
+      // Both status checks are required, not defensive: custody treats a wallet
+      // as real only when the wallet AND its config are active (the same pair
+      // custody's own getWallets uses, and what /v1/wallets lists). Without them
+      // a deactivated wallet — which cannot originate a transfer — could be
+      // recorded as the thing that funds the program.
       const row = await db
         .prepare(
           `SELECT cw.id
              FROM custody_wallets cw
              JOIN custody_configs cc ON cc.id = cw.custody_config_id
-            WHERE cw.id = ? AND cc.organization_id = ?`
+            WHERE cw.id = ?
+              AND cc.organization_id = ?
+              AND cw.status = 'active'
+              AND cc.status = 'active'`
         )
         .bind(params.custodyWalletId, params.organizationId)
         .first<{ id: string }>();

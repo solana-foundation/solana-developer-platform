@@ -1,33 +1,29 @@
 "use client";
 
-import type {
-  CustodyWalletSummary,
-  CustodyWalletTokenBalance,
-  EarnPortfolioToken,
-} from "@sdp/types";
+import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types";
 import useSWR from "swr";
 import { portfolioTokenForMint } from "../earn-program-presentation";
 
 /**
- * The organization's SDP wallets, as deposit-flow funding sources.
+ * Funding wallets for the deposit flow: the org's own SDP wallets, plus the
+ * display helpers every surface that names one needs.
  *
  * Earn's program wallet is provisioned and custodied by the provider (Ground),
- * so an SDP wallet is never the program itself — it is where the stablecoins
- * are sent FROM, and the address a withdrawal naturally returns to. This reads
- * the same custody list the Wallets module renders (`/v1/wallets`, proxied by
- * the dashboard BFF) so the two surfaces can never disagree about what exists.
- *
- * `PUT /v1/earn/program` has no source-wallet field, so the chosen wallet is a
- * flow-level decision that shapes the funding instructions — it is deliberately
- * carried in the URL rather than pretended to be server state.
+ * so an SDP wallet is never the program itself — it is where the stablecoins are
+ * sent FROM, and the address a withdrawal returns to. The choice is persisted:
+ * `PUT /v1/earn/program` takes `fundingWalletId` (`custody_wallets.id`) and
+ * `GET /v1/earn/program` returns it, so a reload can restore the selection. What
+ * still does NOT exist is any API that MOVES funds from an SDP wallet into the
+ * program — funding remains a transfer the operator makes to the provider's
+ * Solana address, so no surface may imply SDP performs it.
  */
 
 /**
  * The one custody provider the deposit flow offers to connect. Note what this
- * is NOT: SDP's Fireblocks setup uses the platform's own Fireblocks
- * credentials and provisions a vault account for the scope — pasting an
- * organization's own API keys or adopting an existing vault account is not a
- * supported operation anywhere in the API.
+ * is NOT: SDP's Fireblocks setup uses the platform's own Fireblocks credentials
+ * and provisions a vault account for the scope — pasting an organization's own
+ * API keys or adopting an existing vault account is not a supported operation
+ * anywhere in the API.
  */
 export const EARN_CONNECT_WALLET_PROVIDER = "fireblocks" as const;
 
@@ -59,15 +55,18 @@ export function useEarnFundingWallets() {
   return { wallets: data, error, isLoading };
 }
 
+// --- Display helpers -------------------------------------------------------
+
 /**
- * The wallet's balance in one Earn stablecoin, matched by mint rather than by
- * the provider's token label so it lines up with the catalogue's token groups.
+ * What to call a wallet on screen. THE single source for this: a wallet label is
+ * user-set and nullable, and `||` (not `??`) is required so a label of spaces
+ * falls back instead of rendering an empty name.
  */
-export function walletStablecoinBalance(
-  wallet: CustodyWalletSummary,
-  token: EarnPortfolioToken
-): CustodyWalletTokenBalance | undefined {
-  return wallet.balances?.find((balance) => portfolioTokenForMint(balance.mint) === token);
+export function walletDisplayName(
+  wallet: CustodyWalletSummary | undefined,
+  fallback: string
+): string {
+  return wallet?.label?.trim() || fallback;
 }
 
 /**
@@ -87,7 +86,12 @@ export function walletStablecoinHoldings(
   return [...holdings].sort((left, right) => Number(right.uiAmount) - Number(left.uiAmount));
 }
 
-/** Shortened address for dense rows; never monospaced (SDP typography rule). */
+/**
+ * Shortened address for dense rows; never monospaced (SDP typography rule).
+ * Module-local on purpose: payments and issuance each keep their own with
+ * different lead/tail for their own density, and importing either would couple
+ * Earn to an unrelated module's utils.
+ */
 export function shortenAddress(address: string): string {
   return address.length <= 16 ? address : `${address.slice(0, 6)}…${address.slice(-6)}`;
 }
