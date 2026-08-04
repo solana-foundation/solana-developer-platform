@@ -1,157 +1,192 @@
 "use client";
 
-import { earnCuratorLabel } from "@sdp/types";
+import {
+  type EarnPortfolioPosition,
+  type EarnPortfolioWalletStatus,
+  type EarnStrategy,
+  earnCuratorLabel,
+} from "@sdp/types";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useLocale, useTranslations } from "@/i18n/provider";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import type { MessageKey } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
+import { formatApy, formatUsd, formatUsdCompact } from "./earn-format";
+import { type EarnProgram, useEarnProgram, useEarnStrategies } from "./earn-program-data";
 import {
-  EARN_RISK_TIERS,
-  formatApy,
-  formatTokenAmount,
-  formatUsd,
-  formatUsdCompact,
-  getMockStrategy,
-  type MockEarnStrategy,
-  projectYearlyYield,
-  tokenSymbol,
-} from "./earn-mock-data";
-import {
-  clearMockRedemption,
-  type MockEarnPosition,
-  useMockEarnPositions,
-  useMockEarnRedemptions,
-} from "./earn-mock-positions";
-import {
-  CURATOR_PROGRAMS,
+  buildCuratorPrograms,
   curatorApyRange,
   curatorProfileKey,
+  EARN_RISK_TIERS,
   programAssets,
+  strategyCurator,
+  strategyRiskTier,
+  strategyTvlUsd,
+  UNKNOWN_CURATOR_ID,
   useLiquidityLabel,
 } from "./earn-program-presentation";
-import { EarnCuratorWithdrawModal, EarnWithdrawModal } from "./earn-withdraw-modal";
+import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
-const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
+/** Group id for cash / in-transit slices that belong to no curator. */
+const CASH_GROUP_ID = "__cash";
+
+interface PositionEntry {
+  position: EarnPortfolioPosition;
+  strategy: EarnStrategy | undefined;
+}
 
 interface CuratorPositionGroup {
-  curatorId: string;
-  positions: readonly {
-    position: MockEarnPosition;
-    strategy: MockEarnStrategy | undefined;
-  }[];
-  deposited: number;
-  currentValue: number;
-  projectedYearlyYield: number;
+  id: string;
+  entries: readonly PositionEntry[];
+  valueUsd: number;
+  /** Value-weighted APY across entries with a known rate, else undefined. */
+  blendedApy: number | undefined;
 }
 
-const CURATOR_ORDER = new Map(CURATOR_PROGRAMS.map((program, index) => [program.id, index]));
-
-/** Estimated current value with simple-interest accrual since the deposit. */
-function estimatePositionValue(position: MockEarnPosition): number {
-  const strategy = getMockStrategy(position.strategyId);
-  const rate = Number(strategy?.currentApy ?? 0);
-  const elapsedYears = Math.max(0, Date.now() - Date.parse(position.createdAt)) / MS_PER_YEAR;
-  return position.amount * (1 + rate * elapsedYears);
-}
-
+/**
+ * Group live portfolio positions by curator. Yield-source slices resolve
+ * through the strategy catalogue (providerReference → riskMetadata.curator);
+ * cash and in-transit slices collect into one trailing group so the list
+ * always sums to the wallet total.
+ */
 function groupPositionsByCurator(
-  positions: readonly MockEarnPosition[]
+  positions: readonly EarnPortfolioPosition[],
+  provider: string,
+  strategies: readonly EarnStrategy[]
 ): readonly CuratorPositionGroup[] {
-  const groups = new Map<string, CuratorPositionGroup>();
-  for (const position of positions) {
-    const strategy = getMockStrategy(position.strategyId);
-    const curatorId = strategy?.curator ?? "unknown";
-    const existing = groups.get(curatorId) ?? {
-      curatorId,
-      positions: [],
-      deposited: 0,
-      currentValue: 0,
-      projectedYearlyYield: 0,
-    };
-    groups.set(curatorId, {
-      ...existing,
-      positions: [...existing.positions, { position, strategy }],
-      deposited: existing.deposited + position.amount,
-      currentValue: existing.currentValue + estimatePositionValue(position),
-      projectedYearlyYield:
-        existing.projectedYearlyYield + projectYearlyYield(position.amount, strategy?.currentApy),
-    });
-  }
-  return [...groups.values()].sort(
-    (left, right) =>
-      (CURATOR_ORDER.get(left.curatorId) ?? Number.MAX_SAFE_INTEGER) -
-      (CURATOR_ORDER.get(right.curatorId) ?? Number.MAX_SAFE_INTEGER)
+  const byReference = new Map(
+    strategies
+      .filter((strategy) => strategy.provider === provider)
+      .map((strategy) => [strategy.providerReference, strategy] as const)
   );
+
+  const accumulators = new Map<
+    string,
+    { entries: PositionEntry[]; valueUsd: number; apyValue: number; apyWeight: number }
+  >();
+  for (const position of positions) {
+    const strategy =
+      position.yieldSourceId !== undefined ? byReference.get(position.yieldSourceId) : undefined;
+    const groupId =
+      position.kind === "yield_source"
+        ? strategy
+          ? strategyCurator(strategy)
+          : UNKNOWN_CURATOR_ID
+        : CASH_GROUP_ID;
+
+    const accumulator = accumulators.get(groupId) ?? {
+      entries: [],
+      valueUsd: 0,
+      apyValue: 0,
+      apyWeight: 0,
+    };
+    const valueUsd = Number(position.valueUsd);
+    const apy = Number(strategy?.currentApy);
+    accumulator.entries.push({ position, strategy });
+    if (Number.isFinite(valueUsd)) {
+      accumulator.valueUsd += valueUsd;
+      if (Number.isFinite(apy)) {
+        accumulator.apyValue += valueUsd * apy;
+        accumulator.apyWeight += valueUsd;
+      }
+    }
+    accumulators.set(groupId, accumulator);
+  }
+
+  return [...accumulators]
+    .map(([id, { entries, valueUsd, apyValue, apyWeight }]) => ({
+      id,
+      entries,
+      valueUsd,
+      blendedApy: apyWeight > 0 ? apyValue / apyWeight : undefined,
+    }))
+    .sort((left, right) => {
+      if ((left.id === CASH_GROUP_ID) !== (right.id === CASH_GROUP_ID)) {
+        return left.id === CASH_GROUP_ID ? 1 : -1;
+      }
+      return right.valueUsd - left.valueUsd;
+    });
 }
 
-/** Shared collapsed-drawer summary styling for card-footer disclosures. */
-function DrawerSummary({ children }: { children: React.ReactNode }) {
+const WALLET_STATUS_BADGES: Partial<
+  Record<EarnPortfolioWalletStatus, { variant: "warning" | "danger"; key: MessageKey }>
+> = {
+  creating: { variant: "warning", key: "DashboardEarn.overview.walletStatusCreating" },
+  busy: { variant: "warning", key: "DashboardEarn.overview.walletStatusBusy" },
+  failed: { variant: "danger", key: "DashboardEarn.overview.walletStatusFailed" },
+};
+
+const SKELETON_ITEM_IDS = ["one", "two", "three"];
+
+function PositionsSkeleton() {
   return (
-    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-5 py-2.5 text-[13px] font-medium text-secondary transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 motion-reduce:transition-none [&::-webkit-details-marker]:hidden">
-      {children}
-      <ChevronDownIcon className="size-4 shrink-0 transition-transform duration-200 group-open/drawer:rotate-180 motion-reduce:transition-none" />
-    </summary>
+    <div className="mt-6 grid gap-3" aria-busy="true">
+      <div className="grid gap-x-8 gap-y-4 sm:grid-cols-3">
+        {SKELETON_ITEM_IDS.map((id) => (
+          <SkeletonBlock key={id} className="h-16 w-full rounded-md" />
+        ))}
+      </div>
+      <SkeletonBlock className="h-16 w-full rounded-xl" />
+    </div>
   );
 }
 
 function PositionsSection() {
   const t = useTranslations();
-  const locale = useLocale();
-  const positions = useMockEarnPositions();
   const liquidityLabel = useLiquidityLabel();
-  const [withdrawTarget, setWithdrawTarget] = useState<MockEarnPosition | null>(null);
-  const [withdrawCuratorId, setWithdrawCuratorId] = useState<string | null>(null);
-  const withdrawStrategy = withdrawTarget ? getMockStrategy(withdrawTarget.strategyId) : undefined;
+  const { state, error, isLoading, refresh } = useEarnProgram();
+  const { strategies } = useEarnStrategies();
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
 
-  const groups = useMemo(() => groupPositionsByCurator(positions), [positions]);
-  const withdrawGroup = withdrawCuratorId
-    ? groups.find((group) => group.curatorId === withdrawCuratorId)
-    : undefined;
-  const totals = useMemo(
+  const program = state?.kind === "active" ? state.program : undefined;
+  const groups = useMemo(
     () =>
-      groups.reduce(
-        (total, group) => ({
-          deposited: total.deposited + group.deposited,
-          value: total.value + group.currentValue,
-          projected: total.projected + group.projectedYearlyYield,
-        }),
-        { deposited: 0, value: 0, projected: 0 }
-      ),
-    [groups]
+      program
+        ? groupPositionsByCurator(program.wallet.positions, program.provider, strategies ?? [])
+        : [],
+    [program, strategies]
   );
 
-  const statTiles = [
-    { id: "deposited", label: t("DashboardEarn.overview.totalDeposited"), value: totals.deposited },
-    { id: "value", label: t("DashboardEarn.overview.estimatedValue"), value: totals.value },
-    {
-      id: "projected",
-      label: t("DashboardEarn.overview.projectedYearlyYield"),
-      value: totals.projected,
-    },
-  ];
+  const description = program
+    ? t("DashboardEarn.overview.positionsDescription")
+    : state?.kind === "none"
+      ? t("DashboardEarn.overview.positionsEmpty")
+      : null;
 
   return (
     <section className="rounded-xl border border-border-default bg-surface-raised p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-base font-medium tracking-tight text-primary">
-            {t("DashboardEarn.overview.positionsTitle")}
-          </h2>
-          <p className="mt-1 max-w-xl text-sm leading-6 text-secondary">
-            {positions.length === 0
-              ? t("DashboardEarn.overview.positionsEmpty")
-              : t("DashboardEarn.overview.positionsDescription")}
-          </p>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-medium tracking-tight text-primary">
+              {t("DashboardEarn.overview.positionsTitle")}
+            </h2>
+            <WalletStatusBadge program={program} />
+          </div>
+          {description ? (
+            <p className="mt-1 max-w-xl text-sm leading-6 text-secondary">{description}</p>
+          ) : null}
         </div>
         <div className="flex w-full gap-2 sm:w-auto sm:shrink-0">
-          {positions.length > 0 ? (
-            <Button asChild variant="secondary" className="flex-1 sm:flex-none">
-              <DashboardNavigationLink href="/dashboard/markets/earn/deposit?start=curator">
-                {t("DashboardEarn.overview.exploreCurators")}
-              </DashboardNavigationLink>
-            </Button>
+          {program ? (
+            <>
+              <Button
+                variant="secondary"
+                className="flex-1 sm:flex-none"
+                disabled={Number(program.wallet.balance.withdrawableUsd) <= 0}
+                onClick={() => setWithdrawOpen(true)}
+              >
+                {t("DashboardEarn.overview.withdraw")}
+              </Button>
+              <Button asChild variant="secondary" className="flex-1 sm:flex-none">
+                <DashboardNavigationLink href="/dashboard/markets/earn/deposit?start=curator">
+                  {t("DashboardEarn.overview.exploreCurators")}
+                </DashboardNavigationLink>
+              </Button>
+            </>
           ) : null}
           <Button asChild className="flex-1 sm:flex-none">
             <DashboardNavigationLink
@@ -165,10 +200,45 @@ function PositionsSection() {
         </div>
       </div>
 
-      {positions.length > 0 ? (
+      {isLoading ? <PositionsSkeleton /> : null}
+
+      {error ? (
+        <div className="mt-4 flex items-center gap-3 rounded-md border border-border-subtle bg-fill-subtle p-3">
+          <p className="flex-1 text-sm text-secondary">
+            {t("DashboardEarn.overview.programLoadError")}
+          </p>
+          <Button size="sm" variant="secondary" onClick={refresh}>
+            {t("Shared.SharedComponents.retry")}
+          </Button>
+        </div>
+      ) : null}
+
+      {state?.kind === "unconfigured" ? (
+        <p className="mt-4 rounded-md border border-border-subtle bg-fill-subtle p-3 text-sm leading-6 text-secondary">
+          {t("DashboardEarn.overview.providerNotConfigured")}
+        </p>
+      ) : null}
+
+      {program ? (
         <>
           <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-3">
-            {statTiles.map((tile) => (
+            {[
+              {
+                id: "total",
+                label: t("DashboardEarn.overview.totalBalance"),
+                value: program.wallet.balance.totalUsd,
+              },
+              {
+                id: "earned",
+                label: t("DashboardEarn.overview.totalEarned"),
+                value: program.wallet.balance.earnedUsd,
+              },
+              {
+                id: "withdrawable",
+                label: t("DashboardEarn.overview.withdrawableBalance"),
+                value: program.wallet.balance.withdrawableUsd,
+              },
+            ].map((tile) => (
               <div key={tile.id} className="min-w-0 border-t border-border-subtle pt-3">
                 <dt className="text-xs text-tertiary">{tile.label}</dt>
                 <dd className="mt-1 text-2xl font-medium tracking-tight text-primary tabular-nums">
@@ -178,201 +248,103 @@ function PositionsSection() {
             ))}
           </dl>
 
-          <ul className="mt-5 grid gap-2.5">
-            {groups.map((group) => {
-              const curatorName =
-                group.curatorId === "unknown"
-                  ? t("DashboardEarn.overview.unknownCurator")
-                  : earnCuratorLabel(group.curatorId);
-              const blendedApy =
-                group.deposited > 0 ? group.projectedYearlyYield / group.deposited : 0;
-              const canWithdraw =
-                group.curatorId !== "unknown" &&
-                group.positions.every((entry) => entry.strategy !== undefined);
-              return (
-                <li key={group.curatorId}>
+          {groups.length > 0 ? (
+            <ul className="mt-5 grid gap-2.5">
+              {groups.map((group) => (
+                <li key={group.id}>
                   <details className="sdp-collapse group/drawer overflow-hidden rounded-xl border border-border-default bg-surface-raised">
                     <summary className="flex min-h-16 cursor-pointer list-none items-center gap-4 px-5 py-3 transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 motion-reduce:transition-none [&::-webkit-details-marker]:hidden">
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-primary">{curatorName}</p>
+                        <p className="truncate text-sm font-medium text-primary">
+                          {groupTitle(group.id, t)}
+                        </p>
                         <p className="mt-0.5 text-xs text-tertiary">
                           {t("DashboardEarn.overview.holdingsCount", {
-                            count: group.positions.length,
-                          })}{" "}
-                          · {t("DashboardEarn.overview.curatorManaged")}
+                            count: group.entries.length,
+                          })}
+                          {group.id === CASH_GROUP_ID
+                            ? null
+                            : ` · ${t("DashboardEarn.overview.curatorManaged")}`}
                         </p>
                       </div>
                       <div className="hidden items-baseline gap-5 tabular-nums sm:flex">
-                        <span className="text-sm text-primary">
-                          {formatUsd(group.currentValue)}
-                        </span>
+                        <span className="text-sm text-primary">{formatUsd(group.valueUsd)}</span>
                         <span className="w-14 text-right text-sm text-secondary">
-                          {formatApy(String(blendedApy))}
+                          {group.blendedApy !== undefined
+                            ? formatApy(String(group.blendedApy))
+                            : "—"}
                         </span>
                       </div>
-                      {canWithdraw ? (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          aria-label={t("DashboardEarn.overview.withdrawFromCurator", {
-                            curator: curatorName,
-                          })}
-                          onClick={(event) => {
-                            // Keep the row's disclosure from toggling on withdraw.
-                            event.preventDefault();
-                            event.stopPropagation();
-                            setWithdrawCuratorId(group.curatorId);
-                          }}
-                        >
-                          {t("DashboardEarn.overview.withdraw")}
-                        </Button>
-                      ) : null}
                       <ChevronDownIcon className="size-4 shrink-0 text-tertiary transition-transform duration-200 group-open/drawer:rotate-180 motion-reduce:transition-none" />
                     </summary>
                     <ul className="divide-y divide-border-subtle border-t border-border-subtle">
-                      {group.positions.map(({ position, strategy }) => (
+                      {group.entries.map(({ position, strategy }) => (
                         <li
-                          key={position.id}
-                          className="grid gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
+                          key={position.yieldSourceId ?? `${position.kind}:${position.label}`}
+                          className="grid gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
                         >
                           <div className="min-w-0">
                             <p className="text-sm text-primary">
-                              {strategy?.name ?? position.strategyId}
+                              {strategy?.name ?? position.label}
                             </p>
                             <p className="mt-0.5 text-xs leading-5 text-secondary">
-                              {formatTokenAmount(position.amount, position.tokenMint)} ·{" "}
-                              {strategy ? liquidityLabel(strategy) : null} ·{" "}
-                              {t("DashboardEarn.overview.depositedOn", {
-                                date: new Date(position.createdAt).toLocaleDateString(locale, {
-                                  month: "short",
-                                  day: "numeric",
-                                }),
-                              })}
+                              {[
+                                strategy ? liquidityLabel(strategy) : null,
+                                position.token?.toUpperCase(),
+                                position.pct !== undefined
+                                  ? t("DashboardEarn.overview.portfolioShare", {
+                                      pct: position.pct.toFixed(1),
+                                    })
+                                  : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
                             </p>
                           </div>
                           <div className="sm:text-right">
                             <p className="text-sm text-primary tabular-nums">
-                              {formatUsd(estimatePositionValue(position))}
+                              {formatUsd(position.valueUsd)}
                             </p>
-                            <p className="mt-0.5 text-xs text-secondary">
-                              {formatApy(strategy?.currentApy)}{" "}
-                              {t("DashboardEarn.apyType.variable")}
-                            </p>
+                            {strategy?.currentApy ? (
+                              <p className="mt-0.5 text-xs text-secondary">
+                                {formatApy(strategy.currentApy)}{" "}
+                                {t(`DashboardEarn.apyType.${strategy.apyType}`)}
+                              </p>
+                            ) : null}
                           </div>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            className="w-full sm:w-auto"
-                            aria-label={t("DashboardEarn.overview.withdrawFromHolding", {
-                              holding: strategy?.name ?? position.strategyId,
-                            })}
-                            disabled={!strategy}
-                            onClick={() => setWithdrawTarget(position)}
-                          >
-                            {t("DashboardEarn.overview.withdraw")}
-                          </Button>
                         </li>
                       ))}
                     </ul>
                   </details>
                 </li>
-              );
-            })}
-          </ul>
+              ))}
+            </ul>
+          ) : null}
         </>
       ) : null}
 
-      {withdrawTarget && withdrawStrategy ? (
+      {withdrawOpen && program ? (
         <EarnWithdrawModal
-          position={withdrawTarget}
-          strategy={withdrawStrategy}
-          onClose={() => setWithdrawTarget(null)}
-        />
-      ) : null}
-      {withdrawGroup && withdrawGroup.curatorId !== "unknown" ? (
-        <EarnCuratorWithdrawModal
-          curatorId={withdrawGroup.curatorId}
-          curatorName={earnCuratorLabel(withdrawGroup.curatorId)}
-          onClose={() => setWithdrawCuratorId(null)}
+          balance={program.wallet.balance}
+          onClose={() => setWithdrawOpen(false)}
+          onWithdrawalCreated={refresh}
         />
       ) : null}
     </section>
   );
 }
 
-function RedemptionsSection() {
+function groupTitle(groupId: string, t: ReturnType<typeof useTranslations>): string {
+  if (groupId === CASH_GROUP_ID) return t("DashboardEarn.overview.cashGroupTitle");
+  if (groupId === UNKNOWN_CURATOR_ID) return t("DashboardEarn.overview.unknownCurator");
+  return earnCuratorLabel(groupId);
+}
+
+function WalletStatusBadge({ program }: { program: EarnProgram | undefined }) {
   const t = useTranslations();
-  const locale = useLocale();
-  const redemptions = useMockEarnRedemptions();
-
-  if (redemptions.length === 0) {
-    return null;
-  }
-
-  return (
-    <section className="rounded-xl border border-border-default bg-surface-raised p-6">
-      <h2 className="text-base font-medium tracking-tight text-primary">
-        {t("DashboardEarn.overview.redemptionsTitle")}
-      </h2>
-      <p className="mt-1 max-w-xl text-sm leading-6 text-secondary">
-        {t("DashboardEarn.overview.redemptionsDescription")}
-      </p>
-      <ul className="mt-4 divide-y divide-border-subtle rounded-lg border border-border-subtle">
-        {redemptions.map((redemption) => {
-          const strategy = getMockStrategy(redemption.strategyId);
-          const curatorName = strategy
-            ? earnCuratorLabel(strategy.curator)
-            : t("DashboardEarn.overview.unknownCurator");
-          const settled = Date.parse(redemption.availableAt) <= Date.now();
-          return (
-            <li
-              key={redemption.id}
-              className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-sm text-primary">{curatorName}</p>
-                <p className="mt-0.5 text-xs leading-5 text-secondary">
-                  {strategy?.name ?? redemption.strategyId} ·{" "}
-                  {t("DashboardEarn.overview.redemptionRequested", {
-                    date: new Date(redemption.requestedAt).toLocaleDateString(locale, {
-                      month: "short",
-                      day: "numeric",
-                    }),
-                  })}{" "}
-                  ·{" "}
-                  {t("DashboardEarn.overview.redemptionAvailable", {
-                    date: new Date(redemption.availableAt).toLocaleDateString(locale, {
-                      month: "short",
-                      day: "numeric",
-                    }),
-                  })}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 sm:justify-end">
-                <p className="text-sm text-primary tabular-nums">
-                  {formatTokenAmount(redemption.amount, redemption.tokenMint)}
-                </p>
-                <Badge variant={settled ? "success" : "warning"}>
-                  {settled
-                    ? t("DashboardEarn.overview.redemptionSettled")
-                    : t("DashboardEarn.overview.redemptionPending")}
-                </Badge>
-                {settled ? (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => clearMockRedemption(redemption.id)}
-                  >
-                    {t("DashboardEarn.overview.redemptionClear")}
-                  </Button>
-                ) : null}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
+  const badge = program ? WALLET_STATUS_BADGES[program.wallet.status] : undefined;
+  if (!badge) return null;
+  return <Badge variant={badge.variant}>{t(badge.key)}</Badge>;
 }
 
 function ProgramMetaRow({ label, value }: { label: string; value: string }) {
@@ -384,20 +356,33 @@ function ProgramMetaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Shared collapsed-drawer summary styling for card-footer disclosures. */
+function DrawerSummary({ children }: { children: React.ReactNode }) {
+  return (
+    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-5 py-2.5 text-[13px] font-medium text-secondary transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 motion-reduce:transition-none [&::-webkit-details-marker]:hidden">
+      {children}
+      <ChevronDownIcon className="size-4 shrink-0 transition-transform duration-200 group-open/drawer:rotate-180 motion-reduce:transition-none" />
+    </summary>
+  );
+}
+
 /**
- * The full curator catalogue, shown as the onboarding hero only while there are
- * no positions. Once funds are in, curator discovery moves to the "Explore
- * curators" action in the positions header (curator-first deposit flow), so the
- * overview stays focused on the portfolio rather than burying it below a grid.
+ * The live curator catalogue, shown as the onboarding hero only while there is
+ * no active program. Once funds are in, curator discovery moves to the
+ * "Explore curators" action in the positions header (curator-first deposit
+ * flow), so the overview stays focused on the portfolio.
  */
 function CuratorProgramsSection() {
   const t = useTranslations();
   const liquidityLabel = useLiquidityLabel();
-  const positions = useMockEarnPositions();
+  const { state } = useEarnProgram();
+  const { strategies, error, isLoading } = useEarnStrategies();
 
-  if (positions.length > 0) {
+  if (state?.kind === "active") {
     return null;
   }
+
+  const programs = buildCuratorPrograms(strategies ?? []);
 
   return (
     <section>
@@ -410,22 +395,47 @@ function CuratorProgramsSection() {
         </p>
       </div>
 
+      {isLoading ? (
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-busy="true">
+          {SKELETON_ITEM_IDS.map((id) => (
+            <SkeletonBlock key={id} className="h-96 w-full rounded-xl" />
+          ))}
+        </div>
+      ) : null}
+
+      {error ? (
+        <p className="mt-5 text-sm leading-6 text-secondary">
+          {t("DashboardEarn.overview.curatorsLoadError")}
+        </p>
+      ) : null}
+
+      {!isLoading && !error && programs.length === 0 ? (
+        <p className="mt-5 text-sm leading-6 text-secondary">
+          {t("DashboardEarn.overview.curatorsEmpty")}
+        </p>
+      ) : null}
+
       <div className="mt-5 grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {CURATOR_PROGRAMS.map((program) => {
-          const riskTiers = EARN_RISK_TIERS.filter((tier) =>
-            program.strategies.some((strategy) => strategy.riskTier === tier)
+        {programs.map((program) => {
+          const knownTiers = EARN_RISK_TIERS.filter((tier) =>
+            program.strategies.some((strategy) => strategyRiskTier(strategy) === tier)
           );
           const riskRange =
-            riskTiers.length === 1
-              ? t(`DashboardEarn.risk.${riskTiers[0]}`)
-              : `${t(`DashboardEarn.risk.${riskTiers[0]}`)}–${t(
-                  `DashboardEarn.risk.${riskTiers[riskTiers.length - 1]}`
-                )}`;
+            knownTiers.length === 0
+              ? t(curatorProfileKey(program.id, "risk"))
+              : knownTiers.length === 1
+                ? t(`DashboardEarn.risk.${knownTiers[0]}`)
+                : `${t(`DashboardEarn.risk.${knownTiers[0]}`)}–${t(
+                    `DashboardEarn.risk.${knownTiers[knownTiers.length - 1]}`
+                  )}`;
           const liquidities = [
             ...new Set(program.strategies.map((strategy) => liquidityLabel(strategy))),
           ];
           const assets = programAssets(program.strategies);
-          const curatorName = earnCuratorLabel(program.id);
+          const curatorName =
+            program.id === UNKNOWN_CURATOR_ID
+              ? t("DashboardEarn.overview.unknownCurator")
+              : earnCuratorLabel(program.id);
 
           return (
             <article
@@ -475,29 +485,43 @@ function CuratorProgramsSection() {
                   </span>
                 </DrawerSummary>
                 <ul className="divide-y divide-border-subtle border-t border-border-subtle bg-fill-subtle/50">
-                  {program.strategies.map((strategy) => (
-                    <li key={strategy.id} className="px-5 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm text-primary">{strategy.name}</p>
-                          <p className="mt-0.5 text-xs text-secondary">
-                            {t(`DashboardEarn.source.${strategy.sourceKind}`)} ·{" "}
-                            {t(`DashboardEarn.risk.${strategy.riskTier}`)}
+                  {program.strategies.map((strategy) => {
+                    const tier = strategyRiskTier(strategy);
+                    const tvlUsd = strategyTvlUsd(strategy);
+                    return (
+                      <li key={strategy.id} className="px-5 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm text-primary">{strategy.name}</p>
+                            <p className="mt-0.5 text-xs text-secondary">
+                              {[
+                                t(`DashboardEarn.source.${strategy.sourceKind}`),
+                                tier ? t(`DashboardEarn.risk.${tier}`) : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          </div>
+                          <p className="shrink-0 text-sm text-primary tabular-nums">
+                            {formatApy(strategy.currentApy)}
                           </p>
                         </div>
-                        <p className="shrink-0 text-sm text-primary tabular-nums">
-                          {formatApy(strategy.currentApy)}
+                        <p className="mt-2 text-xs leading-5 text-tertiary">
+                          {[
+                            liquidityLabel(strategy),
+                            programAssets([strategy]).join(", "),
+                            tvlUsd !== undefined
+                              ? t("DashboardEarn.overview.tvl", {
+                                  value: formatUsdCompact(tvlUsd),
+                                })
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </p>
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-tertiary">
-                        {liquidityLabel(strategy)} ·{" "}
-                        {strategy.depositMints.map((mint) => tokenSymbol(mint)).join(", ")} ·{" "}
-                        {t("DashboardEarn.overview.tvl", {
-                          value: formatUsdCompact(strategy.tvlUsd),
-                        })}
-                      </p>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               </details>
 
@@ -514,22 +538,20 @@ function CuratorProgramsSection() {
           );
         })}
       </div>
-      <p className="mt-4 max-w-3xl text-xs leading-5 text-muted">
-        {t("DashboardEarn.overview.programRateDisclosure")}
-      </p>
+      {programs.length > 0 ? (
+        <p className="mt-4 max-w-3xl text-xs leading-5 text-muted">
+          {t("DashboardEarn.overview.programRateDisclosure")}
+        </p>
+      ) : null}
     </section>
   );
 }
 
 export function EarnWorkspace() {
-  const t = useTranslations();
-
   return (
     // No root padding: the dashboard shell already pads non-viewport-locked routes.
     <div className="grid content-start gap-6">
-      <p className="text-xs leading-5 text-muted">{t("DashboardEarn.overview.mockNotice")}</p>
       <PositionsSection />
-      <RedemptionsSection />
       <CuratorProgramsSection />
     </div>
   );

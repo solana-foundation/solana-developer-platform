@@ -7,10 +7,10 @@ import { EarnWorkspace } from "./earn-workspace";
 export const dynamic = "force-dynamic";
 
 /**
- * Earn overview — SDP Markets module (V1: Solana Earn). Currently backed by
- * mock fixtures (see earn-mock-data.ts, the single data seam); the
- * /api/dashboard/markets/earn BFF routes are already stubbed for the swap to live
- * /v1/earn data once the first vault-infra provider sync lands.
+ * Earn overview — SDP Markets module (V1: Solana Earn). Live data: the
+ * workspace reads the shared portfolio program and the synced strategy
+ * catalogue through the /api/dashboard/markets/earn BFF proxies (see
+ * earn-program-data.ts for the client seam).
  */
 export default async function EarnPage() {
   if (!isEarnUiEnabled()) {

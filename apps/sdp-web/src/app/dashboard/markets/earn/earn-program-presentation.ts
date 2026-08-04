@@ -1,24 +1,65 @@
 "use client";
 
-import { earnCuratorLabel } from "@sdp/types";
+import { type EarnStrategy, earnCuratorLabel } from "@sdp/types";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { buildCuratorPrograms, type CuratorProgram } from "./deposit/earn-setup-model";
-import {
-  formatApy,
-  MOCK_EARN_STRATEGIES,
-  type MockEarnStrategy,
-  tokenSymbol,
-} from "./earn-mock-data";
+import { formatApy, tokenSymbol } from "./earn-format";
 
 /**
  * Shared curator-program presentation helpers for every Earn surface
- * (overview, deposit wizard, and future program views). Keep formatting and
- * profile-copy lookups here so the surfaces can't drift apart.
+ * (overview, deposit wizard, and future program views). All helpers are pure
+ * over live `EarnStrategy` catalogue rows — callers fetch the rows from the
+ * strategies BFF and pass them in; nothing here holds module-level data.
  */
 
-/** The mocked curator catalogue every Earn surface renders from. */
-export const CURATOR_PROGRAMS = buildCuratorPrograms(MOCK_EARN_STRATEGIES);
+/** Group id for strategies whose catalogue row carries no curator. */
+export const UNKNOWN_CURATOR_ID = "unknown";
+
+/**
+ * Risk tiers the dashboard knows how to describe. `riskMetadata.riskTier` is
+ * an open string per ADR 0002, so unknown tiers simply don't map to copy.
+ */
+export const EARN_RISK_TIERS = ["conservative", "balanced", "enhanced"] as const;
+export type EarnRiskTier = (typeof EARN_RISK_TIERS)[number];
+
+export function strategyRiskTier(strategy: EarnStrategy): EarnRiskTier | undefined {
+  const tier = strategy.riskMetadata?.riskTier;
+  return EARN_RISK_TIERS.includes(tier as EarnRiskTier) ? (tier as EarnRiskTier) : undefined;
+}
+
+/** Curator id from the synced catalogue row, or the unknown-curator group. */
+export function strategyCurator(strategy: EarnStrategy): string {
+  const curator = strategy.riskMetadata?.curator;
+  return typeof curator === "string" && curator.trim() !== "" ? curator : UNKNOWN_CURATOR_ID;
+}
+
+/** TVL in USD when the catalogue sync recorded one for the strategy. */
+export function strategyTvlUsd(strategy: EarnStrategy): number | undefined {
+  const tvlUsd = strategy.riskMetadata?.tvlUsd;
+  return typeof tvlUsd === "number" && Number.isFinite(tvlUsd) ? tvlUsd : undefined;
+}
+
+export interface EarnCuratorProgram {
+  id: string;
+  strategies: readonly EarnStrategy[];
+}
+
+/** Group live strategies by curator in first catalogue appearance order. */
+export function buildCuratorPrograms(
+  strategies: readonly EarnStrategy[]
+): readonly EarnCuratorProgram[] {
+  const byCurator = new Map<string, EarnStrategy[]>();
+  for (const strategy of strategies) {
+    const curatorId = strategyCurator(strategy);
+    const group = byCurator.get(curatorId);
+    if (group) {
+      group.push(strategy);
+    } else {
+      byCurator.set(curatorId, [strategy]);
+    }
+  }
+  return [...byCurator].map(([id, curatorStrategies]) => ({ id, strategies: curatorStrategies }));
+}
 
 const KNOWN_CURATOR_PROFILE_IDS = new Set(["steakhouse", "gauntlet", "sentora"]);
 
@@ -40,7 +81,9 @@ export function curatorMonogram(curatorId: string): string {
 }
 
 /** Formatted min–max APY across a program's strategies, or "—" when unknown. */
-export function curatorApyRange(program: CuratorProgram | undefined): string {
+export function curatorApyRange(
+  program: Pick<EarnCuratorProgram, "strategies"> | undefined
+): string {
   if (!program || program.strategies.length === 0) return "—";
   const apys = program.strategies
     .map((strategy) => Number(strategy.currentApy))
@@ -53,7 +96,7 @@ export function curatorApyRange(program: CuratorProgram | undefined): string {
 }
 
 /** Unique funding-asset symbols across a program's strategies. */
-export function programAssets(strategies: readonly MockEarnStrategy[]): string[] {
+export function programAssets(strategies: readonly EarnStrategy[]): string[] {
   return [
     ...new Set(
       strategies.flatMap((strategy) => strategy.depositMints.map((mint) => tokenSymbol(mint)))
@@ -61,20 +104,13 @@ export function programAssets(strategies: readonly MockEarnStrategy[]): string[]
   ];
 }
 
-/** Human liquidity term for a strategy (Instant, T+n, or the mixed split). */
+/** Human liquidity term for a strategy (Instant or T+n). */
 export function useLiquidityLabel() {
   const t = useTranslations();
-  return (strategy: MockEarnStrategy): string => {
+  return (strategy: EarnStrategy): string => {
     if (strategy.liquidityTerm === "instant") {
       return t("DashboardEarn.liquidity.instant");
     }
-    const days = strategy.redemptionDelayDays ?? 1;
-    if (strategy.intradayFraction) {
-      return t("DashboardEarn.liquidity.mixed", {
-        pct: Math.round(strategy.intradayFraction * 100),
-        days,
-      });
-    }
-    return t("DashboardEarn.liquidity.delayed", { days });
+    return t("DashboardEarn.liquidity.delayed", { days: strategy.redemptionDelayDays ?? 1 });
   };
 }

@@ -23,19 +23,15 @@ export default async function EarnDepositPage({ searchParams }: EarnDepositPageP
     redirect("/dashboard");
   }
 
+  // The wizard is curator-first by design, so the legacy ?start=curator entry
+  // needs no special handling — every entry lands on the curator step.
   const resolved = searchParams ? await searchParams : undefined;
   const strategyParam = resolved?.strategy;
   const curatorParam = resolved?.curator;
-  const startParam = resolved?.start;
   const initialStrategyId = Array.isArray(strategyParam) ? strategyParam[0] : strategyParam;
   const initialCuratorId = Array.isArray(curatorParam) ? curatorParam[0] : curatorParam;
-  const start = Array.isArray(startParam) ? startParam[0] : startParam;
 
   return (
-    <EarnDepositWizard
-      initialStrategyId={initialStrategyId}
-      initialCuratorId={initialCuratorId}
-      entryStep={start === "curator" ? "curator" : undefined}
-    />
+    <EarnDepositWizard initialStrategyId={initialStrategyId} initialCuratorId={initialCuratorId} />
   );
 }
