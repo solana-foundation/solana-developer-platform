@@ -14,6 +14,14 @@ import frDashboardPayments from "../../messages/fr/dashboard-payments.json";
 import frDashboardPolicies from "../../messages/fr/dashboard-policies.json";
 import frShared from "../../messages/fr/shared.json";
 import fr from "../../messages/fr.json";
+import ptDashboardApprovals from "../../messages/pt/dashboard-approvals.json";
+import ptDashboardCustody from "../../messages/pt/dashboard-custody.json";
+import ptDashboardIssuance from "../../messages/pt/dashboard-issuance.json";
+import ptDashboardPayments from "../../messages/pt/dashboard-payments.json";
+import ptDashboardPolicies from "../../messages/pt/dashboard-policies.json";
+import ptDashboardPrivateChannels from "../../messages/pt/dashboard-private-channels.json";
+import ptShared from "../../messages/pt/shared.json";
+import pt from "../../messages/pt.json";
 
 const enMessages = {
   ...en,
@@ -71,6 +79,19 @@ const frCatalog = {
 
 const frMessages = mergeLocalizedMessages(enMessages, frCatalog);
 
+const ptCatalog = {
+  ...pt,
+  ...ptDashboardApprovals,
+  ...ptDashboardCustody,
+  ...ptDashboardIssuance,
+  ...ptDashboardPayments,
+  ...ptDashboardPolicies,
+  ...ptDashboardPrivateChannels,
+  Shared: ptShared,
+} satisfies LocalizedMessages<Messages>;
+
+const ptMessages = mergeLocalizedMessages(enMessages, ptCatalog);
+
 export type MessageKeyFor<TValue> = TValue extends string
   ? ""
   : {
@@ -85,6 +106,7 @@ export type TranslationValues = Record<string, string | number>;
 const messagesByLocale: Record<AppLocale, Messages> = {
   en: enMessages,
   fr: frMessages,
+  pt: ptMessages,
 };
 
 export function getMessages(locale: AppLocale): Messages {
