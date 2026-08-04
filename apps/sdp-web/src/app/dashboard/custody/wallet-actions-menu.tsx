@@ -169,7 +169,7 @@ export function WalletActionsMenu({
             type="button"
             variant="secondary"
             size="sm"
-            className={cn("min-w-[132px] whitespace-nowrap", triggerClassName)}
+            className={cn("whitespace-nowrap", triggerClassName)}
             iconRight={<ChevronDown className="size-4" />}
             aria-label={t("DashboardCustody.walletActionsFor", { wallet: resolvedWalletLabel })}
             disabled={isBusy}

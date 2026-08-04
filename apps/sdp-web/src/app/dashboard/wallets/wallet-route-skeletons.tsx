@@ -259,51 +259,58 @@ export function WalletPolicySkeleton() {
       layout="wallet-policy"
       className="flex h-full min-h-0 flex-col bg-surface-raised"
     >
-      <div className="flex shrink-0 justify-end gap-2 border-b border-border-default px-4 py-3 md:px-6">
-        <Pulse className="h-9 w-28 rounded-lg" />
-        <Pulse className="h-9 w-32 rounded-lg" />
-      </div>
-      <div className="shrink-0 px-4 py-5 md:px-6">
-        <div className="mx-auto flex w-full max-w-6xl items-center gap-4">
-          <div className="flex items-center gap-1.5">
-            <Pulse className="h-1.5 w-5 rounded-full" />
-            {THREE_ITEMS.map((step) => (
-              <Pulse key={step} className="h-1.5 w-2.5 rounded-full" />
-            ))}
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6" data-wizard-stepper>
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3">
+          <div className="flex shrink-0 items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <Pulse className="h-1.5 w-5 rounded-full" />
+              {THREE_ITEMS.map((step) => (
+                <Pulse key={step} className="h-1.5 w-2.5 rounded-full" />
+              ))}
+            </div>
+            <Pulse className="h-3 w-16" />
           </div>
-          <Pulse className="h-3 w-16" />
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <Pulse className="h-9 w-30 rounded-lg" />
+            <Pulse className="h-9 w-38 rounded-lg" />
+          </div>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden px-4 py-6 md:px-6 md:py-8">
-        <div className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <main className="min-w-0 space-y-6" data-skeleton-section="policy-form">
-            <div className="space-y-2">
-              <Pulse className="h-7 w-64 max-w-full" />
-              <Pulse className="h-4 w-full max-w-2xl" />
-            </div>
-            <div className="space-y-4">
-              <Pulse className="h-32 w-full rounded-lg" />
-              <Pulse className="h-48 w-full rounded-lg" />
-            </div>
-          </main>
-          <aside
-            className="h-fit space-y-4 rounded-lg border border-border-default bg-surface-raised p-5"
-            data-skeleton-section="policy-summary"
-          >
-            <Pulse className="h-5 w-32" />
-            {FIVE_ITEMS.map((row) => (
-              <div
-                key={row}
-                className="flex items-center justify-between gap-4 border-t border-border-default pt-3"
-              >
-                <Pulse className="h-4 w-24" />
-                <Pulse className="h-4 w-28" />
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6" data-wizard-scroll-region>
+        <div className="mx-auto w-full max-w-6xl pb-8">
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_440px]">
+            <main className="min-w-0" data-skeleton-section="policy-form">
+              <div className="mb-6 space-y-2">
+                <Pulse className="h-7 w-64 max-w-full" />
+                <Pulse className="h-4 w-full max-w-2xl" />
               </div>
-            ))}
-          </aside>
+              <div className="space-y-4">
+                <Pulse className="h-32 w-full rounded-lg" />
+                <Pulse className="h-48 w-full rounded-lg" />
+              </div>
+            </main>
+            <aside
+              className="h-fit space-y-4 rounded-lg border border-border-default bg-surface-raised p-6"
+              data-skeleton-section="policy-summary"
+            >
+              <Pulse className="h-5 w-32" />
+              {FIVE_ITEMS.map((row) => (
+                <div
+                  key={row}
+                  className="flex items-center justify-between gap-4 border-t border-border-default pt-3"
+                >
+                  <Pulse className="h-4 w-24" />
+                  <Pulse className="h-4 w-28" />
+                </div>
+              ))}
+            </aside>
+          </div>
         </div>
       </div>
-      <footer className="shrink-0 border-t border-border-default bg-surface-raised px-4 py-4 md:px-6">
+      <footer
+        className="shrink-0 border-t border-border-default bg-surface-raised px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
+        data-wizard-actions
+      >
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
           <Pulse className="h-10 w-24 rounded-lg" />
           <Pulse className="h-10 w-28 rounded-lg" />
