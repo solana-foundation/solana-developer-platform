@@ -387,7 +387,7 @@ describe("policy audit presentation invariants", () => {
     const partial = evaluation("review", { reasonCode: "provider_mapping_partial" });
     expect(providerMappingState(partial)).toBe("partial");
 
-    const missingKey = policyActor(evaluation("allow"), {});
+    const missingKey = policyActor(evaluation("allow"), {}, {});
     expect(missingKey).toMatchObject({ type: "api_key", id: "api-key-1", name: null });
 
     const legacy = evaluation("allow", { evaluationContext: null });

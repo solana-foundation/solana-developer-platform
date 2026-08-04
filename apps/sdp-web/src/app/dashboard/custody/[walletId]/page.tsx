@@ -582,7 +582,7 @@ async function WalletControlsPanel({
   return (
     <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       <div className="flex flex-col gap-5 p-6 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 space-y-3">
+        <div className="min-w-0 flex-1 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-2xl font-medium text-primary">
               {t("DashboardCustody.walletControls")}
@@ -596,53 +596,48 @@ async function WalletControlsPanel({
           {policyError ? (
             <p className="text-sm text-error">{policyError}</p>
           ) : (
-            <div className="space-y-3">
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                <WalletControlMetric
-                  label={t("DashboardCustody.policyAllowedAssets")}
-                  value={
-                    allowedAssets.length > 0
-                      ? String(allowedAssets.length)
-                      : t("DashboardCustody.open")
-                  }
-                />
-                <WalletControlMetric
-                  label={t("DashboardCustody.destinations")}
-                  value={
-                    destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")
-                  }
-                />
-                <WalletControlMetric
-                  label={t("DashboardCustody.perTransfer")}
-                  value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
-                />
-                <WalletControlMetric
-                  label={t("DashboardCustody.daily")}
-                  value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
-                />
+            <div className="max-w-2xl overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
+              <div className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3">
+                <p className="text-[15px] text-secondary">
+                  {t("DashboardCustody.policyAllowedAssets")}
+                </p>
+                {/* Named here rather than under Balances: these are the assets the
+                    wallet may move, which is not the same as what it holds. */}
+                {allowedAssets.length > 0 ? (
+                  <ul className="flex min-w-0 flex-wrap justify-end gap-2">
+                    {allowedAssets.map((mint) => (
+                      <li
+                        key={mint}
+                        className="flex items-center gap-2 rounded-full border border-border-subtle bg-surface-raised py-1 pr-3 pl-1"
+                        title={mint}
+                      >
+                        {/* Only issued symbols are handed over: TokenMark already
+                            resolves well-known mints itself, and an unresolvable mint
+                            should keep its neutral placeholder rather than take a
+                            monogram cut from an address. */}
+                        <TokenMark mint={mint} symbol={issuedSymbolsByMint[mint]} size="sm" />
+                        <span className="text-xs font-medium text-secondary">
+                          {resolveTransferTokenLabel(mint, issuedSymbolsByMint)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[15px] text-primary">{t("DashboardCustody.open")}</p>
+                )}
               </div>
-              {/* Named here rather than under Balances: these are the assets the
-                  wallet may move, which is not the same as what it holds. */}
-              {allowedAssets.length > 0 ? (
-                <ul className="flex flex-wrap gap-2">
-                  {allowedAssets.map((mint) => (
-                    <li
-                      key={mint}
-                      className="flex items-center gap-2 rounded-full border border-border-subtle bg-fill-subtle py-1 pr-3 pl-1"
-                      title={mint}
-                    >
-                      {/* Only issued symbols are handed over: TokenMark already
-                          resolves well-known mints itself, and an unresolvable mint
-                          should keep its neutral placeholder rather than take a
-                          monogram cut from an address. */}
-                      <TokenMark mint={mint} symbol={issuedSymbolsByMint[mint]} size="sm" />
-                      <span className="text-xs font-medium text-secondary">
-                        {resolveTransferTokenLabel(mint, issuedSymbolsByMint)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              <WalletInfoRow
+                label={t("DashboardCustody.destinations")}
+                value={destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")}
+              />
+              <WalletInfoRow
+                label={t("DashboardCustody.perTransfer")}
+                value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
+              />
+              <WalletInfoRow
+                label={t("DashboardCustody.daily")}
+                value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
+              />
             </div>
           )}
         </div>
@@ -660,17 +655,6 @@ async function WalletControlsPanel({
         </Button>
       </div>
     </section>
-  );
-}
-
-function WalletControlMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 rounded-lg border border-border-subtle bg-fill-subtle px-3 py-2">
-      <p className="text-xs font-medium text-muted">{label}</p>
-      <p className="mt-1 truncate text-sm font-medium text-primary" title={value}>
-        {value}
-      </p>
-    </div>
   );
 }
 
