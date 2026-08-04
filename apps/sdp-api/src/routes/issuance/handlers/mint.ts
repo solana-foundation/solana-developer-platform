@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
@@ -209,10 +210,11 @@ export const prepareMint = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const { mintAddress: mintAddressRaw, mosaicAmount } = resolveMintOperationAmount(
-    token,
-    parsed.data.mint.amount
-  );
+  const {
+    mintAddress: mintAddressRaw,
+    mosaicAmount,
+    amountBaseUnits,
+  } = resolveMintOperationAmount(token, parsed.data.mint.amount);
 
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
@@ -273,7 +275,12 @@ export const prepareMint = async (c: AppContext) => {
     simulation = await simulateTransaction(rpc, txBytes);
   }
 
-  // Create transaction record with serialized tx
+  // The row goes in before the reservation and without the serialized transaction.
+  // Before: the row is what tells `POST /supply/refresh` a mint is unsettled, so a
+  // reservation without one sits exposed to a concurrent refresh erasing it.
+  // Without: a serialized transaction in the row is readable through the
+  // transactions API and, in the wallet-authority flow, submittable by whoever
+  // reads it — it may not exist anywhere durable until the cap has admitted it.
   const { transaction: tx } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
@@ -283,8 +290,29 @@ export const prepareMint = async (c: AppContext) => {
       amount: parsed.data.mint.amount,
       memo: parsed.data.mint.memo,
     },
-    serializedTx: prepared.serializedTx,
     initiatedByKeyId: auth.id,
+  });
+
+  // Counted against the cap before the transaction leaves SDP, exactly as an
+  // executed mint is counted before submission — a prepared transaction is a mint
+  // the client can settle at any point until its blockhash expires, so handing it
+  // out IS the point of no return. The pre-flight check above read a cached total
+  // in this process, which a concurrent mint or cap change can invalidate; this
+  // conditional UPDATE contends for the token row itself, so it either sees the
+  // new cap and refuses, or lands first and the cap change fails its own
+  // supply-unchanged guard. If the client never submits, the reservation comes
+  // back through `POST /supply/refresh` once the transaction can no longer land.
+  const reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
+  if (reservedSupply === null) {
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: "Mint amount would exceed maximum supply",
+    });
+    throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+  }
+
+  const preparedTx = await tokenService.updateTransaction(tx.id, {
+    serializedTx: prepared.serializedTx,
   });
 
   // Audit log
@@ -303,7 +331,7 @@ export const prepareMint = async (c: AppContext) => {
   });
 
   return success(c, {
-    transaction: tx,
+    transaction: preparedTx,
     preparedTransaction: {
       serialized: prepared.serializedTx,
       blockhash: prepared.blockhash,
@@ -338,10 +366,11 @@ export const executeMint = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const { mintAddress: mintAddressRaw, mosaicAmount } = resolveMintOperationAmount(
-    token,
-    parsed.data.mint.amount
-  );
+  const {
+    mintAddress: mintAddressRaw,
+    mosaicAmount,
+    amountBaseUnits,
+  } = resolveMintOperationAmount(token, parsed.data.mint.amount);
 
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
@@ -434,18 +463,35 @@ export const executeMint = async (c: AppContext) => {
     });
   }
 
+  // Counted against the cap in the last moment before the transaction is submitted,
+  // and only then. The check above ran against a cached total in this process, which
+  // two concurrent mints — or a concurrent cap change — can both pass; this is a
+  // conditional UPDATE on the token row, so the database serializes it and the second
+  // caller sees the first's result. Refusing here aborts the submission, so a cap
+  // that has no room does not spend a transaction.
+  //
+  // Placement is the point: building the transaction, resolving the token account and
+  // signing can all fail without anything reaching the chain, and holding a
+  // reservation through those failures would retire headroom no token ever used, down
+  // to false MAX_SUPPLY_EXCEEDED on the next legitimate mint. Past this line no
+  // failure proves that much, which is why the reservation then stands.
+  let reservedSupply: string | null = null;
   try {
-    const result = await mosaic.mintTo({
-      mint: mintAddress,
-      destination,
-      amount: mosaicAmount,
-      mintAuthority: signer.address,
-      feePayer: signer.address,
-    });
-
-    // Update transaction with confirmation
-    // Update token supply
-    await tokenService.updateSupply(tokenId, parsed.data.mint.amount, "mint");
+    const result = await mosaic.mintTo(
+      {
+        mint: mintAddress,
+        destination,
+        amount: mosaicAmount,
+        mintAuthority: signer.address,
+        feePayer: signer.address,
+      },
+      async () => {
+        reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
+        if (reservedSupply === null) {
+          throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+        }
+      }
+    );
 
     // Audit log
     const auditService = new AuditService(getDb(c.env));
@@ -477,7 +523,27 @@ export const executeMint = async (c: AppContext) => {
       tokenAccount: result.tokenAccount,
     });
   } catch (error) {
-    // Update transaction as failed
+    // A reservation exists only if the gate ran, which means the transaction was
+    // submitted — and then it stands. Reaching here does not mean nothing landed: a
+    // timeout during confirmation leaves a transaction the cluster may still accept,
+    // and the audit write and status write above run *after* the mint has settled.
+    // Handing the headroom back on any of those would let a second mint reserve supply
+    // the first already minted, and both would be above the cap with no way to undo
+    // it. `POST /supply/refresh` reconciles from the mint account once the transaction
+    // can no longer land — which is also what returns the headroom if it never did.
+    if (reservedSupply !== null) {
+      getLogger().warn(
+        {
+          event: "mint_supply_reservation_retained",
+          tokenId,
+          transactionId: tx.id,
+          reservedBaseUnits: amountBaseUnits.toString(),
+          recordedSupplyBaseUnits: reservedSupply,
+          error: error instanceof Error ? error.message : "Unknown error",
+        },
+        "Mint failed after it was submitted and its supply reserved; the reservation is kept because the transaction may still land. Refresh the token's supply to reconcile."
+      );
+    }
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: error instanceof Error ? error.message : "Unknown error",

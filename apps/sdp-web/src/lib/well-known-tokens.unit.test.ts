@@ -1,6 +1,9 @@
 import {
+  PRIVATE_CHANNEL_TOKEN_SYMBOLS,
+  privateChannelTokens,
   SOL_MINT,
   type SolanaCluster,
+  SPL_TOKEN_PROGRAMS,
   WELL_KNOWN_TOKEN_BY_MINT,
   WELL_KNOWN_TOKENS,
   type WellKnownToken,
@@ -89,5 +92,53 @@ describe("wellKnownMint and wellKnownDecimals", () => {
     expect(wellKnownMint("USDS", "devnet")).toBeUndefined();
     expect(wellKnownDecimals("USDS", "devnet")).toBeUndefined();
     expect(wellKnownDecimals("USDS", "mainnet-beta")).toBe(6);
+  });
+});
+
+describe("privateChannelTokens", () => {
+  it("resolves the allowlist in order, with each mint's own decimals and program", () => {
+    for (const cluster of CLUSTERS) {
+      const tokens = privateChannelTokens(cluster);
+      // Order is the allowlist's order: the first entry is the default the API
+      // falls back to when a request omits `mint`.
+      const deployed = PRIVATE_CHANNEL_TOKEN_SYMBOLS.filter(
+        (symbol) => wellKnownMint(symbol, cluster) !== undefined
+      );
+      expect(tokens.map((token) => token.symbol)).toEqual(
+        deployed.map((symbol) => WELL_KNOWN_TOKENS[symbol].symbol)
+      );
+
+      for (const token of tokens) {
+        expect(token.mint).toBe(WELL_KNOWN_TOKEN_BY_MINT.get(token.mint)?.address);
+        expect(token.decimals).toBe(WELL_KNOWN_TOKEN_BY_MINT.get(token.mint)?.decimals);
+      }
+    }
+  });
+
+  it("carries the owning token program so ATA derivation is never assumed", () => {
+    // spl-token and token-2022 derive DIFFERENT associated-token accounts for the
+    // same (owner, mint). Every allowed token must therefore name its program, or
+    // deposits and burns would target an address that holds nothing.
+    const programs = Object.values(SPL_TOKEN_PROGRAMS) as string[];
+    for (const cluster of CLUSTERS) {
+      for (const token of privateChannelTokens(cluster)) {
+        expect(programs, `${token.symbol} on ${cluster}`).toContain(token.tokenProgram);
+        expect(token.tokenProgram).toBe(
+          SPL_TOKEN_PROGRAMS[WELL_KNOWN_TOKEN_BY_MINT.get(token.mint)?.tokenProgram ?? "spl-token"]
+        );
+      }
+    }
+  });
+
+  it("skips an allowlisted symbol that is not deployed on the cluster", () => {
+    // Guards the edit this list advertises as one line: adding a mainnet-only
+    // symbol must not surface a mint that does not exist on devnet.
+    const undeployed = PRIVATE_CHANNEL_TOKEN_SYMBOLS.filter(
+      (symbol) => wellKnownMint(symbol, "devnet") === undefined
+    );
+    const devnetSymbols = privateChannelTokens("devnet").map((token) => token.symbol);
+    for (const symbol of undeployed) {
+      expect(devnetSymbols).not.toContain(WELL_KNOWN_TOKENS[symbol].symbol);
+    }
   });
 });
