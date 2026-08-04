@@ -39,8 +39,9 @@
  * The catalogue is fixtures; the PROGRAM LINK is not. The seed also points the
  * primary local organization at ONE of the team's real Ground **sandbox**
  * portfolio wallets (SEED_PROVIDER_WALLET), so the dashboard opens onto a live
- * program — real positions, a real Solana deposit address — instead of the empty
- * onboarding state a fresh install shows. Consequences worth knowing:
+ * program — real allocation, real forward APY, a real Solana deposit address —
+ * instead of the empty onboarding state a fresh install shows. Consequences
+ * worth knowing:
  *   - one org gets one program, mirroring the UNIQUE (organization_id,
  *     environment, provider) product model; other local orgs are left unlinked
  *     rather than handed a sibling wallet that stands in for another org;
@@ -130,32 +131,43 @@ const SEED_WALLET_LABEL = "Seeded sandbox wallet (local dev)";
  *
  * It is linked so local dev opens onto a live program instead of an empty
  * onboarding screen. Live provider resource, not a fixture:
- *   - the dashboard reads its real balance, positions, and deposit address;
+ *   - the dashboard reads its real balance, allocation, and deposit address;
  *   - SANDBOX only — never a production wallet ref;
  *   - it is SHARED, so state you change here (funding, a strategy update
  *     through the wizard, a withdrawal) is state your teammates also see.
  * Nothing here writes to Ground; the seed only records the link locally.
  *
- * Why this wallet: it is the only sandbox wallet that is both funded and
- * allocated, so the overview renders non-zero numbers instead of an all-$0
- * screen — a $5 cash balance against a 50/50 USDC target split (Kamino
- * Superstate + RockawayX RWA), which also drives the forward-APY path
- * (`blendPositionApy` weights by target when nothing is deployed yet: 3.71%).
+ * Why THIS wallet: it is the one whose every value is reachable through SDP's
+ * own surface. Its allocation is three Kamino USDC sources, so the overview
+ * renders a real forward APY blended from target weights (`blendPositionApy`
+ * weights by target when nothing is deployed yet), and you fund it yourself by
+ * sending devnet USDC to its Solana deposit address — which exercises the actual
+ * two-phase deposit. It reads $0 until you do, and that is the point: a zero you
+ * can act on beats a balance you cannot.
  *
- * Read the $5 correctly — it is NOT a Solana USDC deposit mid-rebalance.
- * Ground holds it as cash off the Solana rail, and it will not deploy into the
- * USDC targets above, so it stays cash indefinitely rather than converging on
- * the split. Treat it as a balance fixture for rendering, not as a live example
- * of the deposit flow. To exercise the real two-phase deposit, send devnet USDC
- * to the wallet's Solana deposit address and watch that arrive on its own.
+ * DELIBERATELY NOT the sandbox's funded wallets, and this is measured, not
+ * assumed. Their balances sit as USDT cash on a non-Solana rail, and Ground
+ * enforces the lane split at the API:
  *
- * SDP's surface stays Solana-only regardless (ADR 0002 invariant 5): off-rail
- * detail must never reach a wire type or the UI, which is why `mapPosition`
- * synthesizes position labels instead of passing the provider's through.
+ *     USDC -> solana_devnet      409  insufficient_funds (lane withdrawable 0)
+ *     USDT -> solana_devnet      400  "destinationChain must be one of: ..."
+ *     USDT -> <its own rail>     200  withdrawable 5.000000
+ *
+ * So a funded wallet makes the dashboard show a withdrawable balance that SDP
+ * cannot withdraw: `balance.withdrawableUsd` is a wallet-level total, the exit
+ * is per-lane, and the withdraw modal caps on the total. Seeding that wallet
+ * hands every developer a program whose money is unreachable and whose "max"
+ * button 409s — which reads as an SDP bug and is not one. Verified against
+ * Ground's sandbox on 2026-08-04.
+ *
+ * Keep this ref on the Solana rail. The surface is Solana-only (ADR 0002
+ * invariant 5) and a seeded wallet must not imply otherwise — which is also why
+ * `mapPosition` synthesizes position labels rather than passing the provider's
+ * chain-bearing ones through.
  */
 const SEED_PROVIDER_WALLET: { ref: string; note: string } = {
-  ref: "49b0483c-490a-4435-80b0-6c83bee2b206",
-  note: "funded ($5 cash, held off-rail) against a 50/50 USDC target split",
+  ref: "eed99909-b2d4-4f01-af32-461e500d292d",
+  note: "three-source Kamino USDC allocation, $0 until you deposit devnet USDC",
 };
 
 // ── Fixture catalogue ───────────────────────────────────────────────────────

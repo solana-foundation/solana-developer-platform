@@ -112,10 +112,19 @@ Practical notes:
 - **The API-key path has no program.** `db:seed:local`'s dev key belongs to the
   test org, so `curl /v1/earn/program?provider=ground` with it returns 404 by
   design. Use the dashboard, or mint a key for your own org.
-- **Read the seeded $5 correctly:** Ground holds it as cash off the Solana rail,
-  so it will *not* deploy into the wallet's USDC targets and does not demonstrate
-  the deposit flow. It is there so balances render non-zero. To exercise the real
-  two-phase deposit, send devnet USDC to the wallet's Solana deposit address.
+- **The seeded program reads $0, on purpose.** It carries a live three-source
+  Kamino USDC allocation, so the overview shows a real forward APY (blended from
+  target weights) with no balance yet. Fund it yourself by sending devnet USDC to
+  the wallet's Solana deposit address — that exercises the real two-phase deposit
+  (arrives as `cash`, deploys on a later Ground rebalance).
+- **Don't "fix" the $0 by pointing the seed at a funded sandbox wallet.** The
+  funded ones hold USDT cash on a non-Solana rail, and Ground enforces the lane
+  split at the API: USDC→Solana returns `409 insufficient_funds` (lane
+  withdrawable `0`) while USDT is refused on Solana entirely. Because
+  `balance.withdrawableUsd` is a wallet-level total and the withdraw modal caps on
+  it, such a wallet shows a withdrawable balance SDP cannot withdraw and a "max"
+  button that 409s — which reads as an SDP bug and is not one. A zero you can act
+  on beats a balance you cannot.
 
 ### 5. The last gate: org entitlement
 

@@ -283,15 +283,20 @@ Two things write `earn_strategies`, and only one of them is a production path.
   never remove a row the live cron synced.
 - **It also links one program, and that part is NOT a fixture.** The seed points
   your primary local org at one of the team's real Ground *sandbox* portfolio
-  wallets, so the dashboard opens onto live provider state (real positions, a
-  real Solana deposit address) rather than an empty onboarding screen. One org,
-  one program — the same unique constraint production enforces, so the seed
-  never hands an org a second wallet, and other local orgs stay unlinked. The
-  wallet is shared with teammates: funding it, re-weighting it through the
-  wizard, or withdrawing from it changes what they see. Re-run the seed after
-  your first Clerk sign-in and it moves its own link onto your real org; a
-  program you created through the wizard is never moved. `--clean` removes the
-  link, never the Ground wallet.
+  wallets, so the dashboard opens onto live provider state (real allocation, real
+  forward APY, a real Solana deposit address) rather than an empty onboarding
+  screen. One org, one program — the same unique constraint production enforces,
+  so the seed never hands an org a second wallet, and other local orgs stay
+  unlinked. The wallet is shared with teammates: funding it, re-weighting it
+  through the wizard, or withdrawing from it changes what they see. Re-run the
+  seed after your first Clerk sign-in and it moves its own link onto your real
+  org; a program you created through the wizard is never moved. `--clean` removes
+  the link, never the Ground wallet.
+  The seeded program starts at **$0** deliberately — it is an all-Solana/USDC
+  wallet you fund yourself via its devnet deposit address. Pointing the seed at a
+  funded sandbox wallet instead would surface a withdrawable balance SDP cannot
+  withdraw, because those balances sit off the Solana rail while
+  `balance.withdrawableUsd` reports a wallet-level total.
   Full local-dev detail: `CLAUDE.md` → "Get a program — one org, one portfolio
   wallet".
 - **Commands**
