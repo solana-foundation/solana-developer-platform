@@ -12,7 +12,9 @@ invariants.
   (capability of providers that support it).
 - `PUT /program` / `GET /program` — the **shared portfolio wallet**, ONE per
   (org, environment, provider) — unique constraint in `earn_provider_wallets`
-  (migration 0035). PUT is idempotent create-or-update: first call creates the
+  (migration 0049). This is SDP's product model, not a provider limit: one
+  provider account can hold many portfolio wallets, and SDP gives each org
+  exactly one of them. PUT is idempotent create-or-update: first call creates the
   provider wallet + row (concurrent races surface the unique violation as 409);
   later calls update strategy weights. Allocation weights validate on a 0.1
   grid summing to exactly 100 per token group, and every `yieldSourceId` must
