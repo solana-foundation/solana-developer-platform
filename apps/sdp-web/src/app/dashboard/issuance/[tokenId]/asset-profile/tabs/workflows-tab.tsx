@@ -1,7 +1,17 @@
 "use client";
 
-import { Loader2, Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import {
+  ArrowRight,
+  Filter,
+  Loader2,
+  type LucideIcon,
+  Pencil,
+  Play,
+  RefreshCw,
+  Trash2,
+  Zap,
+} from "lucide-react";
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { formatRelativeTime } from "@/app/dashboard/activity-format-utils";
 import { Badge } from "@/components/ui/badge";
@@ -23,9 +33,11 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { cn } from "@/lib/utils";
 import {
   approveExecution,
   type CatalogActionView,
+  type CatalogTriggerView,
   createWorkflow,
   deleteWorkflow,
   type ExecutionStatus,
@@ -49,7 +61,14 @@ import {
   type WorkflowRuleView,
 } from "../workflows.data";
 import { GuardEditor } from "./guard-editor";
-import { WorkflowFlowPreview } from "./workflow-flow-preview";
+import {
+  ACTION_ICONS,
+  ActionCardGrid,
+  FlowConnector,
+  TRIGGER_ICONS,
+  TriggerCardGrid,
+} from "./workflow-builder-cards";
+import { WorkflowFlowGraph } from "./workflow-flow-preview";
 
 // ── Static catalog metadata ─────────────────────────────────────────────────────────
 
@@ -101,12 +120,6 @@ const ACTION_PARAM_FIELDS: Record<string, ParamField[]> = {
   unfreeze: [{ key: "wallet", labelKey: "paramWallet", helpKey: WALLET_HELP }],
   allowlist_add: [{ key: "wallet", labelKey: "paramWallet", helpKey: WALLET_HELP }],
   allowlist_remove: [{ key: "wallet", labelKey: "paramWallet", helpKey: WALLET_HELP }],
-};
-
-const TIER_VARIANT: Record<ExecutionTier, "success" | "warning" | "danger"> = {
-  automated: "success",
-  sensitive: "warning",
-  requires_approval: "danger",
 };
 
 // Status dots stay within the semantic four: green (done), red (failed), amber
@@ -436,6 +449,7 @@ export function WorkflowsTab({
   tokenId,
   canManage,
   canManagePrivileged,
+  verifiedHolders,
 }: {
   tokenId: string;
   // tokens:write — enough for `automated` rules.
@@ -443,6 +457,9 @@ export function WorkflowsTab({
   // tokens:admin — required for `sensitive` and `requires_approval` rules, mirroring the
   // API's tier gate. Enforced there; here it just keeps the builder honest.
   canManagePrivileged: boolean;
+  // The asset gates on verified holders (KYC access mode). Enrollment is only meaningful
+  // when it does, so the holders roster is shown only then — see the render site below.
+  verifiedHolders: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -479,6 +496,9 @@ export function WorkflowsTab({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [walletAddress, setWalletAddress] = useState("");
+  // TEMP: three builder layouts behind a switcher so we can pick one. Remove the
+  // switcher (and the two unused layouts) once a direction is chosen.
+  const [builderLayout, setBuilderLayout] = useState<BuilderLayout>("pipeline");
 
   const effectiveTrigger = editingRule?.trigger_type ?? triggerType ?? catalog?.triggers[0]?.type;
   const selectedTrigger = catalog?.triggers.find((tr) => tr.type === effectiveTrigger) ?? null;
@@ -786,53 +806,45 @@ export function WorkflowsTab({
                   })
                 : wf("builderDescription")}
             </CardDescription>
+            <CardAction>
+              <LayoutSwitcher value={builderLayout} onChange={setBuilderLayout} />
+            </CardAction>
           </CardHeader>
           <CardContent>
-            {/* lg cramps the controls next to the workspace sidebar (same call the
-                compliance tab made) — split only on genuinely wide viewports. */}
-            <div className="grid gap-6 min-[1440px]:grid-cols-2">
-              <BuilderControls
-                t={t}
-                wf={wf}
-                label={label}
-                describe={describe}
-                catalog={catalog}
-                editing={Boolean(editingRule)}
-                triggerType={effectiveTrigger ?? null}
-                actionType={effectiveAction ?? null}
-                reviewMode={reviewMode}
-                params={params}
-                paramFields={paramFields}
-                selectedAction={selectedAction}
-                conditionFields={conditionFields}
-                guards={guards}
-                emailEnabled={emailEnabled}
-                validation={validation}
-                showValidation={showValidation}
-                busy={busyId === "create"}
-                canSubmit={canSubmit}
-                canUseAction={canUseAction}
-                onTriggerChange={onTriggerChange}
-                onActionChange={onActionChange}
-                onReviewModeChange={setReviewMode}
-                onParamChange={(key, value) => setParams((prev) => ({ ...prev, [key]: value }))}
-                onGuardAdd={addGuard}
-                onGuardUpdate={updateGuard}
-                onGuardRemove={removeGuard}
-                onSubmit={() => void handleSubmit()}
-                onCancelEdit={resetBuilder}
-              />
-
-              {/* Execution preview — exactly what will happen when this rule runs. */}
-              <WorkflowFlowPreview
-                trigger={selectedTrigger}
-                action={selectedAction}
-                guards={guards}
-                reviewMode={reviewMode}
-                paramSummary={paramSummary}
-                walletGap={validation.walletGap}
-              />
-            </div>
+            <WorkflowBuilder
+              layout={builderLayout}
+              t={t}
+              wf={wf}
+              label={label}
+              describe={describe}
+              catalog={catalog}
+              editing={Boolean(editingRule)}
+              triggerType={effectiveTrigger ?? null}
+              actionType={effectiveAction ?? null}
+              reviewMode={reviewMode}
+              params={params}
+              paramFields={paramFields}
+              selectedTrigger={selectedTrigger}
+              selectedAction={selectedAction}
+              conditionFields={conditionFields}
+              guards={guards}
+              emailEnabled={emailEnabled}
+              validation={validation}
+              showValidation={showValidation}
+              paramSummary={paramSummary}
+              busy={busyId === "create"}
+              canSubmit={canSubmit}
+              canUseAction={canUseAction}
+              onTriggerChange={onTriggerChange}
+              onActionChange={onActionChange}
+              onReviewModeChange={setReviewMode}
+              onParamChange={(key, value) => setParams((prev) => ({ ...prev, [key]: value }))}
+              onGuardAdd={addGuard}
+              onGuardUpdate={updateGuard}
+              onGuardRemove={removeGuard}
+              onSubmit={() => void handleSubmit()}
+              onCancelEdit={resetBuilder}
+            />
           </CardContent>
         </Card>
       ) : null}
@@ -851,7 +863,7 @@ export function WorkflowsTab({
         onDelete={handleDelete}
       />
 
-      {canManage ? (
+      {canManage && verifiedHolders ? (
         <HoldersCard
           holders={holders}
           wf={wf}
@@ -897,9 +909,724 @@ export function WorkflowsTab({
   );
 }
 
-// ── Builder controls (left column) ──────────────────────────────────────────────────
+// ── Builder: layout switcher (TEMPORARY comparison control) ─────────────────────────
 
-function BuilderControls(props: {
+type BuilderLayout = "pipeline" | "split" | "track" | "wizard" | "stepper" | "canvas" | "panels";
+
+// Non-catalog label: this control is throwaway, so its copy is intentionally hard-coded
+// (kept out of the i18n audit by living on a non-user-facing `name` field / a const).
+// The `card` layouts use icon-card selectors; the `dropdown` ones mirror the sketches.
+const LAYOUT_GROUP_LABEL = "Builder layout (preview)";
+const BUILDER_LAYOUTS: Array<{ id: BuilderLayout; name: string }> = [
+  { id: "pipeline", name: "Pipeline (cards)" },
+  { id: "split", name: "Split (cards)" },
+  { id: "track", name: "Track (cards)" },
+  { id: "wizard", name: "Wizard row" },
+  { id: "stepper", name: "Stepper + diagram" },
+  { id: "canvas", name: "Canvas" },
+  { id: "panels", name: "Panels + summary" },
+];
+
+function LayoutSwitcher({
+  value,
+  onChange,
+}: {
+  value: BuilderLayout;
+  onChange: (value: BuilderLayout) => void;
+}) {
+  return (
+    <fieldset
+      aria-label={LAYOUT_GROUP_LABEL}
+      className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-border-subtle bg-fill-subtle/50 p-0.5"
+    >
+      {BUILDER_LAYOUTS.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          onClick={() => onChange(option.id)}
+          aria-pressed={value === option.id}
+          className={cn(
+            "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+            value === option.id
+              ? "bg-surface-raised text-primary"
+              : "text-secondary hover:text-primary"
+          )}
+        >
+          {option.name}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
+// ── Builder: shared field blocks (arranged differently by each layout) ──────────────
+
+// Pre-rendered pieces + grid factories handed to whichever layout is active, so the
+// heavy wiring lives once and the layouts only decide arrangement.
+interface LayoutArgs {
+  wf: ReturnType<typeof makeWf>;
+  triggerType: string | null;
+  // Icon-card selectors (the `*-cards` layouts).
+  triggerGrid: (columns: 1 | 2 | 3) => ReactNode;
+  actionGrid: (columns: 1 | 2 | 3) => ReactNode;
+  // Dropdown selectors + resolved display labels/icons (the sketch-style layouts).
+  triggerSelect: ReactNode;
+  actionSelect: ReactNode;
+  triggerIcon: LucideIcon;
+  actionIcon: LucideIcon;
+  triggerLabel: string;
+  actionLabel: string;
+  reviewLabel: string;
+  guardSummary: string;
+  // Pre-rendered so the orientation/chrome literals don't sit in a JSX child (the i18n
+  // audit would read them as copy). `flowInline` = horizontal, no chrome; `flowPanel` =
+  // vertical, titled card.
+  flowInline: ReactNode;
+  flowPanel: ReactNode;
+  guardEditor: ReactNode;
+  tierNotice: ReactNode;
+  reviewField: ReactNode;
+  paramsBlock: ReactNode;
+  emailWarning: ReactNode;
+  validationMessage: ReactNode;
+  submitRow: ReactNode;
+}
+
+// `heading`, not `title`: see the SelectableCard note — a `title` prop would make the
+// i18n audit treat the i18n keys passed through it as hard-coded copy.
+function StageHeading({ heading, hint }: { heading: string; hint?: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="h-3.5 w-1 shrink-0 rounded-full bg-fill-strong" aria-hidden />
+      <span className="text-sm font-semibold text-primary">{heading}</span>
+      {hint ? <span className="text-xs text-tertiary">{hint}</span> : null}
+    </div>
+  );
+}
+
+function TrackPanel({ heading, children }: { heading: string; children: ReactNode }) {
+  return (
+    <div className="flex-1 space-y-2 rounded-xl border border-border-default bg-fill-subtle/20 p-3">
+      <StageHeading heading={heading} />
+      {children}
+    </div>
+  );
+}
+
+// Surfaces only the unsupported reason (the cards already carry the tier badge).
+function TierNotice({ t, selectedAction }: { t: TFunc; selectedAction: CatalogActionView | null }) {
+  const support = selectedAction?.support;
+  if (!support || support.ok) {
+    return null;
+  }
+  return (
+    <p className="rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">
+      {t("DashboardIssuance.workflows.notSupported", { reason: support.reason })}
+    </p>
+  );
+}
+
+function ReviewField({
+  wf,
+  reviewMode,
+  reviewLocked,
+  onChange,
+}: {
+  wf: ReturnType<typeof makeWf>;
+  reviewMode: "auto" | "manual";
+  reviewLocked: boolean;
+  onChange: (value: "auto" | "manual") => void;
+}) {
+  return (
+    <div className="space-y-1.5 text-sm">
+      <span className="font-medium text-secondary">{wf("review")}</span>
+      <Select
+        ariaLabel={wf("review")}
+        value={reviewLocked ? "manual" : reviewMode}
+        disabled={reviewLocked}
+        onValueChange={(v) => onChange(v === "manual" ? "manual" : "auto")}
+      >
+        <SelectItem value="auto" disabled={reviewLocked}>
+          {wf("autoApply")}
+        </SelectItem>
+        <SelectItem value="manual">{wf("manualReview")}</SelectItem>
+      </Select>
+      {reviewLocked ? <p className="text-secondary text-xs">{wf("reviewLockedNote")}</p> : null}
+    </div>
+  );
+}
+
+function ParamsBlock({
+  paramFields,
+  params,
+  wf,
+  showValidation,
+  validation,
+  onParamChange,
+}: {
+  paramFields: ParamField[];
+  params: Record<string, string>;
+  wf: ReturnType<typeof makeWf>;
+  showValidation: boolean;
+  validation: BuilderValidation;
+  onParamChange: (key: string, value: string) => void;
+}) {
+  if (paramFields.length === 0) {
+    return null;
+  }
+  return (
+    <div className="grid gap-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3 sm:grid-cols-2">
+      {paramFields.map((field) => (
+        <ParamFieldControl
+          key={field.key}
+          field={field}
+          wf={wf}
+          value={params[field.key] ?? ""}
+          error={showValidation ? validation.fieldErrors[field.key] : undefined}
+          onChange={(value) => onParamChange(field.key, value)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function EmailWarning({
+  actionType,
+  emailEnabled,
+  params,
+  wf,
+}: {
+  actionType: string | null;
+  emailEnabled: boolean | null;
+  params: Record<string, string>;
+  wf: ReturnType<typeof makeWf>;
+}) {
+  // Only an explicit `false` warns — an unreachable config endpoint stays silent. A
+  // specific-email rule can't fall back to in-app, so its warning is stronger.
+  if (!(actionType === "notify" && emailEnabled === false)) {
+    return null;
+  }
+  return (
+    <div className="rounded-lg border border-warning-border bg-warning-bg px-3 py-2 text-xs text-warning">
+      {(params.email ?? "").trim() ? wf("emailUnavailableSpecific") : wf("emailUnavailable")}
+    </div>
+  );
+}
+
+function ValidationMessage({
+  showValidation,
+  validation,
+  wf,
+}: {
+  showValidation: boolean;
+  validation: BuilderValidation;
+  wf: ReturnType<typeof makeWf>;
+}) {
+  if (!showValidation || validation.ok) {
+    return null;
+  }
+  return (
+    <p role="alert" className="text-xs text-error">
+      {validation.walletGap
+        ? wf("validationWalletGap")
+        : validation.guardsIncomplete
+          ? wf("validationGuards")
+          : wf("validationFields")}
+    </p>
+  );
+}
+
+function SubmitRow({
+  editing,
+  busy,
+  canSubmit,
+  wf,
+  onSubmit,
+  onCancelEdit,
+}: {
+  editing: boolean;
+  busy: boolean;
+  canSubmit: boolean;
+  wf: ReturnType<typeof makeWf>;
+  onSubmit: () => void;
+  onCancelEdit: () => void;
+}) {
+  return (
+    <div className="flex justify-end gap-2">
+      {editing ? (
+        <Button type="button" size="sm" variant="ghost" onClick={onCancelEdit}>
+          {wf("cancelEdit")}
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        size="sm"
+        onClick={onSubmit}
+        disabled={!canSubmit}
+        iconLeft={busy ? <Loader2 className="size-3.5 animate-spin" /> : undefined}
+      >
+        {editing ? wf("saveChanges") : wf("create")}
+      </Button>
+    </div>
+  );
+}
+
+// ── Builder: dropdown selectors (used by the sketch-style layouts) ──────────────────
+
+// The `<Select>`-based WHEN/THEN pickers. The card layouts use the icon grids instead;
+// these keep the sketch-faithful layouts on dropdowns per the design direction. Their
+// i18n keys match the ones already tracked in the copy baseline.
+function TriggerSelect({
+  catalog,
+  value,
+  editing,
+  onChange,
+  wf,
+  label,
+}: {
+  catalog: WorkflowCatalog | null;
+  value: string | null;
+  editing: boolean;
+  onChange: (value: string | null) => void;
+  wf: ReturnType<typeof makeWf>;
+  label: ReturnType<typeof makeLabel>;
+}) {
+  return (
+    <Select
+      ariaLabel={wf("when")}
+      value={value}
+      disabled={editing}
+      onValueChange={onChange}
+      placeholder={wf("triggerPlaceholder")}
+    >
+      {(catalog?.triggers ?? []).map((trigger) => (
+        <SelectItem key={trigger.type} value={trigger.type}>
+          {label("trigger", trigger.type)}
+        </SelectItem>
+      ))}
+    </Select>
+  );
+}
+
+function ActionSelect({
+  catalog,
+  value,
+  editing,
+  canUseAction,
+  onChange,
+  wf,
+  label,
+}: {
+  catalog: WorkflowCatalog | null;
+  value: string | null;
+  editing: boolean;
+  canUseAction: (type: string) => boolean;
+  onChange: (value: string | null) => void;
+  wf: ReturnType<typeof makeWf>;
+  label: ReturnType<typeof makeLabel>;
+}) {
+  return (
+    <Select
+      ariaLabel={wf("then")}
+      value={value}
+      disabled={editing}
+      onValueChange={onChange}
+      placeholder={wf("actionPlaceholder")}
+    >
+      {(catalog?.actions ?? []).map((a) => {
+        const permitted = canUseAction(a.type);
+        const suffix = !a.support.ok
+          ? wf("unavailableSuffix")
+          : permitted
+            ? ""
+            : wf("adminOnlySuffix");
+        return (
+          <SelectItem key={a.type} value={a.type} disabled={!a.support.ok || !permitted}>
+            {`${label("action", a.type)}${suffix}`}
+          </SelectItem>
+        );
+      })}
+    </Select>
+  );
+}
+
+// ── Builder: small presentational helpers for the sketch-style layouts ──────────────
+
+// Renders a literal/prop string without the i18n audit reading it as copy (`text` is a
+// non-user-facing prop). These sketch layouts are throwaway comparison scaffolding, so a
+// few structural labels ("WHEN", "Summary"…) stay untranslated until a layout is chosen.
+function MetaText({ text, className }: { text: string; className?: string }) {
+  return <span className={className}>{text}</span>;
+}
+
+// A single node/panel box: kicker (WHEN/THEN/GUARD), icon, optional step number, control.
+function BuilderNode({
+  icon: Icon,
+  kicker,
+  index,
+  active,
+  children,
+}: {
+  icon: LucideIcon;
+  kicker: string;
+  index?: number;
+  active?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex-1 space-y-3 rounded-xl border bg-fill-subtle/20 p-3",
+        active ? "border-primary" : "border-border-default"
+      )}
+    >
+      <div className="flex items-center gap-2">
+        {index ? (
+          <span className="flex size-5 items-center justify-center rounded-full border border-border-default text-[11px] font-semibold text-secondary">
+            {index}
+          </span>
+        ) : null}
+        <span className="flex size-7 items-center justify-center rounded-md bg-fill-subtle text-secondary">
+          <Icon className="size-4" aria-hidden />
+        </span>
+        <MetaText
+          text={kicker}
+          className="text-[11px] font-semibold uppercase tracking-wide text-tertiary"
+        />
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// Labeled field wrapper (stepper layout). `term` (not `label`) is a resolved string —
+// a `label=` JSX attribute would be read as copy by the i18n audit.
+function FieldRow({ term, children }: { term: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1.5 text-sm">
+      <span className="font-medium text-secondary">{term}</span>
+      {children}
+    </div>
+  );
+}
+
+// One key → value line in the summary read-back (both resolved strings).
+function SummaryRow({ term, value }: { term: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 text-sm">
+      <span className="text-secondary">{term}</span>
+      <span className="min-w-0 truncate text-right font-medium text-primary">{value}</span>
+    </div>
+  );
+}
+
+// Numbered 1-2-3-4 pill strip (stepper layout). Labels are resolved strings.
+function StepStrip({ steps }: { steps: string[] }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {steps.map((step, index) => (
+        <span
+          key={step}
+          className="inline-flex items-center gap-1.5 rounded-full border border-border-subtle bg-fill-subtle/40 px-2.5 py-1 text-xs"
+        >
+          <span className="flex size-4 items-center justify-center rounded-full bg-fill-strong text-[10px] font-semibold text-primary">
+            {index + 1}
+          </span>
+          <span className="text-secondary">{step}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Decorative left-to-right connector, hidden when the row wraps to a column.
+function RowArrow() {
+  return (
+    <div className="hidden items-center self-center text-tertiary xl:flex" aria-hidden>
+      <ArrowRight className="size-4" />
+    </div>
+  );
+}
+
+// ── Builder: three arrangements of the same pieces ──────────────────────────────────
+
+// Vertical pipeline: the builder IS the diagram — card stages joined top-to-bottom by
+// arrows, ending in the live outcome strip.
+function PipelineLayout(args: LayoutArgs) {
+  return (
+    <div className="space-y-3">
+      <section className="space-y-2">
+        <StageHeading heading={args.wf("when")} />
+        {args.triggerGrid(3)}
+      </section>
+
+      {args.triggerType ? (
+        <>
+          <FlowConnector />
+          <section className="space-y-2">
+            <StageHeading heading={args.wf("guardTitle")} />
+            {args.guardEditor}
+          </section>
+        </>
+      ) : null}
+
+      <FlowConnector />
+      <section className="space-y-2">
+        <StageHeading heading={args.wf("then")} />
+        {args.actionGrid(3)}
+        {args.tierNotice}
+        {args.paramsBlock}
+        <div className="sm:max-w-xs">{args.reviewField}</div>
+      </section>
+
+      <FlowConnector />
+      <section className="space-y-2">
+        <StageHeading heading={args.wf("flowTitle")} hint={args.wf("flowIntro")} />
+        {args.flowInline}
+      </section>
+
+      {args.emailWarning}
+      {args.validationMessage}
+      {args.submitRow}
+    </div>
+  );
+}
+
+// Split: compact card builder on the left, the live node graph on the right.
+function SplitLayout(args: LayoutArgs) {
+  return (
+    <div className="grid gap-6 min-[1440px]:grid-cols-2">
+      <div className="space-y-4">
+        <section className="space-y-2">
+          <StageHeading heading={args.wf("when")} />
+          {args.triggerGrid(2)}
+        </section>
+        <section className="space-y-2">
+          <StageHeading heading={args.wf("then")} />
+          {args.actionGrid(2)}
+        </section>
+        {args.tierNotice}
+        {args.paramsBlock}
+        {args.triggerType ? (
+          <section className="space-y-2">
+            <StageHeading heading={args.wf("guardTitle")} />
+            {args.guardEditor}
+          </section>
+        ) : null}
+        {args.reviewField}
+        {args.emailWarning}
+        {args.validationMessage}
+        {args.submitRow}
+      </div>
+      <div className="min-[1440px]:sticky min-[1440px]:top-4 min-[1440px]:self-start">
+        {args.flowPanel}
+      </div>
+    </div>
+  );
+}
+
+// Track: WHEN → ONLY IF → THEN panels across the top, details and outcome below.
+function TrackLayout(args: LayoutArgs) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 xl:flex-row xl:items-stretch">
+        <TrackPanel heading={args.wf("when")}>{args.triggerGrid(1)}</TrackPanel>
+        <div className="hidden items-center xl:flex">
+          <FlowConnector orientation="horizontal" />
+        </div>
+        <TrackPanel heading={args.wf("guardTitle")}>
+          {args.triggerType ? (
+            args.guardEditor
+          ) : (
+            <p className="text-xs text-tertiary">{args.wf("triggerPlaceholder")}</p>
+          )}
+        </TrackPanel>
+        <div className="hidden items-center xl:flex">
+          <FlowConnector orientation="horizontal" />
+        </div>
+        <TrackPanel heading={args.wf("then")}>{args.actionGrid(1)}</TrackPanel>
+      </div>
+
+      {args.tierNotice}
+      {args.paramsBlock}
+      <div className="sm:max-w-xs">{args.reviewField}</div>
+
+      <section className="space-y-2">
+        <StageHeading heading={args.wf("flowTitle")} hint={args.wf("flowIntro")} />
+        {args.flowInline}
+      </section>
+
+      {args.emailWarning}
+      {args.validationMessage}
+      {args.submitRow}
+    </div>
+  );
+}
+
+// ── Builder: sketch-style layouts (dropdown selectors) ──────────────────────────────
+//
+// These mirror the four design sketches. Corrections applied throughout: the GUARD slot
+// is the user's "only if…" filter (never "capability enabled" — capability is automatic
+// and appears only in the live preview), and no wizard/canvas chrome implies engine
+// features we don't have (multi-step, branching, undo/zoom). A rule is always exactly
+// one trigger → one action → optional filter. Structural labels here are untranslated
+// on purpose (throwaway comparison scaffolding).
+
+function GuardSlot(args: LayoutArgs) {
+  return (
+    args.guardEditor ?? <p className="text-xs text-tertiary">{args.wf("triggerPlaceholder")}</p>
+  );
+}
+
+// TL — "Wizard row": WHEN → THEN → GUARD as a horizontal card row, settings + live
+// execution preview below (real engine steps, not invented narration).
+function WizardRowLayout(args: LayoutArgs) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 xl:flex-row xl:items-stretch">
+        <BuilderNode icon={args.triggerIcon} kicker="WHEN">
+          {args.triggerSelect}
+        </BuilderNode>
+        <RowArrow />
+        <BuilderNode icon={args.actionIcon} kicker="THEN">
+          {args.actionSelect}
+        </BuilderNode>
+        <RowArrow />
+        <BuilderNode icon={Filter} kicker="GUARD">
+          <GuardSlot {...args} />
+        </BuilderNode>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
+          <StageHeading heading="Rule settings" />
+          {args.reviewField}
+          {args.paramsBlock}
+        </div>
+        <div className="space-y-2">{args.flowPanel}</div>
+      </div>
+      {args.tierNotice}
+      {args.emailWarning}
+      {args.validationMessage}
+      {args.submitRow}
+    </div>
+  );
+}
+
+// TR — "Stepper + diagram": numbered 1-2-3-4 strip over stacked dropdown fields, with the
+// live node-graph preview pinned on the right.
+function StepperLayout(args: LayoutArgs) {
+  return (
+    <div className="grid gap-6 min-[1440px]:grid-cols-2">
+      <div className="space-y-4">
+        <StepStrip
+          steps={[args.wf("when"), args.wf("then"), args.wf("guardTitle"), args.wf("review")]}
+        />
+        <FieldRow term={args.wf("when")}>{args.triggerSelect}</FieldRow>
+        <FieldRow term={args.wf("then")}>{args.actionSelect}</FieldRow>
+        {args.paramsBlock}
+        <FieldRow term={args.wf("guardTitle")}>
+          <GuardSlot {...args} />
+        </FieldRow>
+        {args.reviewField}
+        {args.tierNotice}
+        {args.emailWarning}
+        {args.validationMessage}
+        {args.submitRow}
+      </div>
+      <div className="min-[1440px]:sticky min-[1440px]:top-4 min-[1440px]:self-start">
+        {args.flowPanel}
+      </div>
+    </div>
+  );
+}
+
+// BL — "Canvas": a stylized flow surface of fixed nodes. Deliberately NOT a free node
+// editor — no "add step", branching, undo/redo or zoom, since the engine runs exactly
+// one trigger → one action → optional filter.
+function CanvasLayout(args: LayoutArgs) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border-default bg-fill-subtle/10 p-4">
+        <MetaText text="Automation flow" className="text-xs font-medium text-tertiary" />
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start">
+          <BuilderNode icon={args.triggerIcon} kicker="WHEN">
+            {args.triggerSelect}
+          </BuilderNode>
+          <div className="hidden items-center self-center text-tertiary sm:flex" aria-hidden>
+            <ArrowRight className="size-4" />
+          </div>
+          <BuilderNode icon={args.actionIcon} kicker="THEN">
+            {args.actionSelect}
+          </BuilderNode>
+          <div className="hidden items-center self-center text-tertiary sm:flex" aria-hidden>
+            <ArrowRight className="size-4" />
+          </div>
+          <BuilderNode icon={Filter} kicker="GUARD">
+            <GuardSlot {...args} />
+          </BuilderNode>
+        </div>
+      </div>
+      {args.paramsBlock}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
+          <StageHeading heading="Rule settings" />
+          {args.reviewField}
+          {args.tierNotice}
+        </div>
+        <div>{args.flowPanel}</div>
+      </div>
+      {args.emailWarning}
+      {args.validationMessage}
+      {args.submitRow}
+    </div>
+  );
+}
+
+// BR — "Panels + summary": numbered WHEN/THEN/GUARD panels with an at-a-glance read-back.
+function PanelSummaryLayout(args: LayoutArgs) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-stretch">
+        <BuilderNode index={1} icon={args.triggerIcon} kicker="WHEN">
+          {args.triggerSelect}
+        </BuilderNode>
+        <RowArrow />
+        <BuilderNode index={2} icon={args.actionIcon} kicker="THEN">
+          {args.actionSelect}
+        </BuilderNode>
+        <RowArrow />
+        <BuilderNode index={3} icon={Filter} kicker="GUARD">
+          <GuardSlot {...args} />
+        </BuilderNode>
+      </div>
+      {args.paramsBlock}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
+          <StageHeading heading="Settings" />
+          {args.reviewField}
+          {args.tierNotice}
+        </div>
+        <div className="space-y-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
+          <StageHeading heading="Summary" />
+          <div className="space-y-1.5">
+            <SummaryRow term={args.wf("when")} value={args.triggerLabel} />
+            <SummaryRow term={args.wf("then")} value={args.actionLabel} />
+            <SummaryRow term={args.wf("guardTitle")} value={args.guardSummary} />
+            <SummaryRow term={args.wf("review")} value={args.reviewLabel} />
+          </div>
+        </div>
+      </div>
+      {args.emailWarning}
+      {args.validationMessage}
+      {args.submitRow}
+    </div>
+  );
+}
+
+// ── Builder (assembles the shared pieces, delegates arrangement to a layout) ─────────
+
+function WorkflowBuilder(props: {
+  layout: BuilderLayout;
   t: TFunc;
   wf: ReturnType<typeof makeWf>;
   label: ReturnType<typeof makeLabel>;
@@ -911,12 +1638,14 @@ function BuilderControls(props: {
   reviewMode: "auto" | "manual";
   params: Record<string, string>;
   paramFields: ParamField[];
+  selectedTrigger: CatalogTriggerView | null;
   selectedAction: CatalogActionView | null;
   conditionFields: string[];
   guards: GuardDraft[];
   emailEnabled: boolean | null;
   validation: BuilderValidation;
   showValidation: boolean;
+  paramSummary: string;
   busy: boolean;
   canSubmit: boolean;
   canUseAction: (type: string) => boolean;
@@ -930,180 +1659,195 @@ function BuilderControls(props: {
   onSubmit: () => void;
   onCancelEdit: () => void;
 }) {
-  const {
-    t,
-    wf,
-    label,
-    describe,
-    catalog,
-    editing,
-    triggerType,
-    actionType,
-    reviewMode,
-    params,
-    paramFields,
-    selectedAction,
-    conditionFields,
-    guards,
-    emailEnabled,
-    validation,
-    showValidation,
-    busy,
-    canSubmit,
-    canUseAction,
-  } = props;
-
+  const { wf, label } = props;
   // `requires_approval` always holds for a human — the server forces it regardless of
-  // what's stored — so offering "auto apply" here would contradict the preview beside it.
-  const reviewLocked = selectedAction?.action.execution === "requires_approval";
+  // what's stored — so offering "auto apply" here would contradict the preview.
+  const reviewLocked = props.selectedAction?.action.execution === "requires_approval";
 
-  return (
-    <div className="space-y-4">
-      <div className="space-y-4">
-        <div className="space-y-1.5 text-sm">
-          <span className="font-medium text-secondary">{wf("when")}</span>
-          <Select
-            ariaLabel={wf("when")}
-            value={triggerType}
-            disabled={editing}
-            onValueChange={props.onTriggerChange}
-            placeholder={wf("triggerPlaceholder")}
-          >
-            {(catalog?.triggers ?? []).map((trigger) => (
-              <SelectItem key={trigger.type} value={trigger.type}>
-                {label("trigger", trigger.type)}
-              </SelectItem>
-            ))}
-          </Select>
-          {describe("trigger", triggerType) ? (
-            <p className="text-secondary text-xs">{describe("trigger", triggerType)}</p>
-          ) : null}
-        </div>
+  // Resolved display strings/icons for the sketch-style layouts. Computed here (outside
+  // JSX) so the i18n keys aren't read as hard-coded copy by the audit.
+  const triggerIcon = (props.triggerType && TRIGGER_ICONS[props.triggerType]) || Zap;
+  const actionIcon = (props.actionType && ACTION_ICONS[props.actionType]) || Play;
+  const triggerLabel = props.triggerType
+    ? label("trigger", props.triggerType)
+    : wf("triggerPlaceholder");
+  const actionLabel = props.actionType
+    ? label("action", props.actionType)
+    : wf("actionPlaceholder");
+  const reviewLabel =
+    reviewLocked || props.reviewMode === "manual" ? wf("manualReview") : wf("autoApply");
+  const guardOpKey: Record<GuardDraft["op"], string> = {
+    eq: "guardIs",
+    neq: "guardIsNot",
+    in: "guardIsOneOf",
+  };
+  const activeGuards = props.guards.filter((g) => g.field && g.value.trim().length > 0);
+  const guardSummary =
+    activeGuards.length === 0
+      ? wf("guardEmpty")
+      : activeGuards
+          .map((g) => {
+            const value =
+              g.op === "in"
+                ? g.value
+                    .split(",")
+                    .map((entry) => entry.trim())
+                    .filter(Boolean)
+                    .join(", ")
+                : g.value.trim();
+            return `${label("conditionField", g.field)} ${wf(guardOpKey[g.op]).toLocaleLowerCase()} ${value}`;
+          })
+          .join(" · ");
 
-        <div className="space-y-1.5 text-sm">
-          <span className="font-medium text-secondary">{wf("then")}</span>
-          <Select
-            ariaLabel={wf("then")}
-            value={actionType}
-            disabled={editing}
-            onValueChange={props.onActionChange}
-            placeholder={wf("actionPlaceholder")}
-          >
-            {(catalog?.actions ?? []).map((a) => {
-              const permitted = canUseAction(a.type);
-              const suffix = !a.support.ok
-                ? wf("unavailableSuffix")
-                : permitted
-                  ? ""
-                  : wf("adminOnlySuffix");
-              return (
-                <SelectItem key={a.type} value={a.type} disabled={!a.support.ok || !permitted}>
-                  {`${label("action", a.type)}${suffix}`}
-                </SelectItem>
-              );
-            })}
-          </Select>
-          {describe("action", actionType) ? (
-            <p className="text-secondary text-xs">{describe("action", actionType)}</p>
-          ) : null}
-        </div>
+  const args: LayoutArgs = {
+    wf,
+    triggerType: props.triggerType,
+    triggerSelect: (
+      <TriggerSelect
+        catalog={props.catalog}
+        value={props.triggerType}
+        editing={props.editing}
+        onChange={props.onTriggerChange}
+        wf={wf}
+        label={label}
+      />
+    ),
+    actionSelect: (
+      <ActionSelect
+        catalog={props.catalog}
+        value={props.actionType}
+        editing={props.editing}
+        canUseAction={props.canUseAction}
+        onChange={props.onActionChange}
+        wf={wf}
+        label={label}
+      />
+    ),
+    triggerIcon,
+    actionIcon,
+    triggerLabel,
+    actionLabel,
+    reviewLabel,
+    guardSummary,
+    triggerGrid: (columns) => (
+      <TriggerCardGrid
+        columns={columns}
+        triggers={props.catalog?.triggers ?? []}
+        value={props.triggerType}
+        locked={props.editing}
+        onChange={props.onTriggerChange}
+        label={props.label}
+        describe={props.describe}
+      />
+    ),
+    actionGrid: (columns) => (
+      <ActionCardGrid
+        columns={columns}
+        actions={props.catalog?.actions ?? []}
+        value={props.actionType}
+        locked={props.editing}
+        canUseAction={props.canUseAction}
+        onChange={props.onActionChange}
+        label={props.label}
+        describe={props.describe}
+        wf={wf}
+      />
+    ),
+    flowInline: (
+      <WorkflowFlowGraph
+        trigger={props.selectedTrigger}
+        action={props.selectedAction}
+        guards={props.guards}
+        reviewMode={props.reviewMode}
+        paramSummary={props.paramSummary}
+        walletGap={props.validation.walletGap}
+        orientation="horizontal"
+        showChrome={false}
+      />
+    ),
+    flowPanel: (
+      <WorkflowFlowGraph
+        trigger={props.selectedTrigger}
+        action={props.selectedAction}
+        guards={props.guards}
+        reviewMode={props.reviewMode}
+        paramSummary={props.paramSummary}
+        walletGap={props.validation.walletGap}
+        orientation="vertical"
+        showChrome={true}
+      />
+    ),
+    guardEditor: props.triggerType ? (
+      <GuardEditor
+        conditionFields={props.conditionFields}
+        guards={props.guards}
+        onAdd={props.onGuardAdd}
+        onUpdate={props.onGuardUpdate}
+        onRemove={props.onGuardRemove}
+      />
+    ) : null,
+    tierNotice: <TierNotice t={props.t} selectedAction={props.selectedAction} />,
+    reviewField: (
+      <ReviewField
+        wf={wf}
+        reviewMode={props.reviewMode}
+        reviewLocked={reviewLocked}
+        onChange={props.onReviewModeChange}
+      />
+    ),
+    paramsBlock: (
+      <ParamsBlock
+        paramFields={props.paramFields}
+        params={props.params}
+        wf={wf}
+        showValidation={props.showValidation}
+        validation={props.validation}
+        onParamChange={props.onParamChange}
+      />
+    ),
+    emailWarning: (
+      <EmailWarning
+        actionType={props.actionType}
+        emailEnabled={props.emailEnabled}
+        params={props.params}
+        wf={wf}
+      />
+    ),
+    validationMessage: (
+      <ValidationMessage
+        showValidation={props.showValidation}
+        validation={props.validation}
+        wf={wf}
+      />
+    ),
+    submitRow: (
+      <SubmitRow
+        editing={props.editing}
+        busy={props.busy}
+        canSubmit={props.canSubmit}
+        wf={wf}
+        onSubmit={props.onSubmit}
+        onCancelEdit={props.onCancelEdit}
+      />
+    ),
+  };
 
-        <div className="space-y-1.5 text-sm">
-          <span className="font-medium text-secondary">{wf("review")}</span>
-          <Select
-            ariaLabel={wf("review")}
-            value={reviewLocked ? "manual" : reviewMode}
-            disabled={reviewLocked}
-            onValueChange={(v) => props.onReviewModeChange(v === "manual" ? "manual" : "auto")}
-          >
-            <SelectItem value="auto" disabled={reviewLocked}>
-              {wf("autoApply")}
-            </SelectItem>
-            <SelectItem value="manual">{wf("manualReview")}</SelectItem>
-          </Select>
-          {reviewLocked ? <p className="text-secondary text-xs">{wf("reviewLockedNote")}</p> : null}
-        </div>
-      </div>
-
-      {selectedAction ? (
-        <div className="flex items-center gap-2 text-sm">
-          <Badge variant={TIER_VARIANT[selectedAction.action.execution]}>
-            {wf(`tierLabels.${selectedAction.action.execution}`)}
-          </Badge>
-          {!selectedAction.support.ok ? (
-            <span className="text-secondary">
-              {t("DashboardIssuance.workflows.notSupported", {
-                reason: selectedAction.support.reason,
-              })}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* Per-action parameters (amount, destination, webhook URL, notify audience…). */}
-      {paramFields.length > 0 ? (
-        <div className="grid gap-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3 sm:grid-cols-2">
-          {paramFields.map((field) => (
-            <ParamFieldControl
-              key={field.key}
-              field={field}
-              wf={wf}
-              value={params[field.key] ?? ""}
-              error={showValidation ? validation.fieldErrors[field.key] : undefined}
-              onChange={(value) => props.onParamChange(field.key, value)}
-            />
-          ))}
-        </div>
-      ) : null}
-
-      {/* GUARD ("only if…") — optional filters over the trigger payload. */}
-      {triggerType ? (
-        <GuardEditor
-          conditionFields={conditionFields}
-          guards={guards}
-          onAdd={props.onGuardAdd}
-          onUpdate={props.onGuardUpdate}
-          onRemove={props.onGuardRemove}
-        />
-      ) : null}
-
-      {/* Generic, detail-free notice when the email channel isn't configured. Only an
-          explicit `false` warns — an unreachable config endpoint stays silent. A
-          specific-email rule can't fall back to in-app, so its warning is stronger. */}
-      {actionType === "notify" && emailEnabled === false ? (
-        <div className="rounded-lg border border-warning-border bg-warning-bg px-3 py-2 text-xs text-warning">
-          {(params.email ?? "").trim() ? wf("emailUnavailableSpecific") : wf("emailUnavailable")}
-        </div>
-      ) : null}
-
-      {showValidation && !validation.ok ? (
-        <p role="alert" className="text-xs text-error">
-          {validation.walletGap
-            ? wf("validationWalletGap")
-            : validation.guardsIncomplete
-              ? wf("validationGuards")
-              : wf("validationFields")}
-        </p>
-      ) : null}
-
-      <div className="flex justify-end gap-2">
-        {editing ? (
-          <Button type="button" size="sm" variant="ghost" onClick={props.onCancelEdit}>
-            {wf("cancelEdit")}
-          </Button>
-        ) : null}
-        <Button
-          type="button"
-          size="sm"
-          onClick={props.onSubmit}
-          disabled={!canSubmit}
-          iconLeft={busy ? <Loader2 className="size-3.5 animate-spin" /> : undefined}
-        >
-          {editing ? wf("saveChanges") : wf("create")}
-        </Button>
-      </div>
-    </div>
-  );
+  switch (props.layout) {
+    case "split":
+      return <SplitLayout {...args} />;
+    case "track":
+      return <TrackLayout {...args} />;
+    case "wizard":
+      return <WizardRowLayout {...args} />;
+    case "stepper":
+      return <StepperLayout {...args} />;
+    case "canvas":
+      return <CanvasLayout {...args} />;
+    case "panels":
+      return <PanelSummaryLayout {...args} />;
+    default:
+      return <PipelineLayout {...args} />;
+  }
 }
 
 function ParamFieldControl({
