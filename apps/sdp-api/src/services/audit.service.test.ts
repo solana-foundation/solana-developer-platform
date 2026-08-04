@@ -292,6 +292,36 @@ describe("AuditService", () => {
     await expect(audit.completeCritical(context as never, intent)).resolves.toBe(false);
   });
 
+  it("finds a durable critical outcome for replay repair", async () => {
+    const first = vi.fn(async () => ({
+      status: "success",
+      metadata: JSON.stringify({
+        auditPhase: "outcome",
+        auditIntentId: "aint_123",
+        signature: "sig_123",
+      }),
+    }));
+    const bind = vi.fn(() => ({ first }));
+    const db = { prepare: vi.fn(() => ({ bind })) };
+
+    await expect(
+      new AuditService(db as never).findCriticalOutcome({
+        organizationId: "org_123",
+        action: "mint",
+        resourceType: "token_transaction",
+        resourceId: "ttx_123",
+      })
+    ).resolves.toEqual({
+      status: "success",
+      metadata: {
+        auditPhase: "outcome",
+        auditIntentId: "aint_123",
+        signature: "sig_123",
+      },
+    });
+    expect(bind).toHaveBeenCalledWith("org_123", "mint", "token_transaction", "ttx_123");
+  });
+
   describe("getForAsset", () => {
     const rows = [
       {

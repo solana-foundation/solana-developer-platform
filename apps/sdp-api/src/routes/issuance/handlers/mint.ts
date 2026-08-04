@@ -1,5 +1,6 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import type { TokenTransaction } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -26,6 +27,96 @@ import { buildIdempotencyMetadata } from "./idempotency";
 import { enforceIssuanceWalletOperationPolicy } from "./policy";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+interface SettledMintEvidence {
+  signature: string;
+  slot: number;
+  tokenAccount: string;
+}
+
+function parseSettledMintEvidence(metadata: Record<string, unknown>): SettledMintEvidence | null {
+  const slot =
+    typeof metadata.slot === "string" && /^\d+$/.test(metadata.slot)
+      ? Number(metadata.slot)
+      : metadata.slot;
+  if (
+    typeof metadata.signature !== "string" ||
+    metadata.signature.length === 0 ||
+    !Number.isSafeInteger(slot) ||
+    Number(slot) < 0 ||
+    typeof metadata.tokenAccount !== "string" ||
+    metadata.tokenAccount.length === 0
+  ) {
+    return null;
+  }
+  return {
+    signature: metadata.signature,
+    slot: Number(slot),
+    tokenAccount: metadata.tokenAccount,
+  };
+}
+
+function confirmedMintTransaction(
+  transaction: TokenTransaction,
+  evidence: SettledMintEvidence
+): TokenTransaction {
+  return {
+    ...transaction,
+    status: "confirmed",
+    signature: evidence.signature,
+    slot: evidence.slot,
+    params: { ...transaction.params, tokenAccount: evidence.tokenAccount },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function persistSettledMintTransaction(
+  tokenService: TokenService,
+  transaction: TokenTransaction,
+  evidence: SettledMintEvidence
+): Promise<TokenTransaction> {
+  try {
+    return await tokenService.updateTransaction(transaction.id, {
+      status: "confirmed",
+      signature: evidence.signature,
+      slot: evidence.slot,
+      params: {
+        ...transaction.params,
+        tokenAccount: evidence.tokenAccount,
+      },
+    });
+  } catch (error) {
+    getLogger().error(
+      {
+        event: "settled_mint_transaction_persistence_failed",
+        transactionId: transaction.id,
+        signature: evidence.signature,
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      "Settled mint could not update its transaction row; durable audit evidence will repair idempotent replay"
+    );
+    return confirmedMintTransaction(transaction, evidence);
+  }
+}
+
+async function recoverSettledMintReplay(
+  auditService: AuditService,
+  tokenService: TokenService,
+  transaction: TokenTransaction
+): Promise<TokenTransaction> {
+  if (transaction.status !== "pending") return transaction;
+  const outcome = await auditService.findCriticalOutcome({
+    organizationId: transaction.organizationId,
+    action: "mint",
+    resourceType: "token_transaction",
+    resourceId: transaction.id,
+  });
+  if (outcome?.status !== "success") return transaction;
+  const evidence = parseSettledMintEvidence(outcome.metadata);
+  return evidence
+    ? persistSettledMintTransaction(tokenService, transaction, evidence)
+    : transaction;
+}
 
 type AllowlistInsertArgs = {
   tokenId: string;
@@ -454,16 +545,19 @@ export const executeMint = async (c: AppContext) => {
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
+    const replayedTransaction = await recoverSettledMintReplay(auditService, tokenService, tx);
     const txTokenAccount =
-      typeof tx.params.tokenAccount === "string" ? tx.params.tokenAccount : undefined;
+      typeof replayedTransaction.params.tokenAccount === "string"
+        ? replayedTransaction.params.tokenAccount
+        : undefined;
     return success(c, {
-      transaction: tx,
+      transaction: replayedTransaction,
       tokenAccount: txTokenAccount ?? parsed.data.mint.destination,
     });
   }
 
-  const auditService = new AuditService(getDb(c.env));
   const auditIntent = await auditService.beginCritical(c, {
     action: "mint",
     resourceType: "token_transaction",
@@ -506,25 +600,29 @@ export const executeMint = async (c: AppContext) => {
       }
     );
 
+    const settledTokenAccount = result.tokenAccount ?? parsed.data.mint.destination;
+    const settledEvidence: SettledMintEvidence = {
+      signature: result.signature,
+      slot: Number(result.slot),
+      tokenAccount: settledTokenAccount,
+    };
+    const settledTransaction = await persistSettledMintTransaction(
+      tokenService,
+      tx,
+      settledEvidence
+    );
     await auditService.completeCritical(c, auditIntent, {
       metadata: {
         signature: result.signature,
         slot: result.slot.toString(),
+        tokenAccount: settledTokenAccount,
         addedToAllowlist,
       },
     });
 
     return success(c, {
-      transaction: await tokenService.updateTransaction(tx.id, {
-        status: "confirmed",
-        signature: result.signature,
-        slot: Number(result.slot),
-        params: {
-          ...tx.params,
-          tokenAccount: result.tokenAccount,
-        },
-      }),
-      tokenAccount: result.tokenAccount,
+      transaction: settledTransaction,
+      tokenAccount: settledTokenAccount,
     });
   } catch (error) {
     if (reservedSupply === null) {

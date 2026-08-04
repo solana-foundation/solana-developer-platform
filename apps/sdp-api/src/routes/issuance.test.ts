@@ -3921,16 +3921,16 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("records the settled audit outcome before transaction bookkeeping fails", async () => {
+      it("repairs settled mint bookkeeping from durable audit evidence on replay", async () => {
         await seedAblListAddress();
 
         const idempotencyKey = `idem_${crypto.randomUUID()}`;
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
+          .mockResolvedValue({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
-          .mockResolvedValueOnce(true);
+          .mockResolvedValue(true);
         const mintToSpy = vi
           .spyOn(MosaicService.prototype, "mintTo")
           .mockImplementationOnce(async (_options, onBeforeSubmit) => {
@@ -3958,8 +3958,15 @@ describe("Issuance Routes", () => {
             env
           );
 
-          expect(res.status).toBe(500);
+          expect(res.status).toBe(200);
           expect(mintToSpy).toHaveBeenCalledTimes(1);
+          const firstBody = (await res.json()) as {
+            data: { transaction: { status: string; signature: string | null } };
+          };
+          expect(firstBody.data.transaction).toMatchObject({
+            status: "confirmed",
+            signature: mockMintResult.signature,
+          });
 
           const db = getDb(env);
           const transaction = await db
@@ -3990,6 +3997,42 @@ describe("Issuance Routes", () => {
             .bind(intent?.resource_id)
             .first<{ id: string; status: string }>();
           expect(outcome).toMatchObject({ status: "success" });
+
+          const replay = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                "Idempotency-Key": idempotencyKey,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+          expect(replay.status).toBe(200);
+          const replayBody = (await replay.json()) as {
+            data: { transaction: { status: string; signature: string | null } };
+          };
+          expect(replayBody.data.transaction).toMatchObject({
+            status: "confirmed",
+            signature: mockMintResult.signature,
+          });
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+
+          const repaired = await db
+            .prepare(
+              "SELECT status, signature FROM issuance_transactions WHERE idempotency_key = ? LIMIT 1"
+            )
+            .bind(idempotencyKey)
+            .first<{ status: string; signature: string | null }>();
+          expect(repaired).toMatchObject({
+            status: "confirmed",
+            signature: mockMintResult.signature,
+          });
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();

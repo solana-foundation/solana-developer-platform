@@ -120,6 +120,11 @@ export interface AuditLedgerIntegrity {
   externalCheckpointMatches: boolean;
 }
 
+export interface CriticalAuditOutcome {
+  status: "success" | "failure";
+  metadata: Record<string, unknown>;
+}
+
 export const AUDIT_LEDGER_CHECKPOINT_KEY = "audit-ledger:checkpoint:v1";
 export const AUDIT_LEDGER_SESSION_LOCK_KEY = "sdp:audit-ledger:external-checkpoint";
 
@@ -416,6 +421,40 @@ export class AuditService {
       );
       return false;
     }
+  }
+
+  /**
+   * Read the durable outcome for a resource whose ordinary state write may
+   * have failed after an irreversible effect. Callers use this immutable
+   * evidence to repair idempotent replays without repeating the effect.
+   */
+  async findCriticalOutcome(options: {
+    organizationId: string;
+    action: AuditAction;
+    resourceType: ResourceType;
+    resourceId: string;
+  }): Promise<CriticalAuditOutcome | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT status, metadata
+         FROM audit_logs
+         WHERE organization_id = ?
+           AND action = ?
+           AND resource_type = ?
+           AND resource_id = ?
+           AND CASE
+             WHEN metadata IS NOT NULL AND pg_input_is_valid(metadata, 'jsonb')
+             THEN metadata::jsonb ->> 'auditPhase' = 'outcome'
+             ELSE false
+           END
+         ORDER BY ledger_sequence DESC
+         LIMIT 1`
+      )
+      .bind(options.organizationId, options.action, options.resourceType, options.resourceId)
+      .first<{ status: "success" | "failure"; metadata: string }>();
+    if (!row) return null;
+    const metadata = parseOptionalPostgresJson<Record<string, unknown>>(row.metadata);
+    return metadata ? { status: row.status, metadata } : null;
   }
 
   /** Verify every immutable link and return the current externally anchorable head. */
