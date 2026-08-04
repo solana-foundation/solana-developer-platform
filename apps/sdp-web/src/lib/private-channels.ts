@@ -116,10 +116,13 @@ export function fetchPrivateChannelDeposit(
   );
 }
 
-/** Create a deposit from a custody wallet into the channel escrow. */
+/**
+ * Create a deposit from a custody wallet into the channel escrow. `mint` must be
+ * one the instance allows; omitting it uses the instance's first allowed token.
+ */
 export function createPrivateChannelDeposit(
   client: SdpApiClient,
-  body: { walletId: string; amount: string; recipient?: string }
+  body: { walletId: string; amount: string; mint?: string; recipient?: string }
 ): Promise<PrivateChannelDeposit> {
   return client.fetch<PrivateChannelDeposit>("/v1/private-channels/deposits", {
     method: "POST",
@@ -147,10 +150,13 @@ export function fetchPrivateChannelWithdrawal(
   );
 }
 
-/** Create a withdrawal: burn a custody wallet's channel balance for later devnet release. */
+/**
+ * Create a withdrawal: burn a custody wallet's channel balance for later devnet
+ * release. `mint` must be one the instance allows; omitting it uses its first.
+ */
 export function createPrivateChannelWithdrawal(
   client: SdpApiClient,
-  body: { walletId: string; amount: string; destination?: string }
+  body: { walletId: string; amount: string; mint?: string; destination?: string }
 ): Promise<PrivateChannelWithdrawal> {
   return client.fetch<PrivateChannelWithdrawal>("/v1/private-channels/withdrawals", {
     method: "POST",
@@ -187,6 +193,8 @@ export function createPrivateChannelTransfer(
     walletId: string;
     recipientVerifiedWalletId: string;
     amount: string;
+    /** Must be one the instance allows; omitting it uses its first allowed token. */
+    mint?: string;
   }
 ): Promise<PrivateChannelTransfer> {
   return client.fetch<PrivateChannelTransfer>(
