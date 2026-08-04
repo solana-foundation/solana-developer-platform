@@ -249,7 +249,16 @@ const signingSinkInventory: Record<string, string[]> = {
     "signAndSend",
     "signTransactionMessageWithSigners",
   ],
+  "packages/sdp-solana/src/token-2022.ts": ["signAndSend", "signTransactionMessageWithSigners"],
 };
+
+const valueMovingSourceRoots = [
+  "apps/sdp-api/src/routes",
+  "apps/sdp-api/src/services/payments",
+  "apps/sdp-api/src/services/private-channels",
+  "packages/sdp-issuance/src",
+  "packages/sdp-solana/src",
+];
 
 function readSource(relativePath: string): string {
   return readFileSync(path.join(repositoryRoot, relativePath), "utf8");
@@ -274,16 +283,10 @@ function sourceFiles(directory: string): string[] {
 }
 
 function discoverSigningSinks(): Record<string, string[]> {
-  const roots = [
-    "apps/sdp-api/src/routes",
-    "apps/sdp-api/src/services/payments",
-    "apps/sdp-api/src/services/private-channels",
-    "packages/sdp-issuance/src",
-  ];
   const sinkPattern = /\.(signAndSend|signAsFeePayer)\(|\b(signTransactionMessageWithSigners)\(/g;
   const inventory: Record<string, string[]> = {};
 
-  for (const root of roots) {
+  for (const root of valueMovingSourceRoots) {
     for (const file of sourceFiles(path.join(repositoryRoot, root))) {
       const sinks = [...readFileSync(file, "utf8").matchAll(sinkPattern)].map(
         (match) => match[1] ?? match[2]
@@ -349,7 +352,10 @@ describe("value-moving authorization and replay conformance", () => {
   });
 
   it("keeps durable nonce lifetimes disabled", () => {
-    const productionSource = Object.keys(signingSinkInventory).map(readSource).join("\n");
+    const productionSource = valueMovingSourceRoots
+      .flatMap((root) => sourceFiles(path.join(repositoryRoot, root)))
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n");
     expect(productionSource).not.toMatch(
       /durable.?nonce|nonce.?account|advance.?nonce|setTransactionMessageLifetimeUsingDurableNonce/i
     );
