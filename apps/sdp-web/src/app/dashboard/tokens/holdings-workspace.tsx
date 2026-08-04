@@ -1,6 +1,7 @@
 "use client";
 
 import type { CustodyWalletTokenBalance } from "@sdp/types";
+import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { TokenMark } from "@/components/token-mark";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -17,6 +18,7 @@ import {
   formatDisplayAmount,
   resolveTransferTokenLabel,
 } from "../payments/payments-overview.utils";
+import { tokenActivityHref } from "./holdings-links";
 import { buildHoldingsRows } from "./holdings-rows";
 
 /**
@@ -77,10 +79,16 @@ export function HoldingsWorkspace({ balances }: { balances: CustodyWalletTokenBa
                 return (
                   <TableRow key={row.mint}>
                     <TableCell className="pl-6">
-                      <div className="flex min-w-0 items-center gap-3">
+                      {/* The transactions table already filters by asset, so a
+                          holding's history is a link into that filter rather than
+                          a second surface showing the same rows. */}
+                      <DashboardNavigationLink
+                        href={tokenActivityHref(symbol)}
+                        className="flex min-w-0 items-center gap-3 hover:underline"
+                      >
                         <TokenMark mint={row.mint} symbol={symbol} size="sm" />
                         <span className="min-w-0 truncate font-medium text-primary">{symbol}</span>
-                      </div>
+                      </DashboardNavigationLink>
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-secondary">
                       {formatDisplayAmount(row.uiAmount, symbol)}
