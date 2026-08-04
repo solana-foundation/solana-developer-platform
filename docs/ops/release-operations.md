@@ -32,7 +32,7 @@ The deploy identity needs the least-privilege permissions required to push to th
 Release automation also reads these repository variables:
 
 - `TRANSLATION_AGENT_URL` — required when a release has missing UI translations
-- `TRANSLATION_AGENT_MODEL` — optional model name included in the release summary
+- `TRANSLATION_AGENT_MODEL` — optional model name included in the release summary; the translation agent defaults to `deepseek/deepseek-v4-flash`
 - `TRANSLATION_AGENT_MAX_KEYS` — optional translation budget; defaults to `500`
 - `TRANSLATION_AGENT_BATCH_SIZE` — optional request batch size; defaults to `50`
 - `TRANSLATION_AGENT_MAX_RETRIES` — optional retry count; defaults to `2`

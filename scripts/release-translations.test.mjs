@@ -15,10 +15,19 @@ import {
 
 const guidance = {
   default: {
-    principles: ["Translate meaning, not English word order."],
+    context: {
+      product: "Solana Developer Platform",
+      audience: "Web3 developers",
+    },
+    instructions: ["Translate meaning, not English word order."],
   },
   locales: {
     fr: {
+      context: {
+        localeName: "français (France)",
+        convention: "Established Web3 terms are commonly retained in English.",
+      },
+      instructions: ["Address the user with vous."],
       terminology: [{ source: "token", preferred: "Token", avoid: "jeton" }],
       forbiddenTerms: [
         {
@@ -161,8 +170,18 @@ test("uses the Eve structured session API and preserves placeholders", async () 
         const request = JSON.parse(options.body);
         assert.equal(request.outputSchema.properties.translations.minItems, 1);
         const message = JSON.parse(request.message);
-        assert.deepEqual(message.guidance.general, guidance.default);
-        assert.deepEqual(message.guidance.locale, guidance.locales.fr);
+        assert.deepEqual(message.guidance.context, {
+          general: guidance.default.context,
+          locale: guidance.locales.fr.context,
+        });
+        assert.deepEqual(message.guidance.instructions, {
+          general: guidance.default.instructions,
+          locale: guidance.locales.fr.instructions,
+          terminology: guidance.locales.fr.terminology,
+        });
+        assert.equal("context" in message, false);
+        assert.equal("instructions" in message, false);
+        assert.equal("forbiddenTerms" in message.guidance.instructions, false);
         assert.equal(message.translations[0].context.nearby[0].translation, "Bienvenue");
         return {
           ok: true,
