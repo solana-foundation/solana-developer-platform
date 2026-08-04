@@ -20,6 +20,7 @@ import {
 } from "@/db/repositories/policy.repository";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import {
   attachTokenSymbolsToBalances,
@@ -348,7 +349,7 @@ export async function updateWalletPolicy(c: AppContext) {
   let rows: Awaited<ReturnType<typeof repository.upsertWalletPolicies>>;
   if (parsed.data.rules || parsed.data.defaultAction) {
     rows = await getDb(c.env).transaction(async (tx) => {
-      const txRepository = createPostgresPaymentsRepository(tx);
+      const txRepository = createPostgresPaymentsRepository(tx, getRequestTenantScope(c));
       const savedRows = await txRepository.upsertWalletPolicies(walletPolicyInputs);
 
       if (savedRows.length === 0) {

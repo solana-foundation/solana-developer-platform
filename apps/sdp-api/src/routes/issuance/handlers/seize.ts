@@ -6,15 +6,17 @@ import { getDb } from "@/db";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
-import { TokenService } from "@/services/token.service";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { seizeSchema } from "../schemas";
 import { assertDestinationAllowedByControlList } from "./access-control";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
@@ -35,7 +37,7 @@ export const prepareSeize = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -80,7 +82,7 @@ export const prepareSeize = async (c: AppContext) => {
   const destination = assertValidAddress(parsed.data.seize.destination, "destination");
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
   const prepared = await mosaic.prepareForceTransfer({
     mint: mintAddress,
     source,
@@ -151,7 +153,7 @@ export const executeSeize = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -223,7 +225,7 @@ export const executeSeize = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   try {
     const result = await mosaic.forceTransfer({

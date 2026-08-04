@@ -131,7 +131,8 @@
     "completeRequiredFields": "Complétez les champs requis : {fields}",
     "invalidApiKeyFormat": "Format de clé API invalide. Utilisez une clé brute comme sk_test_... ou sk_live_... avec un suffixe valide.",
     "playgroundExecutionFailed": "Échec de l’exécution Playground.",
-    "requestExecutionFailed": "Échec de l’exécution de la requête."
+    "requestExecutionFailed": "Échec de l’exécution de la requête.",
+    "invalidJsonField": "{field} doit contenir un JSON valide."
   },
   "dashboardShell": {
     "workspace": "Espace de travail",
@@ -198,7 +199,8 @@
     "collapsePaymentsMenu": "Réduire le menu Paiements",
     "backToWallet": "Retour au Wallet",
     "walletControls": "Contrôles du Wallet",
-    "backToApprovals": "Retour aux approbations"
+    "backToApprovals": "Retour aux approbations",
+    "privateChannels": "Canaux privés"
   },
   "validation": {
     "allowlistValueRequired": "La valeur Allowlist est requise",

@@ -1,4 +1,3 @@
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import {
   decideRecurringPaymentActivationTransition,
   getRecurringPaymentOperationStaleBefore,
@@ -27,6 +26,7 @@ import {
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
@@ -34,6 +34,7 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { parseU64String } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
@@ -42,6 +43,13 @@ import {
   generateProgramPlanId,
   sendSubscriptionInstructions,
 } from "./shared";
+
+function tenantScope(input: { organizationId: string; projectId: string }) {
+  return createTenantScope({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+}
 
 async function resetRecurringPaymentActivationUnlessAlreadyActive(input: {
   recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
@@ -555,8 +563,8 @@ export async function activateRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   createdBy: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
+  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
   const rpc = solanaRpc.createRpc(input.env);
   const nowIso = new Date().toISOString();
 
@@ -789,7 +797,12 @@ export async function activateRecurringPayment(input: {
         subscriptionAuthorityAddress,
         { commitment: "confirmed" }
       );
-      const feePayer = await createFeePaymentAdapter(input.env).getFeePayer();
+      const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        actor: { type: "wallet", id: input.sourceWallet.walletId },
+      });
+      const feePayer = await feePayment.getFeePayer();
       const payer = createNoopSigner(feePayer);
 
       subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({

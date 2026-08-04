@@ -1466,6 +1466,33 @@ describe("Issuance Routes", () => {
       expect(body.data.token.description).toBe("New description");
     });
 
+    it("rejects metadata updates while token deployment is in progress", async () => {
+      await getDb(env)
+        .prepare("UPDATE issued_tokens SET status = 'deploying' WHERE id = ?")
+        .bind(tokenId)
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Divergent metadata" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(409);
+      const row = await getDb(env)
+        .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+        .bind(tokenId)
+        .first<{ name: string }>();
+      expect(row?.name).toBe("Update Token");
+    });
+
     it("updates deployed token metadata on-chain before persisting local fields", async () => {
       const db = getDb(env);
       const activeTokenId = "tok_metadataupdate1";
@@ -2161,7 +2188,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("surfaces both errors when add compensation fails", async () => {
+      it("keeps a pending DB row and audit trail when on-chain confirmation is ambiguous", async () => {
         const db = getDb(env);
         await db
           .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
@@ -2170,19 +2197,15 @@ describe("Issuance Routes", () => {
 
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
-          .mockRejectedValueOnce(new Error("on-chain add failed"));
-        // After addToList fails the handler re-checks on-chain membership; if
-        // it returns true, we'd keep the DB row and succeed — for this test we
-        // want the rollback path, so return false.
+          .mockRejectedValueOnce(new Error("on-chain add failed"))
+          .mockResolvedValueOnce(undefined as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(false);
-        const deleteAllowlistEntrySpy = vi
-          .spyOn(TokenService.prototype, "deleteAllowlistEntry")
-          .mockRejectedValueOnce(new Error("rollback failed"));
+        const deleteAllowlistEntrySpy = vi.spyOn(TokenService.prototype, "deleteAllowlistEntry");
 
         try {
           const res = await app.request(
@@ -2202,10 +2225,44 @@ describe("Issuance Routes", () => {
           );
 
           expect(res.status).toBe(500);
-          const body = await res.json();
-          expect(body.error.code).toBe("INTERNAL_ERROR");
-          expect(body.error.details.originalError).toBe("on-chain add failed");
-          expect(body.error.details.restoreError).toBe("rollback failed");
+          expect(deleteAllowlistEntrySpy).not.toHaveBeenCalled();
+
+          const entry = await db
+            .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
+            .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
+            .first<{ id: string; status: string }>();
+          expect(entry?.status).toBe("pending");
+          const audit = await db
+            .prepare(
+              `SELECT id FROM audit_logs
+               WHERE action = 'create' AND resource_type = 'token_allowlist'
+                 AND resource_id = ?`
+            )
+            .bind(entry?.id)
+            .first<{ id: string }>();
+          expect(audit).not.toBeNull();
+
+          const retry = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                address: TEST_SOLANA_ADDRESSES.wallet1,
+                label: "On-chain Wallet",
+              }),
+            },
+            env
+          );
+          expect(retry.status).toBe(201);
+          const reconciled = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry?.id)
+            .first<{ status: string }>();
+          expect(reconciled?.status).toBe("active");
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
@@ -2298,11 +2355,7 @@ describe("Issuance Routes", () => {
         expect(res.status).toBe(409);
       });
 
-      it("restores prior revoked state on rollback when re-adding a previously-revoked entry", async () => {
-        // Reactivated row (previously revoked → addAllowlistEntry promotes back
-        // to active in-place). If addToList then fails and on-chain membership
-        // is not confirmed, rollback must re-revoke (not hard-delete) so the
-        // operator's original revocation record survives.
+      it("keeps a re-added entry pending when on-chain membership is uncertain", async () => {
         const db = getDb(env);
         await db
           .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
@@ -2354,7 +2407,7 @@ describe("Issuance Routes", () => {
             .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
             .first<{ id: string; status: string }>();
           expect(row?.id).toBe(entry.id);
-          expect(row?.status).toBe("revoked");
+          expect(row?.status).toBe("pending");
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
@@ -2500,7 +2553,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("restores the database entry if on-chain control-list removal fails", async () => {
+      it("keeps the database entry active until a retry confirms on-chain removal", async () => {
         await app.request(
           `/v1/issuance/tokens/${tokenId}/allowlist`,
           {
@@ -2532,10 +2585,14 @@ describe("Issuance Routes", () => {
 
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const removeFromListSpy = vi
           .spyOn(MosaicService.prototype, "removeFromList")
-          .mockRejectedValueOnce(new Error("mosaic removal failed"));
+          .mockRejectedValueOnce(new Error("mosaic removal failed"))
+          .mockResolvedValueOnce(undefined as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
 
         try {
           const res = await app.request(
@@ -2549,19 +2606,79 @@ describe("Issuance Routes", () => {
 
           expect(res.status).toBe(500);
 
-          const restoredListRes = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+          const stillActive = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entryId)
+            .first<{ status: string }>();
+          expect(stillActive?.status).toBe("active");
+
+          const retry = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
             {
+              method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
             },
             env
           );
-          const restoredListBody = await restoredListRes.json();
-          expect(restoredListBody.data).toHaveLength(1);
-          expect(restoredListBody.data[0].id).toBe(entryId);
+          expect(retry.status).toBe(204);
+          expect(removeFromListSpy).toHaveBeenCalledTimes(2);
+
+          const revoked = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entryId)
+            .first<{ status: string }>();
+          expect(revoked?.status).toBe("revoked");
         } finally {
           createOrgSignerSpy.mockRestore();
           removeFromListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+        }
+      });
+
+      it("treats a timed-out removal as success when on-chain absence is confirmed", async () => {
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+        const tokenService = new TokenService(db);
+        const { entry } = await tokenService.addAllowlistEntry({
+          tokenId,
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+          addedBy: TEST_PROJECT_API_KEY.id,
+          initialStatus: "pending",
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const removeFromListSpy = vi
+          .spyOn(MosaicService.prototype, "removeFromList")
+          .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist/${entry.id}`,
+            {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+
+          expect(res.status).toBe(204);
+          const revoked = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry.id)
+            .first<{ status: string }>();
+          expect(revoked?.status).toBe("revoked");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          removeFromListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
         }
       });
     });

@@ -3,8 +3,8 @@ import type { MuralWebhookEvent } from "@sdp/payments/ramps/providers/mural/clie
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
 import {
-  createCounterpartiesRepository,
-  createPaymentsRepository,
+  createSystemCounterpartiesRepository,
+  createSystemPaymentsRepository,
   type PaymentsRepository,
   type PaymentTransferRow,
   type PaymentTransferStatus,
@@ -57,14 +57,14 @@ async function handleAccountCredited(
   getLogger().info(
     `[mural webhook] account_credited account=${event.accountId} amount=${event.tokenAmount} org=${event.organizationId}`
   );
-  const counterparty = await createCounterpartiesRepository(
+  const counterparty = await createSystemCounterpartiesRepository(
     c.env
   ).findCounterpartyByMuralOrganizationId(event.organizationId);
   if (!counterparty) {
     getLogger().warn(`[mural webhook] no counterparty for org ${event.organizationId}`);
     return;
   }
-  const payments = createPaymentsRepository(c.env);
+  const payments = createSystemPaymentsRepository(c.env);
   const transfer = await findMuralOnrampTransfer(payments, counterparty, ["awaiting_payment"]);
   if (!transfer) {
     getLogger().warn(
@@ -94,7 +94,7 @@ async function handleOrganizationLifecycleEvent(
   c: AppContext,
   event: Extract<MuralWebhookEvent, { kind: "kyc_status" | "tos_accepted" }>
 ): Promise<void> {
-  const repo = createCounterpartiesRepository(c.env);
+  const repo = createSystemCounterpartiesRepository(c.env);
   const counterparty = await repo.findCounterpartyByMuralOrganizationId(event.organizationId);
   if (!counterparty) {
     getLogger().warn(`[mural webhook] no counterparty for organization ${event.organizationId}`);

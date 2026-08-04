@@ -4,6 +4,7 @@ import {
   type ApiKeyWalletPolicyBindingRow,
   createPolicyRepository,
 } from "@/db/repositories";
+import type { TenantScope } from "@/lib/tenant-scope";
 import {
   type ApiKeyWalletBinding,
   listApiKeyWalletBindingsForApiKeys,
@@ -54,6 +55,7 @@ function mapPolicyBindingSummary(
 export async function buildApiKeyAccessSummaries(
   env: Env,
   db: ApiKeyWalletBindingsDb,
+  scope: TenantScope,
   apiKeyIds: string[]
 ): Promise<Map<string, ApiKeyAccessSummary>> {
   const uniqueApiKeyIds = uniqueStrings(apiKeyIds);
@@ -61,7 +63,7 @@ export async function buildApiKeyAccessSummaries(
     return new Map();
   }
 
-  const policyRepository = createPolicyRepository(env);
+  const policyRepository = createPolicyRepository(env, scope);
 
   const [walletBindings, policyBindings] = await Promise.all([
     listApiKeyWalletBindingsForApiKeys(db, uniqueApiKeyIds),

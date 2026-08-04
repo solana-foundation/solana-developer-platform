@@ -5,9 +5,13 @@
  * fee payment provider integration (Kora for gasless transactions).
  */
 
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import { Token2022Service } from "@sdp/solana/token-2022";
 import type { TransactionSigner } from "@solana/kit";
+import {
+  createSponsorshipFeePayment,
+  createUnscopedSponsorshipFeePayment,
+  type SponsorshipScope,
+} from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 /**
@@ -20,9 +24,17 @@ import type { Env } from "@/types/env";
  * to pay transaction fees (gasless for the custody wallet). Otherwise,
  * the custody wallet pays fees directly.
  */
-export function createToken2022Service(env: Env, signer: TransactionSigner): Token2022Service {
+export function createToken2022Service(
+  env: Env,
+  signer: TransactionSigner,
+  sponsorshipScope?: SponsorshipScope
+): Token2022Service {
   // Only create fee payment adapter if Kora is configured
-  const feePayment = env.KORA_RPC_URL ? createFeePaymentAdapter(env) : undefined;
+  const feePayment = env.KORA_RPC_URL
+    ? sponsorshipScope
+      ? createSponsorshipFeePayment(env, sponsorshipScope)
+      : createUnscopedSponsorshipFeePayment(env)
+    : undefined;
 
   return new Token2022Service(env, signer, feePayment);
 }

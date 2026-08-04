@@ -17,8 +17,8 @@ import type { SignatureStatusInfo } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import {
-  createPaymentsRepository,
-  createPaymentTransferBatchesRepository,
+  createSystemPaymentsRepository,
+  createSystemPaymentTransferBatchesRepository,
   type PaymentsRepository,
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories";
@@ -55,7 +55,7 @@ async function updateTerminalTransfer(
     if (transfer.project_id === null) {
       throw internalError("Transfer batch transfer is missing a project");
     }
-    await createPaymentTransferBatchesRepository(env).settleTransferBatch({
+    await createSystemPaymentTransferBatchesRepository(env).settleTransferBatch({
       transferId: transfer.id,
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
@@ -70,7 +70,7 @@ async function updateTerminalTransfer(
 }
 
 export async function trackPendingTransfers(env: Env): Promise<void> {
-  const repo = createPaymentsRepository(env);
+  const repo = createSystemPaymentsRepository(env);
   const now = new Date();
   const nowIso = now.toISOString();
 

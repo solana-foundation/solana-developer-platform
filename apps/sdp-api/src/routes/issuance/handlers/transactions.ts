@@ -10,7 +10,6 @@ import {
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { badRequest, badRequestQuery, notFound, walletNotFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
@@ -19,9 +18,9 @@ import {
   getAllowedApiKeyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import { getTenantTokenService, requireProjectScope } from "../helpers";
 import { listTokenTransactionsQuerySchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -223,7 +222,7 @@ export const listTokenTransactions = async (c: AppContext) => {
   }
   const { page, pageSize, status, type } = parsed.data;
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -253,7 +252,7 @@ export const listTokenTransactions = async (c: AppContext) => {
 
 export const listTransactions = async (c: AppContext) => {
   const auth = getAuth(c);
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const types = parseTransactionTypes(c);
   const status = parseTransactionStatus(c.req.query("status"));
   const page = parsePositiveInteger(c.req.query("page"), 1, "page");

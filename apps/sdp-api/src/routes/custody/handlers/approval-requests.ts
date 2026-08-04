@@ -4,7 +4,8 @@ import { type ApprovalRequestDetailRow, createPolicyRepository } from "@/db/repo
 import { type ApiKeyContext, getAuth } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { WalletPolicyEnforcementService } from "@/services/policy-enforcement.service";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { WalletPolicyEnforcementService } from "@/services/policy/enforcement.service";
 import type { AppContext } from "../context";
 import { approvalRequestListQuerySchema, approvalRequestParamsSchema } from "../schemas";
 
@@ -80,7 +81,7 @@ function actorId(auth: ApiKeyContext): string {
 
 async function readApprovalRequest(c: AppContext, approvalRequestId: string) {
   const auth = getAuth(c);
-  const repository = createPolicyRepository(c.env);
+  const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
   const row = await repository.getApprovalRequestDetail({
     organizationId: auth.organizationId,
     projectId: auth.projectId,
@@ -105,7 +106,10 @@ export const listApprovalRequests = async (c: AppContext) => {
     throw badRequestQuery({ errors: z.flattenError(parsed.error).fieldErrors });
   }
 
-  const rows = await createPolicyRepository(c.env).listApprovalRequestDetails({
+  const rows = await createPolicyRepository(
+    c.env,
+    getRequestTenantScope(c)
+  ).listApprovalRequestDetails({
     organizationId: auth.organizationId,
     projectId: auth.projectId,
     status: parsed.data.status,
@@ -127,7 +131,7 @@ export const getApprovalRequest = async (c: AppContext) => {
 export const approveApprovalRequest = async (c: AppContext) => {
   const { approvalRequestId } = parseApprovalRequestParams(c);
   const auth = getAuth(c);
-  const repository = createPolicyRepository(c.env);
+  const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
   const approvalRequest = await new WalletPolicyEnforcementService(
     repository
   ).approveApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
@@ -144,7 +148,7 @@ export const approveApprovalRequest = async (c: AppContext) => {
 export const rejectApprovalRequest = async (c: AppContext) => {
   const { approvalRequestId } = parseApprovalRequestParams(c);
   const auth = getAuth(c);
-  const repository = createPolicyRepository(c.env);
+  const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
   const approvalRequest = await new WalletPolicyEnforcementService(
     repository
   ).rejectApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
@@ -161,7 +165,7 @@ export const rejectApprovalRequest = async (c: AppContext) => {
 export const cancelApprovalRequest = async (c: AppContext) => {
   const { approvalRequestId } = parseApprovalRequestParams(c);
   const auth = getAuth(c);
-  const repository = createPolicyRepository(c.env);
+  const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
   const approvalRequest = await new WalletPolicyEnforcementService(
     repository
   ).cancelApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);

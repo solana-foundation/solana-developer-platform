@@ -91,7 +91,6 @@ jobs:
           git fetch origin codex/release-main
           git checkout -B codex/release-main origin/codex/release-main
           node .github/scripts/translate-missing.mjs
-          git push origin HEAD:codex/release-main
 
   publish-release:
     if: "${{ startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
