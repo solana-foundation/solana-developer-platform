@@ -1,7 +1,7 @@
 import type { TokenAllowlistEntry } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, proxyToSdpApi } from "@/lib/sdp-api";
 
 function parseErrorMessage(body: string): string {
   try {
@@ -94,4 +94,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       { status: 500 }
     );
   }
+}
+
+export async function POST(request: Request, { params }: { params: Promise<{ tokenId: string }> }) {
+  const { tokenId } = await params;
+
+  return proxyToSdpApi({
+    request,
+    traceSource: "route.dashboard.issuance.token.allowlist.add",
+    path: `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist`,
+  });
 }

@@ -147,24 +147,16 @@ async function waitForActionResponse(
   trigger: () => Promise<void>
 ): Promise<void> {
   const responsePromise = page.waitForResponse(
-    (response) => {
-      const request = response.request();
-      const postData = request.postData() ?? "";
-      return (
-        response.url().endsWith("/api/playground/execute") &&
-        request.method() === "POST" &&
-        postData.includes(`"method":"${options.method}"`) &&
-        postData.includes(options.pathIncludes)
-      );
-    },
+    (response) =>
+      response.request().method() === options.method &&
+      new URL(response.url()).pathname.includes(options.pathIncludes),
     { timeout: 180_000 }
   );
 
   await trigger();
   const response = await responsePromise;
-  expect(response.ok()).toBe(true);
-  const payload = (await response.json().catch(() => null)) as { ok?: boolean } | null;
-  expect(payload?.ok, JSON.stringify(payload)).toBe(true);
+  const body = await response.text().catch(() => "");
+  expect(response.ok(), body).toBe(true);
 }
 
 async function confirmAction(page: Page, confirmButtonLabel: string): Promise<void> {
@@ -468,7 +460,7 @@ test.describe
         page,
         {
           method: "POST",
-          pathIncludes: `/v1/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist`,
+          pathIncludes: `/api/dashboard/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist`,
         },
         async () => {
           await page.getByRole("button", { name: "Add allowlist entry" }).click();
@@ -487,7 +479,7 @@ test.describe
         page,
         {
           method: "DELETE",
-          pathIncludes: `/v1/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist/`,
+          pathIncludes: `/api/dashboard/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist/`,
         },
         async () => {
           await allowlistEntry.getByRole("button", { name: "Remove entry" }).click();
@@ -515,7 +507,7 @@ test.describe
           page,
           {
             method: "POST",
-            pathIncludes: `/v1/issuance/tokens/${authorityTokenId}/authority`,
+            pathIncludes: `/api/dashboard/issuance/tokens/${authorityTokenId}/authority`,
           },
           async () => {
             await page.getByRole("button", { name: "Save authority" }).click();
@@ -540,7 +532,7 @@ test.describe
         page,
         {
           method: "POST",
-          pathIncludes: `/v1/issuance/tokens/${authorityTokenId}/authority`,
+          pathIncludes: `/api/dashboard/issuance/tokens/${authorityTokenId}/authority`,
         },
         async () => {
           await page.getByRole("button", { name: "Yes, set to None" }).click();
