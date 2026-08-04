@@ -302,6 +302,11 @@ export {
   createPrivateChannelVerifiedWalletRepository,
   createPrivateChannelWithdrawalRepository,
   createProjectUserRepository,
+  createSystemAssetProfilesRepository,
+  createSystemCounterpartiesRepository,
+  createSystemPaymentRequestsRepository,
+  createSystemPaymentsRepository,
+  createSystemPaymentTransferBatchesRepository,
   createTokenRepository,
 } from "./repository-factory";
 export type {

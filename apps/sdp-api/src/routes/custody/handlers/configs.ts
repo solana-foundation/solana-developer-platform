@@ -1,6 +1,7 @@
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { createSigningService } from "@/services/domain/signing.service";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
 import type { CustodyConfigResponse, CustodyConfigsResponse } from "../schemas";
@@ -9,7 +10,7 @@ export const getConfig = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
 
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const config = await signingService.getConfiguration(actor.organizationId, projectId);
 
   if (!config) {
@@ -40,7 +41,7 @@ export const getConfig = async (c: AppContext) => {
 export const getConfigs = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const { configs, defaultConfigId } = await signingService.getConfigurations(
     actor.organizationId,
     projectId

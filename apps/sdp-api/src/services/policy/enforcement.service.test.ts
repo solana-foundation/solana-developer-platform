@@ -9,7 +9,12 @@ import type {
   PolicyRepository,
   WalletOperationRow,
 } from "@/db/repositories";
-import { WalletPolicyEnforcementService } from "./policy-enforcement.service";
+import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
+import type { Env } from "@/types/env";
+import {
+  enforceWalletOperationPolicy,
+  WalletPolicyEnforcementService,
+} from "./enforcement.service";
 
 const baseOperation: CreateWalletOperationInput = {
   organizationId: "org_1",
@@ -263,6 +268,18 @@ function createRepository(options: {
 }
 
 describe("WalletPolicyEnforcementService", () => {
+  it("rejects operation tenant claims that differ from the trusted request scope", async () => {
+    const scope = createTenantScope({ organizationId: "org_1", projectId: "prj_1" });
+
+    await expect(
+      enforceWalletOperationPolicy({} as Env, scope, {
+        ...baseOperation,
+        organizationId: "org_foreign",
+        projectId: "prj_foreign",
+      })
+    ).rejects.toBeInstanceOf(TenantScopeViolationError);
+  });
+
   it("records default-allow operations and marks them evaluated", async () => {
     const repository = createRepository({});
     const service = new WalletPolicyEnforcementService(repository);
@@ -571,6 +588,7 @@ describe("WalletPolicyEnforcementService", () => {
 
     expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
       organizationId: "org_1",
+      projectId: "prj_1",
       approvalRequestId: "appr_1",
       status: "failed",
       operationStatus: "failed",
@@ -589,11 +607,12 @@ describe("WalletPolicyEnforcementService", () => {
     const service = new WalletPolicyEnforcementService(repository);
 
     await expect(service.enforce(baseOperation)).rejects.toThrow(
-      "Wallet operation policy enforcement failed (evaluation write unavailable) and approval cleanup failed (approval cleanup unavailable)"
+      "Wallet operation policy enforcement failed (evaluation write unavailable) and cleanup failed (approval cleanup unavailable)"
     );
 
     expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
       organizationId: "org_1",
+      projectId: "prj_1",
       approvalRequestId: "appr_1",
       status: "failed",
       operationStatus: "failed",

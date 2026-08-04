@@ -117,7 +117,7 @@ const walletOperationFamilySchema = z.enum([
   "provider_admin",
 ]);
 
-const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnion("kind", [
+export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnion("kind", [
   z.object({
     ...policyRuleBaseShape,
     kind: z.literal("operation_family"),

@@ -4,15 +4,17 @@ import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { badRequest, badRequestQuery, notFound } from "@/lib/errors";
+import { badRequest, badRequestQuery, conflict, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
-import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { createTokenSchema, listTokensQuerySchema, updateTokenSchema } from "../schemas";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 
@@ -73,7 +75,7 @@ export const createToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const signingWalletId = resolveApiKeySigningWalletId(auth, parsed.data.signingWalletId, [
     "tokens:write",
   ]);
@@ -143,7 +145,7 @@ export const listTokens = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const { tokens, total } = await tokenService.listTokens(projectId, {
     // A blank search passes validation (an empty input isn't an error) but must
     // not become an `ILIKE '%%'` filter.
@@ -165,7 +167,7 @@ export const listTokens = async (c: AppContext) => {
 export const listTokenFacets = async (c: AppContext) => {
   const { projectId } = requireProjectScope(c);
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const facets = await tokenService.listTokenFacets(projectId);
 
   return success(c, facets);
@@ -175,7 +177,7 @@ export const getToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -203,7 +205,7 @@ export const updateToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
 
   const existing = await tokenService.getToken({
     tokenId,
@@ -212,6 +214,13 @@ export const updateToken = async (c: AppContext) => {
   });
   if (!existing) {
     throw notFound("Token");
+  }
+
+  // `deploying` is an internal transient state, so it is not part of the
+  // public TokenStatus union even though it can be observed between the claim
+  // and final deployment writes. Reject the whole PATCH during that window.
+  if (String(existing.status) === "deploying") {
+    throw conflict("Token deployment is in progress; retry after it completes");
   }
 
   // Access-control enforcement is baked into the mint at deploy; the flag only
@@ -261,7 +270,7 @@ export const updateToken = async (c: AppContext) => {
         currentAuthority: currentAuthorityRaw,
       });
 
-      const mosaic = createMosaicService(c.env, signer, "sponsored");
+      const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
       const result = await mosaic.updateMetadata({
         mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),
         ...metadataPatch,
@@ -273,7 +282,10 @@ export const updateToken = async (c: AppContext) => {
       metadataUpdateSlot = result ? result.slot.toString() : null;
     }
 
-    const token = await tokenService.updateToken(tokenId, parsed.data);
+    const token = await tokenService.updateToken(tokenId, parsed.data, {
+      status: existing.status,
+      mintAddress: existing.mintAddress,
+    });
 
     // Audit log
     const auditService = new AuditService(getDb(c.env));

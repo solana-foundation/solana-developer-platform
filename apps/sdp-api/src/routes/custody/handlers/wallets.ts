@@ -13,6 +13,7 @@ import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import { getLogger } from "@/runtime/logger";
@@ -472,7 +473,7 @@ export const createWallet = async (c: AppContext) => {
     });
   }
 
-  const signingService = signingServiceModule.createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {
     const wallet = await signingService.createWallet(actor.organizationId, projectId, {
@@ -521,7 +522,7 @@ export const deleteWallet = async (c: AppContext) => {
   }
 
   const projectId = c.get("projectId");
-  const signingService = signingServiceModule.createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {
     await signingService.deleteWallet(actor.organizationId, projectId, {
@@ -574,14 +575,12 @@ export const setDefaultWallet = async (c: AppContext) => {
   }
 
   const projectId = c.get("projectId");
-  const signingService = signingServiceModule.createSigningService(c.env);
-  const config = parsed.data.provider
-    ? await signingService.getConfigurationByProvider(
-        actor.organizationId,
-        projectId,
-        parsed.data.provider
-      )
-    : await signingService.getConfiguration(actor.organizationId, projectId);
+  const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
+  const config = await signingService.getConfigurationForMutation(
+    actor.organizationId,
+    projectId,
+    parsed.data.provider
+  );
 
   if (!config?.id) {
     throw new AppError("CONFLICT", "Wallet signing is not initialized");
@@ -655,7 +654,7 @@ export const updateWallet = async (c: AppContext) => {
     });
   }
 
-  const signingService = signingServiceModule.createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
   const wallet = await signingService.getWalletById(actor.organizationId, projectId, walletId);
 
   if (!wallet) {
@@ -825,7 +824,7 @@ export const getWalletById = async (c: AppContext) => {
     throw badRequest("Invalid wallet ID");
   }
 
-  const signingService = signingServiceModule.createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
   const wallet = await signingService.getWalletById(actor.organizationId, projectId, walletId);
 
   if (!wallet) {
@@ -918,7 +917,7 @@ export const getPublicKey = async (c: AppContext) => {
   const projectId = c.get("projectId");
   const requestedWalletId = c.req.query("walletId");
 
-  const signingService = signingServiceModule.createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {
     const walletId = resolveApiKeySigningWalletId(auth, requestedWalletId, ["wallets:read"]);

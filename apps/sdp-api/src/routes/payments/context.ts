@@ -1,4 +1,3 @@
-import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
 import type { Address } from "@solana/kit";
@@ -12,7 +11,8 @@ import {
   createPaymentTransferBatchesRepository,
   createPolicyRepository,
 } from "@/db/repositories";
-import { resolveKoraUserId } from "@/lib/kora-user";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { createRequestSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
@@ -38,35 +38,35 @@ export function rampRuntime(c: AppContext): RampRuntimeContext {
 }
 
 export function getPaymentsRepository(c: AppContext) {
-  return createPaymentsRepository(c.env);
+  return createPaymentsRepository(c.env, getRequestTenantScope(c));
 }
 
 export function getCounterpartiesRepository(c: AppContext) {
-  return createCounterpartiesRepository(c.env);
+  return createCounterpartiesRepository(c.env, getRequestTenantScope(c));
 }
 
 export function getCounterpartyAccountsRepository(c: AppContext) {
-  return createCounterpartyAccountsRepository(c.env);
+  return createCounterpartyAccountsRepository(c.env, getRequestTenantScope(c));
 }
 
 export function getPaymentSubscriptionsRepository(c: AppContext) {
-  return createPaymentSubscriptionsRepository(c.env);
+  return createPaymentSubscriptionsRepository(c.env, getRequestTenantScope(c));
 }
 
 export function getPaymentRecurringPaymentsRepository(c: AppContext) {
-  return createPaymentRecurringPaymentsRepository(c.env);
+  return createPaymentRecurringPaymentsRepository(c.env, getRequestTenantScope(c));
 }
 
 export function getPaymentTransferBatchesRepository(c: AppContext) {
-  return createPaymentTransferBatchesRepository(c.env);
+  return createPaymentTransferBatchesRepository(c.env, getRequestTenantScope(c));
 }
 
 export function getPolicyRepository(c: AppContext) {
-  return createPolicyRepository(c.env);
+  return createPolicyRepository(c.env, getRequestTenantScope(c));
 }
 
 export function getFeePayment(c: AppContext) {
-  return feePaymentAdapters.createFeePaymentAdapter(c.env, resolveKoraUserId(c));
+  return createRequestSponsorshipFeePayment(c);
 }
 
 export async function getSponsoredFeePayer(c: AppContext): Promise<Address> {

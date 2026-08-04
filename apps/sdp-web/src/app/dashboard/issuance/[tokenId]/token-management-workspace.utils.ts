@@ -1,6 +1,7 @@
 import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/types";
 import type { AppLocale } from "@/i18n/config";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { formatDisplayLabel } from "@/lib/utils";
 import { type AccessControlMode, getTokenAccessControlMode } from "../access-control.utils";
 import type {
@@ -11,7 +12,6 @@ import type {
   AuthorityFormState,
   BurnFormState,
   BurnValidationErrors,
-  ExecuteRouteResponse,
   ExtensionRow,
   ForceBurnFormState,
   ForceBurnValidationErrors,
@@ -533,26 +533,6 @@ export function formatValue(value: string | null | undefined, t: Translate): str
   return `${value.slice(0, 6)}...${value.slice(-6)}`;
 }
 
-export function extractApiError(body: unknown, t: Translate): string {
-  if (typeof body === "string") {
-    return body;
-  }
-
-  if (body && typeof body === "object") {
-    const maybeError = (body as { error?: { message?: string } }).error;
-    if (maybeError?.message) {
-      return maybeError.message;
-    }
-
-    const maybeMessage = (body as { message?: string }).message;
-    if (typeof maybeMessage === "string" && maybeMessage) {
-      return maybeMessage;
-    }
-  }
-
-  return t("DashboardIssuance.management.unknownError");
-}
-
 export function getExplorerHref(mintAddress: string | null): string | null {
   if (!mintAddress) {
     return null;
@@ -570,64 +550,36 @@ export async function executeActionRequest(
   input: ActionExecutionInput,
   t: Translate
 ): Promise<ActionExecutionResult> {
-  try {
-    const response = await fetch("/api/playground/execute", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        method: input.method,
-        path: input.path,
-        body: input.body,
-      }),
-    });
+  const result = await dashboardFetch<unknown>(input.path, {
+    method: input.method,
+    body: input.body,
+  });
 
-    const payload = (await response.json()) as ExecuteRouteResponse;
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        message:
-          payload.error ??
-          t("DashboardIssuance.management.executionRouteFailed", { status: response.status }),
-        status: response.status,
-        body: payload,
-      };
-    }
-
-    if (!payload.ok) {
-      const status = payload.status ?? null;
-      return {
-        ok: false,
-        message: t("DashboardIssuance.management.actionFailed", {
-          action: input.label,
-          status: status ?? t("DashboardIssuance.management.unknown"),
-          error: extractApiError(payload.body, t),
-        }),
-        status,
-        body: payload.body,
-      };
-    }
-
-    return {
-      ok: true,
-      message: t("DashboardIssuance.management.actionSucceeded", {
-        action: input.label,
-        status: payload.status ?? t("DashboardIssuance.management.ok"),
-      }),
-      status: payload.status ?? null,
-      body: payload.body ?? null,
-    };
-  } catch (error) {
+  if (!result.ok) {
     return {
       ok: false,
       message:
-        error instanceof Error ? error.message : t("DashboardIssuance.management.requestFailed"),
-      status: null,
-      body: null,
+        result.status === null
+          ? result.error
+          : t("DashboardIssuance.management.actionFailed", {
+              action: input.label,
+              status: result.status,
+              error: result.error,
+            }),
+      status: result.status,
+      body: result.body,
     };
   }
+
+  return {
+    ok: true,
+    message: t("DashboardIssuance.management.actionSucceeded", {
+      action: input.label,
+      status: result.status,
+    }),
+    status: result.status,
+    body: result.data,
+  };
 }
 
 export function getPermissionRows(

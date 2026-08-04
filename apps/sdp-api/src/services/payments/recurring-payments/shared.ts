@@ -1,4 +1,3 @@
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
@@ -19,8 +18,10 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { createTokenRepository } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { isNativePaymentToken, normalizePaymentToken } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
@@ -33,6 +34,7 @@ const RECURRING_PAYMENT_TOKEN_ERROR =
  */
 export async function assertRecurringPaymentTokenMint(
   token: string,
+  organizationId: string,
   projectId: string,
   env: Env
 ): Promise<string> {
@@ -50,7 +52,10 @@ export async function assertRecurringPaymentTokenMint(
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }
 
-  const issuedTokenStatus = await createTokenRepository(env).getStatusByMint(projectId, mint);
+  const issuedTokenStatus = await createTokenRepository(
+    env,
+    createTenantScope({ organizationId, projectId })
+  ).getStatusByMint(projectId, mint);
   if (issuedTokenStatus !== "active") {
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }
@@ -97,7 +102,11 @@ export async function sendSubscriptionInstructions(input: {
 
   const rpc = solanaRpc.createRpc(input.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayment = createFeePaymentAdapter(input.env);
+  const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    actor: { type: "wallet", id: input.sourceWallet.walletId },
+  });
   const feePayer = input.feePayer ?? (await feePayment.getFeePayer());
   const message = pipe(
     createTransactionMessage({ version: 0 }),

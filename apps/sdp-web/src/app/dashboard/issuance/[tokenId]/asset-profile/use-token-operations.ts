@@ -307,7 +307,7 @@ export function useTokenOperations({
   const frozenAccountsTotal = resolvedSupportingData.frozenAccountsTotal;
   const frozenAccountsHasMore = resolvedSupportingData.frozenAccountsHasMore;
 
-  const tokenBasePath = `/v1/issuance/tokens/${token.id}`;
+  const tokenBasePath = `/api/dashboard/issuance/tokens/${token.id}`;
   const explorerHref = getExplorerHref(token.mintAddress);
   const canDeployToken = token.status === "pending" && !token.mintAddress;
   const {
@@ -548,7 +548,7 @@ export function useTokenOperations({
     runAction({
       label: t("DashboardIssuance.management.refreshSupply"),
       method: "POST",
-      path: `${tokenBasePath}/supply/refresh`,
+      path: `${tokenBasePath}/refresh-supply`,
       body: {},
     });
   };

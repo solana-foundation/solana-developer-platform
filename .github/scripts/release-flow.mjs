@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { createCommitOnBranch, githubGraphqlRequest } from "./github-commit-on-branch.mjs";
 
 const mode = process.argv[2];
 const dryRun = process.argv.includes("--dry-run");
@@ -300,33 +301,6 @@ async function githubRequest(method, resourcePath, body) {
   return response.json();
 }
 
-async function githubGraphqlRequest(query, variables) {
-  const response = await fetch("https://api.github.com/graphql", {
-    method: "POST",
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-
-  const text = await response.text();
-  let payload = {};
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`GraphQL request failed: ${response.status} ${text}`);
-  }
-
-  if (!response.ok || payload.errors?.length) {
-    const message = payload.errors?.map((error) => error.message).join("; ") || text;
-    throw new Error(`GraphQL request failed: ${response.status} ${message}`);
-  }
-
-  return payload.data;
-}
-
 async function githubReleaseExists(tagName) {
   try {
     await githubRequest("GET", `/repos/${repo}/releases/tags/${encodeURIComponent(tagName)}`);
@@ -414,38 +388,19 @@ async function createReleaseBranchCommit(version) {
   const expectedHeadOid = git(["rev-parse", "HEAD"]);
   await resetReleaseBranch(expectedHeadOid);
 
-  const query = `
-    mutation CreateReleaseBranchCommit($input: CreateCommitOnBranchInput!) {
-      createCommitOnBranch(input: $input) {
-        commit {
-          oid
-          url
-        }
-      }
-    }
-  `;
-
-  const data = await githubGraphqlRequest(query, {
-    input: {
-      branch: {
-        repositoryNameWithOwner: repo,
-        branchName: releaseBranch,
-      },
-      expectedHeadOid,
-      message: {
-        headline: `chore(main): release ${version}`,
-      },
-      fileChanges: {
-        additions: [
-          releaseFileAddition("package.json"),
-          releaseFileAddition("CHANGELOG.md"),
-          releaseFileAddition(".github/.release-please-manifest.json"),
-        ],
-      },
-    },
+  const commit = await createCommitOnBranch({
+    repository: repo,
+    branch: releaseBranch,
+    expectedHeadOid,
+    headline: `chore(main): release ${version}`,
+    additions: [
+      releaseFileAddition("package.json"),
+      releaseFileAddition("CHANGELOG.md"),
+      releaseFileAddition(".github/.release-please-manifest.json"),
+    ],
+    token,
   });
 
-  const commit = data.createCommitOnBranch.commit;
   console.log(`Created release branch commit ${commit.oid}`);
   return commit.oid;
 }
@@ -469,9 +424,13 @@ async function enableAutoMerge(pullRequestId, version) {
   `;
 
   try {
-    await githubGraphqlRequest(query, {
-      pullRequestId,
-      commitHeadline: `chore(main): release ${version}`,
+    await githubGraphqlRequest({
+      query,
+      variables: {
+        pullRequestId,
+        commitHeadline: `chore(main): release ${version}`,
+      },
+      token,
     });
   } catch (error) {
     if (error.message.includes("Auto merge is already enabled")) {

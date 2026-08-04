@@ -14,6 +14,7 @@ import {
   withOpenApi,
   z,
 } from "./base";
+import { policyRuleSchema } from "./payments";
 
 export const apiKeyRoleSchema = z
   .enum(["api_admin", "api_developer", "api_readonly"])
@@ -94,37 +95,15 @@ export const apiKeyWalletPolicyBindingSchema = z
   })
   .openapi({ description: "Read-only policy binding summary for an API key wallet scope." });
 
-export const apiKeyPolicyRuleSchema = z
-  .object({
-    id: z.string().optional().openapi({ description: "Stable client-side rule identifier." }),
-    name: z.string().optional().openapi({ description: "Human-readable rule name." }),
-    description: z.string().optional().openapi({ description: "Rule description." }),
-    action: z
-      .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
-      .optional()
-      .openapi({ description: "Decision to apply when this rule matches." }),
-    kind: z
-      .enum([
-        "operation_family",
-        "operation_type",
-        "asset",
-        "destination",
-        "amount",
-        "approval",
-        "always",
-      ])
-      .openapi({ description: "API-key policy rule kind." }),
-  })
-  .passthrough()
-  .openapi({
-    description: "Operation-level API-key policy rule.",
-    example: {
-      id: "deny-raw-signing",
-      kind: "operation_family",
-      family: "raw_sign",
-      action: "deny",
-    },
-  });
+export const apiKeyPolicyRuleSchema = withOpenApi(policyRuleSchema, {
+  description: "Operation-level API-key policy rule.",
+  example: {
+    id: "deny-raw-signing",
+    kind: "operation_family",
+    family: "raw_sign",
+    action: "deny",
+  },
+});
 
 export const apiKeyControlProfileSchema = z
   .object({

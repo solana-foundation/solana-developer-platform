@@ -4,6 +4,7 @@
  * Shared data access for API key operations.
  */
 
+// biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashString } from "@sdp/payments/hash";
 import type {
   ApiKeyEnvironment,
@@ -15,6 +16,7 @@ import type {
 import type { DatabaseExecutor } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
+import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
 import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
 
@@ -142,7 +144,14 @@ function stringifyJsonb(value: unknown, fallback: unknown): string {
 }
 
 export class ApiKeyService {
-  constructor(private db: DatabaseClient) {}
+  constructor(
+    private db: DatabaseClient,
+    private scope: TenantScope
+  ) {
+    if (!scope.projectId) {
+      throw new TenantScopeViolationError("ApiKeyService requires a project tenant scope");
+    }
+  }
 
   /**
    * Verifies full API-key material against the current tenant boundary.
@@ -151,6 +160,7 @@ export class ApiKeyService {
    * and not unique. The raw key is hashed in memory and is never stored.
    */
   async ownsUsableApiKey(input: VerifyApiKeyOwnershipInput): Promise<boolean> {
+    assertTenantClaim(this.scope, input, "ApiKeyService.ownsUsableApiKey");
     const keyHash = await hashString(input.apiKey, input.pepper);
     const row = await this.db
       .prepare(
@@ -170,6 +180,11 @@ export class ApiKeyService {
   }
 
   async listForProject(projectId: string): Promise<ApiKeyListItem[]> {
+    assertTenantClaim(
+      this.scope,
+      { organizationId: this.scope.organizationId, projectId },
+      "ApiKeyService.listForProject"
+    );
     const result = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
@@ -185,10 +200,12 @@ export class ApiKeyService {
                 ak.signing_wallet_id, ak.last_used_at, ak.expires_at, ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
-         WHERE ak.project_id = ? AND ak.status NOT IN ('revoked', 'deactivated')
+         WHERE ak.organization_id = ?
+           AND ak.project_id = ?
+           AND ak.status NOT IN ('revoked', 'deactivated')
          ORDER BY ak.created_at DESC`
       )
-      .bind(projectId)
+      .bind(this.scope.organizationId, this.scope.projectId)
       .all<ApiKeyListRow>();
 
     return result.results.map((row) => this.mapListRow(row));
@@ -199,6 +216,7 @@ export class ApiKeyService {
     organizationId: string,
     projectId: string
   ): Promise<ApiKeyDetails | null> {
+    assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.getDetails");
     const row = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
@@ -236,6 +254,7 @@ export class ApiKeyService {
   }
 
   async createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
+    assertTenantClaim(this.scope, input, "ApiKeyService.createApiKey");
     assertGrantableApiKeyPermissions(input.actorPermissions, input.role, input.permissions);
 
     const project = await this.db
@@ -255,8 +274,12 @@ export class ApiKeyService {
 
     if (!createdBy && input.createdByKeyId) {
       const creatorKey = await this.db
-        .prepare("SELECT created_by FROM api_keys WHERE id = ?")
-        .bind(input.createdByKeyId)
+        .prepare(
+          `SELECT created_by
+           FROM api_keys
+           WHERE id = ? AND organization_id = ? AND project_id = ?`
+        )
+        .bind(input.createdByKeyId, this.scope.organizationId, this.scope.projectId)
         .first<{ created_by: string }>();
       createdBy = creatorKey?.created_by || "";
     }
@@ -326,6 +349,7 @@ export class ApiKeyService {
   }
 
   async updateApiKey(input: UpdateApiKeyInput): Promise<void> {
+    assertTenantClaim(this.scope, input, "ApiKeyService.updateApiKey");
     if (input.permissions !== undefined) {
       assertGrantableApiKeyPermissions(
         input.actorPermissions,
@@ -382,6 +406,7 @@ export class ApiKeyService {
     gracePeriodHours: number,
     pepper?: string
   ): Promise<RotateApiKeyResult | null> {
+    assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
     const existing = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
@@ -441,8 +466,12 @@ export class ApiKeyService {
         .run();
 
       await tx
-        .prepare("UPDATE api_keys SET rotation_deadline = ? WHERE id = ?")
-        .bind(rotationDeadline, keyId)
+        .prepare(
+          `UPDATE api_keys
+           SET rotation_deadline = ?
+           WHERE id = ? AND organization_id = ? AND project_id = ?`
+        )
+        .bind(rotationDeadline, keyId, this.scope.organizationId, this.scope.projectId)
         .run();
 
       await tx
@@ -489,6 +518,7 @@ export class ApiKeyService {
     keyHash: string;
     revokedAt: string;
   } | null> {
+    assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.revokeApiKey");
     const key = await this.db
       .prepare(
         "SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
@@ -502,8 +532,12 @@ export class ApiKeyService {
 
     const now = new Date().toISOString();
     await this.db
-      .prepare("UPDATE api_keys SET status = 'deactivated', revoked_at = ? WHERE id = ?")
-      .bind(now, keyId)
+      .prepare(
+        `UPDATE api_keys
+         SET status = 'deactivated', revoked_at = ?
+         WHERE id = ? AND organization_id = ? AND project_id = ?`
+      )
+      .bind(now, keyId, this.scope.organizationId, this.scope.projectId)
       .run();
 
     return { keyHash: key.key_hash, revokedAt: now };
