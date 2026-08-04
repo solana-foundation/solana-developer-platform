@@ -1,5 +1,5 @@
 import type { Address } from "@solana/addresses";
-import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
+import type { CustodyProvider, CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp-support.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
 import type {
@@ -19,6 +19,7 @@ export interface PaymentsDashboardWallet {
   walletId: string;
   publicKey: string;
   label: string | null;
+  provider?: CustodyProvider;
   balances?: CustodyWalletTokenBalance[];
 }
 
@@ -149,7 +150,31 @@ export interface LightsparkRampSettlement {
   failureReason?: string;
 }
 
-export type RampTransferSettlement = MoonpayRampSettlement | LightsparkRampSettlement;
+export interface CoinbaseRampFee {
+  feeAmount: string;
+  feeCurrency: string;
+  feeType: string;
+}
+
+/** Coinbase onramp order economics, captured verbatim from a terminal webhook. */
+export interface CoinbaseRampSettlement {
+  provider: "coinbase";
+  status: "completed" | "failed";
+  paymentCurrency: string;
+  paymentSubtotal: string;
+  paymentTotal: string;
+  purchaseCurrency: string;
+  purchaseAmount: string;
+  exchangeRate: string;
+  fees: CoinbaseRampFee[];
+  txHash?: string;
+  failureReason?: string;
+}
+
+export type RampTransferSettlement =
+  | MoonpayRampSettlement
+  | LightsparkRampSettlement
+  | CoinbaseRampSettlement;
 
 export interface MoneygramTransferDetails {
   transactionId?: string;
@@ -173,6 +198,7 @@ export interface PaymentTransferSummary {
   token?: string;
   amount?: string;
   memo?: string;
+  rampsMemo: Record<string, string>;
   provider?: RampProviderId;
   counterpartyId?: string;
   counterpartyDisplayName?: string;
@@ -832,6 +858,35 @@ export interface PaymentRampEstimateEnvelope {
   };
 }
 
+export const RAMPS_MEMO_LIMITS = {
+  maxEntries: 20,
+  maxKeyLength: 64,
+  maxValueLength: 256,
+} as const satisfies Record<string, number>;
+
+export interface PaymentOnrampQuoteRequest {
+  provider: RampProviderId;
+  counterpartyId: string;
+  destinationWallet: string;
+  cryptoToken: string;
+  fiatCurrency: RampFiatCurrency;
+  fiatAmount: string;
+  redirectUrl?: string;
+  domain?: string;
+  rampsMemo?: Record<string, string>;
+}
+
+export interface PaymentOfframpQuoteRequest {
+  provider: RampProviderId;
+  counterpartyId: string;
+  sourceWallet: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  cryptoAmount: string;
+  redirectUrl?: string;
+  rampsMemo?: Record<string, string>;
+}
+
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "session_widget";
 
 export interface PaymentRampQuoteCurrency {
@@ -880,9 +935,22 @@ export type PaymentRampQuote =
       paymentInstructions: MuralPaymentRampInstruction[];
     })
   | (BasePaymentRampQuote & {
-      provider: "moonpay" | "bvnk" | "coinbase";
+      provider: "moonpay" | "bvnk";
       deliveryMode: "hosted";
       hostedUrl: string;
+    })
+  | (BasePaymentRampQuote & {
+      provider: "coinbase";
+      deliveryMode: "hosted";
+      hostedUrl: string;
+      /** Order economics captured verbatim from the Coinbase create-order response. */
+      paymentCurrency: string;
+      paymentSubtotal: string;
+      paymentTotal: string;
+      purchaseCurrency: string;
+      purchaseAmount: string;
+      exchangeRate: string;
+      fees: CoinbaseRampFee[];
     })
   | (BasePaymentRampQuote & {
       provider: "moneygram";
@@ -891,7 +959,6 @@ export type PaymentRampQuote =
       sessionToken: string;
       sessionId: string;
       widgetUrl: string;
-      sdkUrl: string;
     })
   | (BasePaymentRampQuote & {
       provider: "stripe";
@@ -919,6 +986,14 @@ export type CoinbaseRampEvent =
 
 export type MoneygramRampEvent =
   | { kind: "signed"; sessionId: string; cryptoTransferId: string }
+  | {
+      kind: "onramp_completed";
+      sessionId: string;
+      transactionId: string;
+      status: string;
+      amount: number;
+      referenceNumber?: string;
+    }
   | {
       kind: "completed";
       sessionId: string;

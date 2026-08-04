@@ -1,30 +1,24 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
+import { parseIssuanceListQuery } from "../issuance-list-query";
+import {
+  attachIssuanceAssetProfiles,
+  fetchIssuanceTokenFacets,
+  fetchIssuanceTokensPage,
+} from "../issuance-tokens.data";
 import { IssuanceWorkspace } from "../issuance-workspace";
 
 interface IssuanceTemplateView {
   id: string;
   name: string;
   description?: string;
-}
-
-interface IssuanceTokenView {
-  id: string;
-  name: string;
-  symbol: string;
-  status: string;
-  template: string;
-  imageUrl: string | null;
-  mintAddress: string | null;
-  totalSupply: string;
-  createdAt: string;
-  deployedAt: string | null;
 }
 
 interface FetchResult<T> {
@@ -35,14 +29,10 @@ interface FetchResult<T> {
 }
 
 function resolveTokenListNotice(
-  result: FetchResult<IssuanceTokenView[]>,
+  status: number | null,
   t: Awaited<ReturnType<typeof getTranslations>>
-): string | null {
-  if (result.ok) {
-    return null;
-  }
-
-  if (typeof result.status === "number" && result.status >= 400 && result.status < 500) {
+): string {
+  if (typeof status === "number" && status >= 400 && status < 500) {
     return t("DashboardIssuance.errors.tokenListRetry");
   }
 
@@ -104,74 +94,16 @@ async function fetchTemplates(
   }
 }
 
-async function fetchTokens(
-  request: SdpApiClient["request"],
-  t: Awaited<ReturnType<typeof getTranslations>>
-): Promise<FetchResult<IssuanceTokenView[]>> {
-  try {
-    const tokensPath = `/v1/issuance/tokens?${new URLSearchParams({
-      page: "1",
-      pageSize: "100",
-    }).toString()}`;
-    const response = await request(tokensPath);
-    if (!response.ok) {
-      const body = await response.text();
-      return {
-        ok: false,
-        status: response.status,
-        error: parseErrorMessage(body, t("DashboardIssuance.errors.unknown")),
-      };
-    }
-
-    const json = (await response.json()) as {
-      data?: Array<{
-        id?: string;
-        name?: string;
-        symbol?: string;
-        status?: string;
-        template?: string;
-        imageUrl?: string | null;
-        mintAddress?: string | null;
-        totalSupply?: string;
-        createdAt?: string;
-        deployedAt?: string | null;
-      }>;
-    };
-
-    const tokens = (json?.data ?? [])
-      .filter((token): token is NonNullable<typeof token> => Boolean(token?.id))
-      .map((token) => ({
-        id: token.id ?? "",
-        name: token.name ?? t("DashboardIssuance.management.untitledToken"),
-        symbol: token.symbol ?? "-",
-        status: token.status ?? "pending",
-        template: token.template ?? "custom",
-        imageUrl: token.imageUrl ?? null,
-        mintAddress: token.mintAddress ?? null,
-        totalSupply: token.totalSupply ?? "0",
-        createdAt: token.createdAt ?? "",
-        deployedAt: token.deployedAt ?? null,
-      }));
-
-    return { ok: true, data: tokens };
-  } catch (error) {
-    return {
-      ok: false,
-      error:
-        error instanceof Error ? error.message : t("DashboardIssuance.errors.unableToLoadTokens"),
-    };
-  }
-}
-
 interface IssuancePageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
 export default async function IssuancePage({ searchParams }: IssuancePageProps) {
-  const [t, { userId, orgId }, resolvedSearchParams] = await Promise.all([
+  const [t, { userId, orgId }, resolvedSearchParams, assetProfilesEnabled] = await Promise.all([
     getTranslations(),
     auth(),
     searchParams ?? Promise.resolve(undefined),
+    assetProfiles(),
   ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -188,20 +120,35 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
       (Array.isArray(resolvedSearchParams?.tab) && resolvedSearchParams.tab[0] === "playground")
         ? "playground"
         : "tokens";
+    // Search/filter/sort/page live in the URL, so a shared or reloaded link renders
+    // the same filtered page server-side that the client would have fetched.
+    const listQuery = parseIssuanceListQuery(resolvedSearchParams);
     const apiBaseUrl = resolvePlaygroundApiBaseUrl();
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.issuance.api"))
     );
-    const [templatesResult, tokensResult, apiKeysResult, signerWalletsResult] = await Promise.all([
-      trace.step("fetch_templates", () => fetchTemplates(apiClient.request, t)),
-      trace.step("fetch_tokens", () => fetchTokens(apiClient.request, t)),
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-      trace.step("fetch_signer_wallets", () =>
-        fetchPaymentsWallets(apiClient.request, { view: "summary" })
-      ),
-    ]);
+    const [templatesResult, tokensPage, facets, apiKeysResult, signerWalletsResult] =
+      await Promise.all([
+        trace.step("fetch_templates", () => fetchTemplates(apiClient.request, t)),
+        trace.step("fetch_tokens", () =>
+          fetchIssuanceTokensPage(apiClient.request, listQuery, {
+            untitledLabel: t("DashboardIssuance.management.untitledToken"),
+          })
+        ),
+        // Facet counts drive the filter options and the "no assets yet" vs "no
+        // matches" distinction, so they must not be narrowed by the active filters.
+        trace.step("fetch_token_facets", () => fetchIssuanceTokenFacets(apiClient.request)),
+        trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+        trace.step("fetch_signer_wallets", () =>
+          fetchPaymentsWallets(apiClient.request, { view: "summary" })
+        ),
+      ]);
 
-    const tokens = tokensResult.data ?? [];
+    const tokens = assetProfilesEnabled
+      ? await trace.step("attach_asset_profiles", () =>
+          attachIssuanceAssetProfiles(apiClient.request, tokensPage.tokens)
+        )
+      : tokensPage.tokens;
     const apiKeys = apiKeysResult.data ?? [];
     const templatesError = templatesResult.ok
       ? null
@@ -215,6 +162,9 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
       ok: true,
       tab: currentTab,
       tokenCount: tokens.length,
+      total: tokensPage.total,
+      page: tokensPage.page,
+      pageSize: tokensPage.pageSize,
       templateCount: templatesResult.data?.length ?? 0,
       apiKeyCount: apiKeys.length,
       signerWalletCount: signerWalletsResult.data?.length ?? 0,
@@ -222,13 +172,17 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
 
     return (
       <IssuanceWorkspace
-        tokens={tokens}
+        assetProfilesEnabled={assetProfilesEnabled}
+        initialQuery={listQuery}
+        initialTokens={tokens}
+        initialTotal={tokensPage.total}
+        facets={facets}
         templates={templatesResult.data ?? []}
         apiKeys={apiKeys}
         signerWallets={signerWalletsResult.data ?? []}
         apiBaseUrl={apiBaseUrl}
         templatesError={templatesError}
-        tokensNotice={resolveTokenListNotice(tokensResult, t)}
+        tokensNotice={tokensPage.error ? resolveTokenListNotice(tokensPage.status, t) : null}
         signerWalletsError={
           signerWalletsResult.ok
             ? null

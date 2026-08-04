@@ -52,13 +52,15 @@ async function persistLightsparkData(
   patch: Record<string, unknown>
 ): Promise<void> {
   const repo = getCounterpartiesRepository(c);
-  await repo.updateCounterparty({
+  await repo.mutateProviderData({
     counterpartyId: row.id,
     organizationId: row.organization_id,
     projectId,
-    providerData: {
-      ...row.provider_data,
-      lightspark: { ...readLightsparkData(row.provider_data), ...patch },
+    mutate(providerData) {
+      return {
+        ...providerData,
+        lightspark: { ...readLightsparkData(providerData), ...patch },
+      };
     },
   });
 }
@@ -66,8 +68,11 @@ async function persistLightsparkData(
 /**
  * Returns the Grid customer id for a counterparty, lazily creating the native
  * Lightspark customer (via the provider) and persisting it into provider_data
- * on first use. Business counterparties require collected businessInfo fields;
- * the collected values flow to Grid only and are never persisted.
+ * on first use. Business counterparties require collected businessInfo fields
+ * and KYB approval — the customer id is persisted only once verified, so a
+ * pending verification re-runs on the next requirements advance (creation is
+ * idempotent by platformCustomerId). Collected values flow to Grid only and
+ * are never persisted.
  */
 export async function ensureLightsparkCustomer(
   c: AppContext,
@@ -100,6 +105,17 @@ export async function ensureLightsparkCustomer(
     rampRuntime(c),
     input
   );
+  if (input.customerType === "BUSINESS") {
+    const verification = await RAMP_PROVIDER_CLIENTS.lightspark.submitVerification(rampRuntime(c), {
+      customerId: customer.id,
+    });
+    if (verification.verificationStatus !== "APPROVED") {
+      const outstanding = verification.errors.map((error) => error.reason).join("; ");
+      throw badRequest(
+        `Lightspark KYB verification is ${verification.verificationStatus}. Outstanding requirements: ${outstanding}`
+      );
+    }
+  }
 
   const row = await freshCounterpartyRow(c, counterparty, projectId);
   await persistLightsparkData(c, row, projectId, { customerId: customer.id });

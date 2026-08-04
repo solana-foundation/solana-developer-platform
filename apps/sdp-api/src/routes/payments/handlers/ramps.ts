@@ -43,6 +43,7 @@ import type {
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
+import { getClientIp } from "@/lib/client-ip";
 import {
   AppError,
   badRequest,
@@ -54,11 +55,12 @@ import {
   unsupportedRampCorridor,
 } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
   enforceWalletOperationPolicy,
   walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   type AppContext,
@@ -209,6 +211,7 @@ interface PersistRampQuoteTransferInput {
   cryptoAmount: string | null;
   fiatCurrency: RampFiatCurrency | null;
   fiatAmount: string | null;
+  rampsMemo: Record<string, string> | undefined;
   providerData?: Record<string, unknown>;
 }
 
@@ -241,7 +244,7 @@ async function enforceRampWalletOperationPolicy(
     rawPayload?: Record<string, unknown>;
   }
 ) {
-  return enforceWalletOperationPolicy(c.env, {
+  return enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
     organizationId: input.scope.auth.organizationId,
     projectId: input.scope.auth.projectId,
     custodyWalletId: input.wallet.id,
@@ -304,6 +307,7 @@ async function persistRampQuoteTransfer(
     deliveryMode: input.quote.deliveryMode,
     fiatCurrency: input.fiatCurrency,
     fiatAmount: input.fiatAmount,
+    rampsMemo: input.rampsMemo,
     providerData: input.providerData ?? {},
     serializedTx: null,
     signature: null,
@@ -329,7 +333,7 @@ export async function advanceCounterpartyRequirements(
       const customer = await ensureLightsparkCustomer(c, {
         counterparty: input.counterparty,
         projectId: input.projectId,
-        collectedData: input.direction === "offramp" ? input.collectedData : undefined,
+        collectedData: input.collectedData,
       });
       if (input.direction === "offramp") {
         await ensureLightsparkPayoutAccount(c, {
@@ -600,8 +604,16 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       quote = muralOnrampQuote({ account, fiatCurrency: input.fiatCurrency });
       break;
     }
-    case "moneygram":
-      throw badRequest("MoneyGram on-ramp is not available.");
+    case "moneygram": {
+      quote = await RAMP_PROVIDER_CLIENTS.moneygram.createOnrampQuote(rampRuntime(c), {
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        externalCustomerId: counterparty.external_id ?? counterparty.id,
+      });
+      break;
+    }
     case "coinbase": {
       quote = await RAMP_PROVIDER_CLIENTS.coinbase.createOnrampQuote(rampRuntime(c), {
         cryptoToken: input.cryptoToken,
@@ -622,7 +634,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
-        customerIpAddress: c.req.header("cf-connecting-ip"),
+        customerIpAddress: getClientIp(c) ?? undefined,
       });
       break;
     }
@@ -647,6 +659,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     cryptoAmount: null,
     fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
     fiatAmount: input.fiatAmount,
+    rampsMemo: input.rampsMemo,
     providerData: transferProviderData,
   });
 
@@ -769,6 +782,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         cryptoToken: input.cryptoToken,
         cryptoAmount: input.cryptoAmount,
         fiatCurrency: input.fiatCurrency,
+        rampsMemo: input.rampsMemo,
       });
       try {
         quote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(rampRuntime(c), {
@@ -840,6 +854,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       cryptoAmount: input.cryptoAmount,
       fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
       fiatAmount: null,
+      rampsMemo: input.rampsMemo,
     });
   }
 

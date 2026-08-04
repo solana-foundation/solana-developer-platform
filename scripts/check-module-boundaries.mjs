@@ -18,14 +18,18 @@ const MODULE_METADATA = [
   {
     name: "@sdp/api",
     directory: "apps/sdp-api",
-    purpose: "Cloudflare Workers API and application composition root.",
+    purpose: "Node.js API and application composition root.",
     allowedDependencies: [
       "@sdp/custody",
       "@sdp/env-config",
       "@sdp/issuance",
       "@sdp/payments",
+      "@sdp/policy",
+      "@sdp/private-channels",
       "@sdp/rpc",
       "@sdp/solana",
+      "@sdp/spc-escrow",
+      "@sdp/spc-withdraw",
       "@sdp/types",
     ],
   },
@@ -39,13 +43,33 @@ const MODULE_METADATA = [
     name: "sdp-web",
     directory: "apps/sdp-web",
     purpose: "Dashboard application.",
-    allowedDependencies: ["@sdp/solana", "@sdp/types"],
+    // @sdp/issuance is imported only through its mosaic-free `capabilities`
+    // subpath (the advanced-settings catalog + lookups the editor renders).
+    allowedDependencies: [
+      "@sdp/issuance",
+      "@sdp/policy",
+      "@sdp/private-channels",
+      "@sdp/solana",
+      "@sdp/types",
+    ],
+  },
+  {
+    name: "@sdp/kit-augment",
+    directory: "packages/kit-augment",
+    purpose: "Shared @solana/kit type augmentation for the generated Codama clients.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/api-integration",
     directory: "packages/sdp-api-integration",
     purpose: "Maintainer integration harness for API endpoint and provider coverage.",
-    allowedDependencies: ["@sdp/api", "@sdp/rpc", "@sdp/types"],
+    allowedDependencies: [
+      "@sdp/api",
+      "@sdp/private-channels",
+      "@sdp/rpc",
+      "@sdp/spc-escrow",
+      "@sdp/types",
+    ],
   },
   {
     name: "@sdp/custody",
@@ -72,6 +96,18 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
+    name: "@sdp/policy",
+    directory: "packages/sdp-policy",
+    purpose: "Wallet-operation policy engine: rule evaluation and enforcement orchestration.",
+    allowedDependencies: ["@sdp/solana", "@sdp/types"],
+  },
+  {
+    name: "@sdp/private-channels",
+    directory: "packages/sdp-private-channels",
+    purpose: "Solana Private Channels gateway, auth, and instance clients.",
+    allowedDependencies: ["@sdp/rpc", "@sdp/types"],
+  },
+  {
     name: "@sdp/rpc",
     directory: "packages/sdp-rpc",
     purpose: "Solana RPC clients, errors, and relay helpers.",
@@ -82,6 +118,18 @@ const MODULE_METADATA = [
     directory: "packages/sdp-solana",
     purpose: "Solana transaction and token-program services.",
     allowedDependencies: ["@sdp/rpc", "@sdp/types"],
+  },
+  {
+    name: "@sdp/spc-escrow",
+    directory: "packages/sdp-spc-escrow",
+    purpose: "Generated @solana/kit client for the Private Channels escrow program.",
+    allowedDependencies: ["@sdp/kit-augment"],
+  },
+  {
+    name: "@sdp/spc-withdraw",
+    directory: "packages/sdp-spc-withdraw",
+    purpose: "Generated @solana/kit client for the Private Channels withdraw program.",
+    allowedDependencies: ["@sdp/kit-augment"],
   },
   {
     name: "@sdp/types",

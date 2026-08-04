@@ -6,9 +6,11 @@ import { hashString } from "@sdp/payments/hash";
 
 import { closeDatabasePools, getDb } from "@/db";
 import app from "@/index";
+import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
 import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
-import { createMosaicService } from "@/services/mosaic";
+import { createMosaicService } from "@/services/issuance/mosaic";
+import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { createOrgSigner, createToken2022Service } from "@/services/solana";
 import { CustodyConfigStore, type CustodyWallet } from "@/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -26,8 +28,10 @@ export type ApiTestCustodyWallet = CustodyWallet;
 export const apiTestSupport = {
   app,
   clearTestDatabase,
+  closeAllRedisClients,
   closeDatabasePools,
   createFeePaymentAdapter,
+  createKVStoreSet,
   createMosaicService,
   createOrgSigner,
   createSigningService,
@@ -43,4 +47,5 @@ export const apiTestSupport = {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
   TEST_USER,
+  trackPendingTransfers,
 };

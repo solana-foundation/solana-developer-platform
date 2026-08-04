@@ -82,7 +82,7 @@ function PaymentInstructionField({
   );
 }
 
-function QuoteSummaryField({
+export function QuoteSummaryField({
   icon,
   label,
   value,

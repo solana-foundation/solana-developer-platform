@@ -40,6 +40,8 @@ const providerEnvKeys = [
   "SOLANA_RPC_QUICKNODE_URL",
   "SOLANA_RPC_TRITON_URL",
   "SOLANA_RPC_VALIDATIONCLOUD_URL",
+  "SOLANA_RPC_NODIT_URL",
+  "SOLANA_RPC_NODIT_API_KEY",
   "RANGE_API_KEY",
   "ELLIPTIC_API_TOKEN",
   "ELLIPTIC_API_KEY",
@@ -80,12 +82,15 @@ function setBaseProviderEnv(): void {
     SOLANA_RPC_HELIUS_URL: "https://rpc.helius.test",
     SOLANA_RPC_TRITON_URL: "https://rpc.triton.test",
     SOLANA_RPC_VALIDATIONCLOUD_URL: "https://rpc.validationcloud.test/v1/{API_KEY}",
+    SOLANA_RPC_NODIT_URL: "https://solana-devnet.nodit.io/{API_KEY}",
+    SOLANA_RPC_NODIT_API_KEY: "nodit_test_key",
     RANGE_API_KEY: "range_test_key",
     MOONPAY_API_KEY: "moonpay_test_key",
     MOONPAY_SECRET_KEY: "moonpay_test_secret",
     COINBASE_CDP_API_KEY_ID: "coinbase_test_key_id",
     COINBASE_CDP_API_KEY_SECRET: "coinbase_test_key_secret",
     COINBASE_CDP_WALLET_SECRET: "coinbase_test_wallet_secret",
+    PARA_API_KEY: "para_test_key",
     TURNKEY_API_PUBLIC_KEY: "turnkey_test_public_key",
     TURNKEY_API_PRIVATE_KEY: "turnkey_test_private_key",
     TURNKEY_ORGANIZATION_ID: "turnkey_test_org",
@@ -132,7 +137,7 @@ describe("provider-availability.service", () => {
     await clearTestDatabase(env);
   });
 
-  it("resolves individual defaults and applies provider overrides", () => {
+  it("resolves general defaults independently of the legacy tier value", () => {
     const resolved = resolveOrganizationProviderEntitlements({
       tier: "individual",
       providerOverrides: {
@@ -156,14 +161,15 @@ describe("provider-availability.service", () => {
     expect(resolved.providers.custody.coinbase_cdp).toBe(true);
     expect(resolved.providers.custody.turnkey).toBe(true);
     expect(resolved.providers.custody.local).toBe(true);
-    expect(resolved.providers.custody.para).toBe(false);
+    expect(resolved.providers.custody.para).toBe(true);
     expect(resolved.providers.rpc.default).toBe(true);
     expect(resolved.providers.rpc.helius).toBe(true);
     expect(resolved.providers.rpc.triton).toBe(true);
-    expect(resolved.providers.rpc.validationcloud).toBe(false);
+    expect(resolved.providers.rpc.validationcloud).toBe(true);
+    expect(resolved.providers.rpc.nodit).toBe(true);
     expect(resolved.providers.compliance.range).toBe(true);
     expect(resolved.providers.ramps.moonpay).toBe(true);
-    expect(resolved.providers.ramps.lightspark).toBe(false);
+    expect(resolved.providers.ramps.lightspark).toBe(true);
   });
 
   it("marks providers available only when the organization is entitled and the environment is configured", async () => {
@@ -177,14 +183,19 @@ describe("provider-availability.service", () => {
     });
     expect(availability.providers.custody.coinbase_cdp.enabled).toBe(true);
     expect(availability.providers.custody.turnkey.enabled).toBe(true);
-    expect(availability.providers.custody.para.enabled).toBe(false);
+    expect(availability.providers.custody.para.enabled).toBe(true);
     expect(availability.providers.rpc.default.enabled).toBe(true);
     expect(availability.providers.rpc.helius.enabled).toBe(true);
     expect(availability.providers.rpc.triton.enabled).toBe(true);
     expect(availability.providers.rpc.validationcloud).toEqual({
-      entitled: false,
+      entitled: true,
       configured: true,
-      enabled: false,
+      enabled: true,
+    });
+    expect(availability.providers.rpc.nodit).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
     });
     expect(availability.providers.compliance.range).toEqual({
       entitled: false,
@@ -196,7 +207,7 @@ describe("provider-availability.service", () => {
       configured: true,
       enabled: true,
     });
-    expect(availability.providers.ramps.lightspark.enabled).toBe(false);
+    expect(availability.providers.ramps.lightspark.entitled).toBe(true);
   });
 
   it("explains when a configured provider is not entitled for the organization", async () => {
@@ -204,12 +215,15 @@ describe("provider-availability.service", () => {
       assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "compliance", "range")
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
-      message: "Range is only available on the enterprise tier.",
+      message: "Range requires manual activation for this organization.",
     });
   });
 
   it("explains when an entitled provider is not configured in the environment", async () => {
-    await setOrganizationTier("enterprise");
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { compliance: { range: true } } }), TEST_ORG_ID)
+      .run();
     env.RANGE_API_KEY = undefined;
 
     await expect(
@@ -232,6 +246,45 @@ describe("provider-availability.service", () => {
       entitled: true,
       configured: false,
       enabled: false,
+    });
+  });
+
+  it.each([
+    "individual",
+    "enterprise",
+  ] as const)("treats configured Nodit as general for the legacy %s tier and honors an explicit disable", async (tier) => {
+    await setOrganizationTier(tier);
+
+    const enabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(enabled.providers.rpc.nodit).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
+
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { rpc: { nodit: false } } }), TEST_ORG_ID)
+      .run();
+
+    const disabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(disabled.providers.rpc.nodit).toEqual({
+      entitled: false,
+      configured: true,
+      enabled: false,
+    });
+  });
+
+  it("treats Nodit as configured when its URL is present like other RPC providers", async () => {
+    env.SOLANA_RPC_NODIT_URL = "https://rpc.proxy.test/nodit";
+    env.SOLANA_RPC_NODIT_API_KEY = undefined;
+
+    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+
+    expect(availability.providers.rpc.nodit).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
     });
   });
 

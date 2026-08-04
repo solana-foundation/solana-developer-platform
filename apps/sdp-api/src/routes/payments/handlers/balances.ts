@@ -20,6 +20,8 @@ import {
 } from "@/db/repositories/policy.repository";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
@@ -227,12 +229,15 @@ export async function getWalletBalances(c: AppContext) {
     const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
     lamports = accountInfo?.lamports ?? 0n;
   } catch (error) {
-    console.error("getWalletBalances: failed to fetch SOL balance", {
-      requestId: c.get("requestId"),
-      walletId: wallet.walletId,
-      publicKey: wallet.publicKey,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    getLogger().error(
+      {
+        requestId: c.get("requestId"),
+        walletId: wallet.walletId,
+        publicKey: wallet.publicKey,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "getWalletBalances: failed to fetch SOL balance"
+    );
   }
 
   try {
@@ -240,12 +245,15 @@ export async function getWalletBalances(c: AppContext) {
       tokenLabelsByMint,
     });
   } catch (error) {
-    console.error("getWalletBalances: failed to fetch SPL balances", {
-      requestId: c.get("requestId"),
-      walletId: wallet.walletId,
-      publicKey: wallet.publicKey,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    getLogger().error(
+      {
+        requestId: c.get("requestId"),
+        walletId: wallet.walletId,
+        publicKey: wallet.publicKey,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "getWalletBalances: failed to fetch SPL balances"
+    );
   }
 
   const labeledBalances = await attachTokenSymbolsToBalances(c.env, [
@@ -341,7 +349,7 @@ export async function updateWalletPolicy(c: AppContext) {
   let rows: Awaited<ReturnType<typeof repository.upsertWalletPolicies>>;
   if (parsed.data.rules || parsed.data.defaultAction) {
     rows = await getDb(c.env).transaction(async (tx) => {
-      const txRepository = createPostgresPaymentsRepository(tx);
+      const txRepository = createPostgresPaymentsRepository(tx, getRequestTenantScope(c));
       const savedRows = await txRepository.upsertWalletPolicies(walletPolicyInputs);
 
       if (savedRows.length === 0) {

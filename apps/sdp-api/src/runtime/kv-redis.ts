@@ -1,25 +1,43 @@
 /**
- * Redis-backed KVStore implementation. Matches WorkersKVStore's surface
- * with a different backend. One ioredis client per REDIS_URL is shared
- * across the four logical stores (apiKeys / rateLimits / cache / sessions);
+ * Redis-backed KVStore implementation. One ioredis client per REDIS_URL is shared
+ * across the three logical stores (apiKeys / rateLimits / cache);
  * each store prefixes its keys so list() doesn't bleed across domains.
  *
  * ioredis is loaded lazily — the top-level `import type` is erased at emit
  * time, and the real module is fetched via `await import("ioredis")` inside
- * ensureClient on first use. That keeps ioredis out of the static module
- * graph; otherwise the Cloudflare Workers test pool (miniflare) trips on
- * ioredis's debug.js with "Maximum call stack size exceeded" during
- * transformation.
- *
- * Cloudflare KV serves stale reads for up to 60s after a key expires; Redis
- * doesn't. Anything that accidentally relied on that grace will surface.
+ * ensureClient on first use. This avoids opening a connection until a store is
+ * actually used.
  */
 
+import { createHash } from "node:crypto";
 import type { Redis } from "ioredis";
 import type { Env } from "@/types/env";
-import type { KVListResult, KVPutOptions, KVStore, KVStoreSet } from "./kv";
+import type {
+  KVListResult,
+  KVPutOptions,
+  KVStore,
+  KVStoreSet,
+  SlidingWindowAdmission,
+  SlidingWindowOptions,
+} from "./kv";
 
 const SCAN_COUNT = 100;
+
+const ADMIT_SLIDING_WINDOW_LUA = `
+local max = tonumber(ARGV[1])
+local weight = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local previous = tonumber(redis.call('GET', KEYS[2]) or '0')
+if current + previous * weight >= max then
+  return {0, current, previous}
+end
+current = redis.call('INCR', KEYS[1])
+redis.call('PEXPIRE', KEYS[1], ttl)
+return {1, current, previous}
+`;
+
+const ADMIT_SLIDING_WINDOW_SHA = createHash("sha1").update(ADMIT_SLIDING_WINDOW_LUA).digest("hex");
 
 // One Promise<Redis> per URL, shared by every RedisKVStore at that backend.
 // Storing the Promise (not the resolved client) means concurrent first-
@@ -86,12 +104,11 @@ export class RedisKVStore implements KVStore {
   async put(key: string, value: string, options?: KVPutOptions): Promise<void> {
     const client = await this.clientPromise;
     const namespacedKey = this.namespaced(key);
-    // expirationTtl is seconds (parity with CF KV's KVNamespacePutOptions);
-    // PX expects milliseconds.
+    // expirationTtl is seconds; Redis PX expects milliseconds.
     if (options?.expirationTtl !== undefined) {
       await client.set(namespacedKey, value, "PX", options.expirationTtl * 1000);
     } else {
-      // Match CF KV: omitting expirationTtl persists indefinitely.
+      // Omitting expirationTtl persists indefinitely.
       await client.set(namespacedKey, value);
     }
   }
@@ -99,6 +116,33 @@ export class RedisKVStore implements KVStore {
   async delete(key: string): Promise<void> {
     const client = await this.clientPromise;
     await client.del(this.namespaced(key));
+  }
+
+  async admitSlidingWindow(
+    currentKey: string,
+    previousKey: string,
+    options: SlidingWindowOptions
+  ): Promise<SlidingWindowAdmission> {
+    const client = await this.clientPromise;
+    const args: (string | number)[] = [
+      this.namespaced(currentKey),
+      this.namespaced(previousKey),
+      options.maxRequests,
+      options.previousWeight,
+      Math.ceil(options.expirationTtl * 1000),
+    ];
+    let raw: unknown;
+    try {
+      raw = await client.evalsha(ADMIT_SLIDING_WINDOW_SHA, 2, ...args);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("NOSCRIPT")) {
+        raw = await client.eval(ADMIT_SLIDING_WINDOW_LUA, 2, ...args);
+      } else {
+        throw err;
+      }
+    }
+    const [admitted, current, previous] = raw as [number, number, number];
+    return { admitted: admitted === 1, current, previous };
   }
 
   async list(): Promise<KVListResult> {
@@ -109,7 +153,7 @@ export class RedisKVStore implements KVStore {
     let cursor = "0";
     // SCAN is cursor-based and non-blocking; loop until cursor returns "0".
     // Strip the prefix on the way out so callers can round-trip list()
-    // output through delete(name), matching WorkersKVStore.
+    // output through delete(name).
     do {
       const [nextCursor, batch] = await client.scan(cursor, "MATCH", pattern, "COUNT", SCAN_COUNT);
       for (const namespaced of batch) {
@@ -125,7 +169,6 @@ const STORE_PREFIXES = {
   apiKeys: "apiKeys",
   rateLimits: "rateLimits",
   cache: "cache",
-  sessions: "sessions",
 } as const;
 
 /**
@@ -133,11 +176,11 @@ const STORE_PREFIXES = {
  * the stores hold a Promise<Redis>; the import and connection happen lazily
  * on the first method call. Fails fast on missing/whitespace REDIS_URL.
  */
-export function createRedisKVStoreSet(env: Env): KVStoreSet {
+export function createKVStoreSet(env: Env): KVStoreSet {
   const url = env.REDIS_URL?.trim();
   if (!url) {
     throw new Error(
-      "REDIS_URL missing for runtime=node. Set it in the environment (e.g. redis://localhost:6379)."
+      "REDIS_URL is required. Set it in the environment (e.g. redis://localhost:6379)."
     );
   }
   const clientPromise = ensureClient(url);
@@ -145,8 +188,19 @@ export function createRedisKVStoreSet(env: Env): KVStoreSet {
     apiKeys: new RedisKVStore(clientPromise, STORE_PREFIXES.apiKeys),
     rateLimits: new RedisKVStore(clientPromise, STORE_PREFIXES.rateLimits),
     cache: new RedisKVStore(clientPromise, STORE_PREFIXES.cache),
-    sessions: new RedisKVStore(clientPromise, STORE_PREFIXES.sessions),
   };
+}
+
+/** Verify that the configured Redis backend is reachable. */
+export async function pingRedis(env: Env): Promise<void> {
+  const url = env.REDIS_URL?.trim();
+  if (!url) {
+    throw new Error("REDIS_URL is required for the Redis readiness check.");
+  }
+  const response = await (await ensureClient(url)).ping();
+  if (response !== "PONG") {
+    throw new Error(`Unexpected Redis PING response: ${response}`);
+  }
 }
 
 /**

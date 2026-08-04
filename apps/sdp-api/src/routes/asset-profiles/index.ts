@@ -16,8 +16,8 @@ import {
 
 const assetProfiles = new Hono<{ Bindings: Env }>();
 
-// Gate the whole family behind the Asset Profiles feature flag until it is ready
-// for prime time. Off by default; enable per-environment via ASSET_PROFILES_ENABLED.
+// Managed SDP exposes the authenticated API capability while Vercel controls
+// the UI rollout. Self-hosted production retains an explicit environment opt-in.
 async function requireAssetProfilesFeature(c: Context<{ Bindings: Env }>, next: Next) {
   if (!isAssetProfilesEnabled(c.env)) {
     throw new AppError("FORBIDDEN", "Asset Profiles are not enabled for this environment");

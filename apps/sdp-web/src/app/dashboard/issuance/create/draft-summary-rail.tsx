@@ -98,12 +98,15 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
   const transferRestrictionsEnabled =
     draft.accessControl === "allowlist" ||
     draft.accessControl === "blocklist" ||
-    draft.capacities.transferApprovals;
+    draft.capacities.transferApprovals.enabled;
   const website = draft.website.trim();
   const pegSummary = getPegSummary(draft);
 
+  // `top-0` (not `top-4`): the rail sits at the very top of the scroll area, so
+  // any positive inset would shove it below the step header even at rest. With
+  // `top-0` it stays flush with the header and pins to the top on scroll.
   return (
-    <aside className="lg:sticky lg:top-4">
+    <aside className="lg:sticky lg:top-0">
       <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
         <p className="text-base font-medium text-primary">{t("DashboardIssuance.summary.title")}</p>
 
@@ -154,7 +157,9 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
             icon={ClipboardList}
             label={t("DashboardIssuance.summary.investorReporting")}
             value={
-              draft.capacities.investorReporting ? t("DashboardIssuance.summary.enabled") : null
+              draft.capacities.investorReporting.enabled
+                ? t("DashboardIssuance.summary.enabled")
+                : null
             }
           />
           <SummaryRow

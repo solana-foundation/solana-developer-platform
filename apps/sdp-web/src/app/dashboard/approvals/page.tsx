@@ -6,19 +6,12 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { ApprovalInbox } from "./approval-inbox";
-import type { ApprovalInboxTab } from "./approval-requests.data";
 import { fetchApprovalApiKeyNames, fetchApprovalRequests } from "./approval-requests.server";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-export default async function ApprovalsPage({ searchParams }: { searchParams: SearchParams }) {
-  const [t, { userId, orgId, orgRole }, resolvedSearchParams] = await Promise.all([
-    getTranslations(),
-    auth(),
-    searchParams,
-  ]);
+export default async function ApprovalsPage() {
+  const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
@@ -36,9 +29,6 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Se
     );
   }
 
-  const rawTab = resolvedSearchParams.tab;
-  const tabValue = Array.isArray(rawTab) ? rawTab[0] : rawTab;
-  const initialTab: ApprovalInboxTab = tabValue === "history" ? "history" : "pending";
   let requests: WalletApprovalRequestSummary[] = [];
   let apiKeyNames: Record<string, string> = {};
   let loadError = false;
@@ -58,7 +48,6 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Se
       initialRequests={requests}
       apiKeyNames={apiKeyNames}
       canDecide={dashboardAccess.capabilities.canDecideApprovals}
-      initialTab={initialTab}
       renderedAt={Date.now()}
       loadError={loadError}
     />

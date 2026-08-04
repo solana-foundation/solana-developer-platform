@@ -6,6 +6,7 @@ import {
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { getDb } from "@/db";
+import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";
 import type { Env } from "@/types/env";
 
 interface TrackedAssetDefinition {
@@ -71,11 +72,12 @@ interface HeliusGetAssetBatchResponse {
 async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetDefinition>> {
   const network = env.SOLANA_NETWORK ?? "devnet";
   const usdc = WELL_KNOWN_TOKENS.USDC;
+  const usdcMint = usdc.mints[network];
   const trackedAssets: TrackedAssetDefinition[] = [
     {
       token: usdc.symbol,
-      mint: usdc.mints[network],
-      decimals: usdc.decimals,
+      mint: usdcMint.address,
+      decimals: usdcMint.decimals,
       isUsdStable: usdc.isUsdStable,
     },
   ];
@@ -459,17 +461,33 @@ async function resolveUsdPricesForBalances(
     }
   }
 
-  const heliusDasUrl = resolveHeliusDasUrl(env);
   const unresolvedMints = [...new Set(balances.map((balance) => balance.mint))].filter(
     (mint) => !pricesByMint.has(mint)
   );
 
-  if (!heliusDasUrl || unresolvedMints.length === 0) {
+  if (unresolvedMints.length === 0) {
+    return { pricesByMint, trackedAssets };
+  }
+
+  // Jupiter first: it prices from the last swapped price across all venues, so it covers
+  // the long tail Helius DAS has no entry for — which is everything that is neither
+  // USD-stable nor in Helius's index, and is why a token like USDY rendered unpriced.
+  const jupiterPrices = await fetchJupiterUsdPrices(env, unresolvedMints);
+  for (const [mint, price] of jupiterPrices) {
+    pricesByMint.set(mint, price);
+  }
+
+  // Helius stays as a fallback rather than being deleted. Jupiter omits any mint it
+  // cannot price reliably, including anything untraded recently, and Helius still
+  // answers for some of those. Narrowing coverage is not the point of the change.
+  const stillUnresolved = unresolvedMints.filter((mint) => !pricesByMint.has(mint));
+  const heliusDasUrl = resolveHeliusDasUrl(env);
+  if (!heliusDasUrl || stillUnresolved.length === 0) {
     return { pricesByMint, trackedAssets };
   }
 
   try {
-    const fetchedPrices = await fetchUsdPricesByMint(heliusDasUrl, unresolvedMints);
+    const fetchedPrices = await fetchUsdPricesByMint(heliusDasUrl, stillUnresolved);
     for (const [mint, price] of fetchedPrices) {
       pricesByMint.set(mint, price);
     }

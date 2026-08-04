@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { createAssetProfilesRepository } from "@/db/repositories";
+import { createSystemAssetProfilesRepository } from "@/db/repositories";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -25,10 +25,16 @@ export const canonicalMetadataUrl = (origin: string, tokenId: string): string =>
  * on-chain MetadataPointer at deploy time, so an internal/unreachable origin
  * would be a permanent mistake. The configured value is normalized through
  * `URL.origin` so a stray trailing slash or path can't leak into the minted
- * URI. Falls back to the request origin (the public-facing origin on Cloudflare
- * Workers) when the env var is unset or malformed.
+ * URI. Falls back to the request origin when the env var is unset or malformed.
+ * In Cloud Run, the Node adapter sees the cleartext hop from Google's proxy;
+ * only there do we trust the proxy's forwarded scheme when reconstructing the
+ * public origin.
  */
-export const resolveMetadataOrigin = (env: Env, requestUrl: string): string => {
+export const resolveMetadataOrigin = (
+  env: Env,
+  requestUrl: string,
+  forwardedProto?: string
+): string => {
   const configured = env.PUBLIC_API_ORIGIN?.trim();
   if (configured) {
     try {
@@ -38,7 +44,20 @@ export const resolveMetadataOrigin = (env: Env, requestUrl: string): string => {
       // burning a malformed URL into the on-chain MetadataPointer.
     }
   }
-  return new URL(requestUrl).origin;
+
+  const requestOrigin = new URL(requestUrl);
+  if (env.K_SERVICE) {
+    const protocol = forwardedProto
+      ?.split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+      .at(-1);
+    if (protocol === "http" || protocol === "https") {
+      requestOrigin.protocol = `${protocol}:`;
+    }
+  }
+
+  return requestOrigin.origin;
 };
 
 /**
@@ -102,9 +121,9 @@ export const serveTokenMetadata = async (c: AppContext) => {
   // Gated by the same flag as the Asset Profiles family, so the canonical URI
   // already burned into deployed tokens serves the projection once it ships.
   if (isAssetProfilesEnabled(c.env)) {
-    const publicMetadata = await createAssetProfilesRepository(c.env).getPublicMetadataByTokenId(
-      tokenId
-    );
+    const publicMetadata = await createSystemAssetProfilesRepository(
+      c.env
+    ).getPublicMetadataByTokenId(tokenId);
     if (publicMetadata) {
       return c.json({ ...publicMetadata, ...body });
     }

@@ -27,7 +27,7 @@ CLERK_SECRET_KEY=sk_test_...
 CLERK_JWT_TEMPLATE=sdp-api
 ```
 
-In `apps/sdp-api/.dev.vars`:
+In `apps/sdp-api/.env.local`:
 
 ```bash
 CLERK_ISSUER=https://<your-instance>.clerk.accounts.dev
@@ -73,11 +73,11 @@ When testing, sign in to Clerk's hosted UI with an **active organization selecte
 
 ## 4. Set up the webhook relay (local dev)
 
-Clerk webhooks need a public HTTPS URL. Wrangler dev runs on `http://localhost:8787`. Use [ngrok](https://ngrok.com) with a reserved domain to tunnel the whole API — one stable URL serves every webhook consumer (Clerk plus each ramp provider) without re-registering endpoints between sessions.
+Clerk webhooks need a public HTTPS URL. The local API runs on `http://localhost:8787`. Use [ngrok](https://ngrok.com) with a reserved domain to tunnel the whole API — one stable URL serves every webhook consumer (Clerk plus each ramp provider) without re-registering endpoints between sessions.
 
 > **Why ngrok and not the Svix CLI?** Svix Play relays (`svix listen`) forward exactly one path per relay and mint a fresh URL per session unless pinned, so every provider registration goes stale the moment the relay target changes — untenable once more than one webhook consumer is involved. An ngrok reserved domain tunnels the full origin: every route under `/webhooks/*` is reachable at a URL that never changes. Signature verification happens in the API itself — the Clerk handler verifies the [Standard Webhooks](https://www.standardwebhooks.com/) signature via [`verifyWebhook` from `@clerk/backend`](https://clerk.com/docs/references/backend/verify-webhook), and each ramp provider's processor verifies its own scheme — so the tunnel needs no verification layer. (On paid ngrok plans you can additionally reject unsigned traffic at the edge with the [Traffic Policy `verify-webhook` action](https://ngrok.com/docs/traffic-policy/actions/verify-webhook/); the free plan does not include it, and it is defense-in-depth, not a requirement.)
 
-1. Install ngrok (`brew install ngrok`, or see [ngrok.com/download](https://ngrok.com/download)), then reserve a free stable domain at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains) and set it in `apps/sdp-api/.dev.vars`:
+1. Install ngrok (`brew install ngrok`, or see [ngrok.com/download](https://ngrok.com/download)), then reserve a free stable domain at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains) and set it in `apps/sdp-api/.env.local`:
 
    ```bash
    WEBHOOK_INGEST_DOMAIN=<your-subdomain>.ngrok-free.dev
@@ -110,7 +110,7 @@ Clerk webhooks need a public HTTPS URL. Wrangler dev runs on `http://localhost:8
      - `organizationMembership.deleted`
    - Save the endpoint.
 
-5. Copy the endpoint's **Signing Secret** (`whsec_...`) into `apps/sdp-api/.dev.vars` as `CLERK_WEBHOOK_SECRET`.
+5. Copy the endpoint's **Signing Secret** (`whsec_...`) into `apps/sdp-api/.env.local` as `CLERK_WEBHOOK_SECRET`.
 
 6. Restart the API so it picks up the new secret:
 
@@ -134,7 +134,7 @@ In production self-hosted deployments, point Clerk directly at the deployment's 
 
    You should see one row with `clerk_organization_id` matching the org you just created.
 4. From the dashboard, navigate to any authenticated page (wallets, settings). The API call should succeed — the JWT template is verified and `sub` + `org_id` resolve correctly.
-5. With `SDP_DEPLOYMENT_MODE=self_hosted`, the org's tier does not matter; every configured provider is entitled. If a provider picker is empty, that provider's env vars are not set in `.dev.vars`.
+5. With `SDP_DEPLOYMENT_MODE=self_hosted`, the org's tier does not matter; every configured provider is entitled. If a provider picker is empty, that provider's env vars are not set in `.env.local`.
 
 ## Troubleshooting
 

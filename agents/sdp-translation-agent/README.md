@@ -2,7 +2,9 @@
 
 This is the Eve agent used by the release workflow to translate missing SDP web UI strings.
 
-The agent receives one locale batch through Eve's structured HTTP session API and returns translations. It has no repository access and no write tools. GitHub Actions performs catalog discovery, placeholder and markup validation, file writes, and the release-branch commit.
+The agent receives one locale batch through Eve's structured HTTP session API and returns translations. Each entry includes its catalog namespace and nearby English strings, plus approved translations when they exist. The request also includes the locale glossary and voice rules from `.github/translation-guidance.json`.
+
+The agent has no repository access and no write tools. GitHub Actions performs catalog discovery, placeholder, markup, and terminology validation, file writes, and the release-branch commit.
 
 ## Vercel deployment
 

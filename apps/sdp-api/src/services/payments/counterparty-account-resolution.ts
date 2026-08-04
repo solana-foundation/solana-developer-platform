@@ -7,6 +7,7 @@ import {
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { AppError } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 
 export interface ResolvedSolanaCounterpartyAccount {
@@ -33,7 +34,11 @@ export async function resolveSolanaCounterpartyAccount(input: {
   counterpartyId: string;
   counterpartyAccountId: string;
 }): Promise<ResolvedSolanaCounterpartyAccount> {
-  const counterparty = await createCounterpartiesRepository(input.env).getCounterpartyById({
+  const scope = createTenantScope({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  const counterparty = await createCounterpartiesRepository(input.env, scope).getCounterpartyById({
     counterpartyId: input.counterpartyId,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -48,7 +53,10 @@ export async function resolveSolanaCounterpartyAccount(input: {
     );
   }
 
-  const account = await createCounterpartyAccountsRepository(input.env).getCounterpartyAccountById({
+  const account = await createCounterpartyAccountsRepository(
+    input.env,
+    scope
+  ).getCounterpartyAccountById({
     counterpartyAccountId: input.counterpartyAccountId,
     counterpartyId: input.counterpartyId,
     organizationId: input.organizationId,

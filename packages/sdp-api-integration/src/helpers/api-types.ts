@@ -36,6 +36,13 @@ export interface DeployPrepareMetadataApiResponse
  */
 export interface DeployConfirmApiResponse extends ApiResponse<{ token: Token }> {}
 
+export interface PreparedTransactionApiResponse
+  extends ApiResponse<{
+    transaction: TransactionRecord;
+    preparedTransaction: { serialized: string; blockhash: string; lastValidBlockHeight?: string };
+    simulation?: { success: boolean; logs: string[]; unitsConsumed?: number };
+  }> {}
+
 export interface MintPrepareApiResponse
   extends ApiResponse<{
     transaction: TransactionRecord;
@@ -58,10 +65,19 @@ export interface MintApiResponse
     tokenAccount: string;
   }> {}
 
-export interface BurnApiResponse
+export interface TransactionApiResponse
   extends ApiResponse<{
     transaction: TransactionRecord;
   }> {}
+
+export interface TransactionListApiResponse {
+  data: TransactionRecord[];
+  meta: {
+    total: number;
+    page: number;
+    pageSize: number;
+  };
+}
 
 export interface FreezeApiResponse
   extends ApiResponse<{

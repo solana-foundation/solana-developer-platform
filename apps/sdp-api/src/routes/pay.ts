@@ -1,9 +1,8 @@
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { getSdpDocsOrigin, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { getSdpDocsOrigin, SOL_DECIMALS } from "@sdp/types";
 import {
   type AccountMeta,
   AccountRole,
@@ -22,12 +21,13 @@ import { encodeURL } from "@solana/pay";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { Hono } from "hono";
 import { z } from "zod";
-import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest, notFound } from "@/lib/errors";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import {
   buildSplTransferInstructions,
@@ -43,9 +43,9 @@ const transactionRequestBodySchema = z.object({ account: z.string() });
 const pay = new Hono<{ Bindings: Env }>();
 
 pay.get("/:token", async (c) => {
-  const existing = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
-    c.req.param("token")
-  );
+  const existing = await createSystemPaymentRequestsRepository(
+    c.env
+  ).getPaymentRequestByPublicToken(c.req.param("token"));
   if (!existing) {
     throw notFound("Payment request");
   }
@@ -80,9 +80,9 @@ pay.get("/:token/tx", (c) => {
 });
 
 pay.post("/:token/tx", async (c) => {
-  const existing = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
-    c.req.param("token")
-  );
+  const existing = await createSystemPaymentRequestsRepository(
+    c.env
+  ).getPaymentRequestByPublicToken(c.req.param("token"));
   if (!existing) {
     throw notFound("Payment request");
   }
@@ -105,7 +105,14 @@ pay.post("/:token/tx", async (c) => {
 
   const payerSigner = createNoopSigner(payer);
   const rpc = solanaRpc.createRpc(c.env);
-  const feePayment = createFeePaymentAdapter(c.env);
+  if (!request.project_id) {
+    throw badRequest("Payment request is not eligible for sponsored fees");
+  }
+  const feePayment = await createProjectSponsorshipFeePayment(c.env, {
+    organizationId: request.organization_id,
+    projectId: request.project_id,
+    actor: { type: "wallet", id: request.wallet_id },
+  });
   const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
     feePayment.getFeePayer(),
     solanaRpc.getRecentBlockhash(rpc, "confirmed"),
@@ -113,7 +120,7 @@ pay.post("/:token/tx", async (c) => {
 
   let instructions: Instruction[];
   if (request.token === SOL_MINT) {
-    const lamports = parseDecimalAmount(request.amount, WELL_KNOWN_TOKENS.SOL.decimals);
+    const lamports = parseDecimalAmount(request.amount, SOL_DECIMALS);
     if (lamports <= 0n) {
       throw badRequest("Transfer amount must be greater than zero");
     }

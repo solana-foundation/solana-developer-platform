@@ -1,8 +1,16 @@
 "use client";
 
-import { BanIcon, CheckIcon, CopyIcon, EraserIcon, PauseIcon, PlayIcon } from "lucide-react";
+import {
+  BanIcon,
+  BugIcon,
+  CheckIcon,
+  CopyIcon,
+  EraserIcon,
+  PauseIcon,
+  PlayIcon,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { type NetworkDebugEntry, useNetworkDebug } from "@/contexts/network-debug-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
@@ -13,6 +21,7 @@ import {
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
+import { ToggleSwitch } from "./ui/toggle-switch";
 
 const PANEL_TRANSITION = { type: "spring", duration: 0.38, bounce: 0 } as const;
 const CONTENT_FADE_PROPS = {
@@ -164,51 +173,43 @@ function NetworkDebugEntryRow({
 
 export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean }) {
   const t = useTranslations();
-  const { available, enabled, pendingCount, setEnabled } = useNetworkDebug();
+  const { available, enabled, setEnabled } = useNetworkDebug();
+  const switchId = useId();
+  const accessibleName = t("Shared.SharedComponents.apiDebugLogs");
 
   if (!available) {
     return null;
   }
 
-  return (
-    <button
-      type="button"
-      onClick={() => setEnabled(!enabled)}
-      aria-pressed={enabled}
-      aria-label={collapsed ? t("Shared.SharedComponents.apiDebugLogs") : undefined}
-      title={collapsed ? t("Shared.SharedComponents.apiDebugLogs") : undefined}
-      className={cn(
-        "flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary",
-        collapsed && "justify-center"
-      )}
-    >
-      <span
-        className={cn(
-          "relative inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors",
-          enabled ? "border-primary bg-primary" : "border-border-default bg-fill-subtle"
-        )}
-        aria-hidden="true"
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={accessibleName}
+        title={accessibleName}
+        onClick={() => setEnabled(!enabled)}
+        className="flex h-10 w-full shrink-0 cursor-pointer items-center justify-center rounded-lg text-secondary outline-none transition-colors hover:bg-fill-strong hover:text-primary focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:ring-offset-2 focus-visible:ring-offset-surface-raised motion-reduce:transition-none"
       >
-        <span
-          className={cn(
-            "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full bg-surface-raised shadow-sm transition-transform",
-            enabled ? "translate-x-4.5" : "translate-x-0.5"
-          )}
-        />
-      </span>
-      {collapsed ? null : (
-        <>
-          <span className="min-w-0 flex-1 truncate text-left">
-            {t("Shared.SharedComponents.apiDebugLogs")}
-          </span>
-          {pendingCount > 0 ? (
-            <span className="shrink-0 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] text-secondary">
-              {pendingCount}
-            </span>
-          ) : null}
-        </>
-      )}
-    </button>
+        <BugIcon aria-hidden="true" className="h-5 w-5" strokeWidth={1.9} />
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex h-10 w-full items-center justify-between gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary motion-reduce:transition-none">
+      <label htmlFor={switchId} className="flex min-w-0 cursor-pointer items-center gap-3">
+        <BugIcon aria-hidden="true" className="h-5 w-5 shrink-0" strokeWidth={1.9} />
+        <span className="whitespace-nowrap">{accessibleName}</span>
+      </label>
+      <ToggleSwitch
+        id={switchId}
+        checked={enabled}
+        onChange={setEnabled}
+        aria-label={accessibleName}
+      />
+    </div>
   );
 }
 

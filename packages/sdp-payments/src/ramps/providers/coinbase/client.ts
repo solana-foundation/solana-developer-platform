@@ -144,8 +144,24 @@ interface CoinbaseBuyQuoteResponse {
   network_fee: CoinbaseAmount;
 }
 
+interface CoinbaseOrderFee {
+  amount: string;
+  currency: string;
+  type: string;
+}
+
 interface CoinbaseCreateOrderResponse {
-  order: { orderId: string; status: string };
+  order: {
+    orderId: string;
+    status: string;
+    paymentCurrency: string;
+    paymentSubtotal: string;
+    paymentTotal: string;
+    purchaseCurrency: string;
+    purchaseAmount: string;
+    exchangeRate: string;
+    fees: CoinbaseOrderFee[];
+  };
   paymentLink: { url: string; paymentLinkType: string };
 }
 
@@ -326,6 +342,17 @@ export class CoinbaseRampClient implements RampProvider {
       status: "pending",
       deliveryMode: "hosted",
       hostedUrl: hostedUrl.href,
+      paymentCurrency: order.paymentCurrency,
+      paymentSubtotal: order.paymentSubtotal,
+      paymentTotal: order.paymentTotal,
+      purchaseCurrency: order.purchaseCurrency,
+      purchaseAmount: order.purchaseAmount,
+      exchangeRate: order.exchangeRate,
+      fees: order.fees.map((fee) => ({
+        feeAmount: fee.amount,
+        feeCurrency: fee.currency,
+        feeType: fee.type,
+      })),
     };
   }
 

@@ -33,6 +33,7 @@ import Image from "next/image";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { MemoJsonView } from "@/app/dashboard/payments/wizard-summary-list";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,9 +45,11 @@ import {
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import {
@@ -57,7 +60,6 @@ import {
   resolveTransferTypeLabel,
   shortenAddress,
 } from "../payments-overview.utils";
-import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 
@@ -485,6 +487,31 @@ function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement
     );
   }
 
+  if (settlement.provider === "coinbase") {
+    const providerFee = settlement.fees.find((fee) => fee.feeType === "FEE_TYPE_EXCHANGE");
+    const networkFee = settlement.fees.find((fee) => fee.feeType === "FEE_TYPE_NETWORK");
+    return (
+      <>
+        {providerFee ? (
+          <DetailRow
+            label={t("DashboardPayments.transferDetails.providerFee")}
+            value={formatDisplayAmount(providerFee.feeAmount, providerFee.feeCurrency)}
+          />
+        ) : null}
+        {networkFee && Number(networkFee.feeAmount) > 0 ? (
+          <DetailRow
+            label={t("DashboardPayments.transferDetails.networkFee")}
+            value={formatDisplayAmount(networkFee.feeAmount, networkFee.feeCurrency)}
+          />
+        ) : null}
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.exchangeRate")}
+          value={`1 ${settlement.purchaseCurrency} = ${formatDisplayAmount(settlement.exchangeRate, settlement.paymentCurrency)}`}
+        />
+      </>
+    );
+  }
+
   const sentDecimal = settlement.sentAmount.amount / 10 ** settlement.sentAmount.decimals;
   const receivedDecimal =
     settlement.receivedAmount.amount / 10 ** settlement.receivedAmount.decimals;
@@ -517,9 +544,16 @@ function TransferDetailModal({
   onClose: () => void;
 }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
+  const [memoJsonOpen, setMemoJsonOpen] = useState(false);
   if (!transfer) {
     return null;
   }
+
+  const closeModal = () => {
+    setMemoJsonOpen(false);
+    onClose();
+  };
 
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
   const walletAddress = isInbound ? transfer.destination : transfer.source;
@@ -549,7 +583,7 @@ function TransferDetailModal({
     <Modal
       isOpen
       ariaLabel={t("DashboardPayments.counterparty.transactionDetails")}
-      onClose={onClose}
+      onClose={closeModal}
       size="lg"
     >
       <div className="space-y-5 p-6">
@@ -626,6 +660,16 @@ function TransferDetailModal({
                 value={transfer.memo}
               />
             ) : null}
+            {Object.keys(transfer.rampsMemo).length > 0 ? (
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.memo")}
+                value={
+                  <Button type="button" size="xs" onClick={() => setMemoJsonOpen(true)}>
+                    {t("DashboardPayments.ramps.memoViewJson")}
+                  </Button>
+                }
+              />
+            ) : null}
             {transfer.settlement ? <RampSettlementRows settlement={transfer.settlement} /> : null}
             {moneygram?.referenceNumber ? (
               <DetailRow
@@ -693,13 +737,24 @@ function TransferDetailModal({
             className="w-full"
             iconLeft={<ExternalLinkIcon className="size-4" />}
             onClick={() =>
-              window.open(getDevnetExplorerUrl(signature), "_blank", "noopener,noreferrer")
+              window.open(explorerTxUrl(signature, cluster), "_blank", "noopener,noreferrer")
             }
           >
             {t("DashboardPayments.counterparty.viewOnExplorer")}
           </Button>
         ) : null}
       </div>
+
+      <Modal
+        isOpen={memoJsonOpen}
+        onClose={() => setMemoJsonOpen(false)}
+        ariaLabel={t("DashboardPayments.ramps.memoJsonTitle")}
+        size="lg"
+      >
+        <div className="p-6">
+          <MemoJsonView json={transfer.rampsMemo} />
+        </div>
+      </Modal>
     </Modal>
   );
 }

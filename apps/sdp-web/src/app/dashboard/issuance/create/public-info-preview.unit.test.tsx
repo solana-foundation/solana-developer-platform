@@ -47,7 +47,7 @@ describe("PublicInfoPreview", () => {
     );
 
     // The whole row is the click target, not just the round check.
-    expect(markup).toMatch(/<button[^>]*w-full items-start/);
+    expect(markup).toMatch(/<button[^>]*w-full items-center/);
   });
 
   it("hides the mint address until the token is deployed", () => {

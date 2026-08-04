@@ -31,7 +31,12 @@ function buildApp(setup: (c: Context<{ Bindings: Env }>) => void) {
     await next();
   });
   app.use("*", projectContextMiddleware());
-  app.get("/probe", (c) => c.json({ projectId: c.get("projectId") }));
+  app.get("/probe", (c) =>
+    c.json({
+      projectId: c.get("projectId"),
+      projectEnvironment: c.get("projectEnvironment"),
+    })
+  );
 
   app.onError((err, c) => {
     if (err instanceof AppError) {
@@ -106,8 +111,12 @@ describe("projectContextMiddleware", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { projectId: string };
+    const body = (await res.json()) as {
+      projectId: string;
+      projectEnvironment: string;
+    };
     expect(body.projectId).toBe(MEMBER_PROJECT_ID);
+    expect(body.projectEnvironment).toBe("sandbox");
   });
 
   it("rejects an x-project-id header for a project in the same org the user does not belong to", async () => {
@@ -155,8 +164,12 @@ describe("projectContextMiddleware", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { projectId: string };
+    const body = (await res.json()) as {
+      projectId: string;
+      projectEnvironment: string;
+    };
     expect(body.projectId).toBe(MEMBER_PROJECT_ID);
+    expect(body.projectEnvironment).toBe("sandbox");
   });
 
   it("returns 401 when neither API key nor session is present", async () => {

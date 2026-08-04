@@ -9,13 +9,12 @@ const useExternalApi = env.useExternalApi;
 const localApiPort = process.env.PLAYWRIGHT_API_PORT ?? "8788";
 const localApiUrl = process.env.PLAYWRIGHT_API_URL ?? `http://127.0.0.1:${localApiPort}`;
 const apiBaseUrl = useExternalApi ? env.sdpApiBaseUrl : localApiUrl;
-const apiPersistPath = process.env.PLAYWRIGHT_API_PERSIST_PATH ?? ".wrangler/state-playwright";
 const webPort = new URL(env.baseURL).port || "3001";
 const nextDistDir = process.env.PLAYWRIGHT_NEXT_DIST_DIR ?? ".next-playwright";
 const useNextStart = process.env.PLAYWRIGHT_USE_NEXT_START === "1";
 const webCommand = useNextStart
-  ? `corepack pnpm exec next start --hostname localhost --port ${webPort}`
-  : `corepack pnpm exec next dev --webpack --hostname localhost --port ${webPort}`;
+  ? `pnpm exec next start --hostname localhost --port ${webPort}`
+  : `pnpm exec next dev --hostname localhost --port ${webPort}`;
 
 function resolveProcessEnv(): Record<string, string> {
   return Object.fromEntries(
@@ -45,7 +44,6 @@ export default defineConfig({
             reuseExistingServer: false,
             env: {
               ...resolveProcessEnv(),
-              SDP_API_LOCAL_PERSIST_PATH: apiPersistPath,
               SDP_API_PORT: localApiPort,
               SDP_API_RESET_LOCAL_STATE: "1",
             },
@@ -90,7 +88,19 @@ export default defineConfig({
     {
       name: "dashboard",
       testMatch: /.*\.e2e\.spec\.ts/,
-      testIgnore: /.*(issuance|auth-entry|gcp-read-only).*.e2e\.spec\.ts/,
+      testIgnore: [
+        /.*(issuance|auth-entry|gcp-read-only).*.e2e\.spec\.ts/,
+        /(^|\/)(payments|wallets)\.e2e\.spec\.ts$/,
+      ],
+      dependencies: ["auth-setup"],
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: authStatePath,
+      },
+    },
+    {
+      name: "dashboard-transactions",
+      testMatch: /(^|\/)(payments|wallets)\.e2e\.spec\.ts$/,
       dependencies: ["auth-setup"],
       use: {
         ...devices["Desktop Chrome"],

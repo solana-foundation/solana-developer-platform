@@ -14,6 +14,7 @@ import {
   withOpenApi,
   z,
 } from "./base";
+import { policyRuleSchema } from "./payments";
 
 export const apiKeyRoleSchema = z
   .enum(["api_admin", "api_developer", "api_readonly"])
@@ -94,37 +95,15 @@ export const apiKeyWalletPolicyBindingSchema = z
   })
   .openapi({ description: "Read-only policy binding summary for an API key wallet scope." });
 
-export const apiKeyPolicyRuleSchema = z
-  .object({
-    id: z.string().optional().openapi({ description: "Stable client-side rule identifier." }),
-    name: z.string().optional().openapi({ description: "Human-readable rule name." }),
-    description: z.string().optional().openapi({ description: "Rule description." }),
-    action: z
-      .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
-      .optional()
-      .openapi({ description: "Decision to apply when this rule matches." }),
-    kind: z
-      .enum([
-        "operation_family",
-        "operation_type",
-        "asset",
-        "destination",
-        "amount",
-        "approval",
-        "always",
-      ])
-      .openapi({ description: "API-key policy rule kind." }),
-  })
-  .passthrough()
-  .openapi({
-    description: "Operation-level API-key policy rule.",
-    example: {
-      id: "deny-raw-signing",
-      kind: "operation_family",
-      family: "raw_sign",
-      action: "deny",
-    },
-  });
+export const apiKeyPolicyRuleSchema = withOpenApi(policyRuleSchema, {
+  description: "Operation-level API-key policy rule.",
+  example: {
+    id: "deny-raw-signing",
+    kind: "operation_family",
+    family: "raw_sign",
+    action: "deny",
+  },
+});
 
 export const apiKeyControlProfileSchema = z
   .object({
@@ -310,7 +289,7 @@ export const apiKeyDetailSchema = z
       .array(z.string())
       .nullable()
       .openapi({
-        description: "CIDR ranges permitted to use the key.",
+        description: "IPv4/IPv6 addresses or CIDR ranges permitted to use the key.",
         example: ["203.0.113.0/24"],
       }),
     walletScope: apiKeyWalletScopeSchema,
@@ -447,7 +426,7 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       example: "selected",
     }),
     allowedIps: withOpenApi(apiKeyCreateSchemaBase.shape.allowedIps, {
-      description: "Optional list of CIDR ranges allowed to use the key.",
+      description: "Optional list of IPv4/IPv6 addresses or CIDR ranges allowed to use the key.",
       example: ["203.0.113.0/24"],
     }),
     expiresAt: withOpenApi(apiKeyCreateSchemaBase.shape.expiresAt, {
@@ -502,7 +481,7 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
       example: "all",
     }),
     allowedIps: withOpenApi(apiKeyUpdateSchemaBase.shape.allowedIps, {
-      description: "Updated IP allowlist. Use null to clear.",
+      description: "Updated IPv4/IPv6 address or CIDR allowlist. Use null to clear.",
       example: ["203.0.113.0/24"],
     }),
     expiresAt: withOpenApi(apiKeyUpdateSchemaBase.shape.expiresAt, {

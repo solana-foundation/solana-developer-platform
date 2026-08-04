@@ -4,6 +4,8 @@ import {
   Activity,
   Anchor,
   Banknote,
+  Building2,
+  Calendar,
   Check,
   ChevronDown,
   CircleCheck,
@@ -12,6 +14,7 @@ import {
   Copy,
   ExternalLink,
   FileText,
+  Gauge,
   Globe,
   Hash,
   Image,
@@ -20,9 +23,14 @@ import {
   Lock,
   type LucideIcon,
   MapPin,
+  Percent,
+  PieChart,
+  Radio,
+  Scale,
   ShieldCheck,
   Tag,
   Target,
+  TrendingUp,
   User,
   Wallet,
 } from "lucide-react";
@@ -117,11 +125,23 @@ const FIELD_ICONS: Record<string, LucideIcon> = {
   backingtype: ShieldCheck,
   reserveasset: Banknote,
   reservecustodian: Wallet,
+  collateralizationratio: Gauge,
+  oracleprovider: Radio,
+  mincollateralratio: Scale,
   custodian: Wallet,
   website: Globe,
   jurisdiction: MapPin,
   offeringtype: Tag,
+  shareclass: TrendingUp,
+  couponrate: Percent,
+  maturitydate: Calendar,
+  seniority: Layers,
+  fundstrategy: PieChart,
+  managementfee: Percent,
+  netassetvalue: Coins,
   underlyingasset: Coins,
+  propertytype: Building2,
+  propertylocation: MapPin,
 };
 
 // Resilient fallbacks for keys not in the exact map (e.g. future fields),
@@ -805,7 +825,7 @@ function FieldRow({
 
   if (!hasToggle) {
     return (
-      <div className={cn("flex items-start gap-3 px-4 py-3", locked && "bg-fill-subtle")}>
+      <div className={cn("flex items-center gap-3 px-4 py-3", locked && "bg-fill-subtle")}>
         {body}
       </div>
     );
@@ -824,7 +844,7 @@ function FieldRow({
       onClick={onToggle}
       disabled={disabled}
       className={cn(
-        "group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors",
+        "group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors",
         disabled
           ? "cursor-default"
           : "cursor-pointer hover:bg-fill-subtle focus-visible:bg-fill-subtle focus-visible:outline-none"
@@ -851,7 +871,7 @@ function RoundCheck({
     <span
       aria-hidden="true"
       className={cn(
-        "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors",
+        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors",
         checked
           ? "border-primary bg-primary text-on-primary"
           : "border-border-strong bg-surface-raised text-transparent",

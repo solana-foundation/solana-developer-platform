@@ -1,4 +1,5 @@
 import type { Context, Next } from "hono";
+import { getLogger, runWithLogContext } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 const TRACE_ID_HEADER = "X-SDP-Trace-ID";
@@ -55,33 +56,33 @@ export function requestTracingMiddleware() {
     c.set("traceId", traceId);
     c.set("requestSource", requestSource);
 
-    try {
-      await next();
-    } finally {
-      if (c.res) {
-        const durationMs = roundDuration(performance.now() - startedAt);
-        const pathname = new URL(c.req.url).pathname;
+    await runWithLogContext({ request_id: requestId, trace_id: traceId }, async () => {
+      try {
+        await next();
+      } finally {
+        if (c.res) {
+          const durationMs = roundDuration(performance.now() - startedAt);
+          const pathname = new URL(c.req.url).pathname;
 
-        c.header(TRACE_ID_HEADER, traceId);
-        c.header(
-          "Server-Timing",
-          appendServerTiming(c.res.headers.get("Server-Timing"), `app;dur=${durationMs}`)
-        );
+          c.header(TRACE_ID_HEADER, traceId);
+          c.header(
+            "Server-Timing",
+            appendServerTiming(c.res.headers.get("Server-Timing"), `app;dur=${durationMs}`)
+          );
 
-        console.info(
-          JSON.stringify({
-            event: "sdp_api_request_timing",
-            timestamp: new Date().toISOString(),
-            requestId,
-            traceId,
-            source: requestSource,
-            method: c.req.method,
-            path: pathname,
-            status: c.res.status,
-            durationMs,
-          })
-        );
+          getLogger().info(
+            {
+              event: "sdp_api_request_timing",
+              source: requestSource,
+              method: c.req.method,
+              path: pathname,
+              status: c.res.status,
+              duration_ms: durationMs,
+            },
+            "request completed"
+          );
+        }
       }
-    }
+    });
   };
 }

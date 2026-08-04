@@ -3,6 +3,7 @@
  */
 
 import type { Context } from "hono";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { AppError, type ErrorResponse } from "./errors";
 
@@ -76,7 +77,7 @@ export function error(c: Context<{ Bindings: Env }>, err: AppError | Error) {
   }
 
   // Unexpected errors
-  console.error("Unexpected error:", err);
+  getLogger().error({ error: err }, "Unexpected error");
   const response: ErrorResponse = {
     error: {
       code: "INTERNAL_ERROR",

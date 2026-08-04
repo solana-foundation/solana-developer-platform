@@ -2,7 +2,7 @@
 
 ## System boundaries
 
-- `apps/sdp-api` is a Cloudflare Workers API. Treat route handlers, middleware, repositories, Postgres, KV, and provider adapters as server-side code.
+- `apps/sdp-api` is a Node.js API deployed to Cloud Run. Treat route handlers, middleware, repositories, Postgres, Redis, and provider adapters as server-side code.
 - `apps/sdp-web` is a browser-facing Next.js dashboard. Treat browser input, URL parameters, client state, and rendered user-controlled content as untrusted.
 - `apps/sdp-docs` is a public documentation site. Documentation and generated API reference content are public and must not contain secrets or private operational details.
 - `packages/*` contains shared runtime types and constants used by more than one application. Changes here can affect both API and dashboard trust boundaries.
@@ -25,10 +25,16 @@
 
 - External custody, compliance, payments, RPC, and fiat-rail providers are not trusted merely because they are configured. Validate their responses, signatures, status transitions, and identifiers at the provider adapter boundary.
 - Solana RPC responses and transaction metadata are external data. Do not treat a successful submission, signature, account address, or token amount as proof that the intended business operation is authorized or settled.
-- Local development and devnet defaults are not production security controls. Do not infer production safety from local `.dev.vars`, test fixtures, mocks, or devnet behavior.
+- Local development and devnet defaults are not production security controls. Do not infer production safety from local `.env.local`, test fixtures, mocks, or devnet behavior.
 
 ## Review guidance
 
 - Flag missing authorization, cross-tenant access, secret exposure, signature-verification gaps, replay/idempotency flaws, unsafe state transitions, and changes that can cause unauthorized signing or settlement.
 - Treat generated OpenAPI/API reference artifacts as derived output; review the owning source and regeneration path instead of reporting generated duplication by itself.
 - Keep false-positive decisions specific to the affected flow. Do not suppress a finding broadly when the same pattern could be exploitable in a public route, browser surface, custody path, webhook, or provider adapter.
+
+## Browser proxy and public-contract boundaries
+
+- The API Playground execution route is a browser-facing, authenticated proxy to the fixed SDP API client. It must require a signed-in user and active organization, allow only the intended HTTP methods and supported public API paths, and never become a generic outbound-request or internal-route proxy.
+- A user-supplied API key must be verified server-side as available to the selected project before forwarding. Never log, cache, reflect, or substitute it with a server credential, and do not let Playground access bypass the API's normal authorization and policy checks.
+- The public OpenAPI document, generated API reference, Playground catalog, and AI-discovery artifacts must expose only supported public API families. Internal `admin`, `auth`, `organizations`, `members`, `onboarding`, and `rpc` surfaces must not be disclosed or made reachable merely by generated documentation or browser UI changes.

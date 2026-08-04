@@ -8,7 +8,7 @@ import {
   RuntimeEnvCredentialSecretStore,
   resolveCredentialSecretStoreBackend,
 } from "./credential-secret-store";
-import { createEncryptionService } from "./encryption.service";
+import { createCustodyCipher } from "./custody-cipher/cipher-router";
 
 function encodeBase64(value: string): string {
   let binary = "";
@@ -240,6 +240,54 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
     ).rejects.toBeInstanceOf(CredentialSecretStoreError);
   });
 
+  it.each([
+    ["a missing name", {}],
+    ["a non-string name", { name: 7 }],
+    [
+      "a different project",
+      {
+        name: "projects/other-project/secrets/sdp-dev-provider-credentials-pcred_123/versions/1",
+      },
+    ],
+    [
+      "a different secret prefix",
+      {
+        name: "projects/sdp-dev-123/secrets/other-prefix-pcred_123/versions/1",
+      },
+    ],
+    [
+      "a different managed secret",
+      {
+        name: "projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_456/versions/1",
+      },
+    ],
+    [
+      "a non-exact version",
+      {
+        name: "projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_123/versions/latest",
+      },
+    ],
+  ])("treats a successful addVersion response with %s as an upstream error", async (_, body) => {
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: "sdp-dev-123",
+      secretPrefix: "sdp-dev-provider-credentials",
+      accessToken: "test-token",
+      fetcher: async (input) =>
+        String(input).endsWith(":addVersion")
+          ? new Response(JSON.stringify(body))
+          : new Response(null, { status: 409 }),
+    });
+
+    await expect(
+      store.write({
+        orgId: "org_123",
+        provider: "privy",
+        providerCredentialId: "pcred_123",
+        payload: { appSecret: "secret" },
+      })
+    ).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+  });
+
   it("wraps invalid GCP payload base64 in CredentialSecretStoreError", async () => {
     const store = new GcpSecretManagerCredentialSecretStore({
       projectId: "sdp-dev-123",
@@ -310,7 +358,7 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
 describe("EncryptedDbCredentialSecretStore", () => {
   it("stores only ciphertext and decrypts with the organization key scope", async () => {
     const store = new EncryptedDbCredentialSecretStore(
-      createEncryptionService(testEncryptionKey())
+      createCustodyCipher({ CUSTODY_ENCRYPTION_KEY: testEncryptionKey() } as Env)
     );
     const payload = {
       appId: "privy-app-id",
@@ -334,7 +382,9 @@ describe("EncryptedDbCredentialSecretStore", () => {
   });
 
   it("wraps encryption failures in CredentialSecretStoreError", async () => {
-    const store = new EncryptedDbCredentialSecretStore(createEncryptionService("not-a-valid-key"));
+    const store = new EncryptedDbCredentialSecretStore(
+      createCustodyCipher({ CUSTODY_ENCRYPTION_KEY: "not-a-valid-key" } as Env)
+    );
 
     await expect(
       store.write({
@@ -348,7 +398,7 @@ describe("EncryptedDbCredentialSecretStore", () => {
 
   it("does not expose external version deletion for DB-backed storage", async () => {
     const store = new EncryptedDbCredentialSecretStore(
-      createEncryptionService(testEncryptionKey())
+      createCustodyCipher({ CUSTODY_ENCRYPTION_KEY: testEncryptionKey() } as Env)
     );
 
     await expect(

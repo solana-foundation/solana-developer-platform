@@ -7,6 +7,7 @@ import {
 } from "@/services/custody/provisioning";
 import { type SigningRequestStore, SigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
+import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 
 vi.mock("@/services/custody/provisioning", () => ({
@@ -185,6 +186,59 @@ describe("signing.service provider reuse", () => {
 
     expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, signingConfigId);
   });
+
+  it("does not let a project create wallets in an organization-scoped fallback config", async () => {
+    const orgId = "org_shared_wallet_guard";
+    const configRecord = createConfigRecord({
+      id: "cust_shared_wallet_guard",
+      orgId,
+      provider: "privy",
+      defaultWalletId: "privy_shared_default",
+    });
+    const { service, configStore } = createService({ configRecord, wallets: [] });
+    configStore.getDefaultConfig.mockResolvedValue(configRecord);
+
+    await expect(service.createWallet(orgId, "prj_attacker", {})).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(configStore.createWallet).not.toHaveBeenCalled();
+  });
+
+  it("does not return cached signatures outside the request tenant", async () => {
+    const orgId = "org_signing_owner";
+    const configRecord = createConfigRecord({
+      id: "cust_signing_status",
+      orgId,
+      provider: "privy",
+      defaultWalletId: "privy_wallet_1",
+    });
+    const { service, signingStore } = createService({ configRecord, wallets: [] });
+    signingStore.findByIdOrExternal.mockResolvedValue({
+      id: "sreq_owner",
+      organizationId: orgId,
+      projectId: "prj_signing_owner",
+      custodyConfigId: configRecord.id,
+      externalRequestId: "external_owner",
+      status: "completed",
+      transactionMessage: "message",
+      signatures: JSON.stringify([{ publicKey: "OwnerPublicKey", signature: "AQ==" }]),
+      metadata: null,
+    });
+
+    await expect(
+      service.getSigningStatus("org_attacker", "prj_attacker", "sreq_owner")
+    ).resolves.toEqual({ status: "failed", error: "Signing request not found" });
+    await expect(service.getSigningStatus(orgId, "prj_attacker", "sreq_owner")).resolves.toEqual({
+      status: "failed",
+      error: "Signing request not found",
+    });
+    await expect(
+      service.getSigningStatus(orgId, "prj_signing_owner", "sreq_owner")
+    ).resolves.toMatchObject({ status: "completed" });
+    await expect(service.getSigningStatus(orgId, undefined, "sreq_owner")).resolves.toMatchObject({
+      status: "completed",
+    });
+  });
 });
 
 function createService(params: {
@@ -194,6 +248,11 @@ function createService(params: {
   defaultConfigRecord?: SigningConfigRecord | null;
 }): {
   service: SigningService;
+  signingStore: {
+    create: ReturnType<typeof vi.fn>;
+    findByIdOrExternal: ReturnType<typeof vi.fn>;
+    updateStatus: ReturnType<typeof vi.fn>;
+  };
   configStore: {
     findActive: ReturnType<typeof vi.fn>;
     listActive: ReturnType<typeof vi.fn>;
@@ -224,16 +283,14 @@ function createService(params: {
     reactivateWallet: vi.fn(),
   };
 
-  const signingStore: SigningRequestStore = {
+  const signingStore = {
     create: vi.fn(),
     findByIdOrExternal: vi.fn(),
     updateStatus: vi.fn(),
-  };
+  } satisfies SigningRequestStore;
 
   const env: Env = {
-    HYPERDRIVE: {
-      connectionString: "postgresql://sdp:sdp@127.0.0.1:5432/sdp",
-    },
+    DATABASE_URL: testEnv.DATABASE_URL,
     CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
     ENVIRONMENT: "development",
     API_VERSION: "v1",
@@ -243,6 +300,7 @@ function createService(params: {
   return {
     service: new SigningService(configStore as never, signingStore, env),
     configStore,
+    signingStore,
   };
 }
 
@@ -258,6 +316,7 @@ function createConfigRecord(params: {
     projectId: null,
     provider: params.provider,
     config: "encrypted-placeholder",
+    encryptionVersion: "sdp-custody-encryption-v1",
     defaultWalletId: params.defaultWalletId,
     status: "inactive",
     createdAt: "2026-01-01T00:00:00.000Z",

@@ -15,8 +15,13 @@ const ASSOCIATED_TOKEN_PROGRAM_ID = address("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efT
 // biome-ignore lint/security/noSecrets: Solana Token-2022 program ID, not a secret.
 const TOKEN_2022_PROGRAM_ID = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
-function shortValue(value: string): string {
-  return value.length <= 16 ? value : `${value.slice(0, 6)}...${value.slice(-6)}`;
+// Permission rows render an authority through WalletIdentityBadge, which shortens
+// the address — and by a different amount per state: an org custody wallet spends
+// its detail line on "Provider · 5…4", while an address SDP doesn't hold gets the
+// line to itself (11…10). The tail is what every form keeps, so assert on that
+// rather than pinning one truncation the badge is free to retune.
+function addressTail(value: string): string {
+  return value.slice(-4);
 }
 
 async function deriveAssociatedTokenAccountAddress(owner: string, mint: string): Promise<string> {
@@ -142,24 +147,16 @@ async function waitForActionResponse(
   trigger: () => Promise<void>
 ): Promise<void> {
   const responsePromise = page.waitForResponse(
-    (response) => {
-      const request = response.request();
-      const postData = request.postData() ?? "";
-      return (
-        response.url().endsWith("/api/playground/execute") &&
-        request.method() === "POST" &&
-        postData.includes(`"method":"${options.method}"`) &&
-        postData.includes(options.pathIncludes)
-      );
-    },
+    (response) =>
+      response.request().method() === options.method &&
+      new URL(response.url()).pathname.includes(options.pathIncludes),
     { timeout: 180_000 }
   );
 
   await trigger();
   const response = await responsePromise;
-  expect(response.ok()).toBe(true);
-  const payload = (await response.json().catch(() => null)) as { ok?: boolean } | null;
-  expect(payload?.ok, JSON.stringify(payload)).toBe(true);
+  const body = await response.text().catch(() => "");
+  expect(response.ok(), body).toBe(true);
 }
 
 async function confirmAction(page: Page, confirmButtonLabel: string): Promise<void> {
@@ -217,10 +214,11 @@ interface CreateDraftOptions {
   symbol: string;
   decimals: string;
   treasuryWalletId: string;
+  custodySignerWalletCount: number;
 }
 
 // Creating a draft goes through one of two UIs depending on the
-// NEXT_PUBLIC_ASSET_PROFILES_ENABLED flag: the full-page wizard (flag on) or the
+// `asset-profiles` Vercel flag: the full-page wizard (flag on) or the
 // legacy modal (flag off). Detect which one the "Create draft" button opened —
 // the wizard navigates to its own route, the modal stays on the overview — and
 // drive whichever renders, so this passes under either flag value.
@@ -257,6 +255,16 @@ async function createDraftViaWizard(page: Page, options: CreateDraftOptions): Pr
   await page
     .getByPlaceholder("Describe what this asset represents.")
     .fill("Created by Playwright issuance e2e.");
+  await page.getByRole("tab", { name: "Operational", exact: true }).click();
+  // The signing-wallet field locks to the only wallet when the project has
+  // exactly one custody signer wallet (an identity card, no combobox) and
+  // renders a select otherwise. Assert the branch the fixtures dictate.
+  if (options.custodySignerWalletCount === 1) {
+    await expect(page.getByTestId("wallet-identity-card")).toContainText(options.treasuryWalletId);
+  } else {
+    await page.getByRole("combobox").click();
+    await page.getByRole("option").filter({ hasText: options.treasuryWalletId }).click();
+  }
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
   // Public information — defaults are fine.
@@ -268,7 +276,18 @@ async function createDraftViaWizard(page: Page, options: CreateDraftOptions): Pr
   const dialog = page.getByRole("dialog", { name: "Create asset draft" });
   await expect(dialog).toBeVisible();
   await page.waitForTimeout(400);
-  await dialog.getByRole("button", { name: "Create draft", exact: true }).click();
+  // Confirmation starts an async server action, then routes to the new token.
+  // Wait for that navigation so the caller cannot abort the create request by
+  // immediately navigating back to the overview.
+  await Promise.all([
+    page.waitForURL(
+      (url) =>
+        url.pathname.startsWith("/dashboard/issuance") &&
+        url.pathname !== "/dashboard/issuance/create",
+      { timeout: 120_000 }
+    ),
+    dialog.getByRole("button", { name: "Create draft", exact: true }).click(),
+  ]);
 }
 
 // The legacy create-token modal: template → identity → features → create.
@@ -336,6 +355,7 @@ test.describe
         symbol: draftSymbol,
         decimals: "7",
         treasuryWalletId: fixtures.wallets.treasury.walletId,
+        custodySignerWalletCount: fixtures.wallets.custodySignerWalletCount,
       });
 
       // Verify via the overview list, which is identical under either create UI
@@ -440,7 +460,7 @@ test.describe
         page,
         {
           method: "POST",
-          pathIncludes: `/v1/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist`,
+          pathIncludes: `/api/dashboard/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist`,
         },
         async () => {
           await page.getByRole("button", { name: "Add allowlist entry" }).click();
@@ -459,7 +479,7 @@ test.describe
         page,
         {
           method: "DELETE",
-          pathIncludes: `/v1/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist/`,
+          pathIncludes: `/api/dashboard/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist/`,
         },
         async () => {
           await allowlistEntry.getByRole("button", { name: "Remove entry" }).click();
@@ -487,7 +507,7 @@ test.describe
           page,
           {
             method: "POST",
-            pathIncludes: `/v1/issuance/tokens/${authorityTokenId}/authority`,
+            pathIncludes: `/api/dashboard/issuance/tokens/${authorityTokenId}/authority`,
           },
           async () => {
             await page.getByRole("button", { name: "Save authority" }).click();
@@ -496,7 +516,7 @@ test.describe
         await waitForPermissionRowValue(
           page,
           rowTestId,
-          shortValue(fixtures.wallets.delegated.publicKey)
+          addressTail(fixtures.wallets.delegated.publicKey)
         );
       }
 
@@ -512,13 +532,16 @@ test.describe
         page,
         {
           method: "POST",
-          pathIncludes: `/v1/issuance/tokens/${authorityTokenId}/authority`,
+          pathIncludes: `/api/dashboard/issuance/tokens/${authorityTokenId}/authority`,
         },
         async () => {
           await page.getByRole("button", { name: "Yes, set to None" }).click();
         }
       );
-      await waitForPermissionRowValue(page, rowTestId, "None");
+      // The action is worded "set to None", but the resulting row is not an
+      // address — it's the badge's unset state, which reads "Not set" under a
+      // warning mark (DashboardIssuance.overview.authorityNotSet).
+      await waitForPermissionRowValue(page, rowTestId, "Not set");
     });
 
     test("8. user sees denylist controls on the open stablecoin token", async ({ page }) => {

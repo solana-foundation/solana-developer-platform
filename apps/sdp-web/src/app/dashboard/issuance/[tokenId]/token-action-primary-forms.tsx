@@ -22,6 +22,7 @@ import {
 import { TokenSignerSelect } from "./token-signer-select";
 import { TokenValidationMessage } from "./token-validation-message";
 import { TokenWalletAddressField } from "./token-wallet-address-field";
+import { useInlineValidationMessage } from "./use-inline-validation-message";
 
 interface TokenActionPrimaryFormsProps {
   activeAction: AdminAction | null;
@@ -40,6 +41,8 @@ interface TokenActionPrimaryFormsProps {
   burnValidationErrors: BurnValidationErrors;
   burnValidationReason: string | null;
   submitAlignment?: "start" | "end";
+  // Forwarded to TokenActionCard (see there for variants).
+  variant?: "card" | "flat" | "bare";
   onSignerWalletIdChange: (value: string) => void;
   onUpdateMetadata: () => void;
   onMint: () => void;
@@ -63,6 +66,7 @@ export function TokenActionPrimaryForms({
   burnValidationErrors,
   burnValidationReason,
   submitAlignment = "start",
+  variant = "card",
   onSignerWalletIdChange,
   onUpdateMetadata,
   onMint,
@@ -79,6 +83,7 @@ export function TokenActionPrimaryForms({
     <>
       {activeAction === "update-metadata" ? (
         <TokenActionCard
+          variant={variant}
           title={t("DashboardIssuance.forms.updateMetadata")}
           description={t("DashboardIssuance.forms.updateMetadataDescription")}
         >
@@ -152,6 +157,7 @@ export function TokenActionPrimaryForms({
 
       {activeAction === "mint" ? (
         <TokenActionCard
+          variant={variant}
           title={t("DashboardIssuance.management.mintTokens")}
           description={t("DashboardIssuance.forms.mintDescription")}
         >
@@ -173,6 +179,7 @@ export function TokenActionPrimaryForms({
               value={mintForm.destination}
               walletOptions={walletOptions}
               required
+              hideFilterHint={variant !== "card"}
               pattern={SOLANA_ADDRESS_PATTERN}
               title={t("DashboardIssuance.forms.enterSolanaAddress")}
               placeholder={t("DashboardIssuance.forms.destinationPlaceholder")}
@@ -238,6 +245,7 @@ export function TokenActionPrimaryForms({
 
       {activeAction === "burn" ? (
         <TokenActionCard
+          variant={variant}
           title={t("DashboardIssuance.management.burnTokens")}
           description={t("DashboardIssuance.forms.burnDescription")}
         >
@@ -259,6 +267,7 @@ export function TokenActionPrimaryForms({
               value={burnForm.source}
               walletOptions={walletOptions}
               required
+              hideFilterHint={variant !== "card"}
               pattern={SOLANA_ADDRESS_PATTERN}
               title={t("DashboardIssuance.forms.enterSolanaAddress")}
               placeholder={t("DashboardIssuance.forms.sourcePlaceholder")}
@@ -355,6 +364,9 @@ function ActionField({
   error?: string | null;
 }) {
   const fieldId = useId();
+  const errorId = useId();
+  const { message: nativeError, onInvalid, revalidate } = useInlineValidationMessage(label);
+  const hasError = Boolean(error) || nativeError !== null;
 
   return (
     <div className="space-y-2">
@@ -376,11 +388,16 @@ function ActionField({
         step={step}
         placeholder={placeholder}
         inputMode={inputMode}
-        aria-invalid={Boolean(error)}
-        onChange={(event) => onChange(event.currentTarget.value)}
+        aria-invalid={hasError}
+        aria-describedby={hasError ? errorId : undefined}
+        onInvalid={onInvalid}
+        onChange={(event) => {
+          onChange(event.currentTarget.value);
+          revalidate(event.currentTarget);
+        }}
         className="h-11 rounded-[12px] border-border-default bg-surface-raised px-4 shadow-none"
       />
-      <TokenValidationMessage message={error ?? null} />
+      <TokenValidationMessage id={errorId} message={error ?? nativeError} />
     </div>
   );
 }

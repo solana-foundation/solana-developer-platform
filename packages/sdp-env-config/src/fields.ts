@@ -527,6 +527,15 @@ export const FIELDS: EnvField[] = [
     pattern: /^https?:\/\//,
     visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
   },
+  {
+    key: "KORA_CLOUD_RUN_AUDIENCE",
+    section: "fee",
+    kind: "url",
+    label: "Private Kora Cloud Run audience",
+    pattern: /^https?:\/\//,
+    visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
+    help: "Optional. Fetches a Google service identity token for a private Kora Cloud Run service while retaining Kora API-key authentication.",
+  },
 
   // Secrets (auto-generated locally)
   {
@@ -537,12 +546,44 @@ export const FIELDS: EnvField[] = [
     required: true,
   },
   {
+    key: "CREDENTIAL_FINGERPRINT_PEPPER",
+    section: "secrets",
+    kind: "secret",
+    label: "Credential fingerprint pepper",
+    required: true,
+    help: "HMAC key for stored-credential request fingerprints. Keep it stable so committed requests remain replayable.",
+  },
+  {
     key: "CUSTODY_ENCRYPTION_KEY",
     section: "secrets",
     kind: "secret",
     secretEncoding: "base64",
     label: "Custody encryption key",
     required: true,
+  },
+  {
+    key: "CUSTODY_KMS_KEY_NAME",
+    section: "secrets",
+    kind: "text",
+    label: "Cloud KMS key name",
+    pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
+    help: "Optional Cloud KMS key used for custody envelope encryption. Keep the custody encryption key configured so existing legacy rows remain readable.",
+  },
+  {
+    key: "COUNTERPARTY_PII_ENCRYPTION_KEY",
+    section: "secrets",
+    kind: "secret",
+    secretEncoding: "base64",
+    label: "Counterparty PII encryption key",
+    help: "Required for self-hosted deployments. Use a dedicated 32-byte key and never reuse the custody encryption key.",
+  },
+  {
+    key: "COUNTERPARTY_PII_KMS_KEY_NAME",
+    section: "secrets",
+    kind: "text",
+    label: "Counterparty PII Cloud KMS key name",
+    pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
+    help: "Required for managed deployments. Dedicated Cloud KMS key used for counterparty PII envelope encryption.",
   },
 
   // Advanced (defaulted, collapsed)
@@ -617,6 +658,30 @@ export const FIELDS: EnvField[] = [
     derive: (v) => v.SOLANA_NETWORK ?? "devnet",
   },
   {
+    key: "SDP_FLAG_ASSET_PROFILES",
+    section: "advanced",
+    kind: "select",
+    label: "Asset Profiles production opt-in",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Development is always enabled. This setting controls production only.",
+  },
+  {
+    key: "PRIVY_BYOK_PROVISIONING_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Privy stored-credential provisioning",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Allows eligible organizations to submit and provision customer-owned Privy credentials.",
+  },
+  {
     key: "PAYMENTS_RECURRING_COLLECTION_ENABLED",
     section: "advanced",
     kind: "text",
@@ -636,6 +701,34 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Recurring payment collection retry delay (minutes)",
     defaultValue: "30",
+  },
+  {
+    key: "PRIVATE_CHANNELS_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Private Channels enabled",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Gates Private Channels API routes and deposit/withdrawal reconcilers.",
+  },
+  {
+    key: "SPC_CREDENTIAL_ENCRYPTION_KEY",
+    section: "secrets",
+    kind: "secret",
+    secretEncoding: "base64",
+    label: "SPC credential encryption key",
+    help: "Base64-encoded 256-bit key for encrypting invited SPC user passwords. Separate from the custody key so compromising one cannot expose the other.",
+  },
+  {
+    key: "SPC_CREDENTIAL_KMS_KEY_NAME",
+    section: "secrets",
+    kind: "text",
+    label: "SPC credential Cloud KMS key name",
+    pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
+    help: "Optional Cloud KMS key used for SPC credential envelope encryption. Keep the SPC credential encryption key configured too: KMS authenticates through the GCE metadata server, so non-GCP deployments run on the key-in-environment path.",
   },
   {
     key: "SENTRY_DSN",

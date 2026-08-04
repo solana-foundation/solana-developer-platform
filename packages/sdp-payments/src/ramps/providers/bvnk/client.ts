@@ -683,8 +683,8 @@ export class BvnkRampClient implements RampProvider {
     });
 
     if (!response.ok) {
-      console.warn(`[bvnk] ${init.method} ${path} -> ${response.status}: ${raw.slice(0, 600)}`);
-      const message = raw.trim() || `BVNK request failed with status ${response.status}`;
+      console.warn(`[bvnk] ${init.method} ${path} -> ${response.status}`);
+      const message = `BVNK request failed with status ${response.status}`;
       throw mapBvnkErrorStatus(response.status, message, {
         edgeBlocked: isEdgeBlockBody(parsed, raw),
       });

@@ -4,11 +4,7 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#env-impl": {
-      "workerd": "./src/helpers/env.workers.ts",
-      "worker": "./src/helpers/env.workers.ts",
-      "default": "./src/helpers/env.node.ts"
-    }
+    "#env-impl": "./src/helpers/env.node.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -16,18 +12,20 @@
     "typecheck": "vitest run --typecheck.enabled --typecheck.only --typecheck.include='src/**/*.test.ts' --passWithNoTests"
   },
   "dependencies": {
+    "@sdp/private-channels": "workspace:*",
     "@sdp/rpc": "workspace:*",
+    "@sdp/spc-escrow": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
+    "@solana/codecs": "catalog:",
     "@solana/keychain-cdp": "1.3.0",
     "@solana/keychain-para": "1.3.0",
     "@solana/kit": "catalog:"
   },
   "devDependencies": {
     "@sdp/api": "workspace:*",
-    "@cloudflare/vitest-pool-workers": "^0.16.14",
-    "@cloudflare/workers-types": "^4.20260609.1",
     "@solana/surfpool": "^1.4.0",
+    "@types/node": "^25.9.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
   }

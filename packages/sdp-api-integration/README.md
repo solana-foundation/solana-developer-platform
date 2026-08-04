@@ -117,7 +117,9 @@ src/
 │   ├── custody-local.test.ts
 │   ├── deploy.test.ts
 │   ├── freeze.test.ts
-│   ├── issuance-endpoints.test.ts
+│   ├── issuance-crud.test.ts
+│   ├── issuance-execute.test.ts
+│   ├── issuance-prepare.test.ts
 │   ├── kora-flow.test.ts
 │   ├── kora.test.ts
 │   ├── mint.test.ts

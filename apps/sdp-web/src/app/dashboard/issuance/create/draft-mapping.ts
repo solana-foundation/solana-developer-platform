@@ -1,9 +1,108 @@
-import { type AssetCategory, getAssetTypeRegistryEntry, type IssuanceMetadata } from "@sdp/types";
+import {
+  ADVANCED_SETTINGS,
+  AUTHORITY_VALUED_SETTINGS,
+  expandLegacySettingKeys,
+  findIncompatibleExtensionPair,
+  getRecommendedSettings,
+  isSettingAllowed,
+  pruneIncompatibleSettings,
+  resolveSettingsToExtensions,
+  type SettingKey,
+} from "@sdp/issuance/capabilities";
+import { decimalScale, isDecimalString } from "@sdp/solana/amount";
+import {
+  type AdvancedSetting,
+  type AssetCategory,
+  getAssetTypeRegistryEntry,
+  type IssuanceMetadata,
+  type TokenExtensionsConfig,
+  type TokenTemplate,
+} from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { detailFieldOptionLabel } from "./asset-details-config";
-import { CAPACITY_KEYS, type DraftState, isValidDecimals } from "./issuance-draft-wizard.types";
+import {
+  type AdvancedSettingsDraft,
+  CAPACITY_KEYS,
+  type DraftState,
+  isValidDecimals,
+} from "./issuance-draft-wizard.types";
+
+// Recommended advanced settings for an asset type, pre-filled with each
+// parametric setting's default param values. Applied when a type is chosen (the
+// "recommended options are pre-selected" behaviour), mirroring
+// getRecommendedCapacities / getDefaultPublicFields.
+export function getRecommendedAdvancedSettings(
+  category: AssetCategory,
+  type: string
+): AdvancedSettingsDraft {
+  const result: AdvancedSettingsDraft = {};
+  for (const key of getRecommendedSettings(category, type)) {
+    const setting: AdvancedSetting = ADVANCED_SETTINGS[key];
+    const params: Record<string, string> = {};
+    for (const param of setting.params ?? []) {
+      if (param.defaultValue !== undefined) {
+        params[param.key] = String(param.defaultValue);
+      }
+    }
+    result[key] = Object.keys(params).length > 0 ? { params } : {};
+  }
+  return result;
+}
+
+// Re-validate a persisted advanced-settings selection against the current rules.
+// Drops settings the asset type no longer allows and any that would form an
+// incompatible extension pair (keeping the earlier one). Runs on hydration so a
+// stale localStorage draft can't restore a combination the editor would never
+// let you build — e.g. two conflicting extensions both left checked.
+export function sanitizeAdvancedSettings(
+  category: AssetCategory | null,
+  type: string | null,
+  advancedSettings: AdvancedSettingsDraft
+): AdvancedSettingsDraft {
+  // Rewrite retired keys FIRST: the filters below drop anything not in the
+  // catalog, so a stored "freezeTransfers" would be pruned here and never reach
+  // the resolver's own alias handling.
+  const expanded = expandLegacySettingKeys(advancedSettings);
+  const original = Object.keys(expanded);
+  // 1. Keep only keys valid for the type (or, before a type is chosen, only
+  //    known catalog keys).
+  const allowed =
+    category && type
+      ? original.filter((key) => isSettingAllowed(category, type, key))
+      : original.filter((key) => key in ADVANCED_SETTINGS);
+  // 2. Drop conflicting settings, keeping the earlier-listed one.
+  const kept = new Set<string>(pruneIncompatibleSettings(allowed));
+  const result: AdvancedSettingsDraft = {};
+  for (const key of original) {
+    if (kept.has(key)) {
+      result[key] = expanded[key];
+    }
+  }
+  return result;
+}
+
+// Convert the draft's advanced-settings selection into the persisted
+// issuance_metadata.settings.selected shape, dropping empty param strings.
+function buildSelectedSettings(
+  advancedSettings: AdvancedSettingsDraft
+): Record<string, { params?: Record<string, string> }> {
+  const selected: Record<string, { params?: Record<string, string> }> = {};
+  for (const [key, selection] of Object.entries(advancedSettings)) {
+    const params: Record<string, string> = {};
+    for (const [paramKey, paramValue] of Object.entries(selection.params ?? {})) {
+      if (paramValue.trim() !== "") {
+        params[paramKey] = paramValue.trim();
+      }
+    }
+    selected[key] = Object.keys(params).length > 0 ? { params } : {};
+  }
+  return selected;
+}
 
 const SYMBOL_RE = /^[A-Za-z0-9.]{1,10}$/;
+// Mirrors the API's `description: z.string().max(500)` (create/updateTokenSchema)
+// so an over-long value is caught inline, not on a late 400.
+export const ASSET_DESCRIPTION_MAX_LENGTH = 500;
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 // Asset category -> deploy-time Token-2022 template (token creation still needs
@@ -29,6 +128,12 @@ export interface TokenInput {
   uri?: string;
   imageUrl?: string;
   signingWalletId?: string;
+  // Omitted when the issuer left the cap blank — the API treats absent as
+  // uncapped, and sending "" would fail its decimal-string refinement.
+  maxSupply?: string;
+  // Always sent: unlike maxSupply, `false` is a meaningful value the API would
+  // otherwise default back to `true`.
+  isFreezable: boolean;
 }
 
 // Input/result for the create-asset-draft server action. Kept here (not in the
@@ -57,6 +162,50 @@ export function buildTokenInput(draft: DraftState): TokenInput {
     uri: draft.metadataUri.trim() || undefined,
     imageUrl: draft.imageUrl.trim() || undefined,
     signingWalletId: draft.signingWalletId.trim() || undefined,
+    maxSupply: draft.maxSupply.trim() || undefined,
+    // Derived from the resolved settings, not stored separately: "freezeAccounts"
+    // is the single control for the mint's freeze authority, so there is no second
+    // source of truth to keep in sync (and locked-availability families get it
+    // forced on for free).
+    isFreezable: buildDeployConfigPreview(draft)?.isFreezable ?? false,
+  };
+}
+
+// A best-effort preview of what the draft's advanced settings compile to at deploy
+// time — the resolver output (base template, decimals, allowlist, and the resolved
+// Token-2022 extension config). Authorities are deliberately omitted: mint/freeze/
+// delegate are assigned server-side from the signing wallet's custody at deploy, so
+// the client can't show the real on-chain values (the resolver omits an authority
+// rather than emit a bricking placeholder). Returns null before a category/type is
+// chosen — nothing to resolve yet.
+export interface DeployConfigPreview {
+  template: TokenTemplate;
+  decimals: number;
+  requiresAllowlist: boolean;
+  // Whether the mint gets a freeze authority — a base-mint column rather than an
+  // extension, so it appears here and not in `extensions`.
+  isFreezable: boolean;
+  extensions: TokenExtensionsConfig | null;
+}
+
+export function buildDeployConfigPreview(draft: DraftState): DeployConfigPreview | null {
+  if (!draft.assetCategory || !draft.assetType) {
+    return null;
+  }
+  const selected = buildSelectedSettings(
+    sanitizeAdvancedSettings(draft.assetCategory, draft.assetType, draft.advancedSettings)
+  );
+  const decimals = Number(draft.decimals);
+  const resolution = resolveSettingsToExtensions(draft.assetCategory, draft.assetType, selected, {
+    decimals: Number.isFinite(decimals) ? decimals : 0,
+    requiresAllowlist: draft.accessControl === "allowlist",
+  });
+  return {
+    template: resolution.template,
+    decimals: resolution.decimals,
+    requiresAllowlist: resolution.requiresAllowlist,
+    isFreezable: resolution.isFreezable,
+    extensions: resolution.extensions,
   };
 }
 
@@ -93,23 +242,55 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
     description: draft.description.trim(),
     website: draft.website.trim(),
     issuerName: draft.issuerName.trim(),
+    // Set from the chosen sub-type at classification time for typed stablecoins
+    // (see impliedBackingType) so it can't contradict the type; issuer-entered
+    // for a generic stablecoin. Reflected verbatim here to keep load-then-save
+    // idempotent — no value is synthesized during the metadata build.
     backingType: draft.backingType,
     pegCurrency: draft.pegCurrency,
     pegTarget: draft.pegTarget.trim(),
     reserveAsset: draft.reserveAsset.trim(),
     reserveCustodian: draft.reserveCustodian.trim(),
     redemptionEnabled: draft.redemptionEnabled ? true : undefined,
+    collateralizationRatio: draft.collateralizationRatio.trim(),
+    oracleProvider: draft.oracleProvider.trim(),
+    minCollateralRatio: draft.minCollateralRatio.trim(),
     jurisdiction: draft.jurisdiction,
     offeringType: draft.offeringType,
+    shareClass: draft.shareClass.trim(),
+    votingRights: draft.votingRights ? true : undefined,
+    couponRate: draft.couponRate.trim(),
+    maturityDate: draft.maturityDate.trim(),
+    seniority: draft.seniority,
+    fundStrategy: draft.fundStrategy,
+    managementFee: draft.managementFee.trim(),
+    netAssetValue: draft.netAssetValue.trim(),
     underlyingAsset: draft.underlyingAsset.trim(),
     custodian: draft.custodian.trim(),
+    propertyType: draft.propertyType,
+    propertyLocation: draft.propertyLocation.trim(),
     documents: draft.documents
       .filter((doc) => doc.name.trim() || doc.url.trim())
       .map((doc) => ({ type: doc.docType.trim(), name: doc.name.trim(), url: doc.url.trim() })),
   });
 
+  // Off-chain capacities: presence = enabled. Store `{ enabled: true, config? }`
+  // (not a bare `{}`) so pruneEmpty keeps an enabled-but-unconfigured policy —
+  // it drops empty objects. Disabled ⇒ undefined ⇒ pruned. readCapacities also
+  // accepts the legacy `{ key: true }` boolean encoding.
   const capacities = pruneEmpty(
-    Object.fromEntries(CAPACITY_KEYS.map((key) => [key, draft.capacities[key] ? true : undefined]))
+    Object.fromEntries(
+      CAPACITY_KEYS.map((key) => {
+        const selection = draft.capacities[key];
+        if (!selection.enabled) {
+          return [key, undefined];
+        }
+        return [
+          key,
+          selection.config ? { enabled: true, config: selection.config } : { enabled: true },
+        ];
+      })
+    )
   );
   const compliance = pruneEmpty({
     accessControl: draft.accessControl || undefined,
@@ -130,7 +311,11 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
   );
   const custom = pruneEmpty({ customer: Object.keys(customer).length > 0 ? customer : undefined });
 
-  const base = pruneEmpty({ asset, compliance, chain, custom });
+  const selectedSettings = buildSelectedSettings(draft.advancedSettings);
+  const settings =
+    Object.keys(selectedSettings).length > 0 ? { selected: selectedSettings } : undefined;
+
+  const base = pruneEmpty({ asset, compliance, chain, custom, settings });
   // Only persist an explicit `visibility` selection when it differs from the
   // type's registry default. When it matches, we leave `visibility` off and let
   // the server fall back to the default projection — keeping metadata minimal
@@ -221,11 +406,24 @@ const PATH_LABEL_KEYS: Record<string, MessageKey> = {
   "asset.backingType": "DashboardIssuance.config.backingType",
   "asset.reserveAsset": "DashboardIssuance.config.reserveAsset",
   "asset.reserveCustodian": "DashboardIssuance.config.reserveCustodian",
+  "asset.collateralizationRatio": "DashboardIssuance.config.collateralizationRatio",
+  "asset.oracleProvider": "DashboardIssuance.config.oracleProvider",
+  "asset.minCollateralRatio": "DashboardIssuance.config.minCollateralRatio",
   "asset.website": "DashboardIssuance.review.website",
   "asset.jurisdiction": "DashboardIssuance.config.jurisdiction",
   "asset.offeringType": "DashboardIssuance.config.offeringType",
+  "asset.shareClass": "DashboardIssuance.config.shareClass",
+  "asset.votingRights": "DashboardIssuance.config.votingRights",
+  "asset.couponRate": "DashboardIssuance.config.couponRate",
+  "asset.maturityDate": "DashboardIssuance.config.maturityDate",
+  "asset.seniority": "DashboardIssuance.config.seniority",
+  "asset.fundStrategy": "DashboardIssuance.config.fundStrategy",
+  "asset.managementFee": "DashboardIssuance.config.managementFee",
+  "asset.netAssetValue": "DashboardIssuance.config.netAssetValue",
   "asset.underlyingAsset": "DashboardIssuance.config.underlyingAsset",
   "asset.custodian": "DashboardIssuance.config.custodian",
+  "asset.propertyType": "DashboardIssuance.config.propertyType",
+  "asset.propertyLocation": "DashboardIssuance.config.propertyLocation",
   "chain.decimals": "DashboardIssuance.create.decimals",
 };
 
@@ -239,11 +437,27 @@ export const PUBLIC_FIELD_POOL: readonly { path: string; labelKey: MessageKey }[
   { path: "asset.backingType", labelKey: PATH_LABEL_KEYS["asset.backingType"] },
   { path: "asset.reserveAsset", labelKey: PATH_LABEL_KEYS["asset.reserveAsset"] },
   { path: "asset.reserveCustodian", labelKey: PATH_LABEL_KEYS["asset.reserveCustodian"] },
+  {
+    path: "asset.collateralizationRatio",
+    labelKey: PATH_LABEL_KEYS["asset.collateralizationRatio"],
+  },
+  { path: "asset.oracleProvider", labelKey: PATH_LABEL_KEYS["asset.oracleProvider"] },
+  { path: "asset.minCollateralRatio", labelKey: PATH_LABEL_KEYS["asset.minCollateralRatio"] },
   { path: "asset.website", labelKey: PATH_LABEL_KEYS["asset.website"] },
   { path: "asset.jurisdiction", labelKey: PATH_LABEL_KEYS["asset.jurisdiction"] },
   { path: "asset.offeringType", labelKey: PATH_LABEL_KEYS["asset.offeringType"] },
+  { path: "asset.shareClass", labelKey: PATH_LABEL_KEYS["asset.shareClass"] },
+  { path: "asset.votingRights", labelKey: PATH_LABEL_KEYS["asset.votingRights"] },
+  { path: "asset.couponRate", labelKey: PATH_LABEL_KEYS["asset.couponRate"] },
+  { path: "asset.maturityDate", labelKey: PATH_LABEL_KEYS["asset.maturityDate"] },
+  { path: "asset.seniority", labelKey: PATH_LABEL_KEYS["asset.seniority"] },
+  { path: "asset.fundStrategy", labelKey: PATH_LABEL_KEYS["asset.fundStrategy"] },
+  { path: "asset.managementFee", labelKey: PATH_LABEL_KEYS["asset.managementFee"] },
+  { path: "asset.netAssetValue", labelKey: PATH_LABEL_KEYS["asset.netAssetValue"] },
   { path: "asset.underlyingAsset", labelKey: PATH_LABEL_KEYS["asset.underlyingAsset"] },
   { path: "asset.custodian", labelKey: PATH_LABEL_KEYS["asset.custodian"] },
+  { path: "asset.propertyType", labelKey: PATH_LABEL_KEYS["asset.propertyType"] },
+  { path: "asset.propertyLocation", labelKey: PATH_LABEL_KEYS["asset.propertyLocation"] },
 ];
 
 export function pathLabel(path: string, t: Translate): string {
@@ -272,6 +486,21 @@ export function getPublicFieldCandidates(draft: DraftState, t: Translate): Publi
   const enabled = new Set(draft.publicFields);
   return PUBLIC_FIELD_POOL.flatMap(({ path, labelKey }) => {
     const raw = getByPath(metadata, path);
+    // Boolean toggles (e.g. voting rights) only reach here when true — a false
+    // toggle is pruned to undefined in the metadata — so show a human "Enabled"
+    // rather than the literal "true".
+    if (typeof raw === "boolean") {
+      return raw
+        ? [
+            {
+              path,
+              label: t(labelKey),
+              value: t("DashboardIssuance.review.enabled"),
+              enabled: enabled.has(path),
+            },
+          ]
+        : [];
+    }
     const rawValue = typeof raw === "string" ? raw.trim() : raw == null ? "" : String(raw);
     if (!rawValue) {
       return [];
@@ -342,6 +571,47 @@ export function getRequiredAssetDetailKeys(draft: DraftState): Set<keyof DraftSt
   return keys;
 }
 
+// An enabled setting with a required, still-empty parameter (e.g. a transfer fee
+// toggled on but no basis-points entered). Drives the Continue gate and the
+// editor's inline field errors.
+export function advancedSettingsHaveMissingParams(
+  advancedSettings: AdvancedSettingsDraft
+): boolean {
+  for (const [key, selection] of Object.entries(advancedSettings)) {
+    const setting: AdvancedSetting = ADVANCED_SETTINGS[key as SettingKey];
+    if (!setting?.params) {
+      continue;
+    }
+    for (const param of setting.params) {
+      if (param.required && !String(selection.params?.[param.key] ?? "").trim()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Max supply is optional — blank means uncapped. When set it must be a positive
+// decimal the mint can actually represent: the API parses it against the token's
+// decimals and rejects excess precision. Scale is checked against the draft's
+// decimals because the resolver only substitutes a template default when decimals
+// is omitted (`decimalsOverride ?? definition.decimals`) and the wizard always
+// sends it. Returns undefined when there is nothing to report.
+function maxSupplyError(draft: DraftState, t: Translate): string | undefined {
+  const maxSupply = draft.maxSupply.trim();
+  if (!maxSupply) {
+    return undefined;
+  }
+  // isDecimalString already rejects signs, so this only has to rule out zero.
+  if (!isDecimalString(maxSupply) || !/[1-9]/.test(maxSupply)) {
+    return t("DashboardIssuance.errors.maxSupplyPositive");
+  }
+  if (isValidDecimals(draft.decimals) && decimalScale(maxSupply) > Number(draft.decimals.trim())) {
+    return t("DashboardIssuance.errors.maxSupplyPrecision", { decimals: draft.decimals.trim() });
+  }
+  return undefined;
+}
+
 // Per-field validation for the required Asset-details fields — empty or badly
 // formatted entries map to a user-facing message, keyed by draft field. Drives
 // the form's inline errors, the Continue gate, and the review blockers.
@@ -362,8 +632,18 @@ export function getAssetDetailsErrors(
     errors.decimals = t("DashboardIssuance.errors.decimalsWholeNumber");
   }
 
-  if (!draft.description.trim()) {
+  const maxSupplyMessage = maxSupplyError(draft, t);
+  if (maxSupplyMessage) {
+    errors.maxSupply = maxSupplyMessage;
+  }
+
+  const description = draft.description.trim();
+  if (!description) {
     errors.description = t("DashboardIssuance.errors.descriptionRequired");
+  } else if (description.length > ASSET_DESCRIPTION_MAX_LENGTH) {
+    errors.description = t("DashboardIssuance.errors.descriptionTooLong", {
+      max: ASSET_DESCRIPTION_MAX_LENGTH,
+    });
   }
 
   // Website and logo are optional, but must be valid URLs when provided.
@@ -388,6 +668,31 @@ export function getAssetDetailsErrors(
         errors[field] = t("DashboardIssuance.errors.fieldRequired", { field: pathLabel(path, t) });
       }
     }
+  }
+
+  if (advancedSettingsHaveMissingParams(draft.advancedSettings)) {
+    errors.advancedSettings = t("DashboardIssuance.errors.settingValuesRequired");
+  }
+
+  // Two enabled settings whose extensions can't coexist on one mint (e.g.
+  // interest-bearing + scaled display). The editor blocks selecting both, but a
+  // hydrated/legacy draft could still carry the pair — reject it here too.
+  const selectedExtensions = Object.keys(draft.advancedSettings).flatMap((key) => {
+    const setting: AdvancedSetting = ADVANCED_SETTINGS[key as SettingKey];
+    return setting ? [...setting.extensions] : [];
+  });
+  if (findIncompatibleExtensionPair(selectedExtensions)) {
+    errors.advancedSettings = t("DashboardIssuance.errors.settingConflict");
+  }
+
+  // Authority-valued settings (e.g. permanent delegate) bind an on-chain authority
+  // to the signing wallet at deploy, so the server rejects the create without one.
+  // Require it here so the user gets inline guidance instead of a late 400.
+  const needsSigner = Object.keys(draft.advancedSettings).some((key) =>
+    (AUTHORITY_VALUED_SETTINGS as readonly string[]).includes(key)
+  );
+  if (needsSigner && !draft.signingWalletId.trim()) {
+    errors.signingWalletId = t("DashboardIssuance.errors.signerRequiredForSettings");
   }
 
   return errors;

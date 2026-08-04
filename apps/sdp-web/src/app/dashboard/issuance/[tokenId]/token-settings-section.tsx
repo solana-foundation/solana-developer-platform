@@ -1,11 +1,11 @@
 "use client";
 
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import {
   Ban,
   Check,
   CircleDollarSign,
   Coins,
-  Copy,
   FileText,
   LayoutTemplate,
   ListChecks,
@@ -14,12 +14,15 @@ import {
   Percent,
   Scaling,
   Snowflake,
+  SquarePen,
   UserCog,
   Webhook,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
+import { buildWalletIdentityForAuthority } from "../issuance-token-fields";
+import { WalletIdentityBadge } from "../wallet-identity";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import type {
   ExtensionRow,
@@ -27,12 +30,13 @@ import type {
   PermissionRow,
   PermissionRowId,
 } from "./token-management-workspace.types";
-import { formatValue } from "./token-management-workspace.utils";
 
 interface TokenSettingsSectionProps {
   mode: "permissions" | "extensions";
   permissionRows: PermissionRow[];
   extensionRows: ExtensionRow[];
+  /** Resolves each authority address to its custody wallet for the identity badge. */
+  authorityWallets: PaymentsDashboardWallet[];
   showTitle?: boolean;
   canEditAuthorities: boolean;
   onCopy: (value: string | null) => void;
@@ -43,7 +47,7 @@ interface TokenSettingsSectionProps {
 // Token-2022 feature it represents. Keyed by the row `id` unions, so these
 // records are exhaustive: adding or renaming a row id in the workspace layer
 // fails to compile here until the icon is supplied — no silent fallback.
-const PERMISSION_ROW_ICONS: Record<PermissionRowId, LucideIcon> = {
+export const PERMISSION_ROW_ICONS: Record<PermissionRowId, LucideIcon> = {
   "mint-authority": Coins,
   "freeze-authority": Snowflake,
   "metadata-authority": FileText,
@@ -114,6 +118,7 @@ export function TokenSettingsSection({
   mode,
   permissionRows,
   extensionRows,
+  authorityWallets,
   showTitle = true,
   canEditAuthorities,
   onCopy,
@@ -140,46 +145,59 @@ export function TokenSettingsSection({
 
       {mode === "permissions" ? (
         <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
-          {permissionRows.map((row) => (
-            <div
-              key={row.id}
-              data-testid={`permission-row-${row.id}`}
-              className="flex flex-wrap items-center gap-x-3 gap-y-3 border-b border-border-subtle px-4 py-3.5 last:border-b-0"
-            >
-              <IconTile icon={PERMISSION_ROW_ICONS[row.id]} />
-              <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-medium text-primary">{row.title}</p>
-                <p className="text-[13px] text-tertiary">{row.helper}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => onCopy(row.value)}
-                  className="inline-flex items-center gap-1 rounded-full border border-border-default bg-fill-subtle px-3 py-1 text-xs text-secondary"
-                >
-                  {formatValue(row.value, t)}
-                  {row.value ? <Copy className="h-3 w-3" /> : null}
-                </button>
-                <TokenDisabledActionTooltip
-                  reason={
-                    !canEditAuthorities
-                      ? "Token must be deployed before editing authorities."
-                      : (row.editDisabledReason ?? null)
-                  }
-                >
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onEditAuthority(row)}
-                    disabled={!canEditAuthorities || Boolean(row.editDisabledReason)}
+          {permissionRows.map((row) => {
+            return (
+              <div
+                key={row.id}
+                data-testid={`permission-row-${row.id}`}
+                className="flex flex-wrap items-center gap-x-3 gap-y-3 border-b border-border-subtle px-4 py-3.5 last:border-b-0"
+              >
+                <IconTile icon={PERMISSION_ROW_ICONS[row.id]} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] font-medium text-primary">{row.title}</p>
+                  <p className="text-[13px] text-tertiary">{row.helper}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {/* Names the holder rather than showing a bare address, and carries
+                      the custody signal itself — so no separate SDP-managed /
+                      External pill beside the title. Same badge the Overview hero
+                      and the authority popovers use. */}
+                  <WalletIdentityBadge
+                    identity={buildWalletIdentityForAuthority(
+                      row.value,
+                      row.controlStatus ?? "unknown",
+                      authorityWallets,
+                      t
+                    )}
+                    onCopy={onCopy}
+                    // Fixed column from sm up so the badges — and the Edit buttons
+                    // after them — line up down the list despite ragged content
+                    // ("Treasury" vs "Held externally"). Below sm the row wraps and
+                    // the badge takes the width it needs.
+                    className="sm:w-[13.5rem] sm:shrink-0"
+                  />
+                  <TokenDisabledActionTooltip
+                    reason={
+                      !canEditAuthorities
+                        ? "Token must be deployed before editing authorities."
+                        : (row.editDisabledReason ?? null)
+                    }
                   >
-                    {t("DashboardIssuance.management.edit")}
-                  </Button>
-                </TokenDisabledActionTooltip>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      iconLeft={<SquarePen />}
+                      onClick={() => onEditAuthority(row)}
+                      disabled={!canEditAuthorities || Boolean(row.editDisabledReason)}
+                    >
+                      {t("DashboardIssuance.management.edit")}
+                    </Button>
+                  </TokenDisabledActionTooltip>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="grid grid-cols-1 items-start gap-0 md:grid-cols-2 md:gap-3">

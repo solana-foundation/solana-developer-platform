@@ -16,6 +16,8 @@ import {
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
 import { AppError, internalError, nullOnExpected } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
@@ -27,7 +29,7 @@ export function isPaymentRequestExpired(expiresAt: string | null): boolean {
  * when a valid payment is found, records the inbound transfer and marks the
  * request paid.
  *
- * @param env - Worker bindings for RPC and DB access.
+ * @param env - API environment for RPC and database access.
  * @param row - The stored payment request row to reconcile.
  * @param options.bestEffort - When true, unexpected infra failures (e.g. an
  *   RPC outage) degrade to the stored row with a log so one bad row cannot
@@ -56,10 +58,13 @@ export async function reconcilePaymentRequest(
     if (!options.bestEffort || err instanceof AppError) {
       throw err;
     }
-    console.error("reconcilePaymentRequest: best-effort reconcile failed, returning stored row", {
-      paymentRequestId: row.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    getLogger().error(
+      {
+        payment_request_id: row.id,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "reconcilePaymentRequest: best-effort reconcile failed, returning stored row"
+    );
     return row;
   }
 }
@@ -107,7 +112,11 @@ async function settlePaymentRequestIfPaid(
 
   const transfer = await recordInboundTransfer(env, row, projectId, found);
 
-  const requestsRepo = createPaymentRequestsRepository(env);
+  const scope = createTenantScope({
+    organizationId: row.organization_id,
+    projectId,
+  });
+  const requestsRepo = createPaymentRequestsRepository(env, scope);
   const settled = await requestsRepo.markPaymentRequest({
     requestId: row.id,
     organizationId: row.organization_id,
@@ -147,7 +156,13 @@ async function recordInboundTransfer(
   projectId: string,
   found: Awaited<ReturnType<typeof findReference>>
 ): Promise<PaymentTransferRow> {
-  const paymentsRepo = createPaymentsRepository(env);
+  const paymentsRepo = createPaymentsRepository(
+    env,
+    createTenantScope({
+      organizationId: row.organization_id,
+      projectId,
+    })
+  );
   try {
     const transfer = await paymentsRepo.createTransfer({
       organizationId: row.organization_id,

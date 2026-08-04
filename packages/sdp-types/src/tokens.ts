@@ -42,7 +42,7 @@ export const TOKEN_TRANSACTION_STATUSES = [
 ] as const;
 export type TokenTransactionStatus = (typeof TOKEN_TRANSACTION_STATUSES)[number];
 
-export type AllowlistEntryStatus = "active" | "revoked";
+export type AllowlistEntryStatus = "pending" | "active" | "revoked";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Token Templates

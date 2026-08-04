@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@solana/design-system/badge";
-import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
+import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
+import { setNestedValue } from "@/lib/set-nested-value";
 import { cn } from "@/lib/utils";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -25,10 +26,10 @@ export interface ApiPlaygroundFieldConfig {
   placeholder?: string;
   description?: string;
   defaultValue?: string;
-  kind?: "text" | "select";
+  kind?: "text" | "select" | "textarea";
   options?: ApiPlaygroundFieldOption[];
   required?: boolean;
-  valueType?: "string" | "boolean" | "number" | "string_array";
+  valueType?: "string" | "boolean" | "number" | "string_array" | "json";
 }
 
 export interface ApiPlaygroundEndpointConfig {
@@ -76,10 +77,21 @@ function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-function buildInitialFieldValues(endpoint: ApiPlaygroundEndpointConfig): Record<string, string> {
+function buildInitialFieldValues(
+  endpoint: ApiPlaygroundEndpointConfig,
+  preselect?: Record<string, string>
+): Record<string, string> {
   return [...endpoint.pathFields, ...endpoint.bodyFields].reduce<Record<string, string>>(
     (values, field) => {
-      values[field.key] = field.defaultValue ?? "";
+      // A URL-provided preselection (e.g. ?tokenId=…) wins over the field's
+      // default, but only when it's usable: any value for a text field, or a
+      // valid option for a select field. Otherwise fall back to the default.
+      const desired = preselect?.[field.key];
+      const isUsable =
+        desired != null &&
+        desired !== "" &&
+        (field.kind !== "select" || (field.options ?? []).some((o) => o.value === desired));
+      values[field.key] = isUsable ? desired : (field.defaultValue ?? "");
       return values;
     },
     {}
@@ -87,26 +99,7 @@ function buildInitialFieldValues(endpoint: ApiPlaygroundEndpointConfig): Record<
 }
 
 function hasRequestBody(method: ApiPlaygroundMethod): boolean {
-  return method !== "GET" && method !== "DELETE";
-}
-
-function setNestedValue(target: Record<string, unknown>, path: string, value: unknown) {
-  const segments = path.split(".");
-  let current: Record<string, unknown> = target;
-
-  segments.forEach((segment, index) => {
-    if (index === segments.length - 1) {
-      current[segment] = value;
-      return;
-    }
-
-    const existing = current[segment];
-    if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
-      current[segment] = {};
-    }
-
-    current = current[segment] as Record<string, unknown>;
-  });
+  return method !== "GET";
 }
 
 function serializeFieldValue(field: ApiPlaygroundFieldConfig, rawValue: string): unknown {
@@ -125,15 +118,24 @@ function serializeFieldValue(field: ApiPlaygroundFieldConfig, rawValue: string):
       .filter(Boolean);
   }
 
+  if (field.valueType === "json") {
+    return JSON.parse(rawValue) as unknown;
+  }
+
   return rawValue;
+}
+
+interface RequestBodyResult {
+  body: unknown | null;
+  invalidJsonField: string | null;
 }
 
 function buildRequestBody(
   fields: ApiPlaygroundFieldConfig[],
   values: Record<string, string>
-): Record<string, unknown> | null {
+): RequestBodyResult {
   if (fields.length === 0) {
-    return null;
+    return { body: null, invalidJsonField: null };
   }
 
   const payload: Record<string, unknown> = {};
@@ -144,20 +146,48 @@ function buildRequestBody(
       continue;
     }
 
-    setNestedValue(payload, field.key, serializeFieldValue(field, rawValue));
+    try {
+      const value = serializeFieldValue(field, rawValue);
+      if (field.key === "$body") {
+        return { body: value, invalidJsonField: null };
+      }
+      setNestedValue(payload, field.key, value);
+    } catch {
+      return { body: null, invalidJsonField: field.label };
+    }
   }
 
-  return Object.keys(payload).length > 0 ? payload : null;
+  return {
+    body: Object.keys(payload).length > 0 ? payload : null,
+    invalidJsonField: null,
+  };
 }
 
 function resolvePath(
   endpoint: ApiPlaygroundEndpointConfig,
   values: Record<string, string>
 ): string {
-  return endpoint.path.replace(/\{([^}]+)\}/g, (_, token) => {
+  const [pathname, query = ""] = endpoint.path.split("?", 2);
+  const fieldsByKey = new Map(endpoint.pathFields.map((field) => [field.key, field]));
+  const replaceToken = (_match: string, token: string) => {
     const value = values[token];
-    return value?.trim() ? value.trim() : `{${token}}`;
-  });
+    if (value?.trim()) {
+      return encodeURIComponent(value.trim());
+    }
+    return fieldsByKey.get(token)?.required ? `{${token}}` : "";
+  };
+  const resolvedPathname = pathname.replace(/\{([^}]+)\}/g, replaceToken);
+  const resolvedQuery = query
+    .split("&")
+    .filter(Boolean)
+    .map((part) => part.replace(/\{([^}]+)\}/g, replaceToken))
+    .filter((part) => {
+      const separatorIndex = part.indexOf("=");
+      return separatorIndex === -1 || part.slice(separatorIndex + 1) !== "";
+    })
+    .join("&");
+
+  return resolvedQuery ? `${resolvedPathname}?${resolvedQuery}` : resolvedPathname;
 }
 
 function getMissingRequiredFields(
@@ -195,7 +225,7 @@ function isValidSdpApiKey(rawValue: string): boolean {
 function buildFetchSnippet(
   endpoint: ApiPlaygroundEndpointConfig,
   resolvedPath: string,
-  requestBody: Record<string, unknown> | null,
+  requestBody: unknown | null,
   apiBaseUrl: string
 ): string {
   const lines = [
@@ -222,7 +252,7 @@ function buildFetchSnippet(
 function buildAiInstructions(
   endpoint: ApiPlaygroundEndpointConfig,
   fieldValues: Record<string, string>,
-  requestBody: Record<string, unknown> | null,
+  requestBody: unknown | null,
   productName: string,
   t: (key: MessageKey, values?: TranslationValues) => string
 ): string {
@@ -332,6 +362,18 @@ function EmptyState({ children }: { children: string }) {
   return (
     <div className="rounded-2xl border border-dashed border-border-default bg-surface-raised/50 px-4 py-5 text-sm text-tertiary">
       {children}
+    </div>
+  );
+}
+
+/** Shown in the Response panel before a request runs, instead of placeholder JSON. */
+function ResponseEmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+      <span className="flex size-11 items-center justify-center rounded-xl bg-fill-strong text-tertiary">
+        <Braces className="size-5" aria-hidden="true" />
+      </span>
+      <p className="max-w-xs text-sm text-tertiary">{message}</p>
     </div>
   );
 }
@@ -541,8 +583,16 @@ export function ApiPlaygroundShell({
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
   const initialEndpointId = initialEndpoint?.id ?? "";
+  // Deep links can preselect the active resource, e.g. ?tokenId=… from the asset
+  // management workspace, so the playground opens focused on that token. State
+  // stays shareable because it's the URL-driven endpoint + token.
+  const tokenIdParam = searchParams.get("tokenId");
+  const preselectedFieldValues = useMemo(
+    () => (tokenIdParam ? { tokenId: tokenIdParam } : undefined),
+    [tokenIdParam]
+  );
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
-    initialEndpoint ? buildInitialFieldValues(initialEndpoint) : {}
+    initialEndpoint ? buildInitialFieldValues(initialEndpoint, preselectedFieldValues) : {}
   );
   const [mobileSection, setMobileSection] = useState<"request" | "output">("request");
   const [activePanel, setActivePanel] = useState<"code" | "response" | "example">("code");
@@ -594,17 +644,18 @@ export function ApiPlaygroundShell({
       return;
     }
 
-    setFieldValues(buildInitialFieldValues(endpoint));
+    setFieldValues(buildInitialFieldValues(endpoint, preselectedFieldValues));
     setMobileSection("request");
     setActivePanel("code");
     setExecutionResult(null);
     setExecuteError(null);
-  }, [activeEndpointId]);
+  }, [activeEndpointId, preselectedFieldValues]);
 
-  const requestBody = useMemo(
+  const requestBodyResult = useMemo(
     () => (activeEndpoint ? buildRequestBody(activeEndpoint.bodyFields, fieldValues) : null),
     [activeEndpoint, fieldValues]
   );
+  const requestBody = requestBodyResult?.body ?? null;
   const resolvedPath = useMemo(
     () => (activeEndpoint ? resolvePath(activeEndpoint, fieldValues) : ""),
     [activeEndpoint, fieldValues]
@@ -660,7 +711,7 @@ export function ApiPlaygroundShell({
   };
 
   const handleReset = () => {
-    setFieldValues(buildInitialFieldValues(activeEndpoint));
+    setFieldValues(buildInitialFieldValues(activeEndpoint, preselectedFieldValues));
     setMobileSection("request");
     setActivePanel("code");
     setExecutionResult(null);
@@ -675,6 +726,16 @@ export function ApiPlaygroundShell({
     if (missingFields.length > 0) {
       setExecuteError(
         t("Shared.SharedComponents.completeRequiredFields", { fields: missingFields.join(", ") })
+      );
+      setActivePanel("response");
+      return;
+    }
+
+    if (requestBodyResult?.invalidJsonField) {
+      setExecuteError(
+        t("Shared.SharedComponents.invalidJsonField", {
+          field: requestBodyResult.invalidJsonField,
+        })
       );
       setActivePanel("response");
       return;
@@ -860,6 +921,18 @@ export function ApiPlaygroundShell({
                               </option>
                             ))}
                           </select>
+                        ) : field.kind === "textarea" ? (
+                          <textarea
+                            id={getFieldId(field.key)}
+                            value={fieldValues[field.key] ?? ""}
+                            onChange={(event) =>
+                              updateFieldValue(field.key, event.currentTarget.value)
+                            }
+                            placeholder={field.placeholder}
+                            rows={8}
+                            spellCheck={false}
+                            className="w-full resize-y rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+                          />
                         ) : (
                           <Input
                             id={getFieldId(field.key)}
@@ -909,6 +982,18 @@ export function ApiPlaygroundShell({
                               </option>
                             ))}
                           </select>
+                        ) : field.kind === "textarea" ? (
+                          <textarea
+                            id={getFieldId(field.key)}
+                            value={fieldValues[field.key] ?? ""}
+                            onChange={(event) =>
+                              updateFieldValue(field.key, event.currentTarget.value)
+                            }
+                            placeholder={field.placeholder}
+                            rows={10}
+                            spellCheck={false}
+                            className="w-full resize-y rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+                          />
                         ) : (
                           <Input
                             id={getFieldId(field.key)}
@@ -977,7 +1062,13 @@ export function ApiPlaygroundShell({
               }}
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                <CodeBlockContent content={panelContent} language={panelLanguage} />
+                {activePanel === "response" && !executionResult && !executeError ? (
+                  <ResponseEmptyState
+                    message={t("Shared.SharedComponents.runRequestToInspectOutput")}
+                  />
+                ) : (
+                  <CodeBlockContent content={panelContent} language={panelLanguage} />
+                )}
               </div>
               <div
                 className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3 text-sm"

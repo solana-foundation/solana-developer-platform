@@ -2,8 +2,10 @@
  * @sdp/types - Shared types for Solana Developer Platform
  */
 
+export * from "./advanced-settings";
 export * from "./api-keys";
 export * from "./asset-profiles";
+export * from "./audit";
 export * from "./counterparties";
 export * from "./countries";
 export * from "./custody";
@@ -15,6 +17,7 @@ export * from "./payments";
 export * from "./permissions";
 export * from "./places";
 export * from "./policy";
+export * from "./private-channels";
 export * from "./private-transfers";
 export * from "./projects";
 export * from "./provider-access";

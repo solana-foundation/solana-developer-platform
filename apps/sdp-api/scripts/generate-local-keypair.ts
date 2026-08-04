@@ -1,6 +1,6 @@
 #!/usr/bin/env -S tsx
 /**
- * Generate the secrets a self-hosted SDP API needs in .dev.vars:
+ * Generate the secrets a self-hosted SDP API needs in .env.local:
  *   - CUSTODY_PRIVATE_KEY    (Solana 64-byte keypair, base58-encoded)
  *   - CUSTODY_ENCRYPTION_KEY (256-bit AES key, base64-encoded)
  *

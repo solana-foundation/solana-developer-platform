@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
+import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
 import { TransactionsResultsSkeleton } from "../payments-route-skeletons";
 import { fetchTransactionsPage } from "./transactions-page.data";
 import { parseTransactionFilters } from "./transactions-query";
@@ -44,9 +45,12 @@ async function TransactionsData({
 }) {
   const trace = createTimedTrace("dashboard.payments.transactions.results");
   const { request } = await apiClientPromise;
-  const result = await trace.step("fetch_transactions_page", () =>
-    fetchTransactionsPage(request, filters)
-  );
+  // Issued tokens are absent from the well-known catalogue, so without this map every
+  // token this org minted renders as a shortened mint address.
+  const [result, issuedTokenSymbolsResult] = await Promise.all([
+    trace.step("fetch_transactions_page", () => fetchTransactionsPage(request, filters)),
+    fetchPaymentsIssuedTokenSymbols(request),
+  ]);
   trace.log({
     ok: !result.error,
     requestCount: 1,
@@ -56,5 +60,13 @@ async function TransactionsData({
     resultCount: result.transfers.length,
     total: result.total,
   });
-  return <TransactionsResults result={result} serverFilters={filters} />;
+  return (
+    <TransactionsResults
+      result={result}
+      serverFilters={filters}
+      issuedTokenSymbolsByMint={Object.fromEntries(
+        (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
+      )}
+    />
+  );
 }

@@ -56,7 +56,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
   });
 
   async function seedCounterparty(externalId: string | null = null) {
-    const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
+    const counterpartiesRepo = createPostgresCounterpartiesRepository(
+      getDb(env),
+      env.counterpartyPiiCipher
+    );
     const row = await counterpartiesRepo.createCounterparty({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
@@ -200,6 +203,16 @@ describe("PaymentRequestsRepository (postgres)", () => {
     it("returns rows newest first with a total", async () => {
       const first = await repo.createPaymentRequest(createInput());
       const second = await repo.createPaymentRequest(createInput());
+
+      const db = getDb(env);
+      await db
+        .prepare("UPDATE payment_requests SET created_at = ? WHERE id = ?")
+        .bind("2026-01-01T00:00:00.000Z", first?.id)
+        .run();
+      await db
+        .prepare("UPDATE payment_requests SET created_at = ? WHERE id = ?")
+        .bind("2026-01-01T00:00:01.000Z", second?.id)
+        .run();
 
       const { rows, total } = await repo.listPaymentRequests({
         organizationId: TEST_ORG.id,

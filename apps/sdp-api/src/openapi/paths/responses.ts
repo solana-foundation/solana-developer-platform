@@ -46,6 +46,7 @@ import {
   listSessionsResponseSchema,
   listTemplatesResponseSchema,
   offrampCurrenciesResponseSchema,
+  onboardingCompleteResponseSchema,
   onboardingStatusResponseSchema,
   onrampCurrenciesResponseSchema,
   onrampQuoteResponseSchema,
@@ -164,8 +165,66 @@ export const tokenTransactionsResponse = paginatedResponseSchema(tokenTransactio
 export const issuanceTransactionsResponse = paginatedResponseSchema(tokenTransactionListItemSchema);
 export const tokenAllowlistListResponse = paginatedResponseSchema(tokenAllowlistEntrySchema);
 export const tokenAllowlistResponse = successResponseSchema(tokenAllowlistResponseSchema);
+export const tokenAllowlistLabelsResponse = successResponseSchema(
+  z.object({
+    labels: z.array(z.string()).openapi({
+      description: "Distinct labels used across the token's active control-list entries.",
+      example: ["Treasury", "Market maker"],
+    }),
+    total: z.number().int().openapi({
+      description: "Total active control-list entries (unfiltered), for the summary count.",
+      example: 42,
+    }),
+  })
+);
+export const tokenListFacetsResponse = successResponseSchema(
+  z.object({
+    templates: z
+      .array(
+        z.object({
+          template: z.string().openapi({ example: "stablecoin" }),
+          count: z.number().int().openapi({ example: 12 }),
+        })
+      )
+      .openapi({
+        description:
+          "Template ids present in the project with their token counts. Includes legacy ids still stored on older tokens.",
+      }),
+    deploymentStatuses: z
+      .object({
+        draft: z.number().int().openapi({ example: 3 }),
+        active: z.number().int().openapi({ example: 8 }),
+        paused: z.number().int().openapi({ example: 1 }),
+      })
+      .openapi({
+        description:
+          "Token counts per derived lifecycle state (draft until deployed, paused when the mint is paused, active otherwise).",
+      }),
+    total: z.number().int().openapi({
+      description:
+        "Total tokens in the project, unfiltered — distinguishes an empty project from an over-filtered list.",
+      example: 12,
+    }),
+  })
+);
 export const frozenAccountResponse = successResponseSchema(frozenAccountResponseSchema);
 export const frozenAccountListResponse = paginatedResponseSchema(frozenAccountSchema);
+
+const assetAuditEventSchema = z
+  .object({
+    id: z.string(),
+    action: z.string().openapi({ example: "freeze" }),
+    resourceType: z.string().openapi({ example: "frozen_account" }),
+    resourceId: z.string().nullable(),
+    actorType: z.enum(["user", "api_key", "system"]).openapi({ example: "user" }),
+    actorLabel: z.string().openapi({ example: "Jordan Lee" }),
+    status: z.enum(["success", "failure"]).openapi({ example: "success" }),
+    createdAt: z.string().openapi({ example: "2026-07-19T12:00:00.000Z" }),
+    metadata: z.record(z.string(), z.unknown()).nullable(),
+  })
+  .openapi({ description: "A single audit event scoped to an asset." });
+
+export const assetAuditListResponse = paginatedResponseSchema(assetAuditEventSchema);
 
 export const prepareDeployResponse = successResponseSchema(prepareDeployResponseSchema);
 export const prepareDeployMetadataResponse = successResponseSchema(
@@ -220,6 +279,7 @@ export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponse
 export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
 
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
+export const onboardingCompleteResponse = successResponseSchema(onboardingCompleteResponseSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSchema);
 export const policyControlInventoryResponse = successResponseSchema(

@@ -13,11 +13,13 @@ import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import {
   assertProviderAvailable,
   getProviderAvailability,
 } from "@/services/provider-availability.service";
+import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import { updateOrgSchema } from "./schemas";
 
@@ -234,6 +236,13 @@ export const deleteOrganization = async (c: AppContext) => {
       )
       .bind(orgId),
   ]);
+
+  const sessionService = new SessionService(db);
+  await sessionService
+    .revokeOrganizationSessions(orgId)
+    .catch((error) =>
+      getLogger().error({ error }, "Failed to revoke sessions after organization deletion")
+    );
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

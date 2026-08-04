@@ -10,8 +10,10 @@ import {
   type PolicyRule,
   type PrivateTransferRequest,
   RAMP_PROVIDERS,
+  RAMPS_MEMO_LIMITS,
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import { getI64Encoder, getU64Encoder } from "@solana/kit";
 import { z } from "zod";
 import { SOL_MINT } from "@/services/payment-operation.service";
 
@@ -115,7 +117,7 @@ const walletOperationFamilySchema = z.enum([
   "provider_admin",
 ]);
 
-const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnion("kind", [
+export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnion("kind", [
   z.object({
     ...policyRuleBaseShape,
     kind: z.literal("operation_family"),
@@ -209,7 +211,8 @@ const u64StringSchema = z
   .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
   .refine((value) => {
     try {
-      return BigInt(value) <= 18_446_744_073_709_551_615n;
+      getU64Encoder().encode(BigInt(value));
+      return true;
     } catch {
       return false;
     }
@@ -219,8 +222,8 @@ const i64StringSchema = z
   .regex(/^-?\d+$/, { message: "Value must be a signed integer string" })
   .refine((value) => {
     try {
-      const parsed = BigInt(value);
-      return parsed >= -9_223_372_036_854_775_808n && parsed <= 9_223_372_036_854_775_807n;
+      getI64Encoder().encode(BigInt(value));
+      return true;
     } catch {
       return false;
     }
@@ -634,6 +637,15 @@ export const estimateOfframpSchema = z.object({
   cryptoAmount: paymentAmountSchema,
 });
 
+export const rampsMemoSchema = z
+  .record(
+    z.string().min(1).max(RAMPS_MEMO_LIMITS.maxKeyLength),
+    z.string().min(1).max(RAMPS_MEMO_LIMITS.maxValueLength)
+  )
+  .refine((value) => Object.keys(value).length <= RAMPS_MEMO_LIMITS.maxEntries, {
+    message: `rampsMemo must contain at most ${RAMPS_MEMO_LIMITS.maxEntries} key-value pairs`,
+  });
+
 export const createOnrampQuoteSchema = z.object({
   provider: rampProviderSchema,
   counterpartyId: z.string().min(1),
@@ -642,9 +654,12 @@ export const createOnrampQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
+  rampsMemo: rampsMemoSchema.optional(),
   // Embedding domain for Coinbase's Apple Pay payment link (browser origin host).
   domain: z.string().min(1).optional(),
 });
+
+const collectedDataSchema = z.record(z.string(), z.string()).optional();
 
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
@@ -656,23 +671,27 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       cryptoToken: rampCurrencyCodeSchema,
       destinationWallet: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
-      collectedData: z.record(z.string(), z.string()).optional(),
+      collectedData: collectedDataSchema,
     }),
     z.object({
       provider: z.literal("bvnk"),
       direction: z.literal("offramp"),
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
-      collectedData: z.record(z.string(), z.string()).optional(),
+      collectedData: collectedDataSchema,
     }),
   ]),
   z.discriminatedUnion("direction", [
-    z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
+    z.object({
+      provider: z.literal("lightspark"),
+      direction: z.literal("onramp"),
+      collectedData: collectedDataSchema,
+    }),
     z.object({
       provider: z.literal("lightspark"),
       direction: z.literal("offramp"),
       fiatCurrency: rampFiatCurrencySchema,
-      collectedData: z.record(z.string(), z.string()).optional(),
+      collectedData: collectedDataSchema,
     }),
   ]),
   z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
@@ -702,9 +721,18 @@ export const createOfframpQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
+  rampsMemo: rampsMemoSchema.optional(),
 });
 
 export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("onramp_completed"),
+    sessionId: z.string().min(1),
+    transactionId: z.string().min(1),
+    status: z.string().min(1),
+    amount: z.number().positive(),
+    referenceNumber: z.string().min(1).optional(),
+  }),
   z.object({
     kind: z.literal("signed"),
     sessionId: z.string().min(1),

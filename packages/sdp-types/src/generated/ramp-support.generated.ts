@@ -13,17 +13,17 @@ import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  "b890004c2e13336753f5b4f61a7c11f82059c9528d80e4c3c6be2baf9a182431" as const;
+  "454c8d8c1c594289497fa7d285a1bc992ba1d8f7f4c23593d395847cee864f5c" as const;
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   moonpay: "1bae9f40aaee0402594dbe2d72babb8c38032e7300131dc3edee1fe543931d41",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  lightspark: "53a29135bd76f818d513f02097bc2ee3e2ad0d3eff1a6149fcd58a69ecbe5974",
+  lightspark: "0a65054262fee18de1322bc9f1c6b5bb0656e26d5ca458bd0344a9e01d437aa6",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   bvnk: "a81bc9617d867fd16e8fc9b91444ae968bddf32724be7a393a9b3c3a739b81f0",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  moneygram: "82b3a873f199075bb8a93c61d05556c5d039d36aab492ab2f873549035c57a6e",
+  moneygram: "3805404b4918db354043d364dbbb26f224d30e16b0039f2e639647621de922f4",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   coinbase: "5f01258d98e8d8402ea69e349823315744598c38a7e1ee075ea806983f3fe138",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
@@ -36,7 +36,7 @@ export const RAMP_PROVIDER_SUPPORT_COUNTS = {
   moonpay: { onramp: 66, offramp: 25 },
   lightspark: { onramp: 1, offramp: 1 },
   bvnk: { onramp: 8, offramp: 400 },
-  moneygram: { onramp: 0, offramp: 153 },
+  moneygram: { onramp: 1, offramp: 153 },
   coinbase: { onramp: 3, offramp: 0 },
   mural: { onramp: 11, offramp: 0 },
   stripe: { onramp: 2, offramp: 0 },
@@ -906,7 +906,7 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
         USD: { min: "1", max: "10000" },
       },
       countrySupport: { coverage: "unreported" },
-      entityTypes: ["individual"],
+      entityTypes: ["business", "individual"],
     },
     offramp: {
       currencies: {
@@ -1034,9 +1034,11 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
   },
   moneygram: {
     onramp: {
-      currencies: {},
+      currencies: {
+        USD: { min: null, max: null },
+      },
       countrySupport: { coverage: "unreported" },
-      entityTypes: [],
+      entityTypes: ["individual"],
     },
     offramp: {
       currencies: {
@@ -1401,7 +1403,7 @@ export const ONRAMP_SUPPORT = [
   {
     source: "USD",
     dest: "usdc.solana",
-    providers: ["lightspark", "bvnk", "coinbase", "mural", "stripe"],
+    providers: ["lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe"],
   },
   { source: "USD", dest: "usdt.solana", providers: ["bvnk"] },
   { source: "USD", dest: "usdg.solana", providers: ["bvnk"] },

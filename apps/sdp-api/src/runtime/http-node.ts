@@ -23,8 +23,8 @@ function appendVary(headers: Headers, value: string): void {
 }
 
 /**
- * Adds transport behavior needed by the Node/Cloud Run entrypoint without
- * changing the legacy Cloudflare request path.
+ * Adds transport behavior needed by the Node/Cloud Run entrypoint while the
+ * inner app remains independently request-testable.
  */
 export function createNodeHttpApp(app: Hono<{ Bindings: Env }>): Hono<{ Bindings: Env }> {
   const nodeApp = new Hono<{ Bindings: Env }>();

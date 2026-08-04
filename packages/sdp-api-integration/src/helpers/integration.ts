@@ -23,6 +23,7 @@ import { getIntegrationCustodyProvider } from "./custody-provider";
 const {
   app,
   clearTestDatabase,
+  createKVStoreSet,
   createFeePaymentAdapter,
   createMosaicService,
   createSigningService,
@@ -100,11 +101,7 @@ export async function resetIntegrationState(
   apiKeyHash: string
 ): Promise<{ custodyAddress: string }> {
   const db = getDb(env);
-  const apiKeysKV = env.SDP_API_KEYS;
-  const rateLimitKV = env.SDP_RATE_LIMITS;
-  if (!apiKeysKV || !rateLimitKV) {
-    throw new Error("Integration test bindings SDP_API_KEYS and SDP_RATE_LIMITS are required.");
-  }
+  const { apiKeys: apiKeysKV, rateLimits: rateLimitKV } = createKVStoreSet(env);
 
   const rateLimitKeys = await rateLimitKV.list();
   for (const key of rateLimitKeys.keys) {
@@ -620,7 +617,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
-  const maxRetries = 2;
+  const maxRetries = 4;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const response = await fetch(rpcUrl, {
@@ -652,6 +649,7 @@ function isRetryableSolanaRpcError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
   return (
+    message.includes("internal error") ||
     message.includes("unable to complete request") ||
     message.includes("request timed out") ||
     message.includes("timed out") ||
@@ -711,7 +709,7 @@ async function createFundedLocalWallet(input: {
     throw new Error("Integration precondition failed: local signer configuration not found.");
   }
 
-  const configStore = new CustodyConfigStore(getDb(env), env.CUSTODY_ENCRYPTION_KEY);
+  const configStore = new CustodyConfigStore(getDb(env), env);
   // Local custody has one signing key; access tests still need distinct wallet IDs.
   const wallet = await configStore.createWallet(config.id, {
     walletId: `local_${crypto.randomUUID()}`,

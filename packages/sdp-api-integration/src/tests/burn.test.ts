@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { BurnApiResponse, TokenApiResponse } from "../helpers/api-types";
+import type { TokenApiResponse, TransactionApiResponse } from "../helpers/api-types";
 import {
   cleanupIntegrationSuite,
   initIntegrationSuite,
@@ -78,7 +78,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
     });
 
     expect(burnRes.status).toBe(200);
-    const burned = (await burnRes.json()) as BurnApiResponse;
+    const burned = (await burnRes.json()) as TransactionApiResponse;
 
     expect(burned.data.transaction.status).toBe("confirmed");
     expect(burned.data.transaction.signature).toBeTruthy();

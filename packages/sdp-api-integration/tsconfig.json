@@ -1,7 +1,8 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "vitest/globals"],
     "paths": {
       "@/*": ["../../apps/sdp-api/src/*"],
       "@sdp/api/test-support": ["../../apps/sdp-api/src/test/integration-support.ts"],

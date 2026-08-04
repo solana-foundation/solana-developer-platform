@@ -4,11 +4,11 @@ import type { PaymentTransferSummary } from "@sdp/types";
 import { ExternalLinkIcon, ReceiptTextIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { Modal } from "@/components/ui/modal";
-import { Select, SelectItem } from "@/components/ui/select";
+import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
   Table,
@@ -19,15 +19,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import {
   formatDirection,
   formatDisplayAmount,
   formatTimestamp,
+  resolveTransferTokenLabel,
   resolveTransferTypeLabel,
   shortenAddress,
 } from "../payments-overview.utils";
-import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { TransactionAmount } from "./transactions-amount";
 import {
   getTransactionCounterpartyPresentation,
@@ -98,13 +100,16 @@ function TransactionDetail({
   transfer,
   loading,
   error,
+  issuedTokenSymbolsByMint,
 }: {
   transfer: PaymentTransferSummary | null;
   loading: boolean;
   error: string | null;
+  issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const cluster = useSolanaCluster();
   if (loading) {
     return (
       <div className="space-y-4 p-6" role="status">
@@ -131,7 +136,11 @@ function TransactionDetail({
     [t("DashboardPayments.transactions.type"), resolveTransferTypeLabel(transfer.type, t)],
     [
       t("DashboardPayments.transactions.amount"),
-      formatDisplayAmount(transfer.amount, transfer.token, locale),
+      formatDisplayAmount(
+        transfer.amount,
+        resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint),
+        locale
+      ),
     ],
     [t("DashboardPayments.transactions.direction"), formatDirection(transfer.direction, t)],
     [t("DashboardPayments.transactions.wallet"), transfer.walletId],
@@ -174,7 +183,7 @@ function TransactionDetail({
       {transfer.signature ? (
         <div className="border-t border-border-default p-6">
           <Button asChild variant="outline" iconRight={<ExternalLinkIcon />}>
-            <a href={getDevnetExplorerUrl(transfer.signature)} target="_blank" rel="noreferrer">
+            <a href={explorerTxUrl(transfer.signature, cluster)} target="_blank" rel="noreferrer">
               {t("DashboardPayments.transactions.viewOnExplorer")}
             </a>
           </Button>
@@ -236,32 +245,32 @@ function useTransactionDetail(selected: PaymentTransferSummary | null) {
 function EmptyState({ filtered, onClear }: { filtered: boolean; onClear: () => void }) {
   const t = useTranslations();
   return (
-    <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
-      <span className="flex size-11 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
-        <ReceiptTextIcon className="size-5" />
-      </span>
-      <p className="mt-4 text-sm font-medium text-primary">
-        {t(
-          filtered
-            ? "DashboardPayments.transactions.noMatches"
-            : "DashboardPayments.transactions.emptyProject"
-        )}
-      </p>
-      {filtered ? (
-        <Button type="button" variant="secondary" className="mt-4" onClick={onClear}>
-          {t("DashboardPayments.transactions.clearFilters")}
-        </Button>
-      ) : null}
-    </div>
+    <ListEmptyState
+      icon={<ReceiptTextIcon className="size-5" />}
+      message={t(
+        filtered
+          ? "DashboardPayments.transactions.noMatches"
+          : "DashboardPayments.transactions.emptyProject"
+      )}
+      action={
+        filtered ? (
+          <Button type="button" variant="secondary" onClick={onClear}>
+            {t("DashboardPayments.transactions.clearFilters")}
+          </Button>
+        ) : null
+      }
+    />
   );
 }
 
 function DesktopTable({
   transfers,
   onSelect,
+  issuedTokenSymbolsByMint,
 }: {
   transfers: PaymentTransferSummary[];
   onSelect: (transfer: PaymentTransferSummary) => void;
+  issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -302,6 +311,7 @@ function DesktopTable({
                   <TransactionAmount
                     transfer={transfer}
                     locale={locale}
+                    issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
                     className="text-sm font-medium text-primary"
                   />
                 </TableCell>
@@ -309,9 +319,12 @@ function DesktopTable({
                   {formatDirection(transfer.direction, t)}
                 </TableCell>
                 <TableCell className="min-w-0">
+                  {/* primary is already shortened when there is no display
+                      name, so titling it with itself showed the truncated
+                      string again on hover. The reference is the full value. */}
                   <span
                     className="block truncate text-sm text-secondary"
-                    title={counterparty.primary}
+                    title={counterparty.reference ?? counterparty.primary}
                   >
                     {counterparty.primary}
                   </span>
@@ -347,9 +360,11 @@ function DesktopTable({
 function MobileRows({
   transfers,
   onSelect,
+  issuedTokenSymbolsByMint,
 }: {
   transfers: PaymentTransferSummary[];
   onSelect: (transfer: PaymentTransferSummary) => void;
+  issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -373,6 +388,7 @@ function MobileRows({
                 <TransactionAmount
                   transfer={transfer}
                   locale={locale}
+                  issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
                   className="mt-1 font-medium text-primary"
                 />
               </div>
@@ -386,7 +402,10 @@ function MobileRows({
                 <p className="text-xs text-tertiary">
                   {t("DashboardPayments.transactions.counterparty")}
                 </p>
-                <p className="mt-1 truncate text-secondary" title={counterparty.primary}>
+                <p
+                  className="mt-1 truncate text-secondary"
+                  title={counterparty.reference ?? counterparty.primary}
+                >
                   {counterparty.primary}
                 </p>
                 {counterparty.secondary ? (
@@ -417,9 +436,11 @@ function MobileRows({
 export function TransactionsResults({
   result,
   serverFilters,
+  issuedTokenSymbolsByMint,
 }: {
   result: TransactionsPageResult;
   serverFilters: TransactionFilters;
+  issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -441,64 +462,63 @@ export function TransactionsResults({
           serverFilters.asset ||
           serverFilters.provider ||
           serverFilters.from ||
-          serverFilters.to
+          serverFilters.to ||
+          // Excluding observed deposits can be the sole reason a wallet looks
+          // empty, so the empty state must offer to clear filters rather than
+          // claim there is nothing to show.
+          !serverFilters.includeObserved
       ),
     [serverFilters]
   );
   if (result.error) {
     return (
-      <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
-        <p className="text-sm font-medium text-primary">
-          {t("DashboardPayments.transactions.loadError")}
-        </p>
-        <Button type="button" variant="secondary" className="mt-4" onClick={() => router.refresh()}>
-          {t("DashboardPayments.transactions.retry")}
-        </Button>
-      </div>
+      <ListEmptyState
+        message={t("DashboardPayments.transactions.loadError")}
+        action={
+          <Button type="button" variant="secondary" onClick={() => router.refresh()}>
+            {t("DashboardPayments.transactions.retry")}
+          </Button>
+        }
+      />
     );
   }
 
   return (
     <section
-      className={cn("min-w-0 transition-opacity", isPending && "opacity-60")}
+      className={cn("flex min-w-0 flex-1 flex-col transition-opacity", isPending && "opacity-60")}
       aria-busy={isPending}
     >
       {result.transfers.length === 0 ? (
         <EmptyState filtered={filtered} onClear={clearFilters} />
       ) : (
         <>
-          <DesktopTable transfers={result.transfers} onSelect={setSelected} />
-          <MobileRows transfers={result.transfers} onSelect={setSelected} />
-          <div className="flex flex-col gap-4 border-t border-border-default p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-secondary">
-                {t("DashboardPayments.transactions.rowsPerPage")}
-              </span>
-              <Select
-                value={String(filters.pageSize)}
-                onValueChange={(value) =>
-                  updateFilters({ pageSize: Number(value), page: 1 }, { preserveSnapshot: true })
-                }
-                className="w-20"
-              >
-                {[10, 25, 50, 100].map((size) => (
-                  <SelectItem key={size} value={String(size)}>
-                    {size}
-                  </SelectItem>
-                ))}
-              </Select>
-            </div>
-            <ArrowPagination
-              page={result.page}
-              pageCount={pageCount}
-              onPageChange={(page) => updateFilters({ page }, { preserveSnapshot: true })}
-              summary={t("DashboardPayments.transactions.range", {
-                start: rangeStart,
-                end: rangeEnd,
-                total: result.total,
-              })}
-            />
-          </div>
+          <DesktopTable
+            transfers={result.transfers}
+            onSelect={setSelected}
+            issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
+          />
+          <MobileRows
+            transfers={result.transfers}
+            onSelect={setSelected}
+            issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
+          />
+          <PaginatedFooter
+            className="mt-auto"
+            page={result.page}
+            pageCount={pageCount}
+            disabled={isPending}
+            onPageChange={(page) => updateFilters({ page }, { preserveSnapshot: true })}
+            summary={t("DashboardPayments.transactions.range", {
+              start: rangeStart,
+              end: rangeEnd,
+              total: result.total,
+            })}
+            pageSizeControl={{
+              pageSize: filters.pageSize,
+              onPageSizeChange: (pageSize) =>
+                updateFilters({ pageSize, page: 1 }, { preserveSnapshot: true }),
+            }}
+          />
         </>
       )}
       <Modal
@@ -511,6 +531,7 @@ export function TransactionsResults({
           transfer={detailState.detail}
           loading={detailState.loading}
           error={detailState.error}
+          issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
         />
       </Modal>
     </section>

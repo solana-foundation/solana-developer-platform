@@ -5,9 +5,17 @@ import type {
   PaymentWalletPolicy,
 } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
+import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { createSdpApiClient, getSelectedProjectId, type SdpApiClient } from "@/lib/sdp-api";
+import { fetchProviderAvailability } from "@/lib/provider-availability";
+import {
+  createOrgSdpApiClient,
+  createSdpApiClient,
+  getSelectedProjectId,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
+import { getIssuedPolicyTokens } from "./policy-assets.data";
 import { WalletPolicyStartingProfileFlow } from "./wallet-policy-starting-profile-flow";
 
 interface WalletPolicyResult {
@@ -101,6 +109,29 @@ async function getWalletAssets(
   }
 }
 
+/**
+ * Whether the organization has any enabled compliance provider, so the
+ * destination editor knows to run address screening at all.
+ *
+ * @returns True when at least one compliance provider is enabled; false when
+ * the organization is unlinked or the availability fetch fails.
+ */
+async function getComplianceScreeningEnabled(): Promise<boolean> {
+  try {
+    const orgClient = await createOrgSdpApiClient();
+    const onboardingStatus =
+      await orgClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
+    if (!onboardingStatus.organization) return false;
+    const providerAccess = await fetchProviderAvailability(
+      orgClient.request,
+      onboardingStatus.organization.id
+    );
+    return providerAccess.enabledComplianceProviders.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export default async function WalletPolicyPage({
   params,
 }: {
@@ -121,11 +152,14 @@ export default async function WalletPolicyPage({
     redirect("/dashboard");
   }
   const apiClient = await createSdpApiClient();
-  const [wallet, policyResult, walletAssets] = await Promise.all([
-    getWalletDetail(apiClient.request, resolvedWalletId),
-    getWalletPolicy(apiClient.request, resolvedWalletId),
-    getWalletAssets(apiClient.request, resolvedWalletId),
-  ]);
+  const [wallet, policyResult, walletAssets, issuedTokens, complianceScreeningEnabled] =
+    await Promise.all([
+      getWalletDetail(apiClient.request, resolvedWalletId),
+      getWalletPolicy(apiClient.request, resolvedWalletId),
+      getWalletAssets(apiClient.request, resolvedWalletId),
+      getIssuedPolicyTokens(apiClient.request),
+      getComplianceScreeningEnabled(),
+    ]);
 
   return (
     <WalletPolicyStartingProfileFlow
@@ -141,8 +175,10 @@ export default async function WalletPolicyPage({
         mint: asset.mint,
         uiAmount: asset.uiAmount,
       }))}
+      issuedTokens={issuedTokens}
       initialPolicy={policyResult.policy}
       policyError={policyResult.error}
+      complianceScreeningEnabled={complianceScreeningEnabled}
     />
   );
 }

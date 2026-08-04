@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { PaymentsWizardFrame } from "@/app/dashboard/payments/payments-wizard-frame";
+import { WizardFrame } from "@/components/wizard-frame";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { StepContent } from "./components/step-content";
@@ -61,7 +61,7 @@ export function CounterpartyCreatePage({
   }
 
   return (
-    <PaymentsWizardFrame
+    <WizardFrame
       steps={wizardSteps}
       currentStep={step}
       progressLabel={t("DashboardPayments.counterparty.stepProgress", {
@@ -88,6 +88,6 @@ export function CounterpartyCreatePage({
           </motion.div>
         </AnimatePresence>
       </div>
-    </PaymentsWizardFrame>
+    </WizardFrame>
   );
 }

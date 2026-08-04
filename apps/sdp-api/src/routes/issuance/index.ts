@@ -1,12 +1,14 @@
-/**
- * Issuance Routes
- */
-
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
-import { addAllowlistEntry, listAllowlist, removeAllowlistEntry } from "./handlers/allowlist";
+import {
+  addAllowlistEntry,
+  listAllowlist,
+  listAllowlistLabels,
+  removeAllowlistEntry,
+} from "./handlers/allowlist";
+import { getAssetAuditHistory } from "./handlers/audit";
 import { executeUpdateAuthority, prepareUpdateAuthority } from "./handlers/authority";
 import { executeBurn, prepareBurn } from "./handlers/burn";
 import {
@@ -23,7 +25,7 @@ import { pauseToken, unpauseToken } from "./handlers/pause";
 import { executeSeize, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
-import { createToken, getToken, listTokens, updateToken } from "./handlers/tokens";
+import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
 
 const issuance = new Hono<{ Bindings: Env }>();
@@ -34,7 +36,6 @@ const issuance = new Hono<{ Bindings: Env }>();
 // for this path is wired via KV_FREE_PATHS in app.ts.
 issuance.get("/tokens/:tokenId/metadata.json", serveTokenMetadata);
 
-// All routes require authentication
 issuance.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 issuance.use("*", projectContextMiddleware());
 
@@ -46,12 +47,16 @@ issuance.get("/templates/:templateId", requirePermissions("tokens:read"), getTok
 issuance.post("/tokens", requirePermissions("tokens:write"), createToken);
 issuance.get("/tokens", requirePermissions("tokens:read"), listTokens);
 issuance.get("/transactions", requirePermissions("tokens:read"), listTransactions);
+// Filter facets for the token list. Registered BEFORE `/tokens/:tokenId` so the
+// literal path wins the match instead of being read as a token id.
+issuance.get("/tokens/facets", requirePermissions("tokens:read"), listTokenFacets);
 issuance.get("/tokens/:tokenId", requirePermissions("tokens:read"), getToken);
 issuance.get(
   "/tokens/:tokenId/transactions",
   requirePermissions("tokens:read"),
   listTokenTransactions
 );
+issuance.get("/tokens/:tokenId/audit", requirePermissions("tokens:read"), getAssetAuditHistory);
 issuance.post(
   "/tokens/:tokenId/supply/refresh",
   requirePermissions("tokens:read"),
@@ -117,6 +122,13 @@ issuance.post("/tokens/:tokenId/unfreeze", requirePermissions("tokens:admin"), u
 issuance.get("/tokens/:tokenId/frozen", requirePermissions("tokens:read"), listFrozenAccounts);
 
 // Allowlist
+// `/allowlist/labels` (GET) is registered before the `/allowlist/:entryId`
+// (DELETE) route; distinct methods mean there is no path collision either way.
+issuance.get(
+  "/tokens/:tokenId/allowlist/labels",
+  requirePermissions("tokens:read"),
+  listAllowlistLabels
+);
 issuance.get("/tokens/:tokenId/allowlist", requirePermissions("tokens:read"), listAllowlist);
 issuance.post("/tokens/:tokenId/allowlist", requirePermissions("tokens:write"), addAllowlistEntry);
 issuance.delete(

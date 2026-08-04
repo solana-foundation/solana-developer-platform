@@ -5,6 +5,7 @@ import {
   type AssetProfileFieldOptionsResponse,
   type AssetProfileResponse,
   getAssetTypeRegistryEntry,
+  hasPermission,
   isAssetTypeSupported,
   type ListAssetProfilesResponse,
 } from "@sdp/types";
@@ -13,12 +14,18 @@ import { getDb } from "@/db";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
+  AppError,
   badRequest,
   badRequestParams,
   badRequestQuery,
   internalError,
   notFound,
 } from "@/lib/errors";
+import {
+  resolveAdvancedSettings,
+  stampAdvancedSettingsVersion,
+  validateAdvancedSettings,
+} from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
@@ -48,6 +55,79 @@ export function mapToAssetProfile(row: AssetProfileRow): AssetProfile {
   };
 }
 
+type MetadataRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): MetadataRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as MetadataRecord)
+    : null;
+}
+
+// Collapse the two capacity encodings — legacy `{ key: true }` and current
+// `{ key: { enabled, config } }` — so a re-serialized-but-unchanged policy does
+// not read as a change. Disabled entries drop out entirely.
+function normalizeCapacities(value: unknown): MetadataRecord | null {
+  const source = asRecord(value);
+  if (!source) {
+    return null;
+  }
+  const normalized: MetadataRecord = {};
+  for (const [key, raw] of Object.entries(source)) {
+    if (raw === true) {
+      normalized[key] = { enabled: true };
+      continue;
+    }
+    const entry = asRecord(raw);
+    if (!entry || entry.enabled === false) {
+      continue;
+    }
+    normalized[key] =
+      entry.config !== undefined ? { enabled: true, config: entry.config } : { enabled: true };
+  }
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+// A stable, order-independent view of just the admin-governed compliance policy:
+// advanced settings selection, the off-chain capacities, and the access-control
+// mode. Everything else on the profile (asset details, public-info visibility)
+// stays at tokens:write.
+function compliancePolicyView(metadata: unknown): unknown {
+  const source = asRecord(metadata) ?? {};
+  const settings = asRecord(source.settings);
+  const compliance = asRecord(source.compliance);
+  return {
+    // `settings.version` is server-stamped, not policy — compare the selection.
+    settings: settings?.selected ?? null,
+    accessControl: compliance?.accessControl ?? null,
+    capacities: normalizeCapacities(compliance?.capacities),
+  };
+}
+
+function sortRecursively(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortRecursively);
+  }
+  const record = asRecord(value);
+  if (!record) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.keys(record)
+      .sort()
+      .map((key) => [key, sortRecursively(record[key])])
+  );
+}
+
+// True when a PATCH would alter the compliance policy vs. the persisted profile.
+// Editing the policy requires tokens:admin even though the route gate is
+// tokens:write; this is the server backstop for the admin-only compliance tab.
+export function compliancePolicyChanged(before: unknown, after: unknown): boolean {
+  return (
+    JSON.stringify(sortRecursively(compliancePolicyView(before))) !==
+    JSON.stringify(sortRecursively(compliancePolicyView(after)))
+  );
+}
+
 export const getAssetProfileFieldOptions = async (c: AppContext) => {
   const response: AssetProfileFieldOptionsResponse = {
     fields: {
@@ -67,7 +147,7 @@ export const listAssetProfiles = async (c: AppContext) => {
     throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
   }
 
-  const { page, pageSize, includeArchived, category } = parsed.data;
+  const { page, pageSize, includeArchived, category, tokenIds } = parsed.data;
 
   const repo = getAssetProfilesRepository(c);
   const { rows, total } = await repo.listAssetProfiles({
@@ -75,6 +155,7 @@ export const listAssetProfiles = async (c: AppContext) => {
     projectId,
     category,
     includeArchived,
+    tokenIds,
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });
@@ -165,6 +246,21 @@ export const updateAssetProfile = async (c: AppContext) => {
     throw notFound("Asset profile");
   }
 
+  // Compliance policy is admin-governed. The route gate (tokens:write) covers
+  // the rest of the profile, but changing the advanced settings, capacities, or
+  // access-control mode requires tokens:admin — mirroring the admin-only
+  // compliance tab in the dashboard.
+  if (
+    parsed.data.issuanceMetadata !== undefined &&
+    compliancePolicyChanged(current.issuance_metadata, parsed.data.issuanceMetadata) &&
+    !hasPermission(auth.permissions, "tokens:admin")
+  ) {
+    throw new AppError(
+      "INSUFFICIENT_PERMISSIONS",
+      "Editing compliance policy requires the tokens:admin permission"
+    );
+  }
+
   // Resolve the effective category/type by merging the patch over the existing
   // row, then validate the pair (the schema can only check it when both are sent).
   const nextCategory = parsed.data.assetCategory ?? current.asset_category;
@@ -180,9 +276,28 @@ export const updateAssetProfile = async (c: AppContext) => {
 
   const typeChanged = nextCategory !== current.asset_category || nextType !== current.asset_type;
   const metadataChanged = parsed.data.issuanceMetadata !== undefined;
-  const nextMetadata = parsed.data.issuanceMetadata ?? current.issuance_metadata;
 
-  // Recompute the cached public projection whenever its inputs change.
+  // Validate settings when metadata or type changed; catches unsupported by type change too.
+  if (metadataChanged || typeChanged) {
+    const effectiveMetadata = parsed.data.issuanceMetadata ?? current.issuance_metadata;
+    const settingErrors = validateAdvancedSettings(nextCategory, nextType, effectiveMetadata);
+    if (settingErrors.length > 0) {
+      throw badRequest("Invalid advanced settings", { errors: settingErrors });
+    }
+    const buildErrors = resolveAdvancedSettings(nextCategory, nextType, effectiveMetadata);
+    if (buildErrors.length > 0) {
+      throw badRequest("Invalid advanced settings combination", { errors: buildErrors });
+    }
+  }
+
+  // Stamp version only on metadata we persist.
+  const persistedMetadata =
+    parsed.data.issuanceMetadata !== undefined
+      ? stampAdvancedSettingsVersion(parsed.data.issuanceMetadata)
+      : undefined;
+  const nextMetadata = persistedMetadata ?? current.issuance_metadata;
+
+  // Recompute public projection when inputs change.
   const publicMetadata =
     typeChanged || metadataChanged
       ? projectPublicMetadata(nextCategory, nextType, nextMetadata)
@@ -195,7 +310,7 @@ export const updateAssetProfile = async (c: AppContext) => {
     assetCategory: parsed.data.assetCategory,
     assetType: parsed.data.assetType,
     assetTypeVersion: typeChanged ? registryEntry.version : undefined,
-    issuanceMetadata: parsed.data.issuanceMetadata,
+    issuanceMetadata: persistedMetadata,
     publicMetadata,
   });
 

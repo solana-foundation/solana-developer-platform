@@ -13,6 +13,11 @@ export const projectScopeHeaders = z.object({
   "x-project-id": projectScopeHeaderSchema.optional(),
 });
 
+/** Required project selection for session-only operations. */
+export const sessionProjectScopeHeaders = z.object({
+  "x-project-id": projectScopeHeaderSchema,
+});
+
 export const projectScopeWithIdempotencyHeaders = projectScopeHeaders.extend({
   "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
 });

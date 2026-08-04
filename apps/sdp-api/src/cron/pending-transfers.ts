@@ -1,11 +1,10 @@
 /**
- * Pending-transfers reconciliation entrypoint, runtime-neutral.
+ * Pending-transfers reconciliation entrypoint.
  *
  * Wraps `trackPendingTransfers` with a Sentry cron monitor when observability
  * is supplied, and hands the resulting promise to the BackgroundRunner so the
- * caller's runtime (CF `waitUntil`, Node SIGTERM drain) keeps it alive past
- * return. The CF entrypoint calls this from `scheduled`; the Node entrypoint
- * (HOO-511) will call it from its `node-cron` tick.
+ * Node background runner keeps it alive past the initiating tick and drains it
+ * during graceful shutdown.
  */
 
 import type { BackgroundRunner } from "@/runtime/background";

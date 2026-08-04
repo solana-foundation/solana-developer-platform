@@ -24,7 +24,7 @@ The OpenAPI source in `apps/sdp-api/src/openapi` is the source of truth for the 
 
 | Path | Purpose |
 | --- | --- |
-| `apps/sdp-api` | Cloudflare Workers API, OpenAPI source, route handlers, and data integrations |
+| `apps/sdp-api` | Node.js API, OpenAPI source, route handlers, and Postgres/Redis integrations |
 | `apps/sdp-web` | Dashboard application |
 | `apps/sdp-docs` | Public documentation site and generated API reference |
 | `packages/sdp-types` | Shared runtime types and product constants |
@@ -43,7 +43,7 @@ pnpm install
 Create a local API environment file:
 
 ```bash
-cp apps/sdp-api/.dev.vars.example apps/sdp-api/.dev.vars
+cp apps/sdp-api/.env.local.example apps/sdp-api/.env.local
 ```
 
 For basic devnet development, set:
@@ -52,7 +52,7 @@ For basic devnet development, set:
 SOLANA_RPC_URL=https://api.devnet.solana.com
 ```
 
-Start local services:
+Start the local Postgres and Redis services, then the apps:
 
 ```bash
 pnpm db:postgres:up

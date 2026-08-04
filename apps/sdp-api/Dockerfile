@@ -23,7 +23,12 @@ COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
+COPY packages/sdp-policy/package.json ./packages/sdp-policy/
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
+COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
+COPY packages/sdp-spc-escrow/package.json ./packages/sdp-spc-escrow/
+COPY packages/sdp-spc-withdraw/package.json ./packages/sdp-spc-withdraw/
+COPY packages/kit-augment/package.json ./packages/kit-augment/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -40,7 +45,12 @@ COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
 COPY packages/sdp-solana ./packages/sdp-solana
+COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-issuance ./packages/sdp-issuance
+COPY packages/sdp-private-channels ./packages/sdp-private-channels
+COPY packages/sdp-spc-escrow ./packages/sdp-spc-escrow
+COPY packages/sdp-spc-withdraw ./packages/sdp-spc-withdraw
+COPY packages/kit-augment ./packages/kit-augment
 
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs
@@ -53,9 +63,14 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     MIGRATIONS_DIR=/app/migrations
 
-# Apply OS-level security patches not yet in the pinned base image.
+# Update npm for patched node-tar (CVE-2026-59873) and apply OS-level fixes
+# not yet in the pinned base image.
 # This layer is cached — rebuild with --no-cache to pick up new fixes.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+RUN npm install --global npm@12.0.2 \
+ && npm cache clean --force \
+ && apt-get update \
+ && apt-get upgrade -y \
+ && rm -rf /var/lib/apt/lists/*
 
 # UID/GID 1001 matches sdp-web so k8s securityContext is consistent.
 RUN groupadd --system --gid 1001 nodejs \
@@ -80,7 +95,7 @@ LABEL org.opencontainers.image.title="sdp-api" \
 USER sdp
 EXPOSE 8787
 
-# Liveness only — status<500 means the HTTP layer is up. /ready (DB+Redis)
+# Liveness only — status<500 means the HTTP layer is up. /health/ready (DB+Redis)
 # belongs on a k8s readinessProbe, not on the container HEALTHCHECK.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8787)+'/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"

@@ -108,6 +108,11 @@ Use this file as the quick reference for answering tokenization questions on top
   - `POST /v1/issuance/tokens/{tokenId}/pause`
   - `POST /v1/issuance/tokens/{tokenId}/unpause`
   - `POST /v1/issuance/tokens/{tokenId}/supply/refresh`
+  - `GET /v1/issuance/tokens/{tokenId}/transactions` (server-side `type` + `status` filters, newest-first, paginated up to pageSize 500)
+  - `GET /v1/issuance/tokens/{tokenId}/allowlist` (server-side `search` over address/label + exact `label` filter, paginated)
+  - `GET /v1/issuance/tokens/{tokenId}/allowlist/labels` (distinct labels, for building a label filter)
+  - `POST /v1/issuance/tokens/{tokenId}/allowlist`
+  - `DELETE /v1/issuance/tokens/{tokenId}/allowlist/{entryId}`
 - Payments and movement:
   - `POST /v1/payments/transfers`
   - `GET /v1/payments/transfers`

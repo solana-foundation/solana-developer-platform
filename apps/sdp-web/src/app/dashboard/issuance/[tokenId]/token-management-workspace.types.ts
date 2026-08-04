@@ -34,13 +34,6 @@ export interface ActionExecutionInput {
   body?: unknown;
 }
 
-export interface ExecuteRouteResponse {
-  ok?: boolean;
-  status?: number;
-  body?: unknown;
-  error?: string;
-}
-
 export interface ActionExecutionResult {
   ok: boolean;
   message: string;
@@ -189,6 +182,13 @@ export type ExtensionRowId =
   | "interest-bearing"
   | "non-transferable";
 
+/**
+ * Whether an authority address is held by an SDP custody wallet (`sdp`), an
+ * outside address SDP cannot sign for (`external`), unset/revoked (`none`), or
+ * not yet determinable because custody wallets are still loading (`unknown`).
+ */
+export type PermissionControlStatus = "sdp" | "external" | "none" | "unknown";
+
 export interface PermissionRow {
   id: PermissionRowId;
   title: string;
@@ -196,6 +196,7 @@ export interface PermissionRow {
   value: string | null;
   authorityRole: AuthorityFormState["role"];
   editDisabledReason?: string | null;
+  controlStatus?: PermissionControlStatus;
 }
 
 export interface ExtensionRow {

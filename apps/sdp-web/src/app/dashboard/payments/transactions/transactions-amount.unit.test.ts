@@ -8,13 +8,37 @@ describe("transaction amount presentation", () => {
   it("uses the human symbol for a well-known mint", () => {
     expect(
       getTransactionAmountPresentation(
-        { amount: "12.5", token: WELL_KNOWN_TOKENS.USDC.mints.devnet },
+        { amount: "12.5", token: WELL_KNOWN_TOKENS.USDC.mints.devnet.address },
         "en-US"
       )
     ).toEqual({
       compacted: false,
       display: "12.50 USDC",
       full: "12.50 USDC",
+    });
+  });
+
+  it("names a token this org issued instead of shortening its mint", () => {
+    const mint = "AcmeQA1111111111111111111111111111111111111";
+
+    expect(
+      getTransactionAmountPresentation({ amount: "1250", token: mint }, "en-US", {
+        [mint]: "ACME",
+      })
+    ).toEqual({
+      compacted: false,
+      display: "1,250 ACME",
+      full: "1,250 ACME",
+    });
+  });
+
+  it("still shortens an issued mint that is absent from the supplied symbols", () => {
+    const mint = "AcmeQA1111111111111111111111111111111111111";
+
+    expect(getTransactionAmountPresentation({ amount: "1250", token: mint }, "en-US", {})).toEqual({
+      compacted: true,
+      display: "1,250 AcmeQA…1111",
+      full: `1,250 ${mint}`,
     });
   });
 
@@ -33,6 +57,7 @@ describe("transaction amount presentation", () => {
           id: "transfer_1",
           status: "confirmed",
           signature: null,
+          rampsMemo: {},
           amount: "1250",
           token: mint,
         },

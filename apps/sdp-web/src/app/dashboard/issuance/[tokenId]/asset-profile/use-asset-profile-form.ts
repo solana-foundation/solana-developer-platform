@@ -90,9 +90,15 @@ export function useAssetProfileForm({
           description: draft.description.trim() || null,
           uri: draft.metadataUri.trim() || null,
           imageUrl: draft.imageUrl.trim() || null,
-          // Access-control enforcement can only change while undeployed; the
-          // API rejects the field after deploy.
-          ...(isDeployed ? {} : { requiresAllowlist: draft.accessControl === "allowlist" }),
+          // Symbol, decimals, and access-control are baked into the mint at
+          // deploy — editable only while undeployed; the API rejects them after.
+          ...(isDeployed
+            ? {}
+            : {
+                symbol: draft.symbol.trim(),
+                decimals: Number(draft.decimals),
+                requiresAllowlist: draft.accessControl === "allowlist",
+              }),
         },
       });
 
@@ -151,6 +157,8 @@ export function useAssetProfileForm({
 function draftTokenPatch(draft: DraftState): Partial<Token> {
   return {
     name: draft.name.trim(),
+    symbol: draft.symbol.trim(),
+    decimals: Number(draft.decimals),
     description: draft.description.trim() || null,
     uri: draft.metadataUri.trim() || null,
     imageUrl: draft.imageUrl.trim() || null,

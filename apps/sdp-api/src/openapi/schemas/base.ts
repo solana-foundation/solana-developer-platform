@@ -129,7 +129,15 @@ export const pageSizeQuerySchema = z.number().int().positive().openapi({
   example: 50,
 });
 
-export const includeArchivedQuerySchema = z.boolean().openapi({
+export const queryBooleanSchema = withOpenApi(
+  z.stringbool({ truthy: ["true"], falsy: ["false"], case: "sensitive" }),
+  {
+    type: "boolean",
+    description: 'Boolean query parameter; accepts exactly "true" or "false".',
+  }
+);
+
+export const includeArchivedQuerySchema = withOpenApi(queryBooleanSchema, {
   description: "Include archived resources in results.",
   example: false,
 });
@@ -183,6 +191,7 @@ export const errorCodeSchema = z
     "ACCOUNT_FROZEN",
     "ACCOUNT_NOT_FROZEN",
     "MAX_SUPPLY_EXCEEDED",
+    "INSUFFICIENT_TOKEN_BALANCE",
     "SOLANA_RPC_ERROR",
     "CUSTODY_ERROR",
     "TRANSACTION_FAILED",

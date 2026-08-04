@@ -1,10 +1,11 @@
 import type { Token } from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
   walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import type { AppContext } from "../helpers";
 
 type IssuancePolicyOperationType = "issuance_mint_execute" | "issuance_update_authority_execute";
@@ -27,7 +28,7 @@ export async function enforceIssuanceWalletOperationPolicy(
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, input.auth, input.walletId);
 
-  await enforceWalletOperationPolicy(c.env, {
+  await enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
     organizationId: input.auth.organizationId,
     projectId: input.token.projectId,
     custodyWalletId: policyWallet?.id ?? null,

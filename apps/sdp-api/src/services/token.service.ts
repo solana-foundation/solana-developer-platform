@@ -21,6 +21,124 @@ import type {
 } from "@sdp/types";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
+import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
+
+// Escapes LIKE/ILIKE wildcards so operator-supplied search text matches
+// literally (mirrors the payments/policy repositories' `ESCAPE '\'` idiom).
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Token List Filtering
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type TokenListSortBy = "createdAt" | "name";
+export type TokenDeploymentStatusFilter = "draft" | "active" | "paused";
+
+/**
+ * A token counts as deployed once it has a mint address or a deploy timestamp —
+ * the same test the dashboard applies client-side, so server-side filtering and
+ * the rendered badge can't disagree.
+ */
+const TOKEN_DEPLOYED_PREDICATE = "(mint_address IS NOT NULL OR deployed_at IS NOT NULL)";
+
+/** Lifecycle state as presented, derived from deployed-ness + the raw status. */
+const TOKEN_DEPLOYMENT_STATUS_PREDICATES: Record<TokenDeploymentStatusFilter, string> = {
+  draft: `NOT ${TOKEN_DEPLOYED_PREDICATE}`,
+  active: `${TOKEN_DEPLOYED_PREDICATE} AND status <> 'paused'`,
+  paused: `${TOKEN_DEPLOYED_PREDICATE} AND status = 'paused'`,
+};
+
+/**
+ * Contains-style search haystack. Must stay character-for-character in step with
+ * `idx_issued_tokens_search_trgm` — a mismatched expression silently drops the
+ * trigram index and turns every search into a sequential scan.
+ */
+const TOKEN_SEARCH_EXPRESSION =
+  "(name || ' ' || symbol || ' ' || COALESCE(mint_address, '') || ' ' || id)";
+
+/**
+ * Whitelist of sortable keys → physical SQL. Callers only ever supply a key, so
+ * no caller-controlled text reaches the ORDER BY clause.
+ */
+const TOKEN_LIST_SORT_COLUMNS: Record<TokenListSortBy, string> = {
+  createdAt: "created_at",
+  // LOWER() matches the dashboard's case-insensitive name ordering and the
+  // expression indexed by idx_issued_tokens_project_name.
+  name: "LOWER(name)",
+};
+
+export interface ListTokensFilters {
+  status?: TokenStatus;
+  deploymentStatus?: TokenDeploymentStatusFilter;
+  template?: string;
+  /** Contains-style, case-insensitive; wildcards are matched literally. */
+  search?: string;
+  /** Inclusive ISO-8601 lower bound on `created_at`. */
+  createdAfter?: string;
+  /** Inclusive ISO-8601 upper bound on `created_at`. */
+  createdBefore?: string;
+}
+
+export interface ListTokensOptions extends ListTokensFilters {
+  sortBy?: TokenListSortBy;
+  sortDirection?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+export interface TokenListFacets {
+  /** Template ids actually present in the project, with row counts. */
+  templates: Array<{ template: string; count: number }>;
+  /** Row counts per derived lifecycle state. */
+  deploymentStatuses: Record<TokenDeploymentStatusFilter, number>;
+  /** Unfiltered project total — lets the client tell "no assets" from "no matches". */
+  total: number;
+}
+
+/**
+ * Builds the WHERE clause shared by the list query, its count query and the
+ * facet counts, so a filtered page and its total can never diverge.
+ */
+function buildTokenListFilter(
+  projectId: string,
+  filters: ListTokensFilters
+): { whereClause: string; values: Array<string | number> } {
+  const clauses = ["project_id = ?"];
+  const values: Array<string | number> = [projectId];
+
+  if (filters.status) {
+    clauses.push("status = ?");
+    values.push(filters.status);
+  }
+
+  if (filters.deploymentStatus) {
+    clauses.push(`(${TOKEN_DEPLOYMENT_STATUS_PREDICATES[filters.deploymentStatus]})`);
+  }
+
+  if (filters.template) {
+    clauses.push("template = ?");
+    values.push(filters.template);
+  }
+
+  if (filters.search) {
+    clauses.push(`${TOKEN_SEARCH_EXPRESSION} ILIKE ? ESCAPE '\\'`);
+    values.push(`%${escapeLikePattern(filters.search)}%`);
+  }
+
+  if (filters.createdAfter) {
+    clauses.push("created_at >= ?");
+    values.push(filters.createdAfter);
+  }
+
+  if (filters.createdBefore) {
+    clauses.push("created_at <= ?");
+    values.push(filters.createdBefore);
+  }
+
+  return { whereClause: clauses.join(" AND "), values };
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Input Types
@@ -37,7 +155,6 @@ export interface CreateTokenInput {
   description?: string;
   uri?: string;
   imageUrl?: string;
-  /** Token template */
   template?: TokenTemplate;
   extensions?: TokenExtensionsConfig;
   maxSupply?: string;
@@ -48,6 +165,10 @@ export interface CreateTokenInput {
 
 export interface UpdateTokenInput {
   name?: string;
+  /** Only accepted while the token is undeployed (enforced by the route handler). */
+  symbol?: string;
+  /** Only accepted while the token is undeployed (enforced by the route handler). */
+  decimals?: number;
   description?: string | null;
   uri?: string | null;
   imageUrl?: string | null;
@@ -112,6 +233,7 @@ export interface AddAllowlistInput {
   address: string;
   addedBy: string;
   label?: string;
+  initialStatus?: Extract<AllowlistEntryStatus, "pending" | "active">;
 }
 
 export interface FreezeAccountInput {
@@ -276,22 +398,108 @@ interface WalletTransactionScope {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class TokenService {
-  constructor(private db: DatabaseClient) {}
+  constructor(
+    private db: DatabaseClient,
+    private readonly tenantScope?: TenantScope
+  ) {}
+
+  private tenantMutationScope(): { clause: string; values: Array<string | null> } {
+    if (!this.tenantScope) {
+      return { clause: "", values: [] };
+    }
+
+    return {
+      clause: " AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?",
+      values: [this.tenantScope.organizationId, this.tenantScope.projectId],
+    };
+  }
+
+  private tenantTokenScope(alias = ""): { clause: string; values: Array<string | null> } {
+    if (!this.tenantScope) {
+      return { clause: "", values: [] };
+    }
+
+    const prefix = alias ? `${alias}.` : "";
+    return {
+      clause: ` AND ${prefix}organization_id = ? AND ${prefix}project_id IS NOT DISTINCT FROM ?`,
+      values: [this.tenantScope.organizationId, this.tenantScope.projectId],
+    };
+  }
+
+  /**
+   * Enforce the service's immutable tenant boundary before touching a child
+   * resource keyed only by token id. Token ownership is immutable, so this
+   * check remains valid for the following child-row operation.
+   */
+  private async assertTokenInTenant(tokenId: string): Promise<void> {
+    if (!this.tenantScope) {
+      return;
+    }
+
+    const row = await this.db
+      .prepare(
+        `SELECT id
+         FROM issued_tokens
+         WHERE id = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?`
+      )
+      .bind(tokenId, this.tenantScope.organizationId, this.tenantScope.projectId)
+      .first<{ id: string }>();
+
+    if (!row) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
+  }
+
+  private assertTenantOptions(options: {
+    organizationId: string;
+    projectId?: string | null;
+  }): void {
+    if (!this.tenantScope) {
+      return;
+    }
+
+    assertTenantClaim(
+      this.tenantScope,
+      {
+        organizationId: options.organizationId,
+        projectId: options.projectId ?? null,
+      },
+      "TokenService"
+    );
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Token CRUD
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Create a new token
-   */
   async createToken(input: CreateTokenInput): Promise<Token> {
+    if (this.tenantScope) {
+      assertTenantClaim(
+        this.tenantScope,
+        { organizationId: input.organizationId, projectId: input.projectId },
+        "TokenService"
+      );
+    }
     const id = `tok_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const decimals = input.decimals ?? 9;
-    const maxSupplyBaseUnits = input.maxSupply
-      ? parseDecimalAmount(input.maxSupply, decimals).toString()
-      : null;
+    // parseDecimalAmount throws when the cap carries more decimal places than the
+    // mint supports. It can't be caught in the request schema: callers resolve
+    // template settings first, and a template may pin `decimals` to something
+    // other than what the caller asked for — so the effective precision is only
+    // known here. Surface it as a 400 rather than letting AmountError escape.
+    let maxSupplyBaseUnits: string | null = null;
+    if (input.maxSupply) {
+      try {
+        maxSupplyBaseUnits = parseDecimalAmount(input.maxSupply, decimals).toString();
+      } catch {
+        throw badRequest("Invalid maxSupply for this token's decimals", {
+          errors: {
+            maxSupply: [`Must be a number with at most ${decimals} decimal place(s)`],
+          },
+        });
+      }
+    }
 
     const token: Token = {
       id,
@@ -383,6 +591,9 @@ export class TokenService {
     organizationId: string;
     projectId: string;
   }): Promise<Token | null> {
+    if (this.tenantScope) {
+      assertTenantClaim(this.tenantScope, params, "TokenService");
+    }
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
@@ -405,6 +616,12 @@ export class TokenService {
   }
 
   private async _getTokenById(tokenId: string): Promise<Token | null> {
+    const tenantWhere = this.tenantScope
+      ? " AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?"
+      : "";
+    const tenantValues = this.tenantScope
+      ? [this.tenantScope.organizationId, this.tenantScope.projectId]
+      : [];
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
@@ -413,9 +630,9 @@ export class TokenService {
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                 freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
                 created_at, updated_at
-         FROM issued_tokens WHERE id = ?`
+         FROM issued_tokens WHERE id = ?${tenantWhere}`
       )
-      .bind(tokenId)
+      .bind(tokenId, ...tenantValues)
       .first<TokenRow>();
 
     if (!row) {
@@ -473,10 +690,8 @@ export class TokenService {
     };
   }
 
-  /**
-   * Get a token by mint address
-   */
   async getTokenByMint(mintAddress: string): Promise<Token | null> {
+    const tenant = this.tenantTokenScope();
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
@@ -485,9 +700,9 @@ export class TokenService {
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                 freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
                 created_at, updated_at
-         FROM issued_tokens WHERE mint_address = ?`
+         FROM issued_tokens WHERE mint_address = ?${tenant.clause}`
       )
-      .bind(mintAddress)
+      .bind(mintAddress, ...tenant.values)
       .first<TokenRow>();
 
     if (!row) {
@@ -499,43 +714,51 @@ export class TokenService {
   }
 
   /**
-   * List tokens for a project
+   * Page a project's tokens with server-side search, filtering and sorting.
+   *
+   * `total` reflects the active filters, so it is the count the caller should
+   * page against. Ordering always ends in an `id` tiebreaker in the same
+   * direction as the sort key, so rows sharing a `created_at` (or a name) can't
+   * repeat or vanish between pages, and the composite indexes can serve the
+   * whole ordering without a separate sort step.
    */
   async listTokens(
     projectId: string,
-    options: { status?: TokenStatus; limit?: number; offset?: number } = {}
+    options: ListTokensOptions = {}
   ): Promise<{ tokens: Token[]; total: number }> {
-    const { status, limit = 50, offset = 0 } = options;
-
-    let countQuery = "SELECT COUNT(*) as count FROM issued_tokens WHERE project_id = ?";
-    let selectQuery = `
-      SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
-             signing_wallet_id,
-             abl_list_address, name, symbol, decimals, description, uri, image_url, template,
-             total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
-             freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
-             created_at, updated_at
-      FROM issued_tokens WHERE project_id = ?
-    `;
-    const params: (string | number)[] = [projectId];
-
-    if (status) {
-      countQuery += " AND status = ?";
-      selectQuery += " AND status = ?";
-      params.push(status);
+    if (this.tenantScope && this.tenantScope.projectId !== projectId) {
+      throw new AppError("FORBIDDEN", "Token project is outside the authenticated tenant");
     }
+    const { limit = 50, offset = 0, sortBy = "createdAt", sortDirection = "desc" } = options;
 
-    selectQuery += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+    const { whereClause, values } = buildTokenListFilter(projectId, options);
+    const tenant = this.tenantTokenScope();
+    const scopedWhereClause = `${whereClause}${tenant.clause}`;
+    const scopedValues = [...values, ...tenant.values];
+    const sortColumn = TOKEN_LIST_SORT_COLUMNS[sortBy] ?? TOKEN_LIST_SORT_COLUMNS.createdAt;
+    const direction = sortDirection === "asc" ? "ASC" : "DESC";
 
-    const countResult = await this.db
-      .prepare(countQuery)
-      .bind(...params)
-      .first<{ count: number }>();
-
-    const result = await this.db
-      .prepare(selectQuery)
-      .bind(...params, limit, offset)
-      .all<TokenRow>();
+    const [countResult, result] = await Promise.all([
+      this.db
+        .prepare(`SELECT COUNT(*)::int as count FROM issued_tokens WHERE ${scopedWhereClause}`)
+        .bind(...scopedValues)
+        .first<{ count: number }>(),
+      this.db
+        .prepare(
+          `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
+                  signing_wallet_id,
+                  abl_list_address, name, symbol, decimals, description, uri, image_url, template,
+                  total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
+                  freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
+                  created_at, updated_at
+           FROM issued_tokens
+           WHERE ${scopedWhereClause}
+           ORDER BY ${sortColumn} ${direction}, id ${direction}
+           LIMIT ? OFFSET ?`
+        )
+        .bind(...scopedValues, limit, offset)
+        .all<TokenRow>(),
+    ]);
 
     const extensionMap = await this.getExtensionStatesForTokens(
       result.results.map((row) => row.id)
@@ -553,9 +776,63 @@ export class TokenService {
   }
 
   /**
-   * Update a token
+   * Filter facets for a project's token list: which templates exist (so the
+   * dashboard's filter options aren't limited to the rows on the current page),
+   * how many tokens sit in each lifecycle state, and the unfiltered total.
+   *
+   * Deliberately unfiltered — these are the choices offered *before* filtering,
+   * and the unfiltered total is what separates an empty project from an
+   * over-filtered one.
    */
-  async updateToken(tokenId: string, input: UpdateTokenInput): Promise<Token> {
+  async listTokenFacets(projectId: string): Promise<TokenListFacets> {
+    if (this.tenantScope && this.tenantScope.projectId !== projectId) {
+      throw new AppError("FORBIDDEN", "Token project is outside the authenticated tenant");
+    }
+    const tenant = this.tenantTokenScope();
+    const [templateRows, counts] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT template, COUNT(*)::int as count
+           FROM issued_tokens
+           WHERE project_id = ?${tenant.clause}
+           GROUP BY template
+           ORDER BY template ASC`
+        )
+        .bind(projectId, ...tenant.values)
+        .all<{ template: string | null; count: number }>(),
+      this.db
+        .prepare(
+          `SELECT COUNT(*)::int as total,
+                  COUNT(*) FILTER (WHERE ${TOKEN_DEPLOYMENT_STATUS_PREDICATES.draft})::int as draft,
+                  COUNT(*) FILTER (WHERE ${TOKEN_DEPLOYMENT_STATUS_PREDICATES.active})::int as active,
+                  COUNT(*) FILTER (WHERE ${TOKEN_DEPLOYMENT_STATUS_PREDICATES.paused})::int as paused
+           FROM issued_tokens
+           WHERE project_id = ?${tenant.clause}`
+        )
+        .bind(projectId, ...tenant.values)
+        .first<{ total: number; draft: number; active: number; paused: number }>(),
+    ]);
+
+    return {
+      // `template` is NOT NULL in practice but defensive: a null would otherwise
+      // surface as an unselectable blank option.
+      templates: templateRows.results
+        .filter((row): row is { template: string; count: number } => Boolean(row.template))
+        .map((row) => ({ template: row.template, count: row.count })),
+      deploymentStatuses: {
+        draft: counts?.draft ?? 0,
+        active: counts?.active ?? 0,
+        paused: counts?.paused ?? 0,
+      },
+      total: counts?.total ?? 0,
+    };
+  }
+
+  async updateToken(
+    tokenId: string,
+    input: UpdateTokenInput,
+    expectedDeploymentState?: Pick<Token, "status" | "mintAddress">
+  ): Promise<Token> {
     const existing = await this._getTokenById(tokenId);
     if (!existing) {
       throw new Error("TOKEN_NOT_FOUND");
@@ -568,6 +845,16 @@ export class TokenService {
     if (input.name !== undefined) {
       updates.push("name = ?");
       values.push(input.name);
+    }
+
+    if (input.symbol !== undefined) {
+      updates.push("symbol = ?");
+      values.push(input.symbol);
+    }
+
+    if (input.decimals !== undefined) {
+      updates.push("decimals = ?");
+      values.push(input.decimals);
     }
 
     if (input.description !== undefined) {
@@ -606,12 +893,58 @@ export class TokenService {
 
     updates.push("updated_at = ?");
     values.push(now);
-    values.push(tokenId);
 
-    await this.db
-      .prepare(`UPDATE issued_tokens SET ${updates.join(", ")} WHERE id = ?`)
-      .bind(...values)
+    // symbol/decimals/requiresAllowlist are only mutable pre-deploy. The route
+    // handler enforces that from a read of `existing`, but a concurrent
+    // `deployToken` can flip status/mint_address between that read and this
+    // write. Re-assert the pending/undeployed condition inside the UPDATE
+    // itself (optimistic lock) so the race loses the write — matching 0 rows —
+    // instead of silently mutating a mint that's already in flight on-chain.
+    const requiresUndeployedGuard =
+      input.symbol !== undefined ||
+      input.decimals !== undefined ||
+      input.requiresAllowlist !== undefined;
+    const requiresStableDeploymentGuard =
+      input.name !== undefined ||
+      input.description !== undefined ||
+      input.uri !== undefined ||
+      input.imageUrl !== undefined ||
+      input.status !== undefined;
+
+    const whereConditions = ["id = ?"];
+    const whereValues: (string | null)[] = [tokenId];
+    if (requiresUndeployedGuard) {
+      whereConditions.push("status = 'pending'", "mint_address IS NULL");
+    } else if (requiresStableDeploymentGuard) {
+      whereConditions.push("status <> 'deploying'");
+    }
+    if (expectedDeploymentState) {
+      whereConditions.push("status = ?", "mint_address IS NOT DISTINCT FROM ?");
+      whereValues.push(expectedDeploymentState.status, expectedDeploymentState.mintAddress);
+    }
+    if (this.tenantScope) {
+      whereConditions.push("organization_id = ?", "project_id IS NOT DISTINCT FROM ?");
+      whereValues.push(this.tenantScope.organizationId, this.tenantScope.projectId);
+    }
+
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE issued_tokens SET ${updates.join(", ")} WHERE ${whereConditions.join(" AND ")}`
+      )
+      .bind(...values, ...whereValues)
       .run();
+
+    // The row existed at the top-of-method read, so a guarded 0-row result means
+    // it was deployed during the window — surface a 409 rather than a 404.
+    if (
+      (requiresUndeployedGuard || requiresStableDeploymentGuard || expectedDeploymentState) &&
+      rowsAffected === 0
+    ) {
+      throw new AppError(
+        "CONFLICT",
+        "Token deployment state changed while this update was in flight; re-fetch and retry"
+      );
+    }
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
@@ -674,17 +1007,20 @@ export class TokenService {
       values.push(now);
       values.push(tokenId);
 
+      const tenant = this.tenantMutationScope();
+
       await this.db
-        .prepare(`UPDATE issued_tokens SET ${fields.join(", ")} WHERE id = ?`)
-        .bind(...values)
+        .prepare(`UPDATE issued_tokens SET ${fields.join(", ")} WHERE id = ?${tenant.clause}`)
+        .bind(...values, ...tenant.values)
         .run();
     }
 
     if (updates.permanentDelegate !== undefined) {
       if (fields.length === 0) {
+        const tenant = this.tenantMutationScope();
         await this.db
-          .prepare("UPDATE issued_tokens SET updated_at = ? WHERE id = ?")
-          .bind(now, tokenId)
+          .prepare(`UPDATE issued_tokens SET updated_at = ? WHERE id = ?${tenant.clause}`)
+          .bind(now, tokenId, ...tenant.values)
           .run();
       }
       await this.setTokenExtension(tokenId, "permanentDelegate", updates.permanentDelegate, now);
@@ -699,8 +1035,60 @@ export class TokenService {
   }
 
   /**
-   * Set token as deployed with mint address and optional ABL list
+   * Atomically claim a pending token for deployment, flipping it to the
+   * transient `deploying` state and returning the now-frozen snapshot.
+   *
+   * This closes the window the `updateToken` undeployed guard alone can't: a
+   * deploy reads a pending token, then spends seconds creating the on-chain mint
+   * from that snapshot, and only afterwards records `active` + the mint address.
+   * Throughout that gap the row is still `pending`/no-mint, so a concurrent
+   * identity PATCH (symbol/decimals/requiresAllowlist) would pass the guard and
+   * mutate the row — permanently diverging the DB identity from the immutable
+   * mint. Once claimed, the row is no longer `pending`, so both the route- and
+   * service-level PATCH guards reject those edits for the whole mint window.
+   *
+   * Guarded on `pending`/no-mint so exactly one caller wins; returns null if the
+   * token wasn't claimable (already deploying, deployed, or gone). `deploying`
+   * is internal and transient — never surfaced long-term: it advances to
+   * `active` via {@link setTokenDeployed} or back to `pending` via
+   * {@link releaseTokenDeploy}.
    */
+  async beginTokenDeploy(tokenId: string): Promise<Token | null> {
+    const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE issued_tokens SET status = 'deploying', updated_at = ?
+         WHERE id = ?${tenant.clause} AND status = 'pending' AND mint_address IS NULL`
+      )
+      .bind(now, tokenId, ...tenant.values)
+      .run();
+
+    if (rowsAffected === 0) {
+      return null;
+    }
+
+    return this._getTokenById(tokenId);
+  }
+
+  /**
+   * Release a `deploying` claim back to `pending` when a deploy fails before the
+   * mint lands on-chain, so the draft stays editable and redeployable. Guarded
+   * on `deploying`/no-mint, so it's a no-op once the mint is recorded (status
+   * `active`) — safe to call unconditionally from a deploy catch block.
+   */
+  async releaseTokenDeploy(tokenId: string): Promise<void> {
+    const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
+    await this.db
+      .prepare(
+        `UPDATE issued_tokens SET status = 'pending', updated_at = ?
+         WHERE id = ?${tenant.clause} AND status = 'deploying' AND mint_address IS NULL`
+      )
+      .bind(now, tokenId, ...tenant.values)
+      .run();
+  }
+
   async setTokenDeployed(
     tokenId: string,
     mintAddress: string,
@@ -709,8 +1097,9 @@ export class TokenService {
     ablListAddress?: string | null
   ): Promise<Token> {
     const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
 
-    await this.db
+    const rowsAffected = await this.db
       .prepare(
         `UPDATE issued_tokens SET
           mint_address = ?,
@@ -721,7 +1110,7 @@ export class TokenService {
           status = 'active',
           deployed_at = ?,
           updated_at = ?
-         WHERE id = ?`
+         WHERE id = ?${tenant.clause}`
       )
       .bind(
         mintAddress,
@@ -731,9 +1120,14 @@ export class TokenService {
         ablListAddress ?? null,
         now,
         now,
-        tokenId
+        tokenId,
+        ...tenant.values
       )
       .run();
+
+    if (rowsAffected === 0) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
@@ -743,9 +1137,6 @@ export class TokenService {
     return updated;
   }
 
-  /**
-   * Update token supply after mint/burn
-   */
   async updateSupply(tokenId: string, delta: string, operation: "mint" | "burn"): Promise<void> {
     const token = await this._getTokenById(tokenId);
     if (!token) {
@@ -774,29 +1165,36 @@ export class TokenService {
     }
 
     const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
     await this.db
       .prepare(
-        "UPDATE issued_tokens SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ? WHERE id = ?"
+        `UPDATE issued_tokens
+         SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ?
+         WHERE id = ?${tenant.clause}`
       )
-      .bind(newSupply.toString(), now, now, tokenId)
+      .bind(newSupply.toString(), now, now, tokenId, ...tenant.values)
       .run();
   }
 
-  /**
-   * Set token supply directly from a base-units on-chain value.
-   */
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
       throw new Error("INVALID_SUPPLY");
     }
 
     const now = new Date().toISOString();
-    await this.db
+    const tenant = this.tenantMutationScope();
+    const rowsAffected = await this.db
       .prepare(
-        "UPDATE issued_tokens SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ? WHERE id = ?"
+        `UPDATE issued_tokens
+         SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ?
+         WHERE id = ?${tenant.clause}`
       )
-      .bind(supplyBaseUnits, now, now, tokenId)
+      .bind(supplyBaseUnits, now, now, tokenId, ...tenant.values)
       .run();
+
+    if (rowsAffected === 0) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
@@ -810,10 +1208,15 @@ export class TokenService {
   // Token Transactions
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Create a token transaction record
-   */
   async createTransaction(input: CreateTokenTransactionInput): Promise<CreateTransactionResult> {
+    if (this.tenantScope) {
+      this.assertTenantOptions({
+        organizationId: input.organizationId,
+        projectId: this.tenantScope.projectId,
+      });
+      await this.assertTokenInTenant(input.tokenId);
+    }
+
     if (input.idempotencyKey && !input.idempotencyFingerprint) {
       throw badRequest("Missing idempotency fingerprint for idempotency key");
     }
@@ -967,44 +1370,53 @@ export class TokenService {
     values.push(now);
     values.push(txId);
 
-    await this.db
-      .prepare(`UPDATE issuance_transactions SET ${updates.join(", ")} WHERE id = ?`)
-      .bind(...values)
+    const tenant = this.tenantTokenScope("tenant_token");
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE issuance_transactions
+         SET ${updates.join(", ")}
+         WHERE id = ?
+           AND EXISTS (
+             SELECT 1
+             FROM issued_tokens tenant_token
+             WHERE tenant_token.id = issuance_transactions.token_id${tenant.clause}
+           )`
+      )
+      .bind(...values, ...tenant.values)
       .run();
+
+    if (rowsAffected === 0) {
+      throw new Error("TRANSACTION_NOT_FOUND");
+    }
 
     if (input.status) {
       await this.insertTransactionStatus(txId, input.status, now);
     }
 
-    const row = await this.db
-      .prepare(
-        `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
-                signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id,
-                created_at, updated_at
-         FROM issuance_transactions WHERE id = ?`
-      )
-      .bind(txId)
-      .first<TokenTransactionRow>();
-
-    if (!row) {
+    const transaction = await this.getTransaction(txId);
+    if (!transaction) {
       throw new Error("TRANSACTION_NOT_FOUND");
     }
 
-    return this.mapRowToTransaction(row);
+    return transaction;
   }
 
   /**
    * Get a token transaction by ID
    */
   async getTransaction(txId: string): Promise<TokenTransaction | null> {
+    const tenant = this.tenantTokenScope("tenant_token");
     const row = await this.db
       .prepare(
-        `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
-                signature, serialized_tx, operation_params, slot, block_time, fee, error,
-                initiated_by_key_id, created_at, updated_at
-         FROM issuance_transactions WHERE id = ?`
+        `SELECT tx.id, tx.token_id, tx.organization_id, tx.type, tx.status, tx.idempotency_key,
+                tx.idempotency_fingerprint, tx.signature, tx.serialized_tx, tx.operation_params,
+                tx.slot, tx.block_time, tx.fee, tx.error, tx.initiated_by_key_id,
+                tx.created_at, tx.updated_at
+         FROM issuance_transactions tx
+         JOIN issued_tokens tenant_token ON tenant_token.id = tx.token_id
+         WHERE tx.id = ?${tenant.clause}`
       )
-      .bind(txId)
+      .bind(txId, ...tenant.values)
       .first<TokenTransactionRow>();
 
     if (!row) {
@@ -1014,22 +1426,25 @@ export class TokenService {
     return this.mapRowToTransaction(row);
   }
 
-  /**
-   * Find a token transaction by organization + idempotency key
-   */
   async findTransactionByIdempotency(
     organizationId: string,
     idempotencyKey: string
   ): Promise<TokenTransaction | null> {
+    if (this.tenantScope) {
+      this.assertTenantOptions({ organizationId, projectId: this.tenantScope.projectId });
+    }
+    const tenant = this.tenantTokenScope("tenant_token");
     const row = await this.db
       .prepare(
-        `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
-                signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id,
-                created_at, updated_at
-         FROM issuance_transactions
-         WHERE organization_id = ? AND idempotency_key = ?`
+        `SELECT tx.id, tx.token_id, tx.organization_id, tx.type, tx.status, tx.idempotency_key,
+                tx.idempotency_fingerprint, tx.signature, tx.serialized_tx, tx.operation_params,
+                tx.slot, tx.block_time, tx.fee, tx.error, tx.initiated_by_key_id,
+                tx.created_at, tx.updated_at
+         FROM issuance_transactions tx
+         JOIN issued_tokens tenant_token ON tenant_token.id = tx.token_id
+         WHERE tx.organization_id = ? AND tx.idempotency_key = ?${tenant.clause}`
       )
-      .bind(organizationId, idempotencyKey)
+      .bind(organizationId, idempotencyKey, ...tenant.values)
       .first<TokenTransactionRow>();
 
     if (!row) {
@@ -1039,19 +1454,22 @@ export class TokenService {
     return this.mapRowToTransaction(row);
   }
 
-  /**
-   * List transactions for a token
-   */
   async listTokenTransactions(
     tokenId: string,
     options: {
       status?: TokenTransaction["status"];
+      type?: TokenTransaction["type"];
       organizationId?: string;
       limit?: number;
       offset?: number;
     } = {}
   ): Promise<{ transactions: TokenTransaction[]; total: number }> {
-    const { status, organizationId, limit = 50, offset = 0 } = options;
+    const { status, type, organizationId, limit = 50, offset = 0 } = options;
+
+    await this.assertTokenInTenant(tokenId);
+    if (organizationId && this.tenantScope) {
+      this.assertTenantOptions({ organizationId, projectId: this.tenantScope.projectId });
+    }
 
     let countQuery = "SELECT COUNT(*) as count FROM issuance_transactions WHERE token_id = ?";
     let selectQuery = `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
@@ -1072,7 +1490,15 @@ export class TokenService {
       params.push(status);
     }
 
-    selectQuery += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+    if (type) {
+      countQuery += " AND type = ?";
+      selectQuery += " AND type = ?";
+      params.push(type);
+    }
+
+    // id breaks ties so rows sharing a created_at can't shuffle between pages
+    // (same stable ordering as listAllowlistEntries and the org-wide list).
+    selectQuery += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?";
 
     const countResult = await this.db
       .prepare(countQuery)
@@ -1094,6 +1520,7 @@ export class TokenService {
     organizationId: string;
     projectId?: string | null;
   }): Promise<Array<{ tokenId: string; mintAddress: string }>> {
+    this.assertTenantOptions(options);
     const params: string[] = [options.organizationId];
     let query = `
       SELECT id, mint_address
@@ -1129,6 +1556,7 @@ export class TokenService {
     limit?: number;
     offset?: number;
   }): Promise<{ transactions: TokenTransactionListItem[]; total: number }> {
+    this.assertTenantOptions(options);
     const {
       organizationId,
       projectId,
@@ -1184,18 +1612,23 @@ export class TokenService {
           publicKeys.length > 0
             ? config.publicKeyFields.map(
                 (key) =>
-                  `tx.operation_params::jsonb ->> '${key}' IN (${publicKeys.map(() => "?").join(", ")})`
+                  // operation_params is TEXT; a malformed row would abort the whole
+                  // scan on the ::jsonb cast, so guard it with pg_input_is_valid
+                  // (PG16+) inside a CASE (WHERE AND is not short-circuited).
+                  `CASE WHEN pg_input_is_valid(tx.operation_params, 'jsonb') THEN tx.operation_params::jsonb ->> '${key}' IN (${publicKeys.map(() => "?").join(", ")}) ELSE false END`
               )
             : [];
         const tokenAccountConditions =
           tokenAccounts.length > 0
             ? config.tokenAccountFields.map(
-                (key) => `EXISTS (
+                // Same guard as above: the CASE keeps the ::jsonb cast (inside the
+                // EXISTS) from running on a malformed operation_params row.
+                (key) => `CASE WHEN pg_input_is_valid(tx.operation_params, 'jsonb') THEN EXISTS (
                   SELECT 1
                   FROM wallet_token_accounts wta
                   WHERE wta.token_id = tx.token_id
                     AND wta.token_account = (tx.operation_params::jsonb ->> '${key}')
-                )`
+                ) ELSE false END`
               )
             : [];
         const matchConditions = [...publicKeyConditions, ...tokenAccountConditions];
@@ -1281,16 +1714,16 @@ export class TokenService {
   /**
    * Add an address to the token allowlist.
    *
-   * Returns `{ entry, wasReactivated }`. `wasReactivated` is `true` when this
-   * call promoted a previously-revoked row back to `active` (vs. inserting a
-   * fresh row). Callers rolling back after a downstream on-chain failure need
-   * this to choose between `deleteAllowlistEntry` (fresh row → hard-delete)
-   * and `revokeAllowlistEntry` (reactivated row → restore the prior `revoked`
-   * state, preserving the operator's original revocation record).
+   * `initialStatus: "pending"` gives on-chain callers a durable intent record
+   * before submission. A retry reuses that pending row; confirmed membership
+   * is promoted with `activateAllowlistEntry`. Database-only callers keep the
+   * default immediate `active` status.
    */
   async addAllowlistEntry(
     input: AddAllowlistInput
   ): Promise<{ entry: TokenAllowlistEntry; wasReactivated: boolean }> {
+    await this.assertTokenInTenant(input.tokenId);
+    const requestedStatus = input.initialStatus ?? "active";
     const existing = await this.db
       .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(input.tokenId, input.address)
@@ -1300,21 +1733,23 @@ export class TokenService {
       if (existing.status === "active") {
         throw new Error("ADDRESS_ALREADY_ALLOWLISTED");
       }
-      // Reactivate revoked entry — operator-initiated re-add.
+      const wasReactivated = existing.status === "revoked";
       await this.db
         .prepare(
-          "UPDATE token_allowlists SET status = 'active', revoked_at = NULL, label = ?, added_by = ? WHERE id = ?"
+          "UPDATE token_allowlists SET status = ?, revoked_at = NULL, label = ?, added_by = ? WHERE id = ?"
         )
-        .bind(input.label ?? null, input.addedBy, existing.id)
+        .bind(requestedStatus, input.label ?? null, input.addedBy, existing.id)
         .run();
 
-      await this.insertAllowlistStatus(existing.id, "active", new Date().toISOString());
+      if (existing.status !== requestedStatus) {
+        await this.insertAllowlistStatus(existing.id, requestedStatus, new Date().toISOString());
+      }
 
       const entry = await this.getAllowlistEntry(existing.id);
       if (!entry) {
         throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
       }
-      return { entry, wasReactivated: true };
+      return { entry, wasReactivated };
     }
 
     const entry = await this.insertNewAllowlistEntry(input);
@@ -1335,6 +1770,7 @@ export class TokenService {
    *   so the mint short-circuits to 403 instead of silently un-revoking.
    */
   async addAllowlistEntryStrict(input: AddAllowlistInput): Promise<TokenAllowlistEntry> {
+    await this.assertTokenInTenant(input.tokenId);
     const existing = await this.db
       .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(input.tokenId, input.address)
@@ -1359,7 +1795,7 @@ export class TokenService {
       tokenId: input.tokenId,
       address: input.address,
       label: input.label ?? null,
-      status: "active",
+      status: input.initialStatus ?? "active",
       addedBy: input.addedBy,
       createdAt: now,
       revokedAt: null,
@@ -1401,17 +1837,17 @@ export class TokenService {
     return entry;
   }
 
-  /**
-   * Get an allowlist entry by ID
-   */
   async getAllowlistEntry(entryId: string): Promise<TokenAllowlistEntry | null> {
+    const tenant = this.tenantTokenScope("tenant_token");
     const row = await this.db
       .prepare(
-        `SELECT id, token_id, address, label,
-                status, added_by, created_at, revoked_at
-         FROM token_allowlists WHERE id = ?`
+        `SELECT allowlist.id, allowlist.token_id, allowlist.address, allowlist.label,
+                allowlist.status, allowlist.added_by, allowlist.created_at, allowlist.revoked_at
+         FROM token_allowlists allowlist
+         JOIN issued_tokens tenant_token ON tenant_token.id = allowlist.token_id
+         WHERE allowlist.id = ?${tenant.clause}`
       )
-      .bind(entryId)
+      .bind(entryId, ...tenant.values)
       .first<AllowlistRow>();
 
     if (!row) {
@@ -1421,18 +1857,40 @@ export class TokenService {
     return this.mapRowToAllowlistEntry(row);
   }
 
-  /**
-   * List allowlist entries for a token
-   */
   async listAllowlistEntries(
     tokenId: string,
-    options: { status?: AllowlistEntryStatus; limit?: number; offset?: number } = {}
+    options: {
+      status?: AllowlistEntryStatus;
+      search?: string;
+      label?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
   ): Promise<{ entries: TokenAllowlistEntry[]; total: number }> {
-    const { status = "active", limit = 50, offset = 0 } = options;
+    await this.assertTokenInTenant(tokenId);
+    const { status = "active", search, label, limit = 50, offset = 0 } = options;
+
+    // Shared WHERE for the data + count queries. Search is a contains-style
+    // ILIKE over address + label backed by idx_token_allowlist_search_trgm;
+    // label is an exact filter backed by idx_token_allowlist_token_status_label.
+    const clauses = ["token_id = ?", "status = ?"];
+    const filterValues: Array<string | number> = [tokenId, status];
+
+    if (label !== undefined) {
+      clauses.push("label = ?");
+      filterValues.push(label);
+    }
+
+    if (search) {
+      clauses.push("(address || ' ' || COALESCE(label, '')) ILIKE ? ESCAPE '\\'");
+      filterValues.push(`%${escapeLikePattern(search)}%`);
+    }
+
+    const whereClause = clauses.join(" AND ");
 
     const countResult = await this.db
-      .prepare("SELECT COUNT(*) as count FROM token_allowlists WHERE token_id = ? AND status = ?")
-      .bind(tokenId, status)
+      .prepare(`SELECT COUNT(*) as count FROM token_allowlists WHERE ${whereClause}`)
+      .bind(...filterValues)
       .first<{ count: number }>();
 
     const result = await this.db
@@ -1440,11 +1898,11 @@ export class TokenService {
         `SELECT id, token_id, address, label,
                 status, added_by, created_at, revoked_at
          FROM token_allowlists
-         WHERE token_id = ? AND status = ?
-         ORDER BY created_at DESC
+         WHERE ${whereClause}
+         ORDER BY created_at DESC, id DESC
          LIMIT ? OFFSET ?`
       )
-      .bind(tokenId, status, limit, offset)
+      .bind(...filterValues, limit, offset)
       .all<AllowlistRow>();
 
     return {
@@ -1454,9 +1912,43 @@ export class TokenService {
   }
 
   /**
-   * Check if an address is on the allowlist
+   * List the distinct non-empty labels used on a token's control-list entries,
+   * plus the unfiltered entry count. Feeds the compliance-tab label filter and
+   * its "N entries" summary card now that the list itself is server-paged and
+   * search-filtered (the list endpoint's total reflects the active filter, so
+   * the summary count comes from here instead).
    */
+  async listAllowlistLabels(
+    tokenId: string,
+    options: { status?: AllowlistEntryStatus } = {}
+  ): Promise<{ labels: string[]; total: number }> {
+    await this.assertTokenInTenant(tokenId);
+    const { status = "active" } = options;
+
+    const [labelsResult, countResult] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT DISTINCT label
+           FROM token_allowlists
+           WHERE token_id = ? AND status = ? AND label IS NOT NULL
+           ORDER BY label`
+        )
+        .bind(tokenId, status)
+        .all<{ label: string }>(),
+      this.db
+        .prepare("SELECT COUNT(*) as count FROM token_allowlists WHERE token_id = ? AND status = ?")
+        .bind(tokenId, status)
+        .first<{ count: number }>(),
+    ]);
+
+    return {
+      labels: labelsResult.results.map((row) => row.label),
+      total: countResult?.count ?? 0,
+    };
+  }
+
   async isAddressAllowed(tokenId: string, address: string): Promise<boolean> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare(
         "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
@@ -1478,26 +1970,65 @@ export class TokenService {
   async getAllowlistEntryStatusByAddress(
     tokenId: string,
     address: string
-  ): Promise<"active" | "revoked" | null> {
+  ): Promise<AllowlistEntryStatus | null> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare("SELECT status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(tokenId, address)
-      .first<{ status: "active" | "revoked" }>();
+      .first<{ status: AllowlistEntryStatus }>();
 
     return row?.status ?? null;
   }
 
-  /**
-   * Revoke an allowlist entry
-   */
   async revokeAllowlistEntry(entryId: string): Promise<void> {
     const now = new Date().toISOString();
-    await this.db
-      .prepare("UPDATE token_allowlists SET status = 'revoked', revoked_at = ? WHERE id = ?")
-      .bind(now, entryId)
+    const tenant = this.tenantTokenScope("tenant_token");
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE token_allowlists
+         SET status = 'revoked', revoked_at = ?
+         WHERE id = ?
+           AND EXISTS (
+             SELECT 1
+             FROM issued_tokens tenant_token
+             WHERE tenant_token.id = token_allowlists.token_id${tenant.clause}
+           )`
+      )
+      .bind(now, entryId, ...tenant.values)
       .run();
 
+    if (rowsAffected === 0) {
+      throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
+    }
+
     await this.insertAllowlistStatus(entryId, "revoked", now);
+  }
+
+  async activateAllowlistEntry(entryId: string): Promise<TokenAllowlistEntry> {
+    const now = new Date().toISOString();
+    const tenant = this.tenantTokenScope("tenant_token");
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE token_allowlists
+         SET status = 'active', revoked_at = NULL
+         WHERE id = ? AND status = 'pending'
+           AND EXISTS (
+             SELECT 1
+             FROM issued_tokens tenant_token
+             WHERE tenant_token.id = token_allowlists.token_id${tenant.clause}
+           )`
+      )
+      .bind(entryId, ...tenant.values)
+      .run();
+
+    if (rowsAffected > 0) {
+      await this.insertAllowlistStatus(entryId, "active", now);
+    }
+    const entry = await this.getAllowlistEntry(entryId);
+    if (!entry) {
+      throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
+    }
+    return entry;
   }
 
   /**
@@ -1511,17 +2042,31 @@ export class TokenService {
    * `ON DELETE CASCADE`, so status history rows are removed by the database.
    */
   async deleteAllowlistEntry(entryId: string): Promise<void> {
-    await this.db.prepare("DELETE FROM token_allowlists WHERE id = ?").bind(entryId).run();
+    const tenant = this.tenantTokenScope("tenant_token");
+    const rowsAffected = await this.db
+      .prepare(
+        `DELETE FROM token_allowlists
+         WHERE id = ?
+           AND EXISTS (
+             SELECT 1
+             FROM issued_tokens tenant_token
+             WHERE tenant_token.id = token_allowlists.token_id${tenant.clause}
+           )`
+      )
+      .bind(entryId, ...tenant.values)
+      .run();
+
+    if (rowsAffected === 0) {
+      throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Freeze Management
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Freeze an account
-   */
   async freezeAccount(input: FreezeAccountInput): Promise<FrozenAccount> {
+    await this.assertTokenInTenant(input.tokenId);
     const existing = await this.db
       .prepare(
         `SELECT id, token_id, account_address, reason, frozen_at, frozen_by, unfrozen_at, unfrozen_by
@@ -1594,6 +2139,7 @@ export class TokenService {
     accountAddress: string,
     unfrozenBy: string
   ): Promise<FrozenAccount> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare(
         `SELECT id, token_id, account_address, reason, frozen_at, frozen_by, unfrozen_at, unfrozen_by
@@ -1629,6 +2175,7 @@ export class TokenService {
    * Check if an account is frozen
    */
   async isAccountFrozen(tokenId: string, accountAddress: string): Promise<boolean> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare(
         "SELECT id FROM frozen_accounts WHERE token_id = ? AND account_address = ? AND unfrozen_at IS NULL"
@@ -1647,6 +2194,7 @@ export class TokenService {
     accountAddress: string,
     includeUnfrozen = false
   ): Promise<FrozenAccount | null> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare(
         `SELECT id, token_id, account_address, reason, frozen_at, frozen_by, unfrozen_at, unfrozen_by
@@ -1672,6 +2220,7 @@ export class TokenService {
     tokenId: string,
     options: { includeUnfrozen?: boolean; limit?: number; offset?: number } = {}
   ): Promise<{ frozenAccounts: FrozenAccount[]; total: number }> {
+    await this.assertTokenInTenant(tokenId);
     const { includeUnfrozen = false, limit = 50, offset = 0 } = options;
 
     const unfrozenFilter = includeUnfrozen ? "" : "AND unfrozen_at IS NULL";

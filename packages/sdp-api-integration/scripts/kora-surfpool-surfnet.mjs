@@ -24,6 +24,12 @@ const config = {
 };
 
 const surfnet = await Promise.resolve(Surfnet.startWithConfig(config));
+
+const eventDrainInterval = setInterval(() => {
+  surfnet.drainEvents();
+}, 1000);
+eventDrainInterval.unref();
+
 const state = {
   instanceId: surfnet.instanceId,
   payer: surfnet.payer,

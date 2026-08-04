@@ -1,20 +1,31 @@
 /**
  * Node BackgroundRunner — tracks in-flight promises so SIGTERM can drain them.
  *
- * Unlike Cloudflare, the Node runtime gives the process no help keeping
- * "fire-and-forget" work alive past the response. If the process exits while
- * a background promise is mid-flight, the work is lost. The Node server
+ * Node gives the process no help keeping "fire-and-forget" work alive past the
+ * response. If the process exits while a background promise is mid-flight,
+ * the work is lost. The Node server
  * (HOO-511) wires SIGTERM → server.close() → bg.awaitAll() → process.exit
  * so pending background work has a chance to finish before shutdown.
  *
- * Errors inside tracked promises are swallowed silently here — the same
- * behaviour as CF's ctx.waitUntil. Log inside the promise if you care.
- *
- * Not wired anywhere in HOO-507; this impl ships now so HOO-511 doesn't have
- * to introduce both the runner and the server entrypoint in the same change.
+ * Errors inside tracked promises are swallowed silently here. Log inside the
+ * promise if the failure needs to be observable.
  */
 
+import type { ExecutionContext } from "hono";
 import type { BackgroundRunner } from "./background";
+import { getLogger } from "./logger";
+
+export function createNodeExecutionContext(
+  runner: Pick<BackgroundRunner, "run">
+): ExecutionContext {
+  return {
+    waitUntil(promise) {
+      runner.run(promise);
+    },
+    passThroughOnException() {},
+    props: {},
+  };
+}
 
 export class NodeBackgroundRunner implements BackgroundRunner {
   private readonly pending = new Set<Promise<unknown>>();
@@ -43,16 +54,17 @@ export class NodeBackgroundRunner implements BackgroundRunner {
       // any rejection separately — `.catch()` here both attaches the handler
       // that logs and prevents an unhandledRejection.
       const state = this.drainCount > 0 ? "during awaitAll() drain" : "after awaitAll() completed";
-      console.warn(
-        `[NodeBackgroundRunner] run() called ${state} — task not tracked (side effects already in flight)`
+      getLogger().warn(
+        { state },
+        "[NodeBackgroundRunner] run() called — task not tracked (side effects already in flight)"
       );
       promise.catch((err) => {
-        console.warn("[NodeBackgroundRunner] untracked task rejected:", err);
+        getLogger().warn({ error: err }, "[NodeBackgroundRunner] untracked task rejected");
       });
       return;
     }
     // .catch(() => undefined) before .finally absorbs rejections at registration
-    // time, matching CF waitUntil's swallow-and-forget semantics. Without it, a
+    // time, matching the runner's swallow-and-forget contract. Without it, a
     // rejecting task stays unhandled until awaitAll's Promise.allSettled picks
     // it up — which never happens if the process exits before drain.
     const tracked = promise

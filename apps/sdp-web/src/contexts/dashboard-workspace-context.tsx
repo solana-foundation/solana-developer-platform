@@ -15,17 +15,20 @@ import {
   useTransition,
 } from "react";
 import { SWRConfig } from "swr";
-import { Button } from "@/components/ui/button";
-import { useTranslations } from "@/i18n/provider";
+import {
+  DEFAULT_ISSUANCE_TOKEN_VIEW,
+  persistIssuanceTokenView,
+  type TokenView,
+} from "@/app/dashboard/issuance/issuance-token-view";
+import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
-import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { reconcileProjectCookieAction, selectProjectAction } from "@/lib/project-cookie-action";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
-export type CounterpartyWorkspaceTab = "overview" | "playground";
 
 export interface DashboardPlaygroundApiKeyOption {
   id: string;
@@ -45,15 +48,15 @@ type DashboardWorkspaceContextValue = {
   sdpEnvironment: SdpEnvironment;
   isSidebarOpen: boolean;
   issuanceTab: IssuanceWorkspaceTab;
-  counterpartyTab: CounterpartyWorkspaceTab;
+  /** Grid ⇄ list preference for the issuance overview; see issuance-token-view.ts. */
+  issuanceTokenView: TokenView;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
   isProjectSwitching: boolean;
   selectProject: (projectId: string | null) => void;
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
-  setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
-  setCounterpartyTab: (tab: CounterpartyWorkspaceTab) => void;
+  setIssuanceTokenView: (view: TokenView) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
 };
@@ -61,22 +64,6 @@ type DashboardWorkspaceContextValue = {
 const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue | undefined>(
   undefined
 );
-
-function DashboardScopeRefreshFallback() {
-  const router = useRouter();
-  const t = useTranslations();
-
-  return (
-    <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-      <div className="mx-auto max-w-5xl space-y-4 border border-border-subtle bg-surface-raised/70 p-6">
-        <p className="text-sm text-tertiary">{t("Shared.dashboardShell.loadingDashboard")}</p>
-        <Button type="button" variant="ghost" size="sm" onClick={() => router.refresh()}>
-          {t("Shared.SharedComponents.retry")}
-        </Button>
-      </div>
-    </main>
-  );
-}
 
 type DashboardWorkspaceProviderProps = {
   children: ReactNode;
@@ -86,6 +73,8 @@ type DashboardWorkspaceProviderProps = {
   initialSelectedProjectId: string | null;
   shouldRepairInitialProjectCookie: boolean;
   initialSidebarOpen?: boolean;
+  /** Read from the view cookie by the dashboard layout, so SSR paints it. */
+  initialIssuanceTokenView?: TokenView;
 };
 
 export function DashboardWorkspaceProvider({
@@ -96,12 +85,15 @@ export function DashboardWorkspaceProvider({
   initialSelectedProjectId,
   shouldRepairInitialProjectCookie,
   initialSidebarOpen = true,
+  initialIssuanceTokenView = DEFAULT_ISSUANCE_TOKEN_VIEW,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
+  const [issuanceTokenView, setIssuanceTokenViewState] =
+    useState<TokenView>(initialIssuanceTokenView);
   const sandboxProject = useMemo(
     () => projects.find((project) => project.slug === "default-sandbox") ?? null,
     [projects]
@@ -196,25 +188,23 @@ export function DashboardWorkspaceProvider({
     const previousPathname = previousPathnameRef.current;
     if (previousPathname === pathname) return;
     previousPathnameRef.current = pathname;
+    // The snapshot can still hold the previous page's tab here; acting on that stale
+    // value would wipe an explicit deep-link destination (e.g. ?tab=playground).
+    const tab = readDashboardTabFromUrl();
     if (
       shouldClearDashboardTabAfterPathnameChange({
         previousPathname,
         pathname,
-        tab: searchParams.get("tab"),
+        tab,
       })
     ) {
       replaceSearchParams({ tab: null });
     }
-  }, [pathname, searchParams, replaceSearchParams]);
+  }, [pathname, replaceSearchParams]);
 
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");
     return tab === "playground" ? "playground" : "tokens";
-  }, [searchParams]);
-
-  const counterpartyTab: CounterpartyWorkspaceTab = useMemo(() => {
-    const tab = searchParams.get("tab");
-    return tab === "playground" ? "playground" : "overview";
   }, [searchParams]);
 
   const setSidebarOpen = useCallback((open: boolean) => {
@@ -238,23 +228,12 @@ export function DashboardWorkspaceProvider({
     setSidebarOpenState((current) => !current);
   }, []);
 
-  const setIssuanceTab = useCallback(
-    (tab: IssuanceWorkspaceTab) => {
-      replaceSearchParams({
-        tab: tab === "playground" ? "playground" : "overview",
-      });
-    },
-    [replaceSearchParams]
-  );
-
-  const setCounterpartyTab = useCallback(
-    (tab: CounterpartyWorkspaceTab) => {
-      replaceSearchParams({
-        tab: tab === "playground" ? "playground" : "overview",
-      });
-    },
-    [replaceSearchParams]
-  );
+  // Mirrored into the cookie so the next server render — page and loading
+  // skeleton alike — starts in the view the user just chose.
+  const setIssuanceTokenView = useCallback((view: TokenView) => {
+    setIssuanceTokenViewState(view);
+    persistIssuanceTokenView(view);
+  }, []);
 
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
@@ -268,14 +247,13 @@ export function DashboardWorkspaceProvider({
       isSidebarOpen,
       isProjectSwitching,
       issuanceTab,
-      counterpartyTab,
+      issuanceTokenView,
       playgroundApiKeys,
       selectedPlaygroundApiKeyId,
       selectProject,
       setPlaygroundApiKeys,
       setSelectedPlaygroundApiKeyId,
-      setIssuanceTab,
-      setCounterpartyTab,
+      setIssuanceTokenView,
       setSidebarOpen,
       toggleSidebar,
     }),
@@ -291,12 +269,11 @@ export function DashboardWorkspaceProvider({
       isProjectSwitching,
       playgroundApiKeys,
       issuanceTab,
-      counterpartyTab,
+      issuanceTokenView,
       selectedPlaygroundApiKeyId,
       selectProject,
       setPlaygroundApiKeys,
-      setIssuanceTab,
-      setCounterpartyTab,
+      setIssuanceTokenView,
       setSidebarOpen,
       toggleSidebar,
     ]
@@ -305,7 +282,11 @@ export function DashboardWorkspaceProvider({
   return (
     <DashboardWorkspaceContext.Provider value={value}>
       <SWRConfig key={swrScopeKey} value={scopedSwrConfig}>
-        {shouldRenderScopeRefreshFallback ? <DashboardScopeRefreshFallback /> : children}
+        {shouldRenderScopeRefreshFallback ? (
+          <FullscreenLoadingIndicator allowDelayedReload />
+        ) : (
+          children
+        )}
       </SWRConfig>
     </DashboardWorkspaceContext.Provider>
   );
@@ -319,4 +300,12 @@ export function useDashboardWorkspace() {
   }
 
   return context;
+}
+
+// Deliberately tolerant of a missing provider, unlike useDashboardWorkspace: the
+// issuance loading skeletons read the view, and a Suspense fallback is also
+// mounted standalone by the route-loading unit tests. Falling back to the default
+// view there beats making every one of those call sites stand up a provider.
+export function useIssuanceTokenView(): TokenView {
+  return useContext(DashboardWorkspaceContext)?.issuanceTokenView ?? DEFAULT_ISSUANCE_TOKEN_VIEW;
 }

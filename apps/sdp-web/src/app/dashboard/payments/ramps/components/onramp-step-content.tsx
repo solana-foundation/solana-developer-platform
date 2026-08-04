@@ -1,13 +1,17 @@
 "use client";
 
 import { isMuralSandboxPayinCurrency } from "@sdp/types";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import { toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
+import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
+import { MemoStepContent } from "./memo-step-content";
+import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
@@ -18,6 +22,13 @@ import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
+/**
+ * Renders content for the active onramp wizard step.
+ *
+ * @param props - The active onramp wizard state.
+ * @returns The active onramp step content.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: step dispatch keeps every onramp stage in one component while each branch stays simple.
 export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const t = useTranslations();
   const {
@@ -42,7 +53,14 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     collectedData,
     setCollectedField,
     requirementsBlocker,
+    refreshQuote,
+    memoRows,
+    setMemoRows,
   } = wizard;
+
+  if (currentStepId === "MEMO") {
+    return <MemoStepContent rows={memoRows} onChange={setMemoRows} />;
+  }
 
   if (currentStepId === "DEPOSIT") {
     if (!hasEnabledRampProvider(rampProviderAccess)) {
@@ -120,11 +138,40 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
+  if (currentStepId === "PROVIDER" && quote?.provider === "moneygram") {
+    if (!selectedWallet) {
+      return <RampQuoteSkeleton />;
+    }
+    return (
+      <div className="space-y-6">
+        <MoneygramRampWidget
+          direction="onramp"
+          quote={quote}
+          counterparty={selectedCounterparty}
+          sourceWalletId={fields.walletId}
+          sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+          sourceWalletAddress={selectedWallet.publicKey}
+          sourceTokenMint={null}
+          cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
+          cryptoAmount={fields.amount.trim()}
+          fiatCurrency={selectedRampPair.fiatCurrency}
+          onSessionExpiring={refreshQuote}
+        />
+        <div className="border-t border-border-default pt-5">
+          <RampStatusPanel direction="onramp" transfer={transferStatus} />
+        </div>
+      </div>
+    );
+  }
+
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
     return (
       <div className="space-y-6">
         {quote.provider === "coinbase" ? (
-          <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
+          <>
+            <CoinbaseQuoteSummary quote={quote} />
+            <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
+          </>
         ) : (
           <MoonpayRampFrame
             title={t("DashboardPayments.ramps.providerDeposit", { provider: quote.provider })}

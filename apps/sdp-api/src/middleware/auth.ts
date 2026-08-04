@@ -20,12 +20,18 @@ import {
   parsePostgresJson,
   parsePostgresJsonOr,
 } from "@/db/postgres-utils";
+import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
-import { getRuntime, type SdpRuntime } from "@/lib/runtime-env";
+import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import type { KVStore } from "@/runtime/kv";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
+import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
 
 const KV_TTL_SECONDS = 3600; // 1 hour cache
+const INVALID_KEY_CACHE_TTL_SECONDS = 30;
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
 
 interface LastUsedWriteState {
@@ -52,27 +58,6 @@ interface ApiKeyContext {
   walletBindings: ApiKeyWalletBinding[];
 }
 
-/**
- * Extract API key from Authorization header
- */
-function extractApiKey(c: Context<{ Bindings: Env }>): string | null {
-  const authHeader = c.req.header("Authorization");
-  if (!authHeader) {
-    return null;
-  }
-
-  // Support both "Bearer sk_xxx" and just "sk_xxx"
-  if (authHeader.startsWith("Bearer ")) {
-    return authHeader.slice(7);
-  }
-
-  if (authHeader.startsWith("sk_")) {
-    return authHeader;
-  }
-
-  return null;
-}
-
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
   const authHeader = c.req.header("Authorization");
   if (!authHeader) {
@@ -86,25 +71,35 @@ function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
   return authHeader.slice(7);
 }
 
-function looksLikeApiKey(token: string): boolean {
-  return token.startsWith("sk_");
-}
-
 function looksLikeJwt(token: string): boolean {
   return token.split(".").length === 3;
 }
 
-/**
- * Look up API key in KV cache
- */
+/** Look up API key in KV cache */
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
   const cached = await kv.get<CachedApiKey>(`key:${keyHash}`, "json");
-  return cached;
+  // Payloads written before rotation-deadline enforcement do not contain this
+  // property. Treat them as misses so a deploy cannot extend an old key's
+  // validity until the legacy one-hour cache entry expires.
+  return cached && Object.hasOwn(cached, "rotationDeadline") ? cached : null;
 }
 
-/**
- * Look up API key in Postgres and cache to KV
- */
+async function isKnownInvalidKey(kv: KVStore, keyHash: string): Promise<boolean> {
+  const marker = await kv.get<{ invalid: true }>(`invalid:${keyHash}`, "json");
+  return marker?.invalid === true;
+}
+
+async function cacheInvalidKey(kv: KVStore, keyHash: string): Promise<void> {
+  try {
+    await kv.put(`invalid:${keyHash}`, JSON.stringify({ invalid: true }), {
+      expirationTtl: INVALID_KEY_CACHE_TTL_SECONDS,
+    });
+  } catch (err) {
+    getLogger().error({ error: err }, "Failed to cache invalid api key");
+  }
+}
+
+/** Look up API key in Postgres and cache to KV */
 async function getFromDatabaseAndCache(
   db: DatabaseClient,
   kv: KVStore,
@@ -114,7 +109,8 @@ async function getFromDatabaseAndCache(
     .prepare(
       `SELECT ak.id, ak.organization_id, ak.project_id, ak.role, ak.permissions,
               p.environment,
-              ak.rate_limit_tier, ak.allowed_ips, ak.signing_wallet_id, ak.status, ak.expires_at
+              ak.rate_limit_tier, ak.allowed_ips, ak.signing_wallet_id, ak.status, ak.expires_at,
+              ak.rotation_deadline
        FROM api_keys ak
        JOIN projects p ON p.id = ak.project_id
        WHERE ak.key_hash = ?`
@@ -132,6 +128,7 @@ async function getFromDatabaseAndCache(
       signing_wallet_id: string | null;
       status: string;
       expires_at: string | null;
+      rotation_deadline: string | null;
     }>();
 
   if (!result) {
@@ -175,6 +172,7 @@ async function getFromDatabaseAndCache(
     walletBindings,
     status: result.status as "active" | "revoked" | "expired" | "deactivated",
     expiresAt: result.expires_at,
+    rotationDeadline: result.rotation_deadline,
   };
 
   // Cache to KV
@@ -194,7 +192,7 @@ function writeLastUsed(db: DatabaseClient, keyId: string): Promise<void> {
 }
 
 function logLastUsedWriteError(error: unknown): void {
-  console.error("Failed to update last_used_at:", error);
+  getLogger().error({ error }, "Failed to update last_used_at");
 }
 
 function getLastUsedWriteCache(db: DatabaseClient): LastUsedWriteCache {
@@ -229,21 +227,12 @@ function sweepExpiredLastUsedWrites(cache: LastUsedWriteCache, now: number): voi
   cache.nextSweepAt = now + NODE_LAST_USED_WRITE_INTERVAL_MS;
 }
 
-/**
- * Updates last_used_at without putting a write on every Node request. Workers
- * keep their existing per-request behavior because their isolate lifetime is
- * not a useful process-local coalescing boundary.
- */
+/** Updates last_used_at without putting a write on every request. */
 export function scheduleApiKeyLastUsedUpdate(
   db: DatabaseClient,
   keyId: string,
-  runtime: SdpRuntime,
   now = Date.now()
 ): Promise<void> {
-  if (runtime === "cloudflare") {
-    return writeLastUsed(db, keyId).catch(logLastUsedWriteError);
-  }
-
   const cache = getLastUsedWriteCache(db);
   sweepExpiredLastUsedWrites(cache, now);
   const existing = cache.writes.get(keyId);
@@ -359,7 +348,13 @@ export function authMiddleware() {
     const apiKeysKV = c.var.kv.apiKeys;
     let cachedKey = await getFromKV(apiKeysKV, keyHash);
     if (!cachedKey) {
+      if (await isKnownInvalidKey(apiKeysKV, keyHash)) {
+        throw new AppError("INVALID_API_KEY", "Invalid API key");
+      }
       cachedKey = await getFromDatabaseAndCache(getDb(c.env), apiKeysKV, keyHash);
+      if (!cachedKey) {
+        await cacheInvalidKey(apiKeysKV, keyHash);
+      }
     }
 
     if (!cachedKey) {
@@ -380,6 +375,16 @@ export function authMiddleware() {
       throw new AppError("EXPIRED_API_KEY");
     }
 
+    if (isRotationDeadlineReached(cachedKey.rotationDeadline)) {
+      throw new AppError("EXPIRED_API_KEY");
+    }
+
+    if (!isClientIpAllowed(getClientIp(c), cachedKey.allowedIps)) {
+      throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");
+    }
+
+    await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);
+
     // Set auth context
     const normalizedWalletBindings = normalizeWalletBindings(cachedKey);
 
@@ -398,7 +403,7 @@ export function authMiddleware() {
     c.set("apiKey", authContext);
 
     // Update last used (fire and forget). Node coalesces this write per key.
-    void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id, getRuntime(c.env));
+    void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id);
 
     await next();
   };
@@ -446,12 +451,15 @@ export function optionalAuth() {
     const apiKey = extractApiKey(c);
 
     if (apiKey && looksLikeApiKey(apiKey)) {
-      // Reuse the main auth logic but catch errors
+      // Reuse the main auth logic; swallow auth failures (the key is optional)
+      // but never rate limiting — a limited key must not proceed as anonymous.
       try {
         const authMw = authMiddleware();
         await authMw(c, async () => {});
-      } catch {
-        // Ignore auth errors for optional auth
+      } catch (error) {
+        if (error instanceof AppError && error.code === "RATE_LIMITED") {
+          throw error;
+        }
       }
     }
 

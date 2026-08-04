@@ -15,7 +15,8 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
-import { createKVStoreSet } from "@/runtime/factory";
+import { createKVStoreSet } from "@/runtime/kv-redis";
+import { rootLogger } from "@/runtime/logger";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -330,10 +331,57 @@ describe("Issuance Routes", () => {
     await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
   });
 
+  describe("GET /v1/issuance/tokens/{tokenId}/transactions", () => {
+    it("filters the per-token list by type with an accurate total", async () => {
+      const token = await seedIssuedToken();
+      await seedIssuanceTransaction({
+        id: "ptx_mint",
+        type: "mint",
+        params: {},
+        createdAt: "2024-02-02T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ptx_burn",
+        type: "burn",
+        params: {},
+        createdAt: "2024-02-01T00:00:00.000Z",
+      });
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}/transactions?type=mint&page=1&pageSize=10`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(1);
+      expect(body.data.map((tx: { id: string }) => tx.id)).toEqual(["ptx_mint"]);
+    });
+
+    it("rejects an invalid type with 400", async () => {
+      const token = await seedIssuedToken();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}/transactions?type=not_a_real_type`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+    });
+  });
+
   describe("GET /v1/issuance/transactions", () => {
     async function cacheProjectApiKey(overrides: Record<string, unknown>) {
-      const apiKeysKV = (env as { SDP_API_KEYS: KVNamespace }).SDP_API_KEYS;
-      await apiKeysKV.put(
+      const { apiKeys } = createKVStoreSet(env);
+      await apiKeys.put(
         `key:${apiKeyHash}`,
         JSON.stringify({
           ...TEST_PROJECT_CACHED_KEY,
@@ -1195,6 +1243,110 @@ describe("Issuance Routes", () => {
       expect(body.meta.page).toBe(1);
       expect(body.meta.pageSize).toBe(10);
     });
+
+    it("filters by search, reporting the filtered total", async () => {
+      const match = await app.request(
+        "/v1/issuance/tokens?search=Listed",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      expect(match.status).toBe(200);
+      const matchBody = await match.json();
+      expect(matchBody.data.length).toBe(matchBody.meta.total);
+      expect(matchBody.data.every((token: { name: string }) => token.name === "Listed Token")).toBe(
+        true
+      );
+
+      const miss = await app.request(
+        "/v1/issuance/tokens?search=NoSuchTokenAnywhere",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      const missBody = await miss.json();
+      expect(missBody.data).toEqual([]);
+      expect(missBody.meta.total).toBe(0);
+      expect(missBody.meta.hasMore).toBe(false);
+    });
+
+    it("accepts a blank search as no filter", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens?search=",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBeGreaterThan(0);
+    });
+
+    it.each([
+      ["page=0", "non-positive page"],
+      ["page=9007199254740991", "page beyond the offset bound"],
+      ["pageSize=101", "page size above the cap"],
+      ["pageSize=abc", "non-numeric page size"],
+      ["status=bogus", "unknown status"],
+      ["deploymentStatus=bogus", "unknown deployment status"],
+      ["sortBy=created_at%3B+DROP+TABLE+issued_tokens", "unwhitelisted sort key"],
+      ["sortDirection=sideways", "unknown sort direction"],
+      ["createdAfter=yesterday", "unparseable timestamp"],
+    ])("rejects %s (%s) with 400", async (query) => {
+      const res = await app.request(
+        `/v1/issuance/tokens?${query}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("BAD_REQUEST");
+    });
+
+    it("rejects an inverted created_at window with 400", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens?createdAfter=2026-06-01T00:00:00.000Z&createdBefore=2026-01-01T00:00:00.000Z",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("GET /v1/issuance/tokens/facets", () => {
+    beforeEach(async () => {
+      await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Facet Token", symbol: "FCT", template: "stablecoin" }),
+        },
+        env
+      );
+    });
+
+    // "facets" is a literal path registered before /tokens/:tokenId — if the
+    // parameterised route ever wins the match, this 404s as a missing token.
+    it("returns facets rather than resolving 'facets' as a token id", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens/facets",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.total).toBeGreaterThan(0);
+      expect(body.data.templates).toEqual(
+        expect.arrayContaining([{ template: "stablecoin", count: expect.any(Number) }])
+      );
+      // Undeployed drafts, so the derived state counts land on draft.
+      expect(body.data.deploymentStatuses.draft).toBeGreaterThan(0);
+    });
   });
 
   describe("GET /v1/issuance/tokens/:tokenId", () => {
@@ -1312,6 +1464,33 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.data.token.name).toBe("Updated Token Name");
       expect(body.data.token.description).toBe("New description");
+    });
+
+    it("rejects metadata updates while token deployment is in progress", async () => {
+      await getDb(env)
+        .prepare("UPDATE issued_tokens SET status = 'deploying' WHERE id = ?")
+        .bind(tokenId)
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Divergent metadata" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(409);
+      const row = await getDb(env)
+        .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+        .bind(tokenId)
+        .first<{ name: string }>();
+      expect(row?.name).toBe("Update Token");
     });
 
     it("updates deployed token metadata on-chain before persisting local fields", async () => {
@@ -1474,6 +1653,65 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error.message).toContain("requiresAllowlist");
+    });
+
+    it("updates symbol and decimals while the token is undeployed", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ symbol: "RENAMED", decimals: 2 }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.token.symbol).toBe("RENAMED");
+      expect(body.data.token.decimals).toBe(2);
+    });
+
+    it("rejects symbol and decimals changes after deployment", async () => {
+      const db = getDb(env);
+      const deployedTokenId = "tok_symbollocked1";
+
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+           name, symbol, decimals, total_supply_cached, is_mintable, freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, 'Locked Token', 'LOCK', 6, '0', 1, 1, 0, 'active', '2024-01-02T00:00:00.000Z', ?)`
+        )
+        .bind(
+          deployedTokenId,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_ACTIVE_TOKEN.mintAddress,
+          TEST_ACTIVE_TOKEN.mintAuthority,
+          TEST_ACTIVE_TOKEN.freezeAuthority,
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${deployedTokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ symbol: "NEWSYM" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toContain("symbol and decimals");
     });
   });
 
@@ -1950,7 +2188,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("surfaces both errors when add compensation fails", async () => {
+      it("keeps a pending DB row and audit trail when on-chain confirmation is ambiguous", async () => {
         const db = getDb(env);
         await db
           .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
@@ -1959,19 +2197,15 @@ describe("Issuance Routes", () => {
 
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
-          .mockRejectedValueOnce(new Error("on-chain add failed"));
-        // After addToList fails the handler re-checks on-chain membership; if
-        // it returns true, we'd keep the DB row and succeed — for this test we
-        // want the rollback path, so return false.
+          .mockRejectedValueOnce(new Error("on-chain add failed"))
+          .mockResolvedValueOnce(undefined as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(false);
-        const deleteAllowlistEntrySpy = vi
-          .spyOn(TokenService.prototype, "deleteAllowlistEntry")
-          .mockRejectedValueOnce(new Error("rollback failed"));
+        const deleteAllowlistEntrySpy = vi.spyOn(TokenService.prototype, "deleteAllowlistEntry");
 
         try {
           const res = await app.request(
@@ -1991,10 +2225,44 @@ describe("Issuance Routes", () => {
           );
 
           expect(res.status).toBe(500);
-          const body = await res.json();
-          expect(body.error.code).toBe("INTERNAL_ERROR");
-          expect(body.error.details.originalError).toBe("on-chain add failed");
-          expect(body.error.details.restoreError).toBe("rollback failed");
+          expect(deleteAllowlistEntrySpy).not.toHaveBeenCalled();
+
+          const entry = await db
+            .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
+            .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
+            .first<{ id: string; status: string }>();
+          expect(entry?.status).toBe("pending");
+          const audit = await db
+            .prepare(
+              `SELECT id FROM audit_logs
+               WHERE action = 'create' AND resource_type = 'token_allowlist'
+                 AND resource_id = ?`
+            )
+            .bind(entry?.id)
+            .first<{ id: string }>();
+          expect(audit).not.toBeNull();
+
+          const retry = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                address: TEST_SOLANA_ADDRESSES.wallet1,
+                label: "On-chain Wallet",
+              }),
+            },
+            env
+          );
+          expect(retry.status).toBe(201);
+          const reconciled = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry?.id)
+            .first<{ status: string }>();
+          expect(reconciled?.status).toBe("active");
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
@@ -2087,11 +2355,7 @@ describe("Issuance Routes", () => {
         expect(res.status).toBe(409);
       });
 
-      it("restores prior revoked state on rollback when re-adding a previously-revoked entry", async () => {
-        // Reactivated row (previously revoked → addAllowlistEntry promotes back
-        // to active in-place). If addToList then fails and on-chain membership
-        // is not confirmed, rollback must re-revoke (not hard-delete) so the
-        // operator's original revocation record survives.
+      it("keeps a re-added entry pending when on-chain membership is uncertain", async () => {
         const db = getDb(env);
         await db
           .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
@@ -2143,7 +2407,7 @@ describe("Issuance Routes", () => {
             .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
             .first<{ id: string; status: string }>();
           expect(row?.id).toBe(entry.id);
-          expect(row?.status).toBe("revoked");
+          expect(row?.status).toBe("pending");
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
@@ -2289,7 +2553,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("restores the database entry if on-chain control-list removal fails", async () => {
+      it("keeps the database entry active until a retry confirms on-chain removal", async () => {
         await app.request(
           `/v1/issuance/tokens/${tokenId}/allowlist`,
           {
@@ -2321,10 +2585,14 @@ describe("Issuance Routes", () => {
 
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const removeFromListSpy = vi
           .spyOn(MosaicService.prototype, "removeFromList")
-          .mockRejectedValueOnce(new Error("mosaic removal failed"));
+          .mockRejectedValueOnce(new Error("mosaic removal failed"))
+          .mockResolvedValueOnce(undefined as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
 
         try {
           const res = await app.request(
@@ -2338,19 +2606,79 @@ describe("Issuance Routes", () => {
 
           expect(res.status).toBe(500);
 
-          const restoredListRes = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+          const stillActive = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entryId)
+            .first<{ status: string }>();
+          expect(stillActive?.status).toBe("active");
+
+          const retry = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
             {
+              method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
             },
             env
           );
-          const restoredListBody = await restoredListRes.json();
-          expect(restoredListBody.data).toHaveLength(1);
-          expect(restoredListBody.data[0].id).toBe(entryId);
+          expect(retry.status).toBe(204);
+          expect(removeFromListSpy).toHaveBeenCalledTimes(2);
+
+          const revoked = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entryId)
+            .first<{ status: string }>();
+          expect(revoked?.status).toBe("revoked");
         } finally {
           createOrgSignerSpy.mockRestore();
           removeFromListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+        }
+      });
+
+      it("treats a timed-out removal as success when on-chain absence is confirmed", async () => {
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+        const tokenService = new TokenService(db);
+        const { entry } = await tokenService.addAllowlistEntry({
+          tokenId,
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+          addedBy: TEST_PROJECT_API_KEY.id,
+          initialStatus: "pending",
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const removeFromListSpy = vi
+          .spyOn(MosaicService.prototype, "removeFromList")
+          .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist/${entry.id}`,
+            {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+
+          expect(res.status).toBe(204);
+          const revoked = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry.id)
+            .first<{ status: string }>();
+          expect(revoked?.status).toBe("revoked");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          removeFromListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
         }
       });
     });
@@ -4516,7 +4844,7 @@ describe("Issuance Routes", () => {
         const setTokenDeployedSpy = vi
           .spyOn(TokenService.prototype, "setTokenDeployed")
           .mockRejectedValueOnce(new Error("D1_ERROR: timeout"));
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
 
         try {
           const res = await app.request(
@@ -5031,7 +5359,11 @@ describe("Issuance Routes", () => {
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
               parsedType: "initializeMint2",
-              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
             },
           ],
         });
@@ -5113,6 +5445,7 @@ describe("Issuance Routes", () => {
           mintAddress: null,
           status: "pending",
           uri: null,
+          isFreezable: false,
           requiresAllowlist: false,
         });
 
@@ -5132,7 +5465,10 @@ describe("Issuance Routes", () => {
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
               parsedType: "initializeMint2",
-              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
             },
           ],
         });
@@ -5140,7 +5476,7 @@ describe("Issuance Routes", () => {
         const createTransactionSpy = vi
           .spyOn(TokenService.prototype, "createTransaction")
           .mockRejectedValueOnce(new Error("D1_ERROR: timeout"));
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
 
         try {
           const res = await app.request(
@@ -5249,6 +5585,75 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("returns 400 when the mint authority differs from the server-derived custody address", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_wrong_authority",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              parsedType: "initializeMint2",
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+                freezeAuthority: null,
+              },
+            },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5wrongAuthorityConfirmedSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          const stillPending = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(stillPending?.mintAddress).toBeNull();
+          expect(stillPending?.status).toBe("pending");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
       it("returns a retryable error (not the wrong-tx 400) when the tx is not yet indexed", async () => {
         ensureRpcUrl();
 
@@ -5344,7 +5749,11 @@ describe("Issuance Routes", () => {
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
               parsedType: "initializeMint2",
-              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
             },
           ],
         });
@@ -5437,7 +5846,11 @@ describe("Issuance Routes", () => {
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
               parsedType: "initializeMint2",
-              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
             },
           ],
         });

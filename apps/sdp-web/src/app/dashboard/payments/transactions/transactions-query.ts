@@ -36,6 +36,12 @@ export interface TransactionFilters {
   provider?: string;
   from?: string;
   to?: string;
+  /**
+   * On-chain deposits the indexer observed but that have no ledger row. Home
+   * shows these; this table hid them unconditionally, so the same wallet read
+   * differently on the two screens. Defaults on to match Home.
+   */
+  includeObserved: boolean;
   sortBy: TransactionSortField;
   sortDirection: "asc" | "desc";
   snapshot: string;
@@ -101,6 +107,8 @@ export function parseTransactionFilters(
     provider: parseTrimmed(firstValue(searchParams.provider), 64),
     from: parseDate(firstValue(searchParams.from)),
     to: parseDate(firstValue(searchParams.to)),
+    // Absent means on; only an explicit "false" turns it off.
+    includeObserved: firstValue(searchParams.includeObserved) !== "false",
     sortBy: parseEnum(firstValue(searchParams.sortBy), TRANSACTION_SORT_FIELDS) ?? "createdAt",
     sortDirection:
       parseEnum(firstValue(searchParams.sortDirection), ["asc", "desc"] as const) ?? "desc",
@@ -126,6 +134,8 @@ export function serializeTransactionFilters(filters: TransactionFilters): URLSea
   set("provider", filters.provider);
   set("from", filters.from);
   set("to", filters.to);
+  // Only serialise the non-default, so a plain URL stays clean.
+  if (!filters.includeObserved) set("includeObserved", "false");
   if (filters.sortBy !== "createdAt") set("sortBy", filters.sortBy);
   if (filters.sortDirection !== "desc") set("sortDirection", filters.sortDirection);
   set("snapshot", filters.snapshot);
@@ -138,7 +148,7 @@ export function toTransactionsApiQuery(filters: TransactionFilters): URLSearchPa
   const query = new URLSearchParams({
     page: String(filters.page),
     pageSize: String(filters.pageSize),
-    includeObserved: "false",
+    includeObserved: String(filters.includeObserved),
     sortBy: filters.sortBy,
     sortDirection: filters.sortDirection,
   });
@@ -171,5 +181,7 @@ export function countActiveTransactionFilters(filters: TransactionFilters): numb
     filters.provider,
     filters.from,
     filters.to,
+    // Counted only when switched off, since on is the default state.
+    filters.includeObserved ? undefined : "excluded",
   ].filter(Boolean).length;
 }

@@ -24,3 +24,19 @@ export function isTransientRpcError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return TRANSIENT_HTTP_STATUS.test(message) || TRANSIENT_ERROR_TEXT.test(message);
 }
+
+/**
+ * Returns `true` when an RPC failure is a gateway HTTP 401. `@solana/kit`'s HTTP
+ * transport puts that on `error.context.statusCode`; do not widen past 401 (see
+ * `withGatewayRpc` for the one-shot refresh retry that depends on this).
+ */
+export function isUnauthorizedRpcError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const context = (error as { context?: unknown }).context;
+  if (!context || typeof context !== "object") {
+    return false;
+  }
+  return (context as { statusCode?: unknown }).statusCode === 401;
+}

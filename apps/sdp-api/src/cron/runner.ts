@@ -1,22 +1,25 @@
 /**
- * node-cron wrapper for the Node runtime. Schedules the same reconciliation
- * job that the Cloudflare `scheduled` handler triggers, going through the
- * shared `runPendingTransfersReconciliation` so observability and background
- * tracking are wired identically across runtimes.
+ * node-cron wrapper for the API runtime. Schedules reconciliation through the
+ * shared helpers so observability and background tracking are wired
+ * consistently.
  *
- * `DISABLE_CRON=true` skips registration entirely, leaving the process free
- * to run as one of many web replicas without firing the reconciliation N
- * times per minute. A distributed lock would let every replica schedule
- * safely; until that lands, single-replica + DISABLE_CRON elsewhere is the
- * agreed-upon strategy.
+ * Cloud Run services skip registration by default, leaving reconciliation to
+ * the dedicated Cloud Run job rather than firing once per web replica.
+ * `DISABLE_CRON=false` explicitly opts a service back in; self-hosted runtimes
+ * keep the historical enabled-by-default behavior.
  */
 
 import { type ScheduledTask, schedule } from "node-cron";
-import { isRecurringPaymentCollectionEnabled } from "@/lib/feature-flags";
+import { isPrivateChannelsEnabled, isRecurringPaymentCollectionEnabled } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
+import { PENDING_DEPOSITS_CRON, runPendingDepositsReconciliation } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
+import {
+  PENDING_WITHDRAWALS_CRON,
+  runPendingWithdrawalsReconciliation,
+} from "./pending-withdrawals";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
@@ -40,7 +43,7 @@ const FALSY_DISABLE_CRON: ReadonlySet<string> = new Set(["false", "0"]);
 function isCronDisabled(env: Env): boolean {
   const raw = env.DISABLE_CRON;
   if (raw === undefined) {
-    return false;
+    return Boolean(env.K_SERVICE);
   }
   const normalised = raw.trim().toLowerCase();
   if (TRUTHY_DISABLE_CRON.has(normalised)) {
@@ -87,6 +90,33 @@ export function startCron(deps: CronDeps): CronHandle | null {
           return;
         }
         runRecurringPaymentsCollection({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        });
+      })
+    );
+  }
+
+  if (isPrivateChannelsEnabled(deps.env)) {
+    tasks.push(
+      schedule(PENDING_DEPOSITS_CRON, () => {
+        if (stopping) {
+          return;
+        }
+        runPendingDepositsReconciliation({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        });
+      })
+    );
+    tasks.push(
+      schedule(PENDING_WITHDRAWALS_CRON, () => {
+        if (stopping) {
+          return;
+        }
+        runPendingWithdrawalsReconciliation({
           env: deps.env,
           bg: deps.bg,
           observability: deps.observability,

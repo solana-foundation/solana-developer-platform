@@ -131,7 +131,32 @@ export async function assertWalletPolicyAllowsTransferWithRepository(
   }
 ): Promise<void> {
   const rows = await repository.getWalletPoliciesByCustodyWalletId(input.wallet.id);
+  await assertWalletPolicyAllowsTransferWithRows(repository, rows, input);
+}
 
+/**
+ * Enforces wallet policy against pre-fetched policy rows, so callers checking
+ * many transfers on one wallet fetch the rows once. The repository is still
+ * used for the daily-limit volume query when that check is enabled.
+ *
+ * @param repository - Payments repository, used only for daily-limit volume.
+ * @param rows - Policy rows previously fetched for the wallet.
+ * @param input - Transfer under evaluation.
+ */
+export async function assertWalletPolicyAllowsTransferWithRows(
+  repository: PaymentsRepository,
+  rows: WalletPolicyRow[],
+  input: {
+    organizationId: string;
+    projectId: string | null;
+    wallet: CustodyWallet;
+    destinationAddress?: string | null;
+    enforceDestinationAllowlist?: boolean;
+    enforceDailyLimit?: boolean;
+    token: string;
+    amount: string;
+  }
+): Promise<void> {
   if (rows.length === 0) {
     return;
   }

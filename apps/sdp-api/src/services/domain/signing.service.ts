@@ -30,12 +30,14 @@ import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
+import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
   assertCustodyProviderCanCreateWallet,
   assertCustodyProviderCanDeleteWallet,
@@ -61,7 +63,6 @@ import {
   createProviderWallet,
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
-import { createEncryptionService, type EncryptionService } from "@/services/encryption.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
@@ -118,6 +119,7 @@ export interface SigningRequestStore {
 
 export interface CreateSigningRequestParams {
   organizationId: string;
+  projectId: string | null;
   custodyConfigId: string;
   tokenTransactionId?: string | null;
   externalRequestId: string;
@@ -128,6 +130,7 @@ export interface CreateSigningRequestParams {
 export interface SigningRequestRecord {
   id: string;
   organizationId: string;
+  projectId: string | null;
   custodyConfigId: string;
   tokenTransactionId?: string | null;
   externalRequestId: string | null;
@@ -162,7 +165,6 @@ export interface InitFireblocksSigningOptions {
   apiSecretPem: string;
   vaultAccountId: string;
   assetId?: string;
-  apiBaseUrl?: string;
   walletLabel?: string;
 }
 
@@ -170,7 +172,6 @@ export interface InitFireblocksSigningOptions {
  * Options for initializing org signing with Privy provider.
  */
 export interface InitPrivySigningOptions {
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   walletLabel?: string;
 }
@@ -179,9 +180,7 @@ export interface InitPrivySigningOptions {
  * Options for initializing org signing with Coinbase CDP provider.
  */
 export interface InitCoinbaseCdpSigningOptions {
-  apiBaseUrl?: string;
   network?: "solana" | "solana-devnet";
-  walletAddress?: string;
   accountPolicy?: string;
   walletLabel?: string;
 }
@@ -190,9 +189,7 @@ export interface InitCoinbaseCdpSigningOptions {
  * Options for initializing org signing with Para provider.
  */
 export interface InitParaSigningOptions {
-  apiBaseUrl?: string;
   requestDelayMs?: number;
-  walletId?: string;
   walletLabel?: string;
 }
 
@@ -200,9 +197,7 @@ export interface InitParaSigningOptions {
  * Options for initializing org signing with Turnkey provider.
  */
 export interface InitTurnkeySigningOptions {
-  apiBaseUrl?: string;
   requestDelayMs?: number;
-  privateKeyId?: string;
   walletLabel?: string;
 }
 
@@ -210,10 +205,7 @@ export interface InitTurnkeySigningOptions {
  * Options for initializing org signing with DFNS provider.
  */
 export interface InitDfnsSigningOptions {
-  apiBaseUrl?: string;
   network?: "Solana" | "SolanaDevnet";
-  walletId?: string;
-  signingKeyId?: string;
   walletLabel?: string;
 }
 
@@ -224,10 +216,7 @@ export interface InitDfnsSigningOptions {
  * platform-managed via IBM_HAVEN_* env bindings.
  */
 export interface InitIbmHavenSigningOptions {
-  apiBaseUrl?: string;
   network?: "Solana" | "SolanaDevnet";
-  walletId?: string;
-  signingKeyId?: string;
   walletLabel?: string;
 }
 
@@ -237,8 +226,6 @@ export interface InitIbmHavenSigningOptions {
  * Anchorage currently supports wallet lifecycle only (create/delete), not signing.
  */
 export interface InitAnchorageSigningOptions {
-  apiBaseUrl?: string;
-  walletId?: string;
   walletLabel?: string;
   network?: "solana" | "solana-devnet";
 }
@@ -292,7 +279,7 @@ interface ListWalletsOptions {
  */
 export class SigningService {
   private providerCache = new Map<string, SigningPort>();
-  private encryptionService: EncryptionService | null = null;
+  private custodyCipher: CustodyCipher | null = null;
 
   constructor(
     private configStore: SigningConfigStore & {
@@ -312,11 +299,11 @@ export class SigningService {
    * Get the encryption service, lazily initialized.
    * Required for storing encrypted private keys.
    */
-  private getEncryptionService(): EncryptionService {
-    if (!this.encryptionService) {
-      this.encryptionService = createEncryptionService(this.env.CUSTODY_ENCRYPTION_KEY);
+  private getCustodyCipher(): CustodyCipher {
+    if (!this.custodyCipher) {
+      this.custodyCipher = createCustodyCipher(this.env);
     }
-    return this.encryptionService;
+    return this.custodyCipher;
   }
 
   private async assertProviderEnabled(
@@ -401,6 +388,23 @@ export class SigningService {
     }
 
     return this.configStore.findActiveByProvider(orgId, undefined, provider);
+  }
+
+  /**
+   * Resolve an active configuration for an administrative mutation without
+   * project-to-organization fallback. Shared organization configurations may
+   * be used by project workloads, but only organization-scoped callers may
+   * mutate them.
+   */
+  async getConfigurationForMutation(
+    orgId: string,
+    projectId: string | undefined,
+    provider?: SigningConfiguration["provider"]
+  ): Promise<SigningConfigRecord | null> {
+    const config = provider
+      ? await this.configStore.findActiveByProvider(orgId, projectId, provider)
+      : await this.configStore.getDefaultConfig(orgId, projectId);
+    return config?.projectId === (projectId ?? null) ? config : null;
   }
 
   async setDefaultConfiguration(
@@ -552,8 +556,8 @@ export class SigningService {
     const privateKeyBase58 = base58.decode(privateKeyBytes);
 
     // Encrypt the private key for storage
-    const encryption = this.getEncryptionService();
-    const encryptedKey = await encryption.encryptPrivateKey(orgId, privateKeyBase58);
+    const cipher = this.getCustodyCipher();
+    const encryptedKey = await cipher.encrypt(orgId, privateKeyBase58);
 
     // Create config with encrypted private key
     const configJson: LocalProviderConfig = {
@@ -612,8 +616,8 @@ export class SigningService {
     }
 
     // Encrypt the API secret for storage
-    const encryption = this.getEncryptionService();
-    const encryptedSecret = await encryption.encryptPrivateKey(orgId, options.apiSecretPem);
+    const cipher = this.getCustodyCipher();
+    const encryptedSecret = await cipher.encrypt(orgId, options.apiSecretPem);
 
     // Create config with Fireblocks credentials
     const configJson: FireblocksProviderConfig = {
@@ -622,7 +626,6 @@ export class SigningService {
       apiSecretEncrypted: encryptedSecret,
       vaultAccountId: options.vaultAccountId,
       assetId: options.assetId ?? "SOL",
-      apiBaseUrl: options.apiBaseUrl,
     };
 
     // Create the adapter to get the public key
@@ -631,7 +634,7 @@ export class SigningService {
       apiSecretPem: options.apiSecretPem,
       vaultAccountId: options.vaultAccountId,
       assetId: options.assetId ?? "SOL",
-      apiBaseUrl: options.apiBaseUrl,
+      apiBaseUrl: this.env.FIREBLOCKS_API_BASE_URL,
     });
 
     const publicKey = await adapter.getPublicKey();
@@ -699,7 +702,6 @@ export class SigningService {
 
     const configJson: PrivyProviderConfig = {
       provider: "privy",
-      apiBaseUrl: options.apiBaseUrl,
       requestDelayMs: options.requestDelayMs,
       privyAppId: appId,
     };
@@ -718,9 +720,7 @@ export class SigningService {
     }
 
     // Provision a new Privy server wallet under the platform app.
-    const provisioned = await custodyProvisioning.provisionPrivyWallet(this.env, {
-      apiBaseUrl: options.apiBaseUrl,
-    });
+    const provisioned = await custodyProvisioning.provisionPrivyWallet(this.env, {});
     const publicKey = provisioned.address as Address;
     const walletId = normalizePrivyWalletId(provisioned.walletId);
 
@@ -778,14 +778,11 @@ export class SigningService {
       );
     }
 
-    const reusable = options.walletAddress
-      ? null
-      : await this.findReusableProviderWallet(orgId, projectId, "coinbase_cdp");
+    const reusable = await this.findReusableProviderWallet(orgId, projectId, "coinbase_cdp");
 
     if (reusable) {
       const configJson: CoinbaseCdpProviderConfig = {
         provider: "coinbase_cdp",
-        apiBaseUrl: options.apiBaseUrl,
         network: options.network ?? this.env.COINBASE_CDP_NETWORK,
         accountPolicy: options.accountPolicy,
       };
@@ -804,9 +801,7 @@ export class SigningService {
     const provisioned = await custodyProvisioning.provisionCoinbaseCdpAccount(this.env, {
       orgId,
       orgSlug: orgId,
-      apiBaseUrl: options.apiBaseUrl,
       network: options.network,
-      walletAddress: options.walletAddress,
       accountPolicy: options.accountPolicy,
     });
 
@@ -815,7 +810,6 @@ export class SigningService {
 
     const configJson: CoinbaseCdpProviderConfig = {
       provider: "coinbase_cdp",
-      apiBaseUrl: options.apiBaseUrl,
       network: provisioned.network,
       accountPolicy: options.accountPolicy,
     };
@@ -870,14 +864,11 @@ export class SigningService {
       );
     }
 
-    const reusable = options.walletId
-      ? null
-      : await this.findReusableProviderWallet(orgId, projectId, "para");
+    const reusable = await this.findReusableProviderWallet(orgId, projectId, "para");
 
     if (reusable) {
       const configJson: ParaProviderConfig = {
         provider: "para",
-        apiBaseUrl: options.apiBaseUrl,
         requestDelayMs: options.requestDelayMs,
       };
 
@@ -896,8 +887,6 @@ export class SigningService {
       orgId,
       projectId,
       orgSlug: orgId,
-      apiBaseUrl: options.apiBaseUrl,
-      walletId: options.walletId,
     });
 
     const publicKey = provisioned.address as Address;
@@ -905,7 +894,6 @@ export class SigningService {
 
     const configJson: ParaProviderConfig = {
       provider: "para",
-      apiBaseUrl: options.apiBaseUrl,
       requestDelayMs: options.requestDelayMs,
       walletId: provisioned.walletId,
       userIdentifier: provisioned.userIdentifier,
@@ -966,16 +954,13 @@ export class SigningService {
       );
     }
 
-    const reusable = options.privateKeyId
-      ? null
-      : await this.findReusableProviderWallet(orgId, projectId, "turnkey");
+    const reusable = await this.findReusableProviderWallet(orgId, projectId, "turnkey");
 
     if (reusable) {
       const reusablePublicKey = reusable.wallet.publicKey as Address;
       const configJson: TurnkeyProviderConfig = {
         provider: "turnkey",
         organizationId: this.env.TURNKEY_ORGANIZATION_ID,
-        apiBaseUrl: options.apiBaseUrl,
         requestDelayMs: options.requestDelayMs,
         defaultWalletPublicKey: reusablePublicKey,
       };
@@ -994,8 +979,6 @@ export class SigningService {
     const provisioned = await custodyProvisioning.provisionTurnkeyPrivateKey(this.env, {
       orgId,
       orgSlug: orgId,
-      privateKeyId: options.privateKeyId,
-      apiBaseUrl: options.apiBaseUrl,
     });
 
     const publicKey = provisioned.address as Address;
@@ -1004,7 +987,6 @@ export class SigningService {
     const configJson: TurnkeyProviderConfig = {
       provider: "turnkey",
       organizationId: this.env.TURNKEY_ORGANIZATION_ID,
-      apiBaseUrl: options.apiBaseUrl,
       requestDelayMs: options.requestDelayMs,
       defaultWalletPublicKey: publicKey,
     };
@@ -1051,18 +1033,15 @@ export class SigningService {
       );
     }
 
-    const client = await createDfnsApiClient(this.env, { apiBaseUrl: options.apiBaseUrl });
+    const client = await createDfnsApiClient(this.env);
     const resolvedNetwork = resolveDfnsNetwork(options.network);
 
-    const wallet = options.walletId
-      ? await client.wallets.getWallet({ walletId: options.walletId })
-      : await client.wallets.createWallet({
-          body: {
-            network: resolvedNetwork,
-            ...(options.walletLabel ? { name: options.walletLabel } : {}),
-            ...(options.signingKeyId ? { signingKey: { id: options.signingKeyId } } : {}),
-          },
-        });
+    const wallet = await client.wallets.createWallet({
+      body: {
+        network: resolvedNetwork,
+        ...(options.walletLabel ? { name: options.walletLabel } : {}),
+      },
+    });
 
     if (!wallet?.id || !wallet?.address) {
       throw new SigningError(
@@ -1080,10 +1059,9 @@ export class SigningService {
 
     const configJson: DfnsProviderConfig = {
       provider: "dfns",
-      apiBaseUrl: options.apiBaseUrl,
       network: walletNetwork,
       walletId: wallet.id,
-      signingKeyId: wallet.signingKey?.id ?? options.signingKeyId,
+      signingKeyId: wallet.signingKey?.id,
     };
 
     const configId = await this.configStore.upsert(orgId, projectId, {
@@ -1128,18 +1106,15 @@ export class SigningService {
       );
     }
 
-    const client = await createIbmHavenApiClient(this.env, { apiBaseUrl: options.apiBaseUrl });
+    const client = await createIbmHavenApiClient(this.env);
     const resolvedNetwork = resolveDfnsNetwork(options.network, IBM_HAVEN_PROVIDER_LABEL);
 
-    const wallet = options.walletId
-      ? await client.wallets.getWallet({ walletId: options.walletId })
-      : await client.wallets.createWallet({
-          body: {
-            network: resolvedNetwork,
-            ...(options.walletLabel ? { name: options.walletLabel } : {}),
-            ...(options.signingKeyId ? { signingKey: { id: options.signingKeyId } } : {}),
-          },
-        });
+    const wallet = await client.wallets.createWallet({
+      body: {
+        network: resolvedNetwork,
+        ...(options.walletLabel ? { name: options.walletLabel } : {}),
+      },
+    });
 
     if (!wallet?.id || !wallet?.address) {
       throw new SigningError(
@@ -1157,10 +1132,9 @@ export class SigningService {
 
     const configJson: IbmHavenProviderConfig = {
       provider: "ibm_haven",
-      apiBaseUrl: options.apiBaseUrl,
       network: walletNetwork,
       walletId: wallet.id,
-      signingKeyId: wallet.signingKey?.id ?? options.signingKeyId,
+      signingKeyId: wallet.signingKey?.id,
     };
 
     const configId = await this.configStore.upsert(orgId, projectId, {
@@ -1205,8 +1179,6 @@ export class SigningService {
     }
 
     const provisioned = await custodyProvisioning.provisionAnchorageWallet(this.env, {
-      apiBaseUrl: options.apiBaseUrl,
-      walletId: options.walletId,
       walletLabel: options.walletLabel,
       network: options.network,
     });
@@ -1215,7 +1187,6 @@ export class SigningService {
     const publicKey = provisioned.address as Address;
     const configJson: AnchorageProviderConfig = {
       provider: "anchorage",
-      apiBaseUrl: options.apiBaseUrl,
       walletId: provisioned.walletId,
       network: options.network,
     };
@@ -1290,7 +1261,6 @@ export class SigningService {
         provider: "utila",
         vaultId: this.env.UTILA_VAULT_ID,
         network: this.env.UTILA_NETWORK,
-        apiBaseUrl: this.env.UTILA_API_BASE_URL,
       };
 
       await this.updateConfigJson(reusable.configId, configJson);
@@ -1416,9 +1386,7 @@ export class SigningService {
       provider?: SigningConfiguration["provider"];
     }
   ): Promise<CustodyWallet> {
-    const config = params.provider
-      ? await this.getConfigurationByProvider(orgId, projectId, params.provider)
-      : await this.configStore.findActive(orgId, projectId);
+    const config = await this.getConfigurationForMutation(orgId, projectId, params.provider);
     if (!config) {
       throw new SigningError(
         params.provider
@@ -1431,7 +1399,7 @@ export class SigningService {
     await this.assertProviderEnabled(orgId, config.provider);
     assertCustodyProviderCanCreateWallet(config.provider);
 
-    const parsed = await parseConfigRecord(this.env, orgId, config);
+    const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
     const { walletId, publicKey } = await createProviderWallet({
       env: this.env,
       orgId,
@@ -1440,6 +1408,7 @@ export class SigningService {
         label: params.label,
       },
       parsed,
+      cipher: this.getCustodyCipher(),
     });
 
     let wallet: CustodyWallet;
@@ -1494,9 +1463,7 @@ export class SigningService {
       provider?: SigningConfiguration["provider"];
     }
   ): Promise<void> {
-    const config = params.provider
-      ? await this.getConfigurationByProvider(orgId, projectId, params.provider)
-      : await this.configStore.findActive(orgId, projectId);
+    const config = await this.getConfigurationForMutation(orgId, projectId, params.provider);
     if (!config) {
       throw new SigningError(
         params.provider
@@ -1515,7 +1482,7 @@ export class SigningService {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
 
-    const parsed = await parseConfigRecord(this.env, orgId, config);
+    const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
     const deactivateResult = await this.configStore.deactivateWalletIfNotLast(
       config.id,
       targetWallet.walletId
@@ -1590,16 +1557,16 @@ export class SigningService {
     // Direct database update for the config JSON
     // This is safe because we're only updating our own config
     const db = getDb(this.env);
-    const encryption = this.getEncryptionService();
-    const encryptedConfig = await encryption.encrypt(
-      existing.organizationId,
-      JSON.stringify(config)
-    );
+    const cipher = this.getCustodyCipher();
+    const encryptedConfig = await cipher.encrypt(existing.organizationId, JSON.stringify(config));
+    const encryptionVersion = encryptedConfig.startsWith("v2.")
+      ? "sdp-custody-kms-v2"
+      : "sdp-custody-encryption-v1";
     await db
       .prepare(
         "UPDATE custody_configs SET config_encrypted = ?, encryption_version = ?, updated_at = datetime('now') WHERE id = ?"
       )
-      .bind(encryptedConfig.ciphertext, "sdp-custody-encryption-v1", configId)
+      .bind(encryptedConfig, encryptionVersion, configId)
       .run();
   }
 
@@ -1636,7 +1603,12 @@ export class SigningService {
       return cached;
     }
 
-    const adapter = await createAdapterFromEncryptedConfig(this.env, orgId, config);
+    const adapter = await createAdapterFromEncryptedConfig(
+      this.env,
+      orgId,
+      config,
+      this.getCustodyCipher()
+    );
 
     this.providerCache.set(cacheKey, adapter);
     return adapter;
@@ -1824,6 +1796,7 @@ export class SigningService {
     if (result.status === "pending" && result.requestId) {
       await this.signingStore.create({
         organizationId: orgId,
+        projectId: projectId ?? null,
         custodyConfigId: config.id,
         externalRequestId: result.requestId,
         transactionMessage: encodeBase64(request.message),
@@ -1837,10 +1810,26 @@ export class SigningService {
   /**
    * Check the status of an async signing request.
    */
-  async getSigningStatus(requestId: string): Promise<SignStatus> {
+  async getSigningStatus(
+    orgId: string,
+    projectId: string | undefined,
+    requestId: string
+  ): Promise<SignStatus> {
     const record = await this.signingStore.findByIdOrExternal(requestId);
 
-    if (!record) {
+    if (!record || record.organizationId !== orgId) {
+      return { status: "failed", error: "Signing request not found" };
+    }
+
+    if (projectId !== undefined && record.projectId !== projectId) {
+      return { status: "failed", error: "Signing request not found" };
+    }
+
+    const config = await this.configStore.getById(record.custodyConfigId);
+    const configIsVisible =
+      config?.organizationId === orgId &&
+      (config.projectId === null || config.projectId === record.projectId);
+    if (!configIsVisible) {
       return { status: "failed", error: "Signing request not found" };
     }
 
@@ -1868,14 +1857,13 @@ export class SigningService {
       return { status: "failed", error: "Signing failed" };
     }
 
-    // Query the provider for current status
-    const config = await this.configStore.getById(record.custodyConfigId);
-    if (!config) {
-      return { status: "failed", error: "Custody configuration not found" };
-    }
-
     // Use encrypted config handler to properly decrypt credentials
-    const adapter = await createAdapterFromEncryptedConfig(this.env, record.organizationId, config);
+    const adapter = await createAdapterFromEncryptedConfig(
+      this.env,
+      orgId,
+      config,
+      this.getCustodyCipher()
+    );
 
     if (!adapter.getSignStatus) {
       return { status: "pending" };
@@ -2006,12 +1994,72 @@ function decodeBase64(base64: string): Uint8Array {
  * This factory wires up the Postgres-backed stores and creates a fully
  * functional SigningService ready for use in request handlers.
  *
- * @param env - Cloudflare Worker environment bindings
+ * @param env - API process environment
  * @returns Configured SigningService instance
  */
-export function createSigningService(env: Env): SigningService {
-  const configStore = new CustodyConfigStore(getDb(env), env.CUSTODY_ENCRYPTION_KEY);
+export function createSigningService(env: Env, scope?: TenantScope): SigningService {
+  const configStore = new CustodyConfigStore(getDb(env), env);
   const signingStore = new SigningRequestStorePg(getDb(env));
+  const service = new SigningService(configStore, signingStore, env);
 
-  return new SigningService(configStore, signingStore, env);
+  if (!scope) {
+    return service;
+  }
+
+  const tenantMethods = new Set([
+    "getConfigurationByProvider",
+    "getConfigurationForMutation",
+    "setDefaultConfiguration",
+    "setDefaultProvider",
+    "getProviderReuseState",
+    "initializeLocalSigning",
+    "initializeFireblocksSigning",
+    "initializePrivySigning",
+    "initializeCoinbaseCdpSigning",
+    "initializeParaSigning",
+    "initializeTurnkeySigning",
+    "initializeDfnsSigning",
+    "initializeIbmHavenSigning",
+    "initializeAnchorageWalletLifecycle",
+    "initializeAnchorageSigning",
+    "initializeUtilaSigning",
+    "getWallets",
+    "getWalletsWithProviders",
+    // biome-ignore lint/security/noSecrets: public service method identifier, not a credential
+    "getWalletById",
+    "createWallet",
+    "deleteWallet",
+    "getAdapter",
+    "getPublicKey",
+    "getKeypairSigner",
+    "getTransactionSigner",
+    "sign",
+    "getSigningStatus",
+    "configureProvider",
+    "getConfiguration",
+    "getConfigurations",
+    "requiresApproval",
+    "invalidateCache",
+  ]);
+
+  return new Proxy(service, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function" || !tenantMethods.has(String(property))) {
+        return value;
+      }
+
+      return (...args: unknown[]) => {
+        assertTenantClaim(
+          scope,
+          {
+            organizationId: args[0],
+            projectId: args[1] ?? null,
+          },
+          `SigningService.${String(property)}`
+        );
+        return Reflect.apply(value, target, args);
+      };
+    },
+  });
 }

@@ -1,4 +1,5 @@
 import { isDecimalString } from "@sdp/solana/amount";
+import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
 import { z } from "zod";
 import {
   assertAssetTypeSupported,
@@ -11,9 +12,6 @@ import {
 // Extension Schemas
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Transfer fee extension configuration
- */
 const transferFeeConfigSchema = z.object({
   basisPoints: z.number().int().min(0).max(10000),
   maxFee: z.string().refine((value) => isDecimalString(value), {
@@ -23,24 +21,15 @@ const transferFeeConfigSchema = z.object({
   withdrawWithheldAuthority: z.string().optional(),
 });
 
-/**
- * Interest-bearing extension configuration
- */
 const interestBearingConfigSchema = z.object({
   rate: z.number(),
   rateAuthority: z.string().optional(),
 });
 
-/**
- * Pausable extension configuration
- */
 const pausableConfigSchema = z.object({
   authority: z.string().min(32).max(44).optional(),
 });
 
-/**
- * Scaled UI amount extension configuration
- */
 const scaledUiAmountConfigSchema = z.object({
   authority: z.string().min(32).max(44).optional(),
   multiplier: z.number().positive().optional(),
@@ -48,20 +37,12 @@ const scaledUiAmountConfigSchema = z.object({
   newMultiplierEffectiveTimestamp: z.number().int().nonnegative().optional(),
 });
 
-/**
- * Transfer hook extension configuration
- */
 const transferHookConfigSchema = z.object({
   programId: z.string().min(32).max(44),
   authority: z.string().min(32).max(44).optional(),
 });
 
-/**
- * Extension overrides schema
- * Each extension can be:
- * - true/false: enable/disable
- * - config object: enable with specific configuration
- */
+// Each extension can be: true/false (enable/disable) or a config object for custom settings
 const extensionOverridesSchema = z
   .object({
     transferFee: z.union([z.literal(false), transferFeeConfigSchema]).optional(),
@@ -75,9 +56,6 @@ const extensionOverridesSchema = z
   })
   .strict();
 
-/**
- * Template overrides schema
- */
 const templateOverridesSchema = z.object({
   extensions: extensionOverridesSchema.optional(),
   requiresAllowlist: z.boolean().optional(),
@@ -87,19 +65,14 @@ const templateOverridesSchema = z.object({
 // Token Schemas
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Template type enum
- */
+// Normalize legacy template names (tokenized_security, rwa) to canonical form
 export const tokenTemplateSchema = z.preprocess(
   (value) => (value === "tokenized_security" || value === "rwa" ? "tokenized-security" : value),
   z.enum(["stablecoin", "arcade", "tokenized-security", "custom"])
 );
 
-/**
- * Create token request schema
- *
- * Supports template mode with optional overrides.
- */
+// Supports template mode with optional overrides for customization
+
 export const createTokenSchema = z.object({
   name: z.string().min(1).max(100),
   symbol: z
@@ -143,6 +116,15 @@ export type CreateTokenWithAssetProfileInput = z.infer<typeof createTokenWithAss
 
 export const updateTokenSchema = z.object({
   name: z.string().min(1).max(100).optional(),
+  // Symbol and decimals define the mint; the handler rejects them after deploy.
+  // Same constraints as createTokenSchema.
+  symbol: z
+    .string()
+    .min(1)
+    .max(10)
+    .regex(/^[A-Za-z0-9.]+$/)
+    .optional(),
+  decimals: z.number().int().min(0).max(18).optional(),
   description: z.string().max(500).nullable().optional(),
   uri: z.string().url().nullable().optional(),
   imageUrl: z.string().url().nullable().optional(),
@@ -292,4 +274,74 @@ export const unfreezeSchema = z.object({
 export const addAllowlistSchema = z.object({
   address: z.string().min(32).max(44),
   label: z.string().max(100).optional(),
+});
+
+export const listAllowlistQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(500).default(50),
+  // Contains-style search over address + label (see listAllowlistEntries).
+  search: z.string().trim().min(1).max(100).optional(),
+  // Exact-match label filter (values come from the labels facet endpoint).
+  label: z.string().trim().min(1).max(100).optional(),
+});
+
+export const listTokenTransactionsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  // Capped at 500 so the dashboard's grow-window list can't blow up the client.
+  pageSize: z.coerce.number().int().min(1).max(500).default(50),
+  // Optional exact-match filters; ordering stays newest-first server-side.
+  status: z.enum(TOKEN_TRANSACTION_STATUSES).optional(),
+  type: z.enum(TOKEN_TRANSACTION_TYPES).optional(),
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Token List Query
+// ═══════════════════════════════════════════════════════════════════════════
+
+const tokenListTimestampSchema = z
+  .string()
+  .datetime({ offset: true })
+  .transform((value) => new Date(value).toISOString());
+
+/**
+ * Lifecycle state as the dashboard presents it, which is *not* the raw `status`
+ * column: a token is a draft until it has a mint (or a deploy timestamp),
+ * paused once its on-chain pausable extension is engaged, and active otherwise.
+ * Kept as its own filter so `status` stays a faithful column filter for API
+ * consumers.
+ */
+export const tokenDeploymentStatusSchema = z.enum(["draft", "active", "paused"]);
+
+/**
+ * Whitelisted sort keys. The service maps these to physical columns — the raw
+ * value never reaches SQL — and every ordering carries an `id` tiebreaker so
+ * paging stays stable across equal keys.
+ */
+export const tokenListSortBySchema = z.enum(["createdAt", "name"]);
+
+export const listTokensQuerySchema = z.object({
+  // Bounded, not just positive: offset paging turns the page number into work the
+  // database has to walk past, and no project is a million pages deep. Keeps a
+  // crafted `?page=9007199254740991` from becoming a deep-offset scan (and its
+  // offset arithmetic from leaving safe-integer range).
+  page: z.coerce.number().int().positive().max(1_000_000).default(1),
+  // 100 keeps the extension-hydration fan-out and the response body bounded;
+  // the dashboard pages well under it.
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+  // Contains-style search over name + symbol + mint address + id. Blank is
+  // accepted (an empty input is not an error) and treated as "no filter", so a
+  // client can bind this straight to a text input. Needles under 3 characters
+  // can't use the trigram index and fall back to a filtered scan, which is fine
+  // at this table's per-project size.
+  search: z.string().trim().max(100).optional(),
+  status: z.enum(["pending", "active", "paused", "revoked"]).optional(),
+  deploymentStatus: tokenDeploymentStatusSchema.optional(),
+  // Exact match against the stored template id. Not an enum: rows predating the
+  // current catalog hold legacy ids (`rwa`, `tokenized_security`), and the
+  // facets endpoint hands the client the values actually present.
+  template: z.string().trim().min(1).max(64).optional(),
+  createdAfter: tokenListTimestampSchema.optional(),
+  createdBefore: tokenListTimestampSchema.optional(),
+  sortBy: tokenListSortBySchema.default("createdAt"),
+  sortDirection: z.enum(["asc", "desc"]).default("desc"),
 });

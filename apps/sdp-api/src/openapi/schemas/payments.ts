@@ -4,6 +4,7 @@ import {
   ONRAMP_CRYPTO_RAILS,
   RAMP_FIAT_CURRENCIES,
   RAMP_PROVIDERS,
+  RAMPS_MEMO_LIMITS,
 } from "@sdp/types";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -733,6 +734,15 @@ export const transferSchema = z
       .max(256)
       .optional()
       .openapi({ description: "Optional memo for the transfer." }),
+    rampsMemo: z
+      .record(
+        z.string().min(1).max(RAMPS_MEMO_LIMITS.maxKeyLength),
+        z.string().min(1).max(RAMPS_MEMO_LIMITS.maxValueLength)
+      )
+      .openapi({
+        description: `Free-form key-value memo for offchain reconciliation of ramp transfers. At most ${RAMPS_MEMO_LIMITS.maxEntries} entries.`,
+        example: { invoice: "INV-123", po: "PO-9" },
+      }),
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema.optional(),
     provider: z.enum(RAMP_PROVIDERS).optional().openapi({
@@ -1078,7 +1088,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
     ),
     token: withOpenApi(createRecurringPaymentSchemaBase.shape.token, {
       description:
-        "SPL token mint address. Native SOL is not supported for program-backed recurring payments.",
+        "Token mint address or well-known symbol. Must be a USD stablecoin (e.g. USDC) or a token issued in this project; native SOL is not supported.",
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createRecurringPaymentSchemaBase.shape.amount, {
@@ -1124,7 +1134,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
     ),
     token: withOpenApi(updateRecurringPaymentSchemaBase.shape.token, {
       description:
-        "Optional replacement SPL token mint address. Native SOL is not supported for recurring payments.",
+        "Optional replacement token. Must be a USD stablecoin (e.g. USDC) or a token issued in this project; native SOL is not supported.",
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(updateRecurringPaymentSchemaBase.shape.amount, {
@@ -1685,6 +1695,10 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
     redirectUrl: withOpenApi(createOnrampQuoteSchemaBase.shape.redirectUrl, {
       description: "Optional return URL after hosted provider flow completes.",
       example: "https://example.com/onramp/complete",
+    }),
+    rampsMemo: withOpenApi(createOnrampQuoteSchemaBase.shape.rampsMemo, {
+      description: "Optional key-value memo stored on the resulting transfer.",
+      example: { invoice: "INV-123", po: "PO-9" },
     }),
   })
   .openapi({

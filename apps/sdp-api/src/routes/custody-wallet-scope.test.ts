@@ -10,7 +10,7 @@ import * as signingServiceModule from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const actualCreateSigningService = signingServiceModule.createSigningService;
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
@@ -233,7 +233,7 @@ describe("Custody wallet scope routes", () => {
 
   afterEach(async () => {
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
     createSigningServiceMock.mockReset();
     getAccountInfoMock.mockReset();
     getSplTokenBalancesMock.mockReset();
@@ -451,6 +451,56 @@ describe("Custody wallet scope routes", () => {
     );
 
     expect(res.status).toBe(404);
+  });
+
+  it("prevents a project-scoped caller from changing an organization default wallet", async () => {
+    const res = await app.request(
+      "/v1/wallets/default-wallet",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "privy",
+          walletId: "privy_wallet_b",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(409);
+    const config = await getDb(env)
+      .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
+      .bind(PRIVY_CONFIG_ID)
+      .first<{ default_wallet_id: string | null }>();
+    expect(config?.default_wallet_id).toBe("privy_wallet_a");
+  });
+
+  it("prevents a project-scoped caller from deleting an organization wallet", async () => {
+    const res = await app.request(
+      "/v1/wallets",
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "privy",
+          walletId: "privy_wallet_b",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    const wallet = await getDb(env)
+      .prepare("SELECT status FROM custody_wallets WHERE wallet_id = ?")
+      .bind("privy_wallet_b")
+      .first<{ status: string }>();
+    expect(wallet?.status).toBe("active");
   });
 
   it("excludes custody configs from a different project in the same org", async () => {
