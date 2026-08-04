@@ -180,6 +180,15 @@ function BalanceAllocation({
         ) : null}
       </div>
 
+      {/* The card is a summary capped at four priced and four unpriced holdings, so
+          it needs somewhere to send anyone holding more than it shows. */}
+      <Link
+        href="/dashboard/tokens"
+        className="inline-block text-[13px] text-primary underline underline-offset-2"
+      >
+        {t("Shared.homeWorkspace.viewAllHoldings")}
+      </Link>
+
       {segments.length > 0 ? (
         <>
           {/* Hovering either the bar or its row lifts the same segment, so the two
@@ -262,13 +271,18 @@ function BalanceAllocation({
             );
           })}
           {breakdown.otherUnpricedCount > 0 ? (
-            <p className="px-2 pt-1 text-[13px] text-tertiary">
+            /* Was a dead count with no affordance — the holdings page is what it
+               was implicitly promising all along. */
+            <Link
+              href="/dashboard/tokens"
+              className="inline-block px-2 pt-1 text-[13px] text-primary underline underline-offset-2"
+            >
               {breakdown.otherUnpricedCount === 1
                 ? t("Shared.homeWorkspace.singleMoreToken")
                 : t("Shared.homeWorkspace.moreTokensCount", {
                     count: breakdown.otherUnpricedCount,
                   })}
-            </p>
+            </Link>
           ) : null}
         </div>
       ) : null}
