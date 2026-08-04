@@ -28,6 +28,14 @@ export interface ProviderCredentialRow {
   created_at: string;
 }
 
+export interface ProviderCredentialSecretRow extends ProviderCredentialRow {
+  source: "stored" | "runtime";
+  storage_backend: StoredCredentialSecret["storageBackend"];
+  secret_ref: string | null;
+  secret_version_ref: string | null;
+  encrypted_secret_payload: string | null;
+}
+
 export interface CustodyConnectionRow {
   id: string;
   organization_id: string;
@@ -136,6 +144,185 @@ export class ProviderCredentialStore {
     return row !== null;
   }
 
+  async findCredentialForInstallCheck(
+    organizationId: string,
+    id: string,
+    options: { lock?: boolean } = {}
+  ): Promise<ProviderCredentialSecretRow | null> {
+    return this.db.queryOne<ProviderCredentialSecretRow>(
+      `SELECT id, organization_id, project_id, provider, label, scope, scope_key,
+              source, storage_backend, secret_ref, secret_version_ref,
+              encrypted_secret_payload, display_metadata, status, credential_version,
+              rotated_from_provider_credential_id, idempotency_key,
+              idempotency_fingerprint, created_at
+       FROM provider_credentials
+       WHERE id = ? AND organization_id = ? AND provider = 'privy'
+       ${options.lock ? "FOR UPDATE" : ""}`,
+      [id, organizationId]
+    );
+  }
+
+  async listInstallCheckConnections(
+    organizationId: string,
+    projectId: string,
+    providerCredentialId: string,
+    options: { lock?: boolean } = {}
+  ): Promise<CustodyConnectionRow[]> {
+    return this.db.queryMany<CustodyConnectionRow>(
+      `SELECT id, organization_id, project_id, provider, scope,
+              provider_credential_id, provider_credential_scope_key,
+              default_custody_wallet_id, status, setup_metadata,
+              last_check_status, last_check_at, last_check_failure_code,
+              activated_at, created_at
+       FROM custody_connections
+       WHERE organization_id = ?
+         AND project_id = ?
+         AND provider = 'privy'
+         AND provider_credential_id = ?
+       ORDER BY created_at, id
+       ${options.lock ? "FOR UPDATE" : ""}`,
+      [organizationId, projectId, providerCredentialId]
+    );
+  }
+
+  async recordInstallCheckSuccess(params: {
+    providerCredentialId: string;
+    connectionId: string;
+    checkedAt: string;
+    providerAccountFingerprint: string;
+    providerWalletId: string;
+    publicKey: string;
+    label?: string;
+  }): Promise<ProviderCredentialRow | null> {
+    const credential = await this.db.queryOne<ProviderCredentialRow>(
+      `UPDATE provider_credentials
+       SET status = 'active',
+           last_validated_at = ?,
+           last_failure_code = NULL,
+           updated_at = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
+                 display_metadata, status, credential_version,
+                 rotated_from_provider_credential_id, idempotency_key,
+                 idempotency_fingerprint, created_at`,
+      [params.checkedAt, params.checkedAt, params.providerCredentialId]
+    );
+    if (!credential) {
+      return null;
+    }
+
+    const custodyWalletId = `cwlt_${crypto.randomUUID()}`;
+    await this.db.execute(
+      `INSERT INTO custody_wallets (
+         id, custody_config_id, custody_connection_id, wallet_id,
+         public_key, label, status, updated_at
+       ) VALUES (?, NULL, ?, ?, ?, ?, 'active', ?)`,
+      [
+        custodyWalletId,
+        params.connectionId,
+        params.providerWalletId,
+        params.publicKey,
+        params.label ?? null,
+        params.checkedAt,
+      ]
+    );
+
+    const updated = await this.db.execute(
+      `UPDATE custody_connections
+       SET default_custody_wallet_id = ?,
+           status = 'active',
+           setup_metadata =
+             (setup_metadata - 'pendingWalletLabel') || CAST(? AS jsonb),
+           last_check_status = 'success',
+           last_check_at = ?,
+           last_check_failure_code = NULL,
+           activated_at = ?,
+           updated_at = ?
+       WHERE id = ?
+         AND provider_credential_id = ?
+         AND status = 'pending'`,
+      [
+        custodyWalletId,
+        JSON.stringify({
+          providerAccountFingerprint: params.providerAccountFingerprint,
+        }),
+        params.checkedAt,
+        params.checkedAt,
+        params.checkedAt,
+        params.connectionId,
+        params.providerCredentialId,
+      ]
+    );
+    if (updated !== 1) {
+      throw new Error("Install Check connection changed during success persistence");
+    }
+    return credential;
+  }
+
+  async recordInstallCheckFailure(params: {
+    providerCredentialId: string;
+    connectionId: string;
+    checkedAt: string;
+  }): Promise<ProviderCredentialRow | null> {
+    const credential = await this.db.queryOne<ProviderCredentialRow>(
+      `UPDATE provider_credentials
+       SET status = 'failed_validation',
+           encrypted_secret_payload =
+             CASE
+               WHEN storage_backend = 'encrypted_db' THEN NULL
+               ELSE encrypted_secret_payload
+             END,
+           last_failed_at = ?,
+           last_failure_code = 'invalid_credentials',
+           updated_at = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
+                 display_metadata, status, credential_version,
+                 rotated_from_provider_credential_id, idempotency_key,
+                 idempotency_fingerprint, created_at`,
+      [params.checkedAt, params.checkedAt, params.providerCredentialId]
+    );
+    if (!credential) {
+      return null;
+    }
+
+    const updated = await this.db.execute(
+      `UPDATE custody_connections
+       SET status = 'failed',
+           last_check_status = 'failed',
+           last_check_at = ?,
+           last_check_failure_code = 'invalid_credentials',
+           updated_at = ?
+       WHERE id = ?
+         AND provider_credential_id = ?
+         AND status = 'pending'`,
+      [params.checkedAt, params.checkedAt, params.connectionId, params.providerCredentialId]
+    );
+    if (updated !== 1) {
+      throw new Error("Install Check connection changed during failure persistence");
+    }
+    return credential;
+  }
+
+  async recordInstallCheckRetryUnknown(params: {
+    providerCredentialId: string;
+    connectionId: string;
+    checkedAt: string;
+  }): Promise<boolean> {
+    const updated = await this.db.execute(
+      `UPDATE custody_connections
+       SET last_check_status = 'retry_unknown',
+           last_check_at = ?,
+           last_check_failure_code = 'provider_response_unknown',
+           updated_at = ?
+       WHERE id = ?
+         AND provider_credential_id = ?
+         AND status = 'pending'`,
+      [params.checkedAt, params.checkedAt, params.connectionId, params.providerCredentialId]
+    );
+    return updated === 1;
+  }
+
   async insertCredential(params: {
     id: string;
     organizationId: string;
@@ -197,14 +384,15 @@ export class ProviderCredentialStore {
     projectId: string;
     providerCredentialId: string;
     providerCredentialScopeKey: string;
+    pendingWalletLabel?: string;
     createdBy: string;
   }): Promise<CustodyConnectionRow> {
     const row = await this.db.queryOne<CustodyConnectionRow>(
       `INSERT INTO custody_connections (
-         id, organization_id, project_id, provider, scope,
+       id, organization_id, project_id, provider, scope,
          provider_credential_id, provider_credential_scope_key,
-         status, created_by
-       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)
+         setup_metadata, status, created_by
+       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, 'pending', ?)
        RETURNING id, organization_id, project_id, provider, scope,
                  provider_credential_id, provider_credential_scope_key,
                  default_custody_wallet_id, status, setup_metadata,
@@ -216,6 +404,9 @@ export class ProviderCredentialStore {
         params.projectId,
         params.providerCredentialId,
         params.providerCredentialScopeKey,
+        JSON.stringify(
+          params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}
+        ),
         params.createdBy,
       ]
     );
@@ -230,13 +421,14 @@ export class ProviderCredentialStore {
     expectedProviderCredentialId: string;
     providerCredentialId: string;
     providerCredentialScopeKey: string;
+    pendingWalletLabel?: string;
   }): Promise<CustodyConnectionRow | null> {
     return this.db.queryOne<CustodyConnectionRow>(
       `UPDATE custody_connections
        SET provider_credential_id = ?,
            provider_credential_scope_key = ?,
            status = 'pending',
-           setup_metadata = '{}'::jsonb,
+           setup_metadata = CAST(? AS jsonb),
            last_check_status = NULL,
            last_check_at = NULL,
            last_check_failure_code = NULL,
@@ -252,6 +444,9 @@ export class ProviderCredentialStore {
       [
         params.providerCredentialId,
         params.providerCredentialScopeKey,
+        JSON.stringify(
+          params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}
+        ),
         params.id,
         params.expectedProviderCredentialId,
       ]
@@ -260,5 +455,12 @@ export class ProviderCredentialStore {
 }
 
 export function hasPinnedProviderAccountIdentity(value: unknown): boolean {
-  return Object.keys(parsePostgresJsonOr<Record<string, unknown>>(value, {})).length > 0;
+  return Object.keys(parsePostgresJsonOr<Record<string, unknown>>(value, {})).some(
+    (key) => key !== "pendingWalletLabel"
+  );
+}
+
+export function getPendingWalletLabel(value: unknown): string | undefined {
+  const label = parsePostgresJsonOr<Record<string, unknown>>(value, {}).pendingWalletLabel;
+  return typeof label === "string" ? label : undefined;
 }

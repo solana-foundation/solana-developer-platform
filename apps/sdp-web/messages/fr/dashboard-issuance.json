@@ -540,7 +540,19 @@
       "sendTransaction": "Envoyer la transaction ?",
       "sendTransactionDescription": "Ceci soumettra une transaction on-chain. Voulez-vous continuer ?",
       "goAhead": "Continuer",
-      "token": "Token"
+      "token": "Token",
+      "tokenizationEngineTitle": "Moteur de tokenisation",
+      "tokenizationEngineHint": "Choisissez le moteur qui déploie et gère ce Token on-chain.",
+      "engineVulcanForgeName": "Vulcan Forge",
+      "engineVulcanForgeDescription": "Déployez on-chain et tokenisez sur Vulcan Forge avec un registre et une indexation intégrés.",
+      "engineMosaicName": "SDP with Mosaic",
+      "engineMosaicDescription": "Déployez avec le moteur Mosaic intégré de SDP sur Token-2022.",
+      "comingSoon": "Bientôt disponible",
+      "stepProgress": "Étape {current} sur {total}",
+      "vulcanForgeOnboardTitle": "Intégrer le Token à Vulcan Forge",
+      "vulcanForgeOnboardDescription": "AlphaLedger conserve un jumeau hors-ligne enregistré pour l'indexation et le reporting.",
+      "engineStepLabel": "Moteur",
+      "deployStepLabel": "Déployer"
     },
     "forms": {
       "saveMetadata": "Enregistrer les métadonnées",
