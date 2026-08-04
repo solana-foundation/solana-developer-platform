@@ -435,7 +435,7 @@ export function createPostgresCounterpartiesRepository(
     },
 
     async findActiveCounterpartyByBvnkCustomerReference(customerReference: string) {
-      const row = await db
+      const rows = await db
         .prepare(
           `SELECT * FROM counterparties
             WHERE status = 'active'
@@ -446,15 +446,18 @@ export function createPostgresCounterpartiesRepository(
                   AND provider_data->'bvnk'->'customer'->>'customerReference' = ?
                 )
               )
-            LIMIT 1`
+            ORDER BY id
+            LIMIT 2`
         )
         .bind(customerReference, customerReference)
-        .first<Record<string, unknown>>();
-      return row ? mapCounterpartyRow(db, cipher, row) : null;
+        .all<Record<string, unknown>>();
+      return rows.results.length === 1
+        ? mapCounterpartyRow(db, cipher, rows.results[0] as Record<string, unknown>)
+        : null;
     },
 
     async findCounterpartyByMuralOrganizationId(organizationId: string) {
-      const row = await db
+      const rows = await db
         .prepare(
           `SELECT * FROM counterparties
             WHERE status = 'active'
@@ -465,11 +468,14 @@ export function createPostgresCounterpartiesRepository(
                   AND provider_data->'mural'->'organization'->>'id' = ?
                 )
               )
-            LIMIT 1`
+            ORDER BY id
+            LIMIT 2`
         )
         .bind(organizationId, organizationId)
-        .first<Record<string, unknown>>();
-      return row ? mapCounterpartyRow(db, cipher, row) : null;
+        .all<Record<string, unknown>>();
+      return rows.results.length === 1
+        ? mapCounterpartyRow(db, cipher, rows.results[0] as Record<string, unknown>)
+        : null;
     },
 
     async mutateProviderData(params) {
