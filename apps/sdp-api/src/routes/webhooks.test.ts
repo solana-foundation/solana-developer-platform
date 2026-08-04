@@ -1378,6 +1378,70 @@ describe("BVNK ramp webhook", () => {
     expect(Number(transfer?.fiat_amount)).toBe(100);
   });
 
+  it("refuses to guess between ambiguous BVNK pay-in transfers", async () => {
+    const ruleId = "rule_webhook_payment_ambiguous";
+    for (const [index, createdAt] of [
+      [1, "2026-06-05T00:00:00.000Z"],
+      [2, "2026-06-05T00:01:00.000Z"],
+    ] as const) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
+             id, organization_id, project_id, wallet_id, counterparty_id,
+             source_address, destination_address, token, amount, memo, type,
+             direction, status, provider, provider_reference, delivery_mode,
+             fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+             initiated_by_key_id, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          `pt_bvnk_ambiguous_${index}`,
+          ORG_ID,
+          PROJECT_ID,
+          "wallet_bvnk_webhook",
+          COUNTERPARTY_ID,
+          null,
+          "dest",
+          "USDC",
+          null,
+          null,
+          "onramp",
+          "inbound",
+          "awaiting_payment",
+          "bvnk",
+          `bvnk_onramp_quote_ambiguous_${index}`,
+          "manual_instructions",
+          "USD",
+          "100.00",
+          JSON.stringify({ bvnk: { ruleId, fundingWalletId: WALLET_ID } }),
+          null,
+          null,
+          null,
+          createdAt,
+          createdAt
+        )
+        .run();
+    }
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:payment:payin:status-change",
+      data: {
+        customerReference: CUSTOMER_REFERENCE,
+        beneficiary: { walletId: WALLET_ID },
+        status: "COMPLETED",
+        amount: { value: 100, currencyCode: "USD" },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const rows = await getDb(env)
+      .prepare(
+        "SELECT status FROM payment_transfers WHERE id LIKE 'pt_bvnk_ambiguous_%' ORDER BY id"
+      )
+      .all<{ status: string }>();
+    expect(rows.results.map((row) => row.status)).toEqual(["awaiting_payment", "awaiting_payment"]);
+  });
+
   it("moves a BVNK off-ramp transfer to settling when a channel transaction is detected", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
     await getDb(env)

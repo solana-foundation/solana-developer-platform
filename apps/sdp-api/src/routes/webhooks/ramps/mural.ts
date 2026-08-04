@@ -2,6 +2,7 @@ import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type { MuralWebhookEvent } from "@sdp/payments/ramps/providers/mural/client";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
+import { getDb } from "@/db";
 import {
   createSystemCounterpartiesRepository,
   createSystemPaymentsRepository,
@@ -14,6 +15,34 @@ import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import type { AppContext, WebhookProcessor } from "./processor";
+import { applyRampSettlementEvent } from "./settlements";
+
+const MURAL_DELIVERY_ID_FIELD = "__sdpDeliveryId";
+
+type MuralProcessorEvent =
+  | Exclude<MuralWebhookEvent, { kind: "account_credited" }>
+  | (Extract<MuralWebhookEvent, { kind: "account_credited" }> & { deliveryId: string });
+
+async function muralDeliveryId(timestamp: string, rawBody: string): Promise<string> {
+  const bytes = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${timestamp}.${rawBody}`)
+  );
+  return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function readMuralData(transfer: PaymentTransferRow): Record<string, unknown> {
+  const mural = transfer.provider_data.mural;
+  if (!mural || typeof mural !== "object" || Array.isArray(mural)) {
+    return {};
+  }
+  return mural as Record<string, unknown>;
+}
+
+function readMuralAccountId(transfer: PaymentTransferRow): string | undefined {
+  const accountId = readMuralData(transfer).accountId;
+  return typeof accountId === "string" && accountId.length > 0 ? accountId : undefined;
+}
 
 function readMuralWebhookPublicKey(
   env: Record<string, string | undefined>,
@@ -36,6 +65,7 @@ function readMuralWebhookPublicKey(
 async function findMuralOnrampTransfer(
   payments: PaymentsRepository,
   counterparty: CounterpartyRow,
+  accountId: string,
   statuses: PaymentTransferStatus[]
 ): Promise<PaymentTransferRow | undefined> {
   const { rows } = await payments.listTransfers({
@@ -44,15 +74,25 @@ async function findMuralOnrampTransfer(
     counterpartyId: counterparty.id,
     types: ["onramp"],
     statuses,
-    limit: 20,
+    provider: "mural",
+    limit: 100,
     offset: 0,
   });
-  return rows.find((row) => row.provider === "mural");
+  const matches = rows.filter((row) => readMuralAccountId(row) === accountId);
+  // Mural's account_credited event has no quote/transfer reference. Refuse to
+  // guess when multiple live quotes share an account; a single signed event
+  // must never settle more than one transfer through replay or ordering.
+  return matches.length === 1 && rows.length < 100 ? matches[0] : undefined;
 }
 
 async function handleAccountCredited(
   c: AppContext,
-  event: { organizationId: string; accountId: string; tokenAmount: number }
+  event: {
+    organizationId: string;
+    accountId: string;
+    tokenAmount: number;
+    deliveryId: string;
+  }
 ): Promise<void> {
   getLogger().info(
     `[mural webhook] account_credited account=${event.accountId} amount=${event.tokenAmount} org=${event.organizationId}`
@@ -65,7 +105,22 @@ async function handleAccountCredited(
     return;
   }
   const payments = createSystemPaymentsRepository(c.env);
-  const transfer = await findMuralOnrampTransfer(payments, counterparty, ["awaiting_payment"]);
+  const replay = await getDb(c.env)
+    .prepare(
+      `SELECT id
+       FROM payment_transfers
+       WHERE provider = 'mural'
+         AND provider_data->'mural'->>'accountCreditedDeliveryId' = ?
+       LIMIT 1`
+    )
+    .bind(event.deliveryId)
+    .first<{ id: string }>();
+  if (replay) {
+    return;
+  }
+  const transfer = await findMuralOnrampTransfer(payments, counterparty, event.accountId, [
+    "awaiting_payment",
+  ]);
   if (!transfer) {
     getLogger().warn(
       `[mural webhook] no awaiting on-ramp transfer for counterparty ${counterparty.id}`
@@ -81,6 +136,12 @@ async function handleAccountCredited(
     toStatus: "completed",
     updatedAt: new Date().toISOString(),
     amount: String(event.tokenAmount),
+    providerData: {
+      mural: {
+        ...readMuralData(transfer),
+        accountCreditedDeliveryId: event.deliveryId,
+      },
+    },
   });
   if (!claimed) {
     return;
@@ -108,7 +169,7 @@ async function handleOrganizationLifecycleEvent(
   });
 }
 
-export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralWebhookEvent> {
+export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralProcessorEvent> {
   readonly provider = "mural";
 
   async verify({
@@ -136,20 +197,38 @@ export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralWeb
     });
 
     try {
-      return JSON.parse(rawBody);
+      const payload = JSON.parse(rawBody) as unknown;
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        return {
+          ...(payload as Record<string, unknown>),
+          [MURAL_DELIVERY_ID_FIELD]: await muralDeliveryId(timestamp, rawBody),
+        };
+      }
+      return payload;
     } catch {
       throw badRequest("Mural webhook body must be valid JSON", { provider: this.provider });
     }
   }
 
-  parse(payload: unknown): MuralWebhookEvent {
-    return RAMP_PROVIDER_CLIENTS.mural.parseMuralWebhookEvent(payload);
+  parse(payload: unknown): MuralProcessorEvent {
+    const event = RAMP_PROVIDER_CLIENTS.mural.parseMuralWebhookEvent(payload);
+    if (event.kind !== "account_credited") {
+      return event;
+    }
+    const deliveryId =
+      payload && typeof payload === "object" && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)[MURAL_DELIVERY_ID_FIELD]
+        : undefined;
+    if (typeof deliveryId !== "string" || deliveryId.length === 0) {
+      throw badRequest("Mural webhook is missing its verified delivery id", { provider: "mural" });
+    }
+    return { ...event, deliveryId };
   }
 
   async process(
     c: AppContext,
     _environment: SdpEnvironment,
-    event: MuralWebhookEvent
+    event: MuralProcessorEvent
   ): Promise<void> {
     switch (event.kind) {
       case "ignore":
@@ -161,9 +240,17 @@ export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralWeb
       case "account_credited":
         return handleAccountCredited(c, event);
       case "payout_settled":
+        return applyRampSettlementEvent(c, {
+          provider: "mural",
+          kind: "settled",
+          reference: event.payoutRequestId,
+        });
       case "payout_failed":
-        getLogger().info(`[mural webhook] ignored unimplemented payout event: ${event.kind}`);
-        return;
+        return applyRampSettlementEvent(c, {
+          provider: "mural",
+          kind: "failed",
+          reference: event.payoutRequestId,
+        });
     }
   }
 }

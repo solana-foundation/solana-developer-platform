@@ -975,10 +975,8 @@ export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
 /**
  * Coinbase headless on-ramp events, forwarded from the payment-link iframe's
  * postMessage stream (`onramp_api.*`). `orderId` is the create-order id used as
- * the transfer's provider reference. Client events are provisional and only
- * advance the transfer to non-terminal states; the server-side webhook is the
- * settlement authority — it alone completes the transfer, carrying the actual
- * delivered crypto amount, which a client-set terminal status would block.
+ * the transfer's provider reference. Client events are advisory telemetry only;
+ * the signature-verified server-side webhook is the sole settlement authority.
  */
 export type CoinbaseRampEvent =
   | { kind: "committed"; orderId: string }

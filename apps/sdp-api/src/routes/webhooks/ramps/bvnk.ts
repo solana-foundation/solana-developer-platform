@@ -1,3 +1,4 @@
+import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import { readRecord, readString } from "@sdp/payments/json";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
@@ -17,7 +18,10 @@ import {
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { BvnkBankFundingDetails, SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
-import { createSystemCounterpartiesRepository } from "@/db/repositories";
+import {
+  createSystemCounterpartiesRepository,
+  createSystemPaymentsRepository,
+} from "@/db/repositories";
 import type {
   CounterpartiesRepository,
   CounterpartyRow,
@@ -182,7 +186,12 @@ async function handleProviderOnrampSettlementWebhook(
   c: AppContext,
   event: Extract<BvnkWebhookEvent, { kind: "bvnk:payment:payin:status-change" }>
 ): Promise<void> {
-  if (event.status !== "COMPLETED" || !event.customerReference || !event.walletId) {
+  if (
+    event.status !== "COMPLETED" ||
+    !event.customerReference ||
+    !event.walletId ||
+    !event.amount
+  ) {
     return;
   }
   const repo = createSystemCounterpartiesRepository(c.env);
@@ -194,38 +203,45 @@ async function handleProviderOnrampSettlementWebhook(
       `BVNK webhook customer ${event.customerReference} was not found or is not active`
     );
   }
-  // Single guarded UPDATE: the status exclusion is on the write itself (not just the
-  // lookup), so a transfer canceled in the race window can't be reopened to completed.
-  await getDb(c.env)
-    .prepare(
-      `UPDATE payment_transfers
-       SET status = 'completed',
-           amount = CASE WHEN ?::boolean THEN ? ELSE amount END,
-           fiat_amount = CASE WHEN ?::boolean THEN ? ELSE fiat_amount END,
-           updated_at = ?
-       WHERE id = (
-         SELECT id
-         FROM payment_transfers
-         WHERE provider = 'bvnk'
-           AND type = 'onramp'
-           AND counterparty_id = ?
-           AND provider_data->'bvnk'->>'fundingWalletId' = ?
-           AND status NOT IN ('completed', 'failed', 'expired', 'canceled')
-         ORDER BY created_at DESC
-         LIMIT 1
-       )
-         AND status NOT IN ('completed', 'failed', 'expired', 'canceled')`
-    )
-    .bind(
-      event.amount !== undefined,
-      event.amount ?? null,
-      event.amount !== undefined,
-      event.amount ?? null,
-      new Date().toISOString(),
-      counterparty.id,
-      event.walletId
-    )
-    .run();
+  const paymentAmount = event.amount;
+  const payments = createSystemPaymentsRepository(c.env);
+  const { rows } = await payments.listTransfers({
+    organizationId: counterparty.organization_id,
+    projectId: counterparty.project_id,
+    counterpartyId: counterparty.id,
+    provider: "bvnk",
+    types: ["onramp"],
+    statuses: ["pending", "awaiting_payment", "settling"],
+    limit: 100,
+    offset: 0,
+  });
+  const matches = rows.filter((transfer) => {
+    const bvnk = readRecord(transfer.provider_data.bvnk);
+    return (
+      readString(bvnk?.fundingWalletId) === event.walletId &&
+      transfer.fiat_amount !== null &&
+      compareDecimalAmounts(transfer.fiat_amount, paymentAmount) === 0
+    );
+  });
+  // BVNK pay-in events do not carry the SDP quote id. Only a unique active
+  // wallet+amount match is safe; choosing the newest row can settle the wrong quote.
+  if (matches.length !== 1) {
+    getLogger().warn(
+      `[bvnk webhook] refusing ambiguous pay-in settlement customer=${event.customerReference} wallet=${event.walletId} matches=${matches.length}`
+    );
+    return;
+  }
+  const transfer = matches[0];
+  await payments.updateTransferStatusGuarded({
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    fromStatuses: ["pending", "awaiting_payment", "settling"],
+    toStatus: "completed",
+    amount: paymentAmount,
+    fiatAmount: paymentAmount,
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 async function applyBvnkCustomerRequirementWebhook(
