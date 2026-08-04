@@ -1,18 +1,21 @@
 "use client";
 
 import type {
+  OperationFamilyPolicyRule,
   PolicyRule,
   WalletControlProfileRevisionHistory,
   WalletControlProfileRevisionSummary,
 } from "@sdp/types";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { ArrowUpCircle, ChevronRight, ExternalLink } from "lucide-react";
+import { AnimatePresence } from "motion/react";
 import { useState } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { resolveTransferTokenLabel } from "@/app/dashboard/payments/payments-overview.utils";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { JsonCodeBlock } from "@/components/ui/code-block";
+import { HeightReveal } from "@/components/ui/height-reveal";
 import { UserAvatar } from "@/components/user-avatar";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { replaceDashboardSearchParams } from "@/lib/dashboard-url-state";
@@ -21,7 +24,12 @@ import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn, formatDisplayLabel } from "@/lib/utils";
 import { formatPolicyDate, formatPolicyDateTime, shortIdentifier } from "./policy-audit.shared";
 import { AUTHORING_RULE_ACTIONS, categoryForRule } from "./wallet-policy-authoring";
-import { CATEGORY_OPTIONS, RULE_ACTION_LABEL_KEYS } from "./wallet-policy-flow.shared";
+import {
+  CATEGORY_OPTIONS,
+  FAMILY_DESCRIPTION_KEYS,
+  FAMILY_LABEL_KEYS,
+  RULE_ACTION_LABEL_KEYS,
+} from "./wallet-policy-flow.shared";
 
 export function PolicyRevisionExplorer({
   history,
@@ -192,7 +200,7 @@ function RevisionSnapshot({
           ) : null}
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-secondary">
-          <time dateTime={revision.createdAt}>
+          <time dateTime={revision.createdAt} className="min-w-40">
             {formatPolicyDateTime(revision.createdAt, locale)}
           </time>
           <div className="flex min-w-0 items-center gap-2">
@@ -230,7 +238,7 @@ interface RevisionRuleGroup {
  *
  * @param props.rules - The revision's rule snapshot.
  * @param props.defaultAction - Action a rule falls back to when it declares none.
- * @returns The default action followed by one card per rule category.
+ * @returns The default action followed by one card per rule category, each with a single raw-data disclosure.
  */
 function RevisionRuleRows({
   rules,
@@ -275,26 +283,69 @@ function RevisionRuleRows({
         groups.map((group) => (
           <div
             key={group.key}
-            className="rounded-lg border border-border-subtle bg-surface-sunken p-4"
+            className="relative rounded-lg border border-border-subtle bg-surface-sunken p-4"
           >
-            <p className="text-base font-medium text-primary">{group.title}</p>
+            <p className="pr-32 text-base font-medium text-primary">{group.title}</p>
             <div className="divide-y divide-border-subtle">
               {group.rules.map(({ rule, index }) => (
-                <div key={rule.id ?? `${rule.kind}-${index}`} className="relative py-3 last:pb-0">
-                  <div className="pr-32">
+                <div key={rule.id ?? `${rule.kind}-${index}`} className="py-3 last:pb-0">
+                  {rule.kind === "operation_family" ? (
+                    <OperationFamilyRuleSummary rule={rule} defaultAction={defaultAction} />
+                  ) : (
                     <RuleSummary rule={rule} />
-                  </div>
-                  <RawDataDetails
-                    value={rule}
-                    label={t("DashboardCustody.policyRevisionsRawRule")}
-                    filename={`${rule.id ?? `rule-${index + 1}`}.json`}
-                  />
+                  )}
                 </div>
               ))}
             </div>
+            <RawDataDetails
+              value={
+                group.rules.length === 1 ? group.rules[0].rule : group.rules.map(({ rule }) => rule)
+              }
+              label={t("DashboardCustody.policyRevisionsRawRule")}
+              filename={`${
+                group.rules.length === 1 ? (group.rules[0].rule.id ?? group.key) : group.key
+              }.json`}
+            />
           </div>
         ))
       )}
+    </div>
+  );
+}
+
+/**
+ * Editor-style rows for an operation-family rule: each covered family shows
+ * the shared family label and description with the rule's decision rendered
+ * as the same read-only action options the default-action row uses.
+ *
+ * @param props.rule - The stored operation-family rule.
+ * @param props.defaultAction - Revision default applied when the rule declares no action.
+ * @returns One labeled row per family the rule covers.
+ */
+function OperationFamilyRuleSummary({
+  rule,
+  defaultAction,
+}: {
+  rule: OperationFamilyPolicyRule;
+  defaultAction: string;
+}) {
+  const t = useTranslations();
+  const families = rule.families ?? (rule.family ? [rule.family] : []);
+
+  return (
+    <div className="space-y-3">
+      {rule.description ? (
+        <p className="text-sm leading-5 text-secondary">{rule.description}</p>
+      ) : null}
+      {families.map((family) => (
+        <div key={family} className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm text-primary">{t(FAMILY_LABEL_KEYS[family])}</p>
+            <p className="mt-0.5 text-xs text-muted">{t(FAMILY_DESCRIPTION_KEYS[family])}</p>
+          </div>
+          <PolicyActionOptions action={rule.action ?? defaultAction} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -366,14 +417,34 @@ function RawDataDetails({
   label: string;
   filename: string;
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <details className="group/rule">
-      <summary className="absolute top-3 right-0 w-fit cursor-pointer list-none text-xs text-secondary transition-colors hover:text-primary">
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="absolute top-4 right-4 w-fit cursor-pointer text-xs text-secondary transition-colors hover:text-primary"
+      >
         {label}
-        <ChevronRight className="ml-1 inline size-3 transition-transform group-open/rule:rotate-90" />
-      </summary>
-      <JsonCodeBlock value={value} title={filename} className="mt-3" viewportClassName="max-h-72" />
-    </details>
+        <ChevronRight
+          className={cn("ml-1 inline size-3 transition-transform", open && "rotate-90")}
+        />
+      </button>
+      <AnimatePresence>
+        {open ? (
+          <HeightReveal key="raw-rule-data">
+            <JsonCodeBlock
+              value={value}
+              title={filename}
+              className="mt-3"
+              viewportClassName="max-h-96"
+            />
+          </HeightReveal>
+        ) : null}
+      </AnimatePresence>
+    </>
   );
 }
 

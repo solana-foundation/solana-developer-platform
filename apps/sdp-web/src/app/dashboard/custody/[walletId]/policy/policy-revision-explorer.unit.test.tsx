@@ -83,7 +83,7 @@ describe("policy revision explorer", () => {
 
       expect(html).toContain('aria-current="true"');
       expect(html).toContain("Revision #2");
-      expect(html).toContain("rule-assets.json");
+      expect(html).toContain("Allowed assets");
     }
   });
 
@@ -91,7 +91,7 @@ describe("policy revision explorer", () => {
     const html = renderExplorer({ initialRevisionId: "revision-1" });
 
     expect(html).toContain("No explicit rules were stored in this revision.");
-    expect(html).not.toContain("rule-assets.json");
+    expect(html).not.toContain("Allowed assets");
   });
 
   it("labels creators from the member directory and falls back to System", () => {
@@ -161,8 +161,9 @@ describe("policy revision explorer", () => {
     );
 
     expect(html.match(/Operation controls/g)).toHaveLength(1);
-    expect(html).toContain("rule-family-payment.json");
-    expect(html).toContain("rule-family-issuance.json");
-    expect(html).toContain("rule-type.json");
+    expect(html.match(/View raw rule data/g)).toHaveLength(1);
+    expect(html).toContain("Payments");
+    expect(html).toContain("Issuance");
+    expect(html).not.toContain("Families");
   });
 });
