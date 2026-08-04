@@ -188,10 +188,19 @@ export function collectMissingTranslations({ messagesDir, sourceLocale = "en" })
   };
 }
 
-function localeGuidance(guidance, locale) {
+function localePromptConfig(guidance, locale) {
+  const general = guidance?.default ?? {};
+  const localeConfig = guidance?.locales?.[locale] ?? {};
   return {
-    general: guidance?.default ?? {},
-    locale: guidance?.locales?.[locale] ?? {},
+    context: {
+      general: general.context ?? {},
+      locale: localeConfig.context ?? {},
+    },
+    instructions: {
+      general: general.instructions ?? [],
+      locale: localeConfig.instructions ?? [],
+      terminology: localeConfig.terminology ?? [],
+    },
   };
 }
 
@@ -566,7 +575,7 @@ async function requestTranslations({
   const body = {
     message: JSON.stringify({
       targetLocale: locale,
-      guidance: localeGuidance(guidance, locale),
+      ...localePromptConfig(guidance, locale),
       translations: entries.map(({ sourceFile, key, source, context }) => ({
         file: sourceFile,
         key,
