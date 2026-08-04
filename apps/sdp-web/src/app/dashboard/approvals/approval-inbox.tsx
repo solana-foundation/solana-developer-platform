@@ -24,7 +24,7 @@ import {
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DateRangePicker, formatDateValue } from "@/components/ui/date-picker";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { PaginatedFooter, usePaginationUrlState } from "@/components/ui/paginated-footer";
 import { Select, SelectItem } from "@/components/ui/select";
@@ -436,18 +436,11 @@ function ApprovalFilters({
 const DATE_PRESETS = [7, 30, 90] as const;
 type DatePreset = "all" | "7" | "30" | "90" | "custom";
 
-function toDateInputValue(date: Date): string {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function presetRange(days: number): { from: string; to: string } {
   const now = new Date();
   const start = new Date(now);
   start.setDate(start.getDate() - (days - 1));
-  return { from: toDateInputValue(start), to: toDateInputValue(now) };
+  return { from: formatDateValue(start), to: formatDateValue(now) };
 }
 
 function activeDatePreset(from: string, to: string): DatePreset {
@@ -511,28 +504,18 @@ function DateRangeFilter({
         </Select>
       </FilterField>
       {showCustom ? (
-        <>
-          <FilterField label={t("DashboardApprovals.fromFilter")}>
-            <Input
-              type="date"
-              size="xl"
-              value={from}
-              max={to || undefined}
-              onChange={(event) => onChange(event.target.value, to)}
-              className="w-[168px]"
-            />
-          </FilterField>
-          <FilterField label={t("DashboardApprovals.toFilter")}>
-            <Input
-              type="date"
-              size="xl"
-              value={to}
-              min={from || undefined}
-              onChange={(event) => onChange(from, event.target.value)}
-              className="w-[168px]"
-            />
-          </FilterField>
-        </>
+        <FilterField
+          className="min-w-72 flex-[2] sm:min-w-[22rem]"
+          label={t("DashboardApprovals.dateCustom")}
+        >
+          <DateRangePicker
+            size="xl"
+            from={from}
+            to={to}
+            onChange={onChange}
+            ariaLabel={`${t("DashboardApprovals.fromFilter")} – ${t("DashboardApprovals.toFilter")}`}
+          />
+        </FilterField>
       ) : null}
     </>
   );

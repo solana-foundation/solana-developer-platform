@@ -832,7 +832,7 @@ export function DashboardShell({
 
         <section
           className={[
-            "relative min-w-0 rounded-2xl border border-border-subtle bg-surface-raised/80 xl:rounded-tl-[16px]",
+            "relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80",
             shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
           ].join(" ")}
         >

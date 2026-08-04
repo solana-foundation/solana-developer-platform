@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { DateTimePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
@@ -747,11 +748,10 @@ export function RecurringPaymentCreateWorkspace({
               >
                 {t("DashboardPayments.recurring.firstPayment")}
               </Label>
-              <Input
+              <DateTimePicker
                 id="recurring-payment-first-collection"
-                type="datetime-local"
                 value={fields.firstCollectionAt}
-                onChange={(event) => setField("firstCollectionAt", event.currentTarget.value)}
+                onChange={(value) => setField("firstCollectionAt", value)}
                 size="xl"
               />
               {fields.firstCollectionAt && !firstCollectionAtIsValid(fields.firstCollectionAt) ? (
