@@ -8,7 +8,10 @@ import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { walletOperationExecutionRequest } from "@/services/policy/approved-operation-replay";
+import {
+  beginApprovedWalletOperationEffect,
+  walletOperationExecutionRequest,
+} from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -252,6 +255,8 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   if (replayed) {
     return success(c, { transaction: tx });
   }
+
+  await beginApprovedWalletOperationEffect(c);
 
   const signer = await createResolvedAuthoritySigner({
     env: c.env,

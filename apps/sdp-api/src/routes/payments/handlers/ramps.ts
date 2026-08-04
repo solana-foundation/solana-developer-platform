@@ -60,6 +60,7 @@ import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
   approvedWalletOperationAttemptId,
   approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
 import {
@@ -560,6 +561,8 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     },
   });
 
+  await beginApprovedWalletOperationEffect(c);
+
   let quote: PaymentRampQuote;
   let transferProviderData: Record<string, unknown> | undefined;
   switch (input.provider) {
@@ -733,6 +736,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       executionRequest: walletOperationExecutionRequest(c, input),
     },
   });
+
+  await beginApprovedWalletOperationEffect(c);
 
   let quote: PaymentRampQuote;
   let pendingTransfer: PaymentTransferRow | undefined;

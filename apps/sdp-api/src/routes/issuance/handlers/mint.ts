@@ -8,7 +8,10 @@ import { success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { walletOperationExecutionRequest } from "@/services/policy/approved-operation-replay";
+import {
+  beginApprovedWalletOperationEffect,
+  walletOperationExecutionRequest,
+} from "@/services/policy/approved-operation-replay";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
@@ -409,6 +412,8 @@ export const executeMint = async (c: AppContext) => {
       executionRequest: walletOperationExecutionRequest(c, parsed.data),
     },
   });
+
+  await beginApprovedWalletOperationEffect(c);
 
   // Resolve signer + sync the destination on-chain BEFORE createTransaction.
   // If sync (or its inner revoke check) throws inside the try block below,

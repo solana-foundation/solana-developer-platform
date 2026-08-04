@@ -188,6 +188,7 @@ export interface WalletOperationRow {
   execution_result: Record<string, unknown> | null;
   execution_attempt_id: string | null;
   execution_lease_expires_at: string | null;
+  execution_effect_started_at: string | null;
   execution_attempts: number;
   created_at: string;
   updated_at: string;
@@ -588,6 +589,10 @@ export interface PolicyRepository {
     executionAttemptId: string
   ): Promise<WalletOperationRow | null>;
   renewWalletOperationExecutionLease(
+    walletOperationId: string,
+    executionAttemptId: string
+  ): Promise<boolean>;
+  beginWalletOperationExecutionEffect(
     walletOperationId: string,
     executionAttemptId: string
   ): Promise<boolean>;

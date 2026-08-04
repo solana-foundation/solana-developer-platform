@@ -6409,6 +6409,80 @@ describe("Payments routes", () => {
     expect(Number(transferCount?.count ?? 0)).toBe(1);
   });
 
+  it("requires manual reconciliation when an expired execution crossed its effect fence", async () => {
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-ambiguous-recovery",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+    const repository = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    await repository.updateApprovalRequestStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      approvalRequestId,
+      status: "approved",
+      operationStatus: "executing",
+      resolvedBy: TEST_API_KEY.id,
+    });
+    await repository.claimWalletOperationExecution(walletOperationId, "ambiguous-attempt");
+    expect(
+      await repository.beginWalletOperationExecutionEffect(walletOperationId, "ambiguous-attempt")
+    ).toBe(true);
+    await getDb(env)
+      .prepare(
+        `UPDATE wallet_operations
+         SET execution_lease_expires_at = '2000-01-01T00:00:00.000Z'
+         WHERE id = ?`
+      )
+      .bind(walletOperationId)
+      .run();
+
+    expect(await recoverApprovedWalletOperations(env)).toBe(0);
+    const reconciled = await repository.getWalletOperationById(walletOperationId);
+    expect(reconciled).toMatchObject({
+      status: "failed",
+      execution_attempt_id: "ambiguous-attempt",
+      execution_attempts: 1,
+      execution_lease_expires_at: null,
+    });
+    expect(reconciled?.execution_effect_started_at).toBeTruthy();
+    expect(reconciled?.execution_completed_at).toBeTruthy();
+    expect(reconciled?.execution_error).toContain("manual reconciliation");
+
+    const transferCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+      .first<{ count: number | string }>();
+    expect(Number(transferCount?.count ?? 0)).toBe(0);
+  });
+
   it("requires the configured approval-group member to approve execution", async () => {
     const approvalGroupId = "apg_payment_execution";
     const sessionId = "ses_payment_approver";

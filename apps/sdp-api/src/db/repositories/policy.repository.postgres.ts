@@ -495,6 +495,8 @@ function mapWalletOperationRow(row: Record<string, unknown>): WalletOperationRow
     execution_attempt_id: (row.execution_attempt_id as string | null | undefined) ?? null,
     execution_lease_expires_at:
       (row.execution_lease_expires_at as string | null | undefined) ?? null,
+    execution_effect_started_at:
+      (row.execution_effect_started_at as string | null | undefined) ?? null,
     execution_attempts: Number(row.execution_attempts ?? 0),
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -1953,12 +1955,14 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
                execution_attempts = execution_attempts + 1,
                execution_completed_at = NULL,
                execution_result = NULL,
+               execution_effect_started_at = NULL,
                execution_error = NULL,
                updated_at = ?
            WHERE wo.id = ?
              AND wo.organization_id = ?
              AND wo.project_id IS NOT DISTINCT FROM ?
              AND wo.status = 'executing'
+             AND wo.execution_effect_started_at IS NULL
              AND (
                wo.execution_started_at IS NULL
                OR wo.execution_lease_expires_at IS NULL
@@ -2002,6 +2006,35 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         )
         .bind(
           leaseExpiresAt,
+          now,
+          walletOperationId,
+          scope.organizationId,
+          scope.projectId,
+          executionAttemptId,
+          now
+        )
+        .run();
+
+      return result === 1;
+    },
+
+    async beginWalletOperationExecutionEffect(walletOperationId, executionAttemptId) {
+      const now = new Date().toISOString();
+      const result = await db
+        .prepare(
+          `UPDATE wallet_operations
+           SET execution_effect_started_at = ?,
+               updated_at = ?
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
+             AND status = 'executing'
+             AND execution_attempt_id = ?
+             AND execution_lease_expires_at > ?
+             AND execution_effect_started_at IS NULL`
+        )
+        .bind(
+          now,
           now,
           walletOperationId,
           scope.organizationId,

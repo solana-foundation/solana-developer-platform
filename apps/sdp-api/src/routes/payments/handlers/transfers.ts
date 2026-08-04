@@ -49,6 +49,7 @@ import {
 import {
   approvedWalletOperationAttemptId,
   approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
 import {
@@ -961,6 +962,7 @@ export async function createTransfer(c: AppContext) {
   }
 
   if (privateTransfer) {
+    await beginApprovedWalletOperationEffect(c);
     assertMagicBlockKoraSponsoredExecutionOptions(privateTransfer.magicBlock);
     const mapped = await prepareMagicBlockPrivateTransferForOperation({
       c,
@@ -1043,6 +1045,8 @@ export async function createTransfer(c: AppContext) {
   if (replayed) {
     return success(c, buildTransferReplayPayload(transfer));
   }
+
+  await beginApprovedWalletOperationEffect(c);
 
   try {
     if (operation.token === "SOL") {

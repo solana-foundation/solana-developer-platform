@@ -8,7 +8,7 @@ import {
   type WalletOperationRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
-import { createTenantScope } from "@/lib/tenant-scope";
+import { createTenantScope, getRequestTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
@@ -46,6 +46,33 @@ export function approvedWalletOperationAttemptId(
   c: Context<{ Bindings: Env }>
 ): string | undefined {
   return c.get("approvedWalletOperationAttemptId");
+}
+
+/**
+ * Durably fences an approved replay immediately before its first external effect.
+ * Normal requests are a no-op. Once this marker is set, an expired attempt is
+ * never automatically replayed because the external result may be ambiguous.
+ */
+export async function beginApprovedWalletOperationEffect(
+  c: Context<{ Bindings: Env }>
+): Promise<void> {
+  const operationId = approvedWalletOperationId(c);
+  const executionAttemptId = approvedWalletOperationAttemptId(c);
+  if (!operationId && !executionAttemptId) {
+    return;
+  }
+  if (!operationId || !executionAttemptId) {
+    throw new AppError("FORBIDDEN", "Approved-operation execution context is incomplete");
+  }
+
+  const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
+  const began = await repository.beginWalletOperationExecutionEffect(
+    operationId,
+    executionAttemptId
+  );
+  if (!began) {
+    throw new AppError("FORBIDDEN", "Approved-operation execution lease was lost");
+  }
 }
 
 export async function tryApprovedOperationReplayAuth(
@@ -276,11 +303,42 @@ export async function executeApprovedWalletOperation(
 }
 
 export async function recoverApprovedWalletOperations(env: Env, limit = 25): Promise<number> {
-  const rows = await getDb(env)
+  const db = getDb(env);
+  const now = new Date().toISOString();
+
+  // If an attempt disappeared after crossing an external boundary, its result is
+  // ambiguous. Fail closed for operator reconciliation instead of risking a
+  // second signer/provider submission from an automatic retry.
+  await db
+    .prepare(
+      `UPDATE wallet_operations wo
+       SET status = 'failed',
+           execution_completed_at = ?,
+           execution_error = ?,
+           execution_lease_expires_at = NULL,
+           updated_at = ?
+       WHERE wo.status = 'executing'
+         AND wo.execution_effect_started_at IS NOT NULL
+         AND (wo.execution_lease_expires_at IS NULL OR wo.execution_lease_expires_at <= ?)
+         AND EXISTS (
+           SELECT 1 FROM approval_requests ar
+           WHERE ar.wallet_operation_id = wo.id AND ar.status = 'approved'
+         )`
+    )
+    .bind(
+      now,
+      "Approved execution was interrupted after its external effect began; manual reconciliation is required",
+      now,
+      now
+    )
+    .run();
+
+  const rows = await db
     .prepare(
       `SELECT wo.id, wo.organization_id, wo.project_id
        FROM wallet_operations wo
        WHERE wo.status = 'executing'
+         AND wo.execution_effect_started_at IS NULL
          AND (wo.execution_lease_expires_at IS NULL OR wo.execution_lease_expires_at <= ?)
          AND EXISTS (
            SELECT 1 FROM approval_requests ar
@@ -289,7 +347,7 @@ export async function recoverApprovedWalletOperations(env: Env, limit = 25): Pro
        ORDER BY wo.updated_at ASC, wo.id ASC
        LIMIT ?`
     )
-    .bind(new Date().toISOString(), limit)
+    .bind(now, limit)
     .all<{ id: string; organization_id: string; project_id: string | null }>();
 
   let recovered = 0;

@@ -138,6 +138,7 @@ function createRepository(options: {
         execution_result: null,
         execution_attempt_id: null,
         execution_lease_expires_at: null,
+        execution_effect_started_at: null,
         execution_attempts: 0,
         created_at: "2026-06-18T00:00:00.000Z",
         updated_at: "2026-06-18T00:00:00.000Z",

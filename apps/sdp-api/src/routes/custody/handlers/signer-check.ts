@@ -23,6 +23,7 @@ import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import {
   approvedWalletOperationAttemptId,
   approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
 import {
@@ -102,6 +103,8 @@ export const signerCheck = async (c: AppContext) => {
     approvedOperationId,
     attemptId
   );
+
+  await beginApprovedWalletOperationEffect(c);
 
   try {
     const signer = await createOrgSigner(

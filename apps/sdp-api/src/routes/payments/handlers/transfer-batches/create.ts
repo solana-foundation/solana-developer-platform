@@ -8,6 +8,7 @@ import type {
 import { badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
+import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../../context";
 import { createTransferBatchSchema } from "../../schemas";
@@ -87,6 +88,7 @@ export async function createTransferBatch(c: AppContext) {
     }
   }
   await enforceBatchPolicies(c, resolved, parsed.data);
+  await beginApprovedWalletOperationEffect(c);
 
   const feePayment = getFeePayment(c);
   const [signer, feePayer, lifetime] = await Promise.all([
