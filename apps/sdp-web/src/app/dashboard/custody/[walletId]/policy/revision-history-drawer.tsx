@@ -30,6 +30,48 @@ import { fetchWalletRevisionHistoryAction } from "./revision-history.actions";
  * @param props.preloaded - Server-fetched history + member labels, when the page already has them.
  * @returns The trigger button with its drawer.
  */
+/**
+ * Coarse placeholder mirroring the explorer's two-pane geometry — revision
+ * rows on the left, snapshot header and rule cards on the right — so the
+ * drawer doesn't reflow when history arrives.
+ *
+ * @returns The loading layout.
+ */
+function RevisionHistorySkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      className="grid h-full min-h-0 grid-rows-[minmax(0,2fr)_minmax(0,3fr)] bg-surface-raised lg:grid-cols-[320px_minmax(0,1fr)] lg:grid-rows-1"
+    >
+      <div className="flex min-h-0 flex-col overflow-hidden border-b border-border-default lg:border-r lg:border-b-0">
+        <div className="shrink-0 border-b border-border-default px-4 py-3">
+          <SkeletonBlock className="h-6 w-24" />
+        </div>
+        <div className="divide-y divide-border-default">
+          {[0, 1, 2].map((row) => (
+            <div key={row} className="space-y-3 px-4 py-4">
+              <SkeletonBlock className="h-4 w-40 max-w-full" />
+              <div className="flex items-center gap-2">
+                <SkeletonBlock className="size-6 rounded-full" />
+                <SkeletonBlock className="h-4 w-32" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="min-h-0 space-y-5 overflow-hidden p-5 sm:p-6">
+        <div className="space-y-3 border-b border-border-default pb-5">
+          <SkeletonBlock className="h-8 w-44 max-w-full" />
+          <SkeletonBlock className="h-4 w-72 max-w-full" />
+        </div>
+        {[0, 1, 2].map((card) => (
+          <SkeletonBlock key={card} className="h-24 w-full rounded-lg" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function RevisionHistoryDrawer({
   walletId,
   initialRevisionId,
@@ -104,9 +146,7 @@ export function RevisionHistoryDrawer({
         </DrawerClose>
         <div className="min-h-0 flex-1 overflow-hidden">
           {!result ? (
-            <div className="p-4">
-              <SkeletonBlock className="h-72 w-full" />
-            </div>
+            <RevisionHistorySkeleton />
           ) : result.ok ? (
             <PolicyRevisionExplorer
               history={result.history}
