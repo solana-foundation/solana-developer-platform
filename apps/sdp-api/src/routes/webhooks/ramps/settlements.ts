@@ -1,6 +1,6 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
 import type { Context } from "hono";
-import type { PaymentTransferStatus, UpdatePaymentTransferInput } from "@/db/repositories";
+import type { PaymentTransferStatus } from "@/db/repositories";
 import { createSystemPaymentsRepository, isRampTransferType } from "@/db/repositories";
 import type { Env } from "@/types/env";
 
@@ -18,7 +18,19 @@ const TERMINAL_RAMP_TRANSFER_STATUSES = [
   "completed",
   "failed",
   "expired",
+  "canceled",
 ] as const satisfies readonly PaymentTransferStatus[];
+
+const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
+  awaiting_payment: ["pending"],
+  settling: ["pending", "awaiting_payment"],
+  settled: ["pending", "awaiting_payment", "settling"],
+  failed: ["pending", "awaiting_payment", "settling"],
+  expired: ["pending", "awaiting_payment", "settling"],
+} as const satisfies Record<
+  Exclude<RampSettlementEvent["kind"], "ignore">,
+  readonly PaymentTransferStatus[]
+>;
 
 function isTerminalRampTransferStatus(status: PaymentTransferStatus): boolean {
   return (TERMINAL_RAMP_TRANSFER_STATUSES as readonly PaymentTransferStatus[]).includes(status);
@@ -46,9 +58,12 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
     return;
   }
 
-  const update: UpdatePaymentTransferInput = {
+  const update: Parameters<typeof repo.updateTransferStatusGuarded>[0] = {
     transferId: transfer.id,
-    status: RAMP_SETTLEMENT_STATUS[event.kind],
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    fromStatuses: ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES[event.kind],
+    toStatus: RAMP_SETTLEMENT_STATUS[event.kind],
     updatedAt: new Date().toISOString(),
   };
   // Record the actual settled amount the provider reports: the fiat payout for
@@ -72,5 +87,5 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
     update.providerData = { settlement: event.settlement };
   }
 
-  await repo.updateTransfer(update);
+  await repo.updateTransferStatusGuarded(update);
 }

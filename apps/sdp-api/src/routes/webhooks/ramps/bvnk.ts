@@ -17,7 +17,10 @@ import {
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { BvnkBankFundingDetails, SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
-import { createSystemCounterpartiesRepository } from "@/db/repositories";
+import {
+  createSystemCounterpartiesRepository,
+  createSystemPaymentsRepository,
+} from "@/db/repositories";
 import type {
   CounterpartiesRepository,
   CounterpartyRow,
@@ -182,7 +185,12 @@ async function handleProviderOnrampSettlementWebhook(
   c: AppContext,
   event: Extract<BvnkWebhookEvent, { kind: "bvnk:payment:payin:status-change" }>
 ): Promise<void> {
-  if (event.status !== "COMPLETED" || !event.customerReference || !event.walletId) {
+  if (
+    event.status !== "COMPLETED" ||
+    !event.customerReference ||
+    !event.walletId ||
+    !event.amount
+  ) {
     return;
   }
   const repo = createSystemCounterpartiesRepository(c.env);
@@ -194,38 +202,62 @@ async function handleProviderOnrampSettlementWebhook(
       `BVNK webhook customer ${event.customerReference} was not found or is not active`
     );
   }
-  // Single guarded UPDATE: the status exclusion is on the write itself (not just the
-  // lookup), so a transfer canceled in the race window can't be reopened to completed.
-  await getDb(c.env)
+  const paymentAmount = event.amount;
+  const payments = createSystemPaymentsRepository(c.env);
+  const matches = await getDb(c.env)
     .prepare(
-      `UPDATE payment_transfers
-       SET status = 'completed',
-           amount = CASE WHEN ?::boolean THEN ? ELSE amount END,
-           fiat_amount = CASE WHEN ?::boolean THEN ? ELSE fiat_amount END,
-           updated_at = ?
-       WHERE id = (
-         SELECT id
-         FROM payment_transfers
-         WHERE provider = 'bvnk'
-           AND type = 'onramp'
-           AND counterparty_id = ?
-           AND provider_data->'bvnk'->>'fundingWalletId' = ?
-           AND status NOT IN ('completed', 'failed', 'expired', 'canceled')
-         ORDER BY created_at DESC
-         LIMIT 1
-       )
-         AND status NOT IN ('completed', 'failed', 'expired', 'canceled')`
+      `SELECT id
+       FROM payment_transfers
+       WHERE organization_id = ?
+         AND project_id IS NOT DISTINCT FROM ?
+         AND counterparty_id = ?
+         AND provider = 'bvnk'
+         AND type = 'onramp'
+         AND status IN ('pending', 'awaiting_payment', 'settling')
+         AND provider_data->'bvnk'->>'fundingWalletId' = ?
+         AND fiat_amount IS NOT NULL
+         AND fiat_amount::numeric = ?::numeric
+       ORDER BY id
+       LIMIT 2`
     )
     .bind(
-      event.amount !== undefined,
-      event.amount ?? null,
-      event.amount !== undefined,
-      event.amount ?? null,
-      new Date().toISOString(),
+      counterparty.organization_id,
+      counterparty.project_id,
       counterparty.id,
-      event.walletId
+      event.walletId,
+      paymentAmount
     )
-    .run();
+    .all<{ id: string }>();
+  // BVNK pay-in events do not carry the SDP quote id. Only a unique active
+  // wallet+amount match is safe; choosing the newest row can settle the wrong quote.
+  if (matches.results.length !== 1) {
+    getLogger().warn(
+      `[bvnk webhook] refusing ambiguous pay-in settlement customer=${event.customerReference} wallet=${event.walletId} matches=${matches.results.length}`
+    );
+    return;
+  }
+  const match = matches.results[0];
+  if (!match) {
+    return;
+  }
+  const transfer = await payments.getTransferById({
+    transferId: match.id,
+    organizationId: counterparty.organization_id,
+    projectId: counterparty.project_id,
+  });
+  if (!transfer) {
+    return;
+  }
+  await payments.updateTransferStatusGuarded({
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    fromStatuses: ["pending", "awaiting_payment", "settling"],
+    toStatus: "completed",
+    amount: paymentAmount,
+    fiatAmount: paymentAmount,
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 async function applyBvnkCustomerRequirementWebhook(
