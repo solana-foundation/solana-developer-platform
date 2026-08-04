@@ -2964,11 +2964,7 @@ describe("Payments routes", () => {
         "transfer",
         "outbound",
         "processing",
-        JSON.stringify({
-          recurringPaymentId,
-          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
-          collectionDueAt: dueAt,
-        }),
+        JSON.stringify({ recurringPaymentId }),
         submittedSignature,
         now,
         now
@@ -3005,11 +3001,7 @@ describe("Payments routes", () => {
         now,
         "processing",
         null,
-        JSON.stringify({
-          recurringPaymentId,
-          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
-          collectionDueAt: dueAt,
-        }),
+        JSON.stringify({ recurringPaymentId }),
         now,
         now
       )

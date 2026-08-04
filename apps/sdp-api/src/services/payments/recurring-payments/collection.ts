@@ -192,6 +192,14 @@ async function verifyRecurringPaymentCollection(input: {
 }): Promise<VerifiedRecurringPaymentCollection> {
   const providerData = input.transfer.provider_data;
   const attemptMetadata = input.attempt.metadata;
+  const providerEvidenceMatches =
+    providerData.recurringPaymentId === input.recurringPayment.id &&
+    ((providerData.subscriptionId === input.subscription.id &&
+      providerData.collectionDueAt === input.dueAt) ||
+      // Transfers created before settlement verification shipped only persisted the recurring ID.
+      // Their exact attempt/transfer bindings and on-chain instruction are still verified below.
+      (!Object.hasOwn(providerData, "subscriptionId") &&
+        !Object.hasOwn(providerData, "collectionDueAt")));
   const persistedEvidenceMatches =
     input.attempt.subscription_id === input.subscription.id &&
     input.attempt.transfer_id === input.transfer.id &&
@@ -207,9 +215,7 @@ async function verifyRecurringPaymentCollection(input: {
     input.transfer.amount === input.recurringPayment.amount &&
     input.transfer.type === "transfer" &&
     input.transfer.direction === "outbound" &&
-    providerData.recurringPaymentId === input.recurringPayment.id &&
-    providerData.subscriptionId === input.subscription.id &&
-    providerData.collectionDueAt === input.dueAt &&
+    providerEvidenceMatches &&
     (input.attempt.signature === null || input.attempt.signature === input.signature) &&
     input.transfer.signature === input.signature;
 
