@@ -370,10 +370,11 @@ function BalanceHero({
               />
             ) : null}
             {canManageCustody ? (
-              <Button
-                asChild
-                className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
-              >
+              // Secondary, not primary. An organization with balances has already
+              // created its wallets; leading this screen with "Create Wallet" gave
+              // a setup action top billing over the numbers the page exists to
+              // show. It stays reachable, it just stops competing with them.
+              <Button asChild variant="secondary">
                 <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
               </Button>
             ) : null}
