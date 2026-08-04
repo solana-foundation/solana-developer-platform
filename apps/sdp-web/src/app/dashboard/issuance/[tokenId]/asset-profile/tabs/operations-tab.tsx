@@ -85,15 +85,26 @@ export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId:
           </p>
         </div>
 
-        {/* Single deploy action spans full width; mint + burn sit side by side. */}
-        <div className={cn("grid gap-4", operationRows.length > 1 && "sm:grid-cols-2")}>
+        {/* Single deploy action spans full width; mint + burn sit side by side
+            from lg. With lock supply present it spans the second row until 2xl,
+            where all three fit on one row. */}
+        <div
+          className={cn(
+            "grid gap-4",
+            operationRows.length > 1 && "lg:grid-cols-2",
+            operationRows.length > 2 && "2xl:grid-cols-3"
+          )}
+        >
           {operationRows.map((row) => {
             const Icon = row.icon;
             return (
               <div
                 key={row.id}
                 data-testid={`fund-management-row-${row.id}`}
-                className="flex items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised p-5"
+                className={cn(
+                  "flex items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised p-5",
+                  row.id === "lock-supply" && "lg:col-span-2 2xl:col-span-1"
+                )}
               >
                 <div className="flex min-w-0 items-center gap-3.5">
                   <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">

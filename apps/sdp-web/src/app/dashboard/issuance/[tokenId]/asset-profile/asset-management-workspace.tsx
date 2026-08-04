@@ -359,7 +359,9 @@ export function AssetManagementWorkspace({
       />
 
       <Tabs
-        bordered
+        // No rule under the tab strip: the tab content below is already carded,
+        // so the border would read as a second, competing edge.
+        bordered={false}
         value={activeTab}
         onValueChange={(value) => syncActiveTabInUrl(value as AssetManagementTab)}
       >
