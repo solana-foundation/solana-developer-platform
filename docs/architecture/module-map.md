@@ -14,9 +14,10 @@ This map is generated from the module-boundary check. It records the permitted w
 
 | Module | Purpose | Allowed workspace dependencies |
 | --- | --- | --- |
-| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types` |
+| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types` |
 | `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types` |
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/types` |
+| `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/kit-augment` | Shared @solana/kit type augmentation for the generated Codama clients. | None |
@@ -33,9 +34,10 @@ This map is generated from the module-boundary check. It records the permitted w
 
 ## Declared Workspace Graph
 
-- `@sdp/api` -> `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`
+- `@sdp/api` -> `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`
 - `@sdp/api-integration` -> `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types`
 - `@sdp/custody` -> `@sdp/types`
+- `@sdp/earn` -> `@sdp/types`
 - `@sdp/env-config` -> None
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/kit-augment` -> None
