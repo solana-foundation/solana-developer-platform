@@ -13,6 +13,7 @@ import type { SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 
 export const POLICY_AUDIT_PAGE_SIZE = 25;
+const POLICY_AUDIT_PAGE_SIZES: readonly number[] = [10, 25, 50, 100];
 const POLICY_AUDIT_API_PAGE_SIZE = 100;
 const POLICY_AUDIT_MAX_LOCAL_FILTER_PAGES = 50;
 
@@ -47,6 +48,7 @@ export const POLICY_AUDIT_OPERATION_FAMILIES = [
 
 export interface PolicyAuditFilters {
   page: number;
+  pageSize: number;
   decision?: PolicyDecision;
   status?: WalletOperationStatus;
   operationFamily?: WalletOperationFamily;
@@ -125,8 +127,12 @@ function dateValue(value: string | undefined): string | undefined {
 
 export function parsePolicyAuditFilters(searchParams: SearchParams): PolicyAuditFilters {
   const parsedPage = Number.parseInt(firstSearchParam(searchParams.page) ?? "1", 10);
+  const parsedPageSize = Number.parseInt(firstSearchParam(searchParams.pageSize) ?? "", 10);
   return {
     page: Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1,
+    pageSize: POLICY_AUDIT_PAGE_SIZES.includes(parsedPageSize)
+      ? parsedPageSize
+      : POLICY_AUDIT_PAGE_SIZE,
     decision: enumValue(firstSearchParam(searchParams.decision), POLICY_DECISIONS),
     status: enumValue(firstSearchParam(searchParams.status), POLICY_AUDIT_OPERATION_STATUSES),
     operationFamily: enumValue(
@@ -157,6 +163,7 @@ export function buildPolicyAuditSearchParams(
   const values = { ...filters, ...overrides };
   const query = new URLSearchParams();
   if (values.page > 1) query.set("page", String(values.page));
+  if (values.pageSize !== POLICY_AUDIT_PAGE_SIZE) query.set("pageSize", String(values.pageSize));
   if (values.decision) query.set("decision", values.decision);
   if (values.status) query.set("status", values.status);
   if (values.operationFamily) query.set("operationFamily", values.operationFamily);
@@ -300,26 +307,26 @@ export async function fetchPolicyAuditList(
       walletId,
       filters,
       filters.page,
-      POLICY_AUDIT_PAGE_SIZE
+      filters.pageSize
     );
     return {
       evaluations: result.data,
       total: result.meta.total,
       page: filters.page,
-      pageSize: POLICY_AUDIT_PAGE_SIZE,
+      pageSize: filters.pageSize,
     };
   }
 
   const evaluations = await collectLocallyPaginatedPolicyEvaluations(request, walletId, filters);
-  const pageCount = Math.max(1, Math.ceil(evaluations.length / POLICY_AUDIT_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(evaluations.length / filters.pageSize));
   const page = Math.min(filters.page, pageCount);
-  const start = (page - 1) * POLICY_AUDIT_PAGE_SIZE;
+  const start = (page - 1) * filters.pageSize;
 
   return {
-    evaluations: evaluations.slice(start, start + POLICY_AUDIT_PAGE_SIZE),
+    evaluations: evaluations.slice(start, start + filters.pageSize),
     total: evaluations.length,
     page,
-    pageSize: POLICY_AUDIT_PAGE_SIZE,
+    pageSize: filters.pageSize,
   };
 }
 
@@ -453,14 +460,14 @@ export async function fetchPolicyEvaluationNeighbors(
         previousIndex >= 0
           ? {
               id: evaluations[previousIndex].id,
-              page: Math.floor(previousIndex / POLICY_AUDIT_PAGE_SIZE) + 1,
+              page: Math.floor(previousIndex / filters.pageSize) + 1,
             }
           : null,
       next:
         nextIndex < evaluations.length
           ? {
               id: evaluations[nextIndex].id,
-              page: Math.floor(nextIndex / POLICY_AUDIT_PAGE_SIZE) + 1,
+              page: Math.floor(nextIndex / filters.pageSize) + 1,
             }
           : null,
     };
