@@ -216,13 +216,21 @@ function RevisionSnapshot({
   );
 }
 
+interface RevisionRuleGroup {
+  key: string;
+  title: string;
+  rules: { rule: PolicyRule; index: number }[];
+}
+
 /**
- * The snapshot's default action and stored rules presented as one continuous
- * row list.
+ * The snapshot's default action and stored rules, grouped by restriction
+ * category so several stored rules of one classification (e.g. two
+ * operation-family rules) read as rows of a single section, the way the
+ * authoring editor presents them.
  *
  * @param props.rules - The revision's rule snapshot.
  * @param props.defaultAction - Action a rule falls back to when it declares none.
- * @returns The default action followed by the stored rule rows.
+ * @returns The default action followed by one card per rule category.
  */
 function RevisionRuleRows({
   rules,
@@ -232,6 +240,26 @@ function RevisionRuleRows({
   defaultAction: string;
 }) {
   const t = useTranslations();
+  const groups: RevisionRuleGroup[] = [];
+  const groupByKey = new Map<string, RevisionRuleGroup>();
+  rules.forEach((rule, index) => {
+    const categoryOption = CATEGORY_OPTIONS.find((option) => option.id === categoryForRule(rule));
+    const key = categoryOption?.id ?? rule.id ?? `${rule.kind}-${index}`;
+    const existing = groupByKey.get(key);
+    if (existing) {
+      existing.rules.push({ rule, index });
+      return;
+    }
+    const group: RevisionRuleGroup = {
+      key,
+      title: categoryOption
+        ? t(categoryOption.titleKey)
+        : (rule.name ?? formatDisplayLabel(rule.kind)),
+      rules: [{ rule, index }],
+    };
+    groupByKey.set(key, group);
+    groups.push(group);
+  });
 
   return (
     <div className="space-y-3">
@@ -244,29 +272,28 @@ function RevisionRuleRows({
       {rules.length === 0 ? (
         <p className="text-sm text-secondary">{t("DashboardCustody.policyRevisionsNoRules")}</p>
       ) : (
-        rules.map((rule, index) => {
-          const category = categoryForRule(rule);
-          const categoryOption = CATEGORY_OPTIONS.find((option) => option.id === category);
-
-          return (
-            <div
-              key={rule.id ?? `${rule.kind}-${index}`}
-              className="relative rounded-lg border border-border-subtle bg-surface-sunken p-4"
-            >
-              <p className="pr-32 text-base font-medium text-primary">
-                {categoryOption
-                  ? t(categoryOption.titleKey)
-                  : (rule.name ?? formatDisplayLabel(rule.kind))}
-              </p>
-              <RuleSummary rule={rule} />
-              <RawDataDetails
-                value={rule}
-                label={t("DashboardCustody.policyRevisionsRawRule")}
-                filename={`${rule.id ?? `rule-${index + 1}`}.json`}
-              />
+        groups.map((group) => (
+          <div
+            key={group.key}
+            className="rounded-lg border border-border-subtle bg-surface-sunken p-4"
+          >
+            <p className="text-base font-medium text-primary">{group.title}</p>
+            <div className="divide-y divide-border-subtle">
+              {group.rules.map(({ rule, index }) => (
+                <div key={rule.id ?? `${rule.kind}-${index}`} className="relative py-3 last:pb-0">
+                  <div className="pr-32">
+                    <RuleSummary rule={rule} />
+                  </div>
+                  <RawDataDetails
+                    value={rule}
+                    label={t("DashboardCustody.policyRevisionsRawRule")}
+                    filename={`${rule.id ?? `rule-${index + 1}`}.json`}
+                  />
+                </div>
+              ))}
             </div>
-          );
-        })
+          </div>
+        ))
       )}
     </div>
   );
@@ -304,7 +331,7 @@ function RuleSummary({ rule }: { rule: PolicyRule }) {
   );
 
   return (
-    <div className="mt-3">
+    <div>
       {rule.description ? (
         <p className="text-sm leading-5 text-secondary">{rule.description}</p>
       ) : null}
@@ -341,7 +368,7 @@ function RawDataDetails({
 }) {
   return (
     <details className="group/rule">
-      <summary className="absolute top-4 right-4 w-fit cursor-pointer list-none text-xs text-secondary transition-colors hover:text-primary">
+      <summary className="absolute top-3 right-0 w-fit cursor-pointer list-none text-xs text-secondary transition-colors hover:text-primary">
         {label}
         <ChevronRight className="ml-1 inline size-3 transition-transform group-open/rule:rotate-90" />
       </summary>

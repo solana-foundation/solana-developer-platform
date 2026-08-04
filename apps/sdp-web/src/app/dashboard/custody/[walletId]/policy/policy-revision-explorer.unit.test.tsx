@@ -124,4 +124,45 @@ describe("policy revision explorer", () => {
     expect(html).toContain("USDC");
     expect(html).toContain(CUSTOM_MINT);
   });
+
+  it("groups rules of one classification into a single section", () => {
+    const grouped: WalletControlProfileRevisionHistory = {
+      profile: null,
+      revisions: [
+        {
+          ...history.revisions[0],
+          rules: [
+            {
+              id: "rule-family-payment",
+              kind: "operation_family",
+              action: "allow",
+              family: "payment",
+            },
+            {
+              id: "rule-family-issuance",
+              kind: "operation_family",
+              action: "deny",
+              family: "issuance",
+            },
+            {
+              id: "rule-type",
+              kind: "operation_type",
+              action: "allow",
+              operationType: "payment_transfer",
+            },
+          ],
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <PolicyRevisionExplorer history={grouped} />
+      </I18nProvider>
+    );
+
+    expect(html.match(/Operation controls/g)).toHaveLength(1);
+    expect(html).toContain("rule-family-payment.json");
+    expect(html).toContain("rule-family-issuance.json");
+    expect(html).toContain("rule-type.json");
+  });
 });
