@@ -143,6 +143,7 @@ describe("policy audit data", () => {
     expect(
       parsePolicyAuditFilters({
         page: "2",
+        pageSize: "50",
         decision: "deny",
         status: "failed",
         operationFamily: "payment",
@@ -152,6 +153,7 @@ describe("policy audit data", () => {
       })
     ).toEqual({
       page: 2,
+      pageSize: 50,
       decision: "deny",
       status: "failed",
       operationFamily: "payment",
@@ -159,8 +161,11 @@ describe("policy audit data", () => {
       from: "2026-07-01",
       to: "2026-07-31",
     });
-    expect(parsePolicyAuditFilters({ page: "0", decision: "maybe", from: "2026-02-31" })).toEqual({
+    expect(
+      parsePolicyAuditFilters({ page: "0", pageSize: "17", decision: "maybe", from: "2026-02-31" })
+    ).toEqual({
       page: 1,
+      pageSize: 25,
       decision: undefined,
       status: undefined,
       operationFamily: undefined,
@@ -174,6 +179,7 @@ describe("policy audit data", () => {
     expect(
       buildPolicyAuditSearchParams({
         page: 3,
+        pageSize: 25,
         decision: "review",
         status: "pending_approval",
         operationFamily: "ramp",
@@ -190,6 +196,7 @@ describe("policy audit data", () => {
     const request = vi.fn(async () => apiPage([evaluation("deny")], { total: 26, page: 2 }));
     const result = await fetchPolicyAuditList(request, "wallet/one", {
       page: 2,
+      pageSize: 25,
       decision: "deny",
       status: "failed",
       operationFamily: "payment",
@@ -222,6 +229,7 @@ describe("policy audit data", () => {
 
     const result = await fetchPolicyAuditList(request, "wallet-1", {
       page: 1,
+      pageSize: 25,
       decision: "approval_required",
     });
 
@@ -243,6 +251,7 @@ describe("policy audit data", () => {
 
     const result = await fetchPolicyAuditList(request, "wallet-1", {
       page: 1,
+      pageSize: 25,
       from: "2026-07-01",
       to: "2026-07-31",
     });
@@ -259,6 +268,7 @@ describe("policy audit data", () => {
     await expect(
       fetchPolicyAuditList(request, "wallet-1", {
         page: 1,
+        pageSize: 25,
         to: "2026-07-31",
       })
     ).rejects.toThrow("Policy audit history exceeds the local filtering limit");
@@ -276,6 +286,7 @@ describe("policy audit data", () => {
 
     const result = await fetchPolicyEvaluationNeighbors(request, "wallet-1", "evaluation-24", {
       page: 1,
+      pageSize: 25,
       from: "2026-07-01",
     });
 
@@ -292,6 +303,7 @@ describe("policy audit data", () => {
       "wallet-1",
       {
         page: 1,
+        pageSize: 25,
       }
     );
     expect(result).toMatchObject({ evaluations: [], total: 0, page: 1 });

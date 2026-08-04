@@ -44,7 +44,7 @@ export default async function WalletPolicyAuditPage({
     ]);
 
     return (
-      <DashboardWorkspaceOverviewPanel>
+      <DashboardWorkspaceOverviewPanel className="flex flex-col">
         <PolicyAuditList
           walletId={resolvedWalletId}
           walletLabel={context.wallet.label?.trim() || context.wallet.walletId}
