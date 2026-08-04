@@ -80,7 +80,7 @@ import {
   wellKnownMint,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
-import { type AppDb, closeDatabasePools, createDatabaseClient } from "@/db";
+import { type AppDb, asTransactionalClient, closeDatabasePools, createDatabaseClient } from "@/db";
 import type { EarnRepository, InsertEarnNavSnapshotInput } from "@/db/repositories";
 import { createPostgresEarnRepository } from "@/db/repositories";
 
@@ -417,6 +417,14 @@ interface LocalOrganization {
  * Returns at most one row. Other local orgs are left without a program on
  * purpose — a sibling org's program is a wallet of its own in Ground, and this
  * seed has exactly one ref to give.
+ *
+ * The ordering is **fully deterministic**, which matters more than the sort key
+ * itself: because the seeded link follows whichever org this returns, an
+ * ambiguous ORDER BY would let two runs disagree and bounce the program between
+ * orgs, leaving the dashboard on an empty onboarding screen every other run.
+ * `created_at` is TEXT and is written per-second, so two orgs provisioned in the
+ * same second tie on it — and a multi-project or multi-member org yields several
+ * rows for one org. Every remaining key is therefore broken by id.
  */
 async function findPrimaryLocalOrganization(db: AppDb): Promise<LocalOrganization | undefined> {
   const organizations = await db.queryMany<LocalOrganization>(
@@ -431,7 +439,8 @@ async function findPrimaryLocalOrganization(db: AppDb): Promise<LocalOrganizatio
          ON m.organization_id = o.id
       WHERE o.status = 'active'
       GROUP BY o.id, p.id, m.user_id, o.slug, o.created_at
-      ORDER BY (o.id = 'org_test123456789'), o.created_at DESC
+      ORDER BY (o.id = 'org_test123456789'), o.created_at DESC,
+               o.id ASC, p.id ASC, m.user_id ASC
       LIMIT 1`,
     [SEED_ENVIRONMENT]
   );
@@ -475,19 +484,30 @@ async function seedProviderWallets(
     return { linked: 0, kept: 1, moved: false, skipped: false };
   }
 
-  // Only ever removes rows this seed created; a wizard-made link carries a
-  // different label and is left alone.
-  const moved = (await deleteSeededWallets(db)) > 0;
-
-  await repo.insertProviderWallet({
-    organizationId: organization.organizationId,
-    projectId: organization.projectId,
-    environment: SEED_ENVIRONMENT,
-    provider: SEED_PROVIDER,
-    providerWalletRef: SEED_PROVIDER_WALLET.ref,
-    label: SEED_WALLET_LABEL,
-    createdBy: organization.createdBy,
+  // The move is one transaction: the delete and the insert must land together or
+  // not at all. Committing the delete on its own would leave no program link if
+  // the insert then failed, putting the dashboard back on the empty onboarding
+  // screen — the exact state this function exists to prevent.
+  const moved = await db.transaction(async (tx) => {
+    const txRepo = createPostgresEarnRepository(asTransactionalClient(tx));
+    // Only ever removes rows this seed created; a wizard-made link carries a
+    // different label and is left alone.
+    const removed = await tx.execute(
+      "DELETE FROM earn_provider_wallets WHERE environment = ? AND provider = ? AND label = ?",
+      [SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL]
+    );
+    await txRepo.insertProviderWallet({
+      organizationId: organization.organizationId,
+      projectId: organization.projectId,
+      environment: SEED_ENVIRONMENT,
+      provider: SEED_PROVIDER,
+      providerWalletRef: SEED_PROVIDER_WALLET.ref,
+      label: SEED_WALLET_LABEL,
+      createdBy: organization.createdBy,
+    });
+    return removed > 0;
   });
+
   console.log(
     `  ${organization.slug}: ${moved ? "moved" : "linked"} ${SEED_PROVIDER_WALLET.ref} — ${SEED_PROVIDER_WALLET.note}`
   );
