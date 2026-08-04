@@ -2104,17 +2104,19 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
     },
 
     async getApiKeyCreatorUserId(apiKeyId: string) {
-      // Approval ownership is organization-wide: an organization-scoped
-      // resolver must still map a project key back to the user who created it.
+      // Approval ownership is organization-wide when the caller has an
+      // organization scope, while project-scoped callers remain isolated to
+      // their project.
       const row = await db
         .prepare(
           `SELECT created_by
            FROM api_keys
            WHERE id = ?
              AND organization_id = ?
+             AND (?::text IS NULL OR project_id IS NOT DISTINCT FROM ?)
            LIMIT 1`
         )
-        .bind(apiKeyId, scope.organizationId)
+        .bind(apiKeyId, scope.organizationId, scope.projectId, scope.projectId)
         .first<{ created_by: string | null }>();
 
       return row?.created_by ?? null;

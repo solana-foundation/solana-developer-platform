@@ -90,10 +90,14 @@ describe("PolicyRepository (postgres)", () => {
     repo = createPostgresPolicyRepository(getDb(env), TEST_SCOPE);
   });
 
-  it("resolves a project API key creator from an organization-scoped approval check", async () => {
+  it("resolves API key creators without crossing organization or project scope", async () => {
     const organizationRepo = createPostgresPolicyRepository(
       getDb(env),
       createTenantScope({ organizationId: TEST_ORG.id, projectId: null })
+    );
+    const otherProjectRepo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: OTHER_PROJECT.id })
     );
     const foreignOrganizationRepo = createPostgresPolicyRepository(
       getDb(env),
@@ -103,6 +107,8 @@ describe("PolicyRepository (postgres)", () => {
     await expect(organizationRepo.getApiKeyCreatorUserId(TEST_API_KEY.id)).resolves.toBe(
       TEST_USER.id
     );
+    await expect(repo.getApiKeyCreatorUserId(TEST_API_KEY.id)).resolves.toBe(TEST_USER.id);
+    await expect(otherProjectRepo.getApiKeyCreatorUserId(TEST_API_KEY.id)).resolves.toBeNull();
     await expect(
       foreignOrganizationRepo.getApiKeyCreatorUserId(TEST_API_KEY.id)
     ).resolves.toBeNull();
