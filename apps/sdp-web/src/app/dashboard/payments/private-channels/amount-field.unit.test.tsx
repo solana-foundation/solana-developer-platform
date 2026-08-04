@@ -25,7 +25,14 @@ function renderField(props: Partial<ComponentProps<typeof AmountField>> = {}) {
     </I18nProvider>
   );
   return render(
-    <AmountField id="amount" onChange={() => {}} spends="channel" value="" {...props} />,
+    <AmountField
+      id="amount"
+      onChange={() => {}}
+      spends="channel"
+      symbol="USDC"
+      value=""
+      {...props}
+    />,
     { wrapper }
   );
 }

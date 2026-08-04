@@ -85,6 +85,18 @@ export interface IssuanceTokenView {
 
 // ── Shared formatters / derivations ─────────────────────────────────────────
 
+/**
+ * The label for a small logo stand-in, when the asset has no artwork: one
+ * character, because most tickers run to four or more. A single initial reads as
+ * a monogram, while any longer prefix of a longer symbol reads as truncated —
+ * "HRB" beside a real logo looks like a bug rather than a mark. Surfaces with
+ * room for the whole symbol should set that instead of a longer prefix. Casing is
+ * the issuer's, as everywhere else the symbol appears.
+ */
+export function tokenMarkInitial(symbol: string): string {
+  return symbol.trim().slice(0, 1) || "?";
+}
+
 export function formatDate(value: string | null | undefined, locale: string): string {
   if (!value) {
     return "—";
@@ -137,6 +149,47 @@ export function getTokenTypeLabel(template: IssuanceTokenView["template"], t: Tr
   }
 
   return template;
+}
+
+/**
+ * The token's own status as a dot, a colour and a word — the one place on these
+ * surfaces where colour carries meaning. Shared by the asset-management header and
+ * the overview tab so the same status cannot read two ways on one page.
+ */
+export function tokenStatusPresentation(
+  t: Translate,
+  status: Token["status"]
+): { label: string; badgeClassName: string; textClassName: string; dotClassName: string } {
+  const presentations: Record<
+    Token["status"],
+    { label: string; badgeClassName: string; textClassName: string; dotClassName: string }
+  > = {
+    pending: {
+      label: t("DashboardIssuance.status.draft"),
+      badgeClassName: "bg-fill text-secondary",
+      textClassName: "text-secondary",
+      dotClassName: "bg-fill-strong",
+    },
+    active: {
+      label: t("DashboardIssuance.status.active"),
+      badgeClassName: "bg-success-bg text-success",
+      textClassName: "text-success",
+      dotClassName: "bg-success",
+    },
+    paused: {
+      label: t("DashboardIssuance.status.paused"),
+      badgeClassName: "bg-warning-bg text-warning",
+      textClassName: "text-warning",
+      dotClassName: "bg-warning",
+    },
+    revoked: {
+      label: t("DashboardIssuance.status.revoked"),
+      badgeClassName: "bg-error-bg text-error",
+      textClassName: "text-error",
+      dotClassName: "bg-error",
+    },
+  };
+  return presentations[status];
 }
 
 export type DeploymentStatus = "draft" | "active" | "paused";

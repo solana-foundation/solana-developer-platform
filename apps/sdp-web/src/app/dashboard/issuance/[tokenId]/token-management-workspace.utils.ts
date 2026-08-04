@@ -379,6 +379,22 @@ export function hasReachedMaxSupply(totalSupply: string, maxSupply: string | nul
   return comparison !== null && comparison >= 0;
 }
 
+// A cap the token has already outgrown can never be satisfied — minting only
+// pushes the total further past it. Unparseable input reads as "not below" and is
+// left to the format validation. The API rejects it too.
+export function isMaxSupplyBelowMintedSupply(maxSupply: string, totalSupply: string): boolean {
+  const comparison = compareNonNegativeDecimalStrings(maxSupply, totalSupply);
+  return comparison !== null && comparison < 0;
+}
+
+// True once the mint authority is gone: the total can never change again, so the
+// configured cap is frozen with it. Pre-deploy there is no on-chain authority yet
+// (it's assigned at deploy from the signing wallet's custody), so a draft's cap is
+// always still editable.
+export function isSupplyLockedOnChain(token: Token): boolean {
+  return Boolean(token.mintAddress) && (!token.isMintable || !token.mintAuthority);
+}
+
 function compareNonNegativeDecimalStrings(left: string, right: string): number | null {
   const leftMatch = /^(\d+)(?:\.(\d+))?$/.exec(left.trim());
   const rightMatch = /^(\d+)(?:\.(\d+))?$/.exec(right.trim());
@@ -455,8 +471,9 @@ export function getLockSupplyDisabledReason(token: Token, t: Translate): string 
   if (!token.maxSupply) {
     return t("DashboardIssuance.management.lockSupplyNoMaxSupply");
   }
-  // Both mean the authority is already gone, i.e. supply is already permanent.
-  if (!token.isMintable || !token.mintAuthority) {
+  // The authority is already gone, i.e. supply is already permanent. (The
+  // lifecycle gate above has established the token is active, hence deployed.)
+  if (isSupplyLockedOnChain(token)) {
     return t("DashboardIssuance.management.lockSupplyAlreadyLocked");
   }
   if (getRemainingMintableSupply(token) === null) {

@@ -382,6 +382,19 @@ describe("areDraftsEquivalent", () => {
     expect(areDraftsEquivalent(a, b)).toBe(false);
   });
 
+  it("detects a max-supply change but ignores its decimal formatting", () => {
+    const token = makeToken({ maxSupply: "1000.5" });
+    const profile = makeProfile(FOREIGN_METADATA);
+    const a = profileToDraftState(profile, token);
+    // The API round-trips the cap through base units and returns it trimmed, so
+    // the same number typed differently must not strand the form as "unsaved".
+    expect(areDraftsEquivalent(a, { ...a, maxSupply: "1000.50" })).toBe(true);
+    expect(areDraftsEquivalent(a, { ...a, maxSupply: "01000.5" })).toBe(true);
+    expect(areDraftsEquivalent(a, { ...a, maxSupply: "2000" })).toBe(false);
+    // Blank means uncapped — clearing the cap is a real change.
+    expect(areDraftsEquivalent(a, { ...a, maxSupply: "" })).toBe(false);
+  });
+
   it("detects a public-field visibility change but ignores its order", () => {
     const token = makeToken();
     const profile = makeProfile(FOREIGN_METADATA);

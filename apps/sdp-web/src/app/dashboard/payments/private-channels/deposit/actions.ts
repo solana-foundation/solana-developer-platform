@@ -10,6 +10,12 @@ import { getAmountError } from "../amount-validation";
 export interface CreateDepositInput {
   walletId: string;
   amount: string;
+  /**
+   * Selected token mint. Forwarded as-is: the API validates it against the
+   * instance's allowlist, so this action must not vouch for it — nor read a scale
+   * from it, since a client-supplied decimals value cannot be trusted.
+   */
+  mint?: string;
   recipient?: string;
 }
 
@@ -40,6 +46,7 @@ export async function createDepositAction(input: CreateDepositInput): Promise<Cr
     const deposit = await createPrivateChannelDeposit(client, {
       walletId: input.walletId,
       amount: input.amount,
+      ...(input.mint ? { mint: input.mint } : {}),
       ...(input.recipient ? { recipient: input.recipient } : {}),
     });
     revalidatePath("/dashboard/payments/private-channels/deposit");

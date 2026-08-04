@@ -435,7 +435,7 @@ function parseMuralWebhookEvent(payload: unknown): MuralWebhookEvent {
       const tokenAmountRecord = readRecord(body.tokenAmount);
       const tokenAmount =
         tokenAmountRecord === undefined ? undefined : readNumber(tokenAmountRecord.tokenAmount);
-      if (!accountId || tokenAmount === undefined) {
+      if (!accountId || tokenAmount === undefined || tokenAmount <= 0) {
         throw badRequest('Mural "account_credited" webhook is missing accountId or tokenAmount', {
           provider: "mural",
         });
