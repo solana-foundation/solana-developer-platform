@@ -16,7 +16,6 @@ describe("dashboard loading route", () => {
     ["/dashboard/wallets/wallet-1/policy", "wallet-policy"],
     ["/dashboard/wallets/wallet-1/policy/audit", "wallet-policy-audit-list"],
     ["/dashboard/wallets/wallet-1/policy/audit/evaluation-1", "wallet-policy-audit-detail"],
-    ["/dashboard/wallets/wallet-1/policy/revisions", "wallet-policy-revisions"],
     ["/dashboard/custody", "wallets-overview"],
     ["/dashboard/custody/switch", "wallet-setup"],
     ["/dashboard/custody/wallet-1", "wallet-detail"],

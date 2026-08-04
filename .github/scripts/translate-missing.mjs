@@ -106,7 +106,7 @@ function summaryMarkdown({
     `- Generated strings: ${translations.length}`,
     `- Eve agent: \`${agentHost(agentUrl)}\``,
     `- Model: \`${agentModel ?? "configured by Eve"}\``,
-    "- Context: locale glossary, key namespace, and up to 6 nearby catalog entries",
+    "- Context: product and locale background, translation instructions, terminology, key namespace, and up to 6 nearby catalog entries",
     `- Requests: ${batches}`,
     `- Generated files: ${files.length === 0 ? "None" : files.map((file) => `\`${file}\``).join(", ")}`,
     "",

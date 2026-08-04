@@ -59,6 +59,7 @@ interface WalletPolicyStartingProfileFlowProps {
   initialPolicy: PaymentWalletPolicy;
   policyError: string | null;
   complianceScreeningEnabled: boolean;
+  initialRevisionId?: string;
 }
 
 export function WalletPolicyStartingProfileFlow({
@@ -69,6 +70,7 @@ export function WalletPolicyStartingProfileFlow({
   initialPolicy,
   policyError,
   complianceScreeningEnabled,
+  initialRevisionId,
 }: WalletPolicyStartingProfileFlowProps) {
   const t = useTranslations();
   const router = useDashboardRouter();
@@ -295,7 +297,11 @@ export function WalletPolicyStartingProfileFlow({
         description={t(currentStepCopy.descriptionKey)}
         maxWidthClassName="max-w-6xl"
         toolbarActions={
-          <WalletPolicyToolbar walletHref={walletDetailHref(pathname, wallet.walletId)} />
+          <WalletPolicyToolbar
+            walletHref={walletDetailHref(pathname, wallet.walletId)}
+            walletId={wallet.walletId}
+            initialRevisionId={initialRevisionId}
+          />
         }
         aside={
           <PolicySummaryRail
