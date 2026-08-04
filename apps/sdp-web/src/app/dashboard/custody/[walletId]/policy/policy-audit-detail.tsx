@@ -25,6 +25,7 @@ import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { UserAvatar } from "@/components/user-avatar";
 import { formatDisplayLabel } from "@/lib/utils";
 import {
   buildPolicyAuditSearchParams,
@@ -42,6 +43,7 @@ import {
   requestIdFromEvaluation,
   shortIdentifier,
 } from "./policy-audit.shared";
+import { PolicyAuditDetailTabs } from "./policy-audit-detail-tabs";
 import { PolicyRevisionExplorer } from "./policy-revision-explorer";
 
 export type PolicyAuditDetailTab = "decision" | "request" | "revisions";
@@ -51,6 +53,7 @@ export function PolicyAuditDetail({
   evaluation,
   revisionHistory,
   apiKeyNames,
+  userNames,
   neighbors,
   filters,
   tab,
@@ -62,6 +65,7 @@ export function PolicyAuditDetail({
   evaluation: WalletPolicyEvaluationDetail;
   revisionHistory: WalletControlProfileRevisionHistory;
   apiKeyNames: Record<string, string>;
+  userNames: Record<string, string>;
   neighbors: PolicyAuditNeighbors;
   filters: PolicyAuditFilters;
   tab: PolicyAuditDetailTab;
@@ -75,7 +79,7 @@ export function PolicyAuditDetail({
   const detailBaseHref = `${auditHref}/${encodeURIComponent(evaluation.id)}`;
   const backQuery = buildPolicyAuditSearchParams(filters);
   const backHref = backQuery.size > 0 ? `${auditHref}?${backQuery}` : auditHref;
-  const actor = policyActor(evaluation, apiKeyNames);
+  const actor = policyActor(evaluation, apiKeyNames, userNames);
   const requestId = requestIdFromEvaluation(evaluation);
 
   return (
@@ -141,6 +145,8 @@ export function PolicyAuditDetail({
               icon={
                 actor.type === "api_key" ? (
                   <KeyRound className="size-4" />
+                ) : actor.name ? (
+                  <UserAvatar name={actor.name} className="size-5 text-[9px]" />
                 ) : (
                   <UserRound className="size-4" />
                 )
@@ -155,6 +161,16 @@ export function PolicyAuditDetail({
                   ? shortIdentifier(actor.value)
                   : actor.value}
               </span>
+              {actor.id ? (
+                <WalletMetadataCopyButton
+                  value={actor.id}
+                  label={t(
+                    actor.type === "api_key"
+                      ? "DashboardCustody.policyAuditApiKeyId"
+                      : "DashboardCustody.policyAuditUserId"
+                  )}
+                />
+              ) : null}
             </MetadataLine>
           ) : null}
         </div>
@@ -189,11 +205,7 @@ export function PolicyAuditDetail({
             {tab === "revisions" ? (
               <PolicyRevisionExplorer
                 history={revisionHistory}
-                selectedRevisionId={selectedRevisionId}
-                baseHref={detailBaseHref}
-                searchParams={detailSearchParams(filters, "revisions")}
-                locale={locale}
-                t={t}
+                initialRevisionId={selectedRevisionId}
               />
             ) : null}
           </div>
@@ -205,6 +217,7 @@ export function PolicyAuditDetail({
             evaluation={evaluation}
             history={revisionHistory}
             apiKeyNames={apiKeyNames}
+            userNames={userNames}
             policyHref={policyHref}
             t={t}
           />
@@ -234,27 +247,13 @@ function DetailTabs({
   ];
 
   return (
-    <nav
-      className="flex gap-8 border-b border-border-default"
-      aria-label={t("DashboardCustody.policyAuditDetailTabs")}
-    >
-      {tabs.map((item) => {
-        return (
-          <Link
-            key={item.id}
-            href={detailTabHref(detailBaseHref, filters, item.id, selectedRevisionId)}
-            aria-current={activeTab === item.id ? "page" : undefined}
-            className={`border-b-2 px-1 pb-3 text-sm transition-colors ${
-              activeTab === item.id
-                ? "border-primary text-primary"
-                : "border-transparent text-secondary hover:text-primary"
-            }`}
-          >
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
+    <PolicyAuditDetailTabs
+      activeTab={activeTab}
+      tabs={tabs.map((item) => ({
+        ...item,
+        href: detailTabHref(detailBaseHref, filters, item.id, selectedRevisionId),
+      }))}
+    />
   );
 }
 
@@ -801,6 +800,7 @@ function EvaluationContextRail({
   evaluation,
   history,
   apiKeyNames,
+  userNames,
   policyHref,
   t,
 }: {
@@ -808,12 +808,13 @@ function EvaluationContextRail({
   evaluation: WalletPolicyEvaluationDetail;
   history: WalletControlProfileRevisionHistory;
   apiKeyNames: Record<string, string>;
+  userNames: Record<string, string>;
   policyHref: string;
   t: PolicyTranslate;
 }) {
   const operation = evaluation.evaluationContext?.operation;
   const apiKeyId = operation?.apiKeyId ?? null;
-  const actor = policyActor(evaluation, apiKeyNames);
+  const actor = policyActor(evaluation, apiKeyNames, userNames);
   const requestId = requestIdFromEvaluation(evaluation);
   const activeRevisionId =
     history.profile?.activeRevisionId ??
@@ -977,7 +978,7 @@ function NeighborButton({
     return (
       <Button type="button" variant="outline" size="sm" disabled>
         {direction === "previous" ? icon : null}
-        {label}
+        <span className="max-sm:sr-only">{label}</span>
         {direction === "next" ? icon : null}
       </Button>
     );
@@ -986,7 +987,7 @@ function NeighborButton({
     <Button asChild variant="outline" size="sm">
       <Link href={href}>
         {direction === "previous" ? icon : null}
-        {label}
+        <span className="max-sm:sr-only">{label}</span>
         {direction === "next" ? icon : null}
       </Link>
     </Button>

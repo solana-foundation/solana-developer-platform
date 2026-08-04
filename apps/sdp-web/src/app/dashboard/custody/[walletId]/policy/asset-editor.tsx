@@ -91,8 +91,6 @@ export function AssetEditor({
 
   function toggleWalletAsset(mint: string) {
     onChange(assets.includes(mint) ? assets.filter((asset) => asset !== mint) : [...assets, mint]);
-    setQuery("");
-    setOpen(false);
     setInputError(null);
   }
 

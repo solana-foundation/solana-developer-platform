@@ -52,6 +52,7 @@ export default async function WalletPolicyAuditPage({
           filters={filters}
           revisionHistory={context.revisionHistory}
           apiKeyNames={context.apiKeyNames}
+          userNames={context.userNames}
           locale={locale}
           t={t}
         />

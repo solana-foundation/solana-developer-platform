@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { createCommitOnBranch } from "./github-commit-on-branch.mjs";
 import {
   agentHost,
   applyTranslations,
@@ -105,7 +106,7 @@ function summaryMarkdown({
     `- Generated strings: ${translations.length}`,
     `- Eve agent: \`${agentHost(agentUrl)}\``,
     `- Model: \`${agentModel ?? "configured by Eve"}\``,
-    "- Context: locale glossary, key namespace, and up to 6 nearby catalog entries",
+    "- Context: product and locale background, translation instructions, terminology, key namespace, and up to 6 nearby catalog entries",
     `- Requests: ${batches}`,
     `- Generated files: ${files.length === 0 ? "None" : files.map((file) => `\`${file}\``).join(", ")}`,
     "",
@@ -177,6 +178,24 @@ async function updateReleasePrComment(markdown) {
   }
 }
 
+async function createTranslationCommit(files) {
+  const additions = files.map((relativePath) => ({
+    path: relativePath,
+    contents: fs.readFileSync(path.resolve(relativePath)).toString("base64"),
+  }));
+  const commit = await createCommitOnBranch({
+    repository: repo,
+    branch: releaseBranch,
+    expectedHeadOid: git(["rev-parse", "HEAD"]),
+    headline: "chore(i18n): translate missing release strings",
+    additions,
+    token,
+  });
+
+  console.log(`Created translation commit ${commit.oid}`);
+  return commit.oid;
+}
+
 async function main() {
   const inventory = collectMissingTranslations({ messagesDir, sourceLocale });
   const impactedLocales = [...new Set(inventory.missing.map((entry) => entry.locale))].sort();
@@ -220,14 +239,7 @@ async function main() {
       result.translations.map((entry) => path.join(messagesRelativeDir, entry.targetFile))
     ),
   ].sort();
-  git(["add", ...files]);
-  git(["config", "user.name", process.env.GIT_COMMIT_NAME ?? "github-actions[bot]"]);
-  git([
-    "config",
-    "user.email",
-    process.env.GIT_COMMIT_EMAIL ?? "github-actions[bot]@users.noreply.github.com",
-  ]);
-  git(["commit", "-m", "chore(i18n): translate missing release strings"]);
+  await createTranslationCommit(files);
 
   const summary = summaryMarkdown({
     missing: inventory.missing,

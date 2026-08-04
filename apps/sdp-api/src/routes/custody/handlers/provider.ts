@@ -4,7 +4,7 @@ import { SigningError } from "@sdp/custody/signing";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";
-import { isPrivyByokProvisioningEnabled } from "@/lib/feature-flags";
+import { isPrivyByokEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
@@ -388,7 +388,7 @@ async function assertFreshPrivyLegacySetupAllowed(
   }
 
   const availability = await getProviderAvailability(c.env, getDb(c.env), organizationId);
-  if (availability.providers.custody.privy.entitled && isPrivyByokProvisioningEnabled(c.env)) {
+  if (availability.providers.custody.privy.entitled && isPrivyByokEnabled(c.env)) {
     throw forbidden("New Privy setup must use stored credentials");
   }
 }
