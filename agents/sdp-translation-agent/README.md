@@ -2,7 +2,7 @@
 
 This is the Eve agent used by the release workflow to translate missing SDP web UI strings.
 
-The agent receives one locale batch through Eve's structured HTTP session API and returns translations. Each entry includes its catalog namespace and nearby English strings, plus approved translations when they exist. The request also includes the locale glossary and voice rules from `.github/translation-guidance.json`.
+The agent receives one locale batch through Eve's structured HTTP session API and returns translations. Each entry includes its catalog namespace and nearby English strings, plus approved translations when they exist. The request also includes separately structured locale context, translation instructions, and terminology from `.github/translation-guidance.json`.
 
 The agent has no repository access and no write tools. GitHub Actions performs catalog discovery, placeholder, markup, and terminology validation, file writes, and the release-branch commit.
 
@@ -10,7 +10,7 @@ The agent has no repository access and no write tools. GitHub Actions performs c
 
 Create a separate Vercel project rooted at this directory. Configure these Vercel environment variables:
 
-- `TRANSLATION_AGENT_MODEL` - an AI Gateway model id
+- `TRANSLATION_AGENT_MODEL` - an AI Gateway model id; defaults to `deepseek/deepseek-v4-flash`
 - `TRANSLATION_AGENT_USERNAME` - HTTP Basic username
 - `TRANSLATION_AGENT_PASSWORD` - HTTP Basic password
 

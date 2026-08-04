@@ -26,6 +26,7 @@ export interface FeePaymentEnv extends RpcEnv {
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
+  KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
   FEE_PAYER_PRIVATE_KEY?: string;
   CUSTODY_PRIVATE_KEY?: string;

@@ -24,6 +24,7 @@ const MODULE_METADATA = [
       "@sdp/env-config",
       "@sdp/issuance",
       "@sdp/payments",
+      "@sdp/policy",
       "@sdp/private-channels",
       "@sdp/rpc",
       "@sdp/solana",
@@ -44,7 +45,13 @@ const MODULE_METADATA = [
     purpose: "Dashboard application.",
     // @sdp/issuance is imported only through its mosaic-free `capabilities`
     // subpath (the advanced-settings catalog + lookups the editor renders).
-    allowedDependencies: ["@sdp/issuance", "@sdp/private-channels", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: [
+      "@sdp/issuance",
+      "@sdp/policy",
+      "@sdp/private-channels",
+      "@sdp/solana",
+      "@sdp/types",
+    ],
   },
   {
     name: "@sdp/kit-augment",
@@ -87,6 +94,12 @@ const MODULE_METADATA = [
     directory: "packages/sdp-payments",
     purpose: "Payment domain services, fee payment, and ramp providers.",
     allowedDependencies: ["@sdp/rpc", "@sdp/solana", "@sdp/types"],
+  },
+  {
+    name: "@sdp/policy",
+    directory: "packages/sdp-policy",
+    purpose: "Wallet-operation policy engine: rule evaluation and enforcement orchestration.",
+    allowedDependencies: ["@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/private-channels",

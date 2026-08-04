@@ -87,6 +87,7 @@ interface CustodyWalletLookupRow extends CustodyWalletRow {
 interface SigningRequestRow {
   id: string;
   organization_id: string;
+  project_id: string | null;
   custody_config_id: string;
   token_transaction_id: string | null;
   external_request_id: string | null;
@@ -812,12 +813,13 @@ export class SigningRequestStorePg implements SigningRequestStore {
     await this.db
       .prepare(
         `INSERT INTO signing_requests
-         (id, organization_id, custody_config_id, token_transaction_id, external_request_id, transaction_message, metadata)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+         (id, organization_id, project_id, custody_config_id, token_transaction_id, external_request_id, transaction_message, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         id,
         params.organizationId,
+        params.projectId,
         params.custodyConfigId,
         params.tokenTransactionId ?? null,
         params.externalRequestId,
@@ -906,6 +908,7 @@ export class SigningRequestStorePg implements SigningRequestStore {
     return {
       id: row.id,
       organizationId: row.organization_id,
+      projectId: row.project_id,
       custodyConfigId: row.custody_config_id,
       tokenTransactionId: row.token_transaction_id,
       externalRequestId: row.external_request_id,

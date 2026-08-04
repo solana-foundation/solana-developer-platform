@@ -15,6 +15,25 @@ import { KoraClient, type KoraClientOptions } from "@solana/kora";
 import type { FeePaymentPort } from "./port";
 import { FeePaymentError } from "./port";
 
+type SignRequest = { transaction: string; user_id: string };
+
+interface KoraClientTransport {
+  getPayerSigner(): Promise<{
+    signer_address?: string;
+    payment_address?: string;
+    payerSigner?: string;
+  }>;
+  signTransaction(request: SignRequest): Promise<{ signed_transaction: string }>;
+  signAndSendTransaction(
+    request: SignRequest
+  ): Promise<{ signature?: string; signed_transaction: string }>;
+  estimateTransactionFee(request: {
+    transaction: string;
+    fee_token: string;
+  }): Promise<{ fee_in_lamports: number | string }>;
+  getSupportedTokens(): Promise<{ tokens: string[] }>;
+}
+
 export type KoraAdapterConfig = KoraClientOptions & {
   /**
    * Optional request timeout in milliseconds.
@@ -22,11 +41,24 @@ export type KoraAdapterConfig = KoraClientOptions & {
    */
   timeoutMs?: number;
 
-  /** Per-user id forwarded to Kora as `user_id` (required by mainnet's free+usage-tracking config). */
+  /**
+   * Per-user id forwarded to Kora as `user_id`.
+   * Callers should provide an owned, server-derived scope. Missing values use
+   * one shared fail-closed quota bucket instead of bypassing usage tracking.
+   */
   userId?: string;
 
+  /**
+   * Cloud Run audience used to fetch a service identity token from the metadata
+   * server. Optional so public Kora deployments retain their current behavior.
+   */
+  identityTokenAudience?: string;
+
+  /** Injectable service-identity token provider. */
+  identityTokenProvider?: () => Promise<string>;
+
   /** Injectable client. */
-  client?: KoraClient;
+  client?: KoraClientTransport;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -36,15 +68,37 @@ export type KoraAdapterConfig = KoraClientOptions & {
 export class KoraAdapter implements FeePaymentPort {
   readonly providerId = "kora";
 
-  private client: KoraClient;
-  private readonly userId?: string;
+  private client: KoraClientTransport;
+  private readonly userId: string;
   private cachedFeePayer: Address | null = null;
   private cachedFeeToken: string | null = null;
 
   constructor(config: KoraAdapterConfig) {
-    const { rpcUrl, apiKey, hmacSecret, userId } = config;
-    this.client = config.client ?? new KoraClient({ rpcUrl, apiKey, hmacSecret });
-    this.userId = userId;
+    const { rpcUrl, apiKey, getRecaptchaToken, hmacSecret, userId } = config;
+    const identityTokenAudience = config.identityTokenAudience?.trim();
+    if (config.identityTokenProvider && !identityTokenAudience) {
+      throw new Error("identityTokenAudience is required with an identityTokenProvider");
+    }
+    if (identityTokenAudience) {
+      assertCloudRunIdentityDestination(rpcUrl, identityTokenAudience);
+    }
+    const identityTokenProvider =
+      config.identityTokenProvider ??
+      (identityTokenAudience
+        ? createCloudRunIdentityTokenProvider(identityTokenAudience)
+        : undefined);
+    this.client =
+      config.client ??
+      (identityTokenProvider
+        ? new AuthorizedKoraClient({
+            rpcUrl,
+            apiKey,
+            getRecaptchaToken,
+            hmacSecret,
+            identityTokenProvider,
+          })
+        : new KoraClient({ rpcUrl, apiKey, getRecaptchaToken, hmacSecret }));
+    this.userId = userId?.trim() || "sdp:unscoped";
   }
 
   /**
@@ -185,13 +239,9 @@ export class KoraAdapter implements FeePaymentPort {
   // Private Methods
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /** Attach `user_id` to the sign request when configured. */
-  private buildSignRequest(transaction: string): { transaction: string; user_id?: string } {
-    const request: { transaction: string; user_id?: string } = { transaction };
-    if (this.userId) {
-      request.user_id = this.userId;
-    }
-    return request;
+  /** Always attach a quota identity to signing requests. */
+  private buildSignRequest(transaction: string): { transaction: string; user_id: string } {
+    return { transaction, user_id: this.userId };
   }
 
   private async resolveFeeToken(): Promise<string> {
@@ -309,4 +359,177 @@ function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class AuthorizedKoraClient implements KoraClientTransport {
+  constructor(
+    private readonly config: KoraClientOptions & {
+      identityTokenProvider: () => Promise<string>;
+    }
+  ) {}
+
+  getPayerSigner() {
+    return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["getPayerSigner"]>>>(
+      "getPayerSigner"
+    );
+  }
+
+  signTransaction(request: SignRequest) {
+    return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["signTransaction"]>>>(
+      "signTransaction",
+      request
+    );
+  }
+
+  signAndSendTransaction(request: SignRequest) {
+    return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["signAndSendTransaction"]>>>(
+      "signAndSendTransaction",
+      request
+    );
+  }
+
+  estimateTransactionFee(request: { transaction: string; fee_token: string }) {
+    return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["estimateTransactionFee"]>>>(
+      "estimateTransactionFee",
+      request
+    );
+  }
+
+  getSupportedTokens() {
+    return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["getSupportedTokens"]>>>(
+      "getSupportedTokens"
+    );
+  }
+
+  private async rpcRequest<T>(method: string, params?: unknown): Promise<T> {
+    const body = JSON.stringify({ id: 1, jsonrpc: "2.0", method, params });
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${await this.config.identityTokenProvider()}`,
+      "Content-Type": "application/json",
+    };
+    if (this.config.apiKey) {
+      headers["x-api-key"] = this.config.apiKey;
+    }
+    if (this.config.hmacSecret) {
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      headers["x-timestamp"] = timestamp;
+      headers["x-hmac-signature"] = await createHmacSignature(
+        this.config.hmacSecret,
+        timestamp + body
+      );
+    }
+    if (this.config.getRecaptchaToken) {
+      headers["x-recaptcha-token"] = await this.config.getRecaptchaToken();
+    }
+
+    const response = await fetch(this.config.rpcUrl, { method: "POST", headers, body });
+    if (!response.ok) {
+      throw new Error(`Kora HTTP ${response.status}`);
+    }
+    const payload = (await response.json()) as {
+      result?: T;
+      error?: { code: number; message: string };
+    };
+    if (payload.error) {
+      throw new Error(`RPC Error ${payload.error.code}: ${payload.error.message}`);
+    }
+    if (payload.result === undefined) {
+      throw new Error("Kora RPC response did not include a result");
+    }
+    return payload.result;
+  }
+}
+
+function createCloudRunIdentityTokenProvider(audience: string): () => Promise<string> {
+  const normalizedAudience = audience.trim();
+  if (!normalizedAudience) {
+    throw new Error("KORA_CLOUD_RUN_AUDIENCE cannot be empty");
+  }
+
+  let cachedToken: string | undefined;
+  let refreshAt = 0;
+  return async () => {
+    if (cachedToken && Date.now() < refreshAt) {
+      return cachedToken;
+    }
+
+    const endpoint = new URL(
+      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
+    );
+    endpoint.searchParams.set("audience", normalizedAudience);
+    endpoint.searchParams.set("format", "full");
+    const response = await fetch(endpoint, {
+      headers: { "Metadata-Flavor": "Google" },
+    });
+    if (!response.ok) {
+      throw new Error(`Cloud Run identity token request failed with HTTP ${response.status}`);
+    }
+
+    const token = (await response.text()).trim();
+    if (!token) {
+      throw new Error("Cloud Run identity token response was empty");
+    }
+    cachedToken = token;
+    refreshAt = resolveTokenRefreshAt(token);
+    return token;
+  };
+}
+
+function assertCloudRunIdentityDestination(rpcUrl: string, audience: string): void {
+  let destination: URL;
+  let trustedAudience: URL;
+  try {
+    destination = new URL(rpcUrl);
+    trustedAudience = new URL(audience);
+  } catch {
+    throw new Error("KORA_RPC_URL and KORA_CLOUD_RUN_AUDIENCE must be valid URLs");
+  }
+
+  const hasCredentials =
+    destination.username ||
+    destination.password ||
+    trustedAudience.username ||
+    trustedAudience.password;
+  if (
+    destination.protocol !== "https:" ||
+    trustedAudience.protocol !== "https:" ||
+    destination.origin !== trustedAudience.origin ||
+    hasCredentials
+  ) {
+    throw new Error("KORA_RPC_URL must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE origin");
+  }
+}
+
+function resolveTokenRefreshAt(token: string): number {
+  try {
+    const payloadSegment = token.split(".")[1];
+    if (!payloadSegment) {
+      throw new Error("missing payload");
+    }
+    const payload = JSON.parse(new TextDecoder().decode(decodeBase64(payloadSegment))) as {
+      exp?: number;
+    };
+    if (!payload.exp) {
+      throw new Error("missing exp");
+    }
+    return Math.max(Date.now(), payload.exp * 1000 - 60_000);
+  } catch {
+    // Metadata identity tokens currently live for an hour. A short fallback
+    // cache avoids per-RPC metadata calls without assuming that full lifetime.
+    return Date.now() + 5 * 60_000;
+  }
+}
+
+async function createHmacSignature(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return Array.from(new Uint8Array(signature), (byte) => byte.toString(16).padStart(2, "0")).join(
+    ""
+  );
 }

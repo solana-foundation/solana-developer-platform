@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
@@ -225,7 +226,7 @@ describe("TokenService", () => {
   describe("updateToken undeployed guard", () => {
     async function insertToken(
       id: string,
-      overrides: { mintAddress?: string | null; status?: string }
+      overrides: { mintAddress?: string | null; projectId?: string; status?: string }
     ): Promise<void> {
       await db
         .prepare(
@@ -237,7 +238,7 @@ describe("TokenService", () => {
         )
         .bind(
           id,
-          TEST_PROJECT.id,
+          overrides.projectId ?? TEST_PROJECT.id,
           TEST_ORG.id,
           overrides.mintAddress ?? null,
           overrides.status ?? "pending",
@@ -304,7 +305,7 @@ describe("TokenService", () => {
   describe("deploy claim lifecycle (beginTokenDeploy / releaseTokenDeploy)", () => {
     async function insertToken(
       id: string,
-      overrides: { mintAddress?: string | null; status?: string }
+      overrides: { mintAddress?: string | null; projectId?: string; status?: string }
     ): Promise<void> {
       await db
         .prepare(
@@ -316,7 +317,7 @@ describe("TokenService", () => {
         )
         .bind(
           id,
-          TEST_PROJECT.id,
+          overrides.projectId ?? TEST_PROJECT.id,
           TEST_ORG.id,
           overrides.mintAddress ?? null,
           overrides.status ?? "pending",
@@ -379,6 +380,59 @@ describe("TokenService", () => {
       expect(row?.decimals).toBe(9);
     });
 
+    it("blocks metadata updates while deployment is using the claimed snapshot", async () => {
+      await insertToken("tok_claim_metadata_race", { status: "pending", mintAddress: null });
+      await tokenService.beginTokenDeploy("tok_claim_metadata_race");
+
+      await expect(
+        tokenService.updateToken("tok_claim_metadata_race", {
+          name: "Divergent metadata",
+          description: "Must not persist while deployment is in flight",
+        })
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+
+      const row = await db
+        .prepare("SELECT name, description FROM issued_tokens WHERE id = ?")
+        .bind("tok_claim_metadata_race")
+        .first<{ name: string; description: string | null }>();
+      expect(row).toEqual({ name: "Claimed Token", description: null });
+    });
+
+    it("blocks stale metadata updates after deployment completes", async () => {
+      await insertToken("tok_completed_metadata_race", { status: "pending", mintAddress: null });
+      const pendingSnapshot = await tokenService.getToken({
+        tokenId: "tok_completed_metadata_race",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+      expect(pendingSnapshot).not.toBeNull();
+
+      await tokenService.beginTokenDeploy("tok_completed_metadata_race");
+      await tokenService.setTokenDeployed(
+        "tok_completed_metadata_race",
+        "11111111111111111111111111111111",
+        "11111111111111111111111111111111",
+        null
+      );
+
+      await expect(
+        tokenService.updateToken(
+          "tok_completed_metadata_race",
+          { name: "Stale route snapshot" },
+          {
+            status: pendingSnapshot?.status ?? "pending",
+            mintAddress: pendingSnapshot?.mintAddress ?? null,
+          }
+        )
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+
+      const row = await db
+        .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+        .bind("tok_completed_metadata_race")
+        .first<{ name: string }>();
+      expect(row?.name).toBe("Claimed Token");
+    });
+
     it("releases a deploying claim back to pending so a failed deploy stays editable", async () => {
       await insertToken("tok_claim_release", { status: "pending", mintAddress: null });
       await tokenService.beginTokenDeploy("tok_claim_release");
@@ -405,6 +459,152 @@ describe("TokenService", () => {
       await tokenService.releaseTokenDeploy("tok_claim_release_noop");
 
       expect(await readStatus("tok_claim_release_noop")).toBe("active");
+    });
+
+    it("applies tenant predicates before deployment and supply mutations", async () => {
+      const foreignProjectId = "prj_token_foreign";
+      await db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Foreign Project', ?, 'sandbox', 'active', ?)`
+        )
+        .bind(foreignProjectId, TEST_ORG.id, foreignProjectId, TEST_USER.id)
+        .run();
+      for (const [id, status] of [
+        ["tok_foreign_claim", "pending"],
+        ["tok_foreign_release", "deploying"],
+        ["tok_foreign_deployed", "pending"],
+        ["tok_foreign_supply", "active"],
+        ["tok_foreign_child", "active"],
+      ] as const) {
+        await insertToken(id, { projectId: foreignProjectId, status });
+      }
+
+      const { entry: foreignEntry } = await tokenService.addAllowlistEntry({
+        tokenId: "tok_foreign_child",
+        address: "ForeignAllowlist111111111111111111111111111111",
+        addedBy: TEST_USER.id,
+      });
+      await tokenService.freezeAccount({
+        tokenId: "tok_foreign_child",
+        accountAddress: "foreign_account",
+        frozenBy: TEST_USER.id,
+      });
+      const { transaction: foreignTransaction } = await tokenService.createTransaction({
+        tokenId: "tok_foreign_child",
+        organizationId: TEST_ORG.id,
+        type: "mint",
+        params: { destination: "foreign_account", amount: "1" },
+        idempotencyKey: "foreign-idempotency-key",
+        idempotencyFingerprint: "foreign-idempotency-fingerprint",
+      });
+
+      const scoped = new TokenService(
+        db,
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      );
+
+      await expect(scoped.beginTokenDeploy("tok_foreign_claim")).resolves.toBeNull();
+      await scoped.releaseTokenDeploy("tok_foreign_release");
+      await expect(
+        scoped.setTokenDeployed(
+          "tok_foreign_deployed",
+          "ForeignMint111111111111111111111111111111111",
+          "ForeignAuthority11111111111111111111111111111",
+          null
+        )
+      ).rejects.toThrow("TOKEN_NOT_FOUND");
+      await expect(scoped.setSupplyFromBaseUnits("tok_foreign_supply", "999")).rejects.toThrow(
+        "TOKEN_NOT_FOUND"
+      );
+
+      // Child resources must enforce the same boundary even when a caller has
+      // only a globally unique entry/transaction id.
+      await expect(scoped.getAllowlistEntry(foreignEntry.id)).resolves.toBeNull();
+      await expect(scoped.listAllowlistEntries("tok_foreign_child")).rejects.toThrow(
+        "TOKEN_NOT_FOUND"
+      );
+      await expect(scoped.listAllowlistLabels("tok_foreign_child")).rejects.toThrow(
+        "TOKEN_NOT_FOUND"
+      );
+      await expect(scoped.revokeAllowlistEntry(foreignEntry.id)).rejects.toThrow(
+        "ALLOWLIST_ENTRY_NOT_FOUND"
+      );
+      await expect(scoped.activateAllowlistEntry(foreignEntry.id)).rejects.toThrow(
+        "ALLOWLIST_ENTRY_NOT_FOUND"
+      );
+      await expect(scoped.deleteAllowlistEntry(foreignEntry.id)).rejects.toThrow(
+        "ALLOWLIST_ENTRY_NOT_FOUND"
+      );
+      await expect(
+        scoped.addAllowlistEntry({
+          tokenId: "tok_foreign_child",
+          address: "BlockedForeignAdd11111111111111111111111111111",
+          addedBy: TEST_USER.id,
+        })
+      ).rejects.toThrow("TOKEN_NOT_FOUND");
+
+      await expect(
+        scoped.freezeAccount({
+          tokenId: "tok_foreign_child",
+          accountAddress: "blocked_foreign_account",
+          frozenBy: TEST_USER.id,
+        })
+      ).rejects.toThrow("TOKEN_NOT_FOUND");
+      await expect(
+        scoped.unfreezeAccount("tok_foreign_child", "foreign_account", TEST_USER.id)
+      ).rejects.toThrow("TOKEN_NOT_FOUND");
+      await expect(scoped.listFrozenAccounts("tok_foreign_child")).rejects.toThrow(
+        "TOKEN_NOT_FOUND"
+      );
+
+      await expect(scoped.getTransaction(foreignTransaction.id)).resolves.toBeNull();
+      await expect(
+        scoped.updateTransaction(foreignTransaction.id, { status: "confirmed" })
+      ).rejects.toThrow("TRANSACTION_NOT_FOUND");
+      await expect(scoped.listTokenTransactions("tok_foreign_child")).rejects.toThrow(
+        "TOKEN_NOT_FOUND"
+      );
+      await expect(
+        scoped.listTransactions({
+          organizationId: TEST_ORG.id,
+          projectId: foreignProjectId,
+        })
+      ).rejects.toThrow("cannot override the repository project scope");
+
+      await expect(readStatus("tok_foreign_claim")).resolves.toBe("pending");
+      await expect(readStatus("tok_foreign_release")).resolves.toBe("deploying");
+      const rows = await db
+        .prepare(
+          `SELECT id, mint_address, total_supply_cached
+           FROM issued_tokens
+           WHERE id IN ('tok_foreign_deployed', 'tok_foreign_supply')
+           ORDER BY id`
+        )
+        .all<{ id: string; mint_address: string | null; total_supply_cached: string }>();
+      expect(rows.results).toEqual([
+        { id: "tok_foreign_deployed", mint_address: null, total_supply_cached: "0" },
+        { id: "tok_foreign_supply", mint_address: null, total_supply_cached: "0" },
+      ]);
+
+      const childState = await db
+        .prepare(
+          `SELECT
+             (SELECT status FROM token_allowlists WHERE id = ?) AS allowlist_status,
+             (SELECT unfrozen_at FROM frozen_accounts WHERE token_id = ? AND account_address = ?) AS unfrozen_at,
+             (SELECT status FROM issuance_transactions WHERE id = ?) AS transaction_status`
+        )
+        .bind(foreignEntry.id, "tok_foreign_child", "foreign_account", foreignTransaction.id)
+        .first<{
+          allowlist_status: string;
+          unfrozen_at: string | null;
+          transaction_status: string;
+        }>();
+      expect(childState).toEqual({
+        allowlist_status: "active",
+        unfrozen_at: null,
+        transaction_status: "pending",
+      });
     });
   });
 

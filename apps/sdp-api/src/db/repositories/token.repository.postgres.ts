@@ -2,6 +2,7 @@ import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types";
 import type { AppDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import type { ListTokensOptions, TokenRepository } from "./token.repository";
 
 function buildInClause(length: number): string {
@@ -56,12 +57,20 @@ function mapTokenRow(
   };
 }
 
-export function createPostgresTokenRepository(db: AppDb): TokenRepository {
+export function createPostgresTokenRepository(db: AppDb, scope: TenantScope): TokenRepository {
+  if (!scope.projectId) {
+    throw new TenantScopeViolationError("TokenRepository requires a project tenant scope");
+  }
+
   return {
     async getById(tokenId: string) {
       const row = await db
-        .prepare("SELECT * FROM issued_tokens WHERE id = ?")
-        .bind(tokenId)
+        .prepare(
+          `SELECT *
+           FROM issued_tokens
+           WHERE id = ? AND organization_id = ? AND project_id = ?`
+        )
+        .bind(tokenId, scope.organizationId, scope.projectId)
         .first<Record<string, unknown>>();
 
       if (!row) {
@@ -90,9 +99,18 @@ export function createPostgresTokenRepository(db: AppDb): TokenRepository {
     },
 
     async getStatusByMint(projectId: string, mintAddress: string) {
+      assertTenantClaim(
+        scope,
+        { organizationId: scope.organizationId, projectId },
+        "TokenRepository.getStatusByMint"
+      );
       const row = await db
-        .prepare("SELECT status FROM issued_tokens WHERE project_id = ? AND mint_address = ?")
-        .bind(projectId, mintAddress)
+        .prepare(
+          `SELECT status
+           FROM issued_tokens
+           WHERE organization_id = ? AND project_id = ? AND mint_address = ?`
+        )
+        .bind(scope.organizationId, scope.projectId, mintAddress)
         .first<{ status: TokenStatus }>();
 
       if (!row) {
@@ -103,8 +121,13 @@ export function createPostgresTokenRepository(db: AppDb): TokenRepository {
     },
 
     async listByProject(projectId: string, options: ListTokensOptions) {
-      const clauses = ["project_id = ?"];
-      const values: unknown[] = [projectId];
+      assertTenantClaim(
+        scope,
+        { organizationId: scope.organizationId, projectId },
+        "TokenRepository.listByProject"
+      );
+      const clauses = ["organization_id = ?", "project_id = ?"];
+      const values: unknown[] = [scope.organizationId, scope.projectId];
 
       if (options.status) {
         clauses.push("status = ?");

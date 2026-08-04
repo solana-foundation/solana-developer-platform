@@ -244,7 +244,7 @@ function assetsFromRule(rule: Extract<PolicyRule, { kind: "asset" }>): string[] 
   return uniqueValues(rule.assets ?? (rule.asset ? [rule.asset] : []));
 }
 
-function categoryForRule(rule: PolicyRule): RestrictionCategory | null {
+export function categoryForRule(rule: PolicyRule): RestrictionCategory | null {
   switch (rule.kind) {
     case "amount":
       return "limits";

@@ -55,11 +55,12 @@ import {
   unsupportedRampCorridor,
 } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
   enforceWalletOperationPolicy,
   walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   type AppContext,
@@ -243,7 +244,7 @@ async function enforceRampWalletOperationPolicy(
     rawPayload?: Record<string, unknown>;
   }
 ) {
-  return enforceWalletOperationPolicy(c.env, {
+  return enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
     organizationId: input.scope.auth.organizationId,
     projectId: input.scope.auth.projectId,
     custodyWalletId: input.wallet.id,
