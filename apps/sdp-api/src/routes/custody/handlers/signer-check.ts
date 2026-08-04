@@ -104,8 +104,6 @@ export const signerCheck = async (c: AppContext) => {
     attemptId
   );
 
-  await beginApprovedWalletOperationEffect(c);
-
   try {
     const signer = await createOrgSigner(
       c.env,
@@ -154,6 +152,7 @@ export const signerCheck = async (c: AppContext) => {
     const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
     const txEncoder = getTransactionEncoder();
     const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+    await beginApprovedWalletOperationEffect(c);
     const signature = await feePayment.signAndSend(txBytes);
 
     const confirmation = await confirmTransaction(rpc, signature, {

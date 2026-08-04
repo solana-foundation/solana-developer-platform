@@ -49,9 +49,10 @@ export function approvedWalletOperationAttemptId(
 }
 
 /**
- * Durably fences an approved replay immediately before its first external effect.
- * Normal requests are a no-op. Once this marker is set, an expired attempt is
- * never automatically replayed because the external result may be ambiguous.
+ * Durably fences an approved replay immediately before an external submission.
+ * Normal requests are a no-op and repeat fences for the same leased attempt are
+ * idempotent. Once set, an expired attempt is never automatically replayed
+ * because the external result may be ambiguous.
  */
 export async function beginApprovedWalletOperationEffect(
   c: Context<{ Bindings: Env }>

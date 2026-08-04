@@ -366,6 +366,7 @@ async function executeSolTransfer(
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+  await beginApprovedWalletOperationEffect(c);
   const signature = await feePayment.signAndSend(txBytes);
 
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
@@ -748,6 +749,7 @@ async function executePreparedPrivateTransfer(
     getTransactionEncoder().encode(signedTransaction)
   );
 
+  await beginApprovedWalletOperationEffect(c);
   const signature = await feePayment.signAndSend(encodedSignedTransaction);
   const rpc = solanaRpc.createRpc(c.env);
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
@@ -813,6 +815,7 @@ async function executeSplTransfer(
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+  await beginApprovedWalletOperationEffect(c);
   const signature = await feePayment.signAndSend(txBytes);
 
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
@@ -962,7 +965,6 @@ export async function createTransfer(c: AppContext) {
   }
 
   if (privateTransfer) {
-    await beginApprovedWalletOperationEffect(c);
     assertMagicBlockKoraSponsoredExecutionOptions(privateTransfer.magicBlock);
     const mapped = await prepareMagicBlockPrivateTransferForOperation({
       c,
@@ -1045,8 +1047,6 @@ export async function createTransfer(c: AppContext) {
   if (replayed) {
     return success(c, buildTransferReplayPayload(transfer));
   }
-
-  await beginApprovedWalletOperationEffect(c);
 
   try {
     if (operation.token === "SOL") {

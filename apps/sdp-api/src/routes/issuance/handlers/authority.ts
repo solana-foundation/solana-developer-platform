@@ -256,8 +256,6 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
-  await beginApprovedWalletOperationEffect(c);
-
   const signer = await createResolvedAuthoritySigner({
     env: c.env,
     auth,
@@ -267,6 +265,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.updateAuthority({
       mint: mintAddress,
       role: mapAuthorityRole(role),

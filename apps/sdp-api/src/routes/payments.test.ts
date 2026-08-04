@@ -6456,6 +6456,14 @@ describe("Payments routes", () => {
     expect(
       await repository.beginWalletOperationExecutionEffect(walletOperationId, "ambiguous-attempt")
     ).toBe(true);
+    const firstEffect = await repository.getWalletOperationById(walletOperationId);
+    expect(
+      await repository.beginWalletOperationExecutionEffect(walletOperationId, "ambiguous-attempt")
+    ).toBe(true);
+    const repeatedEffect = await repository.getWalletOperationById(walletOperationId);
+    expect(repeatedEffect?.execution_effect_started_at).toBe(
+      firstEffect?.execution_effect_started_at
+    );
     await getDb(env)
       .prepare(
         `UPDATE wallet_operations

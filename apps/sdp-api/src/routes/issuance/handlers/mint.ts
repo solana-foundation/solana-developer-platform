@@ -111,6 +111,7 @@ async function rollbackCreatedAllowlistEntry(
  * Throws when the on-chain write fails and membership cannot be confirmed.
  */
 async function syncDestinationToOnChainAllowlist(opts: {
+  c: AppContext;
   tokenService: TokenService;
   mosaic: ReturnType<typeof createIssuanceMosaicService>;
   tokenId: string;
@@ -159,6 +160,7 @@ async function syncDestinationToOnChainAllowlist(opts: {
   }
 
   try {
+    await beginApprovedWalletOperationEffect(opts.c);
     await opts.mosaic.addToList({
       list: listAddress,
       wallet: opts.destination,
@@ -254,6 +256,7 @@ export const prepareMint = async (c: AppContext) => {
   // SDK's permissionless-thaw can succeed when the client submits.
   const addedToAllowlist = ablListAddress
     ? await syncDestinationToOnChainAllowlist({
+        c,
         tokenService,
         mosaic,
         tokenId,
@@ -413,8 +416,6 @@ export const executeMint = async (c: AppContext) => {
     },
   });
 
-  await beginApprovedWalletOperationEffect(c);
-
   // Resolve signer + sync the destination on-chain BEFORE createTransaction.
   // If sync (or its inner revoke check) throws inside the try block below,
   // the idempotency-keyed tx record gets stored as "failed" and every retry
@@ -428,6 +429,7 @@ export const executeMint = async (c: AppContext) => {
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
   const addedToAllowlist = ablListAddress
     ? await syncDestinationToOnChainAllowlist({
+        c,
         tokenService,
         mosaic,
         tokenId,
@@ -497,6 +499,7 @@ export const executeMint = async (c: AppContext) => {
         if (reservedSupply === null) {
           throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
         }
+        await beginApprovedWalletOperationEffect(c);
       }
     );
 

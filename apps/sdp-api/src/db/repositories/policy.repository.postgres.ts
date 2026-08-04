@@ -2023,15 +2023,14 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       const result = await db
         .prepare(
           `UPDATE wallet_operations
-           SET execution_effect_started_at = ?,
+           SET execution_effect_started_at = COALESCE(execution_effect_started_at, ?),
                updated_at = ?
            WHERE id = ?
              AND organization_id = ?
              AND project_id IS NOT DISTINCT FROM ?
              AND status = 'executing'
              AND execution_attempt_id = ?
-             AND execution_lease_expires_at > ?
-             AND execution_effect_started_at IS NULL`
+             AND execution_lease_expires_at > ?`
         )
         .bind(
           now,
