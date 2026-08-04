@@ -22,18 +22,36 @@ function createMemoryCheckpointStore(): KVStore {
   };
 }
 
+function hashForSequence(sequence: number): string {
+  return sequence.toString(16).padStart(64, "0");
+}
+
 function createAuditWriter(
-  options: { failAt?: number; returnNullAt?: number; commitFailAt?: number } = {}
+  options: {
+    failAt?: number;
+    returnNullAt?: number;
+    commitFailAt?: number;
+    initialCommittedSequence?: number;
+    currentHeadValid?: boolean;
+  } = {}
 ) {
-  let committedSequence = 0;
+  let committedSequence = options.initialCommittedSequence ?? 0;
   let pendingSequence: number | null = null;
   const queryOne = vi.fn(async (query: string, params: readonly unknown[] = []) => {
-    if (query.includes("FROM audit_logs") && query.includes("ORDER BY ledger_sequence DESC")) {
+    if (
+      query.includes("FROM audit_logs") &&
+      (query.includes("ORDER BY ledger_sequence DESC") ||
+        query.includes("ORDER BY ledger.ledger_sequence DESC"))
+    ) {
       return committedSequence === 0
         ? null
         : {
             ledger_sequence: committedSequence,
-            entry_hash: `hash_${committedSequence}`,
+            previous_entry_hash:
+              committedSequence === 1 ? null : hashForSequence(committedSequence - 1),
+            entry_hash: hashForSequence(committedSequence),
+            entry_hash_valid: options.currentHeadValid ?? true,
+            anchor_matches: options.currentHeadValid ?? true,
           };
     }
 
@@ -43,8 +61,8 @@ function createAuditWriter(
     pendingSequence = attempt;
     return {
       ledger_sequence: attempt,
-      previous_entry_hash: attempt === 1 ? null : `hash_${attempt - 1}`,
-      entry_hash: `hash_${attempt}`,
+      previous_entry_hash: attempt === 1 ? null : hashForSequence(attempt - 1),
+      entry_hash: hashForSequence(attempt),
       params,
     };
   });
@@ -142,7 +160,7 @@ describe("AuditService", () => {
     await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBeNull();
   });
 
-  it("locks before another insert when the post-commit checkpoint update fails", async () => {
+  it("repairs one committed-row lag before admitting the next insert", async () => {
     const { db, queryOne, checkpoint } = createAuditWriter();
     vi.mocked(checkpoint.compareAndSet).mockResolvedValueOnce(false);
     const audit = new AuditService(db as never, checkpoint);
@@ -152,9 +170,49 @@ describe("AuditService", () => {
     ).rejects.toBeInstanceOf(AuditPersistenceError);
     await expect(
       audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
+    ).resolves.toBeUndefined();
+
+    expect(insertedCalls(queryOne)).toHaveLength(2);
+    expect(checkpoint.compareAndSet).toHaveBeenNthCalledWith(
+      2,
+      AUDIT_LEDGER_CHECKPOINT_KEY,
+      null,
+      JSON.stringify({ sequence: 1, headHash: hashForSequence(1) })
+    );
+    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBe(
+      JSON.stringify({ sequence: 2, headHash: hashForSequence(2) })
+    );
+  });
+
+  it("fails closed instead of repairing a checkpoint more than one row behind", async () => {
+    const { db, queryOne, checkpoint } = createAuditWriter({ initialCommittedSequence: 2 });
+
+    await expect(
+      new AuditService(db as never, checkpoint).logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+      })
     ).rejects.toBeInstanceOf(AuditPersistenceError);
 
-    expect(insertedCalls(queryOne)).toHaveLength(1);
+    expect(insertedCalls(queryOne)).toHaveLength(0);
+    expect(checkpoint.compareAndSet).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the recoverable head does not match its seal and anchor", async () => {
+    const { db, queryOne, checkpoint } = createAuditWriter({
+      initialCommittedSequence: 1,
+      currentHeadValid: false,
+    });
+
+    await expect(
+      new AuditService(db as never, checkpoint).logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+      })
+    ).rejects.toBeInstanceOf(AuditPersistenceError);
+
+    expect(insertedCalls(queryOne)).toHaveLength(0);
+    expect(checkpoint.compareAndSet).not.toHaveBeenCalled();
   });
 
   it("maps integrity verification results", async () => {

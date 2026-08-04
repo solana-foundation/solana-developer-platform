@@ -128,6 +128,14 @@ interface AuditLedgerCheckpoint {
   headHash: string;
 }
 
+interface AuditLedgerHead {
+  ledger_sequence: number;
+  previous_entry_hash: string | null;
+  entry_hash: string;
+  entry_hash_valid: boolean;
+  anchor_matches: boolean;
+}
+
 function serializeCheckpoint(checkpoint: AuditLedgerCheckpoint): string {
   return JSON.stringify(checkpoint);
 }
@@ -148,6 +156,77 @@ function parseCheckpoint(value: string | null): AuditLedgerCheckpoint {
     // Invalid external state is represented by an impossible sequence below.
   }
   return { sequence: -1, headHash: "" };
+}
+
+function checkpointForHead(head: AuditLedgerHead | null): string | null {
+  return head
+    ? serializeCheckpoint({ sequence: head.ledger_sequence, headHash: head.entry_hash })
+    : null;
+}
+
+function previousCheckpointForHead(head: AuditLedgerHead): string | null | undefined {
+  if (head.ledger_sequence === 1) return null;
+  if (!head.previous_entry_hash) return undefined;
+  return serializeCheckpoint({
+    sequence: head.ledger_sequence - 1,
+    headHash: head.previous_entry_hash,
+  });
+}
+
+function assertValidCurrentHead(head: AuditLedgerHead | null): void {
+  if (!head) return;
+  const previousHashValid =
+    head.ledger_sequence === 1
+      ? head.previous_entry_hash === null
+      : typeof head.previous_entry_hash === "string" &&
+        /^[0-9a-f]{64}$/.test(head.previous_entry_hash);
+  if (
+    !Number.isSafeInteger(head.ledger_sequence) ||
+    head.ledger_sequence < 1 ||
+    !/^[0-9a-f]{64}$/.test(head.entry_hash) ||
+    !previousHashValid ||
+    !head.entry_hash_valid ||
+    !head.anchor_matches
+  ) {
+    throw new Error("Current audit-ledger head failed seal or anchor validation");
+  }
+}
+
+async function reconcileExternalCheckpoint(
+  head: AuditLedgerHead | null,
+  checkpointStore: KVStore
+): Promise<string | null> {
+  assertValidCurrentHead(head);
+  const expectedCheckpoint = checkpointForHead(head);
+  const externalCheckpoint = await checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY);
+  if (externalCheckpoint === expectedCheckpoint) return expectedCheckpoint;
+
+  // PostgreSQL necessarily commits before the independent Redis CAS. A crash
+  // in that narrow interval leaves exactly one sealed row ahead of Redis.
+  // Advance only when Redis names that row's immediate predecessor and the
+  // current row's seal and anchor validated above. Wider, malformed, advanced,
+  // or forked divergence remains fail-closed as suffix deletion/tampering.
+  if (!head) {
+    throw new Error("External audit-ledger checkpoint diverged; writes are locked");
+  }
+  const previousCheckpoint = previousCheckpointForHead(head);
+  if (previousCheckpoint === undefined || externalCheckpoint !== previousCheckpoint) {
+    throw new Error("External audit-ledger checkpoint diverged; writes are locked");
+  }
+  const currentCheckpoint = serializeCheckpoint({
+    sequence: head.ledger_sequence,
+    headHash: head.entry_hash,
+  });
+
+  const repaired = await checkpointStore.compareAndSet(
+    AUDIT_LEDGER_CHECKPOINT_KEY,
+    previousCheckpoint,
+    currentCheckpoint
+  );
+  if (!repaired) {
+    throw new Error("External audit-ledger checkpoint changed during lag recovery");
+  }
+  return currentCheckpoint;
 }
 
 /**
@@ -413,25 +492,38 @@ export class AuditService {
       await lockedTransactionWithPostCommit(
         AUDIT_LEDGER_SESSION_LOCK_KEY,
         async (tx) => {
-          const currentHead = await tx.queryOne<{
-            ledger_sequence: number;
-            entry_hash: string;
-          }>(
-            `SELECT ledger_sequence, encode(entry_hash, 'hex') AS entry_hash
-             FROM audit_logs
-             ORDER BY ledger_sequence DESC
+          const currentHead = await tx.queryOne<AuditLedgerHead>(
+            `SELECT ledger.ledger_sequence,
+                    encode(ledger.previous_entry_hash, 'hex') AS previous_entry_hash,
+                    encode(ledger.entry_hash, 'hex') AS entry_hash,
+                    ledger.entry_hash = sdp_audit_log_hash(
+                      ledger.ledger_sequence,
+                      ledger.id,
+                      ledger.organization_id,
+                      ledger.user_id,
+                      ledger.api_key_id,
+                      ledger.action,
+                      ledger.resource_type,
+                      ledger.resource_id,
+                      ledger.metadata,
+                      ledger.ip_address,
+                      ledger.user_agent,
+                      ledger.request_id,
+                      ledger.status,
+                      ledger.created_at,
+                      ledger.previous_entry_hash
+                    ) AS entry_hash_valid,
+                    anchor.entry_hash = ledger.entry_hash AS anchor_matches
+             FROM audit_logs AS ledger
+             LEFT JOIN audit_ledger_anchors AS anchor
+               ON anchor.ledger_sequence = ledger.ledger_sequence
+             ORDER BY ledger.ledger_sequence DESC
              LIMIT 1`
           );
-          const expectedCheckpoint = currentHead
-            ? serializeCheckpoint({
-                sequence: currentHead.ledger_sequence,
-                headHash: currentHead.entry_hash,
-              })
-            : null;
-          const externalCheckpoint = await checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY);
-          if (externalCheckpoint !== expectedCheckpoint) {
-            throw new Error("External audit-ledger checkpoint diverged; writes are locked");
-          }
+          const expectedCheckpoint = await reconcileExternalCheckpoint(
+            currentHead,
+            checkpointStore
+          );
 
           const inserted = await tx.queryOne<{
             ledger_sequence: number;

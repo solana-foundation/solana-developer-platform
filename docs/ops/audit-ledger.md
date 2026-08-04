@@ -12,7 +12,7 @@ The API and scheduled workers must connect with a PostgreSQL role that is `NOSUP
 
 Never use the migration/admin credential as `DATABASE_URL` for an API or worker runtime. A superuser or `BYPASSRLS` role is intentionally reported as unsafe by the verification command.
 
-The API and every worker must use the same durable Redis deployment through `REDIS_URL`. Compliant writers hold the same PostgreSQL session advisory lock across the database commit and the Redis compare-and-set of `cache:audit-ledger:checkpoint:v1`. The database head must match Redis before insertion, and Redis advances only after the row is durable. A failed database commit therefore never moves Redis. A missing, stale, unexpectedly advanced, or post-commit-unavailable checkpoint fails closed. Do not delete, expire, or manually rewrite this key.
+The API and every worker must use the same durable Redis deployment through `REDIS_URL`. Compliant writers hold the same PostgreSQL session advisory lock across the database commit and the Redis compare-and-set of `cache:audit-ledger:checkpoint:v1`. The database head must match Redis before insertion, and Redis advances only after the row is durable. A failed database commit therefore never moves Redis. If a process exits after commit but before the compare-and-set, the next writer may advance Redis across exactly that one committed row only after its hash seal, append-only anchor, and Redis-named predecessor all match under the same lock. A wider, malformed, unexpectedly advanced, or forked divergence fails closed. Do not delete, expire, or manually rewrite this key.
 
 ## Verify and anchor
 
@@ -59,7 +59,7 @@ On a verification failure:
 5. Restore only from a known-good snapshot under an incident record.
 6. Re-run verification, append a post-recovery checkpoint, and rotate any database credential capable of bypassing row security.
 
-If PostgreSQL is one sequence ahead after a post-commit Redis failure, keep value-moving operations stopped. Preserve the committed row and prove its hash and anchor from the database transaction logs and snapshot, then advance Redis to that exact committed head under the incident record. Never automatically rewind or reseed a non-missing Redis checkpoint.
+If PostgreSQL is one sequence ahead after a post-commit Redis failure, the failed request remains fail-closed. The next audit writer automatically verifies the committed row's hash and append-only anchor, proves that Redis names its immediate predecessor, and advances Redis before appending anything else. Alert if the original write failed or recovery occurred repeatedly. Any difference other than this exact one-row suffix requires the incident procedure above; never automatically rewind or reseed a non-missing Redis checkpoint.
 
 If `unresolvedCriticalIntents` is nonzero, first reconcile the target transaction from the intent's nested `target` metadata against the issuance transaction record and Solana signature state. Append the missing outcome only after the result is proven. Do not repeat an irreversible operation merely because its outcome record is missing.
 

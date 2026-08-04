@@ -7,9 +7,15 @@ import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditService } from "./audit.service";
 
 class MemoryCheckpointStore implements KVStore {
   private value: string | null = null;
+  private rejectNextAdvance = false;
 
   reset() {
     this.value = null;
+    this.rejectNextAdvance = false;
+  }
+
+  rejectNextCompareAndSet() {
+    this.rejectNextAdvance = true;
   }
 
   get(_key: string): Promise<string | null>;
@@ -28,6 +34,10 @@ class MemoryCheckpointStore implements KVStore {
   }
 
   async compareAndSet(_key: string, expected: string | null, value: string): Promise<boolean> {
+    if (this.rejectNextAdvance) {
+      this.rejectNextAdvance = false;
+      return false;
+    }
     if (this.value !== expected) return false;
     this.value = value;
     return true;
@@ -91,6 +101,30 @@ describe("tamper-evident audit ledger", () => {
     expect(rows.map((row) => row.ledger_sequence)).toEqual([...rows.map((_, i) => i + 1)]);
     expect(rows[0]?.previous_entry_hash).toBeNull();
     expect(rows.slice(1).every((row) => row.previous_entry_hash !== null)).toBe(true);
+  });
+
+  it("repairs an exact post-commit checkpoint lag before the next write", async () => {
+    checkpoint.rejectNextCompareAndSet();
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "committed_before_checkpoint_failure",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "write_after_lag_recovery",
+      })
+    ).resolves.toBeUndefined();
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: true,
+      checkedEntries: 2,
+      externalCheckpointMatches: true,
+    });
   });
 
   it("blocks update and delete, including for records past retention review", async () => {
