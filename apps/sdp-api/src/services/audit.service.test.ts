@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { AuditService } from "./audit.service";
+import { AuditPersistenceError, AuditService } from "./audit.service";
 
 describe("AuditService", () => {
   it("redacts credential-shaped metadata before persisting", async () => {
-    const run = vi.fn(async () => undefined);
+    const run = vi.fn(async () => 1);
     const bind = vi.fn((..._args: unknown[]) => ({ run }));
     const db = { prepare: vi.fn(() => ({ bind })) };
     const context = {
@@ -30,6 +30,52 @@ describe("AuditService", () => {
     expect(metadata).toContain('"authorization":"[REDACTED]"');
     expect(metadata).not.toContain("privy-secret");
     expect(metadata).not.toContain("raw-token");
+  });
+
+  it("fails closed when an audit insert fails", async () => {
+    const cause = new Error("database unavailable");
+    const run = vi.fn(async () => {
+      throw cause;
+    });
+    const db = { prepare: vi.fn(() => ({ bind: () => ({ run }) })) };
+
+    await expect(
+      new AuditService(db as never).logSystem({
+        action: "submit",
+        resourceType: "transaction",
+        resourceId: "tx_123",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError", cause });
+  });
+
+  it("rejects a zero-row audit write", async () => {
+    const db = {
+      prepare: vi.fn(() => ({ bind: () => ({ run: vi.fn(async () => 0) }) })),
+    };
+
+    await expect(
+      new AuditService(db as never).logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+      })
+    ).rejects.toBeInstanceOf(AuditPersistenceError);
+  });
+
+  it("maps integrity verification results", async () => {
+    const first = vi.fn(async () => ({
+      valid: true,
+      checked_entries: 42,
+      first_invalid_sequence: null,
+      head_hash: "abc123",
+    }));
+    const db = { prepare: vi.fn(() => ({ first })) };
+
+    await expect(new AuditService(db as never).verifyIntegrity()).resolves.toEqual({
+      valid: true,
+      checkedEntries: 42,
+      firstInvalidSequence: null,
+      headHash: "abc123",
+    });
   });
 
   describe("getForAsset", () => {

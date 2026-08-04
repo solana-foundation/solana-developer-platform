@@ -47,6 +47,8 @@ export const AUDIT_ACTIONS = [
   "rollback",
   "deactivate",
   "blocked_deactivation",
+  // Privileged audit-ledger operations (verification checkpoints, restore evidence).
+  "maintenance",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -78,7 +80,8 @@ export type ResourceType =
   | "counterparty_account"
   | "asset_profile"
   | "provider_credential"
-  | "custody_connection";
+  | "custody_connection"
+  | "audit_ledger";
 
 export interface AuditLogEntry {
   organizationId?: string;
@@ -89,6 +92,29 @@ export interface AuditLogEntry {
   resourceId?: string;
   metadata?: Record<string, unknown>;
   status?: "success" | "failure";
+}
+
+export interface SystemAuditLogEntry extends AuditLogEntry {
+  /** Correlation id supplied by a scheduled job or other non-request caller. */
+  requestId?: string;
+}
+
+export interface AuditLedgerIntegrity {
+  valid: boolean;
+  checkedEntries: number;
+  firstInvalidSequence: number | null;
+  headHash: string | null;
+}
+
+/**
+ * A security-sensitive action must never look successful when its audit record
+ * was not persisted. Callers receive this error instead of silently continuing.
+ */
+export class AuditPersistenceError extends Error {
+  constructor(options: { cause?: unknown } = {}) {
+    super("Required audit record could not be persisted", options);
+    this.name = "AuditPersistenceError";
+  }
 }
 
 /**
@@ -152,13 +178,78 @@ export class AuditService {
     const userId = entry.userId || clerk?.userId || session?.userId || null;
     const apiKeyId = entry.apiKeyId || auth?.id || null;
 
-    const id = `aud_${crypto.randomUUID()}`;
     const ipAddress = getClientIp(c);
     const userAgent = c.req.header("user-agent") || null;
+
+    await this.persist(entry, {
+      organizationId,
+      userId,
+      apiKeyId,
+      ipAddress,
+      userAgent,
+      requestId,
+    });
+  }
+
+  /**
+   * Persist an event from a scheduled job or other caller without an HTTP
+   * context. It intentionally shares the exact same fail-closed write path as
+   * request audit events.
+   */
+  async logSystem(entry: SystemAuditLogEntry): Promise<void> {
+    await this.persist(entry, {
+      organizationId: entry.organizationId ?? null,
+      userId: entry.userId ?? null,
+      apiKeyId: entry.apiKeyId ?? null,
+      ipAddress: null,
+      userAgent: null,
+      requestId: entry.requestId ?? null,
+    });
+  }
+
+  /** Verify every immutable link and return the current externally anchorable head. */
+  async verifyIntegrity(): Promise<AuditLedgerIntegrity> {
+    const result = await this.db
+      .prepare(
+        `SELECT valid, checked_entries, first_invalid_sequence,
+                encode(head_hash, 'hex') AS head_hash
+         FROM sdp_verify_audit_ledger()`
+      )
+      .first<{
+        valid: boolean;
+        checked_entries: number;
+        first_invalid_sequence: number | null;
+        head_hash: string | null;
+      }>();
+
+    if (!result) {
+      throw new AuditPersistenceError();
+    }
+
+    return {
+      valid: result.valid,
+      checkedEntries: result.checked_entries,
+      firstInvalidSequence: result.first_invalid_sequence,
+      headHash: result.head_hash,
+    };
+  }
+
+  private async persist(
+    entry: AuditLogEntry,
+    actor: {
+      organizationId: string | null;
+      userId: string | null;
+      apiKeyId: string | null;
+      ipAddress: string | null;
+      userAgent: string | null;
+      requestId: string | null;
+    }
+  ): Promise<void> {
+    const id = `aud_${crypto.randomUUID()}`;
     const metadata = entry.metadata ? redactCredentialSecrets(entry.metadata) : null;
 
     try {
-      await this.db
+      const inserted = await this.db
         .prepare(
           `INSERT INTO audit_logs (
             id, organization_id, user_id, api_key_id, action, resource_type,
@@ -167,22 +258,26 @@ export class AuditService {
         )
         .bind(
           id,
-          organizationId,
-          userId,
-          apiKeyId,
+          actor.organizationId,
+          actor.userId,
+          actor.apiKeyId,
           entry.action,
           entry.resourceType,
           entry.resourceId || null,
           metadata ? JSON.stringify(metadata) : null,
-          ipAddress,
-          userAgent,
-          requestId,
+          actor.ipAddress,
+          actor.userAgent,
+          actor.requestId,
           entry.status || "success"
         )
         .run();
+
+      if (inserted !== 1) {
+        throw new Error(`Audit insert affected ${inserted} rows`);
+      }
     } catch (err) {
-      // Log but don't fail the request
       getLogger().error({ error: redactCredentialSecrets(err) }, "Failed to write audit log");
+      throw err instanceof AuditPersistenceError ? err : new AuditPersistenceError({ cause: err });
     }
   }
 
