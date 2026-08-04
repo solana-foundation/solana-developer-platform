@@ -5,6 +5,8 @@ import {
   ORGANIZATION_RPC_PROVIDERS,
 } from "@sdp/types";
 import { redirect } from "next/navigation";
+import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
+import { Button } from "@/components/ui/button";
 import { organizationOnboarding } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -41,6 +43,9 @@ export default async function OrganizationOnboardingPage() {
   if (status.setup.status === "complete") redirect("/dashboard");
 
   if (!status.setup.canManage) {
+    // Explaining why someone cannot continue and then stopping leaves them on a
+    // route they were sent to with nowhere to go. Settings is where the members
+    // list lives, so it is where they can find an admin to ask.
     return (
       <div className="flex h-full items-center justify-center p-6">
         <div className="max-w-lg rounded-2xl border border-border-default bg-surface-raised p-6 text-center">
@@ -50,6 +55,11 @@ export default async function OrganizationOnboardingPage() {
           <p className="mt-2 text-sm leading-6 text-tertiary">
             {t("DashboardCustody.onboardingAdminDescription")}
           </p>
+          <Button asChild variant="secondary" className="mt-5">
+            <DashboardNavigationLink href="/dashboard/settings">
+              {t("DashboardCustody.onboardingAdminAction")}
+            </DashboardNavigationLink>
+          </Button>
         </div>
       </div>
     );

@@ -217,3 +217,28 @@ describe("OrganizationOnboardingPage", () => {
     expect(markup).toContain('disabled=""');
   });
 });
+
+describe("member without setup access", () => {
+  it("is given an action rather than a dead end", async () => {
+    // The card explained why they could not continue and then stopped, leaving a
+    // non-admin with nowhere to go from the route they had just been sent to.
+    mocks.organizationFetch.mockResolvedValue({
+      linked: true,
+      organization: { id: "org_test" },
+      setup: {
+        canManage: false,
+        completedAt: null,
+        currentStep: "rpc",
+        custodyProvider: null,
+        rpcProvider: null,
+        status: "not_started",
+        version: 1,
+      },
+    });
+
+    const markup = await renderPage();
+
+    expect(markup).toContain("DashboardCustody.onboardingAdminTitle");
+    expect(markup).toContain("/dashboard/settings");
+  });
+});
