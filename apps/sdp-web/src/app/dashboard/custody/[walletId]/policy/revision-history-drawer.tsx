@@ -2,7 +2,7 @@
 
 import type { WalletControlProfileRevisionHistory } from "@sdp/types";
 import { History, X } from "lucide-react";
-import { type CSSProperties, useEffect, useState } from "react";
+import { type CSSProperties, type ReactElement, useEffect, useState } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +27,9 @@ import { fetchWalletRevisionHistoryAction } from "./revision-history.actions";
  *
  * @param props.walletId - The wallet whose revision history the drawer shows.
  * @param props.initialRevisionId - Deep-linked `?revision=` value; opens the drawer on mount.
+ * @param props.defaultRevisionId - Revision to preselect when the drawer is opened manually; does not open it on mount.
  * @param props.preloaded - Server-fetched history + member labels, when the page already has them.
+ * @param props.trigger - Replaces the default "Revision history" trigger button.
  * @returns The trigger button with its drawer.
  */
 /**
@@ -75,19 +77,23 @@ function RevisionHistorySkeleton() {
 export function RevisionHistoryDrawer({
   walletId,
   initialRevisionId,
+  defaultRevisionId,
   preloaded,
+  trigger,
 }: {
   walletId: string;
   initialRevisionId?: string;
+  defaultRevisionId?: string;
   preloaded?: {
     history: WalletControlProfileRevisionHistory;
     userNames: Record<string, string>;
   };
+  trigger?: ReactElement;
 }) {
   const t = useTranslations();
   const [open, setOpen] = useState(Boolean(initialRevisionId));
   const [selectedRevisionId, setSelectedRevisionId] = useState(
-    initialRevisionId === "latest" ? undefined : initialRevisionId
+    initialRevisionId && initialRevisionId !== "latest" ? initialRevisionId : defaultRevisionId
   );
   const { data } = useSWR(
     open && !preloaded ? `wallet-policy-revisions-${walletId}` : null,
@@ -117,14 +123,18 @@ export function RevisionHistoryDrawer({
     <Drawer open={open} onOpenChange={handleOpenChange} swipeDirection="right">
       <DrawerTrigger
         render={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            iconLeft={<History className="size-4" />}
-          >
-            {t("DashboardCustody.policyAuditRevisionHistory")}
-          </Button>
+          trigger ? (
+            trigger
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              iconLeft={<History className="size-4" />}
+            >
+              {t("DashboardCustody.policyAuditRevisionHistory")}
+            </Button>
+          )
         }
       />
       <DrawerContent
