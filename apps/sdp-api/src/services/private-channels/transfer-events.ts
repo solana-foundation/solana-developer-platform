@@ -12,21 +12,23 @@ export async function emitTransferEvent(
   env: Env,
   transfer: PrivateChannelTransferRow,
   type: PrivateChannelEventType,
-  status: PrivateChannelEventStatus
+  status: PrivateChannelEventStatus,
+  sdpUserId: string
 ): Promise<void> {
   try {
     await createPrivateChannelEventService(env).emit({
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
       instanceId: transfer.instance_id,
-      channelId: transfer.channel_id,
-      // The transfer row records the acting SPC member, not an SDP user id.
-      sdpUserId: null,
+      // Transfers belong to their initiating user and wallets, not a single channel.
+      channelId: null,
+      sdpUserId,
       family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
       type,
       status,
       payload: {
         transferId: transfer.id,
+        senderWalletId: transfer.sender_wallet_id,
         sender: transfer.sender,
         recipient: transfer.recipient,
         amount: transfer.amount,

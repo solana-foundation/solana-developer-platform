@@ -17,7 +17,11 @@ reintroduce fixture modules. Data flows: BFF proxies
   in-flight, and rendering on it flashed onboarding at program holders. Cash
   rows explain themselves from the target allocations (lane → strategy: deploys
   on rebalance; lane → cash: parked by design — Ground never converts between
-  stablecoins). A share percent renders only when value sits behind it.
+  stablecoins). Zero-value NON-strategy slices never render — Ground keeps
+  reporting a drained lane's residual cash bucket at $0 (provider plumbing,
+  not a holding) — while nonzero value always renders whatever rail it sits
+  on, so the list still sums to the wallet total. A share percent renders only
+  when value sits behind it.
   Deliberately **not** grouped by curator — see "One strategy, no curator step"
   below.
 - `earn-program-data.ts` — THE data seam. `useEarnProgram()` discriminates
@@ -44,8 +48,10 @@ reintroduce fixture modules. Data flows: BFF proxies
   incomplete catalogue join degrades to the wallet-level figure; the preview
   stays the authority. A token Ground never routes to Solana (USDT: Ethereum
   only, per their supported-chains doc — sandbox USDT is Ground's mock Sepolia
-  asset) is blocked AT SELECTION: inline notice, amount disabled, no preview
-  round-trip. Preview failures render TRANSLATED copy naming the per-lane
+  asset) is NOT OFFERED at all: the token select renders only
+  `SOLANA_PAYOUT_TOKENS`, mirroring `GROUND_SOLANA_ROUTED_TOKENS` in the
+  provider client, which also keeps un-routable strategies out of the
+  catalogue at sync time. Preview failures render TRANSLATED copy naming the per-lane
   reality — never the provider's wire text ("ground request failed with status
   409" explains nothing).
 - `deposit/` — the deposit flow: funding wallet → profile → filtered strategy
