@@ -136,7 +136,6 @@ export default async function RecurringPaymentDetailRoute({
           )}
           counterpartyLabel={counterpartyLabel}
           amountLabel={formatDisplayAmount(recurringPayment.amount, tokenLabel)}
-          currencyLabel={tokenLabel}
           collectionAttempts={collectionAttemptsResult.data?.collectionAttempts ?? []}
           collectionAttemptsTotal={collectionAttemptsResult.data?.total ?? 0}
           collectionAttemptsError={

@@ -13,7 +13,7 @@ import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
+import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
@@ -194,7 +194,13 @@ export function CopyableValue({
   );
 }
 
-export function ExplorerValue({ value }: { value: string | null }) {
+export function ExplorerValue({
+  value,
+  kind = "tx",
+}: {
+  value: string | null;
+  kind?: "tx" | "address";
+}) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
   if (!value) {
@@ -208,9 +214,19 @@ export function ExplorerValue({ value }: { value: string | null }) {
         asChild
         variant="ghost"
         size="icon-xs"
-        aria-label={t("DashboardPayments.recurring.openSignature")}
+        aria-label={
+          kind === "address"
+            ? t("DashboardPayments.recurring.openAccount")
+            : t("DashboardPayments.recurring.openSignature")
+        }
       >
-        <a href={explorerTxUrl(value, cluster)} target="_blank" rel="noreferrer">
+        <a
+          href={
+            kind === "address" ? explorerAddressUrl(value, cluster) : explorerTxUrl(value, cluster)
+          }
+          target="_blank"
+          rel="noreferrer"
+        >
           <ExternalLinkIcon />
         </a>
       </Button>

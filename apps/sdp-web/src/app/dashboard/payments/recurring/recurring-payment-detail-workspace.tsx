@@ -58,6 +58,7 @@ import {
   amountIsValid,
   CopyableValue,
   DetailRow,
+  ExplorerValue,
   formatOptionalTimestamp,
   formatPeriodHours,
   getSchedulePresets,
@@ -80,7 +81,6 @@ interface RecurringPaymentDetailWorkspaceProps {
   counterpartyAccounts: CounterpartyAccount[];
   counterpartyLabel: string;
   amountLabel: string;
-  currencyLabel: string;
   collectionAttempts: PaymentSubscriptionCollectionAttempt[];
   collectionAttemptsTotal: number;
   collectionAttemptsError?: string;
@@ -223,8 +223,6 @@ function RecurringPaymentActionsMenu({
   pendingAction,
   actionError,
   disabled,
-  editable,
-  onEdit,
   onAction,
   onCancel,
 }: {
@@ -233,8 +231,6 @@ function RecurringPaymentActionsMenu({
   pendingAction: RecurringPaymentAction | null;
   actionError: DetailActionError | null;
   disabled?: boolean;
-  editable: boolean;
-  onEdit: () => void;
   onAction: (action: RecurringPaymentAction) => void;
   onCancel: () => void;
 }) {
@@ -258,10 +254,6 @@ function RecurringPaymentActionsMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuItem onSelect={onEdit} disabled={!editable || actionsDisabled}>
-          <PencilIcon className="size-4" />
-          <span>{t("DashboardPayments.recurring.editPayment")}</span>
-        </DropdownMenuItem>
         {primaryAction ? (
           <DropdownMenuItem
             onSelect={() => onAction(primaryAction.action)}
@@ -364,7 +356,6 @@ export function RecurringPaymentDetailWorkspace({
   counterpartyAccounts,
   counterpartyLabel,
   amountLabel,
-  currencyLabel,
   collectionAttempts,
   collectionAttemptsTotal,
   collectionAttemptsError,
@@ -397,10 +388,7 @@ export function RecurringPaymentDetailWorkspace({
     string | null
   >(null);
   const [savingBillingInterval, setSavingBillingInterval] = useState(false);
-  const [editingCurrency, setEditingCurrency] = useState(false);
   const [selectedToken, setSelectedToken] = useState(recurringPayment.token);
-  const [currencyValidationError, setCurrencyValidationError] = useState<string | null>(null);
-  const [savingCurrency, setSavingCurrency] = useState(false);
   const [editingAmount, setEditingAmount] = useState(false);
   const [selectedAmount, setSelectedAmount] = useState(recurringPayment.amount);
   const [amountValidationError, setAmountValidationError] = useState<string | null>(null);
@@ -425,7 +413,6 @@ export function RecurringPaymentDetailWorkspace({
     savingWallet ||
     savingReceivingAccount ||
     savingBillingInterval ||
-    savingCurrency ||
     savingAmount;
 
   const submitAction = async (action: RecurringPaymentAction) => {
@@ -607,56 +594,6 @@ export function RecurringPaymentDetailWorkspace({
     setEditingBillingInterval(false);
   };
 
-  const submitCurrency = async (token = selectedToken) => {
-    if (controlsDisabled) {
-      return;
-    }
-    if (!token) {
-      setCurrencyValidationError(t("DashboardPayments.recurring.selectCurrency"));
-      return;
-    }
-    if (token === recurringPayment.token) {
-      setCurrencyValidationError(
-        t("DashboardPayments.recurring.alreadyCurrency", {
-          currency: resolveTokenLabel(token, wallets),
-        })
-      );
-      return;
-    }
-
-    setCurrencyValidationError(null);
-    setSavingCurrency(true);
-    const toastId = toast.loading(t("DashboardPayments.recurring.updatingCurrency"), {
-      position: "bottom-right",
-    });
-    try {
-      await updateRecurringPayment(recurringPayment.id, { token }, undefined, t);
-      toast.success(t("DashboardPayments.recurring.currencyUpdated"), {
-        id: toastId,
-        position: "bottom-right",
-      });
-      setEditingCurrency(false);
-      router.refresh();
-    } catch (error) {
-      toast.error(t("DashboardPayments.recurring.currencyUpdateFailed"), {
-        id: toastId,
-        description:
-          error instanceof Error
-            ? error.message
-            : t("DashboardPayments.recurring.paymentUpdateFailed"),
-        position: "bottom-right",
-      });
-    } finally {
-      setSavingCurrency(false);
-    }
-  };
-
-  const closeCurrencyModal = () => {
-    setSelectedToken(recurringPayment.token);
-    setCurrencyValidationError(null);
-    setEditingCurrency(false);
-  };
-
   const submitAmount = async () => {
     if (controlsDisabled) {
       return;
@@ -666,7 +603,18 @@ export function RecurringPaymentDetailWorkspace({
       setAmountValidationError(t("DashboardPayments.recurring.invalidAmount"));
       return;
     }
-    if (amount === recurringPayment.amount) {
+    if (!selectedToken) {
+      setAmountValidationError(t("DashboardPayments.recurring.selectCurrency"));
+      return;
+    }
+    const updates: { amount?: string; token?: string } = {};
+    if (amount !== recurringPayment.amount) {
+      updates.amount = amount;
+    }
+    if (selectedToken !== recurringPayment.token) {
+      updates.token = selectedToken;
+    }
+    if (updates.amount === undefined && updates.token === undefined) {
       setAmountValidationError(t("DashboardPayments.recurring.alreadySet", { value: amountLabel }));
       return;
     }
@@ -677,7 +625,7 @@ export function RecurringPaymentDetailWorkspace({
       position: "bottom-right",
     });
     try {
-      await updateRecurringPayment(recurringPayment.id, { amount }, undefined, t);
+      await updateRecurringPayment(recurringPayment.id, updates, undefined, t);
       toast.success(t("DashboardPayments.recurring.amountUpdated"), {
         id: toastId,
         position: "bottom-right",
@@ -700,6 +648,7 @@ export function RecurringPaymentDetailWorkspace({
 
   const closeAmountModal = () => {
     setSelectedAmount(recurringPayment.amount);
+    setSelectedToken(recurringPayment.token);
     setAmountValidationError(null);
     setEditingAmount(false);
   };
@@ -749,19 +698,9 @@ export function RecurringPaymentDetailWorkspace({
             dueNow={dueNow}
             pendingAction={pendingAction}
             actionError={actionError}
-            editable={isEditable}
             disabled={
-              savingWallet ||
-              savingReceivingAccount ||
-              savingBillingInterval ||
-              savingCurrency ||
-              savingAmount
+              savingWallet || savingReceivingAccount || savingBillingInterval || savingAmount
             }
-            onEdit={() => {
-              setSelectedAmount(recurringPayment.amount);
-              setAmountValidationError(null);
-              setEditingAmount(true);
-            }}
             onAction={(action) => void submitAction(action)}
             onCancel={() => setCancelConfirmOpen(true)}
           />
@@ -779,7 +718,7 @@ export function RecurringPaymentDetailWorkspace({
                 <DetailRow label={t("DashboardPayments.status")}>
                   <RecurringPaymentStatusBadge status={recurringPayment.status} />
                 </DetailRow>
-                <div className="flex min-h-12 items-center justify-between gap-4 py-3">
+                <div className="group flex min-h-12 items-center justify-between gap-4 py-3">
                   <span className="shrink-0 text-sm text-secondary">
                     {t("DashboardPayments.recurring.amount")}
                   </span>
@@ -797,9 +736,11 @@ export function RecurringPaymentDetailWorkspace({
                         size="sm"
                         variant="ghost"
                         disabled={controlsDisabled}
+                        className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
                         iconLeft={<PencilIcon className="size-4" />}
                         onClick={() => {
                           setSelectedAmount(recurringPayment.amount);
+                          setSelectedToken(recurringPayment.token);
                           setAmountValidationError(null);
                           setEditingAmount(true);
                         }}
@@ -809,31 +750,7 @@ export function RecurringPaymentDetailWorkspace({
                     ) : null}
                   </span>
                 </div>
-                <div className="flex min-h-12 items-center justify-between gap-4 py-3">
-                  <span className="shrink-0 text-sm text-secondary">
-                    {t("DashboardPayments.recurring.currency")}
-                  </span>
-                  <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
-                    <span>{currencyLabel}</span>
-                    {isEditable ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={controlsDisabled || assetOptions.length === 0}
-                        iconLeft={<PencilIcon className="size-4" />}
-                        onClick={() => {
-                          setSelectedToken(recurringPayment.token);
-                          setCurrencyValidationError(null);
-                          setEditingCurrency(true);
-                        }}
-                      >
-                        {t("DashboardPayments.recurring.edit")}
-                      </Button>
-                    ) : null}
-                  </span>
-                </div>
-                <div className="flex min-h-12 items-center justify-between gap-4 py-3">
+                <div className="group flex min-h-12 items-center justify-between gap-4 py-3">
                   <span className="shrink-0 text-sm text-secondary">
                     {t("DashboardPayments.recurring.billingInterval")}
                   </span>
@@ -845,6 +762,7 @@ export function RecurringPaymentDetailWorkspace({
                         size="sm"
                         variant="ghost"
                         disabled={controlsDisabled}
+                        className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
                         iconLeft={<PencilIcon className="size-4" />}
                         onClick={() => {
                           setSelectedSchedulePreset(
@@ -875,7 +793,7 @@ export function RecurringPaymentDetailWorkspace({
             </h3>
             <div className="rounded-lg border border-border-default bg-surface-raised px-4">
               <div className="divide-y divide-border-default">
-                <div className="flex min-h-12 items-center justify-between gap-4 py-3">
+                <div className="group flex min-h-12 items-center justify-between gap-4 py-3">
                   <span className="shrink-0 text-sm text-secondary">
                     {t("DashboardPayments.recurring.fundingWallet")}
                   </span>
@@ -901,6 +819,7 @@ export function RecurringPaymentDetailWorkspace({
                         size="sm"
                         variant="ghost"
                         disabled={controlsDisabled || wallets.length === 0}
+                        className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
                         iconLeft={<PencilIcon className="size-4" />}
                         onClick={() => {
                           setSelectedWalletId(recurringPayment.sourceWalletId);
@@ -913,7 +832,7 @@ export function RecurringPaymentDetailWorkspace({
                     ) : null}
                   </span>
                 </div>
-                <div className="flex min-h-12 items-center justify-between gap-4 py-3">
+                <div className="group flex min-h-12 items-center justify-between gap-4 py-3">
                   <span className="shrink-0 text-sm text-secondary">
                     {t("DashboardPayments.recurring.receivingWallet")}
                   </span>
@@ -935,6 +854,7 @@ export function RecurringPaymentDetailWorkspace({
                         size="sm"
                         variant="ghost"
                         disabled={controlsDisabled || counterpartyAccounts.length === 0}
+                        className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
                         iconLeft={<PencilIcon className="size-4" />}
                         onClick={() => {
                           setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
@@ -949,6 +869,9 @@ export function RecurringPaymentDetailWorkspace({
                 </div>
                 <DetailRow label={t("DashboardPayments.recurring.paymentReference")}>
                   <CopyableValue value={recurringPayment.id} label={paymentReferenceLabel} />
+                </DetailRow>
+                <DetailRow label={t("DashboardPayments.recurring.subscriptionAccount")}>
+                  <ExplorerValue value={recurringPayment.subscriptionPda} kind="address" />
                 </DetailRow>
                 <DetailRow label={t("DashboardPayments.recurring.metadata")}>
                   {recurringPayment.metadataUri && isHttpUrl(recurringPayment.metadataUri) ? (
@@ -1151,6 +1074,23 @@ export function RecurringPaymentDetailWorkspace({
                 {t("DashboardPayments.recurring.editAmountDescription")}
               </p>
             </div>
+            <Combobox
+              label={t("DashboardPayments.recurring.currency")}
+              value={selectedToken}
+              onChange={(value) => {
+                setSelectedToken(value);
+                setAmountValidationError(null);
+              }}
+              options={assetOptions}
+              placeholder={
+                assetOptions.length === 0
+                  ? t("DashboardPayments.recurring.noTokenBalances")
+                  : t("DashboardPayments.recurring.selectCurrency")
+              }
+              searchPlaceholder={t("DashboardPayments.ramps.searchCurrencies")}
+              icon={<CreditCardIcon />}
+              disabled={savingAmount || assetOptions.length === 0}
+            />
             <div className="space-y-2">
               <Label htmlFor="recurring-payment-edit-amount">
                 {t("DashboardPayments.recurring.amount")}
@@ -1169,9 +1109,7 @@ export function RecurringPaymentDetailWorkspace({
               />
               {amountValidationError ? (
                 <p className="text-sm text-error">{amountValidationError}</p>
-              ) : (
-                <p className="text-sm text-tertiary">{currencyLabel}</p>
-              )}
+              ) : null}
             </div>
             <div className="flex justify-end gap-2">
               <Button
@@ -1272,76 +1210,6 @@ export function RecurringPaymentDetailWorkspace({
                 disabled={savingBillingInterval}
                 iconLeft={
                   savingBillingInterval ? (
-                    <Loader2Icon className="size-4 shrink-0 animate-spin" />
-                  ) : undefined
-                }
-              >
-                {t("DashboardPayments.recurring.save")}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-
-        <Modal
-          isOpen={editingCurrency}
-          ariaLabel={t("DashboardPayments.recurring.editCurrency")}
-          onClose={savingCurrency ? undefined : closeCurrencyModal}
-          size="sm"
-        >
-          <form
-            className="space-y-5 p-6"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submitCurrency();
-            }}
-          >
-            <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-primary">
-                {t("DashboardPayments.recurring.editCurrency")}
-              </h2>
-              <p className="text-sm text-secondary">
-                {t("DashboardPayments.recurring.editCurrencyDescription")}
-              </p>
-            </div>
-            <Combobox
-              label={t("DashboardPayments.recurring.currency")}
-              value={selectedToken}
-              onChange={(value) => {
-                setSelectedToken(value);
-                setCurrencyValidationError(null);
-              }}
-              options={assetOptions}
-              placeholder={
-                assetOptions.length === 0
-                  ? t("DashboardPayments.recurring.noTokenBalances")
-                  : t("DashboardPayments.recurring.selectCurrency")
-              }
-              searchPlaceholder={t("DashboardPayments.ramps.searchCurrencies")}
-              icon={<CreditCardIcon />}
-              disabled={savingCurrency || assetOptions.length === 0}
-              validationError={currencyValidationError ?? undefined}
-              onEnterSelect={(value) => {
-                setSelectedToken(value);
-                setCurrencyValidationError(null);
-                void submitCurrency(value);
-              }}
-            />
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={savingCurrency}
-                onClick={closeCurrencyModal}
-              >
-                {t("DashboardPayments.recurring.cancel")}
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={savingCurrency}
-                iconLeft={
-                  savingCurrency ? (
                     <Loader2Icon className="size-4 shrink-0 animate-spin" />
                   ) : undefined
                 }

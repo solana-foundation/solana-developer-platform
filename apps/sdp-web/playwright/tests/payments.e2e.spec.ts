@@ -152,7 +152,6 @@ test.describe
       await expect(page.getByRole("link", { name: "Back to recurring payments" })).toBeVisible();
       await expect(page.getByText("Payment reference", { exact: true })).toBeVisible();
       await expect(page.getByText("Billing interval", { exact: true })).toBeVisible();
-      await expect(page.getByText("Currency", { exact: true })).toBeVisible();
       await expect(page.getByText("Funding wallet", { exact: true })).toBeVisible();
       await expect(page.getByText("Receiving wallet", { exact: true })).toBeVisible();
       await expect(page.locator("main").getByText("Token mint", { exact: true })).toHaveCount(0);

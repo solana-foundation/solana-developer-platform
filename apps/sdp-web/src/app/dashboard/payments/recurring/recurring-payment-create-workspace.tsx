@@ -120,7 +120,7 @@ function resolveScheduleLabel(
 
 type AmountValidationError = "format" | "notPositive" | "decimals";
 
-/** Max fractional digits accepted by ONCHAIN_AMOUNT_PATTERN when no asset bounds the precision. */
+/** Max fractional digits accepted before a selected asset bounds the precision (the on-chain 9-decimal cap). */
 const AMOUNT_PATTERN_MAX_DECIMALS = 9;
 
 /**

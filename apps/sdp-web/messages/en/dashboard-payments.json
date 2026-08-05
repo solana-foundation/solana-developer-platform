@@ -912,7 +912,7 @@
       "editReceivingWallet": "Edit receiving wallet",
       "editReceivingWalletDescription": "Choose where this recurring payment sends funds.",
       "editAmount": "Edit amount",
-      "editAmountDescription": "Set the amount collected each billing period.",
+      "editAmountDescription": "Update the amount and currency collected each cycle.",
       "editBillingInterval": "Edit billing interval",
       "editBillingIntervalDescription": "Choose how often this recurring payment should collect.",
       "editCurrency": "Edit currency",
@@ -921,7 +921,9 @@
       "cancelPaymentDescription": "This stops future collections for {counterparty}. You can resume the payment later from the Actions menu.",
       "keepPayment": "Keep payment",
       "cancelPayment": "Cancel payment",
-      "save": "Save"
+      "save": "Save",
+      "subscriptionAccount": "Subscription account",
+      "openAccount": "Open account in explorer"
     },
     "transactions": {
       "searchPlaceholder": "Search ID, signature, address, reference, or counterparty (3+ characters)",
