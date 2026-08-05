@@ -8,7 +8,7 @@ import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
 import { formatDisplayAmount, shortenAddress } from "../../payments-overview.utils";
-import { fetchPaymentsWallets } from "../../payments-page.data";
+import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../../payments-page.data";
 import { RecurringPaymentDetailWorkspace } from "../recurring-payment-detail-workspace";
 import {
   fetchRecurringPaymentById,
@@ -72,14 +72,20 @@ export default async function RecurringPaymentDetailRoute({
     "dashboard.recurring-payments.detail.page",
     async ({ trace, apiClient }) => {
       const t = await getTranslations();
-      const [recurringPaymentResult, walletsResult] = await Promise.all([
+      const [recurringPaymentResult, walletsResult, issuedTokenSymbolsResult] = await Promise.all([
         trace.step("fetch_recurring_payment", () =>
           fetchRecurringPaymentById(apiClient.request, recurringPaymentId, t)
         ),
         trace.step("fetch_wallets", () =>
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
         ),
+        trace.step("fetch_issued_token_symbols", () =>
+          fetchPaymentsIssuedTokenSymbols(apiClient.request)
+        ),
       ]);
+      const issuedTokensByMint = Object.fromEntries(
+        (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token])
+      );
 
       trace.log({
         ok: recurringPaymentResult.ok,
@@ -124,6 +130,7 @@ export default async function RecurringPaymentDetailRoute({
           recurringPayment={recurringPayment}
           wallet={wallet}
           wallets={wallets}
+          issuedTokensByMint={issuedTokensByMint}
           counterpartyAccounts={counterpartyAccounts.filter(
             (account) => account.accountKind === "crypto_wallet" && account.status === "active"
           )}

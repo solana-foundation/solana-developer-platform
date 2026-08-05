@@ -790,6 +790,8 @@
       "clearFilters": "Effacer les filtres",
       "noMatches": "Aucun paiement récurrent ne correspond à vos filtres.",
       "range": "{from}–{to} sur {total} paiements",
+      "detailPaymentSection": "Paiement",
+      "detailWalletsSection": "Portefeuilles et métadonnées",
       "unableToLoad": "Impossible de charger les paiements Recurring",
       "noPayments": "Aucun paiement Recurring pour l’instant.",
       "paymentsAppearHere": "Les enregistrements de paiement Recurring créés apparaîtront ici.",

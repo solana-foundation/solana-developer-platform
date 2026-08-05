@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import {
   CopyableValue,
@@ -63,7 +64,9 @@ export function RecurringPaymentCollectionHistory({
   total,
   error,
   wallets,
+  className,
 }: {
+  className?: string;
   attempts: PaymentSubscriptionCollectionAttempt[];
   total: number;
   error?: string;
@@ -78,7 +81,12 @@ export function RecurringPaymentCollectionHistory({
         : t("DashboardPayments.recurring.attempts", { count: attempts.length });
 
   return (
-    <Card className="flex flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
+    <Card
+      className={cn(
+        "flex flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0",
+        className
+      )}
+    >
       <CardHeader className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1.5">
           <CardTitle>{t("DashboardPayments.recurring.collectionHistory")}</CardTitle>

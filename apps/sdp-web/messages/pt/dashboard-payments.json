@@ -825,6 +825,8 @@
       "clearFilters": "Limpar filtros",
       "noMatches": "Nenhum pagamento recorrente corresponde aos seus filtros.",
       "range": "{from}-{to} de {total} pagamentos",
+      "detailPaymentSection": "Pagamento",
+      "detailWalletsSection": "Carteiras e metadados",
       "unableToLoad": "Não foi possível carregar os pagamentos recorrentes",
       "noPayments": "Nenhum pagamento recorrente ainda.",
       "paymentsAppearHere": "Os registros de pagamentos recorrentes criados aparecerão aqui.",
