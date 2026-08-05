@@ -4,14 +4,13 @@
       "programTitle": "Your program",
       "programDescription": "One provider-managed wallet running one strategy at a time. Balances are read live from the provider.",
       "programEmpty": "No program yet.",
-      "newDeposit": "New deposit",
       "withdraw": "Withdraw",
       "totalBalance": "Total balance",
       "totalEarned": "Earned to date",
       "withdrawableBalance": "Withdrawable now",
       "currentApy": "Current APY",
       "holdingsTitle": "Where the money sits",
-      "holdingsEmpty": "No deposits detected yet. Funds land as cash, then deploy to the strategy on the provider's next rebalance.",
+      "holdingsEmpty": "No deposits detected yet. Funds land as cash, then deploy toward the strategy on the provider's later rebalances.",
       "programShare": "{pct}% of program",
       "walletStatusCreating": "Setting up",
       "walletStatusBusy": "Processing",
@@ -20,16 +19,17 @@
       "providerNotConfigured": "Live earn data is unavailable in this environment — the provider API key is not configured yet.",
       "startTitle": "Put idle stablecoins to work",
       "startDescription": "Choose the wallet that funds it, say what matters most, and pick a strategy. Your funds stay in your custody until you send them.",
-      "startAction": "Start a deposit",
+      "startAction": "Set up Earn",
       "startStatStrategies": "Strategies available",
       "startStatTopApy": "Top APY",
       "startStatAccess": "Fastest access",
       "catalogueLoadError": "The strategy catalogue could not be loaded. Refresh to try again.",
       "catalogueEmpty": "No strategies are available in this environment yet.",
       "rateDisclosure": "APY figures are variable and shown for comparison only. Actual rates and redemption times are set by the provider.",
-      "depositAddressLabel": "Solana deposit address",
-      "cashDeploys": "Deploys automatically on the provider's next rebalance",
-      "cashParked": "Not allocated to a strategy"
+      "depositAddressLabel": "Deposit — send USDC on Solana to",
+      "cashDeploys": "Deploys toward the strategy on a later rebalance — small amounts may stay as cash",
+      "cashParked": "Not allocated to a strategy",
+      "changeStrategy": "Change strategy"
     },
     "source": {
       "defi": "DeFi",
@@ -151,7 +151,7 @@
       "createTitle": "This creates your program",
       "createBody": "Confirming provisions one provider-managed wallet for your organization in this environment and sets its strategy.",
       "updateTitle": "This replaces your current strategy",
-      "updateBody": "Your program already exists. Confirming moves the {token} allocation to this strategy, and existing balances rebalance automatically.",
+      "updateBody": "Your program already exists. Confirming replaces the {token} target immediately; existing balances move toward it on the provider's later rebalances.",
       "rateDisclosure": "APY is variable and shown for comparison only. Actual rates and redemption times are set by the provider.",
       "confirmCreate": "Create program",
       "confirmUpdate": "Switch strategy",
@@ -170,7 +170,7 @@
       "integrationContinue": "Continue to program",
       "liveEyebrow": "Program live",
       "liveTitle": "Fund your program",
-      "liveDescription": "Send stablecoins on Solana to the address below. {strategy} starts earning as soon as they land.",
+      "liveDescription": "Send stablecoins on Solana to the address below. Funds arrive as cash, then deploy toward {strategy} on the provider's later rebalances.",
       "createdNotice": "Your program is live.",
       "updatedNotice": "Your program now targets {strategy}.",
       "depositAddressTitle": "Solana deposit address",
@@ -212,7 +212,7 @@
       "profileBalancedAccess": "instant to T+3",
       "profileYieldAccess": "any redemption speed",
       "poolMeta": "Pool {value}",
-      "timingDisclosure": "Allocation changes are applied by the provider's scheduled rebalancer, not instantly. New deposits sit as cash until the next pass, and moving between strategies can take time to settle."
+      "timingDisclosure": "Confirming saves the target immediately, but money moves on the provider's later rebalances — not instantly. Slower strategies can take hours to converge, and small balances may stay as cash where deploying them isn't economical."
     }
   }
 }

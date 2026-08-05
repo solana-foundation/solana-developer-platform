@@ -6,7 +6,7 @@ import type {
   EarnPortfolioWalletStatus,
   EarnStrategy,
 } from "@sdp/types";
-import { CheckIcon, CopyIcon, PlusIcon } from "lucide-react";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Badge } from "@/components/ui/badge";
@@ -243,6 +243,8 @@ function ProgramSection() {
           </p>
         </div>
         {program ? (
+          // The two verbs that MANAGE the pot. Depositing needs no wizard at
+          // all — it is the address row below — so nothing here says "deposit".
           <div className="flex w-full gap-2 sm:w-auto sm:shrink-0">
             <Button
               className="flex-1 sm:flex-none"
@@ -254,8 +256,7 @@ function ProgramSection() {
             </Button>
             <Button asChild className="flex-1 sm:flex-none">
               <DashboardNavigationLink data-earn-withdraw-focus-fallback href={DEPOSIT_PATH}>
-                <PlusIcon />
-                {t("DashboardEarn.overview.newDeposit")}
+                {t("DashboardEarn.overview.changeStrategy")}
               </DashboardNavigationLink>
             </Button>
           </div>

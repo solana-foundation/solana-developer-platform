@@ -246,10 +246,13 @@ describe("EarnWorkspace with an active program", () => {
     expect(html).toContain("7M6bFd…7F3WcQ");
   });
 
-  it("offers withdraw plus deposit and hides the onboarding hero", () => {
+  it("offers the two managing verbs and keeps deposit as the address row", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("DashboardEarn.overview.withdraw");
-    expect(html).toContain("DashboardEarn.overview.newDeposit");
+    expect(html).toContain("DashboardEarn.overview.changeStrategy");
+    // Depositing is the address row, not a wizard — nothing here says deposit
+    // except the row itself.
+    expect(html).toContain("DashboardEarn.overview.depositAddressLabel");
     expect(html).not.toContain("DashboardEarn.overview.startTitle");
   });
 });

@@ -16,6 +16,7 @@ import {
   useEarnStrategies,
 } from "../earn-program-data";
 import { strategyToken, useLiquidityLabel } from "../earn-program-presentation";
+import { EarnDepositSkeleton } from "../earn-route-skeletons";
 import { SummaryRow } from "./earn-deposit-chrome";
 import {
   availableTokens,
@@ -34,8 +35,10 @@ import { ReviewStep } from "./review-step";
 import { StrategyStep } from "./strategy-step";
 import { WalletStep } from "./wallet-step";
 
-const STEP_ORDER = ["wallet", "profile", "strategy", "review"] as const;
-type DepositStep = (typeof STEP_ORDER)[number];
+const CREATE_STEPS = ["wallet", "profile", "strategy", "review"] as const;
+/** A change-strategy run moves no funds, so it never asks for a wallet. */
+const UPDATE_STEPS = ["profile", "strategy", "review"] as const;
+type DepositStep = (typeof CREATE_STEPS)[number];
 
 const STEP_META: Record<
   DepositStep,
@@ -194,7 +197,7 @@ export function EarnDepositWizard({
     [catalogue]
   );
 
-  const [step, setStep] = useState<DepositStep>("wallet");
+  const [rawStep, setStep] = useState<DepositStep>("wallet");
   /**
    * Session-only: nothing persists the funding wallet, so a later visit asks
    * again. It shapes the funding instructions; it never moves money.
@@ -222,6 +225,11 @@ export function EarnDepositWizard({
 
   const programExists = programState?.kind === "active";
   const providerUnconfigured = programState?.kind === "unconfigured";
+
+  // The run's shape. `rawStep` starts at "wallet" before the program read
+  // resolves; on an update run that maps onto the first real step instead.
+  const stepOrder: readonly DepositStep[] = programExists ? UPDATE_STEPS : CREATE_STEPS;
+  const step: DepositStep = programExists && rawStep === "wallet" ? "profile" : rawStep;
 
   /**
    * Idempotency key for the confirm, minted lazily and held per selected
@@ -312,18 +320,22 @@ export function EarnDepositWizard({
       return;
     }
     if (!stepReady[step]) return;
-    const index = STEP_ORDER.indexOf(step);
-    setStep(STEP_ORDER[index + 1] ?? "review");
+    const index = stepOrder.indexOf(step);
+    setStep(stepOrder[index + 1] ?? "review");
   };
 
   const goBack = () => {
-    if (step === "wallet") {
+    const index = stepOrder.indexOf(step);
+    if (index <= 0) {
       router.push(EARN_DASHBOARD_PATH);
       return;
     }
-    const index = STEP_ORDER.indexOf(step);
-    setStep(STEP_ORDER[index - 1] ?? "wallet");
+    setStep(stepOrder[index - 1] ?? stepOrder[0]);
   };
+
+  if (programState === undefined) {
+    return <EarnDepositSkeleton />;
+  }
 
   if (outcome && selectedStrategy) {
     return (
@@ -343,7 +355,7 @@ export function EarnDepositWizard({
     );
   }
 
-  const currentStep = STEP_ORDER.indexOf(step);
+  const currentStep = stepOrder.indexOf(step);
   const primaryLabel = primaryActionLabel({ programExists, step, stepReady, submitting, t });
 
   return (
@@ -354,12 +366,16 @@ export function EarnDepositWizard({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between [&>button]:w-full sm:[&>button]:w-auto">
           <Button
             disabled={submitting}
-            iconLeft={step === "wallet" ? undefined : <ArrowLeftIcon />}
+            iconLeft={stepOrder.indexOf(step) === 0 ? undefined : <ArrowLeftIcon />}
             onClick={goBack}
             type="button"
             variant="secondary"
           >
-            {t(step === "wallet" ? "DashboardEarn.deposit.cancel" : "DashboardEarn.deposit.back")}
+            {t(
+              stepOrder.indexOf(step) === 0
+                ? "DashboardEarn.deposit.cancel"
+                : "DashboardEarn.deposit.back"
+            )}
           </Button>
           <Button
             disabled={!stepReady[step]}
@@ -379,9 +395,9 @@ export function EarnDepositWizard({
       maxWidthClassName="max-w-4xl"
       progressLabel={t("DashboardEarn.deposit.stepProgress", {
         current: currentStep + 1,
-        total: STEP_ORDER.length,
+        total: stepOrder.length,
       })}
-      steps={STEP_ORDER.map((entry) => ({
+      steps={stepOrder.map((entry) => ({
         label: t(STEP_META[entry].label),
         title: t(STEP_META[entry].title),
       }))}
@@ -390,14 +406,16 @@ export function EarnDepositWizard({
           <h3 className="mb-2 text-sm font-medium text-primary">
             {t("DashboardEarn.deposit.summaryTitle")}
           </h3>
-          <SummaryRow
-            label={t("DashboardEarn.deposit.reviewWallet")}
-            value={
-              selectedWallet
-                ? walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))
-                : t("DashboardEarn.deposit.notSelected")
-            }
-          />
+          {programExists ? null : (
+            <SummaryRow
+              label={t("DashboardEarn.deposit.reviewWallet")}
+              value={
+                selectedWallet
+                  ? walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))
+                  : t("DashboardEarn.deposit.notSelected")
+              }
+            />
+          )}
           <SummaryRow
             label={t("DashboardEarn.deposit.reviewStrategy")}
             value={selectedStrategy?.name ?? t("DashboardEarn.deposit.notSelected")}

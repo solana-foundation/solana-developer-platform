@@ -285,6 +285,23 @@ describe("ReviewStep", () => {
     expect(html).toContain("DashboardEarn.deposit.createTitle");
   });
 
+  it("hides the wallet section on a change-strategy run, which has no wallet step", () => {
+    const html = renderToStaticMarkup(
+      <ReviewStep
+        onEditStrategy={() => {}}
+        onEditWallet={() => {}}
+        programExists
+        providerUnconfigured={false}
+        strategy={CATALOGUE[0]}
+        submitError={null}
+        wallet={undefined}
+      />
+    );
+    expect(html).not.toContain("DashboardEarn.deposit.reviewWalletAddress");
+    expect(html).not.toContain("DashboardEarn.deposit.walletUnnamed");
+    expect(html).toContain("DashboardEarn.deposit.reviewStrategy");
+  });
+
   it("switches to replace-strategy copy when a program already exists", () => {
     const html = renderToStaticMarkup(
       <ReviewStep

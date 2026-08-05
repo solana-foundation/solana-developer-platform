@@ -39,39 +39,45 @@ export function ReviewStep({
   const poolUsd = strategyPoolUsd(strategy);
   const sourceLabel = strategySourceLabel(strategy);
   const curatorLabel = strategyCuratorLabel(strategy);
-  const walletLabel = walletDisplayName(wallet, t("DashboardEarn.deposit.walletUnnamed"));
 
   return (
     <div className="space-y-4">
-      <StepSection
-        action={
-          <Button
-            aria-label={t("DashboardEarn.deposit.reviewEditSection", {
-              section: t("DashboardEarn.deposit.reviewWallet"),
-            })}
-            onClick={onEditWallet}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            {t("DashboardEarn.deposit.reviewEdit")}
-          </Button>
-        }
-        title={
-          <span className="flex items-center gap-2.5">
-            <WalletIcon aria-hidden="true" className="size-4 text-secondary" />
-            {t("DashboardEarn.deposit.reviewWallet")}
-          </span>
-        }
-      >
-        <SummaryRow label={t("DashboardEarn.deposit.reviewWallet")} value={walletLabel} />
-        {wallet ? (
+      {/* Absent on a change-strategy run: the update flow has no wallet
+          step, so there is nothing to review here. */}
+      {wallet ? (
+        <StepSection
+          action={
+            <Button
+              aria-label={t("DashboardEarn.deposit.reviewEditSection", {
+                section: t("DashboardEarn.deposit.reviewWallet"),
+              })}
+              onClick={onEditWallet}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              {t("DashboardEarn.deposit.reviewEdit")}
+            </Button>
+          }
+          title={
+            <span className="flex items-center gap-2.5">
+              <WalletIcon aria-hidden="true" className="size-4 text-secondary" />
+              {t("DashboardEarn.deposit.reviewWallet")}
+            </span>
+          }
+        >
           <SummaryRow
-            label={t("DashboardEarn.deposit.reviewWalletAddress")}
-            value={shortenAddress(wallet.publicKey)}
+            label={t("DashboardEarn.deposit.reviewWallet")}
+            value={walletDisplayName(wallet, t("DashboardEarn.deposit.walletUnnamed"))}
           />
-        ) : null}
-      </StepSection>
+          {wallet ? (
+            <SummaryRow
+              label={t("DashboardEarn.deposit.reviewWalletAddress")}
+              value={shortenAddress(wallet.publicKey)}
+            />
+          ) : null}
+        </StepSection>
+      ) : null}
 
       <StepSection
         action={

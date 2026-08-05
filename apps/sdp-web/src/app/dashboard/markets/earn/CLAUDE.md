@@ -45,10 +45,30 @@ reintroduce fixture modules. Data flows: BFF proxies
 
 ## The deposit flow (`deposit/`)
 
-Four wizard steps in `WizardFrame`, then one or two outcome screens. All of it
-lives on the single `/dashboard/markets/earn/deposit` pathname — the shell's
-full-height lock (`shouldUseWorkspaceViewport`) is an exact-equality check, so a
-sub-route silently loses the sticky footer.
+ONE route, TWO run shapes, THREE user verbs. The verbs: **Set up Earn** (hero
+CTA, no program yet), **Change strategy** (program card button), and
+**Deposit** — which is NOT a wizard at all: it is the copyable address row on
+the program card. Nothing in the UI may call the wizard a deposit; it never
+moves money.
+
+- Setup run (no program): wallet → profile → strategy → review.
+- Change-strategy run (program exists): profile → strategy → review — the
+  wallet step is funding context and an update moves no funds, so it is
+  omitted, and the review/summary rail show no wallet section.
+- The wizard renders a route skeleton until the program read RESOLVES —
+  rendering one shape and collapsing to the other is the hero-flash bug again.
+
+All of it lives on the single `/dashboard/markets/earn/deposit` pathname — the
+shell's full-height lock (`shouldUseWorkspaceViewport`) is an exact-equality
+check, so a sub-route silently loses the sticky footer. The header title
+(`Shared.dashboardShell.earnNewDeposit` → "Earn strategy") is route-static and
+deliberately neutral across both run shapes.
+
+**Timing copy is bound to Ground's documented behaviour** (update-strategy +
+deposits docs): targets save immediately; a LATER rebalance MAY move funds (no
+cadence is promised — never write "scheduled" or "next pass"); slow strategies
+can take hours; small balances may stay as cash on economic minimums. Every
+sentence about timing must trace to one of those.
 
 - `earn-deposit-wizard.tsx` — orchestrator: step state, submit, outcome routing.
 - `earn-deposit-model.ts` — the pure model (profiles, filters, sorting,
