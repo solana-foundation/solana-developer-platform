@@ -73,7 +73,7 @@ describe("PrivyCredentialForm", () => {
     expect(submittedKey(0)).toMatch(/[0-9a-f-]{36}/);
   });
 
-  it("mints a fresh idempotency key after a terminal failure", async () => {
+  it("mints a fresh key and clears the rejected secret after a terminal failure", async () => {
     vi.mocked(submitPrivyCredentialAction)
       .mockResolvedValueOnce({ status: "failed", message: "Privy rejected these credentials." })
       .mockResolvedValueOnce({ status: "success" });
@@ -82,13 +82,33 @@ describe("PrivyCredentialForm", () => {
 
     await fillAndSubmit(user);
     await screen.findByRole("alert");
-    // The invalid credential was removed server-side; resubmitting must be a
-    // new submission, not a replay of the rejected one.
-    await user.type(screen.getByLabelText("Privy app secret"), "corrected-secret");
+    // The rejected secret must not linger for corrections to be typed onto.
+    const secret = screen.getByLabelText("Privy app secret") as HTMLInputElement;
+    expect(secret.value).toBe("");
+    await user.type(secret, "corrected-secret");
     await user.click(screen.getByRole("button", { name: "Connect and verify" }));
 
     await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
+    const second = vi.mocked(submitPrivyCredentialAction).mock.calls[1]?.[0] as FormData;
+    expect(String(second.get("appSecret"))).toBe("corrected-secret");
     expect(submittedKey(1)).not.toBe(submittedKey(0));
+  });
+
+  it("keeps the idempotency key when the submission outcome is unknown", async () => {
+    vi.mocked(submitPrivyCredentialAction)
+      .mockResolvedValueOnce({ status: "error", message: "network dropped" })
+      .mockResolvedValueOnce({ status: "success" });
+    const user = userEvent.setup();
+    renderForm();
+
+    await fillAndSubmit(user);
+    await screen.findByRole("alert");
+    // The POST may have committed server-side; the same key replays instead of
+    // colliding with a connection that already exists.
+    await user.click(screen.getByRole("button", { name: "Connect and verify" }));
+
+    await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
+    expect(submittedKey(1)).toBe(submittedKey(0));
   });
 
   it("offers a safe re-check instead of resubmitting after an unknown outcome", async () => {

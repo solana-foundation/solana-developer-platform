@@ -258,8 +258,7 @@ export function WalletSetupFlow({
   // An uninstalled Privy under BYOK goes through provider details (credential
   // submission + connection check) instead of the legacy initialize path,
   // which the API refuses once stored-credential setup is enforced.
-  const isByokDetails =
-    privyByokEnabled && selectedProviderEntry?.id === "privy" && !isConnected;
+  const isByokDetails = privyByokEnabled && selectedProviderEntry?.id === "privy" && !isConnected;
 
   const continueFromProvider = () => {
     if (!selectedProviderEntry) {

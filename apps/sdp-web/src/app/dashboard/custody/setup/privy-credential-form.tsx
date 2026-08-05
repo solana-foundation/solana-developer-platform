@@ -38,6 +38,7 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
   const [isPending, startTransition] = useTransition();
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
+  const [appSecret, setAppSecret] = useState("");
 
   const privyFields = getCustodyProviderEntry("privy").storedCredentialSetup;
   if (privyFields.mode !== "self_service") {
@@ -57,9 +58,18 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
       setCheck({ kind: "retry_unknown", providerCredentialId: result.providerCredentialId });
       return;
     }
-    // Terminal for this attempt: conclusively-invalid credentials are removed
-    // server-side, so the next submit is a fresh one and needs a fresh key.
-    setIdempotencyKey(crypto.randomUUID());
+    if (result.status === "failed") {
+      // Terminal for this attempt: the rejected credential was removed
+      // server-side, so the next submit is a fresh one — fresh key, and the
+      // rejected secret is cleared rather than left to be typed onto.
+      setIdempotencyKey(crypto.randomUUID());
+      setAppSecret("");
+      setCheck({ kind: "failed", message: result.message });
+      return;
+    }
+    // Transport-level uncertainty: the submission may have committed, so the
+    // key is kept — resubmitting with the same key replays instead of
+    // colliding with a connection the server already created.
     setCheck({ kind: "failed", message: result.message });
   };
 
@@ -156,6 +166,8 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
           type="password"
           autoComplete="off"
           required
+          value={appSecret}
+          onChange={(event) => setAppSecret(event.currentTarget.value)}
           className={FIELD_INPUT_CLASS}
         />
         <p className="text-sm leading-5 text-tertiary">
