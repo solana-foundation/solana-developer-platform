@@ -503,19 +503,29 @@ export function RecurringPaymentDetailSkeleton() {
       data-loading-layout="recurring-payment-detail"
       aria-busy="true"
     >
-      <div className="mx-auto max-w-6xl space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-2">
-            <SkeletonBlock className="h-9 w-48" />
-            <SkeletonBlock className="h-4 w-80 max-w-full" />
+      <div className="flex min-h-full w-full flex-col gap-6">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
+          <div className="flex min-w-0 flex-wrap items-start gap-x-12 gap-y-4">
+            {["to", "amount", "frequency"].map((stat) => (
+              <div key={stat} className="space-y-2">
+                <SkeletonBlock className="h-4 w-16" />
+                <SkeletonBlock className="h-8 w-36" />
+              </div>
+            ))}
           </div>
           <SkeletonBlock className="h-9 w-28 rounded-[10px]" />
         </div>
-        <SkeletonBlock className="h-20 w-full rounded-lg" />
-        <div className="rounded-lg border border-border-default px-4">
-          <DetailRowsSkeleton />
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+          {["payment", "wallets"].map((section) => (
+            <section key={section} className="space-y-3">
+              <SkeletonBlock className="h-5 w-28" />
+              <div className="rounded-lg border border-border-default bg-surface-raised px-4">
+                <DetailRowsSkeleton count={6} />
+              </div>
+            </section>
+          ))}
         </div>
-        <Card className="gap-4 bg-surface-raised">
+        <Card className="min-h-0 flex-1 gap-4 bg-surface-raised">
           <WorkspaceCardHeaderSkeleton withAction={false} />
           <CardContent>
             <div className="space-y-3">
