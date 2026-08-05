@@ -183,15 +183,6 @@ function BalanceAllocation({
         ) : null}
       </div>
 
-      {/* The card is a summary capped at four priced and four unpriced holdings, so
-          it needs somewhere to send anyone holding more than it shows. */}
-      <Link
-        href="/dashboard/tokens"
-        className="inline-block text-[13px] text-primary underline underline-offset-2"
-      >
-        {t("Shared.homeWorkspace.viewAllHoldings")}
-      </Link>
-
       {segments.length > 0 ? (
         <>
           {/* Hovering either the bar or its row lifts the same segment, so the two
@@ -293,6 +284,17 @@ function BalanceAllocation({
           ) : null}
         </div>
       ) : null}
+
+      {/* A summary capped at four priced and four unpriced holdings needs somewhere
+          to send anyone holding more than it shows. Sits after the rows rather than
+          between the header and the bar, where it split the two apart and read as a
+          gap in the card. */}
+      <Link
+        href="/dashboard/tokens"
+        className="inline-block text-[13px] text-primary underline underline-offset-2"
+      >
+        {t("Shared.homeWorkspace.viewAllHoldings")}
+      </Link>
     </div>
   );
 }
