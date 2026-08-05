@@ -234,6 +234,31 @@ describe("EarnWorkspace with an active program", () => {
     expect(html).toContain("DashboardEarn.overview.cashDeploys");
   });
 
+  it("hides zero-value residual cash buckets but keeps zero-value strategy rows", () => {
+    // Ground keeps reporting a drained lane's cash bucket at $0 (e.g. the
+    // Sepolia USDT lane once emptied) — residue, not a holding. A $0 strategy
+    // slice stays: it carries the forward allocation story.
+    const program = data.program.state?.kind === "active" ? data.program.state.program : undefined;
+    program?.wallet.positions.push(
+      { kind: "cash", label: "Cash (USDT)", valueUsd: "0.000000", token: "usdt" },
+      { kind: "bridge", label: "In transit (USDC)", valueUsd: "0.000000", token: "usdc" },
+      {
+        kind: "yield_source",
+        label: "Ground JAAA USDC",
+        valueUsd: "0.000000",
+        pct: 0,
+        yieldSourceId: "ground-jaaa-usdc-vault",
+        token: "usdc",
+      }
+    );
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).not.toContain("Cash (USDT)");
+    expect(html).not.toContain("In transit (USDC)");
+    expect(html).toContain("Ground JAAA USDC");
+    // Nonzero cash still renders — value is never hidden, only $0 residue.
+    expect(html).toContain("Cash (USDC)");
+  });
+
   it("shows a trimmed share only where value sits behind it", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("DashboardEarn.overview.programShare(80)");

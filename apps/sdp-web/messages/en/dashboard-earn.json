@@ -64,6 +64,7 @@
       "createdDescription": "The withdrawal is processing. Funds settle to the destination address once the provider completes it.",
       "referenceLabel": "Reference",
       "statusProcessing": "Processing",
+      "statusPendingApproval": "Awaiting approval",
       "statusCompleted": "Completed",
       "statusPartiallyCompleted": "Partially completed",
       "statusFailed": "Failed",

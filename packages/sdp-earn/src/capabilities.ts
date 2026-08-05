@@ -1,4 +1,8 @@
-import type { EarnPortfolioWalletProvider, EarnVaultProvider } from "./types";
+import type {
+  EarnPortfolioWalletProvider,
+  EarnVaultProvider,
+  EarnWithdrawalApprovalProvider,
+} from "./types";
 
 /**
  * `satisfies` pins this list to the capability's method names: renaming a
@@ -30,4 +34,32 @@ export function supportsPortfolioWallets(
 ): client is EarnPortfolioWalletProvider {
   const candidate = client as Partial<Record<(typeof PORTFOLIO_WALLET_METHODS)[number], unknown>>;
   return PORTFOLIO_WALLET_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const WITHDRAWAL_APPROVAL_METHODS = [
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "listPendingWithdrawalApprovals",
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "createWithdrawalApprovalRequest",
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "submitWithdrawalApprovalVote",
+] as const satisfies readonly Exclude<
+  keyof EarnWithdrawalApprovalProvider,
+  keyof EarnVaultProvider
+>[];
+
+/**
+ * Capability discovery for the optional withdrawal-approval contract — same
+ * all-or-nothing method-presence rule as `supportsPortfolioWallets`. Kept
+ * separate from the portfolio-wallet capability: a provider can manage
+ * portfolio wallets without gating payouts on customer approval, and folding
+ * these methods into that guard would retroactively unsupport such providers.
+ */
+export function supportsWithdrawalApprovals(
+  client: EarnVaultProvider
+): client is EarnWithdrawalApprovalProvider {
+  const candidate = client as Partial<
+    Record<(typeof WITHDRAWAL_APPROVAL_METHODS)[number], unknown>
+  >;
+  return WITHDRAWAL_APPROVAL_METHODS.every((method) => typeof candidate[method] === "function");
 }
