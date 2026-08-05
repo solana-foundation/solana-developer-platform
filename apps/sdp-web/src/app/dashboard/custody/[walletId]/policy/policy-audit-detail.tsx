@@ -153,7 +153,7 @@ export function PolicyAuditDetail({
         </div>
       </section>
 
-      <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_460px]">
+      <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_520px]">
         <main className="min-w-0">
           <DecisionTab evaluation={evaluation} t={t} />
         </main>
