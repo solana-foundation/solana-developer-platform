@@ -187,6 +187,19 @@ async function initializeCustodyWallet(
       apiError.message.includes("Signing already initialized for org")
     ) {
       const configurations = await client.fetch<CustodyConfigsResponse>("/v1/wallets/configs");
+
+      // Repair must never cross providers. If another provider already owns the
+      // default configuration, "repairing" with setDefault would silently flip
+      // the organization's signing default to whatever provider this caller
+      // submitted; changing providers is the switch flow's decision, behind its
+      // own confirmation. Surface the conflict instead.
+      const defaultConfiguration = configurations.configs.find(
+        (configuration) => configuration.isDefault
+      );
+      if (defaultConfiguration && defaultConfiguration.provider !== provider) {
+        throw error;
+      }
+
       const readyConfiguration = configurations.configs.find(
         (configuration) =>
           configuration.provider === provider &&
