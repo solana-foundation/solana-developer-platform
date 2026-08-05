@@ -715,11 +715,34 @@ export function RecurringPaymentDetailWorkspace({
 
   return (
     <DashboardWorkspaceOverviewPanel>
-      <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col gap-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <p className="min-w-0 truncate text-base font-medium text-primary">
-            {counterpartyLabel} · {amountLabel} · {scheduleLabel}
-          </p>
+      <div className="flex min-h-full w-full flex-col gap-6">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
+          <div className="flex min-w-0 flex-wrap items-start gap-x-12 gap-y-4">
+            <div className="min-w-0">
+              <p className="text-sm text-secondary">{t("DashboardPayments.recurring.detailTo")}</p>
+              <p className="mt-1 truncate text-2xl font-medium tracking-tight text-primary">
+                {counterpartyLabel}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-secondary">{t("DashboardPayments.recurring.amount")}</p>
+              <p className="mt-1 flex items-center gap-2 text-2xl font-medium tracking-tight text-primary">
+                <TokenMark
+                  mint={recurringPayment.token}
+                  symbol={resolvedToken.tokenName}
+                  logoUrl={resolvedToken.metadataImageUrl}
+                  size="sm"
+                />
+                {amountLabel}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-secondary">{t("DashboardPayments.recurring.frequency")}</p>
+              <p className="mt-1 text-2xl font-medium tracking-tight text-primary">
+                {scheduleLabel}
+              </p>
+            </div>
+          </div>
           <RecurringPaymentActionsMenu
             status={recurringPayment.status}
             dueNow={dueNow}

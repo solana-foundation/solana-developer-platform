@@ -827,6 +827,8 @@
       "range": "{from}-{to} of {total} payments",
       "detailPaymentSection": "Payment",
       "detailWalletsSection": "Wallets & metadata",
+      "detailTo": "To",
+      "frequency": "Frequency",
       "unableToLoad": "Unable to load recurring payments",
       "noPayments": "No recurring payments yet.",
       "paymentsAppearHere": "Created recurring payment records will appear here.",

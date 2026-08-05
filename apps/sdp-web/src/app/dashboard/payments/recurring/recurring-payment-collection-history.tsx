@@ -93,7 +93,7 @@ export function RecurringPaymentCollectionHistory({
           {attempts.length > 0 ? <CardDescription>{attemptsLabel}</CardDescription> : null}
         </div>
       </CardHeader>
-      <CardContent className="flex flex-col px-0">
+      <CardContent className="flex min-h-0 flex-1 flex-col px-0">
         {error ? (
           <div
             role="alert"
@@ -105,7 +105,6 @@ export function RecurringPaymentCollectionHistory({
           <ListEmptyState
             icon={<RepeatIcon className="size-5" />}
             message={t("DashboardPayments.recurring.noCollectionAttempts")}
-            className="py-16"
           />
         ) : (
           <>
