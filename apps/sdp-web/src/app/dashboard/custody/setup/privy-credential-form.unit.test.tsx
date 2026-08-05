@@ -127,6 +127,8 @@ describe("PrivyCredentialForm", () => {
     );
 
     await fillAndSubmit(user);
+    // The lock engages when the POST leaves, before any outcome is known.
+    expect(onLock.mock.calls[0]?.[0]).toBe(true);
     await screen.findByRole("button", { name: "Retry submission" });
     expect(onLock).toHaveBeenLastCalledWith(true);
 

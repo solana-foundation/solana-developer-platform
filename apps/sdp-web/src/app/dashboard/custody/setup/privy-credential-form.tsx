@@ -98,6 +98,9 @@ export function PrivyCredentialForm({
     const formData = new FormData(form);
     formData.set("idempotencyKey", idempotencyKey);
     lastPayloadRef.current = formData;
+    // Locked from the moment the POST leaves: if it commits while the response
+    // is in flight, unmounting here would discard the only replay state.
+    onRecoveryLockChange?.(true);
     startTransition(async () => {
       applyResult(await submitPrivyCredentialAction(formData));
     });
