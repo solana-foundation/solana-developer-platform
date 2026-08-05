@@ -323,6 +323,12 @@
     "detailDocs": "View documentation",
     "backToIntegrations": "Back to integrations",
     "capabilityAdditionalWallets": "Additional wallets",
-    "statusUnknown": "Status unavailable"
+    "statusUnknown": "Status unavailable",
+    "detailHowItConnects": "How it connects",
+    "capabilitySigning": "Transaction signing",
+    "connectSelfServe": "Connect this provider yourself using credentials from your own account. Secrets are write-only and never shown again after submission.",
+    "connectYouWillNeed": "You will need",
+    "connectByArrangement": "Available by arrangement. Request access and the team will set up the connection with you.",
+    "connectManaged": "Provisioned per deployment. This provider is configured by your SDP operator rather than self-serve."
   }
 }

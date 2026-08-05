@@ -76,32 +76,32 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
   const t = await getTranslations();
   const entry = detail.custodyEntry;
 
-  const primaryAction = detail.statusUnknown ? null : detail.family === "custody" &&
-    detail.status === "active" ? (
-    <Button asChild>
-      <DashboardNavigationLink href="/dashboard/wallets">
-        {t("Shared.integrations.ctaManage")}
-      </DashboardNavigationLink>
-    </Button>
-  ) : detail.family === "custody" && detail.status === "available" ? (
-    <Button asChild>
-      <DashboardNavigationLink href={`/dashboard/wallets/setup?provider=${detail.provider}`}>
-        {t("Shared.integrations.ctaConfigure")}
-      </DashboardNavigationLink>
-    </Button>
-  ) : detail.requestAccessUrl ? (
-    <Button asChild>
-      <a href={detail.requestAccessUrl} target="_blank" rel="noreferrer noopener">
-        {t("Shared.integrations.ctaRequestAccess")}
-      </a>
-    </Button>
-  ) : detail.family === "rpc" ? (
-    <Button asChild variant="secondary">
-      <DashboardNavigationLink href="/dashboard/settings">
-        {t("Shared.integrations.rpcSectionAction")}
-      </DashboardNavigationLink>
-    </Button>
-  ) : null;
+  const primaryAction =
+    detail.family === "custody" && detail.status === "active" ? (
+      <Button asChild>
+        <DashboardNavigationLink href="/dashboard/wallets">
+          {t("Shared.integrations.ctaManage")}
+        </DashboardNavigationLink>
+      </Button>
+    ) : detail.family === "custody" && detail.status === "available" ? (
+      <Button asChild>
+        <DashboardNavigationLink href={`/dashboard/wallets/setup?provider=${detail.provider}`}>
+          {t("Shared.integrations.ctaConfigure")}
+        </DashboardNavigationLink>
+      </Button>
+    ) : detail.requestAccessUrl ? (
+      <Button asChild>
+        <a href={detail.requestAccessUrl} target="_blank" rel="noreferrer noopener">
+          {t("Shared.integrations.ctaRequestAccess")}
+        </a>
+      </Button>
+    ) : detail.family === "rpc" ? (
+      <Button asChild variant="secondary">
+        <DashboardNavigationLink href="/dashboard/settings">
+          {t("Shared.integrations.rpcSectionAction")}
+        </DashboardNavigationLink>
+      </Button>
+    ) : null;
 
   return (
     <div className="w-full space-y-6 px-4 py-6 md:px-6" data-integration-detail={detail.provider}>
@@ -116,9 +116,7 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
                 {detail.label}
               </h1>
               <span className="shrink-0 whitespace-nowrap rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
-                {detail.statusUnknown
-                  ? t("Shared.integrations.statusUnknown")
-                  : t(statusKey(detail.status))}
+                {t(statusKey(detail.status))}
               </span>
             </div>
             <p className="text-sm text-tertiary">
@@ -153,12 +151,52 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
                 {t(CUSTODY_CAPABILITY_LABEL_KEYS[useCase])}
               </li>
             ))}
+            {entry.technicalCapabilities.supportsSigning ? (
+              <li className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary">
+                {t("Shared.integrations.capabilitySigning")}
+              </li>
+            ) : null}
             {entry.technicalCapabilities.supportsAdditionalWalletCreation ? (
               <li className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary">
                 {t("Shared.integrations.capabilityAdditionalWallets")}
               </li>
             ) : null}
           </ul>
+        </Section>
+      ) : null}
+
+      {entry ? (
+        <Section title={t("Shared.integrations.detailHowItConnects")}>
+          {entry.storedCredentialSetup.mode === "self_service" ? (
+            <div className="space-y-3">
+              <p className="max-w-2xl text-sm leading-6 text-secondary">
+                {t("Shared.integrations.connectSelfServe")}
+              </p>
+              <p className="text-xs font-medium tracking-wide text-tertiary uppercase">
+                {t("Shared.integrations.connectYouWillNeed")}
+              </p>
+              <ul className="flex flex-wrap gap-2">
+                {entry.storedCredentialSetup.fields
+                  .filter((field) => field.key !== "credentialLabel" && field.key !== "scope")
+                  .map((field) => (
+                    <li
+                      key={field.key}
+                      className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
+                    >
+                      {t(field.labelKey)}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ) : entry.storedCredentialSetup.mode === "request_access" ? (
+            <p className="max-w-2xl text-sm leading-6 text-secondary">
+              {t("Shared.integrations.connectByArrangement")}
+            </p>
+          ) : (
+            <p className="max-w-2xl text-sm leading-6 text-secondary">
+              {t("Shared.integrations.connectManaged")}
+            </p>
+          )}
         </Section>
       ) : null}
 
