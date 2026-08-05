@@ -38,7 +38,8 @@ function decodeCursor(cursor: string): { occurredAt: string; id: string } | null
 function displayEventPayload(payload: Record<string, unknown>): Record<string, unknown> {
   const displayPayload: Record<string, unknown> = {};
   for (const key of PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS) {
-    const value = payload[key];
+    // Optional read so a hand-written JSON `null` in the column can't 500 the feed.
+    const value = payload?.[key];
     if (typeof value === "string" || (typeof value === "number" && Number.isFinite(value))) {
       displayPayload[key] = value;
     }
