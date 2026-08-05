@@ -143,6 +143,17 @@ valid USDT destination — and Ground's sandbox USDT faucet
 (`POST /v2/sandbox/faucets/usdt`) funds Sepolia addresses only, so exercising
 the Solana lane in sandbox means devnet USDC.
 
+**Getting devnet USDC — Circle's faucet: <https://faucet.circle.com/>.**
+Select **USDC** and **Solana Devnet**, paste the recipient address, submit.
+The faucet mints official devnet USDC
+(`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`) — the exact mint pinned in
+the well-known-token catalogue and carried in every sandbox strategy's
+`depositMints`, so what it sends is what deposits credit. Send either straight
+to the program's Solana deposit address (dashboard → Fund) to watch the real
+two-phase deposit, or to your own devnet wallet first when you want to
+exercise the transfer yourself. The faucet rate-limits per address, so drip
+ahead of time for larger test amounts.
+
 ### Withdrawals unwind in reverse — approval is policy-conditional, and we surface it
 
 Redemption reverses the flow: vaults settle, the wallet claims stablecoin, and

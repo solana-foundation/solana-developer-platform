@@ -117,6 +117,10 @@ Practical notes:
   target weights) with no balance yet. Fund it yourself by sending devnet USDC to
   the wallet's Solana deposit address — that exercises the real two-phase deposit
   (arrives as `cash`, deploys on a later Ground rebalance).
+- **Getting devnet USDC: Circle's faucet — <https://faucet.circle.com/>**
+  (select **USDC** + **Solana Devnet**, paste the address). It mints the
+  official devnet USDC mint (`4zMMC…`, the one pinned in well-known-tokens),
+  so faucet funds credit deposits directly. Rate-limited per address.
 - **Don't "fix" the $0 by pointing the seed at a funded sandbox wallet.** The
   funded ones hold USDT cash on a non-Solana rail, and Ground enforces the lane
   split at the API: USDC→Solana returns `409 insufficient_funds` (lane
@@ -149,6 +153,7 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 | A key you minted yourself returns `strategies: []` **and** program 404 | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox program, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive Ground's **production** API from a laptop. |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows your org's one wallet (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
+| Need devnet USDC to fund a program | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b) |
 
 ## Contracts
 
