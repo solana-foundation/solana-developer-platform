@@ -163,7 +163,7 @@ describe("GroundEarnClient.listStrategies", () => {
     ]);
   });
 
-  it("uses the production host, key, and mainnet mints in production", async () => {
+  it("uses the production host and key, and skips tokens Ground cannot route on Solana", async () => {
     const fetchMock = stubGroundFetch({
       body: page([yieldSource(), yieldSource({ id: "tether-reserve", depositToken: "usdt" })]),
     });
@@ -178,9 +178,11 @@ describe("GroundEarnClient.listStrategies", () => {
       new Headers(requestInit(fetchMock)?.headers).get("Authorization") ?? "",
       /^Bearer production-key$/
     );
+    // The USDT source has a mainnet mint, but Ground's Solana rails are
+    // USDC-only — it must never enter the catalogue, even in production.
     assert.deepEqual(
       strategies.map((s) => s.depositMints),
-      [[wellKnownMint("USDC", "mainnet-beta")], [wellKnownMint("USDT", "mainnet-beta")]]
+      [[wellKnownMint("USDC", "mainnet-beta")]]
     );
   });
 
@@ -924,6 +926,248 @@ describe("GroundEarnClient.getPortfolioWithdrawal", () => {
     assert.equal(withdrawal.status, "completed");
     assert.equal(withdrawal.amountPaidUsd, "49.900000");
     assert.equal(withdrawal.completedAt, "2026-08-03T00:30:00Z");
+  });
+});
+
+describe("GroundEarnClient withdrawal approval parking", () => {
+  it("folds a pending_customer_approval payout leg into pending_approval", async () => {
+    stubGroundFetch({
+      body: groundWithdrawal({
+        payoutLegs: [{ status: "pending_customer_approval", steps: [{ state: "created" }] }],
+      }),
+    });
+
+    const withdrawal = await client.getPortfolioWithdrawal(sandboxCtx, {
+      providerWalletRef: "wal_1",
+      withdrawalRef: "wd_1",
+    });
+
+    assert.equal(withdrawal.status, "pending_approval");
+  });
+
+  it("reads step state when the leg status alone still says processing", async () => {
+    stubGroundFetch({
+      body: groundWithdrawal({
+        payoutLegs: [{ status: "processing", steps: [{ state: "pending_customer_approval" }] }],
+      }),
+    });
+
+    const withdrawal = await client.getPortfolioWithdrawal(sandboxCtx, {
+      providerWalletRef: "wal_1",
+      withdrawalRef: "wd_1",
+    });
+
+    assert.equal(withdrawal.status, "pending_approval");
+  });
+
+  it("never overrides a terminal status with stale leg state", async () => {
+    stubGroundFetch({
+      body: groundWithdrawal({
+        status: "completed",
+        completedAt: "2026-08-03T00:30:00Z",
+        payoutLegs: [{ status: "pending_customer_approval" }],
+      }),
+    });
+
+    const withdrawal = await client.getPortfolioWithdrawal(sandboxCtx, {
+      providerWalletRef: "wal_1",
+      withdrawalRef: "wd_1",
+    });
+
+    assert.equal(withdrawal.status, "completed");
+  });
+
+  it("stays processing while legs advance without an approval gate", async () => {
+    stubGroundFetch({
+      body: groundWithdrawal({
+        payoutLegs: [{ status: "processing", steps: [{ state: "processing" }] }],
+      }),
+    });
+
+    const withdrawal = await client.getPortfolioWithdrawal(sandboxCtx, {
+      providerWalletRef: "wal_1",
+      withdrawalRef: "wd_1",
+    });
+
+    assert.equal(withdrawal.status, "processing");
+  });
+});
+
+const groundTurnkeyActivity = (overrides: Record<string, unknown> = {}) => ({
+  turnkeyActivityId: "act_1",
+  status: "ACTIVITY_STATUS_CONSENSUS_NEEDED",
+  activityType: "ACTIVITY_TYPE_SIGN_TRANSACTION_V2",
+  activityKind: "withdrawal_payout",
+  activityMetadata: {},
+  fingerprint: "fp_1",
+  firstSeenAt: "2026-08-05T00:00:00Z",
+  withdrawalLegId: "leg_1",
+  withdrawalId: "wd_1",
+  portfolioWalletId: "wal_1",
+  destinationChain: "ethereum_sepolia",
+  destinationToken: "usdt",
+  destinationAddress: "0x000000000000000000000000000000000000dead",
+  plannedSourceNativeUnits: "5000000",
+  displayAmountNativeUnits: "5000000",
+  txChain: "ethereum_sepolia",
+  ...overrides,
+});
+
+describe("GroundEarnClient.listPendingWithdrawalApprovals", () => {
+  it("maps pending Turnkey activities to the neutral approval shape", async () => {
+    const fetchMock = stubGroundFetch({ body: { activities: [groundTurnkeyActivity()] } });
+
+    const approvals = await client.listPendingWithdrawalApprovals(sandboxCtx);
+
+    assert.equal(
+      requestUrl(fetchMock),
+      "https://sandbox.groundtech.co/v2/turnkey/activities/pending"
+    );
+    assert.deepEqual(approvals, [
+      {
+        approvalRef: "act_1",
+        providerStatus: "ACTIVITY_STATUS_CONSENSUS_NEEDED",
+        kind: "withdrawal_payout",
+        withdrawalRef: "wd_1",
+        withdrawalLegRef: "leg_1",
+        providerWalletRef: "wal_1",
+        destinationChain: "ethereum_sepolia",
+        destinationToken: "usdt",
+        destinationAddress: "0x000000000000000000000000000000000000dead",
+        amountNativeUnits: "5000000",
+        firstSeenAt: "2026-08-05T00:00:00Z",
+      },
+    ]);
+  });
+
+  it("fails closed before any network call without a key", async () => {
+    const fetchMock = stubGroundFetch({ body: { activities: [] } });
+
+    await assert.rejects(
+      client.listPendingWithdrawalApprovals({ env: {}, environment: "sandbox" }),
+      earnError("PROVIDER_NOT_CONFIGURED")
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+});
+
+describe("GroundEarnClient.createWithdrawalApprovalRequest", () => {
+  it("returns the provider signing payload verbatim", async () => {
+    const stampPayload =
+      '{"type":"ACTIVITY_TYPE_APPROVE_ACTIVITY","timestampMs":"1782302400000","organizationId":"suborg_1","parameters":{"fingerprint":"fp_1"}}';
+    const fetchMock = stubGroundFetch({
+      body: {
+        activityId: "act_1",
+        action: "approve",
+        turnkeyRequest: {
+          type: "ACTIVITY_TYPE_APPROVE_ACTIVITY",
+          timestampMs: "1782302400000",
+          organizationId: "suborg_1",
+          parameters: { fingerprint: "fp_1" },
+        },
+        stampPayload,
+      },
+    });
+
+    const request = await client.createWithdrawalApprovalRequest(sandboxCtx, {
+      approvalRef: "act_1",
+      action: "approve",
+    });
+
+    assert.equal(
+      requestUrl(fetchMock),
+      "https://sandbox.groundtech.co/v2/turnkey/activity-approval-request"
+    );
+    assert.deepEqual(requestBody(fetchMock), { activityId: "act_1", action: "approve" });
+    assert.equal(request.approvalRef, "act_1");
+    assert.equal(request.signingPayload, stampPayload);
+    assert.deepEqual(request.providerRequest, {
+      type: "ACTIVITY_TYPE_APPROVE_ACTIVITY",
+      timestampMs: "1782302400000",
+      organizationId: "suborg_1",
+      parameters: { fingerprint: "fp_1" },
+    });
+  });
+
+  it("maps a not-actionable activity to CONFLICT", async () => {
+    stubGroundFetch({
+      status: 409,
+      body: { error: "Activity is not currently actionable", code: "workflow_conflict" },
+    });
+
+    await assert.rejects(
+      client.createWithdrawalApprovalRequest(sandboxCtx, {
+        approvalRef: "act_1",
+        action: "approve",
+      }),
+      earnError("CONFLICT")
+    );
+  });
+});
+
+describe("GroundEarnClient.submitWithdrawalApprovalVote", () => {
+  it("submits a header-pair stamp and reports the approval applied", async () => {
+    const fetchMock = stubGroundFetch({
+      body: { action: "approve", approved: true, resultStatus: "ACTIVITY_STATUS_COMPLETED" },
+    });
+
+    const result = await client.submitWithdrawalApprovalVote(sandboxCtx, {
+      approvalRef: "act_1",
+      action: "approve",
+      stamp: { headerName: "X-Stamp", headerValue: "stamped-by-customer" },
+      providerRequest: {
+        type: "ACTIVITY_TYPE_APPROVE_ACTIVITY",
+        parameters: { fingerprint: "fp_1" },
+      },
+    });
+
+    assert.equal(
+      requestUrl(fetchMock),
+      "https://sandbox.groundtech.co/v2/turnkey/activities/act_1/vote"
+    );
+    assert.deepEqual(requestBody(fetchMock), {
+      action: "approve",
+      customerApprovalStamp: {
+        stampHeaderName: "X-Stamp",
+        stampHeaderValue: "stamped-by-customer",
+      },
+      turnkeyRequest: {
+        type: "ACTIVITY_TYPE_APPROVE_ACTIVITY",
+        parameters: { fingerprint: "fp_1" },
+      },
+    });
+    assert.deepEqual(result, {
+      action: "approve",
+      applied: true,
+      alreadyResolved: false,
+      providerStatus: "ACTIVITY_STATUS_COMPLETED",
+    });
+  });
+
+  it("passes a string stamp through and reports an already-terminal activity", async () => {
+    const fetchMock = stubGroundFetch({
+      body: {
+        action: "reject",
+        rejected: false,
+        alreadyTerminal: true,
+        status: "ACTIVITY_STATUS_COMPLETED",
+      },
+    });
+
+    const result = await client.submitWithdrawalApprovalVote(sandboxCtx, {
+      approvalRef: "act_1",
+      action: "reject",
+      stamp: "opaque-stamp",
+      providerRequest: {},
+    });
+
+    assert.equal(requestBody(fetchMock).customerApprovalStamp, "opaque-stamp");
+    assert.deepEqual(result, {
+      action: "reject",
+      applied: false,
+      alreadyResolved: true,
+      providerStatus: "ACTIVITY_STATUS_COMPLETED",
+    });
   });
 });
 
