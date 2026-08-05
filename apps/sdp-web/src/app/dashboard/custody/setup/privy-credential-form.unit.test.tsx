@@ -114,6 +114,26 @@ describe("PrivyCredentialForm", () => {
     expect(String(second.get("appSecret"))).toBe("shh-secret");
   });
 
+  it("locks recovery for the parent while an outcome is unknown", async () => {
+    const onLock = vi.fn();
+    vi.mocked(submitPrivyCredentialAction)
+      .mockResolvedValueOnce({ status: "error", message: "network dropped" })
+      .mockResolvedValueOnce({ status: "success" });
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <PrivyCredentialForm formId="byok-lock-test" onRecoveryLockChange={onLock} />
+      </I18nProvider>
+    );
+
+    await fillAndSubmit(user);
+    await screen.findByRole("button", { name: "Retry submission" });
+    expect(onLock).toHaveBeenLastCalledWith(true);
+
+    await user.click(screen.getByRole("button", { name: "Retry submission" }));
+    await waitFor(() => expect(onLock).toHaveBeenLastCalledWith(false));
+  });
+
   it("offers no escape from an unknown outcome except the verbatim replay", async () => {
     vi.mocked(submitPrivyCredentialAction).mockResolvedValueOnce({
       status: "error",

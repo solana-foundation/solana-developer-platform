@@ -239,6 +239,9 @@ export function WalletSetupFlow({
     initialSelection.provider
   );
   const [walletLabel, setWalletLabel] = useState("");
+  // While a BYOK submission is in an unknown state, leaving the step would
+  // unmount the frozen payload and key that are the only path to recovery.
+  const [byokRecoveryLocked, setByokRecoveryLocked] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submissionInFlightRef = useRef(false);
 
@@ -451,7 +454,10 @@ export function WalletSetupFlow({
                 />
               </form>
             ) : isByokDetails ? (
-              <PrivyCredentialForm formId={DETAILS_FORM_ID} />
+              <PrivyCredentialForm
+                formId={DETAILS_FORM_ID}
+                onRecoveryLockChange={setByokRecoveryLocked}
+              />
             ) : (
               <form id={DETAILS_FORM_ID} onSubmit={handleDetailsSubmit} className="grid gap-4">
                 {formContent}
@@ -466,15 +472,21 @@ export function WalletSetupFlow({
         data-wallet-setup-actions="true"
       >
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={goBack}
-            disabled={isPending}
-            iconLeft={currentStep === "details" ? <ArrowLeft className="size-4" /> : undefined}
-          >
-            {currentStep === "provider" ? t("DashboardCustody.cancel") : t("DashboardCustody.back")}
-          </Button>
+          {byokRecoveryLocked ? (
+            <span />
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={goBack}
+              disabled={isPending}
+              iconLeft={currentStep === "details" ? <ArrowLeft className="size-4" /> : undefined}
+            >
+              {currentStep === "provider"
+                ? t("DashboardCustody.cancel")
+                : t("DashboardCustody.back")}
+            </Button>
+          )}
 
           {currentStep === "provider" ? (
             <Button
