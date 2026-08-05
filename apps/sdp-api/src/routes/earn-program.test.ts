@@ -192,7 +192,12 @@ async function seedProgramWallet(): Promise<EarnProviderWalletRow> {
   return row;
 }
 
-function requestEarn(method: string, path: string, body?: Record<string, unknown>) {
+function requestEarn(
+  method: string,
+  path: string,
+  body?: Record<string, unknown>,
+  headers: Record<string, string> = {}
+) {
   return app.request(
     path,
     {
@@ -200,6 +205,7 @@ function requestEarn(method: string, path: string, body?: Record<string, unknown
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        ...headers,
       },
       ...(body !== undefined && { body: JSON.stringify(body) }),
     },
@@ -526,6 +532,9 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
     const withdrawalRes = await requestEarn("POST", "/v1/earn/program/withdrawals", {
       provider: "ground",
+      // Money-out still gates on credentials alone; the key is a retry-safety
+      // requirement every caller carries, not an entitlement check.
+      requestId: "5b0e0c9a-7f3d-4a21-9c46-2f8ab1d5e740",
       amountUsd: "25.50",
       token: "usdc",
       destinationAddress: SOLANA_DESTINATION,
@@ -546,32 +555,100 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     expect(statusBody.data.withdrawal.status).toBe("processing");
   });
 
-  it("mints a UUIDv4 requestId when absent and passes a caller-owned key verbatim", async () => {
-    await seedAuth();
-    await seedProgramWallet();
-    const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
-      .mockResolvedValue(WITHDRAWAL);
-
-    const minted = await requestEarn("POST", "/v1/earn/program/withdrawals", {
+  // The provider dedupes a withdrawal on its request id and SDP stores no row
+  // for one, so that id is the ONLY thing between a retry and a second payout.
+  // Every case here exists to keep it stable across attempts.
+  describe("withdrawal idempotency", () => {
+    const withdrawalBody = (extra: Record<string, unknown> = {}) => ({
       provider: "ground",
       amountUsd: "10.00",
       token: "usdc",
       destinationAddress: SOLANA_DESTINATION,
+      ...extra,
     });
-    expect(minted.status).toBe(201);
-    expect(createWithdrawal.mock.calls[0]?.[1]?.requestId).toMatch(UUID_V4_PATTERN);
 
-    const callerKey = "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d";
-    const verbatim = await requestEarn("POST", "/v1/earn/program/withdrawals", {
-      provider: "ground",
-      requestId: callerKey,
-      amountUsd: "10.00",
-      token: "usdc",
-      destinationAddress: SOLANA_DESTINATION,
+    it("passes a caller-owned requestId to the provider verbatim", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      const callerKey = "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d";
+      const res = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody({ requestId: callerKey })
+      );
+
+      expect(res.status).toBe(201);
+      expect(createWithdrawal.mock.calls[0]?.[1]?.requestId).toBe(callerKey);
     });
-    expect(verbatim.status).toBe(201);
-    expect(createWithdrawal.mock.calls[1]?.[1]?.requestId).toBe(callerKey);
+
+    it("derives the same provider key every time from one Idempotency-Key", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      // The retry a client's own loop would send: identical request, twice.
+      const headers = { "Idempotency-Key": "checkout-9f2b" };
+      const first = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody(),
+        headers
+      );
+      const retry = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody(),
+        headers
+      );
+
+      expect(first.status).toBe(201);
+      expect(retry.status).toBe(201);
+      const [firstCall, retryCall] = createWithdrawal.mock.calls;
+      // Must be v4-SHAPED even though it is derived: Ground rejects any other
+      // version outright (`400 requestId must be a valid UUID v4`).
+      expect(firstCall?.[1]?.requestId).toMatch(UUID_V4_PATTERN);
+      // The whole point: the provider sees ONE withdrawal, not two.
+      expect(retryCall?.[1]?.requestId).toBe(firstCall?.[1]?.requestId);
+    });
+
+    it("keeps two different Idempotency-Keys apart", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      await requestEarn("POST", "/v1/earn/program/withdrawals", withdrawalBody(), {
+        "Idempotency-Key": "payout-a",
+      });
+      await requestEarn("POST", "/v1/earn/program/withdrawals", withdrawalBody(), {
+        "Idempotency-Key": "payout-b",
+      });
+
+      const [a, b] = createWithdrawal.mock.calls;
+      expect(a?.[1]?.requestId).not.toBe(b?.[1]?.requestId);
+    });
+
+    it("refuses a withdrawal carrying no idempotency key at all", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      const res = await requestEarn("POST", "/v1/earn/program/withdrawals", withdrawalBody());
+
+      // Refusing beats accepting: a server-minted random id is fresh per
+      // attempt, so it would turn a retry into a second payout.
+      expect(res.status).toBe(400);
+      expect(createWithdrawal).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects destinations that are not base58 Solana addresses", async () => {

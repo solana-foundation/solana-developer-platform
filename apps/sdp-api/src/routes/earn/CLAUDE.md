@@ -8,6 +8,16 @@ invariants.
 ## Route map
 
 - `GET /strategies[/:id[/nav]]` — synced catalogue (DB), env-scoped.
+- **`POST /program/withdrawals` needs a retry-stable idempotency key** and
+  refuses a request carrying none. The provider dedupes a withdrawal on the
+  request id alone and SDP persists no row for one, so that id is the entire
+  defence against a retried request paying out twice — a server-minted random
+  id is fresh per attempt and would *cause* the double-send. Accepts either
+  `requestId` (UUIDv4, verbatim) or the `Idempotency-Key` header, which
+  `deriveProviderRequestId` hashes into a stable id scoped by org+environment.
+  Ground validates the shape strictly (`400 requestId must be a valid UUID v4`
+  on anything else, verified 2026-08-05), which is why that derivation stamps
+  version 4 despite being derived rather than random.
 - `POST /deposits/quote`, `POST /withdrawals/quote` — per-strategy quoting
   (capability of providers that support it).
 - `PUT /program` / `GET /program` — the **shared portfolio wallet**, ONE per

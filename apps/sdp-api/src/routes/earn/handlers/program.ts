@@ -16,7 +16,9 @@ import type { EarnProviderWalletRow } from "@/db/repositories";
 import { getAuth } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { deriveProviderRequestId } from "@/lib/idempotency";
 import { success } from "@/lib/response";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getLogger } from "@/runtime/logger";
 import {
   assertEarnProviderConfigured,
@@ -317,6 +319,40 @@ export const previewEarnProgramWithdrawal = async (c: AppContext) => {
   return success(c, response);
 };
 
+/**
+ * The key the provider dedupes this withdrawal on.
+ *
+ * It must be STABLE across retries of the same intent, because that key is the
+ * only thing standing between a retried request and a second payout: the
+ * provider replays the original response for a key it has seen and refuses a
+ * mismatched payload under it, while a key it has never seen is, correctly, a
+ * new withdrawal. SDP stores no row for a withdrawal, so there is no second
+ * place to catch a duplicate — this value is the whole mechanism.
+ *
+ * A server-minted random id therefore cannot be the fallback: it is fresh per
+ * HTTP attempt, so it guarantees exactly the double-send it appears to guard
+ * against. Callers get two ways to supply a stable key — an explicit
+ * `requestId`, or the platform-wide `Idempotency-Key` header, scoped here so
+ * one org's key can never resolve to another's withdrawal — and a request
+ * carrying neither is refused rather than silently made unsafe.
+ */
+function resolveWithdrawalRequestId(c: AppContext, requestId: string | undefined): string {
+  if (requestId) {
+    return requestId;
+  }
+  const idempotencyKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
+  if (idempotencyKey) {
+    const auth = getAuth(c);
+    return deriveProviderRequestId(
+      ["earn_program_withdrawal", auth.organizationId, resolveSdpEnvironment(c)],
+      idempotencyKey
+    );
+  }
+  throw badRequest(
+    `A withdrawal needs an idempotency key that is stable across retries: send requestId (UUIDv4) or the ${IDEMPOTENCY_KEY_HEADER} header. Without one, a retried request would pay out twice.`
+  );
+}
+
 export const createEarnProgramWithdrawal = async (c: AppContext) => {
   const body = await parseBody(c, earnProgramWithdrawalCreateSchema);
   const client = requirePortfolioClient(body.provider);
@@ -327,9 +363,7 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
 
   const withdrawal = await client.createPortfolioWithdrawal(earnRuntime(c), {
     providerWalletRef: row.provider_wallet_ref,
-    // Caller-owned keys pass through verbatim (provider dedupes on them);
-    // server-minted keys make bare requests safe without extra client work.
-    requestId: body.requestId ?? crypto.randomUUID(),
+    requestId: resolveWithdrawalRequestId(c, body.requestId),
     amountUsd: body.amountUsd,
     token: body.token,
     destinationAddress: body.destinationAddress,
