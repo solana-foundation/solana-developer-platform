@@ -346,9 +346,10 @@ Two things write `earn_strategies`, and only one of them is a production path.
   seed after your first Clerk sign-in and it moves its own link onto your real
   org; a program you created through the wizard is never moved. `--clean` removes
   the link, never the Ground wallet.
-  The seeded program starts at **$0** deliberately — it is an all-Solana/USDC
-  wallet you fund yourself via its devnet deposit address. Pointing the seed at a
-  funded sandbox wallet instead would surface a withdrawable balance SDP cannot
+  The seeded program is an all-Solana/USDC wallet, funded via its devnet deposit
+  address (Circle's faucet, above) — shared with teammates, so its balance moves
+  and no particular figure is the baseline. Pointing the seed at one of the other
+  funded sandbox wallets instead would surface a withdrawable balance SDP cannot
   withdraw, because those balances sit off the Solana rail while
   `balance.withdrawableUsd` reports a wallet-level total.
   Full local-dev detail: `CLAUDE.md` → "Get a program — one org, one portfolio

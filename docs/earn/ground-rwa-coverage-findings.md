@@ -23,23 +23,28 @@ inventory matches each against every raw source, dropped ones included.
 ## The sandbox picture (2026-08-05)
 
 18 raw sources → **15 catalogued: 4 RWA / 11 DeFi** → 3 dropped (all
-`not_solana_routable` USDT twins). The catalogue moved meaningfully in the day
-since the seed fixtures froze their snapshot (10 catalogued, 2 RWA on
-2026-08-04): Ground added **Invesco USTB** and **Bitwise USCC** (both tokenized
-by Superstate), Aave V3 Core, Morpho Smokehouse, and Kamino RockawayX RWA.
-The RWA shelf is currently:
+`not_solana_routable` USDT twins). The RWA shelf is:
 
-| source | what it is | liquidity |
+| source | what it is | redemption |
 | --- | --- | --- |
-| Janus Henderson JAAA | AAA-rated CLOs (tokenized by Centrifuge) | delayed 2d |
-| Janus Henderson JTRSY | short-duration US Treasuries (Centrifuge) | delayed 2d |
-| Invesco USTB | short-duration US Treasury Bills (Superstate) | delayed 1d |
-| Bitwise Crypto Carry Fund | crypto cash-and-carry + Treasuries (Superstate) | delayed 2d |
+| Janus Henderson JAAA | AAA-rated CLOs (tokenized by Centrifuge) | 1–2 banking days |
+| Janus Henderson JTRSY | short-duration US Treasuries (Centrifuge) | 1–2 banking days |
+| Invesco USTB | short-duration US Treasury Bills (Superstate) | 7200s (~2 hours) |
+| Bitwise Crypto Carry Fund | crypto cash-and-carry + Treasuries (Superstate) | 1–2 banking days |
 
-All four take USDC, all are delayed-liquidity (1–2 banking days), all classify
-`rwa`, and all attribute to a mapped dashboard label. Sandbox's RWA:DeFi ratio
-is improving (2:8 → 4:11) but the shelf is treasuries + one CLO fund + one
-carry fund — none of the marquee issuer names the doc leads with.
+All four take USDC, all classify `rwa`, and all attribute to a mapped dashboard
+label. Note USTB redeems on an **elapsed-seconds** basis, not banking days —
+the catalogue rounds it up to the T+1 the dashboard shows, so the displayed
+term is conservative rather than exact.
+
+**This is a single measurement, not a trend.** The dev seed's 10 fixtures
+(2 `rwa`) are a hand-picked spread chosen to exercise the dashboard — the
+script says so itself — not a snapshot of the 2026-08-04 catalogue, so nothing
+here supports a claim that coverage grew or is improving. Establishing
+direction needs a second inventory run; the committed snapshot exists to make
+that comparison possible from now on. What can be said today is the level: a
+shelf of treasuries plus one CLO fund and one carry fund, and none of the
+marquee issuer names the doc leads with.
 
 ## Delta against the doc's named RWA list
 
@@ -82,12 +87,13 @@ observations for the production run:
   "Superstate USCC" — deliberate, per `EARN_KNOWN_CURATOR_LABELS`, and more
   precise than a bare "Superstate".
 - **One genuine ambiguity:** `kamino-rockawayx-rwa-usdc` is *named* RWA but
-  classifies `defi`, because Ground types its sleeves as Kamino `reserve`s.
-  The reserves sit in Solstice / Huma / OnRe — private-credit and
-  insurance-adjacent protocols — so the name is not obviously wrong; the
-  allocation typing just doesn't carry the information. Same shape as the
-  Syrup question: **is Ground's allocation `type` the authority on RWA-ness,
-  or does SDP need issuer-level truth?**
+  classifies `defi`, because Ground types all seven of its sleeves as Kamino
+  `reserve`s. Those reserves carry OnRe (40.57% + 1.10%), Huma (30.00%),
+  Obligate (18.33%) and Figure (10.00%), with Solstice and a third OnRe sleeve
+  at 0% — private-credit and insurance-adjacent protocols, so the name is not
+  obviously wrong; the allocation typing just doesn't carry the information.
+  Same shape as the Syrup question: **is Ground's allocation `type` the
+  authority on RWA-ness, or does SDP need issuer-level truth?**
 - Side note for the epic text: it attributes JAAA to Maple; Ground reports
   `protocol: centrifuge` for both Janus Henderson vaults.
 
@@ -112,9 +118,9 @@ observations for the production run:
 
 If production mirrors sandbox, V1 launches with **four RWA sources — two
 treasury funds, one CLO fund, one carry fund — versus the ten issuer names
-the doc leads with**, on a shelf that is still majority DeFi (4:11). That is
-a real product-messaging gap but not the "mostly-DeFi product" worst case:
-the treasury/CLO shelf is credible RWA exposure. The epic and product doc
+the doc leads with**, on a shelf that is majority DeFi (4:11). That is a real
+product-messaging gap but not the "mostly-DeFi product" worst case: the
+treasury/CLO shelf is credible RWA exposure. The epic and product doc
 should state the actual day-one RWA list once the production inventory (or
 Ground's answer to question 1) confirms it — that update is the last
 acceptance criterion of PRO-1638 and deliberately waits for production truth.

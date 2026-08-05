@@ -112,11 +112,14 @@ Practical notes:
 - **The API-key path has no program.** `db:seed:local`'s dev key belongs to the
   test org, so `curl /v1/earn/program?provider=ground` with it returns 404 by
   design. Use the dashboard, or mint a key for your own org.
-- **The seeded program reads $0, on purpose.** It carries a live three-source
-  Kamino USDC allocation, so the overview shows a real forward APY (blended from
-  target weights) with no balance yet. Fund it yourself by sending devnet USDC to
-  the wallet's Solana deposit address — that exercises the real two-phase deposit
-  (arrives as `cash`, deploys on a later Ground rebalance).
+- **The seeded program starts at whatever the shared wallet currently holds.**
+  It carries a live single-strategy allocation (one strategy at 100% — the
+  shape the deposit flow authors), so the overview shows a real forward APY.
+  The wallet is shared with teammates and IS funded from time to time for
+  exit-path testing, so do not treat any particular balance as the baseline —
+  read it from the dashboard. Fund it by sending devnet USDC to the wallet's
+  Solana deposit address, which exercises the real two-phase deposit (arrives
+  as `cash`, deploys on a later Ground rebalance).
 - **Getting devnet USDC: Circle's faucet — <https://faucet.circle.com/>**
   (select **USDC** + **Solana Devnet**, paste the address). It mints the
   official devnet USDC mint (`4zMMC…`, the one pinned in well-known-tokens),
