@@ -200,6 +200,11 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 - Ground specifics (base URLs, endpoint shapes, apyBps/liquidity/curator
   mapping decisions) are documented in providers/ground/client.ts doc comments
   and README.md — update both when the mapping changes.
+- Catalogue coverage questions (what Ground offers vs what distillation
+  drops, and why): `pnpm --filter @sdp/api earn:inventory` pulls the raw
+  catalogue and regenerates `docs/earn/ground-catalogue-inventory.md` using
+  the same `distillGroundYieldSource` the sync uses. Sandbox only from a
+  laptop; the production variant is gated behind `--confirm-production`.
 
 ## Cross-package coupling
 

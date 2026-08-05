@@ -1,0 +1,646 @@
+{
+  "provider": "ground",
+  "environment": "sandbox",
+  "fetchedAt": "2026-08-05T19:41:59.095Z",
+  "sources": [
+    {
+      "id": "aave-v3-usdc",
+      "name": "Aave V3 Core USDC",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "aave_v3",
+      "apyBps": 350,
+      "tvlUsd": 2147883645.872481,
+      "utilizationPct": 92.18103621745493,
+      "allocations": [
+        {
+          "label": "Aave V3 Core Market",
+          "type": "market",
+          "pct": 100
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "aave_v3",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "ground-jaaa-usdc-vault",
+      "name": "Janus Henderson JAAA (USDC)",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "centrifuge",
+      "apyBps": 411,
+      "tvlUsd": 684935951.57,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "AAA-rated collateralized loan obligations and cash equivalents",
+          "type": "rwa",
+          "pct": 100
+        }
+      ],
+      "sourceKind": "rwa",
+      "curator": "centrifuge",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "delayed",
+      "redemptionDelayDays": 2
+    },
+    {
+      "id": "ground-jaaa-usdt-vault",
+      "name": "Janus Henderson JAAA (USDT)",
+      "mode": "active",
+      "depositToken": "usdt",
+      "protocol": "centrifuge",
+      "apyBps": 411,
+      "tvlUsd": 684935951.57,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "AAA-rated collateralized loan obligations and cash equivalents",
+          "type": "rwa",
+          "pct": 100
+        }
+      ],
+      "sourceKind": "rwa",
+      "curator": "centrifuge",
+      "outcome": "dropped",
+      "dropReason": "not_solana_routable",
+      "liquidityTerm": null,
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "ground-jtrsy-usdc-vault",
+      "name": "Janus Henderson JTRSY tokenized by Centrifuge",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "centrifuge",
+      "apyBps": 354,
+      "tvlUsd": 881450490.84,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "Short-duration U.S. Treasury Bills and cash equivalents",
+          "type": "treasury",
+          "pct": 100
+        }
+      ],
+      "sourceKind": "rwa",
+      "curator": "centrifuge",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "delayed",
+      "redemptionDelayDays": 2
+    },
+    {
+      "id": "ground-jtrsy-usdt-vault",
+      "name": "Janus Henderson JTRSY tokenized by Centrifuge",
+      "mode": "active",
+      "depositToken": "usdt",
+      "protocol": "centrifuge",
+      "apyBps": 354,
+      "tvlUsd": 881450490.84,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "Short-duration U.S. Treasury Bills and cash equivalents",
+          "type": "treasury",
+          "pct": 100
+        }
+      ],
+      "sourceKind": "rwa",
+      "curator": "centrifuge",
+      "outcome": "dropped",
+      "dropReason": "not_solana_routable",
+      "liquidityTerm": null,
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "ground-uscc-vault",
+      "name": "Bitwise Crypto Carry Fund tokenized by Superstate",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "guscc",
+      "apyBps": 271,
+      "tvlUsd": 129306810.28,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "Crypto cash-and-carry, staking, and U.S. Treasury securities",
+          "type": "rwa",
+          "pct": 100
+        }
+      ],
+      "sourceKind": "rwa",
+      "curator": "guscc",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "delayed",
+      "redemptionDelayDays": 2
+    },
+    {
+      "id": "ground-ustb-vault",
+      "name": "Invesco USTB tokenized by Superstate",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "gustb",
+      "apyBps": 351,
+      "tvlUsd": 956345552.44,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "Short-duration U.S. Treasury Bills",
+          "type": "treasury",
+          "pct": 100
+        }
+      ],
+      "sourceKind": "rwa",
+      "curator": "gustb",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "delayed",
+      "redemptionDelayDays": 1
+    },
+    {
+      "id": "kamino-allez-usdc",
+      "name": "Kamino Allez USDC",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "kamino",
+      "apyBps": 506,
+      "tvlUsd": 15421478.87444,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "USDC / SOL/BTC",
+          "type": "reserve",
+          "pct": 15.52548048414664
+        },
+        {
+          "label": "USDC / JLP",
+          "type": "reserve",
+          "pct": 2.8063254893629166
+        },
+        {
+          "label": "USDC / Bitcoin",
+          "type": "reserve",
+          "pct": 0.6846165798344109
+        },
+        {
+          "label": "USDC / STRCx",
+          "type": "reserve",
+          "pct": 0.25716722846026274
+        },
+        {
+          "label": "USDC / OnRe",
+          "type": "reserve",
+          "pct": 1.9644278425540416
+        },
+        {
+          "label": "USDC / Maple",
+          "type": "reserve",
+          "pct": 2.6642651708053364
+        },
+        {
+          "label": "USDC / Figure",
+          "type": "reserve",
+          "pct": 25.16053133095932
+        },
+        {
+          "label": "USDC / HYPE",
+          "type": "reserve",
+          "pct": 3.240433918169451
+        },
+        {
+          "label": "USDC / Huma",
+          "type": "reserve",
+          "pct": 0
+        },
+        {
+          "label": "USDC / OnRe",
+          "type": "reserve",
+          "pct": 47.696751955707626
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "allez",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "kamino-gauntlet-frontier-usdc",
+      "name": "Kamino Gauntlet USDC Frontier",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "kamino",
+      "apyBps": 480,
+      "tvlUsd": 391674.290414,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "USDC / Figure",
+          "type": "reserve",
+          "pct": 87.62
+        },
+        {
+          "label": "USDC / Maple",
+          "type": "reserve",
+          "pct": 12.379999999999999
+        },
+        {
+          "label": "USDC / SOL/BTC",
+          "type": "reserve",
+          "pct": 0
+        },
+        {
+          "label": "USDC / Solstice",
+          "type": "reserve",
+          "pct": 0
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "gauntlet",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "kamino-rockawayx-rwa-usdc",
+      "name": "Kamino RockawayX RWA USDC",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "kamino",
+      "apyBps": 585,
+      "tvlUsd": 27288452.521874,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "USDC / Solstice",
+          "type": "reserve",
+          "pct": 0
+        },
+        {
+          "label": "USDC / Huma",
+          "type": "reserve",
+          "pct": 30.000030000029998
+        },
+        {
+          "label": "USDC / OnRe",
+          "type": "reserve",
+          "pct": 40.57174057174057
+        },
+        {
+          "label": "USDC / Figure",
+          "type": "reserve",
+          "pct": 10.00001000001
+        },
+        {
+          "label": "USDC / OnRe",
+          "type": "reserve",
+          "pct": 1.0995010995010994
+        },
+        {
+          "label": "USDC / OnRe",
+          "type": "reserve",
+          "pct": 0
+        },
+        {
+          "label": "USDC / Obligate",
+          "type": "reserve",
+          "pct": 18.32871832871833
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "rockawayx",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "kamino-steakhouse-usdc",
+      "name": "Kamino Steakhouse USDC",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "kamino",
+      "apyBps": 393,
+      "tvlUsd": 19925299.786685,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "USDC / JLP",
+          "type": "reserve",
+          "pct": 18.746399999999998
+        },
+        {
+          "label": "USDC / SOL/BTC",
+          "type": "reserve",
+          "pct": 78.69749999999999
+        },
+        {
+          "label": "USDC / Bitcoin",
+          "type": "reserve",
+          "pct": 0.5999
+        },
+        {
+          "label": "USDC / Maple",
+          "type": "reserve",
+          "pct": 1.9562
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "steakhouse",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "kamino-superstate-usdc",
+      "name": "Kamino Superstate USDC",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "kamino",
+      "apyBps": 151,
+      "tvlUsd": 8388187.751484,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "Kamino Superstate Market",
+          "type": "market",
+          "pct": 100
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "superstate",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "morpho-august-usdc-v2",
+      "name": "Morpho August USDC V2",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "morpho",
+      "apyBps": 815,
+      "tvlUsd": 1639405.479603,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "USDC / upUSDC",
+          "type": "market",
+          "pct": 31.504142265626268
+        },
+        {
+          "label": "USDC / syzUSD",
+          "type": "market",
+          "pct": 68.49585773437374
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "august",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "morpho-gauntlet-usdc",
+      "name": "Morpho Gauntlet USDC Prime",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "morpho",
+      "apyBps": 370,
+      "tvlUsd": 28500900.392107,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "USDC / wstETH",
+          "type": "market",
+          "pct": 4.210446719228364
+        },
+        {
+          "label": "USDC / WETH",
+          "type": "market",
+          "pct": 2.082765818737546
+        },
+        {
+          "label": "USDC / WBTC",
+          "type": "market",
+          "pct": 0.42883834554308403
+        },
+        {
+          "label": "USDC / cbBTC",
+          "type": "market",
+          "pct": 0.000004874265549145889
+        },
+        {
+          "label": "USDC / cbBTC",
+          "type": "market",
+          "pct": 57.32306471520808
+        },
+        {
+          "label": "USDC / WBTC",
+          "type": "market",
+          "pct": 21.179431092599106
+        },
+        {
+          "label": "USDC idle market",
+          "type": "market",
+          "pct": 0.3803341884851158
+        },
+        {
+          "label": "USDC / wstETH",
+          "type": "market",
+          "pct": 14.395114245933154
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "gauntlet",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "morpho-smokehouse-usdc",
+      "name": "Morpho Smokehouse USDC",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "morpho",
+      "apyBps": 485,
+      "tvlUsd": 15865222.927329,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "USDC / PT-USDG-24SEP2026",
+          "type": "market",
+          "pct": 0.0077289164118669405
+        },
+        {
+          "label": "USDC / PT-sUSDS-26NOV2026",
+          "type": "market",
+          "pct": 58.17984536149612
+        },
+        {
+          "label": "USDC / PT-reUSD-10DEC2026",
+          "type": "market",
+          "pct": 10.006962959412977
+        },
+        {
+          "label": "USDC / reUSD",
+          "type": "market",
+          "pct": 25.01737906193758
+        },
+        {
+          "label": "USDC / AA_FalconXUSDC",
+          "type": "market",
+          "pct": 6.788083700741457
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "smokehouse",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "morpho-steakhouse-usdc",
+      "name": "Morpho Steakhouse USDC Prime",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "morpho",
+      "apyBps": 352,
+      "tvlUsd": 75960080.929534,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "USDC / FLHYon",
+          "type": "market",
+          "pct": 2.7187073436374295e-8
+        },
+        {
+          "label": "USDC / WBTC",
+          "type": "market",
+          "pct": 27.406638846487642
+        },
+        {
+          "label": "USDC / wstETH",
+          "type": "market",
+          "pct": 6.429445973529907
+        },
+        {
+          "label": "USDC / WBTC",
+          "type": "market",
+          "pct": 1.7925509448280352
+        },
+        {
+          "label": "USDC / cbBTC",
+          "type": "market",
+          "pct": 0.01810561889738339
+        },
+        {
+          "label": "USDC / WETH",
+          "type": "market",
+          "pct": 0.8359172411299256
+        },
+        {
+          "label": "USDC / steakEURCV",
+          "type": "market",
+          "pct": 10.759544348090682
+        },
+        {
+          "label": "USDC / cbBTC",
+          "type": "market",
+          "pct": 52.75528104059345
+        },
+        {
+          "label": "USDC / weETH",
+          "type": "market",
+          "pct": 0.0025159592559107274
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "steakhouse",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": null
+    },
+    {
+      "id": "syrup-usdc",
+      "name": "Syrup USDC",
+      "mode": "active",
+      "depositToken": "usdc",
+      "protocol": "maple",
+      "apyBps": 492,
+      "tvlUsd": 1109452515.92361,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "Open-term loans",
+          "type": "loan",
+          "pct": 98.30826472008603
+        },
+        {
+          "label": "Fixed-term loans",
+          "type": "loan",
+          "pct": 0
+        },
+        {
+          "label": "Liquid assets",
+          "type": "liquidity",
+          "pct": 1.6917352799139778
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "maple",
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "delayed",
+      "redemptionDelayDays": 1
+    },
+    {
+      "id": "syrup-usdt",
+      "name": "Syrup USDT",
+      "mode": "active",
+      "depositToken": "usdt",
+      "protocol": "maple",
+      "apyBps": 422,
+      "tvlUsd": 451381037.336918,
+      "utilizationPct": null,
+      "allocations": [
+        {
+          "label": "Open-term loans",
+          "type": "loan",
+          "pct": 91.88498240884341
+        },
+        {
+          "label": "Fixed-term loans",
+          "type": "loan",
+          "pct": 0
+        },
+        {
+          "label": "Liquid assets",
+          "type": "liquidity",
+          "pct": 8.115017591156594
+        }
+      ],
+      "sourceKind": "defi",
+      "curator": "maple",
+      "outcome": "dropped",
+      "dropReason": "not_solana_routable",
+      "liquidityTerm": null,
+      "redemptionDelayDays": null
+    }
+  ]
+}

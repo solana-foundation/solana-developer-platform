@@ -3,7 +3,7 @@ import { afterEach, describe, it, mock } from "node:test";
 import { wellKnownMint } from "@sdp/types";
 import { SdpEarnError, type SdpEarnErrorCode } from "../../errors";
 import type { EarnRuntimeContext } from "../../types";
-import { GroundEarnClient } from "./client";
+import { distillGroundYieldSource, GroundEarnClient, type GroundYieldSource } from "./client";
 
 /**
  * Canonical no-network harness (see src/fetch.test.ts): `globalThis.fetch` is
@@ -385,6 +385,41 @@ describe("GroundEarnClient.listStrategies", () => {
     mock.restoreAll();
     stubGroundFetch({ status: 503, body: { error: "down" } });
     await assert.rejects(client.listStrategies(sandboxCtx), earnError("PROVIDER_UNAVAILABLE"));
+  });
+});
+
+describe("distillGroundYieldSource", () => {
+  const distill = (
+    overrides: Record<string, unknown>,
+    cluster: "devnet" | "mainnet-beta" = "devnet"
+  ) => distillGroundYieldSource(yieldSource(overrides) as GroundYieldSource, cluster);
+
+  it("names the gate that keeps each source out of the catalogue", () => {
+    assert.deepEqual(distill({ mode: "buy_only" }), {
+      outcome: "dropped",
+      reason: "inactive_mode",
+    });
+    assert.deepEqual(distill({ mode: "emergency_freeze" }), {
+      outcome: "dropped",
+      reason: "inactive_mode",
+    });
+    // Rail-gated, not mint-gated: USDT drops even on mainnet-beta, where a
+    // well-known mint exists — Ground's Solana rails carry USDC only.
+    assert.deepEqual(distill({ depositToken: "usdt" }, "mainnet-beta"), {
+      outcome: "dropped",
+      reason: "not_solana_routable",
+    });
+  });
+
+  it("catalogues an active USDC source with the snapshot listStrategies publishes", () => {
+    const distilled = distill({});
+    if (distilled.outcome !== "catalogued") {
+      assert.fail(`expected catalogued, got dropped: ${distilled.reason}`);
+    }
+    assert.equal(distilled.snapshot.providerReference, "morpho-gauntlet-usdc");
+    assert.equal(distilled.snapshot.sourceKind, "defi");
+    assert.equal(distilled.snapshot.riskMetadata?.curator, "gauntlet");
+    assert.deepEqual(distilled.snapshot.depositMints, [wellKnownMint("USDC", "devnet")]);
   });
 });
 
