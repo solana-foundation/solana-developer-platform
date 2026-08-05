@@ -23,8 +23,8 @@ import {
   EARN_PORTFOLIO_PROVIDER,
   type EarnProgram,
   useEarnProgram,
-  useEarnWalletActivityToasts,
   useEarnStrategies,
+  useEarnWalletActivityToasts,
 } from "./earn-program-data";
 import {
   settlementDays,
