@@ -118,7 +118,8 @@ export async function IntegrationsCatalog({
   ramps,
   compliance,
 }: {
-  custody: CustodyProviderAvailability[];
+  /** `null` when the connected-provider lookup failed: state unknown, not empty. */
+  custody: CustodyProviderAvailability[] | null;
   rpc: IntegrationEntry<OrganizationRpcProvider>[];
   ramps: IntegrationEntry<RampProviderId>[];
   compliance: IntegrationEntry<ComplianceProviderId>[];
@@ -135,7 +136,15 @@ export async function IntegrationsCatalog({
         title={t("Shared.integrations.custodyTitle")}
         description={t("Shared.integrations.custodyDescription")}
       >
-        {custody.map((provider) => (
+        {custody === null ? (
+          <li
+            role="alert"
+            className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
+          >
+            {t("Shared.integrations.custodyUnavailable")}
+          </li>
+        ) : null}
+        {(custody ?? []).map((provider) => (
           <IntegrationRow
             key={provider.entry.id}
             icon={<WalletProviderMark provider={provider.entry.id} size="sm" />}

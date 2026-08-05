@@ -59,8 +59,11 @@ export default async function IntegrationsPage() {
     trace.step("fetch_provider_access", () =>
       fetchProviderAvailability(projectClient.request, organizationId)
     ),
+    // null, not [] — an empty list claims nothing is connected and offers
+    // Configure for providers that are already active. Unknown must render as
+    // unknown, never as installable.
     trace.step("fetch_custody_configs", () =>
-      getConnectedCustodyProviders(projectClient.request).catch(() => [])
+      getConnectedCustodyProviders(projectClient.request).catch(() => null)
     ),
   ]);
 
@@ -68,12 +71,18 @@ export default async function IntegrationsPage() {
 
   return (
     <IntegrationsCatalog
-      custody={resolveCustodyIntegrations({
-        connectedProviders,
-        enabledProviders: availability.enabledCustodyProviders,
-      })}
+      custody={
+        connectedProviders === null
+          ? null
+          : resolveCustodyIntegrations({
+              connectedProviders,
+              enabledProviders: availability.enabledCustodyProviders,
+            })
+      }
       rpc={resolveRpcIntegrations({
-        selectedProvider: onboarding.setup?.rpcProvider ?? null,
+        // The shell only routes here after onboarding, so a missing setting
+        // means the organization runs on SDP's default RPC, not "none".
+        selectedProvider: onboarding.setup?.rpcProvider ?? "default",
         entries: availability.providers.rpc,
       })}
       ramps={resolveRampIntegrations(availability.providers.ramps)}

@@ -297,6 +297,7 @@
     "rampsTitle": "Ramps",
     "rampsDescription": "On-ramp and off-ramp rails used by deposits and payouts.",
     "complianceTitle": "Compliance",
-    "complianceDescription": "Screening and monitoring providers. Enabled per organization by arrangement."
+    "complianceDescription": "Screening and monitoring providers. Enabled per organization by arrangement.",
+    "custodyUnavailable": "Custody connection state is unavailable right now. Reload to see what is installed before setting anything up."
   }
 }

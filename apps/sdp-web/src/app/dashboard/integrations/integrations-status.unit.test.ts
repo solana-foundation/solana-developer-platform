@@ -40,6 +40,14 @@ describe("integrations status", () => {
     expect(rpc.find((p) => p.provider === "triton")?.status).toBe("unavailable");
   });
 
+  it("treats a missing RPC setting as running on SDP's default", () => {
+    // The page maps a null stored setting to "default" before resolving, so
+    // the catalog always names exactly one active RPC provider.
+    const rpc = resolveRpcIntegrations({ selectedProvider: "default", entries: {} });
+    expect(rpc.find((p) => p.provider === "default")?.status).toBe("active");
+    expect(rpc.filter((p) => p.status === "active")).toHaveLength(1);
+  });
+
   it("only names SDP's own RPC while the organization actually runs on it", () => {
     const onDefault = resolveRpcIntegrations({ selectedProvider: "default", entries: {} });
     expect(onDefault.find((p) => p.provider === "default")?.status).toBe("active");
