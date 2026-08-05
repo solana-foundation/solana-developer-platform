@@ -5,12 +5,19 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterparty } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "../payments-page.data";
-import { fetchRecurringPayments } from "./recurring-payments.data";
+import {
+  fetchRecurringPayments,
+  parseRecurringPaymentsListParams,
+} from "./recurring-payments.data";
 import { RecurringPaymentsWorkspace } from "./recurring-payments-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function RecurringPaymentsPage() {
+interface RecurringPaymentsPageProps {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -19,12 +26,16 @@ export default async function RecurringPaymentsPage() {
     redirect("/dashboard");
   }
 
+  const listState = parseRecurringPaymentsListParams((await searchParams) ?? {});
+
   return withDashboardPageTrace(
     "dashboard.recurring-payments.page",
     async ({ trace, apiClient }) => {
       const t = await getTranslations();
       const [recurringPaymentsResult, walletsResult] = await Promise.all([
-        trace.step("fetch_recurring_payments", () => fetchRecurringPayments(apiClient.request, t)),
+        trace.step("fetch_recurring_payments", () =>
+          fetchRecurringPayments(apiClient.request, t, listState)
+        ),
         trace.step("fetch_wallets", () =>
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
         ),
@@ -55,6 +66,8 @@ export default async function RecurringPaymentsPage() {
         <div className="flex h-full min-h-0 w-full flex-col">
           <RecurringPaymentsWorkspace
             initialRecurringPayments={recurringPaymentsResult.data}
+            total={recurringPaymentsResult.total}
+            listState={listState}
             initialError={recurringPaymentsResult.error}
             wallets={walletsResult.data ?? []}
             counterparties={resolvedCounterparties.map((counterparty) => ({

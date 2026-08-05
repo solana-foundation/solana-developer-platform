@@ -28,7 +28,7 @@ import {
   WalletIcon,
   XIcon,
 } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import {
@@ -50,7 +50,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { Modal } from "@/components/ui/modal";
-import { PaginatedFooter, usePaginationUrlState } from "@/components/ui/paginated-footer";
+import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { Select, SelectItem } from "@/components/ui/select";
 import {
   Table,
@@ -70,7 +70,10 @@ import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payment
 import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import {
+  RECURRING_LIST_DEFAULT_PAGE_SIZE,
+  RECURRING_PAYMENT_STATUSES,
   type RecurringPaymentAction,
+  type RecurringPaymentsListState,
   runRecurringPaymentAction,
   updateRecurringPayment,
 } from "./recurring-payments.data";
@@ -107,8 +110,6 @@ const COLLECTION_STATUS_TRANSLATION_KEYS = {
 const COLLECTION_ATTEMPTED_COLUMN_CLASS = "hidden lg:table-cell";
 const COLLECTION_TRANSFER_COLUMN_CLASS = "hidden xl:table-cell";
 
-const RECURRING_LIST_PAGE_SIZE = 25;
-
 type RecurringPaymentWalletView = PaymentsDashboardWallet;
 
 interface RecurringPaymentCounterpartyView {
@@ -118,6 +119,8 @@ interface RecurringPaymentCounterpartyView {
 
 interface RecurringPaymentsWorkspaceProps {
   initialRecurringPayments: PaymentRecurringPayment[];
+  total: number;
+  listState: RecurringPaymentsListState;
   initialError?: string;
   lookupError?: string;
   wallets: RecurringPaymentWalletView[];
@@ -751,6 +754,8 @@ function canEditRecurringPayment(status: PaymentRecurringPaymentStatus): boolean
 
 export function RecurringPaymentsWorkspace({
   initialRecurringPayments,
+  total,
+  listState,
   initialError,
   lookupError,
   wallets,
@@ -759,8 +764,50 @@ export function RecurringPaymentsWorkspace({
   const t = useTranslations();
   const router = useDashboardRouter();
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<PaymentRecurringPaymentStatus | "all">("all");
-  const { page, pageSize, setPage, setPageSize } = usePaginationUrlState(RECURRING_LIST_PAGE_SIZE);
+  const [isPending, startTransition] = useTransition();
+
+  /**
+   * Applies pagination and status updates to the URL so the server refetches
+   * the list. Defaults are dropped from the URL; status changes reset paging.
+   *
+   * @param updates - The list-state fields to change.
+   */
+  const applyListParams = (updates: {
+    page?: number;
+    pageSize?: number;
+    status?: PaymentRecurringPaymentStatus | null;
+  }) => {
+    const params = new URLSearchParams(window.location.search);
+    if (updates.page !== undefined) {
+      if (updates.page === 1) {
+        params.delete("page");
+      } else {
+        params.set("page", String(updates.page));
+      }
+    }
+    if (updates.pageSize !== undefined) {
+      params.delete("page");
+      if (updates.pageSize === RECURRING_LIST_DEFAULT_PAGE_SIZE) {
+        params.delete("pageSize");
+      } else {
+        params.set("pageSize", String(updates.pageSize));
+      }
+    }
+    if (updates.status !== undefined) {
+      params.delete("page");
+      if (updates.status === null) {
+        params.delete("status");
+      } else {
+        params.set("status", updates.status);
+      }
+    }
+    const search = params.toString();
+    startTransition(() =>
+      router.replace(`/dashboard/payments/recurring${search ? `?${search}` : ""}`, {
+        scroll: false,
+      })
+    );
+  };
 
   const walletById = useMemo(
     () => new Map(wallets.map((wallet) => [wallet.walletId, wallet])),
@@ -787,10 +834,7 @@ export function RecurringPaymentsWorkspace({
     );
 
   const needle = query.trim().toLowerCase();
-  const filteredRecurringPayments = initialRecurringPayments.filter((recurringPayment) => {
-    if (statusFilter !== "all" && recurringPayment.status !== statusFilter) {
-      return false;
-    }
+  const visibleRecurringPayments = initialRecurringPayments.filter((recurringPayment) => {
     if (!needle) {
       return true;
     }
@@ -806,18 +850,13 @@ export function RecurringPaymentsWorkspace({
 
   const clearFilters = () => {
     setQuery("");
-    setStatusFilter("all");
-    setPage(1);
+    applyListParams({ status: null, page: 1 });
   };
 
-  const pageCount = Math.max(1, Math.ceil(filteredRecurringPayments.length / pageSize));
-  const currentPage = Math.min(page, pageCount);
-  const visibleRecurringPayments = filteredRecurringPayments.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
-  const rangeStart = filteredRecurringPayments.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const rangeEnd = Math.min(currentPage * pageSize, filteredRecurringPayments.length);
+  const pageCount = Math.max(1, Math.ceil(total / listState.pageSize));
+  const rangeStart = total === 0 ? 0 : (listState.page - 1) * listState.pageSize + 1;
+  const rangeEnd = Math.min(listState.page * listState.pageSize, total);
+  const listIsEmpty = total === 0 && listState.status === null;
 
   return (
     <DashboardWorkspaceOverviewPanel className="flex min-h-0 flex-col overflow-hidden">
@@ -826,10 +865,7 @@ export function RecurringPaymentsWorkspace({
           <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]">
             <Input
               value={query}
-              onChange={(event) => {
-                setQuery(event.currentTarget.value);
-                setPage(1);
-              }}
+              onChange={(event) => setQuery(event.currentTarget.value)}
               placeholder={t("DashboardPayments.recurring.searchPayments")}
               aria-label={t("DashboardPayments.recurring.searchPayments")}
               iconLeft={<SearchIcon />}
@@ -847,14 +883,15 @@ export function RecurringPaymentsWorkspace({
               }
             />
             <Select
-              value={statusFilter}
-              onValueChange={(value) => {
-                setStatusFilter(value as PaymentRecurringPaymentStatus | "all");
-                setPage(1);
-              }}
+              value={listState.status ?? "all"}
+              onValueChange={(value) =>
+                applyListParams({
+                  status: value === "all" ? null : (value as PaymentRecurringPaymentStatus),
+                })
+              }
             >
               <SelectItem value="all">{t("DashboardPayments.recurring.allStatuses")}</SelectItem>
-              {RECURRING_PAYMENT_STATUS_FILTERS.map((status) => (
+              {RECURRING_PAYMENT_STATUSES.map((status) => (
                 <SelectItem key={status} value={status}>
                   {t(STATUS_TRANSLATION_KEYS[status])}
                 </SelectItem>
@@ -876,7 +913,7 @@ export function RecurringPaymentsWorkspace({
             <p className="font-medium">{t("DashboardPayments.recurring.unableToLoad")}</p>
             <p className="mt-1">{initialError}</p>
           </div>
-        ) : initialRecurringPayments.length === 0 ? (
+        ) : listIsEmpty ? (
           <ListEmptyState
             icon={<RepeatIcon className="size-5" />}
             message={t("DashboardPayments.recurring.noPayments")}
@@ -890,7 +927,7 @@ export function RecurringPaymentsWorkspace({
               </Button>
             }
           />
-        ) : filteredRecurringPayments.length === 0 ? (
+        ) : visibleRecurringPayments.length === 0 ? (
           <ListEmptyState
             message={t("DashboardPayments.recurring.noMatches")}
             action={
@@ -1006,15 +1043,19 @@ export function RecurringPaymentsWorkspace({
             </div>
             <PaginatedFooter
               className="mt-auto"
-              page={currentPage}
+              page={listState.page}
               pageCount={pageCount}
-              onPageChange={setPage}
+              onPageChange={(nextPage) => applyListParams({ page: nextPage })}
+              disabled={isPending}
               summary={t("DashboardPayments.recurring.range", {
                 from: rangeStart,
                 to: rangeEnd,
-                total: filteredRecurringPayments.length,
+                total,
               })}
-              pageSizeControl={{ pageSize, onPageSizeChange: setPageSize }}
+              pageSizeControl={{
+                pageSize: listState.pageSize,
+                onPageSizeChange: (nextPageSize) => applyListParams({ pageSize: nextPageSize }),
+              }}
             />
           </>
         )}
@@ -2026,7 +2067,3 @@ const STATUS_TRANSLATION_KEYS = {
   canceled: "DashboardPayments.recurring.canceled",
   expired: "DashboardPayments.recurring.expired",
 } as const satisfies Record<PaymentRecurringPaymentStatus, MessageKey>;
-
-const RECURRING_PAYMENT_STATUS_FILTERS = Object.keys(
-  STATUS_TRANSLATION_KEYS
-) as PaymentRecurringPaymentStatus[];
