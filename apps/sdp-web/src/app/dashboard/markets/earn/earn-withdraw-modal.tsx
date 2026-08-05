@@ -32,6 +32,13 @@ const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 const PREVIEW_DEBOUNCE_MS = 400;
 
+/**
+ * Stablecoins Ground pays out on the Solana rail (docs: supported-chains —
+ * "Solana = USDC deposits and withdrawals only"). SDP's surface is Solana-only,
+ * so a token outside this set cannot complete a withdrawal here at all.
+ */
+const SOLANA_PAYOUT_TOKENS: ReadonlySet<EarnPortfolioToken> = new Set(["usdc"]);
+
 const WITHDRAWAL_STATUS_BADGES: Record<
   EarnPortfolioWithdrawal["status"],
   { variant: "success" | "warning" | "danger"; key: MessageKey }
@@ -174,12 +181,18 @@ function WithdrawPreviewPanel({
         <p className="mt-1 text-xs text-secondary">{t("DashboardEarn.withdraw.previewLoading")}</p>
       ) : null}
       {preview.phase === "error" ? (
-        // Translated, never the provider's wire text: "ground request failed
-        // with status 409" explains nothing. The honest cause on this product
-        // is per-lane: the wallet-level withdrawable can sit entirely in the
-        // OTHER stablecoin, or the token may not route to Solana at all.
+        // Translated, never the provider's wire text — and cause-specific,
+        // because the two failure modes are token-determined, not mixed:
+        // a Solana-payable token can only fail on lane funds, while a token
+        // Ground never routes to Solana (USDT, per their supported-chains
+        // doc) always fails on routing regardless of balance.
         <p className="mt-1 text-xs text-error" role="alert">
-          {t("DashboardEarn.withdraw.previewUnavailable", { token: token.toUpperCase() })}
+          {t(
+            SOLANA_PAYOUT_TOKENS.has(token)
+              ? "DashboardEarn.withdraw.previewInsufficient"
+              : "DashboardEarn.withdraw.previewNoSolanaPayout",
+            { token: token.toUpperCase() }
+          )}
         </p>
       ) : null}
       {preview.phase === "ready" ? (

@@ -73,7 +73,8 @@
       "cancel": "Cancel",
       "confirm": "Confirm withdrawal",
       "confirming": "Confirming…",
-      "previewUnavailable": "The provider can't fill this as {token} right now — the withdrawable balance may sit in the other stablecoin, or {token} may not pay out on Solana. Try the other stablecoin or a smaller amount."
+      "previewInsufficient": "The provider can't fill this {token} withdrawal — the withdrawable balance may sit in the other stablecoin. Try a smaller amount or switch stablecoin.",
+      "previewNoSolanaPayout": "{token} doesn't pay out on Solana — the provider settles {token} withdrawals on other rails only. Withdraw USDC instead."
     },
     "deposit": {
       "progressWallet": "Wallet",
