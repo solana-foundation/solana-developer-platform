@@ -228,3 +228,81 @@ describe("the currently filtered asset", () => {
     expect(assetFilterOptions(undefined, options)).toEqual(options);
   });
 });
+
+describe("assets an organization can filter by", () => {
+  const USDC_DEVNET = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+  const SOL_MINT = "So11111111111111111111111111111111111111112";
+
+  function respond(handlers: {
+    balances?: Array<{ mint: string; token: string }>;
+    transfers?: Array<{ token: string }>;
+  }) {
+    return vi.fn(async (input: string) => {
+      const url = new URL(input, "http://dashboard.local");
+      if (url.pathname.endsWith("/wallets/aggregate")) {
+        return jsonResponse({ data: { aggregate: { balances: handlers.balances ?? [] } } });
+      }
+      if (url.pathname.endsWith("/payments/transfers")) {
+        return jsonResponse({ data: handlers.transfers ?? [] });
+      }
+      if (url.pathname.endsWith("/wallets")) {
+        return jsonResponse({ data: { wallets: [] } });
+      }
+      return jsonResponse({ data: { counterparties: [], pagination: { totalPages: 1 } } });
+    });
+  }
+
+  it("offers a token the organization transferred away and no longer holds", async () => {
+    // The whole balance went out, so the aggregate reports nothing — but those
+    // transfers are still the rows this filter exists to narrow. Sourcing options
+    // from balances alone left the select empty on a table full of SOL.
+    const options = await fetchTransactionFilterOptions(
+      respond({ balances: [], transfers: [{ token: SOL_MINT }, { token: "SOL" }] })
+    );
+
+    expect(options.assets).toHaveLength(1);
+    expect(options.assets[0].label).toBe("SOL");
+  });
+
+  it("does not list the same asset twice when it is stored both ways", async () => {
+    // pt.token holds a mint on some rows and a bare symbol on others.
+    const options = await fetchTransactionFilterOptions(
+      respond({
+        balances: [{ mint: SOL_MINT, token: SOL_MINT }],
+        transfers: [{ token: "SOL" }, { token: SOL_MINT }],
+      })
+    );
+
+    expect(options.assets).toHaveLength(1);
+    expect(options.assets[0].id).toBe(SOL_MINT);
+  });
+
+  it("keeps held and transacted assets together", async () => {
+    const options = await fetchTransactionFilterOptions(
+      respond({
+        balances: [{ mint: USDC_DEVNET, token: USDC_DEVNET }],
+        transfers: [{ token: SOL_MINT }],
+      })
+    );
+
+    expect(options.assets.map((asset) => asset.label).sort()).toEqual(["SOL", "USDC"]);
+  });
+
+  it("still lists held assets when the transfer sample fails", async () => {
+    const failing = vi.fn(async (input: string) => {
+      const url = new URL(input, "http://dashboard.local");
+      if (url.pathname.endsWith("/payments/transfers")) throw new TypeError("Failed to fetch");
+      if (url.pathname.endsWith("/wallets/aggregate")) {
+        return jsonResponse({
+          data: { aggregate: { balances: [{ mint: USDC_DEVNET, token: USDC_DEVNET }] } },
+        });
+      }
+      if (url.pathname.endsWith("/wallets")) return jsonResponse({ data: { wallets: [] } });
+      return jsonResponse({ data: { counterparties: [], pagination: { totalPages: 1 } } });
+    });
+
+    const options = await fetchTransactionFilterOptions(failing);
+
+    expect(options.assets).toEqual([{ id: USDC_DEVNET, label: "USDC" }]);
+  });
+});

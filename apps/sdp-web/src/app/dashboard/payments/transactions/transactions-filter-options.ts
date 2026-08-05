@@ -30,21 +30,50 @@ function uniqueOptions(options: Array<{ id: string; label: string }>) {
   return [...new Map(options.map((option) => [option.id, option])).values()];
 }
 
+/**
+ * Collapses the same asset arriving under more than one id.
+ *
+ * A held token comes back keyed by mint while a transfer of it may be recorded
+ * under the bare symbol, so both resolve to one label and would otherwise show as
+ * two identical-looking rows. First wins, which keeps the balance-derived mint
+ * ahead of a symbol.
+ */
+function uniqueByLabel(options: Array<{ id: string; label: string }>) {
+  const byLabel = new Map<string, { id: string; label: string }>();
+  for (const option of options) {
+    if (!byLabel.has(option.label)) {
+      byLabel.set(option.label, option);
+    }
+  }
+  return [...byLabel.values()];
+}
+
+/** One page is enough to name what an organization actually moves. */
+const TRANSACTED_TOKEN_SAMPLE = 100;
+
 export async function fetchTransactionFilterOptions(
   request: FilterOptionsRequest = fetch
 ): Promise<TransactionFilterOptions> {
-  const [walletsResponse, firstCounterpartiesResponse, aggregateResponse] = await Promise.all([
-    request("/api/dashboard/wallets?view=summary", { cache: "no-store" }),
-    request(`/api/dashboard/counterparty?page=1&pageSize=${COUNTERPARTY_PAGE_SIZE}`, {
-      cache: "no-store",
-    }),
-    // Assets are a convenience, not a requirement, so this one degrades on its
-    // own. Left in the shared Promise.all it would reject the whole thing on a
-    // transport error and every select — wallets and counterparties included —
-    // would render empty. Checking `.ok` afterwards only covers HTTP errors,
-    // which are the case that never reaches this handler.
-    request("/api/dashboard/wallets/aggregate", { cache: "no-store" }).catch(() => null),
-  ]);
+  const [walletsResponse, firstCounterpartiesResponse, aggregateResponse, transfersResponse] =
+    await Promise.all([
+      request("/api/dashboard/wallets?view=summary", { cache: "no-store" }),
+      request(`/api/dashboard/counterparty?page=1&pageSize=${COUNTERPARTY_PAGE_SIZE}`, {
+        cache: "no-store",
+      }),
+      // Assets are a convenience, not a requirement, so this one degrades on its
+      // own. Left in the shared Promise.all it would reject the whole thing on a
+      // transport error and every select — wallets and counterparties included —
+      // would render empty. Checking `.ok` afterwards only covers HTTP errors,
+      // which are the case that never reaches this handler.
+      request("/api/dashboard/wallets/aggregate", { cache: "no-store" }).catch(() => null),
+      // Held tokens are not the same set as filterable ones. An organization that
+      // sent its whole balance away still has those transfers in the table, and
+      // sourcing the options from balances alone left the filter empty on exactly
+      // the ledger it was meant to narrow. Degrades on its own like the aggregate.
+      request(`/api/dashboard/payments/transfers?page=1&pageSize=${TRANSACTED_TOKEN_SAMPLE}`, {
+        cache: "no-store",
+      }).catch(() => null),
+    ]);
   const aggregateBody = aggregateResponse?.ok
     ? ((await aggregateResponse.json().catch(() => null)) as {
         data?: { aggregate?: { balances?: Array<{ mint: string; token: string }> } };
@@ -64,6 +93,27 @@ export async function fetchTransactionFilterOptions(
     .map((balance) => ({
       id: balance.mint,
       label: resolveTransferTokenLabel(balance.mint, symbolsByMint) ?? balance.mint,
+    }));
+
+  // `pt.token` holds a mint on some rows and a bare symbol on others, so the same
+  // asset arrives under two ids. They are deduped by label rather than by id, and
+  // either id filters correctly because the API expands a token to every form the
+  // ledger stores it in.
+  const transfersBody = transfersResponse?.ok
+    ? ((await transfersResponse.json().catch(() => null)) as {
+        data?: Array<{ token?: string | null }>;
+      } | null)
+    : null;
+  // Array-checked rather than defaulted: an unexpected body would otherwise reach
+  // .map as a non-array and throw, taking the whole filter bar down for a list
+  // that is only ever supplementary.
+  const transactedTokens = Array.isArray(transfersBody?.data) ? transfersBody.data : [];
+  const transactedOptions = transactedTokens
+    .map((transfer) => transfer?.token?.trim())
+    .filter((token): token is string => Boolean(token))
+    .map((token) => ({
+      id: token,
+      label: resolveTransferTokenLabel(token, symbolsByMint) ?? token,
     }));
 
   const [walletsBody, firstCounterpartiesBody] = await Promise.all([
@@ -109,7 +159,7 @@ export async function fetchTransactionFilterOptions(
         label: counterparty.displayName,
       }))
     ),
-    assets: uniqueOptions(assetOptions),
+    assets: uniqueByLabel([...assetOptions, ...transactedOptions]),
   };
 }
 
