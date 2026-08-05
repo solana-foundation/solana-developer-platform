@@ -790,6 +790,8 @@
     "onboardingDoneWalletHeading": "Your first wallet",
     "onboardingDoneWalletPending": "Your wallet was already set up on an earlier attempt. You can find it in Wallets.",
     "onboardingDoneGoToDashboard": "Go to dashboard",
-    "onboardingDoneViewWallets": "View wallets"
+    "onboardingDoneViewWallets": "View wallets",
+    "providerStatusComingLater": "Coming later",
+    "providerRequestAccess": "Request access"
   }
 }
