@@ -389,9 +389,6 @@ test.describe
       const drawer = page.getByRole("dialog", { name: "Revision history" });
 
       await page.goto(policyHref, { waitUntil: "domcontentloaded" });
-      await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
       await expect(revisionTrigger).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
 
       await revisionTrigger.click();
@@ -408,6 +405,10 @@ test.describe
       await page.keyboard.press("Escape");
       await expect(drawer).toBeHidden({ timeout: E2E_POLL_TIMEOUT_MS });
 
+      await page.goto(walletHref, { waitUntil: "domcontentloaded" });
+      await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
       await page.locator(`a[href="${auditHref}"]`).click();
       await expect(page).toHaveURL(new RegExp(`${auditHref.replaceAll("/", "\\/")}$`));
       await expect(page.getByRole("button", { name: "Revision history" })).toBeVisible({

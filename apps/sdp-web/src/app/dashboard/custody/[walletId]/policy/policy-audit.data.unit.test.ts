@@ -387,14 +387,14 @@ describe("policy audit presentation invariants", () => {
         item.policyRevisions.wallet.evaluatedRevisionId,
         "Default allow"
       )
-    ).toBe("v1");
+    ).toBe("#1");
     expect(
       formatRevisionReference(
         history,
         item.policyRevisions.wallet.activeRevisionId,
         "No active revision"
       )
-    ).toBe("v2");
+    ).toBe("#2");
   });
 
   it("covers provider-partial, missing API-key, and legacy context states", () => {
