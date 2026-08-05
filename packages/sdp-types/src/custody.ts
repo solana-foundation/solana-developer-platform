@@ -624,3 +624,39 @@ export interface SignerCheckResponse {
   slot: number;
   blockTime: string;
 }
+
+/**
+ * Lifecycle a custody Connection can be in. Counts of these are safe to publish
+ * per provider; the Connections themselves are read from their own resource.
+ */
+export const CUSTODY_CONNECTION_LIFECYCLES = [
+  "pending",
+  "checking",
+  "active",
+  "failed",
+  "deactivated",
+] as const;
+export type CustodyConnectionLifecycle = (typeof CUSTODY_CONNECTION_LIFECYCLES)[number];
+
+/**
+ * Which record actually backs signing for a provider in the current scope.
+ *
+ * `none` covers the case that matters most for setup: a provider the deployment
+ * has environment credentials for is *available to install*, not installed. Only
+ * an explicit initialize produces a Config, and only a checked credential
+ * produces a Connection.
+ */
+export type CustodyEffectiveTargetType = "none" | "config" | "connection";
+
+export interface CustodyProviderSetupStatus {
+  provider: CustodyProvider;
+  /** An active `custody_configs` row exists in this scope — the legacy path. */
+  hasLegacyConfig: boolean;
+  effectiveTargetType: CustodyEffectiveTargetType;
+  /** Bounded per provider: counts only, never a nested Connection inventory. */
+  connectionCounts: Record<CustodyConnectionLifecycle, number>;
+}
+
+export interface CustodySetupStatusResponse {
+  providers: CustodyProviderSetupStatus[];
+}
