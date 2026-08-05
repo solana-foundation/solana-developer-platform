@@ -12,6 +12,190 @@
     ]
   },
   "locales": {
+    "es": {
+      "context": {
+        "localeName": "español (Latinoamérica)",
+        "audience": "Spanish-speaking Web3 developers and institutional finance operators across Latin America",
+        "conventions": [
+          "Latin American Web3 practitioners commonly retain established English product terms.",
+          "Neutral Latin American Spanish; vosotros is never used.",
+          "Standard Latin American financial vocabulary is preferred when it is familiar to practitioners, such as activo, contraparte and custodia.",
+          "Wallet is treated as feminine (la Wallet) and Token as masculine (el Token)."
+        ]
+      },
+      "instructions": [
+        "Use natural professional Latin American Spanish and address the user with tú; use ustedes for plural and never vosotros.",
+        "Use inverted opening punctuation (¿ ¡) in questions and exclamations.",
+        "Keep established Web3 terms in English when Spanish-speaking practitioners normally use the English term.",
+        "Use standard Latin American financial vocabulary, such as activo and contraparte.",
+        "Match the English form per string for enable and disable: infinitive action (habilitar, deshabilitar) versus participle state (habilitado, deshabilitado)."
+      ],
+      "terminology": [
+        {
+          "source": "token / tokens",
+          "preferred": "Token / Tokens",
+          "avoid": "ficha / fichas",
+          "note": "Token is the established Web3 product noun. Use Spanish grammar around it."
+        },
+        {
+          "source": "wallet / wallets",
+          "preferred": "Wallet / Wallets",
+          "avoid": "billetera / monedero / cartera",
+          "note": "Wallet is the established product noun in this dashboard."
+        },
+        {
+          "source": "mint / burn",
+          "preferred": "mint / burn",
+          "avoid": "acuñar / acuñación",
+          "note": "Keep protocol action names recognizable; write natural Spanish around them, for example hacer mint de Tokens."
+        },
+        {
+          "source": "allowlist / blocklist",
+          "preferred": "allowlist / blocklist",
+          "avoid": "lista blanca / lista negra / lista de permitidos / lista de bloqueo",
+          "note": "Keep the neutral technical terms used by the product."
+        },
+        {
+          "source": "on-chain / off-chain",
+          "preferred": "on-chain / off-chain"
+        },
+        {
+          "source": "stablecoin, API, RPC, webhook, blockchain, staking, airdrop",
+          "preferred": "Keep these established technical terms unchanged."
+        },
+        {
+          "source": "endpoint / API Playground",
+          "preferred": "endpoint / API Playground",
+          "avoid": "punto de conexión / punto final / zona de pruebas",
+          "note": "Use the established developer-facing product terms."
+        },
+        {
+          "source": "dashboard",
+          "preferred": "Dashboard",
+          "avoid": "panel / panel de control",
+          "note": "Dashboard is the product surface name."
+        },
+        {
+          "source": "asset / counterparty",
+          "preferred": "activo / contraparte",
+          "note": "These have natural, standard Latin American financial equivalents."
+        },
+        {
+          "source": "transfer / provider / quote",
+          "preferred": "transferencia / proveedor / cotización",
+          "note": "Use the standard Spanish product and financial terms, including in API error copy."
+        },
+        {
+          "source": "draft / deploy",
+          "preferred": "borrador / desplegar or despliegue",
+          "note": "Use the verb or noun that fits the sentence; do not insert the English word into Spanish grammar."
+        },
+        {
+          "source": "custody",
+          "preferred": "Custody for the product category; custodia in explanatory prose",
+          "note": "Choose from context instead of forcing one translation everywhere."
+        },
+        {
+          "source": "validator / account / transaction / signature / keypair / epoch",
+          "preferred": "validador / cuenta / transacción / firma / par de claves / época",
+          "note": "Follow the solanabr/solana-glossary conventions for protocol vocabulary with standard Spanish equivalents."
+        },
+        {
+          "source": "decimals",
+          "preferred": "decimales",
+          "note": "Generic noun in this product; always translate."
+        },
+        {
+          "source": "custodian",
+          "preferred": "custodio",
+          "note": "Standard regulated-finance vocabulary."
+        },
+        {
+          "source": "Mint Authority / Freeze Authority / Update Authority / Metadata Authority / Permanent Delegate",
+          "preferred": "Keep the whole SPL authority family in English as noun labels; verbs describing the action are written in Spanish."
+        },
+        {
+          "source": "Token-2022 extension names (Transfer Fee, Interest Bearing, Scaled UI Amount, Transfer Hook, Non-transferable, Default Account State)",
+          "preferred": "Keep extension names in English as labels; translate their descriptions and helper text."
+        },
+        {
+          "source": "compliance / payout / funding",
+          "preferred": "cumplimiento / pago saliente / fondeo",
+          "note": "Never retiro for payout (retiro is reserved for withdraw); never financiamiento for funding."
+        },
+        {
+          "source": "fee",
+          "preferred": "tarifa for network and transaction fees; comisión for provider and management fees",
+          "note": "Keep the split consistent."
+        },
+        {
+          "source": "expires / manage / remove / clear",
+          "preferred": "vencer y vencimiento / administrar / quitar / borrar",
+          "note": "Quitar detaches without destroying; eliminar is reserved for delete."
+        },
+        {
+          "source": "ramp / on-ramp / off-ramp / rails / rent / block explorer",
+          "preferred": "ramp / on-ramp / off-ramp / rails / rent / explorador",
+          "note": "Ramp family, rails and Solana rent stay in English; block explorer translates to explorador (Solana Explorer stays as the brand name)."
+        }
+      ],
+      "forbiddenTerms": [
+        {
+          "label": "billetera / monedero",
+          "pattern": "\\b(?:billeteras?|monederos?)\\b",
+          "flags": "iu",
+          "preferred": "Wallet / Wallets"
+        },
+        {
+          "label": "cartera / carteras",
+          "pattern": "\\bcarteras?\\b",
+          "flags": "iu",
+          "preferred": "Wallet / Wallets"
+        },
+        {
+          "label": "ficha / fichas",
+          "pattern": "\\bfichas?\\b",
+          "flags": "iu",
+          "preferred": "Token / Tokens"
+        },
+        {
+          "label": "punto de conexión / punto final",
+          "pattern": "\\bpuntos? (?:de conexión|finales?)\\b",
+          "flags": "iu",
+          "preferred": "endpoint / endpoints"
+        },
+        {
+          "label": "zona de pruebas",
+          "pattern": "\\bzona de pruebas\\b",
+          "flags": "iu",
+          "preferred": "API Playground"
+        },
+        {
+          "label": "lista blanca / lista negra",
+          "pattern": "\\blistas? (?:blancas?|negras?)\\b",
+          "flags": "iu",
+          "preferred": "allowlist / blocklist"
+        },
+        {
+          "label": "lista de permitidos / lista de bloqueo",
+          "pattern": "\\blistas? de (?:permitidos|bloqueados|bloqueos?)\\b",
+          "flags": "iu",
+          "preferred": "allowlist / blocklist"
+        },
+        {
+          "label": "allow list",
+          "pattern": "\\ballow list\\b",
+          "flags": "iu",
+          "preferred": "allowlist"
+        },
+        {
+          "label": "acuñar / acuñación",
+          "pattern": "\\bacuñ(?:ar|ación)\\b",
+          "flags": "iu",
+          "preferred": "mint"
+        }
+      ]
+    },
     "fr": {
       "context": {
         "localeName": "français (France)",
