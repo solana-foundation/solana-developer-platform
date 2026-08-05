@@ -1,6 +1,10 @@
 import type { TokenTransaction } from "@sdp/types";
 import { getLogger } from "@/runtime/logger";
-import type { AuditAction, AuditService } from "@/services/audit.service";
+import {
+  type AuditAction,
+  AuditPersistenceError,
+  type AuditService,
+} from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
 
 export interface SettledTransactionEvidence {
@@ -26,20 +30,23 @@ export function parseSettledTransactionEvidence(
   return { signature: metadata.signature, slot: Number(slot) };
 }
 
-export async function persistSettledTransaction(
+async function persistSettledTransactionWithDurability(
   tokenService: TokenService,
   transaction: TokenTransaction,
   evidence: SettledTransactionEvidence,
   params?: Record<string, unknown>
-): Promise<TokenTransaction> {
+): Promise<{ transaction: TokenTransaction; durable: boolean }> {
   const settledParams = params ? { ...transaction.params, ...params } : transaction.params;
   try {
-    return await tokenService.updateTransaction(transaction.id, {
-      status: "confirmed",
-      signature: evidence.signature,
-      slot: evidence.slot,
-      ...(params ? { params: settledParams } : {}),
-    });
+    return {
+      transaction: await tokenService.updateTransaction(transaction.id, {
+        status: "confirmed",
+        signature: evidence.signature,
+        slot: evidence.slot,
+        ...(params ? { params: settledParams } : {}),
+      }),
+      durable: true,
+    };
   } catch (error) {
     getLogger().error(
       {
@@ -57,12 +64,14 @@ export async function persistSettledTransaction(
     // audit append also misses. This second, narrower write also avoids losing
     // evidence when only status-history bookkeeping caused the first write to
     // reject after the transaction row itself changed.
+    let durable = false;
     try {
       await tokenService.updateTransaction(transaction.id, {
         signature: evidence.signature,
         slot: evidence.slot,
         ...(params ? { params: settledParams } : {}),
       });
+      durable = true;
     } catch (evidenceError) {
       getLogger().error(
         {
@@ -75,15 +84,29 @@ export async function persistSettledTransaction(
       );
     }
     return {
-      ...transaction,
-      status: "confirmed",
-      signature: evidence.signature,
-      slot: evidence.slot,
-      error: null,
-      params: settledParams,
-      updatedAt: new Date().toISOString(),
+      transaction: {
+        ...transaction,
+        status: "confirmed",
+        signature: evidence.signature,
+        slot: evidence.slot,
+        error: null,
+        params: settledParams,
+        updatedAt: new Date().toISOString(),
+      },
+      durable,
     };
   }
+}
+
+export async function persistSettledTransaction(
+  tokenService: TokenService,
+  transaction: TokenTransaction,
+  evidence: SettledTransactionEvidence,
+  params?: Record<string, unknown>
+): Promise<TokenTransaction> {
+  return (
+    await persistSettledTransactionWithDurability(tokenService, transaction, evidence, params)
+  ).transaction;
 }
 
 /**
@@ -98,16 +121,21 @@ export async function persistSettledTransactionThenOutcome(options: {
   transaction: TokenTransaction;
   evidence: SettledTransactionEvidence;
   params?: Record<string, unknown>;
-  persistOutcome: () => Promise<unknown>;
+  persistOutcome: () => Promise<boolean>;
 }): Promise<TokenTransaction> {
-  const settled = await persistSettledTransaction(
+  const settled = await persistSettledTransactionWithDurability(
     options.tokenService,
     options.transaction,
     options.evidence,
     options.params
   );
-  await options.persistOutcome();
-  return settled;
+  const outcomePersisted = await options.persistOutcome();
+  if (!settled.durable && !outcomePersisted) {
+    throw new AuditPersistenceError({
+      cause: new Error("Settled issuance operation has no durable recovery evidence"),
+    });
+  }
+  return settled.transaction;
 }
 
 export async function recoverSettledTransactionReplay(options: {

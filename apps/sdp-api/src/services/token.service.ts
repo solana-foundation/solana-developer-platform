@@ -1376,34 +1376,50 @@ export class TokenService {
     await this.db.transaction(async (tx) => {
       const row = await tx
         .prepare(
-          `SELECT it.supply_bookkeeping_applied_at, t.decimals
+          `SELECT it.supply_bookkeeping_applied_at, it.operation_params,
+                  t.decimals, t.total_supply_updated_at
            FROM issuance_transactions it
            JOIN issued_tokens t ON t.id = it.token_id
            WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
            FOR UPDATE OF it, t`
         )
         .bind(transactionId, tokenId, ...tokenScope.values)
-        .first<{ supply_bookkeeping_applied_at: string | null; decimals: number }>();
+        .first<{
+          supply_bookkeeping_applied_at: string | null;
+          operation_params: string;
+          decimals: number;
+          total_supply_updated_at: string | null;
+        }>();
       if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
       if (row.supply_bookkeeping_applied_at !== null) return;
 
       const deltaBaseUnits = parseDecimalAmount(amount, row.decimals).toString();
       const now = new Date().toISOString();
-      const tokenMutation = this.tenantMutationScope();
-      const updatedToken = await tx
-        .prepare(
-          `UPDATE issued_tokens
-           SET total_supply_cached = GREATEST(
-                 COALESCE(total_supply_cached, '0')::numeric - ?::numeric,
-                 0
-               )::text,
-               total_supply_updated_at = ?,
-               updated_at = ?
-           WHERE id = ?${tokenMutation.clause}`
-        )
-        .bind(deltaBaseUnits, now, now, tokenId, ...tokenMutation.values)
-        .run();
-      if (updatedToken !== 1) throw new Error("TOKEN_NOT_FOUND");
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      const baseline = params.supplyBaselineUpdatedAt;
+      const hasBaseline = baseline === null || typeof baseline === "string";
+      const supplyChangedSinceAdmission = hasBaseline && baseline !== row.total_supply_updated_at;
+
+      // A chain reconciliation after this burn was admitted already includes
+      // the settled burn. Subtracting again would undercount supply and create
+      // false mint headroom, so in that case only consume the retry marker.
+      if (!supplyChangedSinceAdmission) {
+        const tokenMutation = this.tenantMutationScope();
+        const updatedToken = await tx
+          .prepare(
+            `UPDATE issued_tokens
+             SET total_supply_cached = GREATEST(
+                   COALESCE(total_supply_cached, '0')::numeric - ?::numeric,
+                   0
+                 )::text,
+                 total_supply_updated_at = ?,
+                 updated_at = ?
+             WHERE id = ?${tokenMutation.clause}`
+          )
+          .bind(deltaBaseUnits, now, now, tokenId, ...tokenMutation.values)
+          .run();
+        if (updatedToken !== 1) throw new Error("TOKEN_NOT_FOUND");
+      }
 
       const marked = await tx
         .prepare(

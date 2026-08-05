@@ -173,4 +173,19 @@ describe("settled issuance transaction recovery", () => {
       slot: 123,
     });
   });
+
+  it("fails closed when neither transaction evidence nor the audit outcome is durable", async () => {
+    await expect(
+      persistSettledTransactionThenOutcome({
+        tokenService: {
+          updateTransaction: vi.fn().mockRejectedValue(new Error("database unavailable")),
+        } as unknown as TokenService,
+        transaction: pendingTransaction,
+        evidence: { signature: "sig_settled", slot: 123 },
+        persistOutcome: vi.fn().mockResolvedValue(false),
+      })
+    ).rejects.toMatchObject({
+      name: "AuditPersistenceError",
+    });
+  });
 });

@@ -208,6 +208,7 @@ export const prepareBurn = async (c: AppContext) => {
       source: parsed.data.burn.source,
       amount: parsed.data.burn.amount,
       memo: parsed.data.burn.memo,
+      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     serializedTx: prepared.serializedTx,
     initiatedByKeyId: auth.id,

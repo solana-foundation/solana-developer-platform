@@ -542,6 +542,37 @@ describe("TokenService", () => {
       ).toMatchObject({ supply_bookkeeping_applied_at: expect.any(String) });
     });
 
+    it("does not subtract a settled burn twice after on-chain supply reconciliation", async () => {
+      const tokenId = "tok_cap_reconciled_burn";
+      const transactionId = "ttx_cap_reconciled_burn";
+      const baseline = "2026-08-05T00:00:00.000Z";
+      await insertCappedToken(tokenId, "1000000000", null);
+      await db
+        .prepare("UPDATE issued_tokens SET total_supply_updated_at = ? WHERE id = ?")
+        .bind(baseline, tokenId)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'burn', 'confirmed', ?, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ amount: "100", supplyBaselineUpdatedAt: baseline }),
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      // The chain snapshot already observes the burn's 100-token reduction.
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000");
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
+    });
+
     it("does not replay an already-applied pause over a newer token state", async () => {
       const tokenId = "tok_historical_pause";
       const transactionId = "ttx_historical_pause";

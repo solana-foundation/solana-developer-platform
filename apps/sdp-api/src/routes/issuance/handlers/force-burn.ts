@@ -99,6 +99,7 @@ export const prepareForceBurn = async (c: AppContext) => {
       amount: parsed.data.forceBurn.amount,
       delegateAuthority: permanentDelegateRaw,
       memo: parsed.data.forceBurn.memo,
+      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     serializedTx: prepared.serializedTx,
     initiatedByKeyId: auth.id,
