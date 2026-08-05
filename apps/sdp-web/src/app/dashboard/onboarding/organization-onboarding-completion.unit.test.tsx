@@ -9,9 +9,10 @@ import { completeOrganizationOnboardingAction } from "./actions";
 import { OrganizationOnboardingFlow } from "./organization-onboarding-flow";
 
 const push = vi.fn();
+const refresh = vi.fn();
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push, refresh: vi.fn() }),
+  useRouter: () => ({ push, refresh }),
 }));
 
 vi.mock("./actions", () => ({
@@ -45,6 +46,7 @@ describe("onboarding completion", () => {
   beforeEach(() => {
     cleanup();
     push.mockClear();
+    refresh.mockClear();
     vi.mocked(completeOrganizationOnboardingAction).mockReset();
   });
 
@@ -64,6 +66,15 @@ describe("onboarding completion", () => {
     expect(screen.getByText(/Privy is connected/)).toBeTruthy();
     // The redirect is now a choice the user makes, not something done to them.
     expect(push).not.toHaveBeenCalled();
+    // A refresh here re-runs the server page, which redirects on completion
+    // and would unmount this panel.
+    expect(refresh).not.toHaveBeenCalled();
+    // Exits are full navigations so the shell's setup guard sees fresh state.
+    const exits = screen.getAllByRole("link");
+    expect(exits.map((el) => el.getAttribute("href"))).toEqual([
+      "/dashboard",
+      "/dashboard/wallets",
+    ]);
   });
 
   it("still confirms completion when an earlier attempt had provisioned the wallet", async () => {

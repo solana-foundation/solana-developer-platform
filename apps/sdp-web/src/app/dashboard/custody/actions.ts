@@ -137,7 +137,7 @@ export async function initializeCustody(formData: FormData) {
  */
 async function initializeCustodyWallet(
   formData: FormData
-): Promise<InitializeSigningResponse | null> {
+): Promise<OnboardingProvisionedWallet | null> {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -174,10 +174,11 @@ async function initializeCustodyWallet(
   const client = await createSdpApiClient();
 
   try {
-    return await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
+    const initialized = await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    return { publicKey: initialized.publicKey, walletId: initialized.walletId };
   } catch (error) {
     const apiError = parseApiActionError(error);
 
@@ -186,7 +187,7 @@ async function initializeCustodyWallet(
       apiError.message.includes("Signing already initialized for org")
     ) {
       const configurations = await client.fetch<CustodyConfigsResponse>("/v1/wallets/configs");
-      const readyConfiguration = configurations.configs.some(
+      const readyConfiguration = configurations.configs.find(
         (configuration) =>
           configuration.provider === provider &&
           configuration.isDefault &&
@@ -194,22 +195,30 @@ async function initializeCustodyWallet(
       );
 
       if (readyConfiguration) {
-        // Already provisioned by an earlier attempt; the address is on the
-        // configuration rather than in a response we can return here.
-        return null;
+        // Already provisioned by an earlier attempt; the configuration carries
+        // the wallet, so completion can still show it.
+        return {
+          publicKey: readyConfiguration.publicKey,
+          walletId: readyConfiguration.defaultWalletId as string,
+        };
       }
 
       // Repair a provider connection whose first wallet did not finish
       // persisting instead of leaving the organization trapped in onboarding.
-      return await client.fetch<InitializeSigningResponse>("/v1/wallets", {
-        method: "POST",
-        body: JSON.stringify({
-          provider,
-          label: walletLabel,
-          purpose: "root",
-          setDefault: true,
-        }),
-      });
+      // This endpoint nests its wallet, unlike initialize.
+      const repaired = await client.fetch<{ wallet: { walletId: string; publicKey: string } }>(
+        "/v1/wallets",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            provider,
+            label: walletLabel,
+            purpose: "root",
+            setDefault: true,
+          }),
+        }
+      );
+      return { publicKey: repaired.wallet.publicKey, walletId: repaired.wallet.walletId };
     } else {
       throw error;
     }

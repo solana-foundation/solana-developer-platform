@@ -121,7 +121,11 @@ export function OrganizationOnboardingFlow({
       // Setup provisions a real wallet. Redirecting straight out of the wizard
       // spent that moment silently and left the user to discover it, so the
       // flow ends by naming what was created and where to go next.
-      router.refresh();
+      //
+      // Deliberately no router.refresh() here: setup is complete now, so
+      // re-rendering this route's server page would hit its completion redirect
+      // and unmount this panel. The panel's exits are full navigations, which
+      // refetch every server boundary on the way out.
       setCompletion({ provider: custodyProvider, wallet: result.wallet });
     });
   };

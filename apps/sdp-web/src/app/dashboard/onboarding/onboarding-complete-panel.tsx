@@ -4,7 +4,6 @@ import type { CustodyProvider } from "@sdp/types";
 import type { OnboardingProvisionedWallet } from "@/app/dashboard/custody/actions";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/custody/provider-catalog";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
@@ -59,16 +58,16 @@ export function OnboardingCompletePanel({
           </p>
         )}
 
+        {/* Full-document navigations on purpose. Client-side navigation out of
+            onboarding can serve cached server state from before completion, and
+            the shell's incomplete-setup guard would bounce straight back here.
+            A hard navigation refetches everything and leaves cleanly. */}
         <div className="mt-7 flex flex-wrap items-center gap-3">
           <Button asChild>
-            <DashboardNavigationLink href="/dashboard">
-              {t("DashboardCustody.onboardingDoneGoToDashboard")}
-            </DashboardNavigationLink>
+            <a href="/dashboard">{t("DashboardCustody.onboardingDoneGoToDashboard")}</a>
           </Button>
           <Button asChild variant="secondary">
-            <DashboardNavigationLink href="/dashboard/wallets">
-              {t("DashboardCustody.onboardingDoneViewWallets")}
-            </DashboardNavigationLink>
+            <a href="/dashboard/wallets">{t("DashboardCustody.onboardingDoneViewWallets")}</a>
           </Button>
         </div>
       </div>
