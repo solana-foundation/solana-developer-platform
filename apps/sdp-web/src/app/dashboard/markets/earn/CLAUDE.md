@@ -38,6 +38,13 @@ reintroduce fixture modules. Data flows: BFF proxies
 - **i18n: English only.** Edit `messages/en/dashboard-earn.json`; NEVER touch
   `messages/fr/*` (CI Translation Catalog Policy fails the branch).
 - **Solana-only surface**: only Solana deposit addresses/destinations render.
+  Position **labels arrive display-ready** — the provider client synthesizes them
+  from kind + token precisely because a provider names a position after the chain
+  its value sits on (`"USDT (Ethereum Sepolia)"`). Render `position.label` as
+  given; never rebuild it from raw provider fields, and treat a chain name
+  appearing in the UI as a provider-client bug, not something to patch here.
+  A `cash` position can be a token the org never deposited on Solana, so do not
+  assume positions imply a Solana deposit — only the addresses do.
 - Design system: SDP quiet-institutional (see `.claude/skills/sdp-ui-designer`).
   Inter only — monospace is forbidden, including for addresses. Wizard steps
   must land pre-scrolled at top (useLayoutEffect reset — keep it).

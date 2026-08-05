@@ -71,13 +71,60 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 
 - **Live (real Ground data):** with the sandbox key set and both flags on, the
   hourly catalogue-sync cron registers and populates `earn_strategies` from
-  Ground's real yield sources.
+  Ground's real yield sources. It fires on the hour, so a freshly started API
+  shows nothing until then — seed if you don't want to wait.
 - **Offline (no key needed):** `DATABASE_URL=… pnpm -C apps/sdp-api db:seed:earn`
   writes 10 Ground-shaped fixtures (prefixed `seed-demo-`, removable with
   `--clean`, never confusable with synced rows).
 
+Running both is fine but leaves near-twin rows (same vault names, different
+reference prefix); `--clean` removes only the fixtures.
+
 See README.md → "Catalogue data: the sync cron vs the dev seed" for cadence,
 failure behaviour, and when to prefer each.
+
+### 4b. Get a program — one org, one portfolio wallet
+
+`db:seed:earn` also links your org to a real Ground sandbox portfolio wallet, so
+the dashboard opens onto a live program instead of an empty onboarding screen.
+
+**One org gets exactly one program.** That is SDP's product model — the UNIQUE
+`(organization_id, environment, provider)` constraint on `earn_provider_wallets`
+(migration 0049) — *not* a Ground limit. Ground has no concept of an SDP org and
+one Ground account holds many portfolio wallets; every SDP org shares a single
+account per environment (`readGroundConfig` resolves one API key, never a per-org
+credential). So the sibling wallets you see in Ground's dashboard stand in for
+*other* orgs — the seed deliberately does not hand them to yours, and there is no
+way to attach several to one org.
+
+This is also why **your local total won't match Ground's dashboard**: Ground's
+console sums every wallet in the shared sandbox account, SDP shows only your
+org's one wallet. Both numbers are right.
+
+Practical notes:
+
+- **Which org gets it:** the org you sign into (the Clerk-backed one), ahead of
+  the `db:seed:local` test fixture. Other local orgs stay unlinked on purpose.
+- **Re-run the seed after your first Clerk sign-in.** On a fresh machine the only
+  org is the test fixture, so an early seed lands the program there. The seed
+  *moves* its own link to follow your real org — but only when you re-run it. A
+  program you created through the wizard is never moved.
+- **The API-key path has no program.** `db:seed:local`'s dev key belongs to the
+  test org, so `curl /v1/earn/program?provider=ground` with it returns 404 by
+  design. Use the dashboard, or mint a key for your own org.
+- **The seeded program reads $0, on purpose.** It carries a live three-source
+  Kamino USDC allocation, so the overview shows a real forward APY (blended from
+  target weights) with no balance yet. Fund it yourself by sending devnet USDC to
+  the wallet's Solana deposit address — that exercises the real two-phase deposit
+  (arrives as `cash`, deploys on a later Ground rebalance).
+- **Don't "fix" the $0 by pointing the seed at a funded sandbox wallet.** The
+  funded ones hold USDT cash on a non-Solana rail, and Ground enforces the lane
+  split at the API: USDC→Solana returns `409 insufficient_funds` (lane
+  withdrawable `0`) while USDT is refused on Solana entirely. Because
+  `balance.withdrawableUsd` is a wallet-level total and the withdraw modal caps on
+  it, such a wallet shows a withdrawable balance SDP cannot withdraw and a "max"
+  button that 409s — which reads as an SDP bug and is not one. A zero you can act
+  on beats a balance you cannot.
 
 ### 5. The last gate: org entitlement
 
@@ -97,6 +144,10 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 | "requires manual activation" | org lacks the earn provider override |
 | API waits then dies on boot | `DATABASE_URL` not preserved → Doppler's Cloud SQL URL won |
 | Web typecheck fails in `.next/dev/types` | stale generated cache: `rm -rf apps/sdp-web/.next/dev/types` |
+| Dashboard shows empty onboarding, but a program exists in the DB | it is linked to another local org — re-run `db:seed:earn` to move it to the org you sign into |
+| `GET /v1/earn/program` → 404 with the dev API key | that key is the test org's, which has no program by design (§4b) |
+| Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows your org's one wallet (§4b) |
+| Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
 
 ## Contracts
 
