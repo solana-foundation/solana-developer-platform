@@ -19,24 +19,33 @@ Companion docs:
 
 ## The product model (V1, Ground)
 
-- **Curators, not vaults, are the primary decision.** Users pick the team that
-  manages the allocation (Steakhouse, Gauntlet, …). Curators are **open-string
-  data** derived from provider catalogue metadata — onboarding a curator is a
-  data change, zero code (see `EARN_KNOWN_CURATOR_LABELS` in `@sdp/types`).
+- **One strategy is the whole decision.** The wizard runs funding wallet →
+  profile → filtered catalogue → one strategy; there is no curator step, because
+  picking a house first gated the catalogue behind a choice the reader had no
+  facts to make. Curator is metadata rendered beside a strategy, never a gate —
+  but still **open-string data** derived from provider catalogue metadata, so
+  onboarding a curator is a data change, zero code (see
+  `EARN_KNOWN_CURATOR_LABELS` in `@sdp/types`).
 - **One shared portfolio wallet per (organization, environment, provider).**
-  Choosing a curator (optionally with a custom split) sets the shared wallet's
-  strategy weights. Enforced by a DB unique constraint
+  Selecting a strategy sets that wallet's strategy weights as a *single*
+  allocation — `pct: 100` for the selected strategy's stablecoin lane
+  (`singleStrategyAllocation`, `earn-deposit-model.ts`) — and an omitted token
+  lane keeps its current weights, so a USDC pick never disturbs an existing USDT
+  one. One wallet per org is enforced by a DB unique constraint
   (`earn_provider_wallets`, migration 0049). This is SDP's product model, not a
   provider constraint: Ground has no concept of an SDP organization, one Ground
   account holds many portfolio wallets, and every SDP org shares a single account
   per environment. A provider account's other wallets therefore belong to other
   orgs — which is why a provider console's account-wide total will exceed what any
   one org sees in SDP.
-- **Solana-only surface.** Deposits are funded by sending USDC/USDT on Solana
-  to the wallet's deposit address (`solana_devnet` in sandbox, `solana` in
-  production); withdrawals settle to a Solana address the org controls. Ground
-  routes capital to yield sources on other chains internally — that is
-  provider plumbing, never exposed in SDP's product surface.
+- **Solana-only surface, and USDC-only on it.** Deposits are funded by sending
+  **USDC** on Solana to the wallet's deposit address (`solana_devnet` in
+  sandbox, `solana` in production); withdrawals settle to a Solana address the
+  org controls. USDT is not a second option here: Ground routes it on Ethereum
+  only (`GROUND_SOLANA_ROUTED_TOKENS`), so a USDT source never enters the
+  catalogue and a USDT payout is refused before any network call. Ground routes
+  capital to yield sources on other chains internally — that is provider
+  plumbing, never exposed in SDP's product surface.
 - **Funding is address-based in V1**: show the deposit address, track incoming
   deposits via the provider's deposits API. No custody signing in the flow.
   Webhooks (Ground supports Stripe-style HMAC) are future work; V1 polls.
@@ -92,9 +101,10 @@ one (`solana_devnet` in sandbox, `solana` in production).
 
 ### Deposits are two-phase (this is why `cash` exists)
 
-1. A customer sends USDC/USDT on Solana to the wallet's deposit address —
-   an ordinary SPL transfer, initiated from **their** custody (Fireblocks,
-   Anchorage, …). SDP builds and signs nothing.
+1. A customer sends USDC on Solana to the wallet's deposit address — an
+   ordinary SPL transfer, initiated from **their** custody (Fireblocks,
+   Anchorage, …). SDP builds and signs nothing. (Ground's own rails accept
+   USDT too, but on Ethereum, which SDP never surfaces.)
 2. Ground detects it and the funds land as **cash** in the portfolio wallet.
 3. A **later Ground-managed rebalance** deploys that cash per the strategy
    weights: `Portfolio Wallet → MasterRouter → AdapterRegistry → Protocol

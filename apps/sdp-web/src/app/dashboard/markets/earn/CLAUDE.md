@@ -177,7 +177,9 @@ funding instructions and nothing else — never imply a transfer happens.
   helper, a `process.env` read, or a `NEXT_PUBLIC_*` twin is wrong (the deleted
   `lib/earn-feature.ts` was all three).
 - **i18n: English only.** Edit `messages/en/dashboard-earn.json`; NEVER touch
-  `messages/fr/*` (CI Translation Catalog Policy fails the branch).
+  `messages/{es,fr,pt}` — or any future non-`en` locale — in the same PR. CI's
+  Translation Catalog Policy fails a branch that edits English and localized
+  catalogs together, because translations land on the automated release PR.
 - **Solana-only surface**: only Solana deposit addresses/destinations render.
   Position **labels arrive display-ready** — the provider client synthesizes them
   from kind + token precisely because a provider names a position after the chain

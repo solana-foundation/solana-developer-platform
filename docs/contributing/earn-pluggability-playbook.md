@@ -175,13 +175,18 @@ provider actually offers it.
 
 1. **Implement the full interface, or none of it.**
    `EarnPortfolioWalletProvider` (`packages/sdp-earn/src/types.ts`) extends
-   `EarnVaultProvider` with eight methods: `createPortfolioWallet`,
-   `getPortfolioWallet`, `updatePortfolioStrategy`, `listPortfolioDeposits`,
-   `previewPortfolioWithdrawal`, `createPortfolioWithdrawal`,
-   `getPortfolioWithdrawal`, `createPortfolioAddressBookEntry`. Callers
-   detect the capability with `supportsPortfolioWallets`
-   (`@sdp/earn/capabilities`) — an all-or-nothing method-presence guard, so a
-   partial implementation is treated as unsupported.
+   `EarnVaultProvider` with nine methods: `createPortfolioWallet`,
+   `getPortfolioWallet`, `updatePortfolioStrategy`, `getPortfolioYield`,
+   `listPortfolioDeposits`, `previewPortfolioWithdrawal`,
+   `createPortfolioWithdrawal`, `getPortfolioWithdrawal`,
+   `createPortfolioAddressBookEntry`. (`getPortfolioYield` is its own method
+   because providers serve yield metrics from a distinct endpoint — callers
+   that only need balances must not pay for it — which also makes it the easy
+   one to forget.) Callers detect the capability with
+   `supportsPortfolioWallets` (`@sdp/earn/capabilities`), which checks that
+   whole list (`PORTFOLIO_WALLET_METHODS`) — an all-or-nothing
+   method-presence guard, so a partial implementation is treated as
+   unsupported.
 2. **Speak the shared DTOs.** Wire shapes live in `@sdp/types/earn`
    (`EarnPortfolioWalletSnapshot`, `EarnPortfolioDeposit(sPage)`,
    `EarnPortfolioWithdrawal(Preview)`, statuses, tokens). Map provider
@@ -197,7 +202,7 @@ provider actually offers it.
    verbatim; create/update may generate a UUIDv4 when omitted. A provider
    requestId-conflict error surfaces as `CONFLICT`.
 5. **Persistence.** One shared wallet per org+environment+provider:
-   `earn_provider_wallets` (migration `0035`), via
+   `earn_provider_wallets` (migration `0049_earn_provider_wallets.sql`), via
    `EarnRepository.getProviderWallet` / `insertProviderWallet` — the unique
    constraint makes double-provisioning a first-writer-wins race, not a
    duplicate.
@@ -207,8 +212,13 @@ provider actually offers it.
    error taxonomy, requestId behavior, and the capability guard —
    `capabilities.test.ts` is the guard's own suite.
 
-**Live sandbox runs need a key:** `GROUND_SANDBOX_API_KEY` must exist in
-Doppler before anything can talk to Ground's sandbox — until it does, the
+**Live sandbox runs need a key:** `GROUND_SANDBOX_API_KEY` has to reach the
+process before anything can talk to Ground's sandbox. Locally that means
+`apps/sdp-api/.env.local` (gitignored): the Doppler wrapper
+(`scripts/doppler/run-with-config.sh`) overlays `apps/*/.env.local` on top of
+the Doppler-injected values, so the file wins with no `DOPPLER_PRESERVE_ENV`
+opt-in — a plain shell export, by contrast, is dropped. Deployed environments
+take the key from Doppler/Secret Manager instead. Until it resolves, the
 provider is `configured: false` and every call fails closed with
 `PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't care).
 
