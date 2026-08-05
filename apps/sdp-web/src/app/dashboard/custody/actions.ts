@@ -137,7 +137,7 @@ export async function initializeCustody(formData: FormData) {
  */
 async function initializeCustodyWallet(
   formData: FormData
-): Promise<OnboardingProvisionedWallet | null> {
+): Promise<OnboardingProvisionedWallet> {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -280,7 +280,7 @@ export interface OnboardingProvisionedWallet {
 export type OnboardingCustodyActionResult =
   | {
       status: "success";
-      wallet: OnboardingProvisionedWallet | null;
+      wallet: OnboardingProvisionedWallet;
     }
   | {
       status: "error";
@@ -325,7 +325,7 @@ export async function initializeOnboardingCustodyAction(
     // fetch fresh state without any help.
     return {
       status: "success",
-      wallet: wallet ? { publicKey: wallet.publicKey, walletId: wallet.walletId } : null,
+      wallet: { publicKey: wallet.publicKey, walletId: wallet.walletId },
     };
   } catch (error) {
     return {

@@ -77,10 +77,12 @@ describe("onboarding completion", () => {
     ]);
   });
 
-  it("still confirms completion when an earlier attempt had provisioned the wallet", async () => {
+  it("still shows the wallet when an earlier attempt had provisioned it", async () => {
+    // Every recovery path in initializeCustodyWallet resolves the wallet it
+    // finds or repairs, so completion always has an address to show.
     vi.mocked(completeOrganizationOnboardingAction).mockResolvedValue({
       status: "success",
-      wallet: null,
+      wallet: { publicKey: WALLET_ADDRESS, walletId: "wallet-1" },
     });
 
     renderCustodyStep();
@@ -89,7 +91,7 @@ describe("onboarding completion", () => {
     await waitFor(() => {
       expect(screen.getByText("Your workspace is ready")).toBeTruthy();
     });
-    expect(screen.getByText(/already set up on an earlier attempt/)).toBeTruthy();
+    expect(screen.getByText(WALLET_ADDRESS)).toBeTruthy();
   });
 
   it("keeps the user in the wizard when setup fails", async () => {

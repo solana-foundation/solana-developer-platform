@@ -78,7 +78,7 @@ export function OrganizationOnboardingFlow({
   const [custodyProvider, setCustodyProvider] = useState<CustodyProvider | null>(null);
   const [completion, setCompletion] = useState<{
     provider: CustodyProvider;
-    wallet: OnboardingProvisionedWallet | null;
+    wallet: OnboardingProvisionedWallet;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const custodyEntries = useMemo(() => {

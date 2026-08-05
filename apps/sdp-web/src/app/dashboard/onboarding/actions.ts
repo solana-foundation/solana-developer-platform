@@ -16,7 +16,7 @@ export type OrganizationOnboardingActionResult =
 
 /** Completion carries the wallet it provisioned so the wizard can show it. */
 export type OrganizationOnboardingCompletionResult =
-  | { status: "success"; wallet: OnboardingProvisionedWallet | null }
+  | { status: "success"; wallet: OnboardingProvisionedWallet }
   | { status: "error"; message: string };
 
 export async function saveOnboardingRpcAction(input: {

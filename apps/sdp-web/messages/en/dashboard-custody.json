@@ -788,7 +788,6 @@
     "onboardingDoneTitle": "Your workspace is ready",
     "onboardingDoneBody": "{provider} is connected and your first wallet is live.",
     "onboardingDoneWalletHeading": "Your first wallet",
-    "onboardingDoneWalletPending": "Your wallet was already set up on an earlier attempt. You can find it in Wallets.",
     "onboardingDoneGoToDashboard": "Go to dashboard",
     "onboardingDoneViewWallets": "View wallets",
     "providerStatusComingLater": "Coming later",

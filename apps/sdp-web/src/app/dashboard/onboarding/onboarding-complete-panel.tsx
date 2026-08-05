@@ -19,7 +19,7 @@ export function OnboardingCompletePanel({
   wallet,
 }: {
   provider: CustodyProvider;
-  wallet: OnboardingProvisionedWallet | null;
+  wallet: OnboardingProvisionedWallet;
 }) {
   const t = useTranslations();
   const providerLabel = CUSTODY_PROVIDER_CATALOG.find((entry) => entry.id === provider)?.label;
@@ -37,26 +37,20 @@ export function OnboardingCompletePanel({
           {t("DashboardCustody.onboardingDoneBody", { provider: providerLabel ?? "" })}
         </p>
 
-        {wallet ? (
-          <div className="mt-6 rounded-2xl border border-border-subtle bg-fill-subtle px-5 py-4">
-            <p className="text-xs font-medium tracking-wide text-tertiary uppercase">
-              {t("DashboardCustody.onboardingDoneWalletHeading")}
-            </p>
-            <div className="mt-2 flex items-center gap-2">
-              <code className="min-w-0 truncate font-mono text-sm text-primary">
-                {wallet.publicKey}
-              </code>
-              <WalletMetadataCopyButton
-                value={wallet.publicKey}
-                label={t("DashboardCustody.onboardingDoneWalletHeading")}
-              />
-            </div>
-          </div>
-        ) : (
-          <p className="mt-6 rounded-2xl border border-border-subtle bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary">
-            {t("DashboardCustody.onboardingDoneWalletPending")}
+        <div className="mt-6 rounded-2xl border border-border-subtle bg-fill-subtle px-5 py-4">
+          <p className="text-xs font-medium tracking-wide text-tertiary uppercase">
+            {t("DashboardCustody.onboardingDoneWalletHeading")}
           </p>
-        )}
+          <div className="mt-2 flex items-center gap-2">
+            <code className="min-w-0 truncate font-mono text-sm text-primary">
+              {wallet.publicKey}
+            </code>
+            <WalletMetadataCopyButton
+              value={wallet.publicKey}
+              label={t("DashboardCustody.onboardingDoneWalletHeading")}
+            />
+          </div>
+        </div>
 
         {/* Full-document navigations on purpose. Client-side navigation out of
             onboarding can serve cached server state from before completion, and
