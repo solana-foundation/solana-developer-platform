@@ -316,6 +316,12 @@
     "complianceRangeDescription": "Transaction screening and risk monitoring for Solana.",
     "complianceEllipticDescription": "Blockchain analytics and transaction screening.",
     "complianceTrmDescription": "Risk intelligence and compliance monitoring.",
-    "complianceChainalysisDescription": "Blockchain intelligence and transaction monitoring."
+    "complianceChainalysisDescription": "Blockchain intelligence and transaction monitoring.",
+    "detailAbout": "About",
+    "detailCapabilities": "Capabilities",
+    "detailResources": "Resources",
+    "detailDocs": "View documentation",
+    "backToIntegrations": "Back to integrations",
+    "capabilityAdditionalWallets": "Additional wallets"
   }
 }

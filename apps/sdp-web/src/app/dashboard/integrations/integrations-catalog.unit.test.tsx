@@ -44,7 +44,7 @@ function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>
 function visibleRowLabels(): string[] {
   return screen
     .getAllByRole("listitem")
-    .map((row) => row.querySelector("span.text-base")?.textContent ?? "");
+    .map((row) => row.querySelector("a.text-base, span.text-base")?.textContent ?? "");
 }
 
 describe("IntegrationsCatalog filtering", () => {

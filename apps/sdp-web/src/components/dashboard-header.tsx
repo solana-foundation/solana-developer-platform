@@ -572,6 +572,16 @@ export function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
+  if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) {
+    return {
+      title: t("Shared.dashboardShell.integrations"),
+      contentWidthClass: "max-w-5xl",
+      backAction: {
+        href: "/dashboard/integrations",
+        label: t("Shared.integrations.backToIntegrations"),
+      },
+    };
+  }
   if (pathname.startsWith("/dashboard/integrations")) {
     // Card-grid page: fill the shell's wide container instead of stacking a
     // second max-width inside the centered default and stranding gutters.

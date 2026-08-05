@@ -54,6 +54,7 @@ export type DashboardLoadingRoute =
   | "approval-detail"
   | "settings"
   | "integrations"
+  | "integration-detail"
   | "allowlist";
 
 function normalizePathname(pathname: string): string {
@@ -123,6 +124,7 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
   if (pathname === "/dashboard/settings") return "settings";
   if (pathname === "/dashboard/integrations") return "integrations";
+  if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) return "integration-detail";
   if (pathname === "/dashboard/allowlist") return "allowlist";
 
   return null;

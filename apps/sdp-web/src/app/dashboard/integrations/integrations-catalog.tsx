@@ -111,7 +111,12 @@ function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate })
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-2 self-stretch">
         <div className="flex items-start justify-between gap-3">
-          <span className="truncate pt-2 text-base font-medium text-primary">{row.label}</span>
+          <DashboardNavigationLink
+            href={`/dashboard/integrations/${row.provider}`}
+            className="truncate pt-2 text-base font-medium text-primary hover:underline"
+          >
+            {row.label}
+          </DashboardNavigationLink>
           <StatusBadge status={row.status} t={t} />
         </div>
         {row.description ? (
