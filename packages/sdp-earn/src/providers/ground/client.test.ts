@@ -929,6 +929,89 @@ describe("GroundEarnClient.getPortfolioWithdrawal", () => {
   });
 });
 
+describe("GroundEarnClient path-segment encoding", () => {
+  const TRAVERSAL = "../../wallets?";
+
+  /**
+   * Every request carries the account-wide Ground API key, so a ref that
+   * reaches the path unencoded is a request-forgery primitive: the URL parser
+   * resolves `..`, retargeting an authenticated call at another endpoint.
+   * These assert the escape does not happen — on unencoded interpolation the
+   * URL collapses to `/v2/wallets?/...` and every one of them fails.
+   */
+  const assertContained = (url: string, prefix: string) => {
+    assert.ok(url.startsWith(prefix), `escaped its path prefix: ${url}`);
+    assert.ok(!url.includes("/../"), `unresolved traversal survived: ${url}`);
+  };
+
+  it("keeps a traversal ref inside the activities segment when voting", async () => {
+    const fetchMock = stubGroundFetch({ body: { action: "approve", approved: true } });
+
+    await client.submitWithdrawalApprovalVote(sandboxCtx, {
+      approvalRef: TRAVERSAL,
+      action: "approve",
+      stamp: "s",
+      providerRequest: {},
+    });
+
+    assertContained(requestUrl(fetchMock), "https://sandbox.groundtech.co/v2/turnkey/activities/");
+    assert.ok(requestUrl(fetchMock).endsWith("/vote"));
+  });
+
+  it("keeps a traversal wallet ref inside the wallets segment", async () => {
+    const fetchMock = stubGroundFetch({ body: groundWallet() });
+
+    await client.getPortfolioWallet(sandboxCtx, { providerWalletRef: TRAVERSAL });
+
+    assertContained(requestUrl(fetchMock), "https://sandbox.groundtech.co/v2/wallets/");
+  });
+
+  it("keeps a traversal withdrawal ref inside the withdrawals segment", async () => {
+    const fetchMock = stubGroundFetch({ body: groundWithdrawal() });
+
+    await client.getPortfolioWithdrawal(sandboxCtx, {
+      providerWalletRef: "wal_1",
+      withdrawalRef: TRAVERSAL,
+    });
+
+    assertContained(
+      requestUrl(fetchMock),
+      "https://sandbox.groundtech.co/v2/wallets/wal_1/withdrawals/"
+    );
+  });
+
+  it("keeps a traversal wallet ref inside the deposits URL built via URL()", async () => {
+    const fetchMock = stubGroundFetch({ body: page([]) });
+
+    await client.listPortfolioDeposits(sandboxCtx, { providerWalletRef: TRAVERSAL });
+
+    assertContained(requestUrl(fetchMock), "https://sandbox.groundtech.co/v2/wallets/");
+  });
+
+  it("rejects a blank reference before any network call", async () => {
+    const fetchMock = stubGroundFetch({ body: groundWallet() });
+
+    await assert.rejects(
+      client.getPortfolioWallet(sandboxCtx, { providerWalletRef: "   " }),
+      earnError("BAD_REQUEST", /wallet reference is required/)
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  it("leaves ordinary provider ids byte-identical", async () => {
+    const fetchMock = stubGroundFetch({ body: groundWallet() });
+
+    await client.getPortfolioWallet(sandboxCtx, {
+      providerWalletRef: "5fe239ad-0153-4a43-b784-95feae040930",
+    });
+
+    assert.equal(
+      requestUrl(fetchMock),
+      "https://sandbox.groundtech.co/v2/wallets/5fe239ad-0153-4a43-b784-95feae040930"
+    );
+  });
+});
+
 describe("GroundEarnClient Solana routability guard", () => {
   it("refuses a USDT withdrawal preview before any network call", async () => {
     const fetchMock = stubGroundFetch({ body: {} });

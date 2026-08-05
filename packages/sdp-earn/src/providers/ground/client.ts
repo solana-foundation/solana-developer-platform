@@ -115,6 +115,29 @@ function readGroundConfig(ctx: EarnRuntimeContext): GroundConfig {
   };
 }
 
+/**
+ * Encode a provider reference for use as ONE URL path segment.
+ *
+ * Every request here carries the platform's Ground API key, and that key is
+ * account-wide — one Ground account serves every SDP org. So a reference that
+ * reaches the path unencoded is not a broken URL, it is a request-forgery
+ * primitive: the WHATWG URL parser resolves `..` segments, so an id of
+ * `../../wallets?` turns `/v2/turnkey/activities/<id>/vote` into
+ * `/v2/wallets?/vote` — a different, authenticated endpoint. Refs originate
+ * variously from the DB, from provider responses, and from request path
+ * params, so they are all treated as untrusted here, at the one layer that
+ * builds the URL. Encoding (not format validation) is the fix: provider id
+ * formats drift, while percent-encoding is correct for any opaque id and
+ * leaves UUID-shaped refs byte-identical.
+ */
+function pathSegment(reference: string, name: string): string {
+  const trimmed = reference.trim();
+  if (!trimmed) {
+    throw badRequest(`Ground ${name} is required`);
+  }
+  return encodeURIComponent(trimmed);
+}
+
 // --- Ground wire shapes (docs.groundtech.co, verified 2026-08-03) ---
 
 interface GroundListResponse<TItem> {
@@ -706,7 +729,7 @@ export class GroundEarnClient
     const config = readGroundConfig(ctx);
     const result = await providerFetchJson<GroundWalletYield>(
       this.provider,
-      `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/yield`,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/yield`,
       { method: "GET", headers: config.headers }
     );
     const positions = (result.positions ?? []).map((position) => ({
@@ -731,7 +754,7 @@ export class GroundEarnClient
     const config = readGroundConfig(ctx);
     const wallet = await providerFetchJson<GroundWallet>(
       this.provider,
-      `${config.baseUrl}/v2/wallets/${input.providerWalletRef}`,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}`,
       { method: "GET", headers: config.headers }
     );
     return {
@@ -760,11 +783,15 @@ export class GroundEarnClient
     const result = await providerFetchJson<
       { strategyAllocations: GroundStrategyAllocations },
       { requestId: string; allocations: EarnPortfolioAllocationInput }
-    >(this.provider, `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/strategy`, {
-      method: "PATCH",
-      headers: config.headers,
-      body: { requestId: input.requestId ?? crypto.randomUUID(), allocations: input.allocations },
-    });
+    >(
+      this.provider,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/strategy`,
+      {
+        method: "PATCH",
+        headers: config.headers,
+        body: { requestId: input.requestId ?? crypto.randomUUID(), allocations: input.allocations },
+      }
+    );
     return { allocations: mapTargetAllocations(result.strategyAllocations) };
   }
 
@@ -773,7 +800,10 @@ export class GroundEarnClient
     input: EarnPortfolioDepositsInput
   ): Promise<EarnPortfolioDepositsPage> {
     const config = readGroundConfig(ctx);
-    const url = new URL(`/v2/wallets/${input.providerWalletRef}/deposits`, config.baseUrl);
+    const url = new URL(
+      `/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/deposits`,
+      config.baseUrl
+    );
     if (input.cursor) {
       url.searchParams.set("cursor", input.cursor);
     }
@@ -794,15 +824,19 @@ export class GroundEarnClient
     const preview = await providerFetchJson<
       GroundWithdrawalPreview,
       { destinationChain: string; token: string; amountUsd: number }
-    >(this.provider, `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/withdrawal-preview`, {
-      method: "POST",
-      headers: config.headers,
-      body: {
-        destinationChain: config.chain,
-        token: input.token,
-        amountUsd: parseUsdAmount(input.amountUsd),
-      },
-    });
+    >(
+      this.provider,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/withdrawal-preview`,
+      {
+        method: "POST",
+        headers: config.headers,
+        body: {
+          destinationChain: config.chain,
+          token: input.token,
+          amountUsd: parseUsdAmount(input.amountUsd),
+        },
+      }
+    );
     return {
       amountRequestedUsd: preview.amountRequestedUsd ?? undefined,
       feeUsd: preview.feeUsd,
@@ -827,19 +861,23 @@ export class GroundEarnClient
         amountUsd: number;
         destinationAddress: string;
       }
-    >(this.provider, `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/withdrawals`, {
-      method: "POST",
-      headers: config.headers,
-      body: {
-        // Caller-owned idempotency key: Ground replays the original response
-        // for a matching payload and 409s (request_id_conflict) on a mismatch.
-        requestId: input.requestId,
-        destinationChain: config.chain,
-        token: input.token,
-        amountUsd: parseUsdAmount(input.amountUsd),
-        destinationAddress: input.destinationAddress,
-      },
-    });
+    >(
+      this.provider,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/withdrawals`,
+      {
+        method: "POST",
+        headers: config.headers,
+        body: {
+          // Caller-owned idempotency key: Ground replays the original response
+          // for a matching payload and 409s (request_id_conflict) on a mismatch.
+          requestId: input.requestId,
+          destinationChain: config.chain,
+          token: input.token,
+          amountUsd: parseUsdAmount(input.amountUsd),
+          destinationAddress: input.destinationAddress,
+        },
+      }
+    );
     return mapWithdrawal(withdrawal);
   }
 
@@ -850,7 +888,7 @@ export class GroundEarnClient
     const config = readGroundConfig(ctx);
     const withdrawal = await providerFetchJson<GroundWithdrawal>(
       this.provider,
-      `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/withdrawals/${input.withdrawalRef}`,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/withdrawals/${pathSegment(input.withdrawalRef, "withdrawal reference")}`,
       { method: "GET", headers: config.headers }
     );
     return mapWithdrawal(withdrawal);
@@ -923,15 +961,19 @@ export class GroundEarnClient
         customerApprovalStamp: typeof customerApprovalStamp;
         turnkeyRequest: Record<string, unknown>;
       }
-    >(this.provider, `${config.baseUrl}/v2/turnkey/activities/${input.approvalRef}/vote`, {
-      method: "POST",
-      headers: config.headers,
-      body: {
-        action: input.action,
-        customerApprovalStamp,
-        turnkeyRequest: input.providerRequest,
-      },
-    });
+    >(
+      this.provider,
+      `${config.baseUrl}/v2/turnkey/activities/${pathSegment(input.approvalRef, "approval reference")}/vote`,
+      {
+        method: "POST",
+        headers: config.headers,
+        body: {
+          action: input.action,
+          customerApprovalStamp,
+          turnkeyRequest: input.providerRequest,
+        },
+      }
+    );
     return {
       action: input.action,
       applied: input.action === "approve" ? result.approved === true : result.rejected === true,
