@@ -824,6 +824,7 @@
       "allStatuses": "All statuses",
       "clearFilters": "Clear filters",
       "noMatches": "No recurring payments match your filters.",
+      "range": "{from}-{to} of {total} payments",
       "unableToLoad": "Unable to load recurring payments",
       "noPayments": "No recurring payments yet.",
       "paymentsAppearHere": "Created recurring payment records will appear here.",
