@@ -785,7 +785,7 @@
     "policyAssetsInWallet": "In this wallet",
     "policyAssetsCommon": "Common tokens",
     "policyAssetsIssued": "Your tokens",
-    "providerStatusComingLater": "Coming later",
-    "providerRequestAccess": "Request access"
+    "providerMoreProviders": "More providers",
+    "providerMoreProvidersDescription": "Not available for self-serve setup in this organization yet."
   }
 }

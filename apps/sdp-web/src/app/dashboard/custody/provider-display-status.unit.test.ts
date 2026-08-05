@@ -42,24 +42,28 @@ describe("custody provider availability", () => {
     );
   });
 
-  it("offers gated providers a request-access route instead of hiding them", () => {
-    const fireblocks = resolveCustodyProviderAvailability({
+  it("distinguishes a gated provider from one that simply does not exist yet", () => {
+    const availability = resolveCustodyProviderAvailability({
       connectedProviders: [],
       enabledProviders: [],
-    }).find((provider) => provider.entry.id === "fireblocks");
+    });
+    const byId = (id: string) => availability.find((provider) => provider.entry.id === id);
 
-    expect(fireblocks?.status).toBe("request_access");
-    expect(fireblocks?.requestAccessUrl).toBe("https://solanafoundation.typeform.com/to/wShiq9SN");
+    expect(byId("fireblocks")?.status).toBe("request_access");
+    expect(byId("turnkey")?.status).toBe("unavailable");
+    // Neither is installable from this step.
+    expect(byId("fireblocks")?.isSelectable).toBe(false);
+    expect(byId("turnkey")?.isSelectable).toBe(false);
   });
 
-  it("keeps a gated provider's active connection ahead of its request-access route", () => {
+  it("puts a gated provider's active connection ahead of its gate", () => {
     const fireblocks = resolveCustodyProviderAvailability({
       connectedProviders: ["fireblocks"],
       enabledProviders: [],
     }).find((provider) => provider.entry.id === "fireblocks");
 
     expect(fireblocks?.status).toBe("active");
-    expect(fireblocks?.requestAccessUrl).toBeUndefined();
+    expect(fireblocks?.isSelectable).toBe(true);
   });
 
   it("shows a provider with no setup route as unavailable rather than dropping it", () => {
