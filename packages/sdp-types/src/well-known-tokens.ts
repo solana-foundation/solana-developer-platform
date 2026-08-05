@@ -334,6 +334,21 @@ export function wellKnownDecimals(
 }
 
 /**
+ * Catalogue entries by every casing of every name they answer to.
+ *
+ * The catalogue is keyed in upper case (`JITOSOL`) while the entry carries its
+ * own display casing (`JitoSOL`), and the ledger stores the display form. So the
+ * key and the symbol are two different strings for the same asset, and a lookup
+ * that knows only one of them sees a token it does not recognise.
+ */
+const WELL_KNOWN_TOKEN_BY_NAME: ReadonlyMap<string, WellKnownTokenSymbol> = new Map(
+  (Object.keys(WELL_KNOWN_TOKENS) as WellKnownTokenSymbol[]).flatMap((key) => [
+    [key.toLowerCase(), key] as const,
+    [WELL_KNOWN_TOKENS[key].symbol.toLowerCase(), key] as const,
+  ])
+);
+
+/**
  * Every stored form a token may appear as, given one of them.
  *
  * `payment_transfers.token` is not written consistently: the same asset appears
@@ -341,7 +356,12 @@ export function wellKnownDecimals(
  * a single transfer type. An exact match on either form therefore silently drops
  * the rows written the other way, so a filter has to accept both.
  *
- * @param token - A mint address or a well-known symbol.
+ * Symbols resolve case-insensitively, and both the catalogue key and the display
+ * symbol are emitted. Matching the key exactly made this asymmetric for every
+ * mixed-case asset: the mint expanded to `JitoSOL`, but `JitoSOL` did not expand
+ * back to the mint, so filtering by the symbol still dropped the mint rows.
+ *
+ * @param token - A mint address or a well-known symbol, in any casing.
  * @returns The distinct forms to match, always including the input itself.
  */
 export function tokenFilterAliases(token: string): string[] {
@@ -357,8 +377,12 @@ export function tokenFilterAliases(token: string): string[] {
     aliases.add(byMint.symbol);
   }
 
-  if (isWellKnownTokenSymbol(trimmed)) {
-    for (const mint of Object.values(WELL_KNOWN_TOKENS[trimmed].mints)) {
+  const key = WELL_KNOWN_TOKEN_BY_NAME.get(trimmed.toLowerCase());
+  if (key) {
+    const entry = WELL_KNOWN_TOKENS[key];
+    aliases.add(key);
+    aliases.add(entry.symbol);
+    for (const mint of Object.values(entry.mints)) {
       aliases.add(mint.address);
     }
   }

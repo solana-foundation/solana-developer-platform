@@ -38,6 +38,37 @@ describe("tokenFilterAliases", () => {
     expect(tokenFilterAliases("   ")).toEqual([]);
   });
 
+  it("expands a mixed-case display symbol to its mint", () => {
+    // The catalogue is keyed JITOSOL while the entry's symbol is JitoSOL, and the
+    // ledger stores the display form. Matching the key exactly made this
+    // asymmetric: the mint expanded to JitoSOL, but JitoSOL did not expand back.
+    const jitoMint = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
+
+    expect(tokenFilterAliases("JitoSOL")).toContain(jitoMint);
+    expect(tokenFilterAliases(jitoMint)).toContain("JitoSOL");
+  });
+
+  it("round-trips every mixed-case catalogue symbol through its mint", () => {
+    for (const symbol of ["JitoSOL", "mSOL", "bSOL", "cbBTC"]) {
+      const aliases = tokenFilterAliases(symbol);
+      const mints = aliases.filter((alias) => alias.length > 30);
+      expect(mints.length).toBeGreaterThan(0);
+
+      // Whichever mint the ledger used, filtering by it has to come back to the
+      // same symbol, or the two directions disagree again.
+      for (const mint of mints) {
+        expect(tokenFilterAliases(mint)).toContain(symbol);
+      }
+    }
+  });
+
+  it("resolves a symbol whatever casing it arrives in", () => {
+    const jitoMint = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
+    for (const spelling of ["JITOSOL", "jitosol", "JitoSOL", "jItOsOl"]) {
+      expect(tokenFilterAliases(spelling)).toContain(jitoMint);
+    }
+  });
+
   it("does not duplicate when a token resolves to itself", () => {
     const aliases = tokenFilterAliases(SOL_MINT);
     expect(new Set(aliases).size).toBe(aliases.length);
