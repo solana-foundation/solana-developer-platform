@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.55.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.54.0...v0.55.0) (2026-08-05)
+
+### Features
+
+* **api:** report what custody setup an organization actually has ([#1121](https://github.com/solana-foundation/solana-developer-platform/pull/1121)) ([161b4c0](https://github.com/solana-foundation/solana-developer-platform/commit/161b4c046ecffcccd58445b5536e38d6dc4130d8))
+* **earn:** rebuild the deposit flow around one strategy, no curator step ([#1110](https://github.com/solana-foundation/solana-developer-platform/pull/1110)) ([898b1df](https://github.com/solana-foundation/solana-developer-platform/commit/898b1dfa475468030f3f0517985c06cfd738ee1e))
+* **web:** show every custody provider and what can be done about it ([#1120](https://github.com/solana-foundation/solana-developer-platform/pull/1120)) ([e2ce275](https://github.com/solana-foundation/solana-developer-platform/commit/e2ce275219fd50d5f52bee46395fe420f5363efa))
+* **i18n:** add complete Latin American Spanish (es) UI translation catalogs ([#1047](https://github.com/solana-foundation/solana-developer-platform/pull/1047)) ([704275a](https://github.com/solana-foundation/solana-developer-platform/commit/704275a15fec637c56c19c6dc732e4ae4ff3d3fc))
+* **web:** rework policy audit detail and surface wallet-control actions ([#1115](https://github.com/solana-foundation/solana-developer-platform/pull/1115)) ([c79e58f](https://github.com/solana-foundation/solana-developer-platform/commit/c79e58f75783bcd227520828369c5b9d9f395bbb))
+* **web:** polish recurring payment create flow ([#1111](https://github.com/solana-foundation/solana-developer-platform/pull/1111)) ([64235fa](https://github.com/solana-foundation/solana-developer-platform/commit/64235fa58c6822473b44e3ef13b9521609fce153))
+
+### Bug Fixes
+
+* **web:** let workspace list cards grow so paginated tables scroll ([#1127](https://github.com/solana-foundation/solana-developer-platform/pull/1127)) ([0657632](https://github.com/solana-foundation/solana-developer-platform/commit/0657632c165d8bc14f187d45ae3db36ab43bd2c2))
+* **web:** align wallet card skeleton button margin and update policy e2e flow ([#1117](https://github.com/solana-foundation/solana-developer-platform/pull/1117)) ([43bf5cb](https://github.com/solana-foundation/solana-developer-platform/commit/43bf5cb5fda2b807e766de243214d835947e1254))
+
 ## [0.54.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.53.0...v0.54.0) (2026-08-04)
 
 ### Features
