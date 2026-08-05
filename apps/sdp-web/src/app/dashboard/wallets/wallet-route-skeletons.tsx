@@ -60,7 +60,9 @@ function WalletCardSkeleton() {
           </div>
         ))}
       </div>
-      <Pulse className="mt-auto h-11 w-full rounded-[10px]" />
+      <div className="mt-auto pt-3">
+        <Pulse className="h-11 w-full rounded-[10px]" />
+      </div>
     </article>
   );
 }
