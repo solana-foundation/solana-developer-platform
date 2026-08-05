@@ -18,6 +18,8 @@ interface DatePickerProps {
   id?: string;
   value: string;
   onChange: (value: string) => void;
+  /** Disables selection of days before today. */
+  disablePast?: boolean;
   size?: DatePickerSize;
   className?: string;
 }
@@ -190,11 +192,20 @@ function PickerTrigger({
   );
 }
 
-function Picker({ id, value, onChange, size = "lg", className, includeTime }: PickerProps) {
+function Picker({
+  id,
+  value,
+  onChange,
+  disablePast,
+  size = "lg",
+  className,
+  includeTime,
+}: PickerProps) {
   const locale = useLocale();
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   const selectedDate = parseDateValue(value);
+  const currentYear = new Date().getFullYear();
 
   function selectDate(date: Date | undefined) {
     if (!date) {
@@ -232,13 +243,18 @@ function Picker({ id, value, onChange, size = "lg", className, includeTime }: Pi
         />
         <Popover.Portal>
           <Popover.Positioner className="z-50" side="bottom" align="start" sideOffset={4}>
-            <Popover.Popup className={POPUP_CLASSNAME}>
+            <Popover.Popup className={cn(POPUP_CLASSNAME, "w-[var(--anchor-width)] min-w-fit")}>
               <Calendar
                 mode="single"
                 locale={pickerLocale(locale)}
                 selected={selectedDate}
                 defaultMonth={selectedDate}
                 onSelect={selectDate}
+                captionLayout="dropdown"
+                startMonth={disablePast ? new Date() : new Date(currentYear - 100, 0)}
+                endMonth={new Date(currentYear + 10, 11)}
+                disabled={disablePast ? { before: new Date() } : undefined}
+                className="w-full"
               />
               {includeTime ? (
                 <div className="flex items-end gap-2 border-t border-border-default p-2">

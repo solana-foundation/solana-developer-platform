@@ -218,6 +218,21 @@ describe("recurring payment schema", () => {
       false
     );
   });
+
+  it("rejects non-http metadata URI schemes that would execute when rendered as links", () => {
+    expect(
+      updateRecurringPaymentSchema.safeParse({ metadataUri: "javascript:alert(document.domain)" })
+        .success
+    ).toBe(false);
+    expect(
+      updateRecurringPaymentSchema.safeParse({ metadataUri: "data:text/html,<script>1</script>" })
+        .success
+    ).toBe(false);
+    expect(
+      updateRecurringPaymentSchema.safeParse({ metadataUri: "https://example.com/metadata.json" })
+        .success
+    ).toBe(true);
+  });
 });
 
 describe("wallet policy destinationAllowlist schema", () => {
