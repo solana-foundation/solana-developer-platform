@@ -3,7 +3,6 @@ import type {
   ApiPlaygroundFieldConfig,
 } from "@/components/api-playground-shell";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 
 // Sandbox constants from PROPOSAL.md §0. Kept as literals so the playground works
 // out of the box for a newly connected project — override in the form when the
@@ -245,10 +244,5 @@ export function buildPrivateChannelsPlaygroundEndpointConfigs(
     },
   ];
 
-  // Merge fills in the remaining ~13 SPC operations (list deposits, list
-  // withdrawals, list transfers, get transfer, list channels, delete channel,
-  // list events, list project events, list verified wallets, delete verified
-  // wallet, get overview, disconnect instance, delete instance) from the
-  // generated OpenAPI catalog.
-  return mergeOpenApiPlaygroundEndpoints("private-channels", curatedEndpoints);
+  return curatedEndpoints;
 }

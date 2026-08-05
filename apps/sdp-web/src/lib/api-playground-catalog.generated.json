@@ -6,8 +6,7 @@
       "wallets": 19,
       "payments": 40,
       "counterparties": 12,
-      "issuance": 35,
-      "private-channels": 0
+      "issuance": 35
     }
   },
   "modules": {
@@ -9028,7 +9027,6 @@
         "bodyFields": [],
         "expectedResponse": {}
       }
-    ],
-    "private-channels": []
+    ]
   }
 }

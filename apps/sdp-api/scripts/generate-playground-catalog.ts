@@ -8,7 +8,7 @@ import { createPublicOpenApiDocument } from "../src/openapi/spec";
 
 type JsonRecord = Record<string, unknown>;
 type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-type PlaygroundModule = "wallets" | "payments" | "counterparties" | "issuance" | "private-channels";
+type PlaygroundModule = "wallets" | "payments" | "counterparties" | "issuance";
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
 const TAG_TO_MODULE = new Map<string, PlaygroundModule>([
@@ -16,7 +16,6 @@ const TAG_TO_MODULE = new Map<string, PlaygroundModule>([
   ["Payments", "payments"],
   ["Counterparties", "counterparties"],
   ["Issuance", "issuance"],
-  ["Private Channels", "private-channels"],
 ]);
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -310,7 +309,6 @@ function generateCatalog(): string {
     payments: [],
     counterparties: [],
     issuance: [],
-    "private-channels": [],
   };
 
   for (const [pathname, pathItemInput] of Object.entries(paths)) {

@@ -4,7 +4,6 @@ import { buildWalletsPlaygroundEndpointConfigs } from "@/app/dashboard/custody/w
 import { buildIssuancePlaygroundEndpointConfigs } from "@/app/dashboard/issuance/issuance-playground-config";
 import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/dashboard/payments/counterparty/counterparty-playground-config";
 import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/dashboard/payments/payments-playground-config";
-import { buildPrivateChannelsPlaygroundEndpointConfigs } from "@/app/dashboard/payments/private-channels/api-playground/private-channels-playground-config";
 import type { ApiPlaygroundEndpointConfig } from "@/components/api-playground-shell";
 import { getMessages, translate } from "@/i18n/messages";
 import { getOpenApiPlaygroundEndpoints } from "./api-playground-openapi-catalog";
@@ -29,7 +28,6 @@ describe("API playground module coverage", () => {
       payments: buildPaymentsPlaygroundEndpointConfigs({ transfers: [], wallets: [] }, t),
       counterparties: buildCounterpartyPlaygroundEndpointConfigs([], t),
       issuance: buildIssuancePlaygroundEndpointConfigs({ templates: [], tokens: [], t }),
-      "private-channels": buildPrivateChannelsPlaygroundEndpointConfigs(t),
     };
 
     for (const [module, configs] of Object.entries(configsByModule)) {
