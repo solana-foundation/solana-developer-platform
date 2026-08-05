@@ -22,6 +22,7 @@ interface FetchPaymentsWalletsOptions {
 export interface PaymentsIssuedTokenSymbol {
   mintAddress: string;
   symbol: string;
+  imageUrl: string | null;
 }
 
 export async function fetchPaymentsWallets(
@@ -332,11 +333,13 @@ export async function fetchPaymentsIssuedTokenSymbols(
           | Array<{
               mintAddress?: string | null;
               symbol?: string;
+              imageUrl?: string | null;
             }>
           | {
               tokens?: Array<{
                 mintAddress?: string | null;
                 symbol?: string;
+                imageUrl?: string | null;
               }>;
             };
         meta?: {
@@ -353,11 +356,16 @@ export async function fetchPaymentsIssuedTokenSymbols(
             ): token is {
               mintAddress: string;
               symbol?: string;
+              imageUrl?: string | null;
             } => typeof token?.mintAddress === "string" && token.mintAddress.length > 0
           )
           .map((token) => ({
             mintAddress: token.mintAddress,
             symbol: token.symbol?.trim() || token.mintAddress,
+            imageUrl:
+              typeof token.imageUrl === "string" && token.imageUrl.trim().length > 0
+                ? token.imageUrl
+                : null,
           }))
       );
 

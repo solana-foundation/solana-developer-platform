@@ -140,6 +140,16 @@ export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
   return `${formatTokenAmount(formatUiAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
 }
 
+/**
+ * Builds an amount-input placeholder that communicates an asset's precision.
+ *
+ * @param decimals - The asset's fractional digit count.
+ * @returns A zero amount padded to the asset's decimals, e.g. `0.000000` for 6.
+ */
+export function amountInputPlaceholder(decimals: number): string {
+  return decimals <= 0 ? "0" : `0.${"0".repeat(decimals)}`;
+}
+
 export function formatDisplayAmount(value?: string, token?: string, locale?: string): string {
   if (!value) {
     return token ? `- ${token}` : "-";

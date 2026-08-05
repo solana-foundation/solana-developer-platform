@@ -55,7 +55,6 @@ export default async function RecurringPaymentsPage() {
         <div className="flex h-full min-h-0 w-full flex-col">
           <RecurringPaymentsWorkspace
             initialRecurringPayments={recurringPaymentsResult.data}
-            initialTotal={recurringPaymentsResult.total}
             initialError={recurringPaymentsResult.error}
             wallets={walletsResult.data ?? []}
             counterparties={resolvedCounterparties.map((counterparty) => ({

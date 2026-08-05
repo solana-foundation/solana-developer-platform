@@ -334,7 +334,7 @@ function WizardPageSkeleton({
       data-loading-wizard
       aria-busy="true"
     >
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
         <div className="mx-auto w-full max-w-3xl">
           <WizardProgressSkeleton steps={steps} />
         </div>
@@ -396,7 +396,7 @@ export function CounterpartyCreateSkeleton() {
       data-loading-wizard
       aria-busy="true"
     >
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
         <div className="mx-auto w-full max-w-xl">
           <WizardProgressSkeleton steps={4} />
         </div>

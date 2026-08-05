@@ -50,6 +50,8 @@ interface TokenMarkProps {
   mint?: string | null;
   /** Display symbol, used for the monogram when no logo is bundled. */
   symbol?: string | null;
+  /** Issuer-supplied logo URL, used only when the mint is not well-known. */
+  logoUrl?: string | null;
   size?: TokenMarkSize;
   className?: string;
 }
@@ -61,13 +63,16 @@ function toMonogram(symbol: string): string {
   return trimmed.slice(0, 3).toUpperCase();
 }
 
-export function TokenMark({ mint, symbol, size = "sm", className }: TokenMarkProps) {
+export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: TokenMarkProps) {
   const wellKnown = mint ? WELL_KNOWN_TOKEN_BY_MINT.get(mint.trim()) : undefined;
   const displaySymbol = wellKnown?.symbol ?? symbol?.trim() ?? "";
 
-  // The catalogue is keyed by uppercase symbol while `symbol` carries display
-  // casing, so resolve the logo through the uppercase form.
-  const logo = TOKEN_LOGOS[displaySymbol.toUpperCase() as WellKnownTokenSymbol];
+  // Logos only render for mints verified against the well-known registry. A
+  // symbol alone must never resolve one: token names are self-reported, so an
+  // issued token named "USDC" would otherwise wear Circle's mark.
+  const logo = wellKnown
+    ? TOKEN_LOGOS[wellKnown.symbol.toUpperCase() as WellKnownTokenSymbol]
+    : undefined;
 
   const { box, text, px } = SIZE_STYLES[size];
 
@@ -82,6 +87,22 @@ export function TokenMark({ mint, symbol, size = "sm", className }: TokenMarkPro
         aria-hidden="true"
       >
         <Image src={logo} alt="" fill sizes={`${px}px`} className="object-contain" />
+      </span>
+    );
+  }
+
+  if (logoUrl) {
+    return (
+      <span
+        className={cn(
+          "relative inline-flex shrink-0 overflow-hidden rounded-full border border-border-subtle bg-[white]",
+          box,
+          className
+        )}
+        aria-hidden="true"
+      >
+        {/* biome-ignore lint/performance/noImgElement: issuer-supplied external logo URL; next/image can't be configured for arbitrary hosts. */}
+        <img src={logoUrl} alt="" className="h-full w-full object-cover" />
       </span>
     );
   }

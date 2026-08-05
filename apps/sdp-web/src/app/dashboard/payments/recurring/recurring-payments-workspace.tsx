@@ -107,7 +107,6 @@ interface RecurringPaymentCounterpartyView {
 
 interface RecurringPaymentsWorkspaceProps {
   initialRecurringPayments: PaymentRecurringPayment[];
-  initialTotal: number;
   initialError?: string;
   lookupError?: string;
   wallets: RecurringPaymentWalletView[];
@@ -719,7 +718,6 @@ function canEditRecurringPayment(status: PaymentRecurringPaymentStatus): boolean
 
 export function RecurringPaymentsWorkspace({
   initialRecurringPayments,
-  initialTotal,
   initialError,
   lookupError,
   wallets,
@@ -736,11 +734,6 @@ export function RecurringPaymentsWorkspace({
     () => new Map(counterparties.map((counterparty) => [counterparty.id, counterparty])),
     [counterparties]
   );
-
-  const countLabel =
-    initialTotal === 1
-      ? t("DashboardPayments.recurring.oneRecurringPayment")
-      : t("DashboardPayments.recurring.recurringPaymentCount", { count: initialTotal });
 
   const getWalletLabel = (recurringPayment: PaymentRecurringPayment) => {
     const wallet = walletById.get(recurringPayment.sourceWalletId);
@@ -763,14 +756,18 @@ export function RecurringPaymentsWorkspace({
         <CardHeader className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1.5">
             <CardTitle>{t("DashboardPayments.recurring.recurringPayments")}</CardTitle>
-            <CardDescription>{countLabel}</CardDescription>
+            <CardDescription>
+              {t("DashboardPayments.recurring.recurringPaymentsDescription")}
+            </CardDescription>
           </div>
-          <Button asChild size="sm">
-            <Link href="/dashboard/payments/recurring/create">
-              <PlusIcon className="size-4" />
-              {t("DashboardPayments.recurring.createPayment")}
-            </Link>
-          </Button>
+          {initialRecurringPayments.length > 0 ? (
+            <Button asChild size="sm">
+              <Link href="/dashboard/payments/recurring/create">
+                <PlusIcon className="size-4" />
+                {t("DashboardPayments.recurring.createPayment")}
+              </Link>
+            </Button>
+          ) : null}
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col px-0">
           {initialError ? (
@@ -782,7 +779,7 @@ export function RecurringPaymentsWorkspace({
               <p className="mt-1">{initialError}</p>
             </div>
           ) : initialRecurringPayments.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-16 text-center">
               <RepeatIcon className="h-10 w-10 text-muted" />
               <div className="space-y-1">
                 <p className="text-sm font-medium text-primary">

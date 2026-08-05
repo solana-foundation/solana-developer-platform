@@ -195,6 +195,7 @@ function Picker({ id, value, onChange, size = "lg", className, includeTime }: Pi
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   const selectedDate = parseDateValue(value);
+  const currentYear = new Date().getFullYear();
 
   function selectDate(date: Date | undefined) {
     if (!date) {
@@ -239,6 +240,9 @@ function Picker({ id, value, onChange, size = "lg", className, includeTime }: Pi
                 selected={selectedDate}
                 defaultMonth={selectedDate}
                 onSelect={selectDate}
+                captionLayout="dropdown"
+                startMonth={new Date(currentYear - 10, 0)}
+                endMonth={new Date(currentYear + 10, 11)}
               />
               {includeTime ? (
                 <div className="flex items-end gap-2 border-t border-border-default p-2">

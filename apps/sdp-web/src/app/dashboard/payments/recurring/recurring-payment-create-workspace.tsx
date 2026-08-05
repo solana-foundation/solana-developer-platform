@@ -1,10 +1,17 @@
 "use client";
 
-import type { Counterparty, CounterpartyAccount, PaymentsDashboardWallet } from "@sdp/types";
+import { decimalScale, isDecimalString } from "@sdp/solana/amount";
+import {
+  type Counterparty,
+  type CounterpartyAccount,
+  type PaymentsDashboardWallet,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import { PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
+import { TokenMark } from "@/components/token-mark";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { DateTimePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
@@ -12,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
-import { isSolBalance, shortenAddress } from "../payments-overview.utils";
+import { amountInputPlaceholder, isSolBalance, shortenAddress } from "../payments-overview.utils";
 import {
   type CounterpartiesResult,
   fetchAllCounterparties,
@@ -26,7 +33,6 @@ import {
   PAYMENTS_ACTION_WALLETS_KEY,
   usePaymentsActionWallets,
 } from "../ramps/hooks/use-payments-action-wallets";
-import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
 import { walletBalanceAssetOptions } from "../ramps/wallet-options";
 import { createRecurringPayment } from "./recurring-payments.data";
 
@@ -34,6 +40,7 @@ interface RecurringPaymentCreateWorkspaceProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
+  issuedTokenImageUrlsByMint: Record<string, string>;
   counterpartiesResult: CounterpartiesResult;
 }
 
@@ -109,8 +116,54 @@ function resolveScheduleLabel(
     : t("DashboardPayments.recurring.everyHours", { count: periodHours });
 }
 
-function amountIsValid(value: string): boolean {
-  return ONCHAIN_AMOUNT_PATTERN.test(value.trim()) && Number(value) > 0;
+type AmountValidationError = "format" | "notPositive" | "decimals";
+
+/** Max fractional digits accepted by ONCHAIN_AMOUNT_PATTERN when no asset bounds the precision. */
+const AMOUNT_PATTERN_MAX_DECIMALS = 9;
+
+/**
+ * Validates a recurring payment amount and reports why it fails.
+ *
+ * @param value - The raw amount input.
+ * @param maxDecimals - The maximum fractional digits the selected asset supports.
+ * @returns The failure reason, or null when the amount is valid.
+ */
+function amountError(value: string, maxDecimals: number): AmountValidationError | null {
+  const trimmed = value.trim();
+  if (!isDecimalString(trimmed)) {
+    return "format";
+  }
+  if (decimalScale(trimmed) > maxDecimals) {
+    return "decimals";
+  }
+  return /[1-9]/.test(trimmed) ? null : "notPositive";
+}
+
+/**
+ * Resolves the field hint copy for an amount validation failure.
+ *
+ * @param error - The amount validation failure reason.
+ * @param maxDecimals - The maximum fractional digits the selected asset supports.
+ * @param t - The translation function.
+ * @returns The localized error message.
+ */
+function amountErrorMessage(
+  error: AmountValidationError,
+  maxDecimals: number,
+  t: ReturnType<typeof useTranslations>
+): string {
+  switch (error) {
+    case "decimals":
+      return t("DashboardPayments.recurring.invalidAmountDecimals", { decimals: maxDecimals });
+    case "notPositive":
+      return t("DashboardPayments.recurring.invalidAmount");
+    case "format":
+      return t("DashboardPayments.recurring.invalidAmountFormat");
+    default: {
+      const exhaustive: never = error;
+      throw new Error(`Unhandled amount error: ${exhaustive}`);
+    }
+  }
 }
 
 function metadataUriIsValid(value: string): boolean {
@@ -172,6 +225,7 @@ export function RecurringPaymentCreateWorkspace({
   wallets,
   walletsError,
   issuedTokenSymbolsByMint,
+  issuedTokenImageUrlsByMint,
   counterpartiesResult,
 }: RecurringPaymentCreateWorkspaceProps) {
   const t = useTranslations();
@@ -292,8 +346,23 @@ export function RecurringPaymentCreateWorkspace({
     [issuedTokenSymbolsByMint, selectedWallet, t]
   );
   const assetSelectOptions = useMemo(
-    () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
-    [assetOptions]
+    () =>
+      assetOptions.map((asset) => ({
+        value: asset.value,
+        label: asset.label,
+        icon: (
+          <TokenMark
+            mint={asset.value}
+            symbol={asset.label}
+            logoUrl={issuedTokenImageUrlsByMint[asset.value]}
+            size="xs"
+          />
+        ),
+        badge: WELL_KNOWN_TOKEN_BY_MINT.has(asset.value)
+          ? undefined
+          : t("DashboardPayments.recurring.custom"),
+      })),
+    [assetOptions, issuedTokenImageUrlsByMint, t]
   );
   const nonSolBalanceCount =
     selectedWallet?.balances?.filter((balance) => !isSolBalance(balance)).length ?? 0;
@@ -306,6 +375,10 @@ export function RecurringPaymentCreateWorkspace({
         : null,
     [fields.token, selectedAsset, selectedWallet]
   );
+  const maxAmountDecimals = selectedAssetBalance
+    ? selectedAssetBalance.decimals
+    : AMOUNT_PATTERN_MAX_DECIMALS;
+  const amountValidationError = amountError(fields.amount, maxAmountDecimals);
   const availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : null;
   const exceedsBalance =
     fields.amount.length > 0 && availableAmount !== null && Number(fields.amount) > availableAmount;
@@ -398,14 +471,21 @@ export function RecurringPaymentCreateWorkspace({
         fields.walletId &&
           fields.token &&
           selectedAssetBalance &&
-          amountIsValid(fields.amount) &&
+          amountValidationError === null &&
           periodHours &&
           firstCollectionAtIsValid(fields.firstCollectionAt) &&
           metadataUriIsValid(fields.metadataUri)
       );
     }
     return true;
-  }, [currentStep.id, fields, periodHours, selectedAccount, selectedAssetBalance]);
+  }, [
+    amountValidationError,
+    currentStep.id,
+    fields,
+    periodHours,
+    selectedAccount,
+    selectedAssetBalance,
+  ]);
 
   const reviewRows = [
     {
@@ -640,12 +720,9 @@ export function RecurringPaymentCreateWorkspace({
             disabled={availableWallets.length === 0}
           />
 
-          <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+          <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
             <div className="flex flex-col gap-2">
-              <Label
-                className="text-sm font-medium text-tertiary"
-                htmlFor="recurring-payment-amount"
-              >
+              <Label className="text-tertiary" htmlFor="recurring-payment-amount">
                 {t("DashboardPayments.recurring.amount")}
               </Label>
               <Input
@@ -656,8 +733,9 @@ export function RecurringPaymentCreateWorkspace({
                 step="any"
                 value={fields.amount}
                 onChange={(event) => setField("amount", event.currentTarget.value)}
-                placeholder="1.0"
+                placeholder={amountInputPlaceholder(maxAmountDecimals)}
                 size="xl"
+                maxDecimals={maxAmountDecimals}
                 action={
                   availableAmount !== null ? (
                     <AmountBalanceReadout
@@ -673,8 +751,10 @@ export function RecurringPaymentCreateWorkspace({
                   ) : undefined
                 }
               />
-              {fields.amount && !amountIsValid(fields.amount) ? (
-                <FieldHint tone="error">{t("DashboardPayments.recurring.invalidAmount")}</FieldHint>
+              {fields.amount && amountValidationError ? (
+                <FieldHint tone="error">
+                  {amountErrorMessage(amountValidationError, maxAmountDecimals, t)}
+                </FieldHint>
               ) : null}
             </div>
 
@@ -692,6 +772,7 @@ export function RecurringPaymentCreateWorkspace({
               }
               searchable={false}
               disabled={!fields.walletId || assetSelectOptions.length === 0}
+              size="xl"
             />
           </div>
           {fields.walletId && assetOptions.length === 0 ? (
@@ -710,14 +791,12 @@ export function RecurringPaymentCreateWorkspace({
             searchable={false}
             icon={<RepeatIcon />}
             size="xl"
+            variant="dialog"
           />
 
           {fields.schedulePreset === "custom" ? (
             <div className="flex flex-col gap-2">
-              <Label
-                className="text-sm font-medium text-tertiary"
-                htmlFor="recurring-payment-period-hours"
-              >
+              <Label className="text-tertiary" htmlFor="recurring-payment-period-hours">
                 {t("DashboardPayments.recurring.intervalHours")}
               </Label>
               <Input
@@ -742,10 +821,7 @@ export function RecurringPaymentCreateWorkspace({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-2">
-              <Label
-                className="text-sm font-medium text-tertiary"
-                htmlFor="recurring-payment-first-collection"
-              >
+              <Label className="text-tertiary" htmlFor="recurring-payment-first-collection">
                 {t("DashboardPayments.recurring.firstPayment")}
               </Label>
               <DateTimePicker
@@ -764,10 +840,7 @@ export function RecurringPaymentCreateWorkspace({
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label
-                className="text-sm font-medium text-tertiary"
-                htmlFor="recurring-payment-metadata"
-              >
+              <Label className="text-tertiary" htmlFor="recurring-payment-metadata">
                 {t("DashboardPayments.recurring.metadataUrl")}
               </Label>
               <Input
