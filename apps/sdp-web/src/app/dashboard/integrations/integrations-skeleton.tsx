@@ -23,7 +23,7 @@ export function IntegrationsSkeleton() {
             {[0, 1, 2, 3].map((card) => (
               <div
                 key={card}
-                className="h-[166px] rounded-2xl border border-border-subtle bg-surface-raised"
+                className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised"
               />
             ))}
           </div>

@@ -105,12 +105,17 @@ describe("IntegrationsCatalog filtering", () => {
     expect(screen.queryByText("No integrations match")).toBeNull();
   });
 
-  it("keeps custody rows free of generic links and non-custody rows action-free", () => {
+  it("keeps cards action-free: browsing here, acting on the detail page", () => {
     renderCatalog();
 
-    // RPC's destination is linked once at the section level, not per row.
+    // Shared destinations link once at the section level, never per card.
     expect(screen.getAllByRole("link", { name: "Change in Settings" })).toHaveLength(1);
-    expect(screen.queryAllByRole("link", { name: "Manage" }).length).toBeLessThanOrEqual(1);
+    expect(screen.queryAllByRole("link", { name: "Manage" })).toHaveLength(0);
+    expect(screen.queryAllByRole("link", { name: "Configure" })).toHaveLength(0);
+    expect(screen.queryAllByRole("link", { name: "Request access" })).toHaveLength(0);
+    // Every card is a navigation target to its provider detail.
+    const privy = screen.getByRole("link", { name: "Privy" });
+    expect(privy.getAttribute("href")).toBe("/dashboard/integrations/privy");
   });
 
   it("fills every row with a description instead of dead space", () => {

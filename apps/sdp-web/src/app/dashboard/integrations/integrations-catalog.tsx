@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
-import { Search } from "lucide-react";
+import { ChevronRight, Search } from "lucide-react";
 import Image from "next/image";
 import { type ReactNode, useMemo, useState } from "react";
 import type { CustodyProviderAvailability } from "@/app/dashboard/custody/provider-display-status";
@@ -93,26 +93,25 @@ function FilterPill({
 interface IntegrationRowModel extends FilterableIntegration {
   icon: ReactNode;
   description?: string;
-  action?: ReactNode;
 }
 
 function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate }) {
-  // Media-object layout: the icon owns the left rail and the content column
-  // owns everything else, so the title, description and action share one left
-  // edge instead of the description hanging under the icon.
+  // Cards browse; the detail page acts. Its header carries the state-correct
+  // action, so repeating a button here was redundant, and the chevron is the
+  // standing invitation that the whole card opens it.
   return (
     <li
-      className="relative flex items-start gap-3 rounded-2xl border border-border-default bg-surface-raised p-5 transition-colors hover:border-border-strong motion-reduce:transition-none"
+      className="group relative flex items-start gap-3 rounded-2xl border border-border-default bg-surface-raised p-5 transition-colors hover:border-border-strong motion-reduce:transition-none"
       data-integration-row="true"
       data-integration-status={row.status}
     >
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-fill-strong">
         {row.icon}
       </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-2 self-stretch">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-start justify-between gap-3">
-          {/* Stretched link: the title anchors it, the overlay makes the whole
-              card the click target, and the action button stacks above it. */}
+          {/* Stretched link: the title anchors it and the overlay makes the
+              whole card the click target. */}
           <DashboardNavigationLink
             href={`/dashboard/integrations/${row.provider}`}
             className="truncate pt-2 text-base font-medium text-primary after:absolute after:inset-0 after:content-['']"
@@ -122,12 +121,13 @@ function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate })
           <StatusBadge status={row.status} t={t} />
         </div>
         {row.description ? (
-          <p className="text-sm leading-5 text-tertiary">{row.description}</p>
+          <p className="pr-6 text-sm leading-5 text-tertiary">{row.description}</p>
         ) : null}
-        {/* Anchored to the card's bottom edge so a row of cards shows its
-            actions on one line regardless of description length. */}
-        {row.action ? <div className="relative z-10 mt-auto pt-2">{row.action}</div> : null}
       </div>
+      <ChevronRight
+        aria-hidden
+        className="absolute right-4 bottom-4 size-4 text-tertiary transition-transform group-hover:translate-x-0.5 group-hover:text-secondary motion-reduce:transition-none"
+      />
     </li>
   );
 }
@@ -193,38 +193,10 @@ export function IntegrationsCatalog({
       status: provider.status,
       icon: <WalletProviderMark provider={provider.entry.id} size="sm" />,
       description: t(provider.entry.descriptionKey),
-      action:
-        provider.status === "active" ? (
-          <Button asChild variant="secondary" size="sm">
-            <DashboardNavigationLink href="/dashboard/wallets">
-              {t("Shared.integrations.ctaManage")}
-            </DashboardNavigationLink>
-          </Button>
-        ) : provider.status === "available" ? (
-          <Button asChild variant="secondary" size="sm">
-            <DashboardNavigationLink
-              href={`/dashboard/wallets/setup?provider=${provider.entry.id}`}
-            >
-              {t("Shared.integrations.ctaConfigure")}
-            </DashboardNavigationLink>
-          </Button>
-        ) : provider.status === "request_access" &&
-          provider.entry.storedCredentialSetup.mode === "request_access" ? (
-          <Button asChild variant="secondary" size="sm">
-            <a
-              href={provider.entry.storedCredentialSetup.requestAccessUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              {t("Shared.integrations.ctaRequestAccess")}
-            </a>
-          </Button>
-        ) : undefined,
     }));
 
-    // Non-custody rows carry no per-row action on purpose. Repeating one
-    // generic page link on every row read as noise; the destination that owns
-    // the work is linked once at the section level instead.
+    // No card carries an action: the detail page's header owns the
+    // state-correct one, and the section header links shared destinations.
     const rpcRows: IntegrationRowModel[] = rpc.map((provider) => ({
       family: "rpc",
       provider: provider.provider,
