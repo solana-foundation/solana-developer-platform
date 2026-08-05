@@ -820,7 +820,7 @@
       "failed": "Falhou",
       "skipped": "Ignorado",
       "recurringPayments": "Agendamentos de pagamento",
-      "recurringPaymentsDescription": "Pagamentos agendados executados automaticamente em um intervalo definido.",
+      "recurringPaymentsDescription": "Pagamentos automáticos para contrapartes em um intervalo fixo.",
       "unableToLoad": "Não foi possível carregar os pagamentos recorrentes",
       "noPayments": "Nenhum pagamento recorrente ainda.",
       "paymentsAppearHere": "Os registros de pagamentos recorrentes criados aparecerão aqui.",

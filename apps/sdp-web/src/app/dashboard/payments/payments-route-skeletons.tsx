@@ -134,7 +134,7 @@ const TABLE_SKELETON_CONFIGS: Record<TableSkeletonVariant, TableSkeletonConfig> 
     ],
   },
   "recurring-payments": {
-    tableClassName: "w-full [&_table]:table-fixed",
+    tableClassName: "rounded-none border-0 w-full [&_table]:table-fixed",
     containerClassName: "min-h-0 flex-1 overflow-hidden",
     columns: [
       {

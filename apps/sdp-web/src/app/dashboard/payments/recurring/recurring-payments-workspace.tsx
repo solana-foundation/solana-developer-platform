@@ -827,7 +827,7 @@ export function RecurringPaymentsWorkspace({
                   </button>
                 ))}
               </div>
-              <Table className="hidden w-full [&_table]:table-fixed md:block">
+              <Table className="hidden rounded-none border-0 w-full [&_table]:table-fixed md:block">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%] 2xl:w-[15%]">

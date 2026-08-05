@@ -785,7 +785,7 @@
       "failed": "Échec",
       "skipped": "Sauté",
       "recurringPayments": "Paiements Recurring",
-      "recurringPaymentsDescription": "Paiements planifiés exécutés automatiquement à intervalle défini.",
+      "recurringPaymentsDescription": "Paiements automatiques vers des contreparties à intervalle fixe.",
       "unableToLoad": "Impossible de charger les paiements Recurring",
       "noPayments": "Aucun paiement Recurring pour l’instant.",
       "paymentsAppearHere": "Les enregistrements de paiement Recurring créés apparaîtront ici.",

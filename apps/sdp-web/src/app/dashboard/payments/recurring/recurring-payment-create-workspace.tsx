@@ -819,7 +819,7 @@ export function RecurringPaymentCreateWorkspace({
             </div>
           ) : null}
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-[280px_minmax(0,1fr)]">
             <div className="flex flex-col gap-2">
               <Label className="text-tertiary" htmlFor="recurring-payment-first-collection">
                 {t("DashboardPayments.recurring.firstPayment")}
