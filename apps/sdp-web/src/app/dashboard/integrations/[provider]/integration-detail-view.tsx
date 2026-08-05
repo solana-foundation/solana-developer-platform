@@ -76,32 +76,32 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
   const t = await getTranslations();
   const entry = detail.custodyEntry;
 
-  const primaryAction =
-    detail.family === "custody" && detail.status === "active" ? (
-      <Button asChild>
-        <DashboardNavigationLink href="/dashboard/wallets">
-          {t("Shared.integrations.ctaManage")}
-        </DashboardNavigationLink>
-      </Button>
-    ) : detail.family === "custody" && detail.status === "available" ? (
-      <Button asChild>
-        <DashboardNavigationLink href={`/dashboard/wallets/setup?provider=${detail.provider}`}>
-          {t("Shared.integrations.ctaConfigure")}
-        </DashboardNavigationLink>
-      </Button>
-    ) : detail.requestAccessUrl ? (
-      <Button asChild>
-        <a href={detail.requestAccessUrl} target="_blank" rel="noreferrer noopener">
-          {t("Shared.integrations.ctaRequestAccess")}
-        </a>
-      </Button>
-    ) : detail.family === "rpc" ? (
-      <Button asChild variant="secondary">
-        <DashboardNavigationLink href="/dashboard/settings">
-          {t("Shared.integrations.rpcSectionAction")}
-        </DashboardNavigationLink>
-      </Button>
-    ) : null;
+  const primaryAction = detail.statusUnknown ? null : detail.family === "custody" &&
+    detail.status === "active" ? (
+    <Button asChild>
+      <DashboardNavigationLink href="/dashboard/wallets">
+        {t("Shared.integrations.ctaManage")}
+      </DashboardNavigationLink>
+    </Button>
+  ) : detail.family === "custody" && detail.status === "available" ? (
+    <Button asChild>
+      <DashboardNavigationLink href={`/dashboard/wallets/setup?provider=${detail.provider}`}>
+        {t("Shared.integrations.ctaConfigure")}
+      </DashboardNavigationLink>
+    </Button>
+  ) : detail.requestAccessUrl ? (
+    <Button asChild>
+      <a href={detail.requestAccessUrl} target="_blank" rel="noreferrer noopener">
+        {t("Shared.integrations.ctaRequestAccess")}
+      </a>
+    </Button>
+  ) : detail.family === "rpc" ? (
+    <Button asChild variant="secondary">
+      <DashboardNavigationLink href="/dashboard/settings">
+        {t("Shared.integrations.rpcSectionAction")}
+      </DashboardNavigationLink>
+    </Button>
+  ) : null;
 
   return (
     <div className="w-full space-y-6 px-4 py-6 md:px-6" data-integration-detail={detail.provider}>
@@ -116,7 +116,9 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
                 {detail.label}
               </h1>
               <span className="shrink-0 whitespace-nowrap rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
-                {t(statusKey(detail.status))}
+                {detail.statusUnknown
+                  ? t("Shared.integrations.statusUnknown")
+                  : t(statusKey(detail.status))}
               </span>
             </div>
             <p className="text-sm text-tertiary">

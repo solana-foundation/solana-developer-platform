@@ -39,6 +39,13 @@ describe("integration detail", () => {
     expect(resolveIntegrationDetail({ provider: "range", ...INPUTS })?.family).toBe("compliance");
   });
 
+  it("keeps a known custody provider reachable when connection state is unknown", () => {
+    const detail = resolveIntegrationDetail({ ...INPUTS, provider: "privy", custody: null });
+    expect(detail).not.toBeNull();
+    expect(detail?.statusUnknown).toBe(true);
+    expect(detail?.custodyEntry?.id).toBe("privy");
+  });
+
   it("rejects unknown providers before any data fetch", () => {
     expect(isKnownIntegrationProvider("not-a-provider")).toBe(false);
     expect(resolveIntegrationDetail({ provider: "nope", ...INPUTS })).toBeNull();

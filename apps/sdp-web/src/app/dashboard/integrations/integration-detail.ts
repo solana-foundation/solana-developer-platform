@@ -18,6 +18,8 @@ export interface IntegrationDetail {
   provider: string;
   label: string;
   status: IntegrationStatus;
+  /** Connection state could not be read; the status is entitlement-only. */
+  statusUnknown?: boolean;
   descriptionKey?: MessageKey;
   custodyEntry?: CustodyProviderCatalogEntry;
   requestAccessUrl?: string;
@@ -41,6 +43,26 @@ export function resolveIntegrationDetail(input: {
   ramps: IntegrationEntry<RampProviderId>[];
   compliance: IntegrationEntry<ComplianceProviderId>[];
 }): IntegrationDetail | null {
+  // A failed connection lookup must not turn a known custody provider into a
+  // 404: the page renders from the catalog entry with its state marked
+  // unknown, and offers no action that depends on the state it cannot see.
+  if (input.custody === null) {
+    const entry = CUSTODY_PROVIDER_CATALOG.find(
+      (candidate) => candidate.id === input.provider && candidate.visible
+    );
+    if (entry) {
+      return {
+        family: "custody",
+        provider: entry.id,
+        label: entry.label,
+        status: "unavailable",
+        statusUnknown: true,
+        descriptionKey: entry.descriptionKey,
+        custodyEntry: entry,
+      };
+    }
+  }
+
   const custodyMatch = (input.custody ?? []).find((entry) => entry.entry.id === input.provider);
   if (custodyMatch) {
     return {

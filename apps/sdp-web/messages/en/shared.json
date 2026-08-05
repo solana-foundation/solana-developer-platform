@@ -322,6 +322,7 @@
     "detailResources": "Resources",
     "detailDocs": "View documentation",
     "backToIntegrations": "Back to integrations",
-    "capabilityAdditionalWallets": "Additional wallets"
+    "capabilityAdditionalWallets": "Additional wallets",
+    "statusUnknown": "Status unavailable"
   }
 }
