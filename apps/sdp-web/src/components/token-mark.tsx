@@ -88,7 +88,7 @@ function resolveMark(
 
 export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: TokenMarkProps) {
   const { displaySymbol, logo } = resolveMark(mint, symbol);
-  const [logoUrlFailed, setLogoUrlFailed] = useState(false);
+  const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
 
   const { box, text, px } = SIZE_STYLES[size];
 
@@ -107,7 +107,7 @@ export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: Tok
     );
   }
 
-  if (logoUrl && !logoUrlFailed) {
+  if (logoUrl && failedLogoUrl !== logoUrl) {
     return (
       <span
         className={cn(
@@ -122,7 +122,7 @@ export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: Tok
           src={logoUrl}
           alt=""
           className="h-full w-full object-cover"
-          onError={() => setLogoUrlFailed(true)}
+          onError={() => setFailedLogoUrl(logoUrl)}
         />
       </span>
     );

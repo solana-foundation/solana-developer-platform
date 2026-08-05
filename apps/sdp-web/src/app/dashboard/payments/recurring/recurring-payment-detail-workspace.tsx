@@ -355,7 +355,6 @@ function canEditRecurringPayment(status: PaymentRecurringPaymentStatus): boolean
   return status === "pending_activation" || status === "active";
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: detail editing intentionally centralizes lifecycle and modal state in one workspace.
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
   wallet,
