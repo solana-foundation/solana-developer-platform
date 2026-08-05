@@ -22,7 +22,7 @@ const DEPOSIT: PrivateChannelDepositRow = {
   signature: "deposit-signature",
   settlement_ref: null,
   failure_reason: null,
-  context: {},
+  context: { actingUserId: "usr_depositor" },
   created_at: NOW,
   updated_at: NOW,
 };
@@ -41,7 +41,7 @@ const WITHDRAWAL: PrivateChannelWithdrawalRow = {
   signature: "withdrawal-signature",
   settlement_ref: null,
   failure_reason: null,
-  context: {},
+  context: { actingUserId: "usr_owner" },
   created_at: NOW,
   updated_at: NOW,
 };
@@ -60,22 +60,35 @@ afterEach(() => {
 });
 
 describe("financial event emitters", () => {
-  it("makes deposit events visible to depositor and recipient wallets", async () => {
+  it("attributes deposit events and keeps wallet context in the payload", async () => {
     await emitDepositEvent(ENV, DEPOSIT, "transfer.deposit.submitted", "pending");
 
     expect(emit).toHaveBeenCalledWith(
       expect.objectContaining({
-        wallets: [DEPOSIT.depositor, DEPOSIT.recipient],
+        sdpUserId: "usr_depositor",
+        payload: expect.objectContaining({
+          senderWalletId: DEPOSIT.wallet_id,
+          sender: DEPOSIT.depositor,
+          recipient: DEPOSIT.recipient,
+        }),
       })
     );
   });
 
-  it("makes withdrawal events visible to owner and destination wallets", async () => {
+  it("attributes withdrawal events and names each address once", async () => {
     await emitWithdrawalEvent(ENV, WITHDRAWAL, "transfer.withdrawal.confirmed", "confirmed");
 
     expect(emit).toHaveBeenCalledWith(
       expect.objectContaining({
-        wallets: [WITHDRAWAL.owner, WITHDRAWAL.destination],
+        sdpUserId: "usr_owner",
+        payload: {
+          withdrawalId: WITHDRAWAL.id,
+          senderWalletId: WITHDRAWAL.wallet_id,
+          sender: WITHDRAWAL.owner,
+          recipient: WITHDRAWAL.destination,
+          amount: WITHDRAWAL.amount,
+          mint: WITHDRAWAL.mint,
+        },
       })
     );
   });

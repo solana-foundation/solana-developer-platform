@@ -49,29 +49,6 @@ describe("PrivateChannelEventService", () => {
     expect(seen).toHaveLength(2);
     expect(seen[0]?.startsWith("a:pce_")).toBe(true);
     expect(seen[1]?.startsWith("b:pce_")).toBe(true);
-    expect(captured.event?.wallets).toEqual([]);
-  });
-
-  it("normalizes wallet visibility without adding it to the payload", async () => {
-    const captured: { event: PrivateChannelEventRecord | null } = { event: null };
-    const service = new PrivateChannelEventService([
-      {
-        name: "capture",
-        handle(event) {
-          captured.event = event;
-        },
-      },
-    ]);
-
-    await service.emit(
-      baseInput({
-        wallets: [" wallet-a ", "", "wallet-a", "  wallet-b", "wallet-b  ", "   "],
-      })
-    );
-
-    expect(captured.event?.wallets).toEqual(["wallet-a", "wallet-b"]);
-    expect(captured.event?.payload).toEqual({ name: "Treasury" });
-    expect(captured.event?.payload).not.toHaveProperty("wallets");
   });
 
   it("isolates a throwing sink so emit still resolves and peers run", async () => {

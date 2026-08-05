@@ -3,7 +3,7 @@ import type {
   PrivateChannelEventFamily,
   PrivateChannelEventStatus,
 } from "@sdp/types";
-import { hasPermission } from "@sdp/types";
+import { hasPermission, PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS } from "@sdp/types";
 import type { PrivateChannelEventRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
@@ -35,6 +35,17 @@ function decodeCursor(cursor: string): { occurredAt: string; id: string } | null
   }
 }
 
+function displayEventPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const displayPayload: Record<string, unknown> = {};
+  for (const key of PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS) {
+    const value = payload[key];
+    if (typeof value === "string" || (typeof value === "number" && Number.isFinite(value))) {
+      displayPayload[key] = value;
+    }
+  }
+  return displayPayload;
+}
+
 function mapPrivateChannelEventRow(
   row: PrivateChannelEventRow,
   includeRawPayload: boolean
@@ -49,8 +60,7 @@ function mapPrivateChannelEventRow(
     family: row.family,
     type: row.type,
     status: row.status,
-    payload: includeRawPayload ? row.payload : {},
-    wallets: row.wallets,
+    payload: includeRawPayload ? row.payload : displayEventPayload(row.payload),
     occurredAt: row.occurred_at,
     createdAt: row.created_at,
   };
@@ -86,7 +96,9 @@ function parseEventsQuery(c: AppContext): ParsedEventsQuery {
 function eventsEnvelope(c: AppContext, rows: PrivateChannelEventRow[], hasMore: boolean) {
   const last = rows.at(-1);
   const nextCursor = hasMore && last ? encodeCursor(last.occurred_at, last.id) : null;
-  const includeRawPayload = hasPermission(getAuth(c).permissions, "org:admin");
+  const auth = getAuth(c);
+  const includeRawPayload =
+    auth.authType !== "api_key" && hasPermission(auth.permissions, "org:admin");
   return success(c, {
     events: rows.map((row) => mapPrivateChannelEventRow(row, includeRawPayload)),
     hasMore,
@@ -115,14 +127,16 @@ export async function listChannelEvents(c: AppContext) {
   if (viewer.scope === "none") {
     return eventsEnvelope(c, [], false);
   }
+  if (viewer.scope === "member" && !viewer.channelIds.includes(channelId)) {
+    return eventsEnvelope(c, [], false);
+  }
   const { rows, hasMore } = await getPrivateChannelEventRepository(c).listByChannel({
     channelId,
     instanceId: instance.id,
     family,
     type,
     status,
-    wallets: viewer.scope === "wallets" ? viewer.wallets : undefined,
-    viewerUserId: viewer.scope === "wallets" ? viewer.userId : undefined,
+    viewerUserId: viewer.scope === "member" ? viewer.userId : undefined,
     limit,
     beforeOccurredAt: cursor?.occurredAt,
     beforeId: cursor?.id,
@@ -149,8 +163,10 @@ export async function listProjectEvents(c: AppContext) {
     family,
     type,
     status,
-    wallets: viewer.scope === "wallets" ? viewer.wallets : undefined,
-    viewerUserId: viewer.scope === "wallets" ? viewer.userId : undefined,
+    viewer:
+      viewer.scope === "member"
+        ? { channelIds: viewer.channelIds, userId: viewer.userId }
+        : undefined,
     limit,
     beforeOccurredAt: cursor?.occurredAt,
     beforeId: cursor?.id,

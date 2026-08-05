@@ -65,19 +65,5 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapPrivateChannelVerifiedWalletRow);
     },
-
-    async listByProjectAndUser(scope, userId) {
-      const result = await db
-        .prepare(
-          `SELECT * FROM private_channel_verified_wallets
-             WHERE organization_id = ?
-               AND project_id = ?
-               AND user_id = ?
-             ORDER BY verified_at DESC, id DESC`
-        )
-        .bind(scope.organizationId, scope.projectId, userId)
-        .all<Record<string, unknown>>();
-      return (result.results ?? []).map(mapPrivateChannelVerifiedWalletRow);
-    },
   };
 }

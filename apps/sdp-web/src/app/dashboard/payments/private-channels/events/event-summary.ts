@@ -1,4 +1,4 @@
-import type { PrivateChannelEventDto } from "@sdp/types";
+import type { PrivateChannelEventDisplayPayloadKey, PrivateChannelEventDto } from "@sdp/types";
 
 export type PrivateChannelEventSummaryKind =
   | "deposit"
@@ -16,8 +16,6 @@ export interface PrivateChannelEventSummaryIds {
   depositId?: string;
   withdrawalId?: string;
   transferId?: string;
-  channelId?: string;
-  instanceId?: string;
   walletId?: string;
   privateChannelUserId?: string;
   targetUserId?: string;
@@ -34,18 +32,13 @@ export interface PrivateChannelEventSummary {
   mint?: string;
   sender?: string;
   recipient?: string;
-  owner?: string;
-  destination?: string;
-  depositor?: string;
   pubkey?: string;
   signature?: string;
+  gatewayUrl?: string;
+  confirmedAt?: string;
   reason?: string;
   channelName?: string;
-  gatewayUrl?: string;
-  role?: string;
   latencyMs?: string;
-  attempt?: string;
-  confirmedAt?: string;
   ids: PrivateChannelEventSummaryIds;
 }
 
@@ -94,17 +87,30 @@ function resolveKind(family: string, type: string): PrivateChannelEventSummaryKi
   return "unknown";
 }
 
+// `satisfies PrivateChannelEventDisplayPayloadKey[]` keeps these reads inside the
+// server's display allowlist: a key the API strips would never arrive here.
 const ID_KEYS = [
   "depositId",
   "withdrawalId",
   "transferId",
-  "channelId",
-  "instanceId",
   "walletId",
   "privateChannelUserId",
   "targetUserId",
   "membershipId",
-] as const satisfies readonly (keyof PrivateChannelEventSummaryIds)[];
+] as const satisfies readonly (keyof PrivateChannelEventSummaryIds &
+  PrivateChannelEventDisplayPayloadKey)[];
+
+const STRING_KEYS = [
+  "amount",
+  "mint",
+  "sender",
+  "recipient",
+  "pubkey",
+  "signature",
+  "gatewayUrl",
+  "confirmedAt",
+] as const satisfies readonly (keyof PrivateChannelEventSummary &
+  PrivateChannelEventDisplayPayloadKey)[];
 
 /**
  * Extracts only known primitive fields from an event payload. API payloads are
@@ -121,24 +127,10 @@ export function summarizePrivateChannelEvent(event: EventSummaryInput): PrivateC
     if (value !== undefined) summary.ids[key] = value;
   }
 
-  const amount = readString(payload, "amount");
-  if (amount !== undefined) summary.amount = amount;
-  const mint = readString(payload, "mint");
-  if (mint !== undefined) summary.mint = mint;
-  const sender = readString(payload, "sender");
-  if (sender !== undefined) summary.sender = sender;
-  const recipient = readString(payload, "recipient");
-  if (recipient !== undefined) summary.recipient = recipient;
-  const owner = readString(payload, "owner");
-  if (owner !== undefined) summary.owner = owner;
-  const destination = readString(payload, "destination");
-  if (destination !== undefined) summary.destination = destination;
-  const depositor = readString(payload, "depositor");
-  if (depositor !== undefined) summary.depositor = depositor;
-  const pubkey = readString(payload, "pubkey");
-  if (pubkey !== undefined) summary.pubkey = pubkey;
-  const signature = readString(payload, "signature");
-  if (signature !== undefined) summary.signature = signature;
+  for (const key of STRING_KEYS) {
+    const value = readString(payload, key);
+    if (value !== undefined) summary[key] = value;
+  }
 
   const reason =
     readString(payload, "failureReason") ??
@@ -146,21 +138,15 @@ export function summarizePrivateChannelEvent(event: EventSummaryInput): PrivateC
     readString(payload, "message");
   if (reason !== undefined) summary.reason = reason;
 
-  const channelName =
-    readString(payload, "channelName") ??
-    (kind === "channel" ? readString(payload, "name") : undefined);
-  if (channelName !== undefined) summary.channelName = channelName;
+  // Channel events name the channel in `name`; error payloads reuse `name` for
+  // the error class, so only read it for channel lifecycle.
+  if (kind === "channel") {
+    const channelName = readString(payload, "name");
+    if (channelName !== undefined) summary.channelName = channelName;
+  }
 
-  const gatewayUrl = readString(payload, "gatewayUrl");
-  if (gatewayUrl !== undefined) summary.gatewayUrl = gatewayUrl;
-  const role = readString(payload, "role");
-  if (role !== undefined) summary.role = role;
   const latencyMs = readNumericDisplay(payload, "latencyMs");
   if (latencyMs !== undefined) summary.latencyMs = latencyMs;
-  const attempt = readNumericDisplay(payload, "attempt");
-  if (attempt !== undefined) summary.attempt = attempt;
-  const confirmedAt = readString(payload, "confirmedAt");
-  if (confirmedAt !== undefined) summary.confirmedAt = confirmedAt;
 
   return summary;
 }

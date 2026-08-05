@@ -25,7 +25,7 @@ function auth(overrides: Partial<ApiKeyContext> = {}): ApiKeyContext {
 function dependencies() {
   return {
     findPrivateChannelUser: vi.fn(),
-    listVerifiedWallets: vi.fn(),
+    listMemberships: vi.fn(),
   };
 }
 
@@ -66,11 +66,11 @@ describe("resolveEventViewerForAuth", () => {
     expect(deps.findPrivateChannelUser).not.toHaveBeenCalled();
   });
 
-  it("gives organization admins full event visibility", async () => {
+  it("gives project writers full event visibility", async () => {
     const deps = dependencies();
 
     const viewer = await resolveEventViewerForAuth(
-      auth({ permissions: ["payments:read", "org:admin"] }),
+      auth({ permissions: ["payments:read", "projects:write"] }),
       PROJECT_ID,
       deps
     );
@@ -79,48 +79,52 @@ describe("resolveEventViewerForAuth", () => {
     expect(deps.findPrivateChannelUser).not.toHaveBeenCalled();
   });
 
-  it("limits ordinary members to their verified wallet pubkeys", async () => {
+  it("limits ordinary members to their channel memberships and authored transfers", async () => {
     const deps = dependencies();
     deps.findPrivateChannelUser.mockResolvedValue({ id: "pcu_event_access" });
-    deps.listVerifiedWallets.mockResolvedValue([{ pubkey: "wallet-a" }, { pubkey: "wallet-b" }]);
+    deps.listMemberships.mockResolvedValue([
+      { channel_id: "pch_alpha" },
+      { channel_id: "pch_beta" },
+    ]);
 
     const viewer = await resolveEventViewerForAuth(auth(), PROJECT_ID, deps);
 
     expect(viewer).toEqual({
-      scope: "wallets",
-      wallets: ["wallet-a", "wallet-b"],
+      scope: "member",
+      channelIds: ["pch_alpha", "pch_beta"],
       userId: "usr_event_access",
     });
     expect(deps.findPrivateChannelUser).toHaveBeenCalledWith(
       { organizationId: "org_event_access", projectId: PROJECT_ID },
       "usr_event_access"
     );
-    expect(deps.listVerifiedWallets).toHaveBeenCalledWith(
-      { organizationId: "org_event_access", projectId: PROJECT_ID },
-      "pcu_event_access"
-    );
+    expect(deps.listMemberships).toHaveBeenCalledWith("pcu_event_access");
   });
 
-  it("returns no visibility when the user is not a Private Channels member", async () => {
+  it("preserves authored-transfer visibility after Private Channels membership removal", async () => {
     const deps = dependencies();
     deps.findPrivateChannelUser.mockResolvedValue(null);
 
     const viewer = await resolveEventViewerForAuth(auth(), PROJECT_ID, deps);
 
-    expect(viewer).toEqual({ scope: "none" });
-    expect(deps.listVerifiedWallets).not.toHaveBeenCalled();
+    expect(viewer).toEqual({
+      scope: "member",
+      channelIds: [],
+      userId: "usr_event_access",
+    });
+    expect(deps.listMemberships).not.toHaveBeenCalled();
   });
 
-  it("keeps authored-event visibility when the member has no verified wallets", async () => {
+  it("keeps authored-transfer visibility when the member has no channel memberships", async () => {
     const deps = dependencies();
     deps.findPrivateChannelUser.mockResolvedValue({ id: "pcu_event_access" });
-    deps.listVerifiedWallets.mockResolvedValue([]);
+    deps.listMemberships.mockResolvedValue([]);
 
     const viewer = await resolveEventViewerForAuth(auth(), PROJECT_ID, deps);
 
     expect(viewer).toEqual({
-      scope: "wallets",
-      wallets: [],
+      scope: "member",
+      channelIds: [],
       userId: "usr_event_access",
     });
   });

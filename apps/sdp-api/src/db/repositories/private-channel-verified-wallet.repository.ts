@@ -56,11 +56,6 @@ export interface PrivateChannelVerifiedWalletRepository {
     userId: string,
     instanceId: string
   ): Promise<PrivateChannelVerifiedWalletRow[]>;
-  /** The member's verified wallets across every instance in one project. */
-  listByProjectAndUser(
-    scope: VerifiedWalletScope,
-    userId: string
-  ): Promise<PrivateChannelVerifiedWalletRow[]>;
 }
 
 export function mapPrivateChannelVerifiedWalletRow(

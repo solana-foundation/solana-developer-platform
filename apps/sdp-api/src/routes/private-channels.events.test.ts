@@ -201,7 +201,6 @@ describe("Private Channels — event routes", () => {
     expect(body.data.events[0]?.type).toBe(PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_CHANNEL_CREATED);
     expect(body.data.events[0]?.channelId).toBe(created.data.id);
     expect(body.data.events[0]?.payload).toEqual({ name: "Treasury" });
-    expect(body.data.events[0]?.wallets).toEqual([]);
   });
 
   it("filters events by exact status and rejects unknown statuses", async () => {
@@ -217,8 +216,8 @@ describe("Private Channels — event routes", () => {
     await getDb(env)
       .prepare(
         `INSERT INTO private_channel_events
-           (id, organization_id, project_id, instance_id, channel_id, family, type, status, payload, wallets, occurred_at)
-         VALUES ('pce_failed_status', ?, ?, ?, ?, ?, ?, ?, '{}'::jsonb, ?::text[], '2026-07-30T12:00:00.000Z')`
+           (id, organization_id, project_id, instance_id, channel_id, family, type, status, payload, occurred_at)
+         VALUES ('pce_failed_status', ?, ?, ?, ?, ?, ?, ?, '{}'::jsonb, '2026-07-30T12:00:00.000Z')`
       )
       .bind(
         instance?.organization_id,
@@ -227,8 +226,7 @@ describe("Private Channels — event routes", () => {
         channelId,
         PRIVATE_CHANNEL_EVENT_FAMILIES.ERROR,
         PRIVATE_CHANNEL_EVENT_TYPES.ERROR_SPC_UNREACHABLE,
-        PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
-        ["status-wallet"]
+        PRIVATE_CHANNEL_EVENT_STATUSES.FAILED
       )
       .run();
 
@@ -240,7 +238,6 @@ describe("Private Channels — event routes", () => {
     expect(filtered.status).toBe(200);
     const body = (await filtered.json()) as { data: PrivateChannelEventListEnvelope };
     expect(body.data.events.map((event) => event.id)).toEqual(["pce_failed_status"]);
-    expect(body.data.events[0]?.wallets).toEqual(["status-wallet"]);
 
     const invalid = await app.request(
       `/v1/private-channels/channels/${channelId}/events?status=unknown`,
@@ -373,10 +370,11 @@ describe("Private Channels — event routes", () => {
     expect(err?.payload).toMatchObject({
       message: "boom",
       gatewayUrl: SANDBOX_DEFAULTS.gatewayUrl,
+      latencyMs: 12,
     });
   });
 
-  it("wallet verification events persist the verified pubkey for visibility", async () => {
+  it("wallet verification events keep the verified pubkey in the payload", async () => {
     const pubkey = "So11111111111111111111111111111111111111112";
     const verifyMock = vi.spyOn(pcServices, "verifyPrivateChannelWallet").mockResolvedValueOnce({
       row: {
@@ -405,13 +403,13 @@ describe("Private Channels — event routes", () => {
 
     expect(res.status).toBe(200);
     const event = await getDb(env)
-      .prepare("SELECT wallets FROM private_channel_events WHERE type = ?")
+      .prepare("SELECT payload FROM private_channel_events WHERE type = ?")
       .bind(PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED)
-      .first<{ wallets: string[] }>();
-    expect(event?.wallets).toEqual([pubkey]);
+      .first<{ payload: { walletId: string; pubkey: string } }>();
+    expect(event?.payload).toEqual({ walletId: "wallet_event_test", pubkey });
   });
 
-  it("wallet revocation events persist the revoked pubkey for visibility", async () => {
+  it("wallet revocation events keep the revoked pubkey in the payload", async () => {
     const pubkey = "So11111111111111111111111111111111111111113";
     const deleteMock = vi.spyOn(pcServices, "deletePrivateChannelWallet").mockResolvedValueOnce({
       instance: {
@@ -435,10 +433,10 @@ describe("Private Channels — event routes", () => {
 
     expect(res.status).toBe(200);
     const event = await getDb(env)
-      .prepare("SELECT wallets FROM private_channel_events WHERE type = ?")
+      .prepare("SELECT payload FROM private_channel_events WHERE type = ?")
       .bind(PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED)
-      .first<{ wallets: string[] }>();
-    expect(event?.wallets).toEqual([pubkey]);
+      .first<{ payload: { pubkey: string } }>();
+    expect(event?.payload).toEqual({ pubkey });
   });
 
   it("does not emit a wallet revocation event when no verification was deleted", async () => {

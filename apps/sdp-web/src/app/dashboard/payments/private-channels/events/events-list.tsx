@@ -91,25 +91,15 @@ function amountFrom(t: Translate, amount: string | undefined, counterparty: stri
     : undefined;
 }
 
-function depositSummary(
+/** Deposits and withdrawals move funds across the channel boundary in one direction. */
+function movementSummary(
   t: Translate,
   summary: PrivateChannelEventSummary,
   amount: string | undefined
 ): string | undefined {
   return (
     amountTo(t, amount, shortValue(summary.recipient)) ??
-    amountFrom(t, amount, shortValue(summary.depositor))
-  );
-}
-
-function withdrawalSummary(
-  t: Translate,
-  summary: PrivateChannelEventSummary,
-  amount: string | undefined
-): string | undefined {
-  return (
-    amountTo(t, amount, shortValue(summary.destination)) ??
-    amountFrom(t, amount, shortValue(summary.owner))
+    amountFrom(t, amount, shortValue(summary.sender))
   );
 }
 
@@ -130,7 +120,7 @@ function transferSummary(
   if (sender && recipient) {
     return t("DashboardPrivateChannels.events.summaryDirection", { sender, recipient });
   }
-  return amountTo(t, amount, recipient ?? shortValue(summary.destination));
+  return amountTo(t, amount, recipient);
 }
 
 function formatRowSummary(
@@ -140,8 +130,9 @@ function formatRowSummary(
 ): string {
   const amount = rowAmount(summary, locale);
   const directionalSummary =
-    (summary.kind === "deposit" ? depositSummary(t, summary, amount) : undefined) ??
-    (summary.kind === "withdrawal" ? withdrawalSummary(t, summary, amount) : undefined) ??
+    (summary.kind === "deposit" || summary.kind === "withdrawal"
+      ? movementSummary(t, summary, amount)
+      : undefined) ??
     (summary.kind === "transfer" ? transferSummary(t, summary, amount) : undefined);
   if (directionalSummary) return directionalSummary;
 

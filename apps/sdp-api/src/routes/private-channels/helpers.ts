@@ -37,7 +37,6 @@ export function emitLifecycle(
   extra?: {
     channelId?: string | null;
     payload?: Record<string, unknown>;
-    wallets?: string[];
   }
 ): Promise<void> {
   return getPrivateChannelEventService(c).emit({
@@ -50,7 +49,6 @@ export function emitLifecycle(
     type,
     status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
     payload: extra?.payload ?? {},
-    wallets: extra?.wallets,
   });
 }
 
@@ -73,7 +71,6 @@ export function emitMember(
   extra?: {
     channelId?: string | null;
     payload?: Record<string, unknown>;
-    wallets?: string[];
   }
 ): Promise<void> {
   return getPrivateChannelEventService(c).emit({
@@ -86,7 +83,6 @@ export function emitMember(
     type,
     status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
     payload: extra?.payload ?? {},
-    wallets: extra?.wallets,
   });
 }
 

@@ -33,7 +33,6 @@ function baseEvent(
     type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_CHANNEL_CREATED,
     status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
     payload: { name: "Treasury" },
-    wallets: [],
     occurredAt: now,
     createdAt: now,
     ...overrides,
@@ -106,7 +105,6 @@ describe("PrivateChannelEventRepository (postgres)", () => {
         occurredAt: "2026-02-01T00:00:00.000Z",
         type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_CHANNEL_ARCHIVED,
         payload: { name: "Default" },
-        wallets: ["wallet-new"],
       })
     );
 
@@ -118,15 +116,21 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     expect(hasMore).toBe(false);
     expect(rows.map((r) => r.id)).toEqual([newer.id, older.id]);
     expect(rows[0]?.payload).toEqual({ name: "Default" });
-    expect(rows[0]?.wallets).toEqual(["wallet-new"]);
   });
 
-  it("includes instance-level events (channel_id null) in the channel feed", async () => {
+  it("includes instance-level events but excludes channel-less transfers from channel feeds", async () => {
     await repo.insert(
       baseEvent({
         channelId: null,
         type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_CONNECTED,
         payload: { gatewayUrl: "http://gw" },
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        channelId: null,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
       })
     );
     const { rows } = await repo.listByChannel({
@@ -173,79 +177,119 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     expect(byType.rows).toHaveLength(1);
   });
 
-  it("filters channel events by wallet overlap without leaking empty-wallet instance events", async () => {
-    await repo.insert(baseEvent({ id: "pce_wallet_match", wallets: ["wallet-a", "wallet-b"] }));
-    await repo.insert(baseEvent({ id: "pce_wallet_other", wallets: ["wallet-c"] }));
+  it("keeps lifecycle and self-authored instance events in a member's channel feed", async () => {
+    await repo.insert(baseEvent({ id: "pce_member_channel" }));
     await repo.insert(
       baseEvent({
-        id: "pce_wallet_empty",
+        id: "pce_instance_level",
         channelId: null,
         type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_CONNECTED,
-        wallets: [],
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_own_wallet",
+        channelId: null,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_other_wallet",
+        channelId: null,
+        sdpUserId: "usr_other",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
       })
     );
 
     const { rows } = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
-      wallets: ["wallet-b"],
+      viewerUserId: TEST_USER.id,
       limit: 10,
     });
 
-    expect(rows.map((row) => row.id)).toEqual(["pce_wallet_match"]);
+    expect(rows.map((row) => row.id).sort()).toEqual(
+      ["pce_member_channel", "pce_instance_level", "pce_own_wallet"].sort()
+    );
   });
 
-  it("filters project events by wallet overlap and empty filters match no rows", async () => {
-    await repo.insert(baseEvent({ id: "pce_project_wallet_match", wallets: ["wallet-a"] }));
-    await repo.insert(baseEvent({ id: "pce_project_wallet_other", wallets: ["wallet-b"] }));
-    await repo.insert(baseEvent({ id: "pce_project_wallet_empty", wallets: [] }));
-
-    const matching = await repo.listByProject({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      wallets: ["wallet-a"],
-      limit: 10,
-    });
-    expect(matching.rows.map((row) => row.id)).toEqual(["pce_project_wallet_match"]);
-
-    const empty = await repo.listByProject({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      wallets: [],
-      limit: 10,
-    });
-    expect(empty.rows).toEqual([]);
-  });
-
-  it("includes viewer-authored events after the associated wallet is revoked", async () => {
+  it("shows a member's channel events, lifecycle, and their own channel-less transfers", async () => {
+    await repo.insert(baseEvent({ id: "pce_member_channel" }));
     await repo.insert(
       baseEvent({
-        id: "pce_viewer_authored",
-        sdpUserId: TEST_USER.id,
-        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
-        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED,
-        wallets: ["wallet-revoked"],
+        id: "pce_other_channel",
+        channelId: "pch_other",
       })
     );
     await repo.insert(
       baseEvent({
-        id: "pce_other_authored",
+        id: "pce_own_transfer",
+        channelId: null,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+        sdpUserId: TEST_USER.id,
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_other_transfer",
+        channelId: null,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
         sdpUserId: "usr_other",
-        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
-        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED,
-        wallets: ["wallet-other"],
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_instance_level",
+        channelId: null,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_CONNECTED,
       })
     );
 
     const { rows } = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      wallets: [],
-      viewerUserId: TEST_USER.id,
+      viewer: { channelIds: [TEST_CHANNEL_ID], userId: TEST_USER.id },
       limit: 10,
     });
 
-    expect(rows.map((row) => row.id)).toEqual(["pce_viewer_authored"]);
+    expect(rows.map((row) => row.id).sort()).toEqual(
+      ["pce_member_channel", "pce_own_transfer", "pce_instance_level"].sort()
+    );
+  });
+
+  it("keeps authored channel-less events visible after the member leaves every channel", async () => {
+    await repo.insert(
+      baseEvent({
+        id: "pce_authored_member_event",
+        channelId: null,
+        sdpUserId: TEST_USER.id,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED,
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_other_member_event",
+        channelId: null,
+        sdpUserId: "usr_other",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED,
+      })
+    );
+
+    const { rows } = await repo.listByProject({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      viewer: { channelIds: [], userId: TEST_USER.id },
+      limit: 10,
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["pce_authored_member_event"]);
   });
 
   it("filters channel and project feeds by exact status", async () => {

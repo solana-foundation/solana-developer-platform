@@ -40,7 +40,7 @@ describe("summarizePrivateChannelEvent", () => {
       type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_DEPOSIT_SETTLED,
       payload: {
         depositId: "pcd_deposit",
-        depositor: SENDER,
+        sender: SENDER,
         recipient: RECIPIENT,
         amount: "3.25",
         mint: MINT,
@@ -51,8 +51,8 @@ describe("summarizePrivateChannelEvent", () => {
       type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_WITHDRAWAL_FAILED,
       payload: {
         withdrawalId: "pcw_withdrawal",
-        owner: SENDER,
-        destination: RECIPIENT,
+        sender: SENDER,
+        recipient: RECIPIENT,
         amount: "1.75",
         mint: MINT,
         failureReason: "Release transaction expired",
@@ -61,14 +61,14 @@ describe("summarizePrivateChannelEvent", () => {
 
     expect(deposit).toMatchObject({
       kind: "deposit",
-      depositor: SENDER,
+      sender: SENDER,
       recipient: RECIPIENT,
       ids: { depositId: "pcd_deposit" },
     });
     expect(withdrawal).toMatchObject({
       kind: "withdrawal",
-      owner: SENDER,
-      destination: RECIPIENT,
+      sender: SENDER,
+      recipient: RECIPIENT,
       reason: "Release transaction expired",
       ids: { withdrawalId: "pcw_withdrawal" },
     });
@@ -83,7 +83,7 @@ describe("summarizePrivateChannelEvent", () => {
     const channel = summarizePrivateChannelEvent({
       family: PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE,
       type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_CHANNEL_CREATED,
-      payload: { channelId: "channel_1", name: "Treasury" },
+      payload: { name: "Treasury" },
     });
 
     expect(wallet).toEqual({
@@ -94,7 +94,7 @@ describe("summarizePrivateChannelEvent", () => {
     expect(channel).toEqual({
       kind: "channel",
       channelName: "Treasury",
-      ids: { channelId: "channel_1" },
+      ids: {},
     });
   });
 
@@ -103,7 +103,6 @@ describe("summarizePrivateChannelEvent", () => {
       family: PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE,
       type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_CONNECTED,
       payload: {
-        instanceId: "pci_instance",
         gatewayUrl: "https://gateway.example",
         latencyMs: 42,
       },
@@ -114,7 +113,6 @@ describe("summarizePrivateChannelEvent", () => {
       payload: {
         reason: "Gateway timed out",
         message: "Lower-priority fallback",
-        attempt: 2,
       },
     });
 
@@ -122,12 +120,11 @@ describe("summarizePrivateChannelEvent", () => {
       kind: "instance",
       gatewayUrl: "https://gateway.example",
       latencyMs: "42",
-      ids: { instanceId: "pci_instance" },
+      ids: {},
     });
     expect(error).toEqual({
       kind: "error",
       reason: "Gateway timed out",
-      attempt: "2",
       ids: {},
     });
   });
@@ -164,14 +161,12 @@ describe("summarizePrivateChannelEvent", () => {
         transferId: 456,
         signature: 789,
         latencyMs: 42,
-        attempt: 2,
       },
     });
 
     expect(malformed).toEqual({
       kind: "transfer",
       latencyMs: "42",
-      attempt: "2",
       ids: {},
     });
   });

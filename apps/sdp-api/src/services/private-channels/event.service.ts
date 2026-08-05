@@ -27,7 +27,6 @@ export interface PrivateChannelEventInput {
   type: PrivateChannelEventType;
   status: PrivateChannelEventStatus;
   payload?: Record<string, unknown>;
-  wallets?: string[];
   /** Defaults to now. */
   occurredAt?: string;
 }
@@ -57,9 +56,6 @@ function normalizeError(error: unknown): Record<string, unknown> {
 function toRecord(input: PrivateChannelEventInput): PrivateChannelEventRecord {
   const now = isoNow();
   const payload = redactCredentialSecrets(input.payload ?? {}) as Record<string, unknown>;
-  const wallets = [
-    ...new Set((input.wallets ?? []).map((wallet) => wallet.trim()).filter(Boolean)),
-  ];
   return {
     id: generatePrivateChannelEventId(),
     organizationId: input.organizationId,
@@ -71,7 +67,6 @@ function toRecord(input: PrivateChannelEventInput): PrivateChannelEventRecord {
     type: input.type,
     status: input.status,
     payload,
-    wallets,
     occurredAt: input.occurredAt ?? now,
     createdAt: now,
   };

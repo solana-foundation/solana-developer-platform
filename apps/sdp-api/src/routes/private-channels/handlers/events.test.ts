@@ -9,7 +9,6 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPrivateChannelEventRepository } from "@/db/repositories/private-channel-event.repository.postgres";
-import { createPostgresPrivateChannelVerifiedWalletRepository } from "@/db/repositories/private-channel-verified-wallet.repository.postgres";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
@@ -22,7 +21,7 @@ const NON_MEMBER_USER_ID = "usr_event_handler_non_member";
 const PRIVATE_CHANNEL_USER_ID = "pcu_event_handler_test";
 const INSTANCE_ID = "pci_event_handler_test";
 const CHANNEL_ID = "pch_event_handler_test";
-const VERIFIED_WALLET = "wallet-a";
+const OTHER_CHANNEL_ID = "pch_event_handler_other";
 const NOW = "2026-07-30T12:00:00.000Z";
 
 function buildApp(userId: string, permissions: CachedSession["permissions"] = ["payments:read"]) {
@@ -42,6 +41,25 @@ function buildApp(userId: string, permissions: CachedSession["permissions"] = ["
   });
   app.get("/events", listProjectEvents);
   app.get("/channels/:id/events", listChannelEvents);
+  return app;
+}
+
+function buildApiKeyApp() {
+  const app = new Hono<{ Bindings: Env }>();
+  app.use("*", async (c, next) => {
+    c.set("apiKey", {
+      id: "key_event_handler_test",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      role: "api_admin",
+      permissions: ["*"],
+      environment: "sandbox",
+      signingWalletId: null,
+    });
+    c.set("projectId", PROJECT_ID);
+    await next();
+  });
+  app.get("/events", listProjectEvents);
   return app;
 }
 
@@ -91,20 +109,27 @@ describe("Private Channels event handlers", () => {
       .run();
     await db
       .prepare(
+        `INSERT INTO private_channels
+           (id, organization_id, project_id, instance_id, name, is_default, status)
+         VALUES (?, ?, ?, ?, 'Other', false, 'active')`
+      )
+      .bind(OTHER_CHANNEL_ID, ORGANIZATION_ID, PROJECT_ID, INSTANCE_ID)
+      .run();
+    await db
+      .prepare(
         `INSERT INTO private_channel_users (id, organization_id, project_id, user_id)
          VALUES (?, ?, ?, ?)`
       )
       .bind(PRIVATE_CHANNEL_USER_ID, ORGANIZATION_ID, PROJECT_ID, USER_ID)
       .run();
-
-    await createPostgresPrivateChannelVerifiedWalletRepository(db).upsert({
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      userId: PRIVATE_CHANNEL_USER_ID,
-      instanceId: INSTANCE_ID,
-      walletId: "wallet-id-a",
-      pubkey: VERIFIED_WALLET,
-    });
+    await db
+      .prepare(
+        `INSERT INTO private_channel_memberships
+           (id, channel_id, private_channel_user_id, added_by)
+         VALUES ('pcm_event_handler_test', ?, ?, ?)`
+      )
+      .bind(CHANNEL_ID, PRIVATE_CHANNEL_USER_ID, USER_ID)
+      .run();
 
     const eventRepository = createPostgresPrivateChannelEventRepository(db);
     await eventRepository.insert({
@@ -114,11 +139,10 @@ describe("Private Channels event handlers", () => {
       instanceId: INSTANCE_ID,
       channelId: CHANNEL_ID,
       sdpUserId: USER_ID,
-      family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
-      type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_CONFIRMED,
-      status: PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED,
-      payload: { amount: "12.50", signature: "sig_private" },
-      wallets: [VERIFIED_WALLET],
+      family: PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE,
+      type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_CHANNEL_CREATED,
+      status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
+      payload: { amount: "12.50", signature: "sig_private", adminOnly: "secret-value" },
       occurredAt: NOW,
       createdAt: NOW,
     });
@@ -127,13 +151,40 @@ describe("Private Channels event handlers", () => {
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
       instanceId: INSTANCE_ID,
-      channelId: CHANNEL_ID,
+      channelId: OTHER_CHANNEL_ID,
       sdpUserId: null,
       family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
       type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_CONFIRMED,
       status: PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED,
       payload: {},
-      wallets: ["wallet-b"],
+      occurredAt: NOW,
+      createdAt: NOW,
+    });
+    await eventRepository.insert({
+      id: "pce_own_transfer",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      instanceId: INSTANCE_ID,
+      channelId: null,
+      sdpUserId: USER_ID,
+      family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+      type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+      status: PRIVATE_CHANNEL_EVENT_STATUSES.PENDING,
+      payload: { senderWalletId: "wallet-id-a", sender: "wallet-a", recipient: "wallet-b" },
+      occurredAt: NOW,
+      createdAt: NOW,
+    });
+    await eventRepository.insert({
+      id: "pce_other_wallet_event",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      instanceId: INSTANCE_ID,
+      channelId: null,
+      sdpUserId: "usr_other_member",
+      family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+      type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
+      status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
+      payload: { pubkey: "other-member-pubkey", walletId: "wallet-other" },
       occurredAt: NOW,
       createdAt: NOW,
     });
@@ -148,7 +199,6 @@ describe("Private Channels event handlers", () => {
       type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_CONNECTED,
       status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
       payload: {},
-      wallets: [],
       occurredAt: NOW,
       createdAt: NOW,
     });
@@ -158,28 +208,83 @@ describe("Private Channels event handlers", () => {
     await clearTestDatabase(env);
   });
 
-  it("filters project and channel feeds to a member's verified wallets", async () => {
+  it("shows channel memberships plus authored transfers in the project feed", async () => {
     const app = buildApp(USER_ID);
 
-    for (const path of ["/events", `/channels/${CHANNEL_ID}/events`]) {
-      const res = await app.request(path, {}, env);
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
-      expect(body.data.events.map((event) => event.id)).toEqual(["pce_member_match"]);
-      expect(body.data.events[0]?.wallets).toEqual([VERIFIED_WALLET]);
-      expect(body.data.events[0]?.payload).toEqual({});
-    }
+    const projectResponse = await app.request("/events", {}, env);
+    expect(projectResponse.status).toBe(200);
+    const projectBody = (await projectResponse.json()) as {
+      data: PrivateChannelEventListEnvelope;
+    };
+    expect(projectBody.data.events.map((event) => event.id).sort()).toEqual(
+      ["pce_member_match", "pce_own_transfer", "pce_admin_lifecycle"].sort()
+    );
+    expect(
+      projectBody.data.events.find((event) => event.id === "pce_member_match")?.payload
+    ).toEqual({
+      amount: "12.50",
+      signature: "sig_private",
+    });
+    expect(
+      projectBody.data.events.find((event) => event.id === "pce_own_transfer")?.payload
+    ).toEqual({
+      senderWalletId: "wallet-id-a",
+      sender: "wallet-a",
+      recipient: "wallet-b",
+    });
+
+    const channelResponse = await app.request(`/channels/${CHANNEL_ID}/events`, {}, env);
+    expect(channelResponse.status).toBe(200);
+    const channelBody = (await channelResponse.json()) as {
+      data: PrivateChannelEventListEnvelope;
+    };
+    expect(channelBody.data.events.map((event) => event.id)).toEqual([
+      "pce_member_match",
+      "pce_admin_lifecycle",
+    ]);
   });
 
   it("returns raw payloads only to organization admins", async () => {
-    const app = buildApp(USER_ID, ["payments:read", "org:admin"]);
+    const app = buildApp(USER_ID, ["payments:read", "projects:write", "org:admin"]);
 
     const res = await app.request("/events", {}, env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
     const event = body.data.events.find((candidate) => candidate.id === "pce_member_match");
 
-    expect(event?.payload).toEqual({ amount: "12.50", signature: "sig_private" });
+    expect(event?.payload).toEqual({
+      amount: "12.50",
+      signature: "sig_private",
+      adminOnly: "secret-value",
+    });
+  });
+
+  it("hides another member's channel-less events from both feeds", async () => {
+    const app = buildApp(USER_ID);
+
+    for (const path of ["/events", `/channels/${CHANNEL_ID}/events`]) {
+      const res = await app.request(path, {}, env);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
+      expect(body.data.events.map((event) => event.id)).not.toContain("pce_other_wallet_event");
+    }
+  });
+
+  it("returns an empty channel feed when the member does not belong to that channel", async () => {
+    const res = await buildApp(USER_ID).request(`/channels/${OTHER_CHANNEL_ID}/events`, {}, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
+    expect(body.data).toEqual({ events: [], hasMore: false, nextCursor: null });
+  });
+
+  it("returns only display-safe payload fields to wildcard API keys", async () => {
+    const res = await buildApiKeyApp().request("/events", {}, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
+    expect(body.data.events.find((event) => event.id === "pce_member_match")?.payload).toEqual({
+      amount: "12.50",
+      signature: "sig_private",
+    });
   });
 
   it("returns an empty envelope when the authenticated user has no PC user", async () => {

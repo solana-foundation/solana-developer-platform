@@ -74,18 +74,13 @@ export function EventDetail({
     detailField(t("DashboardPrivateChannels.events.detailOccurredAt"), formattedOccurredAt),
     detailField(t("DashboardPrivateChannels.events.fieldAmount"), summary.amount),
     detailField(t("DashboardPrivateChannels.events.fieldMint"), summary.mint, true),
-    detailField(t("DashboardPrivateChannels.events.fieldDepositor"), summary.depositor, true),
     detailField(t("DashboardPrivateChannels.events.fieldSender"), summary.sender, true),
-    detailField(t("DashboardPrivateChannels.events.fieldOwner"), summary.owner, true),
     detailField(t("DashboardPrivateChannels.events.fieldRecipient"), summary.recipient, true),
-    detailField(t("DashboardPrivateChannels.events.fieldDestination"), summary.destination, true),
     detailField(t("DashboardPrivateChannels.events.fieldWallet"), summary.pubkey, true),
     detailField(t("DashboardPrivateChannels.events.fieldChannelName"), summary.channelName),
     detailField(t("DashboardPrivateChannels.events.fieldReason"), summary.reason),
     detailField(t("DashboardPrivateChannels.events.fieldGateway"), summary.gatewayUrl, true),
-    detailField(t("DashboardPrivateChannels.events.fieldRole"), summary.role),
     detailField(t("DashboardPrivateChannels.events.fieldLatency"), summary.latencyMs),
-    detailField(t("DashboardPrivateChannels.events.fieldAttempt"), summary.attempt),
     detailField(t("DashboardPrivateChannels.events.fieldConfirmedAt"), summary.confirmedAt),
     detailField(t("DashboardPrivateChannels.events.fieldSignature"), summary.signature, true),
     detailField(t("DashboardPrivateChannels.events.fieldDepositId"), summary.ids.depositId, true),
@@ -95,16 +90,8 @@ export function EventDetail({
       true
     ),
     detailField(t("DashboardPrivateChannels.events.fieldTransferId"), summary.ids.transferId, true),
-    detailField(
-      t("DashboardPrivateChannels.events.fieldChannelId"),
-      summary.ids.channelId ?? event.channelId,
-      true
-    ),
-    detailField(
-      t("DashboardPrivateChannels.events.fieldInstanceId"),
-      summary.ids.instanceId ?? event.instanceId,
-      true
-    ),
+    detailField(t("DashboardPrivateChannels.events.fieldChannelId"), event.channelId, true),
+    detailField(t("DashboardPrivateChannels.events.fieldInstanceId"), event.instanceId, true),
     detailField(t("DashboardPrivateChannels.events.fieldWalletId"), summary.ids.walletId, true),
     detailField(
       t("DashboardPrivateChannels.events.fieldMemberId"),

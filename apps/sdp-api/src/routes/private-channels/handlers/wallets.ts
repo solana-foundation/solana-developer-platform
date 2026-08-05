@@ -75,7 +75,6 @@ export async function verifyWallet(c: AppContext) {
       PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
       {
         payload: { walletId: row.wallet_id, pubkey: row.pubkey },
-        wallets: [row.pubkey],
       }
     );
     return success(c, { wallet: toVerifiedWalletDto(row) });
@@ -110,7 +109,7 @@ export async function deleteVerifiedWallet(c: AppContext) {
           instanceId: instance.id,
         },
         PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED,
-        { payload: { pubkey }, wallets: [pubkey] }
+        { payload: { pubkey } }
       );
     }
     return success(c, { deleted });

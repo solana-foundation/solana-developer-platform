@@ -514,7 +514,6 @@ export const privateChannelEventSchema = z
     type: privateChannelEventTypeSchema,
     status: privateChannelEventStatusSchema,
     payload: z.record(z.string(), z.unknown()),
-    wallets: z.array(solanaAddressSchema),
     occurredAt: z.string(),
     createdAt: z.string(),
   })

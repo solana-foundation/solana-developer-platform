@@ -134,38 +134,6 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     expect(await repo.listByUserAndInstance(PCU_ID, instanceB)).toHaveLength(0);
   });
 
-  it("listByProjectAndUser scopes by organization, project, and private-channel user", async () => {
-    await repo.upsert({
-      ...scope,
-      userId: PCU_ID,
-      instanceId: instanceA,
-      walletId: "wal_1",
-      pubkey: PUBKEY_A,
-    });
-    await repo.upsert({
-      ...scope,
-      userId: PCU_ID,
-      instanceId: instanceA,
-      walletId: "wal_2",
-      pubkey: PUBKEY_B,
-    });
-
-    const rows = await repo.listByProjectAndUser(scope, PCU_ID);
-    expect(rows.map((row) => row.pubkey).sort()).toEqual([PUBKEY_A, PUBKEY_B].sort());
-    expect(
-      await repo.listByProjectAndUser(
-        { organizationId: "org_other", projectId: TEST_PROJECT_ID },
-        PCU_ID
-      )
-    ).toEqual([]);
-    expect(
-      await repo.listByProjectAndUser(
-        { organizationId: TEST_ORG.id, projectId: OTHER_PROJECT_ID },
-        PCU_ID
-      )
-    ).toEqual([]);
-  });
-
   it("deleteByUserInstanceAndPubkey removes only the named pubkey; stale pubkey → false", async () => {
     await repo.upsert({
       ...scope,
