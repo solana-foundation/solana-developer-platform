@@ -72,37 +72,55 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
+  // With the connection state unreadable, no state-dependent action is honest.
+  if (detail.statusUnknown) {
+    return null;
+  }
+  if (detail.family === "custody" && detail.status === "active") {
+    return (
+      <Button asChild>
+        <DashboardNavigationLink href="/dashboard/wallets">
+          {t("Shared.integrations.ctaManage")}
+        </DashboardNavigationLink>
+      </Button>
+    );
+  }
+  if (detail.family === "custody" && detail.status === "available") {
+    return (
+      <Button asChild>
+        <DashboardNavigationLink href={`/dashboard/wallets/setup?provider=${detail.provider}`}>
+          {t("Shared.integrations.ctaConfigure")}
+        </DashboardNavigationLink>
+      </Button>
+    );
+  }
+  if (detail.requestAccessUrl) {
+    return (
+      <Button asChild>
+        <a href={detail.requestAccessUrl} target="_blank" rel="noreferrer noopener">
+          {t("Shared.integrations.ctaRequestAccess")}
+        </a>
+      </Button>
+    );
+  }
+  if (detail.family === "rpc") {
+    return (
+      <Button asChild variant="secondary">
+        <DashboardNavigationLink href="/dashboard/settings">
+          {t("Shared.integrations.rpcSectionAction")}
+        </DashboardNavigationLink>
+      </Button>
+    );
+  }
+  return null;
+}
+
 export async function IntegrationDetailView({ detail }: { detail: IntegrationDetail }) {
   const t = await getTranslations();
   const entry = detail.custodyEntry;
 
-  // With the connection state unreadable, no state-dependent action is honest.
-  const primaryAction = detail.statusUnknown ? null : detail.family === "custody" &&
-    detail.status === "active" ? (
-    <Button asChild>
-      <DashboardNavigationLink href="/dashboard/wallets">
-        {t("Shared.integrations.ctaManage")}
-      </DashboardNavigationLink>
-    </Button>
-  ) : detail.family === "custody" && detail.status === "available" ? (
-    <Button asChild>
-      <DashboardNavigationLink href={`/dashboard/wallets/setup?provider=${detail.provider}`}>
-        {t("Shared.integrations.ctaConfigure")}
-      </DashboardNavigationLink>
-    </Button>
-  ) : detail.requestAccessUrl ? (
-    <Button asChild>
-      <a href={detail.requestAccessUrl} target="_blank" rel="noreferrer noopener">
-        {t("Shared.integrations.ctaRequestAccess")}
-      </a>
-    </Button>
-  ) : detail.family === "rpc" ? (
-    <Button asChild variant="secondary">
-      <DashboardNavigationLink href="/dashboard/settings">
-        {t("Shared.integrations.rpcSectionAction")}
-      </DashboardNavigationLink>
-    </Button>
-  ) : null;
+  const primaryAction = resolvePrimaryAction(detail, t);
 
   return (
     <div className="w-full space-y-6 px-4 py-6 md:px-6" data-integration-detail={detail.provider}>
