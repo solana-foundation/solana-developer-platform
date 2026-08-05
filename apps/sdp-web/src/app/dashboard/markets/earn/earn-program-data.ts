@@ -5,6 +5,7 @@ import type {
   EarnPortfolioDepositsPage,
   EarnPortfolioToken,
   EarnPortfolioWalletSnapshot,
+  EarnPortfolioWalletStatus,
   EarnPortfolioWithdrawal,
   EarnPortfolioWithdrawalPreview,
   EarnPortfolioYield,
@@ -12,7 +13,10 @@ import type {
   EarnStrategy,
   ListEarnStrategiesResponse,
 } from "@sdp/types";
+import { useEffect, useRef } from "react";
+import { toast } from "sonner";
 import useSWR from "swr";
+import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 
 /**
@@ -75,24 +79,95 @@ async function fetchEarnProgramState(): Promise<EarnProgramState> {
   return { kind: "active", program: body.data.program };
 }
 
-export interface UseEarnProgramOptions {
-  /**
-   * Poll while the shared wallet is still provisioning so screens waiting on
-   * the deposit address (the funding step) advance without a manual refresh.
-   */
-  refreshWhileCreating?: boolean;
+/**
+ * Poll cadence per wallet status — a property of the WALLET, never of the
+ * caller. Every surface reads the same live provider snapshot, and none of
+ * them wants a state that stops converging: `creating` blocks the funding step
+ * on a deposit address that does not exist yet, and `busy` means the provider
+ * is mid-withdrawal or mid-rebalance, so the figures on screen are already
+ * out of date. `ready` and `failed` are absent (⇒ 0): a settled program and a
+ * terminal failure issue no extra provider reads.
+ *
+ * Ground is hit live on every program read, so `busy` is deliberately slower
+ * than `creating`: against a ~40s observed settle the reader loses nothing
+ * perceptible and the provider takes a quarter of the requests.
+ */
+const WALLET_POLL_MS: Partial<Record<EarnPortfolioWalletStatus, number>> = {
+  creating: 4_000,
+  busy: 10_000,
+};
+
+/**
+ * Poll cadence for a given program read; 0 means stop. Exported so the rule is
+ * assertable — a browser cannot prove it, because SWR suspends the interval
+ * whenever the tab is hidden.
+ */
+export function earnProgramRefreshInterval(state: EarnProgramState | undefined): number {
+  return state?.kind === "active" ? (WALLET_POLL_MS[state.program.wallet.status] ?? 0) : 0;
 }
 
-export function useEarnProgram(options: UseEarnProgramOptions = {}) {
+/**
+ * Dedupe window for the program read. MUST stay below every cadence in
+ * `WALLET_POLL_MS`: the dashboard-wide default (`DASHBOARD_SWR_CONFIG`) is
+ * 10s, which is the busy cadence itself, and a poll landing inside its own
+ * dedupe window is dropped — freezing the status exactly while it moves.
+ */
+export const EARN_PROGRAM_DEDUPING_MS = 2_000;
+
+/**
+ * Announce a provider operation FINISHING, once, from observed truth.
+ *
+ * The provider is the only authority on whether the money moved, so this
+ * watches the polled wallet for a `busy → settled` transition rather than
+ * reacting to what the user submitted: a withdrawal that fails still tells the
+ * truth, and a rebalance the provider started by itself is announced the same
+ * way. What completed is named from the activity observed BEFORE the
+ * transition, since the provider drops it once the wallet settles.
+ *
+ * Never fires on first observation — a program that is already busy when the
+ * page opens is a state, not an event — and only from the ONE caller that owns
+ * the surface, since the hook it observes runs in several components.
+ */
+export function useEarnWalletActivityToasts(state: EarnProgramState | undefined) {
+  const t = useTranslations();
+  const previous = useRef<EarnPortfolioWalletSnapshot | undefined>(undefined);
+
+  useEffect(() => {
+    const wallet = state?.kind === "active" ? state.program.wallet : undefined;
+    const before = previous.current;
+    previous.current = wallet;
+
+    // Nothing to compare against yet, or the wallet was never busy, or it is
+    // still busy — no completion has been observed.
+    if (!before || !wallet || before.status !== "busy" || wallet.status === "busy") {
+      return;
+    }
+    if (wallet.status === "failed") {
+      toast.error(t("DashboardEarn.overview.activityFailed"));
+      return;
+    }
+    toast.success(
+      t(
+        before.activity === "withdrawing"
+          ? "DashboardEarn.overview.activityWithdrawalComplete"
+          : before.activity === "rebalancing"
+            ? "DashboardEarn.overview.activityRebalanceComplete"
+            : // A busy state this build does not recognize still completed;
+              // say so without claiming which operation it was.
+              "DashboardEarn.overview.activityComplete"
+      )
+    );
+  }, [state, t]);
+}
+
+export function useEarnProgram() {
   const { data, error, isLoading, mutate } = useSWR(
     "dashboard-earn-program",
     () => fetchEarnProgramState(),
-    options.refreshWhileCreating
-      ? {
-          refreshInterval: (state) =>
-            state?.kind === "active" && state.program.wallet.status === "creating" ? 4_000 : 0,
-        }
-      : undefined
+    {
+      refreshInterval: earnProgramRefreshInterval,
+      dedupingInterval: EARN_PROGRAM_DEDUPING_MS,
+    }
   );
   return { state: data, error, isLoading, refresh: () => void mutate() };
 }

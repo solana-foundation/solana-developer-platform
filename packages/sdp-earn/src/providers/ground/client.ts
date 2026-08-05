@@ -12,6 +12,7 @@ import {
   type EarnPortfolioProcessingEstimate,
   type EarnPortfolioTargetAllocations,
   type EarnPortfolioToken,
+  type EarnPortfolioWalletActivity,
   type EarnPortfolioWalletSnapshot,
   type EarnPortfolioWalletStatus,
   type EarnPortfolioWithdrawal,
@@ -531,18 +532,38 @@ export function distillGroundYieldSource(
   };
 }
 
-const WALLET_STATUS_BY_GROUND_STATUS: Record<string, EarnPortfolioWalletStatus> = {
-  creating: "creating",
-  idle: "ready",
-  withdrawal_active: "busy",
-  rebalance_active: "busy",
-  withdrawal_and_rebalance_active: "busy",
-  failed: "failed",
+/**
+ * THE mapping from Ground's wallet vocabulary to SDP's — the only place in the
+ * platform that knows these strings. Each entry carries both facts a consumer
+ * needs: whether the wallet can take a mutation (`status`) and, when it is
+ * busy, what it is doing (`activity`). Keeping them in one table is what stops
+ * a second copy of Ground's vocabulary appearing in a UI that wants to name the
+ * operation.
+ */
+const WALLET_STATE_BY_GROUND_STATUS: Record<
+  string,
+  { status: EarnPortfolioWalletStatus; activity?: EarnPortfolioWalletActivity }
+> = {
+  creating: { status: "creating" },
+  idle: { status: "ready" },
+  withdrawal_active: { status: "busy", activity: "withdrawing" },
+  rebalance_active: { status: "busy", activity: "rebalancing" },
+  // The withdrawal is the fact a reader is waiting on; a concurrent rebalance
+  // is provider housekeeping that implies nothing for them to do.
+  withdrawal_and_rebalance_active: { status: "busy", activity: "withdrawing" },
+  failed: { status: "failed" },
 };
 
-/** Unknown statuses read as `busy`: funds stay visible, mutations wait. */
-function normalizeWalletStatus(status: string): EarnPortfolioWalletStatus {
-  return WALLET_STATUS_BY_GROUND_STATUS[status] ?? "busy";
+/**
+ * Unknown statuses read as `busy` with NO activity: funds stay visible,
+ * mutations wait, and nothing claims to know what a status this build has
+ * never seen actually means.
+ */
+function normalizeWalletState(status: string): {
+  status: EarnPortfolioWalletStatus;
+  activity?: EarnPortfolioWalletActivity;
+} {
+  return WALLET_STATE_BY_GROUND_STATUS[status] ?? { status: "busy" };
 }
 
 /**
@@ -766,7 +787,7 @@ export class GroundEarnClient
         strategy: { allocations: input.allocations },
       },
     });
-    return { providerWalletRef: wallet.id, status: normalizeWalletStatus(wallet.status) };
+    return { providerWalletRef: wallet.id, status: normalizeWalletState(wallet.status).status };
   }
 
   async getPortfolioYield(
@@ -806,7 +827,7 @@ export class GroundEarnClient
     );
     return {
       providerWalletRef: wallet.id,
-      status: normalizeWalletStatus(wallet.status),
+      ...normalizeWalletState(wallet.status),
       providerStatus: wallet.status,
       // Solana-only mandate: of Ground's multi-chain funding addresses, SDP
       // surfaces exactly the one on this environment's Solana rail.

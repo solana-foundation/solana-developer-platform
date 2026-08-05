@@ -505,6 +505,44 @@ describe("GroundEarnClient.getPortfolioWallet", () => {
     assert.equal(snapshot.solanaDepositAddress, "So1anaMainnetDepositAddr");
   });
 
+  // The provider is the source of truth for what is happening to the money.
+  // Consumers read the neutral `activity`, so this table is the ONE place
+  // Ground's vocabulary is interpreted — a UI must never re-derive it.
+  it("names the operation behind every busy status, and never guesses on an unknown one", async () => {
+    const observed: Array<{ status: string; activity: string | undefined }> = [];
+    for (const providerStatus of [
+      "idle",
+      "creating",
+      "withdrawal_active",
+      "rebalance_active",
+      "withdrawal_and_rebalance_active",
+      "failed",
+      // Ground adds a status this build has never seen.
+      "some_future_state",
+    ]) {
+      mock.restoreAll();
+      stubGroundFetch({ body: groundWallet({ status: providerStatus }) });
+      const snapshot = await client.getPortfolioWallet(sandboxCtx, {
+        providerWalletRef: "wal_1",
+      });
+      assert.equal(snapshot.providerStatus, providerStatus, "raw status is always relayed");
+      observed.push({ status: snapshot.status, activity: snapshot.activity });
+    }
+
+    assert.deepEqual(observed, [
+      { status: "ready", activity: undefined },
+      { status: "creating", activity: undefined },
+      { status: "busy", activity: "withdrawing" },
+      { status: "busy", activity: "rebalancing" },
+      // A concurrent rebalance never masks the withdrawal the reader waits on.
+      { status: "busy", activity: "withdrawing" },
+      { status: "failed", activity: undefined },
+      // Unknown ⇒ busy so funds stay visible and mutations wait, but NO
+      // activity: nothing may claim to know what an unseen status means.
+      { status: "busy", activity: undefined },
+    ]);
+  });
+
   // ADR 0002 invariant 5: no other chain's rails may reach a wire type or the
   // UI. Ground names non-yield positions after the chain the value sits on, so
   // these labels are synthesized rather than passed through. Payload shapes here
