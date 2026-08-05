@@ -218,6 +218,10 @@ export const upsertEarnProgram = async (c: AppContext) => {
     await client.updatePortfolioStrategy(earnRuntime(c), {
       providerWalletRef: row.provider_wallet_ref,
       allocations: body.allocations,
+      // Forwarded so a double-submitted confirm re-applies the SAME strategy
+      // change instead of firing two independent provider mutations. Absent
+      // means the client accepted non-idempotent behaviour (see the schema).
+      requestId: body.requestId,
     });
   } else {
     if (!auth.projectId) {
@@ -226,6 +230,10 @@ export const upsertEarnProgram = async (c: AppContext) => {
     const createdWallet = await client.createPortfolioWallet(earnRuntime(c), {
       label: body.label ?? `sdp-earn-${auth.organizationId}-${environment}`,
       allocations: body.allocations,
+      // Same key on the create branch: without it a retried first PUT can
+      // provision a second provider wallet that the unique constraint then
+      // orphans.
+      requestId: body.requestId,
     });
 
     try {

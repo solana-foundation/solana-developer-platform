@@ -101,6 +101,13 @@ export interface EarnProgramUpsertInput {
   /** Weights per token group, keyed to provider yield-source ids. */
   allocations: EarnPortfolioAllocationInput;
   label?: string;
+  /**
+   * Client-minted UUIDv4 so a retried confirm can neither provision a second
+   * provider wallet nor apply the same strategy change twice. Must be re-minted
+   * whenever `allocations` changes — the provider conflicts on a reused key with
+   * a different payload.
+   */
+  requestId?: string;
 }
 
 export interface EarnProgramUpsertResult {
@@ -140,14 +147,41 @@ export function useEarnProgramDeposits(options: { enabled?: boolean } = {}) {
   return { page: data, error, isLoading };
 }
 
-async function fetchEarnStrategies(): Promise<EarnStrategy[]> {
-  const { status, body } = await requestJson<{ data: ListEarnStrategiesResponse }>(
-    "/api/dashboard/markets/earn/strategies?pageSize=100"
-  );
-  if (status < 200 || status >= 300 || !body) {
-    throw new Error(errorMessage(body, status));
+/** The API caps pageSize at 100, so a full catalogue needs paging. */
+const STRATEGY_PAGE_SIZE = 100;
+
+/**
+ * Hard stop on the paging loop. The catalogue is a synced provider list in the
+ * low tens, so this only exists so a bad `total` can never spin forever.
+ */
+const STRATEGY_PAGE_LIMIT = 20;
+
+/**
+ * The whole active catalogue. The list endpoint has no provider filter and
+ * offers no sort control, so callers filter and order client-side — which only
+ * works if every page is actually fetched. Requesting one page of 100 silently
+ * dropped everything past it once a second provider synced.
+ */
+export async function fetchEarnStrategies(): Promise<EarnStrategy[]> {
+  const strategies: EarnStrategy[] = [];
+
+  for (let page = 1; page <= STRATEGY_PAGE_LIMIT; page += 1) {
+    const { status, body } = await requestJson<{ data: ListEarnStrategiesResponse }>(
+      `/api/dashboard/markets/earn/strategies?page=${page}&pageSize=${STRATEGY_PAGE_SIZE}`
+    );
+    if (status < 200 || status >= 300 || !body) {
+      throw new Error(errorMessage(body, status));
+    }
+
+    strategies.push(...body.data.strategies);
+    // Stop on a short page as well as on the reported total: either one alone
+    // can be wrong, and agreeing on "done" beats trusting one of them.
+    if (body.data.strategies.length < STRATEGY_PAGE_SIZE || strategies.length >= body.data.total) {
+      break;
+    }
   }
-  return body.data.strategies;
+
+  return strategies;
 }
 
 export function useEarnStrategies() {
