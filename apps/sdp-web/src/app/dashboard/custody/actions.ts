@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigsResponse } from "@sdp/types";
+import type { CustodyConfigsResponse, InitializeSigningResponse } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
@@ -130,7 +130,14 @@ export async function initializeCustody(formData: FormData) {
   redirect("/dashboard/wallets");
 }
 
-async function initializeCustodyWallet(formData: FormData) {
+/**
+ * Returns the wallet the call provisioned so callers can show it. Onboarding
+ * previously discarded this and left the user with no evidence of what setup
+ * created for them.
+ */
+async function initializeCustodyWallet(
+  formData: FormData
+): Promise<InitializeSigningResponse | null> {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -167,7 +174,7 @@ async function initializeCustodyWallet(formData: FormData) {
   const client = await createSdpApiClient();
 
   try {
-    await client.fetch("/v1/wallets/initialize", {
+    return await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -187,12 +194,14 @@ async function initializeCustodyWallet(formData: FormData) {
       );
 
       if (readyConfiguration) {
-        return;
+        // Already provisioned by an earlier attempt; the address is on the
+        // configuration rather than in a response we can return here.
+        return null;
       }
 
       // Repair a provider connection whose first wallet did not finish
       // persisting instead of leaving the organization trapped in onboarding.
-      await client.fetch("/v1/wallets", {
+      return await client.fetch<InitializeSigningResponse>("/v1/wallets", {
         method: "POST",
         body: JSON.stringify({
           provider,
@@ -240,6 +249,22 @@ async function createCustodyWalletForProvider(formData: FormData) {
   });
 }
 
+/** A provisioned wallet is `null` when an earlier attempt had already created it. */
+export interface OnboardingProvisionedWallet {
+  publicKey: string;
+  walletId: string;
+}
+
+export type OnboardingCustodyActionResult =
+  | {
+      status: "success";
+      wallet: OnboardingProvisionedWallet | null;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
 export type WalletSetupActionResult =
   | {
       status: "success";
@@ -267,12 +292,15 @@ export async function initializeCustodySetupAction(
 
 export async function initializeOnboardingCustodyAction(
   formData: FormData
-): Promise<WalletSetupActionResult> {
+): Promise<OnboardingCustodyActionResult> {
   const t = await getTranslations();
   try {
-    await initializeCustodyWallet(formData);
+    const wallet = await initializeCustodyWallet(formData);
     revalidateWalletPaths();
-    return { status: "success" };
+    return {
+      status: "success",
+      wallet: wallet ? { publicKey: wallet.publicKey, walletId: wallet.walletId } : null,
+    };
   } catch (error) {
     return {
       status: "error",
