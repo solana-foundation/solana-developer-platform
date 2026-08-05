@@ -255,6 +255,17 @@ function redeemLiquidity(
   return { liquidityTerm: "delayed", redemptionDelayDays };
 }
 
+/**
+ * Allocation types that mark a sleeve as real-world assets.
+ *
+ * Observed against the live sandbox catalogue (18 sources, 2026-08-04), the only
+ * `type` values Ground actually emits are `market`, `liquidity`, `loan`,
+ * `reserve`, `rwa` and `treasury`. Of those exactly two are RWA and both already
+ * match: the Janus Henderson vaults report `rwa` and the Superstate/treasury
+ * vaults report `treasury`. Everything else is genuinely DeFi. The extra
+ * alternatives below are kept for values Ground documents but has not emitted
+ * here; do not add more on speculation — check what the API returns first.
+ */
 const RWA_ALLOCATION_TYPE = /treasur|t.?bill|clo|rwa|bond|credit|note/i;
 
 /**

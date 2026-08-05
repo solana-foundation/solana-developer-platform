@@ -10,22 +10,145 @@ reintroduce fixture modules. Data flows: BFF proxies
   whole Markets module the same way. Pages hold no flag checks — add new Earn
   routes under this segment and they inherit both gates.
 - `earn-workspace.tsx` — overview: portfolio stat strip (total / earned /
-  withdrawable), positions grouped by curator (compact disclosure rows),
-  curator-grid onboarding hero (only when no program exists), withdraw entry.
+  withdrawable / APY), a FLAT value-ordered holdings list (deployed slices
+  first, cash last), a copyable deposit-address row (the funding loop without
+  re-walking the wizard), and a catalogue-fact onboarding hero. The hero renders
+  ONLY once the program read RESOLVES to none/unconfigured — `undefined` is
+  in-flight, and rendering on it flashed onboarding at program holders. Cash
+  rows explain themselves from the target allocations (lane → strategy: deploys
+  on rebalance; lane → cash: parked by design — Ground never converts between
+  stablecoins). A share percent renders only when value sits behind it.
+  Deliberately **not** grouped by curator — see "One strategy, no curator step"
+  below.
 - `earn-program-data.ts` — THE data seam. `useEarnProgram()` discriminates
   `404 → none`, `503 → unconfigured` (no provider key), `200 → active`;
   `useEarnStrategies()`, program upsert, deposits, withdrawal fetchers.
   `EARN_PORTFOLIO_PROVIDER` is the single deliberate Ground pin — widening to
   multi-provider selection happens HERE, not by scattering provider ids.
-- `earn-program-presentation.ts` — pure presentation helpers over live
-  `EarnStrategy[]` (curator grouping, APY ranges, monograms, profile copy).
-- `earn-withdraw-modal.tsx` — portfolio-level withdrawal: amount + token +
-  Solana destination; preview → confirm → submitted state.
-- `deposit/` — wizard: curator (live catalogue) → allocation (per-token weight
-  editors, 0.1 grid, sum 100) → review (create vs update copy — the org has ONE
-  shared wallet) → funding screen (program status polling, Solana deposit
-  address, live deposits feed).
+  `fetchEarnStrategies()` **pages** the catalogue: the API caps `pageSize` at
+  100 and has no provider filter, so a single request silently dropped every
+  strategy past the first page. It stops on a short page OR the reported total,
+  with a hard page cap — keep all three.
+- `earn-program-presentation.ts` — pure per-strategy helpers shared by every
+  surface: token lane, settlement days, pool size, APY, curator/protocol labels,
+  liquidity copy. Every one reads a field the provider actually publishes.
+- `earn-withdraw-modal.tsx` — portfolio-level withdrawal: stablecoin FIRST
+  (it scopes everything below), then amount + Solana destination; preview →
+  confirm → submitted state. The token always defaults to USDC — the one
+  stablecoin Ground pays out on Solana. Every figure the modal quotes
+  (available line, Max, amount validation, per-option amounts) is scoped to the
+  SELECTED token via `withdrawLanes()` in `earn-program-presentation.ts`,
+  because `withdrawableUsd` is wallet-level while Ground fills per lane —
+  quoting the wallet figure let Max fill an amount the lane could never pay.
+  Lane-unresolved value widens every lane's ceiling (never narrows), so an
+  incomplete catalogue join degrades to the wallet-level figure; the preview
+  stays the authority. A token Ground never routes to Solana (USDT: Ethereum
+  only, per their supported-chains doc — sandbox USDT is Ground's mock Sepolia
+  asset) is blocked AT SELECTION: inline notice, amount disabled, no preview
+  round-trip. Preview failures render TRANSLATED copy naming the per-lane
+  reality — never the provider's wire text ("ground request failed with status
+  409" explains nothing).
+- `deposit/` — the deposit flow: funding wallet → profile → filtered strategy
+  browse → review, then post-confirm outcome screens. See "The deposit flow".
 - `earn-format.ts` — formatting utilities (APY, USD, token symbols).
+
+## The deposit flow (`deposit/`)
+
+ONE route, TWO run shapes, THREE user verbs. The verbs: **Set up Earn** (hero
+CTA, no program yet), **Change strategy** (program card button), and
+**Deposit** — which is NOT a wizard at all: it is the copyable address row on
+the program card. Nothing in the UI may call the wizard a deposit; it never
+moves money.
+
+- Setup run (no program): wallet → profile → strategy → review.
+- Change-strategy run (program exists): profile → strategy → review — the
+  wallet step is funding context and an update moves no funds, so it is
+  omitted, and the review/summary rail show no wallet section.
+- The wizard renders a route skeleton until the program read RESOLVES —
+  rendering one shape and collapsing to the other is the hero-flash bug again.
+
+All of it lives on the single `/dashboard/markets/earn/deposit` pathname — the
+shell's full-height lock (`shouldUseWorkspaceViewport`) is an exact-equality
+check, so a sub-route silently loses the sticky footer. The header title
+(`Shared.dashboardShell.earnNewDeposit` → "Earn strategy") is route-static and
+deliberately neutral across both run shapes.
+
+**Timing copy is bound to Ground's documented behaviour** (update-strategy +
+deposits docs): targets save immediately; a LATER rebalance MAY move funds (no
+cadence is promised — never write "scheduled" or "next pass"); slow strategies
+can take hours; small balances may stay as cash on economic minimums. Every
+sentence about timing must trace to one of those.
+
+- `earn-deposit-wizard.tsx` — orchestrator: step state, submit, outcome routing.
+- `earn-deposit-model.ts` — the pure model (profiles, filters, sorting,
+  `singleStrategyAllocation`). No JSX, unit-tested.
+- `earn-funding-wallets.ts` — org wallets via `/api/dashboard/wallets`.
+- `wallet-step` → `profile-step` → `strategy-step` → `review-step`.
+- `integration-screen.tsx` + `earn-api-snippets.ts` — the conditional API step.
+  Snippets are Shiki-highlighted via `ui/code-block` → `lib/shiki-code`, the ONE
+  shared css-variables theme (extracted from, and still used by, the API
+  playground shell). Do not fork the theme.
+- `program-live-screen.tsx` — deposit address, status, live deposits feed.
+- `earn-deposit-chrome.tsx` / `earn-deposit-outcome.tsx` — shared primitives.
+
+### One strategy, no curator step
+
+The flow selects exactly ONE strategy and sends `pct: 100` for that strategy's
+stablecoin lane. Curator-first selection and manual weight editing were removed
+on purpose; curator is metadata rendered beside a strategy, never a gate. Do not
+reintroduce a curator step, a weight editor, or curator grouping without
+changing this note.
+
+Omitting a token lane **preserves** it server-side (Ground: "the omitted group
+is not changed"), which is why the review copy promises only the selected lane.
+
+### Profiles are filters, never a risk rating
+
+Ground publishes **no** risk tier, rating, grade, or score on a yield source —
+its own docs say so, and `riskMetadata.riskTier` is written only by the local dev
+seed. Profiles therefore compile to transparent filters over observable fields
+(settlement speed, backing kind, pool size) and the UI says as much. Never ship
+copy implying the provider rated anything.
+
+The filter vocabulary intentionally mirrors Ground's
+`POST /v2/wallets/strategy/optimize` constraints so a profile could later be
+handed to that endpoint. That endpoint has **no** SDP surface today (no client
+method, no route, no proxy) — wiring it is a three-layer build, not a swap.
+
+A filter must never exclude on a field the provider left absent (an unreported
+pool size passes every floor); the sandbox omits `tvlUsd` often enough that the
+opposite choice empties the catalogue.
+
+### Confirm is idempotent — keep it that way
+
+The confirm sends a client-minted `requestId`, held per selected strategy in a
+ref: a retry after a failed confirm replays the SAME key (the provider cannot
+apply the change twice), and switching strategy mints a fresh one (reusing a key
+with a different payload is a provider conflict). Dropping either half
+reintroduces a double-submit that fires two provider mutations.
+
+### The funding wallet is session-only, deliberately
+
+Step 1 picks the wallet that stablecoins are sent FROM, keyed by
+`custody_wallets.id`. It is **not persisted**, and that was a decision, not an
+omission: `PUT /v1/earn/program` has no source-wallet field, and no API moves
+funds from an SDP wallet into the program. A `funding_wallet_id` column was
+built and reverted — its only consumer was preselecting the wallet on a return
+visit, and provenance is already answered better by the deposit's own on-chain
+`fromAddress`. Bring it back when something consumes it; defaulting the withdraw
+modal's destination is the natural trigger. Until then the choice shapes the
+funding instructions and nothing else — never imply a transfer happens.
+
+### Conditions with no first-class data source
+
+- **The API-integration screen** keys off "the org has active API keys", resolved
+  in `page.tsx`. SDP persists no organization type, so this is a proxy for a
+  B2B2C/API customer, not a real flag. If an org-type field ever lands, swap the
+  prop. Snippets may only use routes that exist — there is no partner
+  deposit-signing handshake in V1.
+- Fireblocks is **not** custody-entitled by default, so the connect affordance is
+  gated on provider availability; wallet setup also has no return-to plumbing, so
+  never promise the reader they will come back mid-flow.
 
 ## Rules
 
@@ -46,11 +169,25 @@ reintroduce fixture modules. Data flows: BFF proxies
   A `cash` position can be a token the org never deposited on Solana, so do not
   assume positions imply a Solana deposit — only the addresses do.
 - Design system: SDP quiet-institutional (see `.claude/skills/sdp-ui-designer`).
-  Inter only — monospace is forbidden, including for addresses. Wizard steps
-  must land pre-scrolled at top (useLayoutEffect reset — keep it).
+  Inter only — monospace is forbidden, including for addresses; use
+  `tabular-nums` for numeric alignment. The ONE exception is a genuine code
+  surface: `deposit/integration-screen.tsx` renders `ui/code-block`, which is
+  mono by design. Selection state is `border-primary bg-fill-subtle` across the
+  whole module — do not mix in the issuance/ramps outline+ring variant. `Badge`
+  is status-only; a plain label is an inline chip.
+- Steps must land pre-scrolled at top (useLayoutEffect, `behavior: "instant"`,
+  then focus the first `h2` — keep it). `WizardFrame` owns the only scroll
+  container AND already renders the step `h2` + description, so step children
+  must add neither.
 - Provider-unconfigured (503) must degrade to the quiet notice, never crash.
-- Tests: vitest; mock the BFF fetch layer (see earn-workspace.unit.test.tsx),
-  not internals. Run: `pnpm exec vitest run src/app/dashboard/markets/earn`.
+  Note the asymmetry: `PUT /program` answers 403 even for *missing credentials*,
+  so read `error.code`, not just the status, before labelling a failure.
+- Missing numbers render "—", never `0` and never a fabricated rate.
+- Tests: vitest, `environment: "node"` by default — a test that touches
+  `document` needs a `// @vitest-environment jsdom` docblock. Mock the data-hook
+  seam (`./earn-program-data`), not fetch. Run:
+  `pnpm --filter sdp-web exec vitest run src/app/dashboard/markets/earn`.
+  CI does **not** run these (sdp-web has no `test` script) — run them yourself.
 
 ## Running this locally
 
