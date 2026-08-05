@@ -165,7 +165,17 @@ times, and each leg can gate on its own customer approval.
 > wallet with no approval policy settled end to end ($5 USDT → Sepolia, wallet
 > `5fe239ad…`, withdrawal `907001f5…`) while
 > `GET /v2/turnkey/activities/pending` stayed empty for the entire lifecycle —
-> no stamp, no vote, funds paid out. The approval flow engages only when an
+> no stamp, no vote, funds paid out.
+>
+> **Confirmed on the Solana lane the same day**, which is the lane SDP actually
+> ships: $1 USDC from the same wallet to a devnet address, submitted through the
+> dashboard (withdrawal `fd8857cf…`). Ground reserved the amount immediately
+> (`withdrawableUsd` $20 → $19, `reservedUsd` $1.001004), unwound it from the
+> Kamino vault while reporting `withdrawal_active`, and returned to `idle`
+> ~40s later with the USDC confirmed on-chain at the destination —
+> `pendingApprovals` polled `0` at every step. So neither lane requires a stamp
+> by default, and the Solana path is now observed end to end rather than
+> inferred from the Sepolia one. The approval flow engages only when an
 > org-level approval policy is in place; Ground's docs tie that to production
 > withdrawal limits (`403 withdrawal_policy_required` — *"Production
 > withdrawal limit reached. Contact Ground to increase your limit."*).
