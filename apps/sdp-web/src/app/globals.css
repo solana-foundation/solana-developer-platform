@@ -95,18 +95,26 @@
   --sdp-series-4: #d27b00;
 }
 
-/* Exposed through @theme so Tailwind emits real `bg-series-*` utilities.
+/* Written as real rules rather than generated utilities.
  *
- * Declaring them in :root alone is not enough: Tailwind treeshakes custom
- * properties its scanner never sees, and referencing them only from a JS string
- * (`style={{ backgroundColor: "var(--sdp-series-1)" }}`) is invisible to it. The
- * declaration was dropped from the compiled stylesheet while the JS kept
- * pointing at it, so every segment rendered transparent. */
-@theme inline {
-  --color-series-1: var(--sdp-series-1);
-  --color-series-2: var(--sdp-series-2);
-  --color-series-3: var(--sdp-series-3);
-  --color-series-4: var(--sdp-series-4);
+ * The class names live in a TypeScript string array, because the segment colour
+ * is chosen per mint at runtime. Tailwind's scanner does not reliably find them
+ * there: an `@theme` mapping compiled correctly in a production build but emitted
+ * nothing in dev — neither the `bg-series-*` utilities nor the custom properties
+ * they reference survived, so every segment computed to rgba(0,0,0,0) and the bar
+ * was invisible. Declaring the rules outright removes the scanner from the path,
+ * and referencing the properties here is also what keeps them in `:root`. */
+.bg-series-1 {
+  background-color: var(--sdp-series-1);
+}
+.bg-series-2 {
+  background-color: var(--sdp-series-2);
+}
+.bg-series-3 {
+  background-color: var(--sdp-series-3);
+}
+.bg-series-4 {
+  background-color: var(--sdp-series-4);
 }
 
 html,
