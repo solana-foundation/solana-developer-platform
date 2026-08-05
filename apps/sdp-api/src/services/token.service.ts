@@ -19,6 +19,7 @@ import type {
   TokenTransactionStatus,
   TokenTransactionType,
 } from "@sdp/types";
+import type { DatabaseExecutor } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
@@ -1466,6 +1467,144 @@ export class TokenService {
         .run();
       if (marked !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_MARKER_CONFLICT");
     });
+  }
+
+  /**
+   * Mirror a settled authority change without allowing an older replay to
+   * overwrite a later on-chain authority. The settlement slot is the primary
+   * ordering key; request creation time and id provide a deterministic tie
+   * break for transactions confirmed in the same slot.
+   */
+  async applySettledTokenAuthority(
+    transactionId: string,
+    tokenId: string,
+    role: "mint" | "freeze" | "permanentDelegate" | "metadata",
+    newAuthority: string | null
+  ): Promise<void> {
+    const tokenScope = this.tenantTokenScope("t");
+    await this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.type, it.status, it.slot, it.created_at, it.operation_params,
+                  it.authority_bookkeeping_applied_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(transactionId, tokenId, ...tokenScope.values)
+        .first<{
+          type: string;
+          status: string;
+          slot: number | null;
+          created_at: string;
+          operation_params: string;
+          authority_bookkeeping_applied_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+      if (row.type !== "update_authority" || row.status !== "confirmed" || row.slot === null) {
+        throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_AUTHORITY");
+      }
+      if (row.authority_bookkeeping_applied_at !== null) return;
+
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      if (params.role !== role || params.newAuthority !== newAuthority) {
+        throw new Error("TOKEN_TRANSACTION_AUTHORITY_PARAMS_MISMATCH");
+      }
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions newer
+           WHERE newer.token_id = ?
+             AND newer.type = 'update_authority'
+             AND newer.status = 'confirmed'
+             AND newer.operation_params::jsonb ->> 'role' = ?
+             AND (
+               newer.slot > ?
+               OR (newer.slot = ? AND newer.created_at > ?)
+               OR (newer.slot = ? AND newer.created_at = ? AND newer.id > ?)
+             )
+           LIMIT 1`
+        )
+        .bind(
+          tokenId,
+          role,
+          row.slot,
+          row.slot,
+          row.created_at,
+          row.slot,
+          row.created_at,
+          transactionId
+        )
+        .first<{ exists: number }>();
+
+      const now = new Date().toISOString();
+      if (!newer) {
+        await this.applyTokenAuthorityMirror(tx, tokenId, role, newAuthority, now);
+      }
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET authority_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND authority_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, transactionId, tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_AUTHORITY_MARKER_CONFLICT");
+    });
+  }
+
+  private async applyTokenAuthorityMirror(
+    tx: DatabaseExecutor,
+    tokenId: string,
+    role: "mint" | "freeze" | "permanentDelegate" | "metadata",
+    newAuthority: string | null,
+    now: string
+  ): Promise<void> {
+    const tokenMutation = this.tenantMutationScope();
+    if (role === "mint" || role === "freeze") {
+      const authorityField = role === "mint" ? "mint_authority" : "freeze_authority";
+      const enabledField = role === "mint" ? "is_mintable" : "freeze_authority_enabled";
+      const updated = await tx
+        .prepare(
+          `UPDATE issued_tokens
+           SET ${authorityField} = ?, ${enabledField} = ?, updated_at = ?
+           WHERE id = ?${tokenMutation.clause}`
+        )
+        .bind(newAuthority, newAuthority === null ? 0 : 1, now, tokenId, ...tokenMutation.values)
+        .run();
+      if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+      return;
+    }
+
+    if (role !== "permanentDelegate") return;
+
+    const updated = await tx
+      .prepare(`UPDATE issued_tokens SET updated_at = ? WHERE id = ?${tokenMutation.clause}`)
+      .bind(now, tokenId, ...tokenMutation.values)
+      .run();
+    if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+
+    if (newAuthority === null) {
+      await tx
+        .prepare(
+          "DELETE FROM issued_token_extensions WHERE token_id = ? AND extension = 'permanentDelegate'"
+        )
+        .bind(tokenId)
+        .run();
+      return;
+    }
+
+    await tx
+      .prepare(
+        `INSERT INTO issued_token_extensions (id, token_id, extension, config, created_at)
+         VALUES (?, ?, 'permanentDelegate', ?, ?)
+         ON CONFLICT(token_id, extension) DO UPDATE SET config = excluded.config`
+      )
+      .bind(`tex_${crypto.randomUUID()}`, tokenId, JSON.stringify(newAuthority), now)
+      .run();
   }
 
   /**

@@ -572,6 +572,58 @@ describe("TokenService", () => {
       ).toMatchObject({ status: "active" });
     });
 
+    it("does not replay an older authority change over a newer settled authority", async () => {
+      const tokenId = "tok_authority_replay_order";
+      const olderId = "ttx_authority_older";
+      const newerId = "ttx_authority_newer";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, slot,
+             initiated_by_key_id, created_at, updated_at
+           ) VALUES
+             (?, ?, ?, 'update_authority', 'confirmed', ?, 100, ?, ?, ?),
+             (?, ?, ?, 'update_authority', 'confirmed', ?, 101, ?, ?, ?)`
+        )
+        .bind(
+          olderId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ role: "mint", newAuthority: "authority_older" }),
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:00:00.000Z",
+          "2026-08-05T00:00:00.000Z",
+          newerId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ role: "mint", newAuthority: "authority_newer" }),
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:01:00.000Z",
+          "2026-08-05T00:01:00.000Z"
+        )
+        .run();
+
+      await tokenService.applySettledTokenAuthority(newerId, tokenId, "mint", "authority_newer");
+      await tokenService.applySettledTokenAuthority(olderId, tokenId, "mint", "authority_older");
+
+      expect(
+        await db
+          .prepare("SELECT mint_authority FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ mint_authority: string | null }>()
+      ).toMatchObject({ mint_authority: "authority_newer" });
+      expect(
+        await db
+          .prepare(
+            `SELECT authority_bookkeeping_applied_at
+             FROM issuance_transactions WHERE id = ?`
+          )
+          .bind(olderId)
+          .first<{ authority_bookkeeping_applied_at: string | null }>()
+      ).toMatchObject({ authority_bookkeeping_applied_at: expect.any(String) });
+    });
+
     it("refuses a cap that a mint outran between the check and the write", async () => {
       await insertCappedToken("tok_cap_lost_race", "500000000", "1000000000");
       const originalPrepare = db.prepare.bind(db);

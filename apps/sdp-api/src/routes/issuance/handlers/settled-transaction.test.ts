@@ -81,6 +81,34 @@ describe("settled issuance transaction recovery", () => {
     });
   });
 
+  it("repairs from journaled chain evidence when the terminal audit outcome is missing", async () => {
+    const journaledTransaction = {
+      ...pendingTransaction,
+      signature: "sig_journaled",
+      slot: 321,
+    };
+    const updateTransaction = vi.fn().mockResolvedValue({
+      ...journaledTransaction,
+      status: "confirmed",
+    });
+    const findCriticalOutcome = vi.fn();
+
+    const recovered = await recoverSettledTransactionReplay({
+      auditService: { findCriticalOutcome } as unknown as AuditService,
+      tokenService: { updateTransaction } as unknown as TokenService,
+      transaction: journaledTransaction,
+      action: "burn",
+    });
+
+    expect(findCriticalOutcome).not.toHaveBeenCalled();
+    expect(updateTransaction).toHaveBeenCalledWith(journaledTransaction.id, {
+      status: "confirmed",
+      signature: "sig_journaled",
+      slot: 321,
+    });
+    expect(recovered.status).toBe("confirmed");
+  });
+
   it("returns confirmed evidence when the repair write is temporarily unavailable", async () => {
     const recovered = await recoverSettledTransactionReplay({
       auditService: {

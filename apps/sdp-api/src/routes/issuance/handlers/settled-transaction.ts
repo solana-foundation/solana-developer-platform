@@ -51,6 +51,29 @@ export async function persistSettledTransaction(
       },
       "Settled issuance operation could not update its transaction row; durable audit evidence will repair idempotent replay"
     );
+
+    // Preserve the chain receipt independently of the status transition. A
+    // retry can recover directly from these columns even when the terminal
+    // audit append also misses. This second, narrower write also avoids losing
+    // evidence when only status-history bookkeeping caused the first write to
+    // reject after the transaction row itself changed.
+    try {
+      await tokenService.updateTransaction(transaction.id, {
+        signature: evidence.signature,
+        slot: evidence.slot,
+        ...(params ? { params: settledParams } : {}),
+      });
+    } catch (evidenceError) {
+      getLogger().error(
+        {
+          event: "settled_issuance_evidence_persistence_failed",
+          transactionId: transaction.id,
+          signature: evidence.signature,
+          error: evidenceError instanceof Error ? evidenceError.message : "Unknown evidence error",
+        },
+        "Settled issuance evidence could not be journaled; terminal audit persistence remains the recovery fallback"
+      );
+    }
     return {
       ...transaction,
       status: "confirmed",
@@ -95,6 +118,18 @@ export async function recoverSettledTransactionReplay(options: {
   params?: Record<string, unknown>;
 }): Promise<TokenTransaction> {
   if (options.transaction.status !== "pending") return options.transaction;
+  const journaledEvidence = parseSettledTransactionEvidence({
+    signature: options.transaction.signature,
+    slot: options.transaction.slot,
+  });
+  if (journaledEvidence) {
+    return persistSettledTransaction(
+      options.tokenService,
+      options.transaction,
+      journaledEvidence,
+      options.params
+    );
+  }
   const outcome = await options.auditService.findCriticalOutcome({
     organizationId: options.transaction.organizationId,
     action: options.action,

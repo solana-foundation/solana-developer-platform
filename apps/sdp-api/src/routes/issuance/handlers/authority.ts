@@ -32,27 +32,6 @@ import {
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicAuthorityRole = Parameters<MosaicService["prepareUpdateAuthority"]>[0]["role"];
 
-type AuthorityUpdate = {
-  mintAuthority?: string | null;
-  isMintable?: boolean;
-  freezeAuthority?: string | null;
-  isFreezable?: boolean;
-  permanentDelegate?: string | null;
-};
-
-function authorityUpdates(role: AuthorityRole, newAuthority: string | null): AuthorityUpdate {
-  if (role === "mint") {
-    return { mintAuthority: newAuthority, isMintable: newAuthority !== null };
-  }
-  if (role === "freeze") {
-    return { freezeAuthority: newAuthority, isFreezable: newAuthority !== null };
-  }
-  if (role === "permanentDelegate") {
-    return { permanentDelegate: newAuthority };
-  }
-  return {};
-}
-
 const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
   switch (role) {
     case "mint":
@@ -273,10 +252,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       action: "update_authority",
     });
     if (transaction.status === "confirmed") {
-      const updates = authorityUpdates(role, newAuthority);
-      if (Object.keys(updates).length > 0) {
-        await tokenService.updateTokenAuthorities(tokenId, updates);
-      }
+      await tokenService.applySettledTokenAuthority(tx.id, tokenId, role, newAuthority);
     }
     return success(c, { transaction });
   }
@@ -322,10 +298,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
         }),
     });
 
-    const updates = authorityUpdates(role, newAuthority);
-    if (Object.keys(updates).length > 0) {
-      await tokenService.updateTokenAuthorities(tokenId, updates);
-    }
+    await tokenService.applySettledTokenAuthority(tx.id, tokenId, role, newAuthority);
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
