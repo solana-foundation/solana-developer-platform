@@ -242,6 +242,10 @@ describe("internal custody connections", () => {
 
     const clamped = await listConnections("?limit=9999");
     expect(clamped.pagination.limit).toBe(50);
+
+    // Fractional values must be truncated before they reach PostgreSQL.
+    const fractional = await listConnections("?limit=1.5&offset=1.9");
+    expect(fractional.pagination).toEqual({ limit: 1, offset: 1, total: 3 });
   });
 
   it("does not leak another project's connections", async () => {

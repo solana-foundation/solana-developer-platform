@@ -43,8 +43,8 @@ internalCustody.use("*", idempotencyKeyMiddleware());
 internalCustody.get("/connections", async (c) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 20) || 20, 1), 50);
-  const offset = Math.max(Number(c.req.query("offset") ?? 0) || 0, 0);
+  const limit = Math.min(Math.max(Math.trunc(Number(c.req.query("limit") ?? 20) || 20), 1), 50);
+  const offset = Math.max(Math.trunc(Number(c.req.query("offset") ?? 0) || 0), 0);
 
   const store = new ProviderCredentialStore(getDb(c.env));
   const { connections, total } = await store.listProjectConnectionsPage(
