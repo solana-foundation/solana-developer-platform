@@ -60,10 +60,11 @@ export function IntegrationScreen({
       description={t("DashboardEarn.deposit.integrationDescription")}
       eyebrow={t("DashboardEarn.deposit.integrationEyebrow")}
       footer={
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between [&>button]:w-full sm:[&>button]:w-auto">
-          <Button onClick={onDone} type="button" variant="secondary">
-            {t("DashboardEarn.deposit.integrationSkip")}
-          </Button>
+        // One action, because there is only one: this screen is read-only, so a
+        // "Skip" beside a "Continue" that did the same thing was two names for
+        // one door. The destination is the funding screen, not the dashboard,
+        // so the label promises no more than "onward".
+        <div className="flex justify-end">
           <Button onClick={onDone} type="button">
             {t("DashboardEarn.deposit.integrationContinue")}
           </Button>
