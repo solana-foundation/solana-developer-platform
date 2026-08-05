@@ -205,6 +205,18 @@ describe("custody setup status", () => {
     expect(status.providers.length).toBeGreaterThanOrEqual(10);
   });
 
+  it("reports every provider with a reachable config, not only the scope default", async () => {
+    // Signing targeted at a specific provider resolves through that provider's
+    // config regardless of which one is the scope default; default-ness is the
+    // configs resource's fact, not this endpoint's.
+    await seedLegacyConfig("privy", "cust_cfg_setup_status_multi_privy");
+    await seedLegacyConfig("para", "cust_cfg_setup_status_multi_para");
+
+    const status = await fetchSetupStatus();
+    expect(statusFor(status, "privy")?.effectiveTargetType).toBe("config");
+    expect(statusFor(status, "para")?.effectiveTargetType).toBe("config");
+  });
+
   it("reports an active legacy config as a config-backed target", async () => {
     await seedLegacyConfig("privy", "cust_cfg_setup_status_privy");
 
