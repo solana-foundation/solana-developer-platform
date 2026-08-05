@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.55.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.54.0...v0.55.0) (2026-08-05)
+
+### Features
+
+* **web:** polish recurring payment create flow ([#1111](https://github.com/solana-foundation/solana-developer-platform/pull/1111)) ([64235fa](https://github.com/solana-foundation/solana-developer-platform/commit/64235fa58c6822473b44e3ef13b9521609fce153))
+
 ## [0.54.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.53.0...v0.54.0) (2026-08-04)
 
 ### Features
