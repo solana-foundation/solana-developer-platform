@@ -16,10 +16,16 @@ export default async function PrivateChannelsLayout({ children }: { children: Re
   const client = await createSdpApiClient();
   const instance = await loadInstance(client);
 
+  // Payments routes are viewport-locked: the shell renders this segment inside an
+  // `overflow-hidden` box of bounded height. Lay the tabs + page out as a flex column
+  // (tabs fixed, page fills the rest) so a full-height page like the overview can size
+  // to the remaining space instead of overshooting past the tabs and clipping its
+  // bottom. Natural-height sibling pages are unaffected — they sit at the top of the
+  // flex-1 area at their own height.
   return (
-    <>
+    <div className="flex h-full min-h-0 flex-col">
       <PrivateChannelsHeaderTabs isConnected={instance.data?.isActive === true} />
-      {children}
-    </>
+      <div className="min-h-0 flex-1">{children}</div>
+    </div>
   );
 }

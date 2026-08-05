@@ -1,6 +1,4 @@
 import { redirect } from "next/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import {
   PRIVATE_CHANNELS_INSTANCE_PATH,
@@ -9,27 +7,35 @@ import {
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
 import {
   loadChannelBalances,
+  loadChannels,
+  loadEvents,
   loadOverview,
   loadWalletVerification,
 } from "../private-channels-page.data";
-import { InstanceOverviewCard } from "./instance-overview-card";
-import { VerifiedWalletsSection } from "./verified-wallets-section";
+import { AllowedTokensPanel } from "./allowed-tokens-panel";
+import { ConnectedInstancePanel } from "./connected-instance-panel";
+import { channelNameById } from "./overview-data";
+import { PrivateBalancePanel } from "./private-balance-panel";
+import { RecentActivityPanel } from "./recent-activity-panel";
 
 export default async function PrivateChannelsOverviewPage() {
   await requirePrivateChannelsAccess();
 
-  const t = await getTranslations();
-
   const client = await createSdpApiClient();
-  const [overview, wallets] = await Promise.all([
+  const [overview, wallets, channels, events] = await Promise.all([
     loadOverview(client),
     loadWalletVerification(client),
+    loadChannels(client),
+    loadEvents(client),
   ]);
 
-  // `ok` with no data is the expected "no active instance" 404 — route to the
-  // connect form. A genuine failure keeps the user here and shows the error.
+  // `ok` with no data is the expected "no active instance" 404 — route to connect.
   if (overview.ok && !overview.data) {
     redirect(PRIVATE_CHANNELS_INSTANCE_PATH);
+  }
+  // A genuine overview failure: keep the user here and surface the error.
+  if (!overview.data) {
+    return <PrivateChannelsLoadError message={overview.error} />;
   }
 
   // Channel balances only exist for verified wallets — unverified reads would 403.
@@ -38,40 +44,27 @@ export default async function PrivateChannelsOverviewPage() {
     : {};
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("DashboardPrivateChannels.overview.title")}</CardTitle>
-          <CardDescription>{t("DashboardPrivateChannels.overview.description")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {overview.data ? (
-            <InstanceOverviewCard
-              instance={overview.data.instance}
-              overview={overview.data.overview}
-            />
-          ) : (
-            <PrivateChannelsLoadError message={overview.error} />
-          )}
-        </CardContent>
-      </Card>
+    // Payments routes are viewport-locked (see dashboard-shell): the page renders in
+    // an `overflow-hidden flex-1` container with the shell's usual `px-3 py-5 md:p-6`
+    // padding dropped. So this page (1) re-adds that padding — a full-bleed layout
+    // gets no side gutter from `mx-auto max-w-*` centering the way narrow siblings do —
+    // and (2) is a full-height flex column: the summary row stays fixed while the
+    // activity panel fills the remaining height and scrolls internally, instead of
+    // overflowing below the locked viewport.
+    <div className="flex h-full min-h-0 w-full flex-col gap-4 px-3 py-5 md:p-6">
+      <div className="grid shrink-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <ConnectedInstancePanel
+          instance={overview.data.instance}
+          overview={overview.data.overview}
+        />
+        <PrivateBalancePanel channelBalances={channelBalances} />
+        <AllowedTokensPanel instance={overview.data.instance} />
+      </div>
 
-      <Card id="verified-wallets">
-        <CardHeader>
-          <CardTitle>{t("DashboardPrivateChannels.verifiedWallets.title")}</CardTitle>
-          <CardDescription>
-            {t("DashboardPrivateChannels.verifiedWallets.description")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <VerifiedWalletsSection
-            verifiedWallets={wallets.data.verified}
-            custodyWallets={wallets.data.custody}
-            channelBalances={channelBalances}
-            loadError={!wallets.ok}
-          />
-        </CardContent>
-      </Card>
+      <RecentActivityPanel
+        initialEvents={events.data.events}
+        channelNames={channelNameById(channels.data)}
+      />
     </div>
   );
 }
