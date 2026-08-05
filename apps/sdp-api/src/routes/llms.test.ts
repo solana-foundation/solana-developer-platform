@@ -14,7 +14,6 @@ describe("GET /llms.txt", () => {
     expect(body).toContain("/docs");
     expect(body).toContain("/v1/api-keys");
     expect(body).toContain("/v1/wallets");
-    expect(body).toContain("/v1/private-channels");
     expect(body).not.toContain("/admin/allowlist");
     expect(body).not.toContain("/v1/onboarding");
     expect(body).not.toContain("/v1/organizations");

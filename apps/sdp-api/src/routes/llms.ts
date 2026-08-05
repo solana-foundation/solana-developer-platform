@@ -29,7 +29,6 @@ const body = [
   `- Projects: ${DEFAULT_SDP_API_URL}/v1/projects`,
   `- Issuance: ${DEFAULT_SDP_API_URL}/v1/issuance`,
   `- Payments: ${DEFAULT_SDP_API_URL}/v1/payments`,
-  `- Private Channels: ${DEFAULT_SDP_API_URL}/v1/private-channels`,
   `- Compliance: ${DEFAULT_SDP_API_URL}/v1/compliance`,
   "",
   "## Versioning",

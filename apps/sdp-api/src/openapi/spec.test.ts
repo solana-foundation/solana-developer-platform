@@ -142,7 +142,6 @@ describe("OpenAPI spec", () => {
       "Issuance",
       "Payments",
       "Policies",
-      "Private Channels",
       "Compliance",
       "Counterparties",
       "Asset Profiles",
@@ -154,11 +153,7 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/rpc/providers"]).toBeUndefined();
     expect(doc.paths?.["/admin/allowlist"]).toBeUndefined();
     expect(doc.paths?.["/v1/onboarding/status"]).toBeUndefined();
-    // sessionCookie IS registered in the public doc: some public-tagged Private
-    // Channels operations require session auth and reference this scheme. It's
-    // registered so those references resolve; API-key clients can't mint the
-    // cookie, so those operations are documented-but-uncallable externally.
-    expect(doc.components?.securitySchemes?.sessionCookie).toBeDefined();
+    expect(doc.components?.securitySchemes?.sessionCookie).toBeUndefined();
     expect(doc.components?.securitySchemes?.adminKey).toBeUndefined();
     expect(updateProject).toContain('"rpcProvider"');
     expect(updateProject).toContain('"nodit"');

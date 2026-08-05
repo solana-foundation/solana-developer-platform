@@ -63,18 +63,16 @@ describe("buildPrivateChannelsPlaygroundEndpointConfigs", () => {
     );
   });
 
-  it("merges every generated SPC operation so no public endpoint is hidden", () => {
-    // The coverage assertion in api-playground-openapi-catalog.unit.test.ts
-    // enforces the reverse (nothing extra), but this test also pins the union
-    // so a stale generator run — where the module has fewer entries than the
-    // OpenAPI doc — surfaces here rather than in a browser-only smoke test.
+  it("exposes only the hand-curated operations while SPC is out of the public spec", () => {
+    // Private Channels is intentionally not in the public OpenAPI doc yet
+    // (feature flag off + security review pending), so the generated catalog
+    // contributes zero SPC operations. Only the curated entries in this file
+    // show up in the playground until the module is promoted.
     const configs = buildPrivateChannelsPlaygroundEndpointConfigs(t);
     const ids = new Set(configs.map((endpoint) => endpoint.id));
 
     expect(ids.has("get-private-channel-instance")).toBe(true);
     expect(ids.has("connect-private-channel-instance")).toBe(true);
-    expect(ids.has("list-private-channels")).toBe(true);
-    expect(ids.has("list-project-private-channel-events")).toBe(true);
-    expect(ids.has("delete-private-channel")).toBe(true);
+    expect(ids.has("create-private-channel")).toBe(true);
   });
 });
