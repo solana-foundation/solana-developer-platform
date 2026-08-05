@@ -1,4 +1,7 @@
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import {
+  DashboardWorkspaceCard,
+  DashboardWorkspaceOverviewPanel,
+} from "@/components/dashboard-workspace-panel";
 import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
@@ -480,12 +483,16 @@ export function RecurringPaymentsPageSkeleton() {
       data-loading-layout="recurring-payments"
       aria-busy="true"
     >
-      <Card className="flex h-full min-h-0 min-w-0 flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
-        <WorkspaceCardHeaderSkeleton stackActionOnMobile />
-        <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col px-0">
-          <RouteTableSkeleton variant="recurring-payments" />
-        </CardContent>
-      </Card>
+      <DashboardWorkspaceCard>
+        <div className="border-b border-border-default px-4 py-3">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]">
+            <SkeletonBlock className="h-10 w-full rounded-lg" />
+            <SkeletonBlock className="h-10 w-full rounded-lg" />
+            <SkeletonBlock className="h-10 w-40 rounded-lg" />
+          </div>
+        </div>
+        <RouteTableSkeleton variant="recurring-payments" />
+      </DashboardWorkspaceCard>
     </DashboardWorkspaceOverviewPanel>
   );
 }

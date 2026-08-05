@@ -236,9 +236,8 @@ describe("home and payments route loading states", () => {
   it("keeps the recurring list loader contained at a 390px viewport", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentsLoading />);
 
-    expect(markup).toContain("flex min-w-0 flex-col gap-4 p-4 sm:grid");
-    expect(markup).toContain("h-full min-h-0 min-w-0 flex-col");
-    expect(markup).toContain("flex min-h-0 min-w-0 flex-1 flex-col");
+    expect(markup).toContain("grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]");
+    expect(markup).toContain("flex min-w-0 flex-1 flex-col overflow-hidden");
     expect(markup).toContain("table-scroll-container overflow-x-auto");
   });
 
