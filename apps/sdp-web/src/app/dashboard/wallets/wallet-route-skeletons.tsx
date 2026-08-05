@@ -402,7 +402,7 @@ export function WalletPolicyAuditDetailSkeleton() {
             ))}
           </div>
         </section>
-        <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_400px]">
+        <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_460px]">
           <main className="min-w-0">
             <div className="space-y-3">
               {FIVE_ITEMS.map((step) => (
