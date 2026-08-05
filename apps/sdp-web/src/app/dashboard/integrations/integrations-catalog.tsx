@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
-import { SearchIcon, XIcon } from "lucide-react";
+import { SearchIcon } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import type { CustodyProviderAvailability } from "@/app/dashboard/custody/provider-display-status";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
@@ -93,26 +93,28 @@ interface IntegrationRowModel extends FilterableIntegration {
   action?: ReactNode;
 }
 
-function IntegrationRow({ row, t }: { row: IntegrationRowModel; t: Translate }) {
+function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate }) {
   return (
     <li
-      className="flex items-center gap-4 rounded-2xl border border-border-default bg-surface-raised px-5 py-4"
+      className="flex flex-col gap-3 rounded-2xl border border-border-default bg-surface-raised p-5"
       data-integration-row="true"
       data-integration-status={row.status}
     >
-      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-fill-strong">
-        {row.icon}
-      </span>
-      <span className="min-w-0 flex-1 space-y-1">
-        <span className="flex flex-wrap items-center gap-2">
-          <span className="text-base font-medium text-primary">{row.label}</span>
-          <StatusBadge status={row.status} t={t} />
-        </span>
-        {row.description ? (
-          <span className="block text-sm leading-5 text-tertiary">{row.description}</span>
-        ) : null}
-      </span>
-      {row.action ? <span className="shrink-0">{row.action}</span> : null}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-fill-strong">
+            {row.icon}
+          </span>
+          <span className="truncate text-base font-medium text-primary">{row.label}</span>
+        </div>
+        <StatusBadge status={row.status} t={t} />
+      </div>
+      {row.description ? (
+        <p className="min-h-10 text-sm leading-5 text-tertiary">{row.description}</p>
+      ) : (
+        <span className="min-h-10" aria-hidden />
+      )}
+      {row.action ? <div>{row.action}</div> : null}
     </li>
   );
 }
@@ -208,6 +210,7 @@ export function IntegrationsCatalog({
       label: provider.label,
       status: provider.status,
       icon: <RpcProviderMark provider={provider.provider} />,
+      description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
     }));
     const rampRows: IntegrationRowModel[] = ramps.map((provider) => ({
       family: "ramps",
@@ -215,6 +218,7 @@ export function IntegrationsCatalog({
       label: provider.label,
       status: provider.status,
       icon: <NeutralMark label={provider.label} />,
+      description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
     }));
     const complianceRows: IntegrationRowModel[] = compliance.map((provider) => ({
       family: "compliance",
@@ -222,6 +226,7 @@ export function IntegrationsCatalog({
       label: provider.label,
       status: provider.status,
       icon: <NeutralMark label={provider.label} />,
+      description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
     }));
 
     return [...custodyRows, ...rpcRows, ...rampRows, ...complianceRows];
@@ -240,48 +245,52 @@ export function IntegrationsCatalog({
       </p>
 
       <div className="space-y-3" data-integrations-filters="true">
-        <div className="relative max-w-md">
-          <SearchIcon
-            aria-hidden
-            className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-tertiary"
-          />
-          <Input
-            type="search"
-            value={filters.query}
-            onChange={(event) => setFilters({ ...filters, query: event.currentTarget.value })}
-            placeholder={t("Shared.integrations.searchPlaceholder")}
-            aria-label={t("Shared.integrations.searchPlaceholder")}
-            className="h-11 rounded-2xl border-border-default bg-surface-raised pl-11 shadow-none"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {familyPills.map((family) => (
-            <FilterPill
-              key={family}
-              active={filters.family === family}
-              onClick={() => setFilters({ ...filters, family })}
-            >
-              {family === "all"
-                ? t("Shared.integrations.filterAllFamilies")
-                : `${t(familyLabelKey(family))} · ${familyCounts[family]}`}
-            </FilterPill>
-          ))}
-          <span aria-hidden className="mx-1 h-5 w-px bg-border-subtle" />
-          {STATUS_FILTERS.map((status) => (
-            <FilterPill
-              key={status}
-              active={filters.status === status}
-              onClick={() => setFilters({ ...filters, status })}
-            >
-              {statusLabel(status, t)}
-            </FilterPill>
-          ))}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="relative w-full max-w-md">
+            <SearchIcon
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-tertiary"
+            />
+            <Input
+              type="search"
+              value={filters.query}
+              onChange={(event) => setFilters({ ...filters, query: event.currentTarget.value })}
+              placeholder={t("Shared.integrations.searchPlaceholder")}
+              aria-label={t("Shared.integrations.searchPlaceholder")}
+              className="h-11 rounded-2xl border-border-default bg-surface-raised pl-11 shadow-none"
+            />
+          </div>
           {filtered ? (
             <Button variant="ghost" size="sm" onClick={() => setFilters(NO_FILTERS)}>
-              <XIcon aria-hidden className="size-3.5" />
               {t("Shared.integrations.clearFilters")}
             </Button>
           ) : null}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+          <div className="flex flex-wrap items-center gap-2" data-integrations-family-pills="true">
+            {familyPills.map((family) => (
+              <FilterPill
+                key={family}
+                active={filters.family === family}
+                onClick={() => setFilters({ ...filters, family })}
+              >
+                {family === "all"
+                  ? t("Shared.integrations.filterAllFamilies")
+                  : `${t(familyLabelKey(family))} · ${familyCounts[family]}`}
+              </FilterPill>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2" data-integrations-status-pills="true">
+            {STATUS_FILTERS.map((status) => (
+              <FilterPill
+                key={status}
+                active={filters.status === status}
+                onClick={() => setFilters({ ...filters, status })}
+              >
+                {statusLabel(status, t)}
+              </FilterPill>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -336,9 +345,9 @@ export function IntegrationsCatalog({
               </div>
             ) : null}
 
-            <ul className="grid gap-3">
+            <ul className="grid gap-3 md:grid-cols-2">
               {familyRows.map((row) => (
-                <IntegrationRow key={`${row.family}:${row.provider}`} row={row} t={t} />
+                <IntegrationCard key={`${row.family}:${row.provider}`} row={row} t={t} />
               ))}
             </ul>
           </section>

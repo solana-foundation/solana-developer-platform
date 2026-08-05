@@ -10,6 +10,7 @@ import {
   type CustodyProviderAvailability,
   resolveCustodyProviderAvailability,
 } from "@/app/dashboard/custody/provider-display-status";
+import type { MessageKey } from "@/i18n/messages";
 
 /**
  * One vocabulary across every provider family, matching the custody setup step:
@@ -28,7 +29,35 @@ export interface IntegrationEntry<TProvider extends string = string> {
   provider: TProvider;
   label: string;
   status: IntegrationStatus;
+  descriptionKey?: MessageKey;
 }
+
+const RPC_DESCRIPTION_KEYS: Record<OrganizationRpcProvider, MessageKey> = {
+  alchemy: "DashboardCustody.onboardingRpcAlchemyDescription",
+  default: "DashboardCustody.onboardingRpcDefaultDescription",
+  helius: "DashboardCustody.onboardingRpcHeliusDescription",
+  nodit: "DashboardCustody.onboardingRpcNoditDescription",
+  quicknode: "DashboardCustody.onboardingRpcQuickNodeDescription",
+  triton: "DashboardCustody.onboardingRpcTritonDescription",
+  validationcloud: "DashboardCustody.onboardingRpcValidationCloudDescription",
+};
+
+const RAMP_DESCRIPTION_KEYS: Record<RampProviderId, MessageKey> = {
+  moonpay: "Shared.integrations.rampMoonpayDescription",
+  lightspark: "Shared.integrations.rampLightsparkDescription",
+  bvnk: "Shared.integrations.rampBvnkDescription",
+  moneygram: "Shared.integrations.rampMoneygramDescription",
+  coinbase: "Shared.integrations.rampCoinbaseDescription",
+  mural: "Shared.integrations.rampMuralDescription",
+  stripe: "Shared.integrations.rampStripeDescription",
+};
+
+const COMPLIANCE_DESCRIPTION_KEYS: Record<ComplianceProviderId, MessageKey> = {
+  range: "Shared.integrations.complianceRangeDescription",
+  elliptic: "Shared.integrations.complianceEllipticDescription",
+  trm: "Shared.integrations.complianceTrmDescription",
+  chainalysis: "Shared.integrations.complianceChainalysisDescription",
+};
 
 /** Display labels for families whose ids never had UI names on main. */
 export const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
@@ -81,7 +110,12 @@ export function resolveRpcIntegrations(input: {
     const entry = input.entries[provider];
     const status: IntegrationStatus =
       provider === input.selectedProvider ? "active" : entry?.enabled ? "available" : "unavailable";
-    return { provider, label: RPC_PROVIDER_LABELS[provider], status };
+    return {
+      provider,
+      label: RPC_PROVIDER_LABELS[provider],
+      status,
+      descriptionKey: RPC_DESCRIPTION_KEYS[provider],
+    };
   });
 }
 
@@ -105,6 +139,7 @@ export function resolveRampIntegrations(
     provider,
     label: RAMP_PROVIDER_LABELS[provider],
     status: entitledEntryStatus(entries[provider]),
+    descriptionKey: RAMP_DESCRIPTION_KEYS[provider],
   }));
 }
 
@@ -115,5 +150,6 @@ export function resolveComplianceIntegrations(
     provider,
     label: COMPLIANCE_PROVIDER_LABELS[provider],
     status: entitledEntryStatus(entries[provider]),
+    descriptionKey: COMPLIANCE_DESCRIPTION_KEYS[provider],
   }));
 }

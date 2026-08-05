@@ -26,7 +26,12 @@ function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>
               })
         }
         rpc={[
-          { provider: "helius", label: "Helius", status: "active" },
+          {
+            provider: "helius",
+            label: "Helius",
+            status: "active",
+            descriptionKey: "DashboardCustody.onboardingRpcHeliusDescription",
+          },
           { provider: "alchemy", label: "Alchemy", status: "available" },
         ]}
         ramps={[{ provider: "moonpay", label: "MoonPay", status: "unavailable" }]}
@@ -106,6 +111,12 @@ describe("IntegrationsCatalog filtering", () => {
     // RPC's destination is linked once at the section level, not per row.
     expect(screen.getAllByRole("link", { name: "Change in Settings" })).toHaveLength(1);
     expect(screen.queryAllByRole("link", { name: "Manage" }).length).toBeLessThanOrEqual(1);
+  });
+
+  it("fills every row with a description instead of dead space", () => {
+    renderCatalog();
+
+    expect(screen.getByText("Use Helius infrastructure for Solana RPC requests.")).toBeTruthy();
   });
 
   it("still renders the custody-unknown alert alongside the filters", () => {
