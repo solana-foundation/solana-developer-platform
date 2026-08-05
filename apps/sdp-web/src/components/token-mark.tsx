@@ -2,6 +2,7 @@
 
 import { WELL_KNOWN_TOKEN_BY_MINT, type WellKnownTokenSymbol } from "@sdp/types";
 import Image from "next/image";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -50,6 +51,8 @@ interface TokenMarkProps {
   mint?: string | null;
   /** Display symbol, used for the monogram when no logo is bundled. */
   symbol?: string | null;
+  /** Issuer-supplied logo URL, used only when the mint is not well-known. */
+  logoUrl?: string | null;
   size?: TokenMarkSize;
   className?: string;
 }
@@ -61,13 +64,31 @@ function toMonogram(symbol: string): string {
   return trimmed.slice(0, 3).toUpperCase();
 }
 
-export function TokenMark({ mint, symbol, size = "sm", className }: TokenMarkProps) {
+/**
+ * Resolves a mint to its display symbol and bundled logo. Logos only resolve
+ * through mints verified against the well-known registry — a symbol alone
+ * must never resolve one, since token names are self-reported and an issued
+ * token named "USDC" would otherwise wear Circle's mark.
+ *
+ * @param mint - Mint address; resolves a well-known token when it matches one.
+ * @param symbol - Display symbol fallback for mints outside the registry.
+ * @returns The mint's display symbol and bundled logo path.
+ */
+function resolveMark(
+  mint?: string | null,
+  symbol?: string | null
+): { displaySymbol: string; logo: string | undefined } {
   const wellKnown = mint ? WELL_KNOWN_TOKEN_BY_MINT.get(mint.trim()) : undefined;
   const displaySymbol = wellKnown?.symbol ?? symbol?.trim() ?? "";
+  const logo = wellKnown
+    ? TOKEN_LOGOS[wellKnown.symbol.toUpperCase() as WellKnownTokenSymbol]
+    : undefined;
+  return { displaySymbol, logo };
+}
 
-  // The catalogue is keyed by uppercase symbol while `symbol` carries display
-  // casing, so resolve the logo through the uppercase form.
-  const logo = TOKEN_LOGOS[displaySymbol.toUpperCase() as WellKnownTokenSymbol];
+export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: TokenMarkProps) {
+  const { displaySymbol, logo } = resolveMark(mint, symbol);
+  const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
 
   const { box, text, px } = SIZE_STYLES[size];
 
@@ -82,6 +103,27 @@ export function TokenMark({ mint, symbol, size = "sm", className }: TokenMarkPro
         aria-hidden="true"
       >
         <Image src={logo} alt="" fill sizes={`${px}px`} className="object-contain" />
+      </span>
+    );
+  }
+
+  if (logoUrl && failedLogoUrl !== logoUrl) {
+    return (
+      <span
+        className={cn(
+          "relative inline-flex shrink-0 overflow-hidden rounded-full border border-border-subtle bg-[white]",
+          box,
+          className
+        )}
+        aria-hidden="true"
+      >
+        {/* biome-ignore lint/performance/noImgElement: issuer-supplied external logo URL; next/image can't be configured for arbitrary hosts. */}
+        <img
+          src={logoUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setFailedLogoUrl(logoUrl)}
+        />
       </span>
     );
   }

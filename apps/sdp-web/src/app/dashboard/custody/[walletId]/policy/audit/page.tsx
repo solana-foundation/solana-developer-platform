@@ -62,7 +62,11 @@ export default async function WalletPolicyAuditPage({
     if (error instanceof PolicyAuditRequestError && error.status === 404) notFound();
     return (
       <DashboardWorkspaceOverviewPanel>
-        <PolicyAuditLoadError backHref={policyHref} t={t} />
+        <PolicyAuditLoadError
+          backHref={policyHref}
+          backLabel={t("DashboardCustody.policyAuditBackToWalletControls")}
+          t={t}
+        />
       </DashboardWorkspaceOverviewPanel>
     );
   }

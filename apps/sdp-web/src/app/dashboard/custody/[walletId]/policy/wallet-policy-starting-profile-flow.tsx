@@ -25,6 +25,7 @@ import { LimitsAndAssetsStep } from "./limits-assets-step";
 import type { IssuedPolicyToken } from "./policy-assets.data";
 import { PolicySummaryRail } from "./policy-summary-rail";
 import { ReviewStep } from "./review-step";
+import { RevisionHistoryDrawer } from "./revision-history-drawer";
 import {
   buildDisabledPolicyPayload,
   buildPolicyAssetOptions,
@@ -49,7 +50,6 @@ import {
   type WalletAssetOption,
   walletDetailHref,
 } from "./wallet-policy-flow.shared";
-import { WalletPolicyToolbar } from "./wallet-policy-toolbar";
 
 interface WalletPolicyStartingProfileFlowProps {
   projectId: string;
@@ -297,11 +297,7 @@ export function WalletPolicyStartingProfileFlow({
         description={t(currentStepCopy.descriptionKey)}
         maxWidthClassName="max-w-6xl"
         toolbarActions={
-          <WalletPolicyToolbar
-            walletHref={walletDetailHref(pathname, wallet.walletId)}
-            walletId={wallet.walletId}
-            initialRevisionId={initialRevisionId}
-          />
+          <RevisionHistoryDrawer walletId={wallet.walletId} initialRevisionId={initialRevisionId} />
         }
         aside={
           <PolicySummaryRail

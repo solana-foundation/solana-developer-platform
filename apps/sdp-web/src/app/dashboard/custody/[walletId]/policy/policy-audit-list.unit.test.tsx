@@ -153,7 +153,6 @@ describe("policy audit presentation", () => {
           userNames={{}}
           neighbors={{ previous: null, next: null }}
           filters={{ page: 1, pageSize: 25 }}
-          tab="decision"
           locale="en-US"
           t={t}
         />
@@ -161,7 +160,6 @@ describe("policy audit presentation", () => {
     );
 
     expect(html).toContain('data-policy-audit-detail-actor="true"');
-    expect(html).toContain('data-policy-audit-detail-rail-actor="true"');
     expect(html).toContain('class="min-w-0 flex-1 truncate"');
     expect(html).toContain(`title="User · ${LONG_ACTOR_ID}"`);
     expect(html).toContain("inline-flex min-w-0 max-w-full items-center gap-2");
