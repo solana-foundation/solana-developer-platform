@@ -217,6 +217,37 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     expect(empty.rows).toEqual([]);
   });
 
+  it("includes viewer-authored events after the associated wallet is revoked", async () => {
+    await repo.insert(
+      baseEvent({
+        id: "pce_viewer_authored",
+        sdpUserId: TEST_USER.id,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED,
+        wallets: ["wallet-revoked"],
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_other_authored",
+        sdpUserId: "usr_other",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED,
+        wallets: ["wallet-other"],
+      })
+    );
+
+    const { rows } = await repo.listByProject({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      wallets: [],
+      viewerUserId: TEST_USER.id,
+      limit: 10,
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["pce_viewer_authored"]);
+  });
+
   it("filters channel and project feeds by exact status", async () => {
     await repo.insert(
       baseEvent({

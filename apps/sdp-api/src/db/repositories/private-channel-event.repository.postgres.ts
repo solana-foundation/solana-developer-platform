@@ -91,8 +91,13 @@ export function createPostgresPrivateChannelEventRepository(
         binds.push(params.status);
       }
       if (params.wallets) {
-        clauses.push("wallets && ?::text[]");
-        binds.push(params.wallets);
+        if (params.viewerUserId) {
+          clauses.push("(wallets && ?::text[] OR sdp_user_id = ?)");
+          binds.push(params.wallets, params.viewerUserId);
+        } else {
+          clauses.push("wallets && ?::text[]");
+          binds.push(params.wallets);
+        }
       }
       // Composite cursor: (occurred_at, id) is a total order, so ties on
       // occurred_at can't skip or duplicate rows across pages.
@@ -138,8 +143,13 @@ export function createPostgresPrivateChannelEventRepository(
         binds.push(params.status);
       }
       if (params.wallets) {
-        clauses.push("wallets && ?::text[]");
-        binds.push(params.wallets);
+        if (params.viewerUserId) {
+          clauses.push("(wallets && ?::text[] OR sdp_user_id = ?)");
+          binds.push(params.wallets, params.viewerUserId);
+        } else {
+          clauses.push("wallets && ?::text[]");
+          binds.push(params.wallets);
+        }
       }
       if (params.beforeOccurredAt && params.beforeId) {
         clauses.push("(occurred_at < ? OR (occurred_at = ? AND id < ?))");

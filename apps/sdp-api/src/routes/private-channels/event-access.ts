@@ -1,5 +1,6 @@
 import { hasPermission } from "@sdp/types";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
+import { forbidden } from "@/lib/errors";
 import type { AppContext } from "./context";
 import {
   getPrivateChannelUserRepository,
@@ -8,7 +9,7 @@ import {
 
 export type EventViewer =
   | { scope: "all" }
-  | { scope: "wallets"; wallets: string[] }
+  | { scope: "wallets"; wallets: string[]; userId: string }
   | { scope: "none" };
 
 interface EventViewerResolverDependencies {
@@ -27,7 +28,13 @@ export async function resolveEventViewerForAuth(
   projectId: string,
   dependencies: EventViewerResolverDependencies
 ): Promise<EventViewer> {
-  if (auth.authType === "api_key" || hasPermission(auth.permissions, "org:admin")) {
+  if (auth.authType === "api_key") {
+    if (auth.projectId !== projectId) {
+      throw forbidden("API key is not scoped to the requested project");
+    }
+    return { scope: "all" };
+  }
+  if (hasPermission(auth.permissions, "org:admin")) {
     return { scope: "all" };
   }
   if (!auth.userId) {
@@ -41,10 +48,11 @@ export async function resolveEventViewerForAuth(
   }
 
   const verifiedWallets = await dependencies.listVerifiedWallets(scope, privateChannelUser.id);
-  if (verifiedWallets.length === 0) {
-    return { scope: "none" };
-  }
-  return { scope: "wallets", wallets: verifiedWallets.map((wallet) => wallet.pubkey) };
+  return {
+    scope: "wallets",
+    wallets: verifiedWallets.map((wallet) => wallet.pubkey),
+    userId: auth.userId,
+  };
 }
 
 export async function resolveEventViewer(c: AppContext): Promise<EventViewer> {

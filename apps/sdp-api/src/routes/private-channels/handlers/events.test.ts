@@ -25,13 +25,13 @@ const CHANNEL_ID = "pch_event_handler_test";
 const VERIFIED_WALLET = "wallet-a";
 const NOW = "2026-07-30T12:00:00.000Z";
 
-function buildApp(userId: string) {
+function buildApp(userId: string, permissions: CachedSession["permissions"] = ["payments:read"]) {
   const app = new Hono<{ Bindings: Env }>();
   const session: CachedSession = {
     id: `ses_${userId}`,
     userId,
     organizationId: ORGANIZATION_ID,
-    permissions: ["payments:read"],
+    permissions,
     expiresAt: "2099-01-01T00:00:00.000Z",
   };
 
@@ -117,7 +117,7 @@ describe("Private Channels event handlers", () => {
       family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
       type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_CONFIRMED,
       status: PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED,
-      payload: {},
+      payload: { amount: "12.50", signature: "sig_private" },
       wallets: [VERIFIED_WALLET],
       occurredAt: NOW,
       createdAt: NOW,
@@ -167,7 +167,19 @@ describe("Private Channels event handlers", () => {
       const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
       expect(body.data.events.map((event) => event.id)).toEqual(["pce_member_match"]);
       expect(body.data.events[0]?.wallets).toEqual([VERIFIED_WALLET]);
+      expect(body.data.events[0]?.payload).toEqual({});
     }
+  });
+
+  it("returns raw payloads only to organization admins", async () => {
+    const app = buildApp(USER_ID, ["payments:read", "org:admin"]);
+
+    const res = await app.request("/events", {}, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
+    const event = body.data.events.find((candidate) => candidate.id === "pce_member_match");
+
+    expect(event?.payload).toEqual({ amount: "12.50", signature: "sig_private" });
   });
 
   it("returns an empty envelope when the authenticated user has no PC user", async () => {

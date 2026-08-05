@@ -48,6 +48,8 @@ export interface ListPrivateChannelEventsParams {
   type?: string;
   status?: PrivateChannelEventStatus;
   wallets?: string[];
+  /** Also include rows authored by this user after a wallet is revoked. */
+  viewerUserId?: string;
   /** Capped at 100 by callers. */
   limit: number;
   /** Cursor: occurred_at of the last row from the previous page. */
@@ -63,6 +65,8 @@ export interface ListProjectPrivateChannelEventsParams {
   type?: string;
   status?: PrivateChannelEventStatus;
   wallets?: string[];
+  /** Also include rows authored by this user after a wallet is revoked. */
+  viewerUserId?: string;
   /** Capped at 100 by callers. */
   limit: number;
   /** Cursor: occurred_at of the last row from the previous page. */

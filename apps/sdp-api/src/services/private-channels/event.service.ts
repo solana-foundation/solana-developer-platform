@@ -12,6 +12,7 @@ import {
   type PrivateChannelEventRepository,
   type PrivateChannelEventWriteInput,
 } from "@/db/repositories";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { createDbEventSink } from "./sinks/db-sink";
 import { createLogEventSink } from "./sinks/log-sink";
@@ -88,12 +89,15 @@ export class PrivateChannelEventService {
       const result = results[i];
       if (result?.status === "rejected") {
         const sink = this.sinks[i];
-        console.error("private-channel-event sink failed", {
-          sink: sink?.name ?? `sink[${i}]`,
-          eventId: event.id,
-          type: event.type,
-          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
-        });
+        getLogger().error(
+          {
+            sink: sink?.name ?? `sink[${i}]`,
+            eventId: event.id,
+            type: event.type,
+            error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+          },
+          "private-channel-event sink failed"
+        );
       }
     }
   }

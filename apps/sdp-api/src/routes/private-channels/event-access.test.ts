@@ -47,6 +47,25 @@ describe("resolveEventViewerForAuth", () => {
     expect(deps.findPrivateChannelUser).not.toHaveBeenCalled();
   });
 
+  it("rejects API keys whose project does not match the requested project", async () => {
+    const deps = dependencies();
+
+    await expect(
+      resolveEventViewerForAuth(
+        auth({
+          authType: "api_key",
+          projectId: "prj_other",
+          userId: null,
+          apiKeyId: "key_event_access",
+        }),
+        PROJECT_ID,
+        deps
+      )
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    expect(deps.findPrivateChannelUser).not.toHaveBeenCalled();
+  });
+
   it("gives organization admins full event visibility", async () => {
     const deps = dependencies();
 
@@ -67,7 +86,11 @@ describe("resolveEventViewerForAuth", () => {
 
     const viewer = await resolveEventViewerForAuth(auth(), PROJECT_ID, deps);
 
-    expect(viewer).toEqual({ scope: "wallets", wallets: ["wallet-a", "wallet-b"] });
+    expect(viewer).toEqual({
+      scope: "wallets",
+      wallets: ["wallet-a", "wallet-b"],
+      userId: "usr_event_access",
+    });
     expect(deps.findPrivateChannelUser).toHaveBeenCalledWith(
       { organizationId: "org_event_access", projectId: PROJECT_ID },
       "usr_event_access"
@@ -88,13 +111,17 @@ describe("resolveEventViewerForAuth", () => {
     expect(deps.listVerifiedWallets).not.toHaveBeenCalled();
   });
 
-  it("returns no visibility when the member has no verified wallets", async () => {
+  it("keeps authored-event visibility when the member has no verified wallets", async () => {
     const deps = dependencies();
     deps.findPrivateChannelUser.mockResolvedValue({ id: "pcu_event_access" });
     deps.listVerifiedWallets.mockResolvedValue([]);
 
     const viewer = await resolveEventViewerForAuth(auth(), PROJECT_ID, deps);
 
-    expect(viewer).toEqual({ scope: "none" });
+    expect(viewer).toEqual({
+      scope: "wallets",
+      wallets: [],
+      userId: "usr_event_access",
+    });
   });
 });

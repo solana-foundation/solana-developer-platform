@@ -3,6 +3,7 @@ import type {
   PrivateChannelEventFamily,
   PrivateChannelEventStatus,
 } from "@sdp/types";
+import { hasPermission } from "@sdp/types";
 import type { PrivateChannelEventRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
@@ -34,7 +35,10 @@ function decodeCursor(cursor: string): { occurredAt: string; id: string } | null
   }
 }
 
-export function mapPrivateChannelEventRow(row: PrivateChannelEventRow): PrivateChannelEventDto {
+function mapPrivateChannelEventRow(
+  row: PrivateChannelEventRow,
+  includeRawPayload: boolean
+): PrivateChannelEventDto {
   return {
     id: row.id,
     organizationId: row.organization_id,
@@ -45,7 +49,7 @@ export function mapPrivateChannelEventRow(row: PrivateChannelEventRow): PrivateC
     family: row.family,
     type: row.type,
     status: row.status,
-    payload: row.payload,
+    payload: includeRawPayload ? row.payload : {},
     wallets: row.wallets,
     occurredAt: row.occurred_at,
     createdAt: row.created_at,
@@ -82,7 +86,12 @@ function parseEventsQuery(c: AppContext): ParsedEventsQuery {
 function eventsEnvelope(c: AppContext, rows: PrivateChannelEventRow[], hasMore: boolean) {
   const last = rows.at(-1);
   const nextCursor = hasMore && last ? encodeCursor(last.occurred_at, last.id) : null;
-  return success(c, { events: rows.map(mapPrivateChannelEventRow), hasMore, nextCursor });
+  const includeRawPayload = hasPermission(getAuth(c).permissions, "org:admin");
+  return success(c, {
+    events: rows.map((row) => mapPrivateChannelEventRow(row, includeRawPayload)),
+    hasMore,
+    nextCursor,
+  });
 }
 
 /** GET /channels/:id/events — paginated activity feed for a channel. */
@@ -113,6 +122,7 @@ export async function listChannelEvents(c: AppContext) {
     type,
     status,
     wallets: viewer.scope === "wallets" ? viewer.wallets : undefined,
+    viewerUserId: viewer.scope === "wallets" ? viewer.userId : undefined,
     limit,
     beforeOccurredAt: cursor?.occurredAt,
     beforeId: cursor?.id,
@@ -140,6 +150,7 @@ export async function listProjectEvents(c: AppContext) {
     type,
     status,
     wallets: viewer.scope === "wallets" ? viewer.wallets : undefined,
+    viewerUserId: viewer.scope === "wallets" ? viewer.userId : undefined,
     limit,
     beforeOccurredAt: cursor?.occurredAt,
     beforeId: cursor?.id,
