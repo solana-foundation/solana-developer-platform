@@ -38,14 +38,17 @@ export async function fetchTransactionFilterOptions(
     request(`/api/dashboard/counterparty?page=1&pageSize=${COUNTERPARTY_PAGE_SIZE}`, {
       cache: "no-store",
     }),
-    request("/api/dashboard/wallets/aggregate", { cache: "no-store" }),
+    // Assets are a convenience, not a requirement, so this one degrades on its
+    // own. Left in the shared Promise.all it would reject the whole thing on a
+    // transport error and every select — wallets and counterparties included —
+    // would render empty. Checking `.ok` afterwards only covers HTTP errors,
+    // which are the case that never reaches this handler.
+    request("/api/dashboard/wallets/aggregate", { cache: "no-store" }).catch(() => null),
   ]);
-  // Assets are a convenience, not a requirement: a failure here leaves the select
-  // empty rather than taking the whole filter bar down with it.
-  const aggregateBody = aggregateResponse.ok
-    ? ((await aggregateResponse.json()) as {
+  const aggregateBody = aggregateResponse?.ok
+    ? ((await aggregateResponse.json().catch(() => null)) as {
         data?: { aggregate?: { balances?: Array<{ mint: string; token: string }> } };
-      })
+      } | null)
     : null;
 
   // `balance.token` is not a symbol — the aggregate returns the mint there for

@@ -159,4 +159,33 @@ describe("asset options", () => {
     const options = await fetchTransactionFilterOptions(failing);
     expect(options.assets).toEqual([]);
   });
+
+  it("keeps the other filters when the aggregate request rejects outright", async () => {
+    // A 500 still resolves, so the `.ok` check catches it. A transport-level
+    // rejection does not, and sharing one Promise.all meant it took the wallet
+    // and counterparty selects down with it — the whole bar rendered empty.
+    const rejecting = vi.fn(async (input: string) => {
+      const url = new URL(input, "http://dashboard.local");
+      if (url.pathname.endsWith("/wallets/aggregate")) {
+        throw new TypeError("Failed to fetch");
+      }
+      if (url.pathname.endsWith("/wallets")) {
+        return jsonResponse({
+          data: { wallets: [{ walletId: "wallet-1", publicKey: "pk-1", label: "Treasury" }] },
+        });
+      }
+      return jsonResponse({
+        data: {
+          counterparties: [{ id: "cp-1", displayName: "Acme" }],
+          pagination: { totalPages: 1 },
+        },
+      });
+    });
+
+    const options = await fetchTransactionFilterOptions(rejecting);
+
+    expect(options.assets).toEqual([]);
+    expect(options.wallets).toEqual([{ id: "wallet-1", label: "Treasury" }]);
+    expect(options.counterparties).toEqual([{ id: "cp-1", label: "Acme" }]);
+  });
 });
