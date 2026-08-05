@@ -20,6 +20,7 @@ function flattenKeys(value: unknown, prefix = ""): string[] {
 describe("i18n messages", () => {
   it("only accepts configured locales", () => {
     expect(isAppLocale("en")).toBe(true);
+    expect(isAppLocale("es")).toBe(true);
     expect(isAppLocale("fr")).toBe(true);
     expect(isAppLocale("pt")).toBe(true);
     expect(isAppLocale("de")).toBe(false);
@@ -27,6 +28,7 @@ describe("i18n messages", () => {
 
   it("resolves typed catalog entries", () => {
     expect(translate(getMessages("en"), "Home.trySdp")).toBe("Try SDP");
+    expect(translate(getMessages("es"), "Home.contactUs")).toBe("Contáctanos");
     expect(translate(getMessages("fr"), "Home.contactUs")).toBe("Nous contacter");
     expect(translate(getMessages("pt"), "Home.contactUs")).toBe("Fale conosco");
   });
