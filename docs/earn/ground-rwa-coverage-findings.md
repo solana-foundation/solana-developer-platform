@@ -46,6 +46,24 @@ that comparison possible from now on. What can be said today is the level: a
 shelf of treasuries plus one CLO fund and one carry fund, and none of the
 marquee issuer names the doc leads with.
 
+## Where these sources actually live (and why it is not a filter)
+
+Of the 15 catalogued sources, **only 5 are hosted on Solana — all Kamino, all
+DeFi. Every one of the 4 RWA sources sits on Ethereum**, as do Morpho, Aave and
+Syrup. That is not a bug in the catalogue: SDP's Solana-only mandate governs the
+rails the **customer** touches — they send USDC to a Solana address and are paid
+out to one — while Ground routes the capital onward internally, which is exactly
+what the `bridge` position kind represents. A source hosted off Solana but
+funded by Solana USDC is therefore catalogued on purpose.
+
+It is worth stating plainly because it is easy to assume otherwise, and because
+it sets the price of a decision nobody has been asked to make yet: **narrowing
+V1 to Solana-hosted sources would take RWA coverage to zero** and leave a
+five-source, all-Kamino, all-DeFi shelf — the precise outcome the product doc
+says to avoid. If "Solana Earn" is ever meant to imply Solana-hosted yield
+rather than Solana-rail access, that is a V1-scope question for the epic, not a
+catalogue-mapping fix.
+
 ## Delta against the doc's named RWA list
 
 - **Present and correct:** AAA CLO — that is JAAA, catalogued as `rwa`.

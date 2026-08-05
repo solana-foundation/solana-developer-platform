@@ -165,6 +165,17 @@ export interface GroundYieldSource {
   name: string;
   /** Documented: active | buy_only | sell_only | emergency_freeze — kept open. */
   mode: string;
+  /**
+   * Where the yield source ITSELF sits — provider plumbing, deliberately NOT a
+   * catalogue gate. SDP's Solana-only mandate is about the rails the customer
+   * touches (deposit address, payout address, `depositToken`), not about where
+   * Ground routes the capital afterwards: it bridges internally, which is what
+   * the `bridge` position kind represents. So an Ethereum-hosted source funded
+   * by USDC on Solana is catalogued on purpose. Surfaced for the inventory
+   * script, which reports it because "how much of this shelf actually lives on
+   * Solana" is a product question the gates alone do not answer.
+   */
+  chain?: string | null;
   apyBps?: number | null;
   tvlUsd?: number | null;
   utilizationPct?: number | null;

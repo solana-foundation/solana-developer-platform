@@ -1,17 +1,18 @@
 {
   "provider": "ground",
   "environment": "sandbox",
-  "fetchedAt": "2026-08-05T19:41:59.095Z",
+  "fetchedAt": "2026-08-05T23:36:57.376Z",
   "sources": [
     {
       "id": "aave-v3-usdc",
       "name": "Aave V3 Core USDC",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "aave_v3",
-      "apyBps": 350,
-      "tvlUsd": 2147883645.872481,
-      "utilizationPct": 92.18103621745493,
+      "apyBps": 351,
+      "tvlUsd": 1978726696.323814,
+      "utilizationPct": 99.99465275870236,
       "allocations": [
         {
           "label": "Aave V3 Core Market",
@@ -30,6 +31,7 @@
       "id": "ground-jaaa-usdc-vault",
       "name": "Janus Henderson JAAA (USDC)",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "centrifuge",
       "apyBps": 411,
@@ -53,6 +55,7 @@
       "id": "ground-jaaa-usdt-vault",
       "name": "Janus Henderson JAAA (USDT)",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdt",
       "protocol": "centrifuge",
       "apyBps": 411,
@@ -76,6 +79,7 @@
       "id": "ground-jtrsy-usdc-vault",
       "name": "Janus Henderson JTRSY tokenized by Centrifuge",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "centrifuge",
       "apyBps": 354,
@@ -99,6 +103,7 @@
       "id": "ground-jtrsy-usdt-vault",
       "name": "Janus Henderson JTRSY tokenized by Centrifuge",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdt",
       "protocol": "centrifuge",
       "apyBps": 354,
@@ -122,6 +127,7 @@
       "id": "ground-uscc-vault",
       "name": "Bitwise Crypto Carry Fund tokenized by Superstate",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "guscc",
       "apyBps": 271,
@@ -145,6 +151,7 @@
       "id": "ground-ustb-vault",
       "name": "Invesco USTB tokenized by Superstate",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "gustb",
       "apyBps": 351,
@@ -168,51 +175,52 @@
       "id": "kamino-allez-usdc",
       "name": "Kamino Allez USDC",
       "mode": "active",
+      "chain": "solana_devnet",
       "depositToken": "usdc",
       "protocol": "kamino",
       "apyBps": 506,
-      "tvlUsd": 15421478.87444,
+      "tvlUsd": 15421376.992137,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "USDC / SOL/BTC",
           "type": "reserve",
-          "pct": 15.52548048414664
+          "pct": 15.511845230356514
         },
         {
           "label": "USDC / JLP",
           "type": "reserve",
-          "pct": 2.8063254893629166
+          "pct": 2.866891384105099
         },
         {
           "label": "USDC / Bitcoin",
           "type": "reserve",
-          "pct": 0.6846165798344109
+          "pct": 0.42522965889668596
         },
         {
           "label": "USDC / STRCx",
           "type": "reserve",
-          "pct": 0.25716722846026274
+          "pct": 0.2590698220123732
         },
         {
           "label": "USDC / OnRe",
           "type": "reserve",
-          "pct": 1.9644278425540416
+          "pct": 2.0839741374116483
         },
         {
           "label": "USDC / Maple",
           "type": "reserve",
-          "pct": 2.6642651708053364
+          "pct": 2.6848766009531992
         },
         {
           "label": "USDC / Figure",
           "type": "reserve",
-          "pct": 25.16053133095932
+          "pct": 25.091403765232638
         },
         {
           "label": "USDC / HYPE",
           "type": "reserve",
-          "pct": 3.240433918169451
+          "pct": 3.2407510170948033
         },
         {
           "label": "USDC / Huma",
@@ -222,7 +230,7 @@
         {
           "label": "USDC / OnRe",
           "type": "reserve",
-          "pct": 47.696751955707626
+          "pct": 47.83595838393704
         }
       ],
       "sourceKind": "defi",
@@ -236,10 +244,11 @@
       "id": "kamino-gauntlet-frontier-usdc",
       "name": "Kamino Gauntlet USDC Frontier",
       "mode": "active",
+      "chain": "solana_devnet",
       "depositToken": "usdc",
       "protocol": "kamino",
-      "apyBps": 480,
-      "tvlUsd": 391674.290414,
+      "apyBps": 479,
+      "tvlUsd": 391667.254369,
       "utilizationPct": null,
       "allocations": [
         {
@@ -274,10 +283,11 @@
       "id": "kamino-rockawayx-rwa-usdc",
       "name": "Kamino RockawayX RWA USDC",
       "mode": "active",
+      "chain": "solana_devnet",
       "depositToken": "usdc",
       "protocol": "kamino",
       "apyBps": 585,
-      "tvlUsd": 27288452.521874,
+      "tvlUsd": 27292892.090138,
       "utilizationPct": null,
       "allocations": [
         {
@@ -293,7 +303,7 @@
         {
           "label": "USDC / OnRe",
           "type": "reserve",
-          "pct": 40.57174057174057
+          "pct": 40.58014058014058
         },
         {
           "label": "USDC / Figure",
@@ -303,7 +313,7 @@
         {
           "label": "USDC / OnRe",
           "type": "reserve",
-          "pct": 1.0995010995010994
+          "pct": 1.099001099001099
         },
         {
           "label": "USDC / OnRe",
@@ -313,7 +323,7 @@
         {
           "label": "USDC / Obligate",
           "type": "reserve",
-          "pct": 18.32871832871833
+          "pct": 18.320818320818322
         }
       ],
       "sourceKind": "defi",
@@ -327,31 +337,32 @@
       "id": "kamino-steakhouse-usdc",
       "name": "Kamino Steakhouse USDC",
       "mode": "active",
+      "chain": "solana_devnet",
       "depositToken": "usdc",
       "protocol": "kamino",
       "apyBps": 393,
-      "tvlUsd": 19925299.786685,
+      "tvlUsd": 19924792.976088,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "USDC / JLP",
           "type": "reserve",
-          "pct": 18.746399999999998
+          "pct": 18.665499999999998
         },
         {
           "label": "USDC / SOL/BTC",
           "type": "reserve",
-          "pct": 78.69749999999999
+          "pct": 78.5549
         },
         {
           "label": "USDC / Bitcoin",
           "type": "reserve",
-          "pct": 0.5999
+          "pct": 0.827
         },
         {
           "label": "USDC / Maple",
           "type": "reserve",
-          "pct": 1.9562
+          "pct": 1.9526000000000001
         }
       ],
       "sourceKind": "defi",
@@ -365,10 +376,11 @@
       "id": "kamino-superstate-usdc",
       "name": "Kamino Superstate USDC",
       "mode": "active",
+      "chain": "solana_devnet",
       "depositToken": "usdc",
       "protocol": "kamino",
       "apyBps": 151,
-      "tvlUsd": 8388187.751484,
+      "tvlUsd": 8388124.799811,
       "utilizationPct": null,
       "allocations": [
         {
@@ -388,21 +400,22 @@
       "id": "morpho-august-usdc-v2",
       "name": "Morpho August USDC V2",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "morpho",
       "apyBps": 815,
-      "tvlUsd": 1639405.479603,
+      "tvlUsd": 1598579.296852,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "USDC / upUSDC",
           "type": "market",
-          "pct": 31.504142265626268
+          "pct": 29.754776822786038
         },
         {
           "label": "USDC / syzUSD",
           "type": "market",
-          "pct": 68.49585773437374
+          "pct": 70.24522317721394
         }
       ],
       "sourceKind": "defi",
@@ -416,51 +429,52 @@
       "id": "morpho-gauntlet-usdc",
       "name": "Morpho Gauntlet USDC Prime",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "morpho",
       "apyBps": 370,
-      "tvlUsd": 28500900.392107,
+      "tvlUsd": 28486197.202605,
       "utilizationPct": null,
       "allocations": [
         {
-          "label": "USDC / wstETH",
-          "type": "market",
-          "pct": 4.210446719228364
-        },
-        {
           "label": "USDC / WETH",
           "type": "market",
-          "pct": 2.082765818737546
+          "pct": 2.083812757201495
         },
         {
           "label": "USDC / WBTC",
           "type": "market",
-          "pct": 0.42883834554308403
+          "pct": 0.42905389363330165
+        },
+        {
+          "label": "USDC / wstETH",
+          "type": "market",
+          "pct": 4.212563258702585
         },
         {
           "label": "USDC / cbBTC",
           "type": "market",
-          "pct": 0.000004874265549145889
+          "pct": 0.000004876715914750664
         },
         {
           "label": "USDC / cbBTC",
           "type": "market",
-          "pct": 57.32306471520808
+          "pct": 57.176729245141274
         },
         {
           "label": "USDC / WBTC",
           "type": "market",
-          "pct": 21.179431092599106
+          "pct": 21.365224384770805
         },
         {
           "label": "USDC idle market",
           "type": "market",
-          "pct": 0.3803341884851158
+          "pct": 0.33026496815876905
         },
         {
           "label": "USDC / wstETH",
           "type": "market",
-          "pct": 14.395114245933154
+          "pct": 14.40234661567586
         }
       ],
       "sourceKind": "defi",
@@ -474,36 +488,37 @@
       "id": "morpho-smokehouse-usdc",
       "name": "Morpho Smokehouse USDC",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "morpho",
       "apyBps": 485,
-      "tvlUsd": 15865222.927329,
+      "tvlUsd": 15846940.67263,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "USDC / PT-USDG-24SEP2026",
           "type": "market",
-          "pct": 0.0077289164118669405
+          "pct": 0.00752934843994693
         },
         {
           "label": "USDC / PT-sUSDS-26NOV2026",
           "type": "market",
-          "pct": 58.17984536149612
+          "pct": 56.20792173978661
         },
         {
           "label": "USDC / PT-reUSD-10DEC2026",
           "type": "market",
-          "pct": 10.006962959412977
+          "pct": 10.011614888764091
         },
         {
           "label": "USDC / reUSD",
           "type": "market",
-          "pct": 25.01737906193758
+          "pct": 25.028873145206802
         },
         {
           "label": "USDC / AA_FalconXUSDC",
           "type": "market",
-          "pct": 6.788083700741457
+          "pct": 8.744060877802545
         }
       ],
       "sourceKind": "defi",
@@ -517,56 +532,57 @@
       "id": "morpho-steakhouse-usdc",
       "name": "Morpho Steakhouse USDC Prime",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "morpho",
       "apyBps": 352,
-      "tvlUsd": 75960080.929534,
+      "tvlUsd": 75954831.816277,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "USDC / FLHYon",
           "type": "market",
-          "pct": 2.7187073436374295e-8
+          "pct": 2.3396650299899852e-8
         },
         {
           "label": "USDC / WBTC",
           "type": "market",
-          "pct": 27.406638846487642
+          "pct": 42.67164013840488
         },
         {
           "label": "USDC / wstETH",
           "type": "market",
-          "pct": 6.429445973529907
+          "pct": 7.358308076885897
         },
         {
           "label": "USDC / WBTC",
           "type": "market",
-          "pct": 1.7925509448280352
+          "pct": 1.7164783064016216
         },
         {
           "label": "USDC / cbBTC",
           "type": "market",
-          "pct": 0.01810561889738339
+          "pct": 0.015669057826118542
         },
         {
           "label": "USDC / WETH",
           "type": "market",
-          "pct": 0.8359172411299256
+          "pct": 1.3838428615857323
         },
         {
           "label": "USDC / steakEURCV",
           "type": "market",
-          "pct": 10.759544348090682
+          "pct": 10.791499305582763
         },
         {
           "label": "USDC / cbBTC",
           "type": "market",
-          "pct": 52.75528104059345
+          "pct": 36.03650443844039
         },
         {
           "label": "USDC / weETH",
           "type": "market",
-          "pct": 0.0025159592559107274
+          "pct": 0.026057791475946075
         }
       ],
       "sourceKind": "defi",
@@ -580,16 +596,17 @@
       "id": "syrup-usdc",
       "name": "Syrup USDC",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "maple",
       "apyBps": 492,
-      "tvlUsd": 1109452515.92361,
+      "tvlUsd": 1109136116.677432,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "Open-term loans",
           "type": "loan",
-          "pct": 98.30826472008603
+          "pct": 98.33847042805209
         },
         {
           "label": "Fixed-term loans",
@@ -599,7 +616,7 @@
         {
           "label": "Liquid assets",
           "type": "liquidity",
-          "pct": 1.6917352799139778
+          "pct": 1.6615295719479057
         }
       ],
       "sourceKind": "defi",
@@ -613,16 +630,17 @@
       "id": "syrup-usdt",
       "name": "Syrup USDT",
       "mode": "active",
+      "chain": "ethereum_sepolia",
       "depositToken": "usdt",
       "protocol": "maple",
       "apyBps": 422,
-      "tvlUsd": 451381037.336918,
+      "tvlUsd": 451390380.370055,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "Open-term loans",
           "type": "loan",
-          "pct": 91.88498240884341
+          "pct": 91.88475863112032
         },
         {
           "label": "Fixed-term loans",
@@ -632,7 +650,7 @@
         {
           "label": "Liquid assets",
           "type": "liquidity",
-          "pct": 8.115017591156594
+          "pct": 8.115241368879678
         }
       ],
       "sourceKind": "defi",

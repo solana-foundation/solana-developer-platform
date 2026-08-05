@@ -12,27 +12,27 @@ platform does — not a parallel interpretation.
 
 ## Environment: sandbox
 
-Fetched 2026-08-05T19:41:59.095Z · **18 raw sources** → **15 catalogued** (4 rwa / 11 defi) · **3 dropped** (3 × `not_solana_routable`)
+Fetched 2026-08-05T23:36:57.376Z · **18 raw sources** → **15 catalogued** (4 rwa / 11 defi) · **3 dropped** (3 × `not_solana_routable`)
 
 ### Catalogued sources
 
-| id | name | kind | curator | token | APY | TVL (USD) | liquidity | allocations |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ground-jaaa-usdc-vault` | Janus Henderson JAAA (USDC) | **rwa** | `centrifuge` → Centrifuge | usdc | 4.11% | 684,935,952 | delayed 2d | rwa 100 |
-| `ground-jtrsy-usdc-vault` | Janus Henderson JTRSY tokenized by Centrifuge | **rwa** | `centrifuge` → Centrifuge | usdc | 3.54% | 881,450,491 | delayed 2d | treasury 100 |
-| `ground-uscc-vault` | Bitwise Crypto Carry Fund tokenized by Superstate | **rwa** | `guscc` → Superstate USCC | usdc | 2.71% | 129,306,810 | delayed 2d | rwa 100 |
-| `ground-ustb-vault` | Invesco USTB tokenized by Superstate | **rwa** | `gustb` → Superstate USTB | usdc | 3.51% | 956,345,552 | delayed 1d | treasury 100 |
-| `aave-v3-usdc` | Aave V3 Core USDC | **defi** | `aave_v3` → Aave V3 | usdc | 3.50% | 2,147,883,646 | instant | market 100 |
-| `kamino-allez-usdc` | Kamino Allez USDC | **defi** | `allez` → Allez Labs | usdc | 5.06% | 15,421,479 | instant | reserve 15.53 / reserve 2.81 / reserve 0.68 / reserve 0.26 / reserve 1.96 / reserve 2.66 / reserve 25.16 / reserve 3.24 / reserve 0 / reserve 47.7 |
-| `kamino-gauntlet-frontier-usdc` | Kamino Gauntlet USDC Frontier | **defi** | `gauntlet` → Gauntlet | usdc | 4.80% | 391,674 | instant | reserve 87.62 / reserve 12.38 / reserve 0 / reserve 0 |
-| `kamino-rockawayx-rwa-usdc` | Kamino RockawayX RWA USDC | **defi** | `rockawayx` → RockawayX | usdc | 5.85% | 27,288,453 | instant | reserve 0 / reserve 30 / reserve 40.57 / reserve 10 / reserve 1.1 / reserve 0 / reserve 18.33 |
-| `kamino-steakhouse-usdc` | Kamino Steakhouse USDC | **defi** | `steakhouse` → Steakhouse Financial | usdc | 3.93% | 19,925,300 | instant | reserve 18.75 / reserve 78.7 / reserve 0.6 / reserve 1.96 |
-| `kamino-superstate-usdc` | Kamino Superstate USDC | **defi** | `superstate` → Superstate | usdc | 1.51% | 8,388,188 | instant | market 100 |
-| `morpho-august-usdc-v2` | Morpho August USDC V2 | **defi** | `august` → August | usdc | 8.15% | 1,639,405 | instant | market 31.5 / market 68.5 |
-| `morpho-gauntlet-usdc` | Morpho Gauntlet USDC Prime | **defi** | `gauntlet` → Gauntlet | usdc | 3.70% | 28,500,900 | instant | market 4.21 / market 2.08 / market 0.43 / market 0 / market 57.32 / market 21.18 / market 0.38 / market 14.4 |
-| `morpho-smokehouse-usdc` | Morpho Smokehouse USDC | **defi** | `smokehouse` → Smokehouse | usdc | 4.85% | 15,865,223 | instant | market 0.01 / market 58.18 / market 10.01 / market 25.02 / market 6.79 |
-| `morpho-steakhouse-usdc` | Morpho Steakhouse USDC Prime | **defi** | `steakhouse` → Steakhouse Financial | usdc | 3.52% | 75,960,081 | instant | market 0 / market 27.41 / market 6.43 / market 1.79 / market 0.02 / market 0.84 / market 10.76 / market 52.76 / market 0 |
-| `syrup-usdc` | Syrup USDC | **defi** | `maple` → Maple | usdc | 4.92% | 1,109,452,516 | delayed 1d | loan 98.31 / loan 0 / liquidity 1.69 |
+| id | name | kind | host chain | curator | token | APY | TVL (USD) | liquidity | allocations |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ground-jaaa-usdc-vault` | Janus Henderson JAAA (USDC) | **rwa** | ethereum_sepolia | `centrifuge` → Centrifuge | usdc | 4.11% | 684,935,952 | delayed 2d | rwa 100 |
+| `ground-jtrsy-usdc-vault` | Janus Henderson JTRSY tokenized by Centrifuge | **rwa** | ethereum_sepolia | `centrifuge` → Centrifuge | usdc | 3.54% | 881,450,491 | delayed 2d | treasury 100 |
+| `ground-uscc-vault` | Bitwise Crypto Carry Fund tokenized by Superstate | **rwa** | ethereum_sepolia | `guscc` → Superstate USCC | usdc | 2.71% | 129,306,810 | delayed 2d | rwa 100 |
+| `ground-ustb-vault` | Invesco USTB tokenized by Superstate | **rwa** | ethereum_sepolia | `gustb` → Superstate USTB | usdc | 3.51% | 956,345,552 | delayed 1d | treasury 100 |
+| `aave-v3-usdc` | Aave V3 Core USDC | **defi** | ethereum_sepolia | `aave_v3` → Aave V3 | usdc | 3.51% | 1,978,726,696 | instant | market 100 |
+| `kamino-allez-usdc` | Kamino Allez USDC | **defi** | solana_devnet | `allez` → Allez Labs | usdc | 5.06% | 15,421,377 | instant | reserve 15.51 / reserve 2.87 / reserve 0.43 / reserve 0.26 / reserve 2.08 / reserve 2.68 / reserve 25.09 / reserve 3.24 / reserve 0 / reserve 47.84 |
+| `kamino-gauntlet-frontier-usdc` | Kamino Gauntlet USDC Frontier | **defi** | solana_devnet | `gauntlet` → Gauntlet | usdc | 4.79% | 391,667 | instant | reserve 87.62 / reserve 12.38 / reserve 0 / reserve 0 |
+| `kamino-rockawayx-rwa-usdc` | Kamino RockawayX RWA USDC | **defi** | solana_devnet | `rockawayx` → RockawayX | usdc | 5.85% | 27,292,892 | instant | reserve 0 / reserve 30 / reserve 40.58 / reserve 10 / reserve 1.1 / reserve 0 / reserve 18.32 |
+| `kamino-steakhouse-usdc` | Kamino Steakhouse USDC | **defi** | solana_devnet | `steakhouse` → Steakhouse Financial | usdc | 3.93% | 19,924,793 | instant | reserve 18.67 / reserve 78.55 / reserve 0.83 / reserve 1.95 |
+| `kamino-superstate-usdc` | Kamino Superstate USDC | **defi** | solana_devnet | `superstate` → Superstate | usdc | 1.51% | 8,388,125 | instant | market 100 |
+| `morpho-august-usdc-v2` | Morpho August USDC V2 | **defi** | ethereum_sepolia | `august` → August | usdc | 8.15% | 1,598,579 | instant | market 29.75 / market 70.25 |
+| `morpho-gauntlet-usdc` | Morpho Gauntlet USDC Prime | **defi** | ethereum_sepolia | `gauntlet` → Gauntlet | usdc | 3.70% | 28,486,197 | instant | market 2.08 / market 0.43 / market 4.21 / market 0 / market 57.18 / market 21.37 / market 0.33 / market 14.4 |
+| `morpho-smokehouse-usdc` | Morpho Smokehouse USDC | **defi** | ethereum_sepolia | `smokehouse` → Smokehouse | usdc | 4.85% | 15,846,941 | instant | market 0.01 / market 56.21 / market 10.01 / market 25.03 / market 8.74 |
+| `morpho-steakhouse-usdc` | Morpho Steakhouse USDC Prime | **defi** | ethereum_sepolia | `steakhouse` → Steakhouse Financial | usdc | 3.52% | 75,954,832 | instant | market 0 / market 42.67 / market 7.36 / market 1.72 / market 0.02 / market 1.38 / market 10.79 / market 36.04 / market 0.03 |
+| `syrup-usdc` | Syrup USDC | **defi** | ethereum_sepolia | `maple` → Maple | usdc | 4.92% | 1,109,136,117 | delayed 1d | loan 98.34 / loan 0 / liquidity 1.66 |
 
 ### Dropped sources — never reach the catalogue
 
@@ -44,6 +44,19 @@ Ground carries that SDP does not surface, and the drop reason says which gate co
 | `ground-jaaa-usdt-vault` | Janus Henderson JAAA (USDT) | **rwa** | `centrifuge` → Centrifuge | usdt | active | `not_solana_routable` |
 | `ground-jtrsy-usdt-vault` | Janus Henderson JTRSY tokenized by Centrifuge | **rwa** | `centrifuge` → Centrifuge | usdt | active | `not_solana_routable` |
 | `syrup-usdt` | Syrup USDT | **defi** | `maple` → Maple | usdt | active | `not_solana_routable` |
+
+### Host-chain census — what is actually Solana-native
+
+SDP's Solana-only mandate governs the rails the CUSTOMER touches: deposits and
+payouts move USDC on Solana. Where a yield source itself lives is Ground's
+internal routing (the `bridge` position kind), so an off-Solana source funded by
+Solana USDC is catalogued on purpose. This table is how much of the shelf would
+remain if that decision were ever narrowed to Solana-hosted sources only.
+
+| host chain | catalogued sources | of which RWA |
+| --- | --- | --- |
+| `ethereum_sepolia` | 10 | 4 |
+| `solana_devnet` | 5 | 0 |
 
 ### Allocation-type census
 

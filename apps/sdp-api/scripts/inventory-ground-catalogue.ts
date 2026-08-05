@@ -77,6 +77,8 @@ const sourceRowSchema = z.object({
   id: z.string(),
   name: z.string(),
   mode: z.string(),
+  /** Where the source itself sits; see GroundYieldSource.chain. */
+  chain: z.string().nullable(),
   depositToken: z.string(),
   protocol: z.string().nullable(),
   apyBps: z.number().nullable(),
@@ -118,6 +120,7 @@ function toSourceRow(source: GroundYieldSource, environment: SdpEnvironment): So
     id: source.id,
     name: source.name,
     mode: source.mode,
+    chain: source.chain ?? null,
     depositToken: source.depositToken,
     protocol: source.protocol ?? null,
     apyBps: source.apyBps ?? null,
@@ -195,13 +198,38 @@ function formatAllocations(row: SourceRow): string {
 
 function renderCataloguedTable(rows: readonly SourceRow[]): string {
   const lines = [
-    "| id | name | kind | curator | token | APY | TVL (USD) | liquidity | allocations |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| id | name | kind | host chain | curator | token | APY | TVL (USD) | liquidity | allocations |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const row of rows) {
     lines.push(
-      `| \`${row.id}\` | ${escapeCell(row.name)} | **${row.sourceKind}** | ${formatCurator(row.curator)} | ${row.depositToken} | ${formatApy(row.apyBps)} | ${formatUsd(row.tvlUsd)} | ${formatLiquidity(row)} | ${escapeCell(formatAllocations(row))} |`
+      `| \`${row.id}\` | ${escapeCell(row.name)} | **${row.sourceKind}** | ${row.chain ?? "—"} | ${formatCurator(row.curator)} | ${row.depositToken} | ${formatApy(row.apyBps)} | ${formatUsd(row.tvlUsd)} | ${formatLiquidity(row)} | ${escapeCell(formatAllocations(row))} |`
     );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Where the catalogued shelf actually lives. SDP's Solana-only mandate governs
+ * the rails the CUSTOMER touches, not where Ground routes capital afterwards,
+ * so a source hosted off Solana is catalogued by design — but "how much of what
+ * we offer is Solana-native" is a product question the gates never answer, and
+ * this is where it gets answered.
+ */
+function renderHostChainCensus(rows: readonly SourceRow[]): string {
+  const counts = new Map<string, { total: number; rwa: number }>();
+  for (const row of rows) {
+    const chain = row.chain ?? "(unreported)";
+    const entry = counts.get(chain) ?? { total: 0, rwa: 0 };
+    entry.total += 1;
+    if (row.sourceKind === "rwa") {
+      entry.rwa += 1;
+    }
+    counts.set(chain, entry);
+  }
+  const lines = ["| host chain | catalogued sources | of which RWA |", "| --- | --- | --- |"];
+  for (const [chain, entry] of [...counts.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(`| \`${chain}\` | ${entry.total} | ${entry.rwa} |`);
   }
   return lines.join("\n");
 }
@@ -296,6 +324,16 @@ function renderEnvironmentSection(inventory: Inventory): string {
     "Ground carries that SDP does not surface, and the drop reason says which gate cost it.",
     "",
     renderDroppedTable([...dropped].sort(byKindThenId)),
+    "",
+    "### Host-chain census — what is actually Solana-native",
+    "",
+    "SDP's Solana-only mandate governs the rails the CUSTOMER touches: deposits and",
+    "payouts move USDC on Solana. Where a yield source itself lives is Ground's",
+    "internal routing (the `bridge` position kind), so an off-Solana source funded by",
+    "Solana USDC is catalogued on purpose. This table is how much of the shelf would",
+    "remain if that decision were ever narrowed to Solana-hosted sources only.",
+    "",
+    renderHostChainCensus(catalogued),
     "",
     "### Allocation-type census",
     "",
