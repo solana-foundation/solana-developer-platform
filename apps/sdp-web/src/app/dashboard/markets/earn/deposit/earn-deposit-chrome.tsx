@@ -57,7 +57,7 @@ export function SelectableCard({
   return (
     <div
       className={cn(
-        "rounded-2xl border bg-surface-raised transition-[border-color,background-color] duration-200 ease-out motion-reduce:transition-none",
+        "h-full rounded-2xl border bg-surface-raised transition-[border-color,background-color] duration-200 ease-out motion-reduce:transition-none",
         selected
           ? "border-primary bg-fill-subtle"
           : "border-border-default hover:border-border-strong hover:bg-fill-subtle/60"
@@ -75,7 +75,7 @@ export function SelectableCard({
         value={value}
       />
       <label
-        className="block cursor-pointer rounded-2xl p-4 peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40 sm:p-5"
+        className="block h-full cursor-pointer rounded-2xl p-4 peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40 sm:p-5"
         htmlFor={inputId}
       >
         {children}

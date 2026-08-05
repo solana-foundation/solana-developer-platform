@@ -11,7 +11,7 @@
       "withdrawableBalance": "Withdrawable now",
       "currentApy": "Current APY",
       "holdingsTitle": "Where the money sits",
-      "holdingsEmpty": "Nothing is deployed yet. Deposits are allocated as soon as they land.",
+      "holdingsEmpty": "No deposits detected yet. Funds land as cash, then deploy to the strategy on the provider's next rebalance.",
       "programShare": "{pct}% of program",
       "walletStatusCreating": "Setting up",
       "walletStatusBusy": "Processing",
@@ -26,7 +26,10 @@
       "startStatAccess": "Fastest access",
       "catalogueLoadError": "The strategy catalogue could not be loaded. Refresh to try again.",
       "catalogueEmpty": "No strategies are available in this environment yet.",
-      "rateDisclosure": "APY figures are variable and shown for comparison only. Actual rates and redemption times are set by the provider."
+      "rateDisclosure": "APY figures are variable and shown for comparison only. Actual rates and redemption times are set by the provider.",
+      "depositAddressLabel": "Solana deposit address",
+      "cashDeploys": "Deploys automatically on the provider's next rebalance",
+      "cashParked": "Not allocated to a strategy"
     },
     "source": {
       "defi": "DeFi",
@@ -69,7 +72,8 @@
       "errorDestinationInvalid": "Enter a valid Solana address.",
       "cancel": "Cancel",
       "confirm": "Confirm withdrawal",
-      "confirming": "Confirming…"
+      "confirming": "Confirming…",
+      "previewUnavailable": "The provider can't fill this as {token} right now — the withdrawable balance may sit in the other stablecoin, or {token} may not pay out on Solana. Try the other stablecoin or a smaller amount."
     },
     "deposit": {
       "progressWallet": "Wallet",
@@ -100,16 +104,10 @@
       "profileDescription": "This sets the filters you browse with. You can change them on the next step.",
       "profileLiquidityName": "Liquidity first",
       "profileLiquidityTagline": "Withdraw whenever you need to.",
-      "profileLiquidityDetail": "Only strategies that redeem instantly.",
       "profileBalancedName": "Balanced",
       "profileBalancedTagline": "Quick access, stronger rates.",
-      "profileBalancedDetail": "Redeems instantly or within three days.",
       "profileYieldName": "Yield first",
       "profileYieldTagline": "The best rate on offer.",
-      "profileYieldDetail": "No limit on redemption time.",
-      "profileCount": "{count} available",
-      "profileTopApy": "up to {apy}",
-      "profileNoMatches": "None available right now",
       "profileBasisTitle": "How these are built",
       "profileBasisBody": "Profiles filter the live catalogue on redemption speed, what backs the yield, and pool size — the facts the provider publishes. No risk rating is implied.",
       "selectProfile": "Choose a profile",
@@ -132,10 +130,7 @@
       "strategiesEmpty": "Nothing matches these filters. Widen them to see more of the catalogue.",
       "strategiesLoadError": "The strategy catalogue could not be loaded. Refresh to try again.",
       "strategyLegend": "Available strategies",
-      "accessLabel": "Access",
-      "poolLabel": "Pool",
       "poolUnknown": "Not reported",
-      "backedBy": "Backed by {source}",
       "curatedBy": "Curated by {curator}",
       "selectStrategy": "Select a strategy",
       "selectedStrategyAnnouncement": "{strategy} selected.",
@@ -210,7 +205,13 @@
       "walletsFiltered": "No wallet matches that search.",
       "goToWallets": "Open Wallets",
       "walletHolding": "{amount} {token}",
-      "reviewWalletAddress": "Address"
+      "reviewWalletAddress": "Address",
+      "profileTopApyLabel": "Top APY",
+      "profileMeta": "{count} strategies · {access}",
+      "profileLiquidityAccess": "instant redemption only",
+      "profileBalancedAccess": "instant to T+3",
+      "profileYieldAccess": "any redemption speed",
+      "poolMeta": "Pool {value}"
     }
   }
 }

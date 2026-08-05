@@ -4,8 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnProgramState } from "./earn-program-data";
 
+// Values-aware identity translations, so assertions can pin interpolations
+// (e.g. the trimmed share "programShare(80)").
 vi.mock("@/i18n/provider", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, string | number>) =>
+    values ? `${key}(${Object.values(values).join(",")})` : key,
   useLocale: () => "en",
 }));
 
@@ -107,6 +110,18 @@ beforeEach(() => {
   data.strategies.strategies = CATALOGUE;
   data.strategies.error = undefined;
   data.strategies.isLoading = false;
+});
+
+describe("EarnWorkspace while the program is still loading", () => {
+  it("shows the skeleton and never flashes the onboarding hero", () => {
+    // state stays undefined (in flight). Rendering the hero here flashed
+    // onboarding at program holders for a beat, then yanked it away.
+    data.program.isLoading = true;
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).not.toContain("DashboardEarn.overview.startTitle");
+    expect(html).not.toContain("DashboardEarn.overview.startAction");
+    expect(html).toContain("aria-busy");
+  });
 });
 
 describe("EarnWorkspace with no program yet", () => {
@@ -211,6 +226,24 @@ describe("EarnWorkspace with an active program", () => {
   it("renders the provider's position label verbatim so no chain name is rebuilt", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("Cash (USDC)");
+  });
+
+  it("explains what each cash slice is waiting for, from the target allocations", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    // The USDC lane targets a yield source, so its cash deploys on rebalance.
+    expect(html).toContain("DashboardEarn.overview.cashDeploys");
+  });
+
+  it("shows a trimmed share only where value sits behind it", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).toContain("DashboardEarn.overview.programShare(80)");
+    expect(html).not.toContain("programShare(80.0)");
+  });
+
+  it("keeps the deposit address one copy away on the dashboard", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).toContain("DashboardEarn.overview.depositAddressLabel");
+    expect(html).toContain("7M6bFd…7F3WcQ");
   });
 
   it("offers withdraw plus deposit and hides the onboarding hero", () => {

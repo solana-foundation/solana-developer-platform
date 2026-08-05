@@ -151,12 +151,21 @@ describe("ProfileStep", () => {
       />
     );
     // Liquidity-first reaches only the instant 6.1% source; yield-first reaches 10.4%.
-    expect(html).toContain("DashboardEarn.deposit.profileTopApy(6.1%)");
-    expect(html).toContain("DashboardEarn.deposit.profileTopApy(10.4%)");
+    expect(html).toContain("DashboardEarn.deposit.profileTopApyLabel");
+    expect(html).toContain("6.1%");
+    expect(html).toContain("10.4%");
+    // The meta line carries count + the access constraint — the differentiator
+    // when two profiles tie on top APY.
+    expect(html).toContain(
+      "DashboardEarn.deposit.profileMeta(1,DashboardEarn.deposit.profileLiquidityAccess)"
+    );
+    expect(html).toContain(
+      "DashboardEarn.deposit.profileMeta(2,DashboardEarn.deposit.profileYieldAccess)"
+    );
     expect(html).toContain("DashboardEarn.deposit.profileBasisBody");
   });
 
-  it("says so plainly when a profile matches nothing", () => {
+  it("states an empty profile as a dash and a zero count, never a fabricated rate", () => {
     const html = renderToStaticMarkup(
       <ProfileStep
         hasError={false}
@@ -168,7 +177,10 @@ describe("ProfileStep", () => {
         ])}
       />
     );
-    expect(html).toContain("DashboardEarn.deposit.profileNoMatches");
+    expect(html).toContain("—");
+    expect(html).toContain(
+      "DashboardEarn.deposit.profileMeta(0,DashboardEarn.deposit.profileLiquidityAccess)"
+    );
   });
 });
 
@@ -190,12 +202,14 @@ describe("StrategyStep", () => {
       />
     );
     expect(html).toContain("10.4%");
-    expect(html).toContain("DashboardEarn.deposit.accessLabel");
-    expect(html).toContain("DashboardEarn.deposit.poolLabel");
-    expect(html).toContain("$40M");
+    // Access and pool share one quiet facts line.
+    expect(html).toContain("DashboardEarn.liquidity.delayed(2)");
+    expect(html).toContain("DashboardEarn.deposit.poolMeta($40M)");
     // Curator survives as metadata only — never as a selection step.
     expect(html).toContain("DashboardEarn.deposit.curatedBy(Gauntlet)");
     expect(html).toContain("DashboardEarn.deposit.resultCount(2)");
+    // Single-stablecoin catalogue: no per-row token chip.
+    expect(html).not.toContain(">USDC<");
   });
 
   it("hides the stablecoin filter when the catalogue has a single lane", () => {
@@ -247,7 +261,8 @@ describe("StrategyStep", () => {
         tokens={["usdc"]}
       />
     );
-    expect(html).toContain("DashboardEarn.deposit.poolUnknown");
+    // An unreported pool is omitted from the facts line, not placeholdered.
+    expect(html).not.toContain("DashboardEarn.deposit.poolMeta");
     expect(html).not.toContain("$0");
   });
 });

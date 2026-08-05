@@ -3,6 +3,7 @@
 import {
   EARN_PORTFOLIO_TOKENS,
   type EarnPortfolioBalance,
+  type EarnPortfolioPosition,
   type EarnPortfolioToken,
   type EarnPortfolioWithdrawal,
   type EarnPortfolioWithdrawalPreview,
@@ -103,7 +104,33 @@ type PreviewState =
   | { phase: "idle" }
   | { phase: "loading" }
   | { phase: "ready"; preview: EarnPortfolioWithdrawalPreview }
-  | { phase: "error"; message: string };
+  | { phase: "error" };
+
+/**
+ * The stablecoin most likely to actually pay out, from the slices that carry a
+ * token (cash and in-transit; deployed slices are lane-ambiguous on the wire).
+ * `withdrawableUsd` is wallet-level while Ground fills withdrawals per lane, so
+ * defaulting to a token with nothing behind it invites a provider refusal as
+ * the FIRST thing the reader sees.
+ */
+function defaultWithdrawToken(positions: readonly EarnPortfolioPosition[]): EarnPortfolioToken {
+  const totals = new Map<EarnPortfolioToken, number>();
+  for (const position of positions) {
+    if (!position.token) continue;
+    const value = Number(position.valueUsd);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    totals.set(position.token, (totals.get(position.token) ?? 0) + value);
+  }
+  let best: EarnPortfolioToken = "usdc";
+  let bestValue = 0;
+  for (const [token, value] of totals) {
+    if (value > bestValue) {
+      best = token;
+      bestValue = value;
+    }
+  }
+  return best;
+}
 
 function ProcessingEstimateLine({
   estimate,
@@ -131,7 +158,13 @@ function ProcessingEstimateLine({
   );
 }
 
-function WithdrawPreviewPanel({ preview }: { preview: PreviewState }) {
+function WithdrawPreviewPanel({
+  preview,
+  token,
+}: {
+  preview: PreviewState;
+  token: EarnPortfolioToken;
+}) {
   const t = useTranslations();
   if (preview.phase === "idle") return null;
   return (
@@ -141,8 +174,12 @@ function WithdrawPreviewPanel({ preview }: { preview: PreviewState }) {
         <p className="mt-1 text-xs text-secondary">{t("DashboardEarn.withdraw.previewLoading")}</p>
       ) : null}
       {preview.phase === "error" ? (
+        // Translated, never the provider's wire text: "ground request failed
+        // with status 409" explains nothing. The honest cause on this product
+        // is per-lane: the wallet-level withdrawable can sit entirely in the
+        // OTHER stablecoin, or the token may not route to Solana at all.
         <p className="mt-1 text-xs text-error" role="alert">
-          {preview.message}
+          {t("DashboardEarn.withdraw.previewUnavailable", { token: token.toUpperCase() })}
         </p>
       ) : null}
       {preview.phase === "ready" ? (
@@ -223,6 +260,8 @@ function WithdrawalCreatedView({
 
 interface EarnWithdrawModalProps {
   balance: EarnPortfolioBalance;
+  /** Live portfolio slices; used to default the stablecoin to one with funds. */
+  positions: readonly EarnPortfolioPosition[];
   onClose: () => void;
   /** Fired once a withdrawal is accepted, so the caller can refresh balances. */
   onWithdrawalCreated: () => void;
@@ -236,13 +275,14 @@ interface EarnWithdrawModalProps {
  */
 export function EarnWithdrawModal({
   balance,
+  positions,
   onClose,
   onWithdrawalCreated,
 }: EarnWithdrawModalProps) {
   const t = useTranslations();
   const contentRef = useEarnModalFocus();
   const [amountInput, setAmountInput] = useState("");
-  const [token, setToken] = useState<EarnPortfolioToken>("usdc");
+  const [token, setToken] = useState<EarnPortfolioToken>(() => defaultWithdrawToken(positions));
   const [destinationInput, setDestinationInput] = useState("");
   const [preview, setPreview] = useState<PreviewState>({ phase: "idle" });
   const [submitting, setSubmitting] = useState(false);
@@ -292,9 +332,7 @@ export function EarnWithdrawModal({
       const result = await previewEarnWithdrawal({ amountUsd: amount, token }, controller.signal);
       if (controller.signal.aborted) return;
       setPreview(
-        result.ok
-          ? { phase: "ready", preview: result.data.data.preview }
-          : { phase: "error", message: result.error }
+        result.ok ? { phase: "ready", preview: result.data.data.preview } : { phase: "error" }
       );
     }, PREVIEW_DEBOUNCE_MS);
     return () => {
@@ -441,7 +479,7 @@ export function EarnWithdrawModal({
           ) : null}
         </div>
 
-        <WithdrawPreviewPanel preview={preview} />
+        <WithdrawPreviewPanel preview={preview} token={token} />
 
         {submitError ? (
           <p className="mt-4 text-xs text-error" role="alert">

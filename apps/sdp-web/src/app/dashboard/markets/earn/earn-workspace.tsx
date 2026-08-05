@@ -1,7 +1,12 @@
 "use client";
 
-import type { EarnPortfolioPosition, EarnPortfolioWalletStatus, EarnStrategy } from "@sdp/types";
-import { PlusIcon } from "lucide-react";
+import type {
+  EarnPortfolioPosition,
+  EarnPortfolioTargetAllocations,
+  EarnPortfolioWalletStatus,
+  EarnStrategy,
+} from "@sdp/types";
+import { CheckIcon, CopyIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +14,9 @@ import { Button } from "@/components/ui/button";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useCopy } from "@/lib/use-copy";
 import { fundableStrategies } from "./deposit/earn-deposit-model";
+import { shortenAddress } from "./deposit/earn-funding-wallets";
 import { formatApy, formatUsd } from "./earn-format";
 import {
   EARN_PORTFOLIO_PROVIDER,
@@ -96,9 +103,35 @@ function ProgramSkeleton() {
   );
 }
 
-function HoldingsList({ rows }: { rows: readonly HoldingRow[] }) {
+/** "80" not "80.0" — the tenth only earns its place when it is non-zero. */
+function formatShare(pct: number): string {
+  return Number.isInteger(pct) ? String(pct) : pct.toFixed(1);
+}
+
+function HoldingsList({
+  allocations,
+  rows,
+}: {
+  allocations: EarnPortfolioTargetAllocations;
+  rows: readonly HoldingRow[];
+}) {
   const t = useTranslations();
   const liquidityLabel = useLiquidityLabel();
+
+  /**
+   * What a cash slice is waiting for, read from the program's own target
+   * allocations. A lane whose target is a yield source deploys on the next
+   * provider rebalance; a lane targeting `cash` is parked by design — Ground
+   * never converts between stablecoins, so without this line a USDT balance
+   * beside a USDC strategy reads as "stuck" when it is exactly on target.
+   */
+  const cashStatus = (position: EarnPortfolioPosition): string | null => {
+    if (position.kind !== "cash" || !position.token) return null;
+    const lane = allocations[position.token];
+    if (!lane || lane.length === 0) return null;
+    const deploys = lane.some((entry) => entry.yieldSourceId !== "cash" && entry.weightBps > 0);
+    return t(deploys ? "DashboardEarn.overview.cashDeploys" : "DashboardEarn.overview.cashParked");
+  };
 
   return (
     <div className="mt-6">
@@ -119,9 +152,14 @@ function HoldingsList({ rows }: { rows: readonly HoldingRow[] }) {
                 {[
                   strategy ? liquidityLabel(strategy) : null,
                   strategy ? strategySourceLabel(strategy) : null,
-                  position.pct === undefined
-                    ? null
-                    : t("DashboardEarn.overview.programShare", { pct: position.pct.toFixed(1) }),
+                  cashStatus(position),
+                  // A share only means something once value sits behind it: a
+                  // target weight next to $0.00 contradicts the row above it.
+                  position.pct !== undefined && Number(position.valueUsd) > 0
+                    ? t("DashboardEarn.overview.programShare", {
+                        pct: formatShare(position.pct),
+                      })
+                    : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -138,6 +176,35 @@ function HoldingsList({ rows }: { rows: readonly HoldingRow[] }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * The funding loop, kept on the dashboard: after the flow finishes, this row is
+ * how an operator gets the deposit address again without re-walking the wizard.
+ * Copy puts the FULL address on the clipboard; the row shows it shortened.
+ */
+function DepositAddressRow({ address }: { address: string | undefined }) {
+  const t = useTranslations();
+  const { copied, copy } = useCopy(1800);
+  if (!address) return null;
+
+  return (
+    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-4">
+      <div className="min-w-0">
+        <p className="text-xs text-tertiary">{t("DashboardEarn.overview.depositAddressLabel")}</p>
+        <p className="mt-0.5 text-sm text-primary">{shortenAddress(address)}</p>
+      </div>
+      <Button
+        iconLeft={copied ? <CheckIcon /> : <CopyIcon />}
+        onClick={() => void copy(address)}
+        size="sm"
+        type="button"
+        variant="secondary"
+      >
+        {t(copied ? "DashboardEarn.deposit.copied" : "DashboardEarn.deposit.copy")}
+      </Button>
     </div>
   );
 }
@@ -251,18 +318,21 @@ function ProgramSection() {
           </dl>
 
           {holdings.length > 0 ? (
-            <HoldingsList rows={holdings} />
+            <HoldingsList allocations={program.wallet.allocations} rows={holdings} />
           ) : (
             <p className="mt-6 text-sm leading-6 text-secondary">
               {t("DashboardEarn.overview.holdingsEmpty")}
             </p>
           )}
+
+          <DepositAddressRow address={program.wallet.solanaDepositAddress} />
         </>
       ) : null}
 
       {withdrawOpen && program ? (
         <EarnWithdrawModal
           balance={program.wallet.balance}
+          positions={program.wallet.positions}
           onClose={() => setWithdrawOpen(false)}
           onWithdrawalCreated={refresh}
         />
@@ -282,7 +352,12 @@ function StartSection() {
   const { state } = useEarnProgram();
   const { strategies, error, isLoading } = useEarnStrategies();
 
-  if (state?.kind === "active") {
+  // Nothing until the program read RESOLVES. `undefined` is in-flight, not
+  // "no program": rendering the hero on it flashed onboarding at every reader
+  // who already has a program, then yanked it away when the response landed.
+  // Resolved non-active states (none / unconfigured) still get the hero, and
+  // a failed read shows ProgramSection's error instead of guessing.
+  if (state === undefined || state.kind === "active") {
     return null;
   }
 

@@ -11,9 +11,15 @@ reintroduce fixture modules. Data flows: BFF proxies
   routes under this segment and they inherit both gates.
 - `earn-workspace.tsx` — overview: portfolio stat strip (total / earned /
   withdrawable / APY), a FLAT value-ordered holdings list (deployed slices
-  first, cash last), and a catalogue-fact onboarding hero shown only when no
-  program exists. Deliberately **not** grouped by curator — see "One strategy,
-  no curator step" below.
+  first, cash last), a copyable deposit-address row (the funding loop without
+  re-walking the wizard), and a catalogue-fact onboarding hero. The hero renders
+  ONLY once the program read RESOLVES to none/unconfigured — `undefined` is
+  in-flight, and rendering on it flashed onboarding at program holders. Cash
+  rows explain themselves from the target allocations (lane → strategy: deploys
+  on rebalance; lane → cash: parked by design — Ground never converts between
+  stablecoins). A share percent renders only when value sits behind it.
+  Deliberately **not** grouped by curator — see "One strategy, no curator step"
+  below.
 - `earn-program-data.ts` — THE data seam. `useEarnProgram()` discriminates
   `404 → none`, `503 → unconfigured` (no provider key), `200 → active`;
   `useEarnStrategies()`, program upsert, deposits, withdrawal fetchers.
@@ -27,7 +33,12 @@ reintroduce fixture modules. Data flows: BFF proxies
   surface: token lane, settlement days, pool size, APY, curator/protocol labels,
   liquidity copy. Every one reads a field the provider actually publishes.
 - `earn-withdraw-modal.tsx` — portfolio-level withdrawal: amount + token +
-  Solana destination; preview → confirm → submitted state.
+  Solana destination; preview → confirm → submitted state. The stablecoin
+  defaults to the token with funds behind it (from token-bearing positions),
+  because `withdrawableUsd` is wallet-level while Ground fills per lane. Preview
+  failures render TRANSLATED copy naming the per-lane reality — never the
+  provider's wire text ("ground request failed with status 409" explains
+  nothing).
 - `deposit/` — the deposit flow: funding wallet → profile → filtered strategy
   browse → review, then post-confirm outcome screens. See "The deposit flow".
 - `earn-format.ts` — formatting utilities (APY, USD, token symbols).
@@ -45,6 +56,9 @@ sub-route silently loses the sticky footer.
 - `earn-funding-wallets.ts` — org wallets via `/api/dashboard/wallets`.
 - `wallet-step` → `profile-step` → `strategy-step` → `review-step`.
 - `integration-screen.tsx` + `earn-api-snippets.ts` — the conditional API step.
+  Snippets are Shiki-highlighted via `ui/code-block` → `lib/shiki-code`, the ONE
+  shared css-variables theme (extracted from, and still used by, the API
+  playground shell). Do not fork the theme.
 - `program-live-screen.tsx` — deposit address, status, live deposits feed.
 - `earn-deposit-chrome.tsx` / `earn-deposit-outcome.tsx` — shared primitives.
 

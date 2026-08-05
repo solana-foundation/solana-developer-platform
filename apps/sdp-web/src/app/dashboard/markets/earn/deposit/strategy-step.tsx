@@ -165,10 +165,12 @@ function FilterBar({
 function StrategyCard({
   onSelect,
   selected,
+  showTokenChip,
   strategy,
 }: {
   onSelect: () => void;
   selected: boolean;
+  showTokenChip: boolean;
   strategy: EarnStrategy;
 }) {
   const t = useTranslations();
@@ -181,6 +183,29 @@ function StrategyCard({
   const sourceLabel = strategySourceLabel(strategy);
   const curatorLabel = strategyCuratorLabel(strategy);
 
+  // Provider metadata, not a gate: backing, protocol, curating house — deduped,
+  // because "Maple · Curated by Maple" says one thing twice.
+  const meta = [
+    t(`DashboardEarn.source.${strategy.sourceKind}`),
+    sourceLabel,
+    curatorLabel && curatorLabel !== sourceLabel
+      ? t("DashboardEarn.deposit.curatedBy", { curator: curatorLabel })
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  // The decision facts in one quiet line; an unreported pool is simply absent
+  // rather than a "not reported" placeholder shouting on every sandbox row.
+  const facts = [
+    liquidityLabel(strategy),
+    poolUsd === undefined
+      ? null
+      : t("DashboardEarn.deposit.poolMeta", { value: formatUsdCompact(poolUsd) }),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <SelectableCard
       describedBy={detailId}
@@ -191,55 +216,35 @@ function StrategyCard({
       selected={selected}
       value={strategy.id}
     >
-      <span className="flex items-start gap-4">
+      <span className="flex items-center gap-5">
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="text-base font-medium tracking-tight text-primary" id={nameId}>
               {strategy.name}
             </span>
-            {token ? (
+            {/* Only when the catalogue holds more than one stablecoin — a chip
+                repeated on every row is texture, not information. */}
+            {showTokenChip && token ? (
               <span className="rounded-md bg-fill px-2 py-0.5 text-[11px] font-medium text-secondary">
                 {token.toUpperCase()}
               </span>
             ) : null}
           </span>
-          {/* Provider metadata, not a gate: backing, protocol, curating house. */}
-          <span className="mt-1 block text-[13px] leading-5 text-secondary" id={detailId}>
-            {[
-              t(`DashboardEarn.source.${strategy.sourceKind}`),
-              sourceLabel ? t("DashboardEarn.deposit.backedBy", { source: sourceLabel }) : null,
-              curatorLabel ? t("DashboardEarn.deposit.curatedBy", { curator: curatorLabel }) : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+          <span className="mt-1 block truncate text-[13px] leading-5 text-secondary" id={detailId}>
+            {meta}
           </span>
-          <span className="mt-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px]">
-            <span className="text-tertiary">
-              {t("DashboardEarn.deposit.accessLabel")}{" "}
-              <span className="text-primary">{liquidityLabel(strategy)}</span>
-            </span>
-            <span className="text-tertiary">
-              {t("DashboardEarn.deposit.poolLabel")}{" "}
-              <span className="text-primary tabular-nums">
-                {poolUsd === undefined
-                  ? t("DashboardEarn.deposit.poolUnknown")
-                  : formatUsdCompact(poolUsd)}
-              </span>
-            </span>
-          </span>
+          <span className="mt-0.5 block text-[13px] leading-5 text-tertiary">{facts}</span>
         </span>
 
-        <span className="flex shrink-0 items-start gap-4">
-          <span className="text-right">
-            <span className="block text-2xl font-medium tracking-tight text-primary tabular-nums">
-              {formatApy(strategy.currentApy)}
-            </span>
-            <span className="mt-0.5 block text-xs text-tertiary">
-              {t(`DashboardEarn.apyType.${strategy.apyType}`)}
-            </span>
+        <span className="shrink-0 text-right">
+          <span className="block text-2xl font-medium tracking-tight text-primary tabular-nums">
+            {formatApy(strategy.currentApy)}
           </span>
-          <SelectionMark selected={selected} />
+          <span className="mt-0.5 block text-xs text-tertiary">
+            {t(`DashboardEarn.apyType.${strategy.apyType}`)}
+          </span>
         </span>
+        <SelectionMark selected={selected} />
       </span>
     </SelectableCard>
   );
@@ -268,6 +273,8 @@ export function StrategyStep({
 }) {
   const t = useTranslations();
   const selected = strategies.find((strategy) => strategy.id === selectedStrategyId);
+  // A lone stablecoin needs no per-row chip; the review step still names it.
+  const showTokenChip = tokens.length > 1;
 
   return (
     <div className="space-y-4">
@@ -295,6 +302,7 @@ export function StrategyStep({
               key={strategy.id}
               onSelect={() => onSelect(strategy.id)}
               selected={strategy.id === selectedStrategyId}
+              showTokenChip={showTokenChip}
               strategy={strategy}
             />
           ))}

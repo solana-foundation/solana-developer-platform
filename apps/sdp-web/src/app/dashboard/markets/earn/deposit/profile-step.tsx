@@ -17,25 +17,30 @@ import type { EarnDepositProfile, ProfileSummary } from "./earn-deposit-model";
 /**
  * Profile copy keys. Flat keys rather than a nested map because the set is
  * closed and typed — a new profile is a compile error until its copy exists.
+ *
+ * Each card carries exactly ONE sentence (the tagline) plus a stat block; the
+ * access constraint lives in the stat's meta line. An earlier draft had a
+ * second explanatory sentence per card and it read as clutter — the tagline
+ * and the constraint said the same thing twice in different words.
  */
 const PROFILE_COPY: Record<
   EarnDepositProfile,
-  { name: MessageKey; tagline: MessageKey; detail: MessageKey }
+  { name: MessageKey; tagline: MessageKey; access: MessageKey }
 > = {
   liquidity: {
     name: "DashboardEarn.deposit.profileLiquidityName",
     tagline: "DashboardEarn.deposit.profileLiquidityTagline",
-    detail: "DashboardEarn.deposit.profileLiquidityDetail",
+    access: "DashboardEarn.deposit.profileLiquidityAccess",
   },
   balanced: {
     name: "DashboardEarn.deposit.profileBalancedName",
     tagline: "DashboardEarn.deposit.profileBalancedTagline",
-    detail: "DashboardEarn.deposit.profileBalancedDetail",
+    access: "DashboardEarn.deposit.profileBalancedAccess",
   },
   yield: {
     name: "DashboardEarn.deposit.profileYieldName",
     tagline: "DashboardEarn.deposit.profileYieldTagline",
-    detail: "DashboardEarn.deposit.profileYieldDetail",
+    access: "DashboardEarn.deposit.profileYieldAccess",
   },
 };
 
@@ -53,7 +58,6 @@ function ProfileCard({
   const inputId = `earn-deposit-profile-${summary.profile}`;
   const nameId = `${inputId}-name`;
   const detailId = `${inputId}-detail`;
-  const empty = summary.count === 0;
 
   return (
     <SelectableCard
@@ -71,29 +75,29 @@ function ProfileCard({
             <span className="block text-base font-medium tracking-tight text-primary" id={nameId}>
               {t(copy.name)}
             </span>
-            <span className="mt-1 block text-sm font-medium text-secondary">{t(copy.tagline)}</span>
+            <span className="mt-1 block text-sm leading-5 text-secondary">{t(copy.tagline)}</span>
           </span>
           <SelectionMark selected={selected} />
         </span>
 
-        {/* Live figures, not marketing copy: what the catalogue holds right now. */}
-        <span className="mt-4 block text-2xl font-medium tracking-tight text-primary tabular-nums">
-          {empty
-            ? t("DashboardEarn.deposit.profileNoMatches")
-            : summary.topApy === undefined
-              ? t("DashboardEarn.deposit.profileCount", { count: summary.count })
-              : t("DashboardEarn.deposit.profileTopApy", {
-                  apy: formatApy(String(summary.topApy)),
-                })}
-        </span>
-        {!empty && summary.topApy !== undefined ? (
-          <span className="mt-1 block text-xs text-tertiary">
-            {t("DashboardEarn.deposit.profileCount", { count: summary.count })}
+        {/* Same label-over-value grammar as the overview stat strip, pinned to
+            one shared baseline across the three cards. The meta line carries
+            the constraint that actually differentiates profiles when two tie
+            on top APY — live figures, never marketing copy. A "—" rate is an
+            empty profile stated plainly, not a fabricated number. */}
+        <span className="mt-auto block border-t border-border-subtle pt-3">
+          <span className="block text-[11px] font-medium tracking-[0.04em] text-tertiary uppercase">
+            {t("DashboardEarn.deposit.profileTopApyLabel")}
           </span>
-        ) : null}
-
-        <span className="mt-3 block text-[13px] leading-5 text-secondary" id={detailId}>
-          {t(copy.detail)}
+          <span className="mt-1 block text-2xl font-medium tracking-tight text-primary tabular-nums">
+            {summary.topApy === undefined ? "—" : formatApy(String(summary.topApy))}
+          </span>
+          <span className="mt-1 block text-xs leading-5 text-tertiary" id={detailId}>
+            {t("DashboardEarn.deposit.profileMeta", {
+              count: summary.count,
+              access: t(copy.access),
+            })}
+          </span>
         </span>
       </span>
     </SelectableCard>
@@ -123,7 +127,7 @@ export function ProfileStep({
       {hasError ? <StepNotice>{t("DashboardEarn.deposit.strategiesLoadError")}</StepNotice> : null}
 
       {!isLoading && !hasError ? (
-        <fieldset className="grid gap-3 lg:grid-cols-3">
+        <fieldset className="grid items-stretch gap-3 lg:grid-cols-3">
           <legend className="sr-only">{t("DashboardEarn.deposit.profileTitle")}</legend>
           {summaries.map((summary) => (
             <ProfileCard
