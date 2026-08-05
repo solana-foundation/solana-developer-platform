@@ -52,7 +52,15 @@ export function OperationStatusBadge({ status }: { status: WalletOperationStatus
   return <Badge variant={STATUS_VARIANTS[status]}>{formatDisplayLabel(status)}</Badge>;
 }
 
-export function PolicyAuditLoadError({ backHref, t }: { backHref: string; t: PolicyTranslate }) {
+export function PolicyAuditLoadError({
+  backHref,
+  backLabel,
+  t,
+}: {
+  backHref: string;
+  backLabel: string;
+  t: PolicyTranslate;
+}) {
   return (
     <div className="mx-auto max-w-xl border-y border-border-default py-16 text-center">
       <h1 className="text-xl font-medium text-primary">
@@ -62,7 +70,7 @@ export function PolicyAuditLoadError({ backHref, t }: { backHref: string; t: Pol
         {t("DashboardCustody.policyAuditUnavailableDescription")}
       </p>
       <Button asChild variant="outline" className="mt-5">
-        <Link href={backHref}>{t("DashboardCustody.policyAuditBackToWalletControls")}</Link>
+        <Link href={backHref}>{backLabel}</Link>
       </Button>
     </div>
   );
@@ -132,7 +140,7 @@ export function formatRevisionReference(
 ): string {
   if (!revisionId) return empty;
   const number = revisionNumber(history, revisionId);
-  return number ? `v${number}` : shortIdentifier(revisionId);
+  return number ? `#${number}` : shortIdentifier(revisionId);
 }
 
 export function requestIdFromEvaluation(evaluation: WalletPolicyEvaluationDetail): string | null {
