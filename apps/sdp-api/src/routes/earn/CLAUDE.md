@@ -19,6 +19,16 @@ invariants.
   later calls update strategy weights. Allocation weights validate on a 0.1
   grid summing to exactly 100 per token group, and every `yieldSourceId` must
   exist as an **active** synced strategy for that provider+environment.
+  Two optional body fields carry real invariants:
+  - `requestId` (UUIDv4) is the caller-owned idempotency key, forwarded to the
+    provider on BOTH branches. Providers replay the original response for a
+    matching payload and conflict on a mismatch, so a client must mint a NEW id
+    whenever the allocation changes. Absent ⇒ the provider client mints one per
+    call, which is NOT idempotent: a double-submit fires two mutations.
+  `label` is write-once: the update branch never forwards it and there is no
+  repository update path, so a rename silently no-ops. The row has no mutable
+  columns — a source-wallet field was tried and reverted (see the web
+  CLAUDE.md), so do not add one without a consumer.
 - `GET /program/deposits`, `POST /program/withdrawal-preview`,
   `POST /program/withdrawals`, `GET /program/withdrawals/:ref` — funding
   tracking + portfolio-level withdrawals (Solana destinations only).
