@@ -54,6 +54,15 @@ invariants.
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for
   providers lacking the surface.
+- Withdrawal approval is a SECOND optional capability
+  (`supportsWithdrawalApprovals`) with **no public route on purpose**: casting
+  a vote needs the account-level Turnkey signer (platform ops — one shared
+  Ground account per environment), so exposing list/request/vote under
+  `/v1/earn` would hand org API keys an approval surface they must never
+  hold. Orgs see a parked withdrawal as `status: pending_approval` on
+  `GET /program/withdrawals/:ref` (derived by the provider client from payout
+  legs; approval is policy-conditional, not default — see
+  `packages/sdp-earn/README.md` → "Withdrawals unwind in reverse").
 - Provider ids from DB rows are open strings — always dispatch via
   `resolveEarnProviderClient`.
 - Catalogue writes happen ONLY via the sync cron
