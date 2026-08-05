@@ -180,6 +180,28 @@ describe("tamper-evident audit ledger", () => {
     ).toMatchObject({ id: "aud_retention_evidence" });
   });
 
+  it("rejects direct anchor insertion even when the runtime can insert audit rows", async () => {
+    await expect(
+      db
+        .prepare(
+          `INSERT INTO audit_ledger_anchors (ledger_sequence, entry_hash)
+           VALUES (?, decode(?, 'hex'))`
+        )
+        .bind(999_999, "00".repeat(32))
+        .run()
+    ).rejects.toThrow("only be created from sealed audit rows");
+
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "legitimate_anchor",
+    });
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: true,
+      checkedEntries: 1,
+    });
+  });
+
   it("detects privileged out-of-band tampering", async () => {
     await audit.logSystem({
       action: "maintenance",

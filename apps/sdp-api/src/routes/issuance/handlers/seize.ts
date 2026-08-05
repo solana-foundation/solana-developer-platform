@@ -21,6 +21,7 @@ import { seizeSchema } from "../schemas";
 import { assertDestinationAllowedByControlList } from "./access-control";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { persistSettledTransaction, recoverSettledTransactionReplay } from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -221,12 +222,18 @@ export const executeSeize = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    return success(c, { transaction: tx });
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "seize",
+    });
+    return success(c, { transaction });
   }
 
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
-  const auditService = new AuditService(getDb(c.env));
   const auditIntent = await auditService.beginCritical(c, {
     action: "seize",
     resourceType: "token_transaction",
@@ -253,17 +260,16 @@ export const executeSeize = async (c: AppContext) => {
     });
     onChainEffectCompleted = true;
 
-    const updatedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
-
     await auditService.completeCritical(c, auditIntent, {
       metadata: {
         signature: result.signature,
         slot: result.slot.toString(),
       },
+    });
+
+    const updatedTx = await persistSettledTransaction(tokenService, tx, {
+      signature: result.signature,
+      slot: Number(result.slot),
     });
 
     return success(c, { transaction: updatedTx });

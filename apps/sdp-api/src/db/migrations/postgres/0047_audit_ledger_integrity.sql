@@ -206,6 +206,29 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION sdp_reject_direct_audit_anchor_insert()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- A legitimate anchor is written only by audit_logs_anchor_insert. Inside
+  -- this BEFORE trigger that produces a nesting depth of two; a runtime caller
+  -- inserting directly reaches only depth one. The matching sealed row check
+  -- also prevents an unrelated trigger from manufacturing a ledger head.
+  IF pg_trigger_depth() < 2 OR NOT EXISTS (
+    SELECT 1
+    FROM audit_logs
+    WHERE audit_logs.ledger_sequence = NEW.ledger_sequence
+      AND audit_logs.entry_hash = NEW.entry_hash
+  ) THEN
+    RAISE EXCEPTION 'audit ledger anchors may only be created from sealed audit rows'
+      USING ERRCODE = '42501';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION sdp_reject_audit_log_mutation()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -254,6 +277,12 @@ BEFORE UPDATE OR DELETE ON audit_ledger_anchors
 FOR EACH STATEMENT
 EXECUTE FUNCTION sdp_reject_audit_log_mutation();
 
+DROP TRIGGER IF EXISTS audit_ledger_anchors_reject_direct_insert ON audit_ledger_anchors;
+CREATE TRIGGER audit_ledger_anchors_reject_direct_insert
+BEFORE INSERT ON audit_ledger_anchors
+FOR EACH ROW
+EXECUTE FUNCTION sdp_reject_direct_audit_anchor_insert();
+
 DROP TRIGGER IF EXISTS audit_ledger_anchors_reject_truncate ON audit_ledger_anchors;
 CREATE TRIGGER audit_ledger_anchors_reject_truncate
 BEFORE TRUNCATE ON audit_ledger_anchors
@@ -279,7 +308,14 @@ CREATE POLICY audit_ledger_anchors_select ON audit_ledger_anchors FOR SELECT USI
 
 DROP POLICY IF EXISTS audit_ledger_anchors_insert ON audit_ledger_anchors;
 CREATE POLICY audit_ledger_anchors_insert
-  ON audit_ledger_anchors FOR INSERT WITH CHECK (true);
+  ON audit_ledger_anchors FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1
+      FROM audit_logs
+      WHERE audit_logs.ledger_sequence = audit_ledger_anchors.ledger_sequence
+        AND audit_logs.entry_hash = audit_ledger_anchors.entry_hash
+    )
+  );
 
 -- Verification deliberately requires the independently stored Redis head.
 -- PostgreSQL must never be able to certify a shortened prefix using only data

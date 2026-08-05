@@ -24,6 +24,7 @@ import {
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { enforceIssuanceWalletOperationPolicy } from "./policy";
+import { persistSettledTransaction, recoverSettledTransactionReplay } from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicAuthorityRole = Parameters<MosaicService["prepareUpdateAuthority"]>[0]["role"];
@@ -35,6 +36,19 @@ type AuthorityUpdate = {
   isFreezable?: boolean;
   permanentDelegate?: string | null;
 };
+
+function authorityUpdates(role: AuthorityRole, newAuthority: string | null): AuthorityUpdate {
+  if (role === "mint") {
+    return { mintAuthority: newAuthority, isMintable: newAuthority !== null };
+  }
+  if (role === "freeze") {
+    return { freezeAuthority: newAuthority, isFreezable: newAuthority !== null };
+  }
+  if (role === "permanentDelegate") {
+    return { permanentDelegate: newAuthority };
+  }
+  return {};
+}
 
 const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
   switch (role) {
@@ -247,8 +261,21 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    return success(c, { transaction: tx });
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "update_authority",
+    });
+    if (transaction.status === "confirmed") {
+      const updates = authorityUpdates(role, newAuthority);
+      if (Object.keys(updates).length > 0) {
+        await tokenService.updateTokenAuthorities(tokenId, updates);
+      }
+    }
+    return success(c, { transaction });
   }
 
   const signer = await createResolvedAuthoritySigner({
@@ -258,7 +285,6 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     currentAuthority: currentAuthorityRaw,
   });
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
-  const auditService = new AuditService(getDb(c.env));
   const auditIntent = await auditService.beginCritical(c, {
     action: "update_authority",
     resourceType: "token_transaction",
@@ -277,35 +303,22 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
     onChainEffectCompleted = true;
 
-    const updatedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
-
-    const updates: AuthorityUpdate = {};
-    if (role === "mint") {
-      updates.mintAuthority = newAuthority;
-      updates.isMintable = newAuthority !== null;
-    }
-    if (role === "freeze") {
-      updates.freezeAuthority = newAuthority;
-      updates.isFreezable = newAuthority !== null;
-    }
-    if (role === "permanentDelegate") {
-      updates.permanentDelegate = newAuthority;
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await tokenService.updateTokenAuthorities(tokenId, updates);
-    }
-
     await auditService.completeCritical(c, auditIntent, {
       metadata: {
         signature: result.signature,
         slot: result.slot.toString(),
       },
     });
+
+    const updatedTx = await persistSettledTransaction(tokenService, tx, {
+      signature: result.signature,
+      slot: Number(result.slot),
+    });
+
+    const updates = authorityUpdates(role, newAuthority);
+    if (Object.keys(updates).length > 0) {
+      await tokenService.updateTokenAuthorities(tokenId, updates);
+    }
 
     return success(c, { transaction: updatedTx });
   } catch (error) {

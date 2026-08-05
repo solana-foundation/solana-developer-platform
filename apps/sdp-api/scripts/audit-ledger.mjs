@@ -100,6 +100,7 @@ async function inspect(client, redis, approvedCheckpoint) {
                  'audit_logs_anchor_insert',
                  'audit_logs_reject_row_mutation',
                  'audit_logs_reject_truncate',
+                 'audit_ledger_anchors_reject_direct_insert',
                  'audit_ledger_anchors_reject_row_mutation',
                  'audit_ledger_anchors_reject_truncate'
                )
@@ -123,7 +124,7 @@ async function inspect(client, redis, approvedCheckpoint) {
       posture.relforcerowsecurity &&
       posture.anchors_rowsecurity &&
       posture.anchors_forcerowsecurity &&
-      posture.enabled_security_triggers === 6
+      posture.enabled_security_triggers === 7
   );
   const checkedEntries = Number(result?.checked_entries ?? 0);
   const headHash = result?.head_hash ?? null;

@@ -20,6 +20,7 @@ import {
 import { forceBurnSchema } from "../schemas";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { persistSettledTransaction, recoverSettledTransactionReplay } from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -194,12 +195,18 @@ export const executeForceBurn = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    return success(c, { transaction: tx });
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "force_burn",
+    });
+    return success(c, { transaction });
   }
 
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
-  const auditService = new AuditService(getDb(c.env));
   const auditIntent = await auditService.beginCritical(c, {
     action: "force_burn",
     resourceType: "token_transaction",
@@ -224,20 +231,19 @@ export const executeForceBurn = async (c: AppContext) => {
     });
     onChainEffectCompleted = true;
 
-    const updatedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
-
-    await tokenService.updateSupply(tokenId, parsed.data.forceBurn.amount, "burn");
-
     await auditService.completeCritical(c, auditIntent, {
       metadata: {
         signature: result.signature,
         slot: result.slot.toString(),
       },
     });
+
+    const updatedTx = await persistSettledTransaction(tokenService, tx, {
+      signature: result.signature,
+      slot: Number(result.slot),
+    });
+
+    await tokenService.updateSupply(tokenId, parsed.data.forceBurn.amount, "burn");
 
     return success(c, { transaction: updatedTx });
   } catch (error) {

@@ -1,0 +1,105 @@
+import type { TokenTransaction } from "@sdp/types";
+import { describe, expect, it, vi } from "vitest";
+import type { AuditService } from "@/services/audit.service";
+import type { TokenService } from "@/services/token.service";
+import {
+  parseSettledTransactionEvidence,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
+
+const pendingTransaction: TokenTransaction = {
+  id: "ttx_settled_replay",
+  tokenId: "tok_settled_replay",
+  organizationId: "org_settled_replay",
+  type: "burn",
+  status: "pending",
+  idempotencyKey: "settled-replay",
+  idempotencyFingerprint: "fingerprint",
+  signature: null,
+  serializedTx: null,
+  params: { amount: "1" },
+  slot: null,
+  blockTime: null,
+  fee: null,
+  error: null,
+  initiatedByKeyId: "key_settled_replay",
+  createdAt: "2026-08-05T00:00:00.000Z",
+  updatedAt: "2026-08-05T00:00:00.000Z",
+};
+
+describe("settled issuance transaction recovery", () => {
+  it("accepts only complete, safely representable settlement evidence", () => {
+    expect(parseSettledTransactionEvidence({ signature: "sig", slot: "42" })).toEqual({
+      signature: "sig",
+      slot: 42,
+    });
+    expect(parseSettledTransactionEvidence({ signature: "", slot: "42" })).toBeNull();
+    expect(parseSettledTransactionEvidence({ signature: "sig", slot: "not-a-slot" })).toBeNull();
+    expect(
+      parseSettledTransactionEvidence({
+        signature: "sig",
+        slot: Number.MAX_SAFE_INTEGER + 1,
+      })
+    ).toBeNull();
+  });
+
+  it("repairs a pending transaction from its durable successful outcome", async () => {
+    const updateTransaction = vi.fn().mockResolvedValue({
+      ...pendingTransaction,
+      status: "confirmed",
+      signature: "sig_settled",
+      slot: 123,
+    });
+    const findCriticalOutcome = vi.fn().mockResolvedValue({
+      status: "success",
+      metadata: { signature: "sig_settled", slot: "123" },
+    });
+
+    const recovered = await recoverSettledTransactionReplay({
+      auditService: { findCriticalOutcome } as unknown as AuditService,
+      tokenService: { updateTransaction } as unknown as TokenService,
+      transaction: pendingTransaction,
+      action: "burn",
+    });
+
+    expect(findCriticalOutcome).toHaveBeenCalledWith({
+      organizationId: pendingTransaction.organizationId,
+      action: "burn",
+      resourceType: "token_transaction",
+      resourceId: pendingTransaction.id,
+    });
+    expect(updateTransaction).toHaveBeenCalledWith(pendingTransaction.id, {
+      status: "confirmed",
+      signature: "sig_settled",
+      slot: 123,
+    });
+    expect(recovered).toMatchObject({
+      status: "confirmed",
+      signature: "sig_settled",
+      slot: 123,
+    });
+  });
+
+  it("returns confirmed evidence when the repair write is temporarily unavailable", async () => {
+    const recovered = await recoverSettledTransactionReplay({
+      auditService: {
+        findCriticalOutcome: vi.fn().mockResolvedValue({
+          status: "success",
+          metadata: { signature: "sig_settled", slot: "123" },
+        }),
+      } as unknown as AuditService,
+      tokenService: {
+        updateTransaction: vi.fn().mockRejectedValue(new Error("database unavailable")),
+      } as unknown as TokenService,
+      transaction: pendingTransaction,
+      action: "burn",
+    });
+
+    expect(recovered).toMatchObject({
+      status: "confirmed",
+      signature: "sig_settled",
+      slot: 123,
+      error: null,
+    });
+  });
+});

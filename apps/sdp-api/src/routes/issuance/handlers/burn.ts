@@ -22,6 +22,7 @@ import {
 } from "../helpers";
 import { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { persistSettledTransaction, recoverSettledTransactionReplay } from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
@@ -295,10 +296,16 @@ export const executeBurn = async (c: AppContext) => {
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
   });
 
-  if (replayed) {
-    return success(c, { transaction: tx });
-  }
   const auditService = new AuditService(getDb(c.env));
+  if (replayed) {
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "burn",
+    });
+    return success(c, { transaction });
+  }
   const auditIntent = await auditService.beginCritical(c, {
     action: "burn",
     resourceType: "token_transaction",
@@ -339,22 +346,21 @@ export const executeBurn = async (c: AppContext) => {
     });
     onChainEffectCompleted = true;
 
-    // Update transaction with confirmation
-    const updatedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
+    const evidence = { signature: result.signature, slot: Number(result.slot) };
 
-    // Update token supply
-    await tokenService.updateSupply(tokenId, parsed.data.burn.amount, "burn");
-
+    // Seal the irreversible outcome before fallible database bookkeeping. An
+    // idempotent replay can then repair a transaction row left pending here.
     await auditService.completeCritical(c, auditIntent, {
       metadata: {
         signature: result.signature,
         slot: result.slot.toString(),
       },
     });
+
+    const updatedTx = await persistSettledTransaction(tokenService, tx, evidence);
+
+    // Update token supply
+    await tokenService.updateSupply(tokenId, parsed.data.burn.amount, "burn");
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
