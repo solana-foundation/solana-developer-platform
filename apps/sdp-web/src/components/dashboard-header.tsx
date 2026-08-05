@@ -308,10 +308,15 @@ function getWalletRoutePageConfig(
   );
   if (walletPolicyRouteMatch) {
     const [, section, walletId] = walletPolicyRouteMatch;
+    const isPolicyEvaluationDetail = /\/policy\/audit\/[^/]+$/.test(pathname);
     return actionPageConfig({
       centeredTitle: t("Shared.dashboardShell.walletControls"),
-      backHref: `/dashboard/${section}/${walletId}`,
-      backLabel: t("Shared.dashboardShell.backToWallet"),
+      backHref: isPolicyEvaluationDetail
+        ? `/dashboard/${section}/${walletId}/policy/audit`
+        : `/dashboard/${section}/${walletId}`,
+      backLabel: isPolicyEvaluationDetail
+        ? t("Shared.dashboardShell.backToPolicyHistory")
+        : t("Shared.dashboardShell.backToWallet"),
       contentWidthClass: "max-w-none",
     });
   }

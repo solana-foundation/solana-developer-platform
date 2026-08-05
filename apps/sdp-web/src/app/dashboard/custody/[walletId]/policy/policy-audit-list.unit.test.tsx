@@ -153,7 +153,6 @@ describe("policy audit presentation", () => {
           userNames={{}}
           neighbors={{ previous: null, next: null }}
           filters={{ page: 1, pageSize: 25 }}
-          tab="decision"
           locale="en-US"
           t={t}
         />
