@@ -870,9 +870,8 @@ function walletLabel(wallet: CustodyWalletMetadataResponse["wallet"]): string {
 }
 
 /**
- * A neighboring evaluation's detail href carrying the list filters and the
- * neighbor's page — but no `?tab=`, which PolicyAuditNeighborButton appends
- * from the live URL at render time.
+ * A neighboring evaluation's detail href, carrying the audit-list filters and
+ * the neighbor's page so the list state survives stepping between evaluations.
  *
  * @param currentDetailBaseHref - The current evaluation's detail href without a query.
  * @param neighbor - The neighboring evaluation.
