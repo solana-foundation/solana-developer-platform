@@ -99,7 +99,14 @@ function buildTransferListWhere(params: ListTransfersInput): {
   // some rows and as a bare symbol on others, including within one transfer type.
   // Matching a single form silently dropped every row written the other way, so a
   // filter for SOL missed its mint rows and vice versa.
-  addIn("pt.token", params.token ? tokenFilterAliases(params.token) : undefined);
+  //
+  // A blank token is treated as no filter at all. The query schema takes `token`
+  // as a bare optional string with no trim, so a whitespace-only value arrives
+  // truthy; matching it literally is what the previous exact-match did, and it
+  // returned zero rows for what is really an absent filter. Trimming here makes
+  // that deliberate instead of a side effect of the alias list coming back empty.
+  const tokenFilter = params.token?.trim();
+  addIn("pt.token", tokenFilter ? tokenFilterAliases(tokenFilter) : undefined);
   addEquals("pt.direction", params.direction);
   addIn("pt.status", params.statuses);
   addIn("pt.type", params.types);
