@@ -148,7 +148,7 @@ export function resolveTokenLabel(token: string, wallets: RecurringPaymentWallet
 
 export function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-3">
+    <div className="flex min-h-12 items-center justify-between gap-4 py-3">
       <span className="shrink-0 text-sm text-secondary">{label}</span>
       <span className="min-w-0 break-all text-right text-sm font-medium text-primary">
         {children}

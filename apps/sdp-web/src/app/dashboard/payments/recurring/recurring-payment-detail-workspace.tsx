@@ -764,7 +764,7 @@ export function RecurringPaymentDetailWorkspace({
                   <DetailRow label={t("DashboardPayments.status")}>
                     <RecurringPaymentStatusBadge status={recurringPayment.status} />
                   </DetailRow>
-                  <div className="flex items-start justify-between gap-4 py-3">
+                  <div className="flex min-h-12 items-center justify-between gap-4 py-3">
                     <span className="shrink-0 text-sm text-secondary">
                       {t("DashboardPayments.recurring.amount")}
                     </span>
@@ -794,7 +794,7 @@ export function RecurringPaymentDetailWorkspace({
                       ) : null}
                     </span>
                   </div>
-                  <div className="flex items-start justify-between gap-4 py-3">
+                  <div className="flex min-h-12 items-center justify-between gap-4 py-3">
                     <span className="shrink-0 text-sm text-secondary">
                       {t("DashboardPayments.recurring.currency")}
                     </span>
@@ -818,7 +818,7 @@ export function RecurringPaymentDetailWorkspace({
                       ) : null}
                     </span>
                   </div>
-                  <div className="flex items-start justify-between gap-4 py-3">
+                  <div className="flex min-h-12 items-center justify-between gap-4 py-3">
                     <span className="shrink-0 text-sm text-secondary">
                       {t("DashboardPayments.recurring.billingInterval")}
                     </span>
@@ -860,7 +860,7 @@ export function RecurringPaymentDetailWorkspace({
               </h3>
               <div className="rounded-lg border border-border-default bg-surface-raised px-4">
                 <div className="divide-y divide-border-default">
-                  <div className="flex items-start justify-between gap-4 py-3">
+                  <div className="flex min-h-12 items-center justify-between gap-4 py-3">
                     <span className="shrink-0 text-sm text-secondary">
                       {t("DashboardPayments.recurring.fundingWallet")}
                     </span>
@@ -899,7 +899,7 @@ export function RecurringPaymentDetailWorkspace({
                       ) : null}
                     </span>
                   </div>
-                  <div className="flex items-start justify-between gap-4 py-3">
+                  <div className="flex min-h-12 items-center justify-between gap-4 py-3">
                     <span className="shrink-0 text-sm text-secondary">
                       {t("DashboardPayments.recurring.receivingWallet")}
                     </span>
