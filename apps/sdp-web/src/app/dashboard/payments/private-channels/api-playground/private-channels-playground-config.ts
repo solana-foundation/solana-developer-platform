@@ -14,9 +14,7 @@ const SANDBOX_AUTH_URL = "http://34.71.147.163:8903";
 const SANDBOX_ESCROW_PROGRAM_ID = "9tgHa1DcnaSSUtmMsst8ovKTe1Gfxzezn27KnH9xXYeU";
 const SANDBOX_WITHDRAW_PROGRAM_ID = "J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi";
 const SANDBOX_ESCROW_INSTANCE_ADDR = "7C1Pu8mbHaDDTFnGH8YTqemNDofqXP3XEotzSo6TbwHz";
-const SANDBOX_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 
-const exampleWalletId = "wlt_example";
 const exampleChannelId = "pch_9f1c...";
 const exampleDepositId = "dep_9f1c...";
 const exampleWithdrawalId = "wd_9f1c...";
@@ -25,21 +23,11 @@ const exampleWithdrawalId = "wd_9f1c...";
 // composition, following the counterparty playground precedent.
 const pathTokenLabel = (name: string) => ["{", name, "}"].join("");
 const idPathLabel = pathTokenLabel("id");
-const channelIdPathLabel = pathTokenLabel("channelId");
-const walletIdPathLabel = pathTokenLabel("walletId");
 // Schema example (createPrivateChannelBodySchema.name.example = "Treasury");
 // used as a placeholder in the create-channel form.
 const exampleChannelName = ["Treas", "ury"].join("");
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-const channelIdPathField: ApiPlaygroundFieldConfig = {
-  key: "channelId",
-  label: channelIdPathLabel,
-  placeholder: exampleChannelId,
-  defaultValue: exampleChannelId,
-  required: true,
-};
 
 const channelIdParamField: ApiPlaygroundFieldConfig = {
   key: "id",
@@ -62,14 +50,6 @@ const withdrawalIdField: ApiPlaygroundFieldConfig = {
   label: idPathLabel,
   placeholder: exampleWithdrawalId,
   defaultValue: exampleWithdrawalId,
-  required: true,
-};
-
-const walletIdField: ApiPlaygroundFieldConfig = {
-  key: "walletId",
-  label: walletIdPathLabel,
-  placeholder: exampleWalletId,
-  defaultValue: exampleWalletId,
   required: true,
 };
 
@@ -207,110 +187,6 @@ export function buildPrivateChannelsPlaygroundEndpointConfigs(
       },
     },
     {
-      id: "get-private-channel-balance",
-      title: t("DashboardPrivateChannels.playground.getBalance"),
-      method: "GET",
-      path: "/v1/private-channels/balance?owner={owner}&mint={mint}",
-      pathFields: [
-        {
-          key: "owner",
-          label: "owner",
-          placeholder: t("DashboardPrivateChannels.playground.ownerPlaceholder"),
-          defaultValue: exampleWalletId,
-          required: true,
-        },
-        {
-          key: "mint",
-          label: "mint",
-          defaultValue: SANDBOX_USDC_MINT,
-        },
-      ],
-      bodyFields: [],
-      expectedResponse: {
-        data: {
-          owner: SANDBOX_ESCROW_INSTANCE_ADDR,
-          mint: SANDBOX_USDC_MINT,
-          amount: "1500000",
-          decimals: 6,
-          uiAmount: "1.5",
-        },
-      },
-    },
-    {
-      id: "create-private-channel-deposit",
-      title: t("DashboardPrivateChannels.playground.createDeposit"),
-      method: "POST",
-      path: "/v1/private-channels/deposits",
-      pathFields: [],
-      bodyFields: [
-        {
-          key: "walletId",
-          label: "walletId",
-          placeholder: exampleWalletId,
-          defaultValue: exampleWalletId,
-          required: true,
-        },
-        {
-          key: "amount",
-          label: "amount",
-          placeholder: "1.5",
-          defaultValue: "1.5",
-          required: true,
-        },
-        {
-          key: "recipient",
-          label: "recipient",
-          placeholder: t("DashboardPrivateChannels.playground.recipientPlaceholder"),
-          description: t("DashboardPrivateChannels.playground.recipientHint"),
-        },
-      ],
-      expectedResponse: {
-        data: {
-          id: exampleDepositId,
-          walletId: exampleWalletId,
-          amount: "1.5",
-          status: "submitted",
-        },
-      },
-    },
-    {
-      id: "create-private-channel-withdrawal",
-      title: t("DashboardPrivateChannels.playground.createWithdrawal"),
-      method: "POST",
-      path: "/v1/private-channels/withdrawals",
-      pathFields: [],
-      bodyFields: [
-        {
-          key: "walletId",
-          label: "walletId",
-          placeholder: exampleWalletId,
-          defaultValue: exampleWalletId,
-          required: true,
-        },
-        {
-          key: "amount",
-          label: "amount",
-          placeholder: "1.5",
-          defaultValue: "1.5",
-          required: true,
-        },
-        {
-          key: "destination",
-          label: "destination",
-          placeholder: t("DashboardPrivateChannels.playground.destinationPlaceholder"),
-          description: t("DashboardPrivateChannels.playground.destinationHint"),
-        },
-      ],
-      expectedResponse: {
-        data: {
-          id: exampleWithdrawalId,
-          walletId: exampleWalletId,
-          amount: "1.5",
-          status: "submitted",
-        },
-      },
-    },
-    {
       id: "create-private-channel",
       title: t("DashboardPrivateChannels.playground.createChannel"),
       method: "POST",
@@ -365,38 +241,6 @@ export function buildPrivateChannelsPlaygroundEndpointConfigs(
       bodyFields: [],
       expectedResponse: {
         data: { id: exampleChannelId, name: exampleChannelName },
-      },
-    },
-    {
-      id: "list-private-channel-transfer-recipients",
-      title: t("DashboardPrivateChannels.playground.listTransferRecipients"),
-      method: "GET",
-      path: "/v1/private-channels/channels/{channelId}/transfer-recipients",
-      pathFields: [channelIdPathField],
-      bodyFields: [],
-      expectedResponse: {
-        data: {
-          recipients: [
-            { memberId: "pcm_9f1c...", wallets: [{ pubkey: SANDBOX_ESCROW_INSTANCE_ADDR }] },
-          ],
-        },
-      },
-    },
-    {
-      id: "verify-private-channel-wallet",
-      title: t("DashboardPrivateChannels.playground.verifyWallet"),
-      method: "POST",
-      path: "/v1/private-channels/wallets/{walletId}/verify",
-      pathFields: [walletIdField],
-      bodyFields: [],
-      expectedResponse: {
-        data: {
-          wallet: {
-            id: "pcvw_9f1c...",
-            walletId: exampleWalletId,
-            pubkey: SANDBOX_ESCROW_INSTANCE_ADDR,
-          },
-        },
       },
     },
   ];

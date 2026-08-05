@@ -7,7 +7,7 @@
       "payments": 40,
       "counterparties": 12,
       "issuance": 35,
-      "private-channels": 27
+      "private-channels": 19
     }
   },
   "modules": {
@@ -4016,10 +4016,6 @@
                 "value": "AMD"
               },
               {
-                "label": "ANG",
-                "value": "ANG"
-              },
-              {
                 "label": "AOA",
                 "value": "AOA"
               },
@@ -4050,10 +4046,6 @@
               {
                 "label": "BDT",
                 "value": "BDT"
-              },
-              {
-                "label": "BGN",
-                "value": "BGN"
               },
               {
                 "label": "BHD",
@@ -4122,10 +4114,6 @@
               {
                 "label": "CRC",
                 "value": "CRC"
-              },
-              {
-                "label": "CUC",
-                "value": "CUC"
               },
               {
                 "label": "CUP",
@@ -4218,10 +4206,6 @@
               {
                 "label": "HNL",
                 "value": "HNL"
-              },
-              {
-                "label": "HRK",
-                "value": "HRK"
               },
               {
                 "label": "HTG",
@@ -4492,10 +4476,6 @@
                 "value": "SLE"
               },
               {
-                "label": "SLL",
-                "value": "SLL"
-              },
-              {
                 "label": "SOS",
                 "value": "SOS"
               },
@@ -4510,10 +4490,6 @@
               {
                 "label": "STN",
                 "value": "STN"
-              },
-              {
-                "label": "SVC",
-                "value": "SVC"
               },
               {
                 "label": "SYP",
@@ -4789,10 +4765,6 @@
                 "value": "AMD"
               },
               {
-                "label": "ANG",
-                "value": "ANG"
-              },
-              {
                 "label": "AOA",
                 "value": "AOA"
               },
@@ -4823,10 +4795,6 @@
               {
                 "label": "BDT",
                 "value": "BDT"
-              },
-              {
-                "label": "BGN",
-                "value": "BGN"
               },
               {
                 "label": "BHD",
@@ -4895,10 +4863,6 @@
               {
                 "label": "CRC",
                 "value": "CRC"
-              },
-              {
-                "label": "CUC",
-                "value": "CUC"
               },
               {
                 "label": "CUP",
@@ -4991,10 +4955,6 @@
               {
                 "label": "HNL",
                 "value": "HNL"
-              },
-              {
-                "label": "HRK",
-                "value": "HRK"
               },
               {
                 "label": "HTG",
@@ -5265,10 +5225,6 @@
                 "value": "SLE"
               },
               {
-                "label": "SLL",
-                "value": "SLL"
-              },
-              {
                 "label": "SOS",
                 "value": "SOS"
               },
@@ -5283,10 +5239,6 @@
               {
                 "label": "STN",
                 "value": "STN"
-              },
-              {
-                "label": "SVC",
-                "value": "SVC"
               },
               {
                 "label": "SYP",
@@ -5947,10 +5899,6 @@
                 "value": "AMD"
               },
               {
-                "label": "ANG",
-                "value": "ANG"
-              },
-              {
                 "label": "AOA",
                 "value": "AOA"
               },
@@ -5981,10 +5929,6 @@
               {
                 "label": "BDT",
                 "value": "BDT"
-              },
-              {
-                "label": "BGN",
-                "value": "BGN"
               },
               {
                 "label": "BHD",
@@ -6053,10 +5997,6 @@
               {
                 "label": "CRC",
                 "value": "CRC"
-              },
-              {
-                "label": "CUC",
-                "value": "CUC"
               },
               {
                 "label": "CUP",
@@ -6149,10 +6089,6 @@
               {
                 "label": "HNL",
                 "value": "HNL"
-              },
-              {
-                "label": "HRK",
-                "value": "HRK"
               },
               {
                 "label": "HTG",
@@ -6423,10 +6359,6 @@
                 "value": "SLE"
               },
               {
-                "label": "SLL",
-                "value": "SLL"
-              },
-              {
                 "label": "SOS",
                 "value": "SOS"
               },
@@ -6441,10 +6373,6 @@
               {
                 "label": "STN",
                 "value": "STN"
-              },
-              {
-                "label": "SVC",
-                "value": "SVC"
               },
               {
                 "label": "SYP",
@@ -7457,7 +7385,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true\n}",
+            "defaultValue": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
             "required": true
           }
         ],
@@ -9363,87 +9291,6 @@
         }
       },
       {
-        "id": "get-private-channel-balance",
-        "operationId": "getPrivateChannelBalance",
-        "title": "Read an owner's channel token balance",
-        "method": "GET",
-        "path": "/v1/private-channels/balance?owner={owner}&mint={mint}",
-        "pathFields": [
-          {
-            "key": "owner",
-            "label": "owner",
-            "description": "Owner to read the balance for: a `walletId` from GET /v1/wallets, a wallet public key, or a raw Solana address.",
-            "defaultValue": "7C1Pu8mbHaDDTFnGH8YTqemNDofqXP3XEotzSo6TbwHz",
-            "required": true
-          },
-          {
-            "key": "mint",
-            "label": "mint",
-            "description": "Token mint to read. Defaults to the instance cluster's USDC mint.",
-            "defaultValue": "So11111111111111111111111111111111111111112",
-            "required": false
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "owner": "So11111111111111111111111111111111111111112",
-            "mint": "So11111111111111111111111111111111111111112",
-            "tokenAccount": "So11111111111111111111111111111111111111112",
-            "amount": "1500000",
-            "decimals": 6,
-            "uiAmount": "1.5"
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "create-private-channel-deposit",
-        "operationId": "createPrivateChannelDeposit",
-        "title": "Create a deposit into the channel escrow",
-        "method": "POST",
-        "path": "/v1/private-channels/deposits",
-        "pathFields": [],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"walletId\": \"wlt_…\",\n  \"amount\": \"1.5\"\n}",
-            "required": false
-          }
-        ],
-        "expectedResponse": {
-          "data": {
-            "id": "dep_9f1c...",
-            "instanceId": "instance_example",
-            "organizationId": "organization_example",
-            "projectId": "project_example",
-            "walletId": "wallet_example",
-            "depositor": "So11111111111111111111111111111111111111112",
-            "recipient": "So11111111111111111111111111111111111111112",
-            "mint": "So11111111111111111111111111111111111111112",
-            "amount": "1.5",
-            "status": "confirmed",
-            "signature": "example",
-            "settlementRef": "example",
-            "failureReason": "example",
-            "context": {},
-            "createdAt": "example",
-            "updatedAt": "example"
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
         "id": "list-private-channel-deposits",
         "operationId": "listPrivateChannelDeposits",
         "title": "List deposits for the project",
@@ -9505,49 +9352,6 @@
             "walletId": "wallet_example",
             "depositor": "So11111111111111111111111111111111111111112",
             "recipient": "So11111111111111111111111111111111111111112",
-            "mint": "So11111111111111111111111111111111111111112",
-            "amount": "1.5",
-            "status": "confirmed",
-            "signature": "example",
-            "settlementRef": "example",
-            "failureReason": "example",
-            "context": {},
-            "createdAt": "example",
-            "updatedAt": "example"
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "create-private-channel-withdrawal",
-        "operationId": "createPrivateChannelWithdrawal",
-        "title": "Create a withdrawal from the channel balance",
-        "method": "POST",
-        "path": "/v1/private-channels/withdrawals",
-        "pathFields": [],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"walletId\": \"wlt_…\",\n  \"amount\": \"1.5\"\n}",
-            "required": false
-          }
-        ],
-        "expectedResponse": {
-          "data": {
-            "id": "wd_9f1c...",
-            "instanceId": "instance_example",
-            "organizationId": "organization_example",
-            "projectId": "project_example",
-            "walletId": "wallet_example",
-            "owner": "So11111111111111111111111111111111111111112",
-            "destination": "So11111111111111111111111111111111111111112",
             "mint": "So11111111111111111111111111111111111111112",
             "amount": "1.5",
             "status": "confirmed",
@@ -9633,95 +9437,6 @@
             "settlementRef": "example",
             "failureReason": "example",
             "context": {},
-            "createdAt": "example",
-            "updatedAt": "example"
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "list-private-channel-transfer-recipients",
-        "operationId": "listPrivateChannelTransferRecipients",
-        "title": "List eligible verified-wallet transfer recipients",
-        "method": "GET",
-        "path": "/v1/private-channels/channels/{channelId}/transfer-recipients",
-        "pathFields": [
-          {
-            "key": "channelId",
-            "label": "{channelId}",
-            "description": "Active logical channel id.",
-            "defaultValue": "pch_9f1c...",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "recipients": [
-              {
-                "privateChannelUserId": "privatechanneluser_example",
-                "userId": "user_example",
-                "email": "example",
-                "name": "example",
-                "wallets": [
-                  {
-                    "id": "_example",
-                    "pubkey": "So11111111111111111111111111111111111111112"
-                  }
-                ]
-              }
-            ]
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "create-private-channel-transfer",
-        "operationId": "createPrivateChannelTransfer",
-        "title": "Create a verified member-to-member channel transfer",
-        "method": "POST",
-        "path": "/v1/private-channels/channels/{channelId}/transfers",
-        "pathFields": [
-          {
-            "key": "channelId",
-            "label": "{channelId}",
-            "description": "Active logical channel id.",
-            "defaultValue": "pch_9f1c...",
-            "required": true
-          }
-        ],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"walletId\": \"wallet_123\",\n  \"recipientVerifiedWalletId\": \"pcvw_9f1c...\",\n  \"amount\": \"1.5\"\n}",
-            "required": false
-          }
-        ],
-        "expectedResponse": {
-          "data": {
-            "id": "pct_9f1c...",
-            "organizationId": "organization_example",
-            "projectId": "project_example",
-            "instanceId": "instance_example",
-            "channelId": "channel_example",
-            "walletId": "wallet_example",
-            "sender": "So11111111111111111111111111111111111111112",
-            "recipient": "So11111111111111111111111111111111111111112",
-            "mint": "So11111111111111111111111111111111111111112",
-            "amount": "1.5",
-            "status": "confirmed",
-            "signature": "example",
-            "failureReason": "example",
             "createdAt": "example",
             "updatedAt": "example"
           },
@@ -10086,88 +9801,6 @@
             ],
             "hasMore": false,
             "nextCursor": "example"
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "list-private-channel-verified-wallets",
-        "operationId": "listPrivateChannelVerifiedWallets",
-        "title": "List the caller's verified wallets",
-        "method": "GET",
-        "path": "/v1/private-channels/wallets",
-        "pathFields": [],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "wallets": [
-              {
-                "id": "pcvw_9f1c...",
-                "walletId": "wallet_123",
-                "pubkey": "So11111111111111111111111111111111111111112",
-                "verifiedAt": "example"
-              }
-            ]
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "verify-private-channel-wallet",
-        "operationId": "verifyPrivateChannelWallet",
-        "title": "Verify a custody wallet with the SPC auth service",
-        "method": "POST",
-        "path": "/v1/private-channels/wallets/{walletId}/verify",
-        "pathFields": [
-          {
-            "key": "walletId",
-            "label": "{walletId}",
-            "description": "SDP managed custody wallet id to verify.",
-            "defaultValue": "wallet_123",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "wallet": {
-              "id": "pcvw_9f1c...",
-              "walletId": "wallet_123",
-              "pubkey": "So11111111111111111111111111111111111111112",
-              "verifiedAt": "example"
-            }
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "delete-private-channel-verified-wallet",
-        "operationId": "deletePrivateChannelVerifiedWallet",
-        "title": "Revoke a verified wallet",
-        "method": "DELETE",
-        "path": "/v1/private-channels/wallets/{pubkey}",
-        "pathFields": [
-          {
-            "key": "pubkey",
-            "label": "{pubkey}",
-            "description": "Verified wallet pubkey (base58) to revoke.",
-            "defaultValue": "7C1Pu8...",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "deleted": false
           },
           "meta": {
             "requestId": "req_example",

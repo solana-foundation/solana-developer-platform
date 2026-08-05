@@ -95,7 +95,7 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.ONBOARDING,
 ];
 
-function registerApiKeyAuth(registry: OpenAPIRegistry) {
+function registerPublicSecuritySchemes(registry: OpenAPIRegistry) {
   registry.registerComponent("securitySchemes", "apiKeyAuth", {
     type: "http",
     scheme: "bearer",
@@ -103,16 +103,21 @@ function registerApiKeyAuth(registry: OpenAPIRegistry) {
     description:
       "Use Authorization: Bearer sk_test_... or sk_live_... with a base64url-encoded suffix.",
   });
-}
 
-function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
+  // Some public-tagged operations are dashboard-only (session-authenticated).
+  // Registering the scheme in the public spec keeps `security: [{ sessionCookie }]`
+  // references valid; API-key clients cannot mint this cookie, so those
+  // operations remain uncallable externally — documented, not accessible.
   registry.registerComponent("securitySchemes", "sessionCookie", {
     type: "apiKey",
     in: "cookie",
     name: "sdp_session",
-    description: "Session cookie for dashboard authentication.",
+    description:
+      "Session cookie issued by the SDP dashboard. Not obtainable via API — operations requiring this scheme are only callable from an active dashboard session.",
   });
+}
 
+function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
   registry.registerComponent("securitySchemes", "adminKey", {
     type: "apiKey",
     in: "header",
@@ -158,7 +163,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
 function createDocument({ publicOnly }: { publicOnly: boolean }): OpenAPIObject {
   const registry = new OpenAPIRegistry();
 
-  registerApiKeyAuth(registry);
+  registerPublicSecuritySchemes(registry);
 
   if (publicOnly) {
     registerPublicPaths(registry);

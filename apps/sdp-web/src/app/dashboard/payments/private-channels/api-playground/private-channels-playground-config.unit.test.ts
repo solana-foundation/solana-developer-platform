@@ -11,20 +11,35 @@ describe("buildPrivateChannelsPlaygroundEndpointConfigs", () => {
 
   it("builds literal path field labels rather than raw interpolation tokens", () => {
     // Regression guard: earlier versions rendered "{id}" via string templates and
-    // that tripped the i18n auditor. The labels must be plain literals composed
-    // by hand so they're both auditable and human-readable in the form.
+    // tripped the i18n auditor. Labels must be plain literals so they're both
+    // auditable and human-readable in the form.
     const configs = buildPrivateChannelsPlaygroundEndpointConfigs(t);
 
     expect(
       configs.find(({ id }) => id === "get-private-channel-deposit")?.pathFields[0]?.label
     ).toBe("{id}");
-    expect(
-      configs.find(({ id }) => id === "list-private-channel-transfer-recipients")?.pathFields[0]
-        ?.label
-    ).toBe("{channelId}");
-    expect(
-      configs.find(({ id }) => id === "verify-private-channel-wallet")?.pathFields[0]?.label
-    ).toBe("{walletId}");
+    expect(configs.find(({ id }) => id === "get-private-channel")?.pathFields[0]?.label).toBe(
+      "{id}"
+    );
+  });
+
+  it("does not include session-only operations that would 401 under API-key auth", () => {
+    // These operations require a dashboard session (see paths/private-channels.ts
+    // security: [{ sessionCookie: [] }]). The playground executes with an API
+    // key, so surfacing them would just show 401 responses. The generator filter
+    // in scripts/generate-playground-catalog.ts drops them; this test pins the
+    // outcome against silent regressions in either the tag or the filter.
+    const configs = buildPrivateChannelsPlaygroundEndpointConfigs(t);
+    const ids = new Set(configs.map((endpoint) => endpoint.id));
+
+    expect(ids.has("get-private-channel-balance")).toBe(false);
+    expect(ids.has("create-private-channel-deposit")).toBe(false);
+    expect(ids.has("create-private-channel-withdrawal")).toBe(false);
+    expect(ids.has("list-private-channel-transfer-recipients")).toBe(false);
+    expect(ids.has("create-private-channel-transfer")).toBe(false);
+    expect(ids.has("verify-private-channel-wallet")).toBe(false);
+    expect(ids.has("delete-private-channel-verified-wallet")).toBe(false);
+    expect(ids.has("list-private-channel-verified-wallets")).toBe(false);
   });
 
   it("preloads the sandbox constants on the connect form so it works out of the box", () => {
@@ -60,6 +75,6 @@ describe("buildPrivateChannelsPlaygroundEndpointConfigs", () => {
     expect(ids.has("connect-private-channel-instance")).toBe(true);
     expect(ids.has("list-private-channels")).toBe(true);
     expect(ids.has("list-project-private-channel-events")).toBe(true);
-    expect(ids.has("delete-private-channel-verified-wallet")).toBe(true);
+    expect(ids.has("delete-private-channel")).toBe(true);
   });
 });
