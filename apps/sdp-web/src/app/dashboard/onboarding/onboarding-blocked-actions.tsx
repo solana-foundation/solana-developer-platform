@@ -22,9 +22,7 @@ export function OnboardingBlockedActions() {
 
   return (
     <div className="mt-5 flex flex-col items-center gap-2">
-      <p className="text-xs text-tertiary">
-        {t("DashboardCustody.onboardingAdminSwitchHint")}
-      </p>
+      <p className="text-xs text-tertiary">{t("DashboardCustody.onboardingAdminSwitchHint")}</p>
       <OrganizationSwitcher hidePersonal />
     </div>
   );
