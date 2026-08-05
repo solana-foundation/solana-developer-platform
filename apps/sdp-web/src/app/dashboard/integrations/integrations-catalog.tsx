@@ -102,7 +102,7 @@ function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate })
   // edge instead of the description hanging under the icon.
   return (
     <li
-      className="flex items-start gap-3 rounded-2xl border border-border-default bg-surface-raised p-5"
+      className="relative flex items-start gap-3 rounded-2xl border border-border-default bg-surface-raised p-5 transition-colors hover:border-border-strong motion-reduce:transition-none"
       data-integration-row="true"
       data-integration-status={row.status}
     >
@@ -111,9 +111,11 @@ function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate })
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-2 self-stretch">
         <div className="flex items-start justify-between gap-3">
+          {/* Stretched link: the title anchors it, the overlay makes the whole
+              card the click target, and the action button stacks above it. */}
           <DashboardNavigationLink
             href={`/dashboard/integrations/${row.provider}`}
-            className="truncate pt-2 text-base font-medium text-primary hover:underline"
+            className="truncate pt-2 text-base font-medium text-primary after:absolute after:inset-0 after:content-['']"
           >
             {row.label}
           </DashboardNavigationLink>
@@ -124,7 +126,7 @@ function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate })
         ) : null}
         {/* Anchored to the card's bottom edge so a row of cards shows its
             actions on one line regardless of description length. */}
-        {row.action ? <div className="mt-auto pt-2">{row.action}</div> : null}
+        {row.action ? <div className="relative z-10 mt-auto pt-2">{row.action}</div> : null}
       </div>
     </li>
   );
