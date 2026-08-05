@@ -572,6 +572,9 @@ export function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
+  if (pathname.startsWith("/dashboard/integrations")) {
+    return { title: t("Shared.dashboardShell.integrations") };
+  }
   if (pathname.startsWith("/dashboard/settings")) {
     // Settings was the only route left on the `max-w-5xl` default, which stranded a
     // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:

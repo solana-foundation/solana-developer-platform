@@ -213,7 +213,8 @@
     "backToPayments": "Back to payments",
     "backToApprovals": "Back to approvals",
     "members": "Members",
-    "allowlist": "Allowlist"
+    "allowlist": "Allowlist",
+    "integrations": "Integrations"
   },
   "validation": {
     "allowlistValueRequired": "Allowlist value is required",
@@ -278,5 +279,24 @@
     "issuanceActivityUnavailable": "Issuance activity is unavailable right now.",
     "failedToLoadActivity": "Failed to load dashboard activity",
     "balanceDataUnavailable": "Balance data is unavailable right now."
+  },
+  "integrations": {
+    "pageDescription": "Every provider SDP can run for this organization, with what is connected and what to do next. Custody installs from Wallets; other families are provisioned per deployment.",
+    "statusActive": "Active",
+    "statusAvailable": "Available",
+    "statusRequestAccess": "Request access",
+    "statusPending": "Pending",
+    "statusNotAvailable": "Not available",
+    "ctaConfigure": "Configure",
+    "ctaManage": "Manage",
+    "ctaRequestAccess": "Request access",
+    "custodyTitle": "Custody",
+    "custodyDescription": "Wallet infrastructure and signing. Install from the wallet setup flow.",
+    "rpcTitle": "RPC",
+    "rpcDescription": "Solana RPC for this organization. One provider is active at a time; change it in Settings.",
+    "rampsTitle": "Ramps",
+    "rampsDescription": "On-ramp and off-ramp rails used by deposits and payouts.",
+    "complianceTitle": "Compliance",
+    "complianceDescription": "Screening and monitoring providers. Enabled per organization by arrangement."
   }
 }
