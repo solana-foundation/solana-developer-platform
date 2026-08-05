@@ -37,7 +37,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import {
   formatTimestamp,
@@ -705,8 +704,6 @@ export function RecurringPaymentDetailWorkspace({
     setEditingAmount(false);
   };
 
-  const activeTab = useDashboardTab() === "history" ? "history" : "details";
-
   const resolvedToken = resolveTokenByMint(
     recurringPayment.token,
     issuedTokensByMint,
@@ -768,224 +765,220 @@ export function RecurringPaymentDetailWorkspace({
 
         <RecurringPaymentLifecycleBand status={recurringPayment.status} actionError={actionError} />
 
-        {activeTab === "history" ? (
-          <RecurringPaymentCollectionHistory
-            attempts={collectionAttempts}
-            total={collectionAttemptsTotal}
-            error={collectionAttemptsError}
-            wallets={wallets}
-            className="min-h-0 flex-1"
-          />
-        ) : (
-          <div className="grid items-start gap-6 lg:grid-cols-2">
-            <section className="space-y-3">
-              <h3 className="text-sm font-medium text-primary">
-                {t("DashboardPayments.recurring.detailPaymentSection")}
-              </h3>
-              <div className="rounded-lg border border-border-default bg-surface-raised px-4">
-                <div className="divide-y divide-border-default">
-                  <DetailRow label={t("DashboardPayments.status")}>
-                    <RecurringPaymentStatusBadge status={recurringPayment.status} />
-                  </DetailRow>
-                  <div className="flex min-h-12 items-center justify-between gap-4 py-3">
-                    <span className="shrink-0 text-sm text-secondary">
-                      {t("DashboardPayments.recurring.amount")}
-                    </span>
-                    <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
-                      <TokenMark
-                        mint={recurringPayment.token}
-                        symbol={resolvedToken.tokenName}
-                        logoUrl={resolvedToken.metadataImageUrl}
-                        size="xs"
-                      />
-                      <span>{amountLabel}</span>
-                      {isEditable ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={controlsDisabled}
-                          iconLeft={<PencilIcon className="size-4" />}
-                          onClick={() => {
-                            setSelectedAmount(recurringPayment.amount);
-                            setAmountValidationError(null);
-                            setEditingAmount(true);
-                          }}
-                        >
-                          {t("DashboardPayments.recurring.edit")}
-                        </Button>
-                      ) : null}
-                    </span>
-                  </div>
-                  <div className="flex min-h-12 items-center justify-between gap-4 py-3">
-                    <span className="shrink-0 text-sm text-secondary">
-                      {t("DashboardPayments.recurring.currency")}
-                    </span>
-                    <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
-                      <span>{currencyLabel}</span>
-                      {isEditable ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={controlsDisabled || assetOptions.length === 0}
-                          iconLeft={<PencilIcon className="size-4" />}
-                          onClick={() => {
-                            setSelectedToken(recurringPayment.token);
-                            setCurrencyValidationError(null);
-                            setEditingCurrency(true);
-                          }}
-                        >
-                          {t("DashboardPayments.recurring.edit")}
-                        </Button>
-                      ) : null}
-                    </span>
-                  </div>
-                  <div className="flex min-h-12 items-center justify-between gap-4 py-3">
-                    <span className="shrink-0 text-sm text-secondary">
-                      {t("DashboardPayments.recurring.billingInterval")}
-                    </span>
-                    <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
-                      <span>{scheduleLabel}</span>
-                      {isEditable ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={controlsDisabled}
-                          iconLeft={<PencilIcon className="size-4" />}
-                          onClick={() => {
-                            setSelectedSchedulePreset(
-                              schedulePresetForPeriodHours(recurringPayment.periodHours)
-                            );
-                            setSelectedCustomPeriodHours(String(recurringPayment.periodHours));
-                            setBillingIntervalValidationError(null);
-                            setEditingBillingInterval(true);
-                          }}
-                        >
-                          {t("DashboardPayments.recurring.edit")}
-                        </Button>
-                      ) : null}
-                    </span>
-                  </div>
-                  <DetailRow label={t("DashboardPayments.recurring.starts")}>
-                    {formatOptionalTimestamp(recurringPayment.firstCollectionAt, t)}
-                  </DetailRow>
-                  <DetailRow label={t("DashboardPayments.recurring.nextPayment")}>
-                    {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt, t)}
-                  </DetailRow>
-                </div>
-              </div>
-            </section>
-            <section className="space-y-3">
-              <h3 className="text-sm font-medium text-primary">
-                {t("DashboardPayments.recurring.detailWalletsSection")}
-              </h3>
-              <div className="rounded-lg border border-border-default bg-surface-raised px-4">
-                <div className="divide-y divide-border-default">
-                  <div className="flex min-h-12 items-center justify-between gap-4 py-3">
-                    <span className="shrink-0 text-sm text-secondary">
-                      {t("DashboardPayments.recurring.fundingWallet")}
-                    </span>
-                    <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
-                      {wallet ? (
-                        <Link
-                          href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
-                          className="min-w-0 truncate underline-offset-4 hover:underline focus-visible:underline"
-                        >
-                          {sourceWalletLabel}
-                        </Link>
-                      ) : (
-                        <span className="min-w-0 truncate">{sourceWalletLabel}</span>
-                      )}
-                      {wallet ? (
-                        <CopyableValue
-                          value={wallet.publicKey}
-                          label={shortenAddress(wallet.publicKey)}
-                        />
-                      ) : null}
-                      {isEditable ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={controlsDisabled || wallets.length === 0}
-                          iconLeft={<PencilIcon className="size-4" />}
-                          onClick={() => {
-                            setSelectedWalletId(recurringPayment.sourceWalletId);
-                            setWalletValidationError(null);
-                            setEditingWallet(true);
-                          }}
-                        >
-                          {t("DashboardPayments.recurring.edit")}
-                        </Button>
-                      ) : null}
-                    </span>
-                  </div>
-                  <div className="flex min-h-12 items-center justify-between gap-4 py-3">
-                    <span className="shrink-0 text-sm text-secondary">
-                      {t("DashboardPayments.recurring.receivingWallet")}
-                    </span>
-                    <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
-                      <span className="min-w-0 truncate">{receivingAccountLabel}</span>
-                      {receivingAccountAddress ? (
-                        <CopyableValue
-                          value={receivingAccountAddress}
-                          label={shortenAddress(receivingAccountAddress)}
-                        />
-                      ) : null}
-                      {isEditable ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={controlsDisabled || counterpartyAccounts.length === 0}
-                          iconLeft={<PencilIcon className="size-4" />}
-                          onClick={() => {
-                            setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
-                            setReceivingAccountValidationError(null);
-                            setEditingReceivingAccount(true);
-                          }}
-                        >
-                          {t("DashboardPayments.recurring.edit")}
-                        </Button>
-                      ) : null}
-                    </span>
-                  </div>
-                  <DetailRow label={t("DashboardPayments.recurring.paymentReference")}>
-                    <CopyableValue value={recurringPayment.id} label={paymentReferenceLabel} />
-                  </DetailRow>
-                  <DetailRow label={t("DashboardPayments.recurring.metadata")}>
-                    {recurringPayment.metadataUri && isHttpUrl(recurringPayment.metadataUri) ? (
-                      <a
-                        href={recurringPayment.metadataUri}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline underline-offset-4"
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+          <section className="space-y-3">
+            <h3 className="text-sm font-medium text-primary">
+              {t("DashboardPayments.recurring.detailPaymentSection")}
+            </h3>
+            <div className="rounded-lg border border-border-default bg-surface-raised px-4">
+              <div className="divide-y divide-border-default">
+                <DetailRow label={t("DashboardPayments.status")}>
+                  <RecurringPaymentStatusBadge status={recurringPayment.status} />
+                </DetailRow>
+                <div className="flex min-h-12 items-center justify-between gap-4 py-3">
+                  <span className="shrink-0 text-sm text-secondary">
+                    {t("DashboardPayments.recurring.amount")}
+                  </span>
+                  <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
+                    <TokenMark
+                      mint={recurringPayment.token}
+                      symbol={resolvedToken.tokenName}
+                      logoUrl={resolvedToken.metadataImageUrl}
+                      size="xs"
+                    />
+                    <span>{amountLabel}</span>
+                    {isEditable ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={controlsDisabled}
+                        iconLeft={<PencilIcon className="size-4" />}
+                        onClick={() => {
+                          setSelectedAmount(recurringPayment.amount);
+                          setAmountValidationError(null);
+                          setEditingAmount(true);
+                        }}
                       >
-                        {t("DashboardPayments.recurring.openMetadata")}
-                      </a>
-                    ) : recurringPayment.metadataUri ? (
-                      <span className="block max-w-64 truncate text-tertiary">
-                        {recurringPayment.metadataUri}
-                      </span>
-                    ) : (
-                      <span className="text-tertiary">
-                        {t("DashboardPayments.recurring.notSet")}
-                      </span>
-                    )}
-                  </DetailRow>
-                  <DetailRow label={t("DashboardPayments.recurring.created")}>
-                    {formatTimestamp(recurringPayment.createdAt, t)}
-                  </DetailRow>
-                  <DetailRow label={t("DashboardPayments.recurring.updated")}>
-                    {formatTimestamp(recurringPayment.updatedAt, t)}
-                  </DetailRow>
+                        {t("DashboardPayments.recurring.edit")}
+                      </Button>
+                    ) : null}
+                  </span>
                 </div>
+                <div className="flex min-h-12 items-center justify-between gap-4 py-3">
+                  <span className="shrink-0 text-sm text-secondary">
+                    {t("DashboardPayments.recurring.currency")}
+                  </span>
+                  <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
+                    <span>{currencyLabel}</span>
+                    {isEditable ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={controlsDisabled || assetOptions.length === 0}
+                        iconLeft={<PencilIcon className="size-4" />}
+                        onClick={() => {
+                          setSelectedToken(recurringPayment.token);
+                          setCurrencyValidationError(null);
+                          setEditingCurrency(true);
+                        }}
+                      >
+                        {t("DashboardPayments.recurring.edit")}
+                      </Button>
+                    ) : null}
+                  </span>
+                </div>
+                <div className="flex min-h-12 items-center justify-between gap-4 py-3">
+                  <span className="shrink-0 text-sm text-secondary">
+                    {t("DashboardPayments.recurring.billingInterval")}
+                  </span>
+                  <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
+                    <span>{scheduleLabel}</span>
+                    {isEditable ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={controlsDisabled}
+                        iconLeft={<PencilIcon className="size-4" />}
+                        onClick={() => {
+                          setSelectedSchedulePreset(
+                            schedulePresetForPeriodHours(recurringPayment.periodHours)
+                          );
+                          setSelectedCustomPeriodHours(String(recurringPayment.periodHours));
+                          setBillingIntervalValidationError(null);
+                          setEditingBillingInterval(true);
+                        }}
+                      >
+                        {t("DashboardPayments.recurring.edit")}
+                      </Button>
+                    ) : null}
+                  </span>
+                </div>
+                <DetailRow label={t("DashboardPayments.recurring.starts")}>
+                  {formatOptionalTimestamp(recurringPayment.firstCollectionAt, t)}
+                </DetailRow>
+                <DetailRow label={t("DashboardPayments.recurring.nextPayment")}>
+                  {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt, t)}
+                </DetailRow>
               </div>
-            </section>
-          </div>
-        )}
+            </div>
+          </section>
+          <section className="space-y-3">
+            <h3 className="text-sm font-medium text-primary">
+              {t("DashboardPayments.recurring.detailWalletsSection")}
+            </h3>
+            <div className="rounded-lg border border-border-default bg-surface-raised px-4">
+              <div className="divide-y divide-border-default">
+                <div className="flex min-h-12 items-center justify-between gap-4 py-3">
+                  <span className="shrink-0 text-sm text-secondary">
+                    {t("DashboardPayments.recurring.fundingWallet")}
+                  </span>
+                  <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
+                    {wallet ? (
+                      <Link
+                        href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
+                        className="min-w-0 truncate underline-offset-4 hover:underline focus-visible:underline"
+                      >
+                        {sourceWalletLabel}
+                      </Link>
+                    ) : (
+                      <span className="min-w-0 truncate">{sourceWalletLabel}</span>
+                    )}
+                    {wallet ? (
+                      <CopyableValue
+                        value={wallet.publicKey}
+                        label={shortenAddress(wallet.publicKey)}
+                      />
+                    ) : null}
+                    {isEditable ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={controlsDisabled || wallets.length === 0}
+                        iconLeft={<PencilIcon className="size-4" />}
+                        onClick={() => {
+                          setSelectedWalletId(recurringPayment.sourceWalletId);
+                          setWalletValidationError(null);
+                          setEditingWallet(true);
+                        }}
+                      >
+                        {t("DashboardPayments.recurring.edit")}
+                      </Button>
+                    ) : null}
+                  </span>
+                </div>
+                <div className="flex min-h-12 items-center justify-between gap-4 py-3">
+                  <span className="shrink-0 text-sm text-secondary">
+                    {t("DashboardPayments.recurring.receivingWallet")}
+                  </span>
+                  <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
+                    <span className="min-w-0 truncate">{receivingAccountLabel}</span>
+                    {receivingAccountAddress ? (
+                      <CopyableValue
+                        value={receivingAccountAddress}
+                        label={shortenAddress(receivingAccountAddress)}
+                      />
+                    ) : null}
+                    {isEditable ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={controlsDisabled || counterpartyAccounts.length === 0}
+                        iconLeft={<PencilIcon className="size-4" />}
+                        onClick={() => {
+                          setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
+                          setReceivingAccountValidationError(null);
+                          setEditingReceivingAccount(true);
+                        }}
+                      >
+                        {t("DashboardPayments.recurring.edit")}
+                      </Button>
+                    ) : null}
+                  </span>
+                </div>
+                <DetailRow label={t("DashboardPayments.recurring.paymentReference")}>
+                  <CopyableValue value={recurringPayment.id} label={paymentReferenceLabel} />
+                </DetailRow>
+                <DetailRow label={t("DashboardPayments.recurring.metadata")}>
+                  {recurringPayment.metadataUri && isHttpUrl(recurringPayment.metadataUri) ? (
+                    <a
+                      href={recurringPayment.metadataUri}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline underline-offset-4"
+                    >
+                      {t("DashboardPayments.recurring.openMetadata")}
+                    </a>
+                  ) : recurringPayment.metadataUri ? (
+                    <span className="block max-w-64 truncate text-tertiary">
+                      {recurringPayment.metadataUri}
+                    </span>
+                  ) : (
+                    <span className="text-tertiary">{t("DashboardPayments.recurring.notSet")}</span>
+                  )}
+                </DetailRow>
+                <DetailRow label={t("DashboardPayments.recurring.created")}>
+                  {formatTimestamp(recurringPayment.createdAt, t)}
+                </DetailRow>
+                <DetailRow label={t("DashboardPayments.recurring.updated")}>
+                  {formatTimestamp(recurringPayment.updatedAt, t)}
+                </DetailRow>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <RecurringPaymentCollectionHistory
+          attempts={collectionAttempts}
+          total={collectionAttemptsTotal}
+          error={collectionAttemptsError}
+          wallets={wallets}
+          className="min-h-0 flex-1"
+        />
 
         <Modal
           isOpen={editingWallet}
