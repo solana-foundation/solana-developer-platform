@@ -11,6 +11,7 @@ import {
   type CustodyProviderCatalogEntry,
   type KnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
+import { PrivyCredentialForm } from "@/app/dashboard/custody/setup/privy-credential-form";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,8 @@ interface WalletSetupFlowProps {
   connectedProviders: KnownCustodyProvider[];
   enabledProviders: KnownCustodyProvider[];
   initialProvider?: KnownCustodyProvider | null;
+  /** Stored-credential install for Privy; ships dark until the flag is on. */
+  privyByokEnabled?: boolean;
 }
 
 function getEnabledProviderEntries(
@@ -142,6 +145,7 @@ export function WalletSetupFlow({
   connectedProviders,
   enabledProviders,
   initialProvider = null,
+  privyByokEnabled = false,
 }: WalletSetupFlowProps) {
   const t = useTranslations();
   const router = useDashboardRouter();
@@ -178,6 +182,10 @@ export function WalletSetupFlow({
     ? !isConnected || selectedProviderEntry.supportsAdditionalWallets
     : false;
   const formAction = isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction;
+  // An uninstalled Privy under BYOK goes through provider details (credential
+  // submission + connection check) instead of the legacy initialize path,
+  // which the API refuses once stored-credential setup is enforced.
+  const isByokDetails = privyByokEnabled && selectedProviderEntry?.id === "privy" && !isConnected;
 
   const continueFromProvider = () => {
     if (!selectedProviderEntry) {
@@ -299,7 +307,9 @@ export function WalletSetupFlow({
   const heading =
     currentStep === "provider"
       ? t("DashboardCustody.chooseProvider")
-      : t("DashboardCustody.walletDetails");
+      : isByokDetails
+        ? t("DashboardCustody.byokProviderDetails")
+        : t("DashboardCustody.walletDetails");
   const canContinue = Boolean(selectedProviderEntry);
   const stepIndex = SETUP_STEPS.indexOf(currentStep);
 
@@ -386,6 +396,8 @@ export function WalletSetupFlow({
                   selectedProvider={selectedProvider}
                 />
               </form>
+            ) : isByokDetails ? (
+              <PrivyCredentialForm formId={DETAILS_FORM_ID} />
             ) : (
               <form id={DETAILS_FORM_ID} onSubmit={handleDetailsSubmit} className="grid gap-4">
                 {formContent}
@@ -419,7 +431,7 @@ export function WalletSetupFlow({
             >
               {t("DashboardCustody.next")}
             </Button>
-          ) : (
+          ) : isByokDetails ? null : (
             <Button
               type="submit"
               form={DETAILS_FORM_ID}

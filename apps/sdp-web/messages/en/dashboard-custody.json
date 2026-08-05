@@ -784,6 +784,15 @@
     "apiKeyClearBindingsConfirmationRequired": "Confirm Clear bindings before saving this binding change.",
     "policyAssetsInWallet": "In this wallet",
     "policyAssetsCommon": "Common tokens",
-    "policyAssetsIssued": "Your tokens"
+    "policyAssetsIssued": "Your tokens",
+    "byokProviderDetails": "Provider details",
+    "byokConnect": "Connect and verify",
+    "byokChecking": "Verifying credentials…",
+    "byokInvalidCredentials": "Privy rejected these credentials. Check the app ID and secret, then connect again.",
+    "byokCheckFailed": "Verification did not complete. Connect again to retry.",
+    "byokRetryUnknown": "We could not confirm whether verification finished. Your credentials are stored; checking again is safe and will not create a duplicate.",
+    "byokCheckAgain": "Check again",
+    "byokMissingFields": "Fill in every required credential field.",
+    "byokSubmitFailed": "Storing the credential failed. Try again."
   }
 }
