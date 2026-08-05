@@ -483,7 +483,7 @@ export function RecurringPaymentsPageSkeleton() {
       data-loading-layout="recurring-payments"
       aria-busy="true"
     >
-      <DashboardWorkspaceCard>
+      <DashboardWorkspaceCard clamp>
         <div className="border-b border-border-default px-4 py-3">
           <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]">
             <SkeletonBlock className="h-10 w-full rounded-lg" />
