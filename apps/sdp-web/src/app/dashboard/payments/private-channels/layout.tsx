@@ -16,11 +16,6 @@ export default async function PrivateChannelsLayout({ children }: { children: Re
   const client = await createSdpApiClient();
   const instance = await loadInstance(client);
 
-  // The dashboard shell hands us a `flex flex-1 flex-col min-h-0 overflow-hidden`
-  // region for /dashboard/payments/*. Wrapping tabs + child in a flex-col here
-  // lets the API Playground page use `flex-1 min-h-0` to fill the space below
-  // the tab bar without spilling past it — a Fragment made the child size to
-  // the whole region and get clipped by the parent's overflow.
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col">
       <PrivateChannelsHeaderTabs isConnected={instance.data?.isActive === true} />

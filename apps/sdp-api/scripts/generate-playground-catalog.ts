@@ -270,8 +270,7 @@ function buildCatalogEntry(
   const tag = Array.isArray(operationInput.tags) ? operationInput.tags[0] : undefined;
   const module = typeof tag === "string" ? TAG_TO_MODULE.get(tag) : undefined;
   if (!module) return null;
-  // Session-cookie ops stay documented in the OpenAPI but are excluded from the
-  // playground catalog — the playground runs under API-key auth and they'd 401.
+  // Session-cookie ops would 401 under API-key playground auth.
   if (requiresSessionCookie(operationInput.security)) return null;
 
   const operationId =
