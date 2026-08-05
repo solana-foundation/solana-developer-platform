@@ -19,7 +19,10 @@ import { freezeSchema, unfreezeSchema } from "../schemas";
 import { getTokenAccessControlMode, type TokenAccessControlMode } from "./access-control";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { persistSettledTransaction, recoverSettledTransactionReplay } from "./settled-transaction";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
@@ -342,25 +345,25 @@ export const freezeAccount = async (c: AppContext) => {
     });
     onChainEffectCompleted = true;
 
-    await auditService.completeCritical(c, auditIntent, {
-      metadata: {
-        signature: result.signature,
-        slot: result.slot.toString(),
-      },
-    });
-
-    await persistSettledTransaction(
+    await persistSettledTransactionThenOutcome({
       tokenService,
-      tx,
-      { signature: result.signature, slot: Number(result.slot) },
-      {
+      transaction: tx,
+      evidence: { signature: result.signature, slot: Number(result.slot) },
+      params: {
         accountAddress: tokenAccount,
         reason: parsed.data.reason,
         tokenAccountAddress: tokenAccount,
         signature: result.signature,
         slot: result.slot.toString(),
-      }
-    );
+      },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
+    });
 
     // Record in database after durable settlement evidence exists.
     const frozenAccount = await tokenService.freezeAccount({
@@ -554,16 +557,20 @@ export const unfreezeAccount = async (c: AppContext) => {
     });
     onChainEffectCompleted = true;
 
-    await auditService.completeCritical(c, auditIntent, {
-      metadata: {
+    await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
         signature: result.signature,
-        slot: result.slot.toString(),
+        slot: Number(result.slot),
       },
-    });
-
-    await persistSettledTransaction(tokenService, tx, {
-      signature: result.signature,
-      slot: Number(result.slot),
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
 
     // Update database record after durable settlement evidence exists.

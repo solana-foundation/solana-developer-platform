@@ -22,7 +22,10 @@ import {
 } from "../helpers";
 import { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { persistSettledTransaction, recoverSettledTransactionReplay } from "./settled-transaction";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
@@ -351,16 +354,21 @@ export const executeBurn = async (c: AppContext) => {
 
     const evidence = { signature: result.signature, slot: Number(result.slot) };
 
-    // Seal the irreversible outcome before fallible database bookkeeping. An
-    // idempotent replay can then repair a transaction row left pending here.
-    await auditService.completeCritical(c, auditIntent, {
-      metadata: {
-        signature: result.signature,
-        slot: result.slot.toString(),
-      },
+    // Persist the settlement first so an audit-outcome outage cannot leave a
+    // completed operation looking pending. If this write is unavailable, the
+    // independent audit outcome below remains the replay-recovery fallback.
+    const updatedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence,
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
-
-    const updatedTx = await persistSettledTransaction(tokenService, tx, evidence);
 
     // Update token supply
     await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.burn.amount);

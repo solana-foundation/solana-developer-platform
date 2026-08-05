@@ -17,7 +17,10 @@ import {
 } from "../helpers";
 import { pauseTokenSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { persistSettledTransaction, recoverSettledTransactionReplay } from "./settled-transaction";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
@@ -137,16 +140,20 @@ export const pauseToken = async (c: AppContext) => {
     });
     onChainEffectCompleted = true;
 
-    await auditService.completeCritical(c, auditIntent, {
-      metadata: {
+    const confirmedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
         signature: result.signature,
-        slot: result.slot.toString(),
+        slot: Number(result.slot),
       },
-    });
-
-    const confirmedTx = await persistSettledTransaction(tokenService, tx, {
-      signature: result.signature,
-      slot: Number(result.slot),
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
     await tokenService.applySettledTokenStatus(tx.id, tokenId, "paused");
 
@@ -281,16 +288,20 @@ export const unpauseToken = async (c: AppContext) => {
     });
     onChainEffectCompleted = true;
 
-    await auditService.completeCritical(c, auditIntent, {
-      metadata: {
+    const confirmedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
         signature: result.signature,
-        slot: result.slot.toString(),
+        slot: Number(result.slot),
       },
-    });
-
-    const confirmedTx = await persistSettledTransaction(tokenService, tx, {
-      signature: result.signature,
-      slot: Number(result.slot),
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
     await tokenService.applySettledTokenStatus(tx.id, tokenId, "active");
 

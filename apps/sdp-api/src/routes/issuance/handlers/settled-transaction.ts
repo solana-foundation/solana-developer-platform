@@ -63,6 +63,30 @@ export async function persistSettledTransaction(
   }
 }
 
+/**
+ * Record settlement in the operational transaction row before appending the
+ * audit outcome. The two writes are deliberately independent: a failed audit
+ * append cannot strand a completed operation as pending, while a failed
+ * transaction write still falls back to the immutable audit outcome used by
+ * replay recovery.
+ */
+export async function persistSettledTransactionThenOutcome(options: {
+  tokenService: TokenService;
+  transaction: TokenTransaction;
+  evidence: SettledTransactionEvidence;
+  params?: Record<string, unknown>;
+  persistOutcome: () => Promise<unknown>;
+}): Promise<TokenTransaction> {
+  const settled = await persistSettledTransaction(
+    options.tokenService,
+    options.transaction,
+    options.evidence,
+    options.params
+  );
+  await options.persistOutcome();
+  return settled;
+}
+
 export async function recoverSettledTransactionReplay(options: {
   auditService: AuditService;
   tokenService: TokenService;

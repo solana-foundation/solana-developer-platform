@@ -24,7 +24,10 @@ import {
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { enforceIssuanceWalletOperationPolicy } from "./policy";
-import { persistSettledTransaction, recoverSettledTransactionReplay } from "./settled-transaction";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicAuthorityRole = Parameters<MosaicService["prepareUpdateAuthority"]>[0]["role"];
@@ -303,16 +306,20 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
     onChainEffectCompleted = true;
 
-    await auditService.completeCritical(c, auditIntent, {
-      metadata: {
+    const updatedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
         signature: result.signature,
-        slot: result.slot.toString(),
+        slot: Number(result.slot),
       },
-    });
-
-    const updatedTx = await persistSettledTransaction(tokenService, tx, {
-      signature: result.signature,
-      slot: Number(result.slot),
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
 
     const updates = authorityUpdates(role, newAuthority);

@@ -4,6 +4,7 @@ import type { AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
 import {
   parseSettledTransactionEvidence,
+  persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
 
@@ -100,6 +101,48 @@ describe("settled issuance transaction recovery", () => {
       signature: "sig_settled",
       slot: 123,
       error: null,
+    });
+  });
+
+  it("durably records settlement before attempting the terminal audit outcome", async () => {
+    const order: string[] = [];
+    const updateTransaction = vi.fn().mockImplementation(async () => {
+      order.push("transaction");
+      return { ...pendingTransaction, status: "confirmed" };
+    });
+    const persistOutcome = vi.fn().mockImplementation(async () => {
+      order.push("outcome");
+      return false;
+    });
+
+    const settled = await persistSettledTransactionThenOutcome({
+      tokenService: { updateTransaction } as unknown as TokenService,
+      transaction: pendingTransaction,
+      evidence: { signature: "sig_settled", slot: 123 },
+      persistOutcome,
+    });
+
+    expect(order).toEqual(["transaction", "outcome"]);
+    expect(settled.status).toBe("confirmed");
+  });
+
+  it("still attempts the audit fallback when transaction persistence is unavailable", async () => {
+    const persistOutcome = vi.fn().mockResolvedValue(true);
+
+    const settled = await persistSettledTransactionThenOutcome({
+      tokenService: {
+        updateTransaction: vi.fn().mockRejectedValue(new Error("database unavailable")),
+      } as unknown as TokenService,
+      transaction: pendingTransaction,
+      evidence: { signature: "sig_settled", slot: 123 },
+      persistOutcome,
+    });
+
+    expect(persistOutcome).toHaveBeenCalledOnce();
+    expect(settled).toMatchObject({
+      status: "confirmed",
+      signature: "sig_settled",
+      slot: 123,
     });
   });
 });
