@@ -83,7 +83,7 @@ export function HoldingsWorkspace({ balances }: { balances: CustodyWalletTokenBa
                           holding's history is a link into that filter rather than
                           a second surface showing the same rows. */}
                       <DashboardNavigationLink
-                        href={tokenActivityHref(symbol)}
+                        href={tokenActivityHref(row.mint)}
                         className="flex min-w-0 items-center gap-3 hover:underline"
                       >
                         <TokenMark mint={row.mint} symbol={symbol} size="sm" />
@@ -99,10 +99,12 @@ export function HoldingsWorkspace({ balances }: { balances: CustodyWalletTokenBa
                           rather than unmeasured. A priced share below one percent
                           rounds to "<1%" for the same reason. */}
                       {row.sharePercent === null
-                        ? "—"
+                        ? t("Shared.homeWorkspace.holdingsShareUnmeasured")
                         : row.sharePercent > 0 && row.sharePercent < 1
-                          ? "<1%"
-                          : `${Math.round(row.sharePercent)}%`}
+                          ? t("Shared.homeWorkspace.holdingsShareBelowOne")
+                          : t("Shared.homeWorkspace.holdingsSharePercent", {
+                              percent: Math.round(row.sharePercent),
+                            })}
                     </TableCell>
                     <TableCell className="pr-6 text-right font-medium tabular-nums text-primary">
                       {row.usdValue === null

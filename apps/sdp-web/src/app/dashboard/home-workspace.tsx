@@ -150,7 +150,7 @@ function BalanceAllocation({
       percent: slice.sharePercent,
       value: slice.usdValue ?? 0,
       fill: allocationFill(index),
-      href: tokenActivityHref(symbolFor(slice)),
+      href: tokenActivityHref(slice.mint),
     })),
     ...(breakdown.otherPricedCount > 0
       ? [
@@ -264,7 +264,7 @@ function BalanceAllocation({
             return (
               <Link
                 key={slice.mint}
-                href={tokenActivityHref(symbol)}
+                href={tokenActivityHref(slice.mint)}
                 className="flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none"
               >
                 <TokenMark mint={slice.mint} symbol={symbol} size="sm" />

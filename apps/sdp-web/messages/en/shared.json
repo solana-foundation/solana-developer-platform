@@ -287,6 +287,9 @@
     "holdingsValue": "Value",
     "holdingsShare": "Share",
     "holdingsNotPriced": "Not priced",
+    "holdingsShareUnmeasured": "—",
+    "holdingsShareBelowOne": "<1%",
+    "holdingsSharePercent": "{percent}%",
     "holdingsUnavailable": "Holdings are unavailable right now.",
     "holdingsCount": "{count} tokens",
     "holdingsCountSingle": "1 token"
