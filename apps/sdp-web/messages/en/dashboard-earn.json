@@ -211,7 +211,8 @@
       "profileLiquidityAccess": "instant redemption only",
       "profileBalancedAccess": "instant to T+3",
       "profileYieldAccess": "any redemption speed",
-      "poolMeta": "Pool {value}"
+      "poolMeta": "Pool {value}",
+      "timingDisclosure": "Allocation changes are applied by the provider's scheduled rebalancer, not instantly. New deposits sit as cash until the next pass, and moving between strategies can take time to settle."
     }
   }
 }

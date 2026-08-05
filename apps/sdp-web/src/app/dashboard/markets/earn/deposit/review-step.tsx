@@ -152,7 +152,9 @@ export function ReviewStep({
 
       {submitError ? <StepNotice tone="error">{submitError}</StepNotice> : null}
 
-      <p className="text-xs leading-5 text-muted">{t("DashboardEarn.deposit.rateDisclosure")}</p>
+      <p className="text-xs leading-5 text-muted">
+        {t("DashboardEarn.deposit.timingDisclosure")} {t("DashboardEarn.deposit.rateDisclosure")}
+      </p>
     </div>
   );
 }

@@ -55,9 +55,13 @@ export function SelectableCard({
   value: string;
 }) {
   return (
+    // `relative` is load-bearing: the sr-only radio inside is absolutely
+    // positioned, and without a positioned ancestor it lands near the top of
+    // the page — so selecting a card low in a scrolled list yanked the view to
+    // the top when the browser scrolled the newly-focused input into view.
     <div
       className={cn(
-        "h-full rounded-2xl border bg-surface-raised transition-[border-color,background-color] duration-200 ease-out motion-reduce:transition-none",
+        "relative h-full rounded-2xl border bg-surface-raised transition-[border-color,background-color] duration-200 ease-out motion-reduce:transition-none",
         selected
           ? "border-primary bg-fill-subtle"
           : "border-border-default hover:border-border-strong hover:bg-fill-subtle/60"
