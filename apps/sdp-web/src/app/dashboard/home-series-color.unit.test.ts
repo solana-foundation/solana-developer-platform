@@ -20,7 +20,7 @@ describe("seriesColorForMint", () => {
 
   it("only ever returns a defined series slot", () => {
     for (const mint of ["a", "b", "c", "d", "e", "f", "g", "mint-usdc", "mint-sol"]) {
-      expect(seriesColorForMint(mint)).toMatch(/^var\(--sdp-series-[1-4]\)$/);
+      expect(seriesColorForMint(mint)).toMatch(/^bg-series-[1-4]$/);
     }
   });
 
@@ -32,6 +32,6 @@ describe("seriesColorForMint", () => {
   });
 
   it("is stable for an empty mint rather than throwing", () => {
-    expect(seriesColorForMint("")).toMatch(/^var\(--sdp-series-[1-4]\)$/);
+    expect(seriesColorForMint("")).toMatch(/^bg-series-[1-4]$/);
   });
 });

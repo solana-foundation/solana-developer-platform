@@ -10,12 +10,16 @@
  * row carries its symbol, share and value, and the bar caps at four named
  * holdings plus a neutral "Other". Identity is never carried by color alone.
  */
-export const SERIES_COLORS = [
-  "var(--sdp-series-1)",
-  "var(--sdp-series-2)",
-  "var(--sdp-series-3)",
-  "var(--sdp-series-4)",
-] as const;
+/**
+ * Utility class names, not raw `var(...)` strings.
+ *
+ * Tailwind treeshakes custom properties its scanner never sees, and a
+ * `var(--sdp-series-1)` living only in a JS string is invisible to it — the
+ * declaration got stripped from the stylesheet while this kept referencing it,
+ * and every segment rendered transparent. These literals are scanned, so the
+ * utilities are always generated.
+ */
+export const SERIES_COLORS = ["bg-series-1", "bg-series-2", "bg-series-3", "bg-series-4"] as const;
 
 export const SERIES_COLOR_COUNT = SERIES_COLORS.length;
 

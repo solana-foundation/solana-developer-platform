@@ -24,9 +24,20 @@ export function resolveHomeHeroState(input: {
   walletCount: number;
   balances: CustodyWalletTokenBalance[];
   totalBalance: number | null;
+  balancesUnavailable: boolean;
 }): HomeHeroState {
   if (input.walletCount === 0) {
     return { kind: "first_run" };
+  }
+
+  // An organization that holds nothing and one whose balance feed just failed
+  // both arrive here with an empty `balances` — the page defaults the aggregate
+  // to `[]` when the request does not succeed. Only the first is genuinely
+  // empty, so a failure has to fall through to the hero that can report it.
+  // Treating it as `provisioned_empty` would tell an established organization to
+  // get started and silently drop the error it should be seeing.
+  if (input.balancesUnavailable) {
+    return { kind: "populated", hasPricedValue: input.totalBalance !== null };
   }
 
   // Reuses the holdings rule the allocation card already applies to this same

@@ -15,7 +15,14 @@ function balance(overrides: Partial<CustodyWalletTokenBalance>): CustodyWalletTo
 
 describe("resolveHomeHeroState", () => {
   it("treats an organization with no wallets as first run", () => {
-    expect(resolveHomeHeroState({ walletCount: 0, balances: [], totalBalance: null })).toEqual({
+    expect(
+      resolveHomeHeroState({
+        walletCount: 0,
+        balances: [],
+        totalBalance: null,
+        balancesUnavailable: false,
+      })
+    ).toEqual({
       kind: "first_run",
     });
   });
@@ -24,7 +31,14 @@ describe("resolveHomeHeroState", () => {
     // Onboarding provisions a wallet before it completes, so walletCount is 1 with
     // nothing in it. The old `wallets.length === 0` gate called this populated and
     // rendered $0.00 as the first thing a new organization ever saw.
-    expect(resolveHomeHeroState({ walletCount: 1, balances: [], totalBalance: null })).toEqual({
+    expect(
+      resolveHomeHeroState({
+        walletCount: 1,
+        balances: [],
+        totalBalance: null,
+        balancesUnavailable: false,
+      })
+    ).toEqual({
       kind: "provisioned_empty",
     });
   });
@@ -34,6 +48,7 @@ describe("resolveHomeHeroState", () => {
       walletCount: 1,
       balances: [balance({ uiAmount: "0" })],
       totalBalance: null,
+      balancesUnavailable: false,
     });
 
     expect(result).toEqual({ kind: "provisioned_empty" });
@@ -46,6 +61,7 @@ describe("resolveHomeHeroState", () => {
       walletCount: 1,
       balances: [balance({ mint: "atd", token: "ATD", uiAmount: "25000" })],
       totalBalance: null,
+      balancesUnavailable: false,
     });
 
     expect(result).toEqual({ kind: "populated", hasPricedValue: false });
@@ -56,6 +72,7 @@ describe("resolveHomeHeroState", () => {
       walletCount: 2,
       balances: [balance({ usdValue: 149.11 })],
       totalBalance: 149.11,
+      balancesUnavailable: false,
     });
 
     expect(result).toEqual({ kind: "populated", hasPricedValue: true });
@@ -67,8 +84,37 @@ describe("resolveHomeHeroState", () => {
       walletCount: 1,
       balances: [balance({ usdValue: 0 })],
       totalBalance: 0,
+      balancesUnavailable: false,
     });
 
     expect(result).toEqual({ kind: "populated", hasPricedValue: true });
+  });
+
+  it("does not call an established organization empty when the balance feed failed", () => {
+    // The page defaults a failed aggregate to `[]`, which is indistinguishable
+    // from holding nothing. Classifying that as provisioned_empty swapped an
+    // established organization's hero for the get-started panel and swallowed the
+    // "balance data is unavailable" message, which only the hero renders.
+    const result = resolveHomeHeroState({
+      walletCount: 3,
+      balances: [],
+      totalBalance: null,
+      balancesUnavailable: true,
+    });
+
+    expect(result).toEqual({ kind: "populated", hasPricedValue: false });
+  });
+
+  it("still shows first run when there are no wallets at all, feed or no feed", () => {
+    // A failed feed says nothing about wallet count, which comes from its own
+    // request, so the genuinely empty organization keeps its own panel.
+    const result = resolveHomeHeroState({
+      walletCount: 0,
+      balances: [],
+      totalBalance: null,
+      balancesUnavailable: true,
+    });
+
+    expect(result).toEqual({ kind: "first_run" });
   });
 });

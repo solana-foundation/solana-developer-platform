@@ -98,7 +98,7 @@ function ActivityAddress({
  * "Other" is a residual bucket, not a token, so it stays neutral rather than
  * taking a categorical hue that would imply an identity it does not have.
  */
-const OTHER_SEGMENT_COLOR = "var(--fill-strong, #d4d4d4)";
+const OTHER_SEGMENT_COLOR = "bg-fill-strong";
 
 /**
  * Holdings by token. The aggregate already returns the per-token rows the total is
@@ -186,12 +186,10 @@ function BalanceAllocation({
                 onMouseLeave={() => setHovered(null)}
                 onFocus={() => setHovered(segment.key)}
                 onBlur={() => setHovered(null)}
-                style={{
-                  width: `${Math.max(segment.percent, 1.5)}%`,
-                  backgroundColor: segment.fill,
-                }}
+                style={{ width: `${Math.max(segment.percent, 1.5)}%` }}
                 className={cn(
                   "h-full rounded-full transition-opacity motion-reduce:transition-none",
+                  segment.fill,
                   hovered && hovered !== segment.key ? "opacity-35" : "opacity-100"
                 )}
               />
@@ -215,8 +213,7 @@ function BalanceAllocation({
                   ) : (
                     <span
                       aria-hidden="true"
-                      style={{ backgroundColor: segment.fill }}
-                      className="size-6 shrink-0 rounded-full"
+                      className={cn("size-6 shrink-0 rounded-full", segment.fill)}
                     />
                   )}
                   <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-primary">
@@ -461,7 +458,15 @@ export function HomeWorkspace({
   // Not `wallets.length === 0`: onboarding provisions a wallet before it completes,
   // so a freshly onboarded organization already has one and fell through to the
   // populated hero holding nothing.
-  const heroState = resolveHomeHeroState({ walletCount, balances, totalBalance });
+  // `totalBalanceError` is set only when the aggregate request failed on an
+  // organization that has wallets — exactly the case where an empty `balances`
+  // means "we could not read it" rather than "there is nothing here".
+  const heroState = resolveHomeHeroState({
+    walletCount,
+    balances,
+    totalBalance,
+    balancesUnavailable: totalBalanceError !== null,
+  });
   const totalBalanceHint = isWalletEmptyState
     ? t("Shared.homeWorkspace.createFirstWalletBalances")
     : totalBalance === null
