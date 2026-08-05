@@ -618,6 +618,8 @@
     "policyAuditViewWalletControls": "Wallet controls",
     "policyAuditViewActiveRevision": "Active revision #{number}",
     "policyAuditNoRevisionApplied": "No revision applied",
+    "policyAuditWalletPolicyTab": "Wallet policy",
+    "policyAuditApiKeyPolicyTab": "API key policy",
     "policyAuditViewApiKey": "API key",
     "policyAuditViewApprovalRequest": "Approval request",
     "policyAuditUnavailableTitle": "Policy history unavailable",

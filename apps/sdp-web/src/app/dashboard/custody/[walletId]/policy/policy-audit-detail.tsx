@@ -4,6 +4,7 @@ import type {
   WalletControlProfileRevisionHistory,
   WalletPolicyEvaluationDetail,
 } from "@sdp/types";
+import { Tab, TabList, TabPanel, Tabs } from "@solana/design-system/tabs";
 import {
   CalendarClock,
   Check,
@@ -105,11 +106,17 @@ export function PolicyAuditDetail({
           <MetadataLine icon={<CalendarClock className="size-4" />}>
             {formatPolicyDateTime(evaluation.evaluatedAt, locale)}
           </MetadataLine>
-          <MetadataLine icon={<WalletCards className="size-4" />}>
+          <MetadataLine
+            icon={<WalletCards className="size-4" />}
+            label={t("DashboardCustody.wallet")}
+          >
             {walletLabel(wallet)}
           </MetadataLine>
           {requestId ? (
-            <MetadataLine icon={<FileKey className="size-4" />}>
+            <MetadataLine
+              icon={<FileKey className="size-4" />}
+              label={t("DashboardCustody.policyAuditRequestId")}
+            >
               <span>{shortIdentifier(requestId)}</span>
               <WalletMetadataCopyButton
                 value={requestId}
@@ -117,6 +124,28 @@ export function PolicyAuditDetail({
               />
             </MetadataLine>
           ) : null}
+          <MetadataLine
+            icon={<Hash className="size-4" />}
+            label={t("DashboardCustody.policyAuditEvaluationId")}
+          >
+            <span title={evaluation.id}>{shortIdentifier(evaluation.id)}</span>
+            <WalletMetadataCopyButton
+              value={evaluation.id}
+              label={t("DashboardCustody.policyAuditEvaluationId")}
+            />
+          </MetadataLine>
+          <MetadataLine
+            icon={<Hash className="size-4" />}
+            label={t("DashboardCustody.policyAuditOperationId")}
+          >
+            <span title={evaluation.walletOperation.id}>
+              {shortIdentifier(evaluation.walletOperation.id)}
+            </span>
+            <WalletMetadataCopyButton
+              value={evaluation.walletOperation.id}
+              label={t("DashboardCustody.policyAuditOperationId")}
+            />
+          </MetadataLine>
           {actor.value ? (
             <MetadataLine
               icon={
@@ -153,7 +182,7 @@ export function PolicyAuditDetail({
         </div>
       </section>
 
-      <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_520px]">
+      <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_460px]">
         <main className="min-w-0">
           <DecisionTab evaluation={evaluation} t={t} />
         </main>
@@ -498,36 +527,29 @@ function RevisionValue({
   );
 }
 
-function ContextSection({
-  title,
-  values,
-  t,
-}: {
-  title: string;
-  values: object;
-  t: PolicyTranslate;
-}) {
+function ContextFields({ values, t }: { values: object; t: PolicyTranslate }) {
   const entries = Object.entries(values).filter(([, value]) => hasAuditValue(value));
+  if (entries.length === 0) {
+    return (
+      <p className="py-3 text-sm text-secondary">
+        {t("DashboardCustody.policyAuditNoRecordedValues")}
+      </p>
+    );
+  }
   return (
-    <section className="py-4 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border-default">
-      <h4 className="text-sm font-medium text-primary">{title}</h4>
-      {entries.length > 0 ? (
-        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-          {entries.map(([key, value]) => (
-            <div key={key} className="min-w-0">
-              <dt className="text-xs text-tertiary">{formatAuditFieldLabel(key)}</dt>
-              <dd className="mt-1 break-words text-sm text-primary">
-                {formatSummaryValue(key, value, t)}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      ) : (
-        <p className="mt-2 text-sm text-secondary">
-          {t("DashboardCustody.policyAuditNoRecordedValues")}
-        </p>
-      )}
-    </section>
+    <dl className="divide-y divide-border-default">
+      {entries.map(([key, value]) => (
+        <div
+          key={key}
+          className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 py-3 text-sm"
+        >
+          <dt className="text-secondary">{formatAuditFieldLabel(key)}</dt>
+          <dd className="min-w-0 break-words text-right text-primary">
+            {formatSummaryValue(key, value, t)}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -550,8 +572,6 @@ function EvaluationContextRail({
 }) {
   const operation = evaluation.evaluationContext?.operation;
   const apiKeyId = operation?.apiKeyId ?? null;
-  const actor = policyActor(evaluation, apiKeyNames, userNames);
-  const requestId = requestIdFromEvaluation(evaluation);
   const activeRevisionId =
     history.profile?.activeRevisionId ??
     history.revisions.find((revision) => revision.isActive)?.id ??
@@ -559,198 +579,157 @@ function EvaluationContextRail({
   const activeRevisionNumber = revisionNumber(history, activeRevisionId);
   const appliedRevisionId = evaluation.policyRevisions.wallet.evaluatedRevisionId;
   const revisionChanged = appliedRevisionId !== activeRevisionId;
+  const apiKeyRevisionChanged =
+    evaluation.policyRevisions.apiKey.evaluatedRevisionId !==
+    evaluation.policyRevisions.apiKey.activeRevisionId;
 
   return (
     <aside className="h-fit rounded-lg border border-border-default bg-surface-raised p-5 xl:sticky xl:top-4">
       <h2 className="text-base font-medium text-primary">
         {t("DashboardCustody.policyAuditEvaluationContext")}
       </h2>
-      <dl className="mt-3 divide-y divide-border-default">
-        <ContextRow icon={<WalletCards className="size-4" />} label={t("DashboardCustody.wallet")}>
-          {walletLabel(wallet)}
-        </ContextRow>
-        {apiKeyId ? (
-          <ContextRow
-            icon={<KeyRound className="size-4" />}
-            label={t("DashboardCustody.policyAuditApiKey")}
-          >
-            {apiKeyNames[apiKeyId] ?? shortIdentifier(apiKeyId)}
-          </ContextRow>
-        ) : null}
-        {actor.type !== "api_key" && actor.value ? (
-          <ContextRow
-            icon={<UserRound className="size-4" />}
-            label={t("DashboardCustody.policyAuditActor")}
-          >
-            <span
-              className="block truncate"
-              data-policy-audit-detail-rail-actor
-              title={actor.value}
+      <Tabs bordered defaultValue="wallet_policy" className="-mx-5 mt-3">
+        <TabList className="px-[calc(--spacing(5)-var(--tab-padding-x-md))]">
+          <Tab value="wallet_policy">{t("DashboardCustody.policyAuditWalletPolicyTab")}</Tab>
+          {evaluation.evaluationContext?.apiKeyPolicy ? (
+            <Tab value="api_key_policy">{t("DashboardCustody.policyAuditApiKeyPolicyTab")}</Tab>
+          ) : null}
+        </TabList>
+        <TabPanel value="wallet_policy" className="px-5">
+          <dl className="divide-y divide-border-default">
+            <ContextRow
+              icon={<ShieldCheck className="size-4" />}
+              label={t("DashboardCustody.policyAuditAppliedRevision")}
             >
-              {actor.value}
-            </span>
-          </ContextRow>
-        ) : null}
-        {evaluation.approvalRequestId ? (
-          <ContextRow
-            icon={<Clock3 className="size-4" />}
-            label={t("DashboardCustody.policyAuditApprovalRequest")}
-          >
-            {shortIdentifier(evaluation.approvalRequestId)}
-          </ContextRow>
-        ) : null}
-        {requestId ? (
-          <ContextRow
-            icon={<FileKey className="size-4" />}
-            label={t("DashboardCustody.policyAuditRequestId")}
-          >
-            <CopyableRowValue
-              value={requestId}
-              label={t("DashboardCustody.policyAuditRequestId")}
+              <RevisionValue
+                revisionId={appliedRevisionId}
+                value={formatRevisionReference(
+                  history,
+                  appliedRevisionId,
+                  t("DashboardCustody.policyAuditNoRevisionApplied")
+                )}
+                t={t}
+              />
+            </ContextRow>
+            <ContextRow
+              icon={<ShieldCheck className="size-4" />}
+              label={t("DashboardCustody.policyAuditActiveRevision")}
+            >
+              <RevisionValue
+                revisionId={activeRevisionId}
+                value={formatRevisionReference(
+                  history,
+                  activeRevisionId,
+                  t("DashboardCustody.policyAuditNoActiveRevision")
+                )}
+                t={t}
+              />
+            </ContextRow>
+          </dl>
+          {evaluation.evaluationContext ? (
+            <div className="border-t border-border-default">
+              <ContextFields values={evaluation.evaluationContext.walletPolicy} t={t} />
+            </div>
+          ) : null}
+          {revisionChanged ? (
+            <p className="border-t border-border-default py-3 text-sm text-warning">
+              {t("DashboardCustody.policyAuditHistoricalRevisionNotice")}
+            </p>
+          ) : null}
+          <div className="mt-3 flex gap-2 pb-1">
+            {activeRevisionId && activeRevisionNumber !== null ? (
+              <RevisionHistoryDrawer
+                walletId={wallet.walletId}
+                preloaded={{ history, userNames }}
+                defaultRevisionId={activeRevisionId}
+                trigger={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-w-0 flex-1"
+                    iconLeft={<History className="size-4" />}
+                  >
+                    {t("DashboardCustody.policyAuditViewActiveRevision", {
+                      number: activeRevisionNumber,
+                    })}
+                  </Button>
+                }
+              />
+            ) : null}
+            <RailAction
+              href={policyHref}
+              label={t("DashboardCustody.policyAuditViewWalletControls")}
             />
-          </ContextRow>
-        ) : null}
-        <ContextRow
-          icon={<Hash className="size-4" />}
-          label={t("DashboardCustody.policyAuditEvaluationId")}
-        >
-          <CopyableRowValue
-            value={evaluation.id}
-            label={t("DashboardCustody.policyAuditEvaluationId")}
-          />
-        </ContextRow>
-        <ContextRow
-          icon={<Hash className="size-4" />}
-          label={t("DashboardCustody.policyAuditOperationId")}
-        >
-          <CopyableRowValue
-            value={evaluation.walletOperation.id}
-            label={t("DashboardCustody.policyAuditOperationId")}
-          />
-        </ContextRow>
-        <ContextRow
-          icon={<ShieldCheck className="size-4" />}
-          label={t("DashboardCustody.policyAuditAppliedRevision")}
-        >
-          <RevisionValue
-            revisionId={appliedRevisionId}
-            value={formatRevisionReference(
-              history,
-              appliedRevisionId,
-              t("DashboardCustody.policyAuditNoRevisionApplied")
-            )}
-            t={t}
-          />
-        </ContextRow>
-        <ContextRow
-          icon={<ShieldCheck className="size-4" />}
-          label={t("DashboardCustody.policyAuditActiveRevision")}
-        >
-          <RevisionValue
-            revisionId={activeRevisionId}
-            value={formatRevisionReference(
-              history,
-              activeRevisionId,
-              t("DashboardCustody.policyAuditNoActiveRevision")
-            )}
-            t={t}
-          />
-        </ContextRow>
+          </div>
+        </TabPanel>
         {evaluation.evaluationContext?.apiKeyPolicy ? (
-          <>
-            <ContextRow
-              icon={<KeyRound className="size-4" />}
-              label={t("DashboardCustody.policyAuditApiKeyAppliedRevision")}
-            >
-              <RevisionValue
-                revisionId={evaluation.policyRevisions.apiKey.evaluatedRevisionId}
-                value={
-                  evaluation.policyRevisions.apiKey.evaluatedRevisionId
-                    ? shortIdentifier(evaluation.policyRevisions.apiKey.evaluatedRevisionId)
-                    : t("DashboardCustody.policyAuditNoAdditionalRestriction")
-                }
-                t={t}
-              />
-            </ContextRow>
-            <ContextRow
-              icon={<KeyRound className="size-4" />}
-              label={t("DashboardCustody.policyAuditApiKeyActiveRevision")}
-            >
-              <RevisionValue
-                revisionId={evaluation.policyRevisions.apiKey.activeRevisionId}
-                value={
-                  evaluation.policyRevisions.apiKey.activeRevisionId
-                    ? shortIdentifier(evaluation.policyRevisions.apiKey.activeRevisionId)
-                    : t("DashboardCustody.policyAuditNoActiveRevision")
-                }
-                t={t}
-              />
-            </ContextRow>
-          </>
-        ) : null}
-      </dl>
-
-      {revisionChanged ? (
-        <>
-          <div aria-hidden="true" className="-mx-5 mt-1 border-t border-border-default" />
-          <p className="mt-4 text-sm text-warning">
-            {t("DashboardCustody.policyAuditHistoricalRevisionNotice")}
-          </p>
-        </>
-      ) : null}
-
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        {activeRevisionId && activeRevisionNumber !== null ? (
-          <RevisionHistoryDrawer
-            walletId={wallet.walletId}
-            preloaded={{ history, userNames }}
-            defaultRevisionId={activeRevisionId}
-            trigger={
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full"
-                iconLeft={<History className="size-4" />}
+          <TabPanel value="api_key_policy" className="px-5">
+            <dl className="divide-y divide-border-default">
+              <ContextRow
+                icon={<KeyRound className="size-4" />}
+                label={t("DashboardCustody.policyAuditApiKeyAppliedRevision")}
               >
-                {t("DashboardCustody.policyAuditViewActiveRevision", {
-                  number: activeRevisionNumber,
-                })}
-              </Button>
-            }
-          />
+                <RevisionValue
+                  revisionId={evaluation.policyRevisions.apiKey.evaluatedRevisionId}
+                  value={
+                    evaluation.policyRevisions.apiKey.evaluatedRevisionId
+                      ? shortIdentifier(evaluation.policyRevisions.apiKey.evaluatedRevisionId)
+                      : t("DashboardCustody.policyAuditNoAdditionalRestriction")
+                  }
+                  t={t}
+                />
+              </ContextRow>
+              <ContextRow
+                icon={<KeyRound className="size-4" />}
+                label={t("DashboardCustody.policyAuditApiKeyActiveRevision")}
+              >
+                <RevisionValue
+                  revisionId={evaluation.policyRevisions.apiKey.activeRevisionId}
+                  value={
+                    evaluation.policyRevisions.apiKey.activeRevisionId
+                      ? shortIdentifier(evaluation.policyRevisions.apiKey.activeRevisionId)
+                      : t("DashboardCustody.policyAuditNoActiveRevision")
+                  }
+                  t={t}
+                />
+              </ContextRow>
+            </dl>
+            <div className="border-t border-border-default">
+              <ContextFields values={evaluation.evaluationContext.apiKeyPolicy} t={t} />
+            </div>
+            {apiKeyRevisionChanged ? (
+              <p className="border-t border-border-default py-3 text-sm text-warning">
+                {t("DashboardCustody.policyAuditHistoricalRevisionNotice")}
+              </p>
+            ) : null}
+            {apiKeyId && apiKeyNames[apiKeyId] ? (
+              <div className="mt-3 flex gap-2 pb-1">
+                <RailAction
+                  href={`/dashboard/api-keys?apiKeyId=${encodeURIComponent(apiKeyId)}`}
+                  label={t("DashboardCustody.policyAuditViewApiKey")}
+                />
+              </div>
+            ) : null}
+          </TabPanel>
         ) : null}
-        <RailAction href={policyHref} label={t("DashboardCustody.policyAuditViewWalletControls")} />
-        {apiKeyId && apiKeyNames[apiKeyId] ? (
-          <RailAction
-            href={`/dashboard/api-keys?apiKeyId=${encodeURIComponent(apiKeyId)}`}
-            label={t("DashboardCustody.policyAuditViewApiKey")}
-          />
-        ) : null}
-        {evaluation.approvalRequestId ? (
+      </Tabs>
+
+      {evaluation.approvalRequestId ? (
+        <div className="mt-4 flex gap-2">
           <RailAction
             href={`/dashboard/approvals/${encodeURIComponent(evaluation.approvalRequestId)}`}
             label={t("DashboardCustody.policyAuditViewApprovalRequest")}
           />
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       <div aria-hidden="true" className="-mx-5 mt-4 border-t border-border-default" />
-      <h3 className="mt-4 text-sm font-medium text-primary">
-        {t("DashboardCustody.policyAuditRequestContext")}
-      </h3>
       {evaluation.evaluationContext ? (
         <>
-          <p className="mt-1 text-xs text-tertiary">
+          <p className="mt-3 text-xs text-tertiary">
             {t("DashboardCustody.policyAuditRedactedContext")}
           </p>
-          {evaluation.evaluationContext.apiKeyPolicy ? (
-            <ContextSection
-              title={t("DashboardCustody.policyAuditApiKeyPolicyEvaluation")}
-              values={evaluation.evaluationContext.apiKeyPolicy}
-              t={t}
-            />
-          ) : null}
           <PolicyAuditRawDetails
             value={evaluation.evaluationContext}
             label={t("DashboardCustody.policyAuditRawDetails")}
@@ -758,7 +737,7 @@ function EvaluationContextRail({
           />
         </>
       ) : (
-        <p className="mt-2 text-sm text-secondary">
+        <p className="mt-3 text-sm text-secondary">
           {t("DashboardCustody.policyAuditLegacyContextEmpty")}
         </p>
       )}
@@ -776,7 +755,7 @@ function ContextRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-center gap-3 py-3 text-sm">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 py-3 text-sm">
       <dt className="flex items-center gap-2 text-secondary">
         {icon}
         {label}
@@ -788,7 +767,7 @@ function ContextRow({
 
 function RailAction({ href, label }: { href: string; label: string }) {
   return (
-    <Button asChild variant="outline" size="sm" className="w-full">
+    <Button asChild variant="outline" size="sm" className="min-w-0 flex-1">
       <Link href={href}>
         {label}
         <ExternalLink className="size-4" />
@@ -797,30 +776,20 @@ function RailAction({ href, label }: { href: string; label: string }) {
   );
 }
 
-function MetadataLine({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+function MetadataLine({
+  icon,
+  label,
+  children,
+}: {
+  icon: ReactNode;
+  label?: string;
+  children: ReactNode;
+}) {
   return (
     <span className="inline-flex min-w-0 max-w-full items-center gap-2">
       <span className="shrink-0">{icon}</span>
+      {label ? <span className="shrink-0 text-tertiary">{label}</span> : null}
       {children}
-    </span>
-  );
-}
-
-/**
- * Right-aligned shortened identifier with its copy button, for context rows
- * whose value is a full id.
- *
- * @param props.value - The full identifier; shown shortened, copied verbatim.
- * @param props.label - Accessible name for the copy button.
- * @returns The row value.
- */
-function CopyableRowValue({ value, label }: { value: string; label: string }) {
-  return (
-    <span className="flex min-w-0 items-center justify-end gap-1">
-      <span className="truncate" title={value}>
-        {shortIdentifier(value)}
-      </span>
-      <WalletMetadataCopyButton value={value} label={label} />
     </span>
   );
 }
