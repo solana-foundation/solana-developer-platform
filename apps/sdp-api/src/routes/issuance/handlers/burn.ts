@@ -294,6 +294,7 @@ export const executeBurn = async (c: AppContext) => {
       source: parsed.data.burn.source,
       amount: parsed.data.burn.amount,
       memo: parsed.data.burn.memo,
+      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     initiatedByKeyId: auth.id,
     idempotencyKey: idempotencyMetadata.idempotencyKey,

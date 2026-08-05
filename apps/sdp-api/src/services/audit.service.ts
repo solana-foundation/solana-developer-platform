@@ -133,6 +133,11 @@ interface AuditLedgerCheckpoint {
   headHash: string;
 }
 
+interface PendingAuditLedgerCheckpoint {
+  previous: AuditLedgerCheckpoint | null;
+  next: AuditLedgerCheckpoint;
+}
+
 interface AuditLedgerHead {
   ledger_sequence: number;
   previous_entry_hash: string | null;
@@ -162,6 +167,39 @@ function parseCheckpoint(value: string | null): AuditLedgerCheckpoint {
     // Invalid external state is represented by an impossible sequence below.
   }
   return { sequence: -1, headHash: "" };
+}
+
+function isValidCheckpoint(value: unknown): value is AuditLedgerCheckpoint {
+  if (!value || typeof value !== "object") return false;
+  const checkpoint = value as Partial<AuditLedgerCheckpoint>;
+  return (
+    Number.isSafeInteger(checkpoint.sequence) &&
+    Number(checkpoint.sequence) > 0 &&
+    typeof checkpoint.headHash === "string" &&
+    /^[0-9a-f]{64}$/.test(checkpoint.headHash)
+  );
+}
+
+function parsePendingCheckpoint(value: string | null): PendingAuditLedgerCheckpoint | null {
+  if (value === null) return null;
+  try {
+    const parsed = JSON.parse(value) as {
+      pending?: unknown;
+      previous?: unknown;
+      next?: unknown;
+    };
+    if (
+      parsed.pending === true &&
+      (parsed.previous === null || isValidCheckpoint(parsed.previous)) &&
+      isValidCheckpoint(parsed.next) &&
+      parsed.next.sequence === (parsed.previous?.sequence ?? 0) + 1
+    ) {
+      return { previous: parsed.previous, next: parsed.next };
+    }
+  } catch {
+    // Malformed pending state remains fail-closed.
+  }
+  return null;
 }
 
 function serializePendingCheckpoint(
@@ -208,6 +246,32 @@ async function reconcileExternalCheckpoint(
   const expectedCheckpoint = checkpointForHead(head);
   const externalCheckpoint = await checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY);
   if (externalCheckpoint === expectedCheckpoint) return expectedCheckpoint;
+
+  // A pending witness whose `next` value is the current, valid PostgreSQL
+  // head proves that PostgreSQL committed and only the post-commit promotion
+  // was interrupted. Finalizing that exact CAS is safe. We deliberately do
+  // not roll a pending witness back when PostgreSQL matches `previous`: that
+  // state is indistinguishable from privileged committed-tail deletion and
+  // remains locked for operator investigation.
+  const pending = parsePendingCheckpoint(externalCheckpoint);
+  const predecessorMatches =
+    pending !== null &&
+    head !== null &&
+    (pending.previous === null
+      ? head.ledger_sequence === 1 && head.previous_entry_hash === null
+      : pending.previous.sequence === head.ledger_sequence - 1 &&
+        pending.previous.headHash === head.previous_entry_hash);
+  if (pending && predecessorMatches && serializeCheckpoint(pending.next) === expectedCheckpoint) {
+    const finalized = await checkpointStore.compareAndSet(
+      AUDIT_LEDGER_CHECKPOINT_KEY,
+      externalCheckpoint,
+      expectedCheckpoint
+    );
+    if (finalized) return expectedCheckpoint;
+    if ((await checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY)) === expectedCheckpoint) {
+      return expectedCheckpoint;
+    }
+  }
   throw new Error("External audit-ledger checkpoint diverged; writes are locked");
 }
 

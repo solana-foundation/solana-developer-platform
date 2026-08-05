@@ -106,7 +106,7 @@ describe("tamper-evident audit ledger", () => {
     expect(rows.slice(1).every((row) => row.previous_entry_hash !== null)).toBe(true);
   });
 
-  it("preserves a pending witness and locks writes after checkpoint promotion fails", async () => {
+  it("finalizes a committed pending witness before the next audit write", async () => {
     await audit.logSystem({
       action: "maintenance",
       resourceType: "audit_ledger",
@@ -132,9 +132,14 @@ describe("tamper-evident audit ledger", () => {
       audit.logSystem({
         action: "maintenance",
         resourceType: "audit_ledger",
-        resourceId: "write_while_witness_pending",
+        resourceId: "write_after_committed_pending_witness",
       })
-    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+    ).resolves.toBeUndefined();
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: true,
+      checkedEntries: 3,
+      externalCheckpointMatches: true,
+    });
   });
 
   it("rolls back the audit row when its pending witness cannot be established", async () => {

@@ -50,6 +50,87 @@ function parseCheckpoint(value) {
   return { sequence: -1, headHash: null };
 }
 
+function validCheckpoint(value) {
+  return (
+    value &&
+    typeof value === "object" &&
+    Number.isSafeInteger(value.sequence) &&
+    value.sequence > 0 &&
+    typeof value.headHash === "string" &&
+    /^[0-9a-f]{64}$/.test(value.headHash)
+  );
+}
+
+function parsePendingCheckpoint(value) {
+  if (value === null) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      parsed.pending === true &&
+      (parsed.previous === null || validCheckpoint(parsed.previous)) &&
+      validCheckpoint(parsed.next) &&
+      parsed.next.sequence === (parsed.previous?.sequence ?? 0) + 1
+    ) {
+      return parsed;
+    }
+  } catch {
+    // Malformed external state remains fail-closed.
+  }
+  return null;
+}
+
+async function finalizeCommittedPendingCheckpoint(client, redis) {
+  const external = await redis.get(EXTERNAL_CHECKPOINT_KEY);
+  const pending = parsePendingCheckpoint(external);
+  if (!pending) return;
+
+  const result = await client.query(`
+    SELECT ledger.ledger_sequence,
+           encode(ledger.previous_entry_hash, 'hex') AS previous_entry_hash,
+           encode(ledger.entry_hash, 'hex') AS entry_hash,
+           ledger.entry_hash = sdp_audit_log_hash(
+             ledger.ledger_sequence, ledger.id, ledger.organization_id,
+             ledger.user_id, ledger.api_key_id, ledger.action,
+             ledger.resource_type, ledger.resource_id, ledger.metadata,
+             ledger.ip_address, ledger.user_agent, ledger.request_id,
+             ledger.status, ledger.created_at, ledger.previous_entry_hash
+           ) AS entry_hash_valid,
+           anchor.entry_hash = ledger.entry_hash AS anchor_matches
+    FROM audit_logs AS ledger
+    LEFT JOIN audit_ledger_anchors AS anchor
+      ON anchor.ledger_sequence = ledger.ledger_sequence
+    ORDER BY ledger.ledger_sequence DESC
+    LIMIT 1
+  `);
+  const head = result.rows[0];
+  const predecessorMatches =
+    head &&
+    (pending.previous === null
+      ? Number(head.ledger_sequence) === 1 && head.previous_entry_hash === null
+      : pending.previous.sequence === Number(head.ledger_sequence) - 1 &&
+        pending.previous.headHash === head.previous_entry_hash);
+  const nextMatches =
+    head &&
+    pending.next.sequence === Number(head.ledger_sequence) &&
+    pending.next.headHash === head.entry_hash;
+  if (!predecessorMatches || !nextMatches || !head.entry_hash_valid || !head.anchor_matches) {
+    throw new Error("Pending audit checkpoint does not match the valid committed ledger head");
+  }
+
+  const next = serializeCheckpoint(pending.next.sequence, pending.next.headHash);
+  const advanced = await redis.eval(
+    ADVANCE_CHECKPOINT_LUA,
+    1,
+    EXTERNAL_CHECKPOINT_KEY,
+    "present",
+    external,
+    next
+  );
+  if (advanced !== 1 && (await redis.get(EXTERNAL_CHECKPOINT_KEY)) !== next) {
+    throw new Error("Committed pending audit checkpoint could not be finalized");
+  }
+}
+
 function usage() {
   return `Usage:
   pnpm --filter @sdp/api audit:ledger verify
@@ -173,6 +254,7 @@ async function appendCheckpoint(client, redis, options) {
   await client.query("SELECT pg_advisory_lock(hashtext($1))", [AUDIT_LEDGER_SESSION_LOCK_KEY]);
   let transactionOpen = false;
   try {
+    await finalizeCommittedPendingCheckpoint(client, redis);
     const before = await inspect(client, redis);
     if (!before.databaseLedgerValid || !before.runtimeRoleProtected) {
       throw new Error(
