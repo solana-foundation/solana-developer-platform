@@ -1,6 +1,6 @@
 export function IntegrationsSkeleton() {
   return (
-    <div className="mx-auto w-full max-w-4xl animate-pulse space-y-8 px-4 py-6 md:px-6">
+    <div className="w-full animate-pulse space-y-8 px-4 py-6 md:px-6">
       <div className="space-y-2">
         <div className="h-4 w-2/3 rounded bg-fill-subtle" />
         <div className="h-4 w-1/3 rounded bg-fill-subtle" />
@@ -19,7 +19,7 @@ export function IntegrationsSkeleton() {
             <div className="h-5 w-28 rounded bg-fill-subtle" />
             <div className="h-4 w-64 rounded bg-fill-subtle" />
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {[0, 1, 2, 3].map((card) => (
               <div
                 key={card}

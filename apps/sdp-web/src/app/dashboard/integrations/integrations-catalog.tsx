@@ -1,7 +1,8 @@
 "use client";
 
 import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
-import { SearchIcon } from "lucide-react";
+import { Search } from "lucide-react";
+import Image from "next/image";
 import { type ReactNode, useMemo, useState } from "react";
 import type { CustodyProviderAvailability } from "@/app/dashboard/custody/provider-display-status";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
@@ -10,6 +11,8 @@ import { DashboardNavigationLink } from "@/components/dashboard-navigation-link"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
+import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
+import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { cn } from "@/lib/utils";
 import {
   countByFamily,
@@ -119,10 +122,18 @@ function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate })
   );
 }
 
-function NeutralMark({ label }: { label: string }) {
+function LogoMark({ src, label }: { src: string; label: string }) {
+  // Mirrors the wallet and RPC marks: logos sit on a white chip so dark-mode
+  // artwork with transparent backgrounds stays legible.
   return (
-    <span aria-hidden className="text-sm font-semibold text-secondary">
-      {label.slice(0, 2).toUpperCase()}
+    <span
+      aria-hidden
+      title={label}
+      className="inline-flex h-7 w-7 items-center justify-center overflow-hidden rounded-md border border-border-subtle bg-[white]"
+    >
+      <span className="relative h-full w-full p-1">
+        <Image src={src} alt="" fill sizes="28px" className="object-contain" />
+      </span>
     </span>
   );
 }
@@ -217,7 +228,7 @@ export function IntegrationsCatalog({
       provider: provider.provider,
       label: provider.label,
       status: provider.status,
-      icon: <NeutralMark label={provider.label} />,
+      icon: <LogoMark src={RAMP_PROVIDER_LOGOS[provider.provider]} label={provider.label} />,
       description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
     }));
     const complianceRows: IntegrationRowModel[] = compliance.map((provider) => ({
@@ -225,7 +236,7 @@ export function IntegrationsCatalog({
       provider: provider.provider,
       label: provider.label,
       status: provider.status,
-      icon: <NeutralMark label={provider.label} />,
+      icon: <LogoMark src={COMPLIANCE_PROVIDER_LOGOS[provider.provider]} label={provider.label} />,
       description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
     }));
 
@@ -239,25 +250,24 @@ export function IntegrationsCatalog({
   const familyPills: FamilyFilter[] = ["all", ...INTEGRATION_FAMILIES];
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-8 px-4 py-6 md:px-6">
+    <div className="w-full space-y-8 px-4 py-6 md:px-6">
       <p className="max-w-2xl text-sm leading-6 text-tertiary">
         {t("Shared.integrations.pageDescription")}
       </p>
 
       <div className="space-y-3" data-integrations-filters="true">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="relative w-full max-w-md">
-            <SearchIcon
-              aria-hidden
-              className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-tertiary"
-            />
+          <div className="w-full max-w-md">
             <Input
               type="search"
               value={filters.query}
               onChange={(event) => setFilters({ ...filters, query: event.currentTarget.value })}
               placeholder={t("Shared.integrations.searchPlaceholder")}
               aria-label={t("Shared.integrations.searchPlaceholder")}
-              className="h-11 rounded-2xl border-border-default bg-surface-raised pl-11 shadow-none"
+              iconLeft={<Search />}
+              // The DS input paints its border on an inner span via
+              // --input-border-*, so border-* classes are inert here.
+              className="h-10 rounded-[10px] bg-surface-raised [--input-border-hover:var(--color-border-strong)] [--input-border-idle:var(--color-border-default)] [--input-border-width:1px]"
             />
           </div>
           {filtered ? (
@@ -345,7 +355,7 @@ export function IntegrationsCatalog({
               </div>
             ) : null}
 
-            <ul className="grid gap-3 md:grid-cols-2">
+            <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {familyRows.map((row) => (
                 <IntegrationCard key={`${row.family}:${row.provider}`} row={row} t={t} />
               ))}
