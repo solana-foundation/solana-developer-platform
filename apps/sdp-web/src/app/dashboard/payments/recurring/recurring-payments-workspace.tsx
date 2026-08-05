@@ -8,6 +8,7 @@ import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
+import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -341,19 +342,27 @@ export function RecurringPaymentsWorkspace({
                           </span>
                         </TableCell>
                         <TableCell className="text-sm text-secondary">
-                          <span className="block truncate">
-                            {getCounterpartyLabel(recurringPayment)}
-                          </span>
+                          {counterpartyById.has(recurringPayment.counterpartyId) ? (
+                            <EntityLink
+                              href={`/dashboard/payments/counterparty/${encodeURIComponent(recurringPayment.counterpartyId)}`}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {getCounterpartyLabel(recurringPayment)}
+                            </EntityLink>
+                          ) : (
+                            <span className="block truncate">
+                              {getCounterpartyLabel(recurringPayment)}
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell className="hidden text-sm text-secondary lg:table-cell">
                           {wallet ? (
-                            <Link
+                            <EntityLink
                               href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
                               onClick={(event) => event.stopPropagation()}
-                              className="block truncate underline-offset-4 hover:underline focus-visible:underline"
                             >
                               {getWalletLabel(recurringPayment)}
-                            </Link>
+                            </EntityLink>
                           ) : (
                             <span className="block truncate">
                               {getWalletLabel(recurringPayment)}

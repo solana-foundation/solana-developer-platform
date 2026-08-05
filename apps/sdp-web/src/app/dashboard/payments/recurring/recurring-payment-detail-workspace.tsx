@@ -21,8 +21,8 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -717,8 +717,12 @@ export function RecurringPaymentDetailWorkspace({
           <div className="flex min-w-0 flex-wrap items-start gap-x-12 gap-y-4">
             <div className="min-w-0">
               <p className="text-sm text-secondary">{t("DashboardPayments.recurring.detailTo")}</p>
-              <p className="mt-1 truncate text-2xl font-medium tracking-tight text-primary">
-                {counterpartyLabel}
+              <p className="mt-1 min-w-0 truncate text-2xl font-medium tracking-tight text-primary">
+                <EntityLink
+                  href={`/dashboard/payments/counterparty/${encodeURIComponent(recurringPayment.counterpartyId)}`}
+                >
+                  {counterpartyLabel}
+                </EntityLink>
               </p>
             </div>
             <div>
@@ -877,12 +881,11 @@ export function RecurringPaymentDetailWorkspace({
                   </span>
                   <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
                     {wallet ? (
-                      <Link
+                      <EntityLink
                         href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
-                        className="min-w-0 truncate underline-offset-4 hover:underline focus-visible:underline"
                       >
                         {sourceWalletLabel}
-                      </Link>
+                      </EntityLink>
                     ) : (
                       <span className="min-w-0 truncate">{sourceWalletLabel}</span>
                     )}
@@ -915,7 +918,11 @@ export function RecurringPaymentDetailWorkspace({
                     {t("DashboardPayments.recurring.receivingWallet")}
                   </span>
                   <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
-                    <span className="min-w-0 truncate">{receivingAccountLabel}</span>
+                    <EntityLink
+                      href={`/dashboard/payments/counterparty/${encodeURIComponent(recurringPayment.counterpartyId)}`}
+                    >
+                      {receivingAccountLabel}
+                    </EntityLink>
                     {receivingAccountAddress ? (
                       <CopyableValue
                         value={receivingAccountAddress}
