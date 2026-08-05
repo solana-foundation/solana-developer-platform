@@ -30,7 +30,10 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPostgresPolicyRepository } from "@/db/repositories";
+import {
+  createPostgresPaymentSubscriptionsRepository,
+  createPostgresPolicyRepository,
+} from "@/db/repositories";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
@@ -799,9 +802,17 @@ async function recurringCollectionTransactionForSignature(signature: Signature) 
            ON s.id = r.subscription_id
           AND s.organization_id = r.organization_id
           AND s.project_id = r.project_id
-        WHERE t.signature = ?`
+        WHERE t.signature = ?
+           OR EXISTS (
+             SELECT 1
+               FROM payment_subscription_collection_attempts a
+              WHERE a.transfer_id = t.id
+                AND a.organization_id = t.organization_id
+                AND a.project_id = t.project_id
+                AND a.signature = ?
+           )`
     )
-    .bind(signature)
+    .bind(signature, signature)
     .first<{
       source_address: string;
       token: string;
@@ -2926,7 +2937,13 @@ describe("Payments routes", () => {
     expect(attempt?.status).toBe("processing");
   });
 
-  it("recovers submitted recurring payment collection attempts", async () => {
+  it.each([
+    { journaledRecord: "transfer", attemptHasSignature: false, transferHasSignature: true },
+    { journaledRecord: "attempt", attemptHasSignature: true, transferHasSignature: false },
+  ])("recovers submitted recurring payment collection attempts from the $journaledRecord journal", async ({
+    attemptHasSignature,
+    transferHasSignature,
+  }) => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3010,7 +3027,7 @@ describe("Payments routes", () => {
         "outbound",
         "processing",
         JSON.stringify({ recurringPaymentId }),
-        submittedSignature,
+        transferHasSignature ? submittedSignature : null,
         now,
         now
       )
@@ -3045,7 +3062,7 @@ describe("Payments routes", () => {
         dueAt,
         now,
         "processing",
-        null,
+        attemptHasSignature ? submittedSignature : null,
         JSON.stringify({ recurringPaymentId }),
         now,
         now
@@ -3091,6 +3108,117 @@ describe("Payments routes", () => {
       submittedSignature,
       expect.objectContaining({ commitment: "confirmed" })
     );
+  });
+
+  it("does not let a delayed authorization preparation overwrite an active subscription", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: `authorization_race_${crypto.randomUUID()}`,
+    });
+    const repo = createPostgresPaymentSubscriptionsRepository(getDb(env));
+    const planId = `psp_${crypto.randomUUID()}`;
+    const subscriptionId = `psub_${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    const trustedTokenAccount = TEST_SOLANA_ADDRESSES.wallet1;
+    const delayedTokenAccount = TEST_SOLANA_ADDRESSES.wallet3;
+
+    await repo.createPlan({
+      id: planId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      ownerWalletId: TEST_WALLET_ID,
+      ownerAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      periodHours: 24,
+      programPlanId: "1004",
+      planPda: null,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      pullerWalletId: null,
+      pullerAddress: null,
+      metadataUri: null,
+      status: "active",
+      createdBy: TEST_USER.id,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await repo.createSubscription({
+      id: subscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      planId,
+      counterpartyId,
+      subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      subscriberTokenAccount: null,
+      subscriptionPda: null,
+      subscriptionAuthorityAddress: null,
+      authorizationSignature: null,
+      status: "pending_authorization",
+      currentPeriodStartAt: null,
+      nextCollectionDueAt: null,
+      createdBy: TEST_USER.id,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    let releaseMintLookup: (() => void) | undefined;
+    let signalMintLookupReached: (() => void) | undefined;
+    const mintLookupReached = new Promise<void>((resolve) => {
+      signalMintLookupReached = resolve;
+    });
+    const mintLookupReleased = new Promise<void>((resolve) => {
+      releaseMintLookup = resolve;
+    });
+    getAccountInfoMock.mockImplementationOnce(async () => {
+      signalMintLookupReached?.();
+      await mintLookupReleased;
+      return {
+        lamports: 4200000000n,
+        owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>;
+    });
+    mockTokenSupplyDecimalsOnce();
+
+    const preparePromise = app.request(
+      `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          expectedSubscriptionAuthorityInitId: "0",
+          subscriberTokenAccount: delayedTokenAccount,
+          expectedPlanCreatedAt: "1700000000",
+        }),
+      },
+      env
+    );
+
+    await mintLookupReached;
+    await repo.updateSubscription({
+      subscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      subscriberTokenAccount: trustedTokenAccount,
+      status: "active",
+      currentPeriodStartAt: now,
+      nextCollectionDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    releaseMintLookup?.();
+
+    const prepareRes = await preparePromise;
+    expect(prepareRes.status).toBe(409);
+    const persisted = await repo.getSubscriptionById({
+      subscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+    });
+    expect(persisted).toMatchObject({
+      status: "active",
+      subscriber_token_account: trustedTokenAccount,
+    });
   });
 
   it("finalizes recovered recurring payment collections after cancellation", async () => {

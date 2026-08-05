@@ -751,6 +751,10 @@ async function recoverRecurringPaymentCollection(input: {
     existing.signature === recoveredSignature
       ? existing
       : { ...existing, signature: recoveredSignature };
+  const recoveredTransfer =
+    transfer.signature === recoveredSignature
+      ? transfer
+      : { ...transfer, signature: recoveredSignature };
 
   try {
     await confirmSubscriptionSignature(
@@ -802,7 +806,7 @@ async function recoverRecurringPaymentCollection(input: {
     recurringPayment: currentRecurringPayment,
     subscription: currentSubscription,
     attempt: recoveredAttempt,
-    transfer,
+    transfer: recoveredTransfer,
     signature: recoveredSignature as Signature,
     dueAt: input.dueAt,
     destinationTokenAccount,
@@ -815,7 +819,7 @@ async function recoverRecurringPaymentCollection(input: {
     recurringPayment: currentRecurringPayment,
     subscription: currentSubscription,
     attempt: recoveredAttempt,
-    transfer,
+    transfer: recoveredTransfer,
     proof,
   });
 }

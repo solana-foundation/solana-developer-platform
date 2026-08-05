@@ -283,10 +283,18 @@ async function persistSubscriptionAuthorizationAddresses(
     subscriberTokenAccount: input.subscriberTokenAccount,
     subscriptionPda: input.subscriptionPda,
     subscriptionAuthorityAddress: input.subscriptionAuthorityAddress,
+    expectedStatus: "pending_authorization",
     updatedAt: new Date().toISOString(),
   });
 
-  return updated ?? subscription;
+  if (!updated) {
+    throw new AppError(
+      "CONFLICT",
+      "Subscription authorization state changed while preparing authorization"
+    );
+  }
+
+  return updated;
 }
 
 async function getSubscriptionWithPlan(
