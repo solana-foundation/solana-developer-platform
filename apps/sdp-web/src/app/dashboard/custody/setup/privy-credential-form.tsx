@@ -100,12 +100,6 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
     });
   };
 
-  const handleStartOver = () => {
-    setIdempotencyKey(crypto.randomUUID());
-    setAppSecret("");
-    setCheck({ kind: "idle" });
-  };
-
   const handleRecheck = (providerCredentialId: string) => {
     if (isPending) {
       return;
@@ -121,12 +115,14 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
         <p className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary">
           {t("DashboardCustody.byokRetryUnknown")}
         </p>
-        <div className="flex flex-wrap gap-3">
+        {/* Replay is the only safe exit: the submission may have committed as a
+            pending connection, which the server will not let a fresh
+            submission replace, so abandoning the key here would strand the
+            install. The idempotent replay always converges on the real
+            outcome. */}
+        <div>
           <Button type="button" onClick={() => handleReplay(check.payload)} disabled={isPending}>
             {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokRetrySubmit")}
-          </Button>
-          <Button type="button" variant="secondary" onClick={handleStartOver} disabled={isPending}>
-            {t("DashboardCustody.byokStartOver")}
           </Button>
         </div>
       </div>

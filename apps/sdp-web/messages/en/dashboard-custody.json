@@ -796,7 +796,6 @@
     "byokSubmitFailed": "Storing the credential failed. Try again.",
     "providerStatusComingLater": "Coming later",
     "providerRequestAccess": "Request access",
-    "byokRetrySubmit": "Retry submission",
-    "byokStartOver": "Start over"
+    "byokRetrySubmit": "Retry submission"
   }
 }

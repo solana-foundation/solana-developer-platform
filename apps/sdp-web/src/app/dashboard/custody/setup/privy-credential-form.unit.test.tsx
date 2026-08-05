@@ -114,7 +114,7 @@ describe("PrivyCredentialForm", () => {
     expect(String(second.get("appSecret"))).toBe("shh-secret");
   });
 
-  it("start over abandons the unknown submission with a fresh key and empty secret", async () => {
+  it("offers no escape from an unknown outcome except the verbatim replay", async () => {
     vi.mocked(submitPrivyCredentialAction).mockResolvedValueOnce({
       status: "error",
       message: "network dropped",
@@ -123,15 +123,11 @@ describe("PrivyCredentialForm", () => {
     renderForm();
 
     await fillAndSubmit(user);
-    await user.click(await screen.findByRole("button", { name: "Start over" }));
-
-    const secret = screen.getByLabelText("Privy app secret") as HTMLInputElement;
-    expect(secret.value).toBe("");
-    await user.type(screen.getByLabelText("Privy app ID"), "app_2");
-    await user.type(secret, "new-secret");
-    await user.click(screen.getByRole("button", { name: "Connect and verify" }));
-    await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
-    expect(submittedKey(1)).not.toBe(submittedKey(0));
+    await screen.findByRole("button", { name: "Retry submission" });
+    // A fresh-key submission over a committed pending connection is refused
+    // server-side, so abandoning the frozen key would strand the install.
+    expect(screen.queryByRole("button", { name: "Start over" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect and verify" })).toBeNull();
   });
 
   it("offers a safe re-check instead of resubmitting after an unknown outcome", async () => {
