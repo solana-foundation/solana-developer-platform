@@ -25,6 +25,20 @@ describe("integrations status", () => {
     expect(custody.find((p) => p.entry.id === "turnkey")?.status).toBe("unavailable");
   });
 
+  it("keeps the self-hosted signer out of the catalog unless it actually signs here", () => {
+    const hosted = resolveCustodyIntegrations({
+      connectedProviders: ["privy"],
+      enabledProviders: ["privy"],
+    });
+    expect(hosted.some((p) => p.entry.id === "local")).toBe(false);
+
+    const selfHosted = resolveCustodyIntegrations({
+      connectedProviders: ["local"],
+      enabledProviders: [],
+    });
+    expect(selfHosted.find((p) => p.entry.id === "local")?.status).toBe("active");
+  });
+
   it("marks the organization's selected RPC provider active and the rest switchable", () => {
     const rpc = resolveRpcIntegrations({
       selectedProvider: "helius",

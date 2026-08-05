@@ -1,9 +1,9 @@
 export function IntegrationsSkeleton() {
   return (
     <div className="w-full animate-pulse space-y-8 px-4 py-6 md:px-6">
-      <div className="space-y-2">
-        <div className="h-4 w-2/3 rounded bg-fill-subtle" />
-        <div className="h-4 w-1/3 rounded bg-fill-subtle" />
+      <div className="mx-auto max-w-2xl space-y-2">
+        <div className="mx-auto h-4 w-full rounded bg-fill-subtle" />
+        <div className="mx-auto h-4 w-1/2 rounded bg-fill-subtle" />
       </div>
       <div className="space-y-3">
         <div className="h-11 w-full max-w-md rounded-2xl bg-fill-subtle" />
@@ -23,7 +23,7 @@ export function IntegrationsSkeleton() {
             {[0, 1, 2, 3].map((card) => (
               <div
                 key={card}
-                className="h-[132px] rounded-2xl border border-border-subtle bg-surface-raised"
+                className="h-[166px] rounded-2xl border border-border-subtle bg-surface-raised"
               />
             ))}
           </div>

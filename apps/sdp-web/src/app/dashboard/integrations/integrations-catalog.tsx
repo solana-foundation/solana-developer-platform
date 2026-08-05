@@ -53,7 +53,7 @@ function StatusBadge({ status, t }: { status: IntegrationStatus; t: Translate })
   return (
     <span
       className={cn(
-        "rounded-full px-3 py-1 text-xs font-medium",
+        "shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium",
         status === "active"
           ? "bg-surface-raised text-secondary ring-1 ring-border-subtle"
           : status === "unavailable"
@@ -97,27 +97,30 @@ interface IntegrationRowModel extends FilterableIntegration {
 }
 
 function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate }) {
+  // Media-object layout: the icon owns the left rail and the content column
+  // owns everything else, so the title, description and action share one left
+  // edge instead of the description hanging under the icon.
   return (
     <li
-      className="flex flex-col gap-3 rounded-2xl border border-border-default bg-surface-raised p-5"
+      className="flex items-start gap-3 rounded-2xl border border-border-default bg-surface-raised p-5"
       data-integration-row="true"
       data-integration-status={row.status}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-fill-strong">
-            {row.icon}
-          </span>
-          <span className="truncate text-base font-medium text-primary">{row.label}</span>
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-fill-strong">
+        {row.icon}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-2 self-stretch">
+        <div className="flex items-start justify-between gap-3">
+          <span className="truncate pt-2 text-base font-medium text-primary">{row.label}</span>
+          <StatusBadge status={row.status} t={t} />
         </div>
-        <StatusBadge status={row.status} t={t} />
+        {row.description ? (
+          <p className="text-sm leading-5 text-tertiary">{row.description}</p>
+        ) : null}
+        {/* Anchored to the card's bottom edge so a row of cards shows its
+            actions on one line regardless of description length. */}
+        {row.action ? <div className="mt-auto pt-2">{row.action}</div> : null}
       </div>
-      {row.description ? (
-        <p className="min-h-10 text-sm leading-5 text-tertiary">{row.description}</p>
-      ) : (
-        <span className="min-h-10" aria-hidden />
-      )}
-      {row.action ? <div>{row.action}</div> : null}
     </li>
   );
 }
@@ -251,7 +254,7 @@ export function IntegrationsCatalog({
 
   return (
     <div className="w-full space-y-8 px-4 py-6 md:px-6">
-      <p className="max-w-2xl text-sm leading-6 text-tertiary">
+      <p className="mx-auto max-w-2xl text-center text-sm leading-6 text-tertiary">
         {t("Shared.integrations.pageDescription")}
       </p>
 

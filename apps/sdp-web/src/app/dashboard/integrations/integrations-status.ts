@@ -91,7 +91,12 @@ export function resolveCustodyIntegrations(input: {
   connectedProviders: readonly KnownCustodyProvider[];
   enabledProviders: readonly KnownCustodyProvider[];
 }): CustodyProviderAvailability[] {
-  return resolveCustodyProviderAvailability(input);
+  // The local signer is a self-hosted deployment mode, not an integration an
+  // organization can go get; its copy even names a deployment env var. It
+  // earns a card only where it is genuinely the active signer.
+  return resolveCustodyProviderAvailability(input).filter(
+    (provider) => provider.entry.id !== "local" || provider.status === "active"
+  );
 }
 
 /**
