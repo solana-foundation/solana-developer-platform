@@ -20,8 +20,11 @@ interface FetchPaymentsWalletsOptions {
 }
 
 export interface PaymentsIssuedTokenSymbol {
+  /** Issued-token id (`tok_…`). Null when the listing omits it. */
+  id: string | null;
   mintAddress: string;
   symbol: string;
+  imageUrl: string | null;
 }
 
 export async function fetchPaymentsWallets(
@@ -330,13 +333,17 @@ export async function fetchPaymentsIssuedTokenSymbols(
       const json = (await response.json()) as {
         data?:
           | Array<{
+              id?: string;
               mintAddress?: string | null;
               symbol?: string;
+              imageUrl?: string | null;
             }>
           | {
               tokens?: Array<{
+                id?: string;
                 mintAddress?: string | null;
                 symbol?: string;
+                imageUrl?: string | null;
               }>;
             };
         meta?: {
@@ -351,13 +358,20 @@ export async function fetchPaymentsIssuedTokenSymbols(
             (
               token
             ): token is {
+              id?: string;
               mintAddress: string;
               symbol?: string;
+              imageUrl?: string | null;
             } => typeof token?.mintAddress === "string" && token.mintAddress.length > 0
           )
           .map((token) => ({
+            id: typeof token.id === "string" && token.id.length > 0 ? token.id : null,
             mintAddress: token.mintAddress,
             symbol: token.symbol?.trim() || token.mintAddress,
+            imageUrl:
+              typeof token.imageUrl === "string" && token.imageUrl.trim().length > 0
+                ? token.imageUrl
+                : null,
           }))
       );
 

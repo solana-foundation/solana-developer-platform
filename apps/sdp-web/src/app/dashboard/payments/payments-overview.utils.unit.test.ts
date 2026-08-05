@@ -1,6 +1,6 @@
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import { formatTokenAmount, resolveTransferTokenLabel } from "./payments-overview.utils";
+import { formatTokenAmount, isHttpUrl, resolveTransferTokenLabel } from "./payments-overview.utils";
 
 const UNCATALOGUED_MINT = "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh";
 
@@ -69,5 +69,24 @@ describe("formatTokenAmount", () => {
 
   it("returns non-numeric input unchanged", () => {
     expect(formatTokenAmount("not-a-number", "fr")).toBe("not-a-number");
+  });
+});
+
+describe("isHttpUrl", () => {
+  it("accepts http and https URLs", () => {
+    expect(isHttpUrl("https://example.com/metadata.json")).toBe(true);
+    expect(isHttpUrl("http://localhost:3000/metadata.json")).toBe(true);
+  });
+
+  it("rejects executable and non-http schemes that must never reach an href", () => {
+    expect(isHttpUrl("javascript:alert(document.domain)")).toBe(false);
+    expect(isHttpUrl("data:text/html,<script>1</script>")).toBe(false);
+    expect(isHttpUrl("vbscript:msgbox(1)")).toBe(false);
+    expect(isHttpUrl("file:///etc/passwd")).toBe(false);
+  });
+
+  it("rejects unparseable values", () => {
+    expect(isHttpUrl("not-a-url")).toBe(false);
+    expect(isHttpUrl("")).toBe(false);
   });
 });

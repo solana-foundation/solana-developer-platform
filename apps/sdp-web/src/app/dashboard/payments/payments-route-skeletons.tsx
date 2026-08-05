@@ -1,4 +1,7 @@
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import {
+  DashboardWorkspaceCard,
+  DashboardWorkspaceOverviewPanel,
+} from "@/components/dashboard-workspace-panel";
 import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
@@ -134,7 +137,7 @@ const TABLE_SKELETON_CONFIGS: Record<TableSkeletonVariant, TableSkeletonConfig> 
     ],
   },
   "recurring-payments": {
-    tableClassName: "w-full [&_table]:table-fixed",
+    tableClassName: "rounded-none border-0 w-full [&_table]:table-fixed",
     containerClassName: "min-h-0 flex-1 overflow-hidden",
     columns: [
       {
@@ -334,7 +337,7 @@ function WizardPageSkeleton({
       data-loading-wizard
       aria-busy="true"
     >
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
         <div className="mx-auto w-full max-w-3xl">
           <WizardProgressSkeleton steps={steps} />
         </div>
@@ -396,7 +399,7 @@ export function CounterpartyCreateSkeleton() {
       data-loading-wizard
       aria-busy="true"
     >
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
         <div className="mx-auto w-full max-w-xl">
           <WizardProgressSkeleton steps={4} />
         </div>
@@ -480,12 +483,16 @@ export function RecurringPaymentsPageSkeleton() {
       data-loading-layout="recurring-payments"
       aria-busy="true"
     >
-      <Card className="flex h-full min-h-0 min-w-0 flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
-        <WorkspaceCardHeaderSkeleton stackActionOnMobile />
-        <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col px-0">
-          <RouteTableSkeleton variant="recurring-payments" />
-        </CardContent>
-      </Card>
+      <DashboardWorkspaceCard>
+        <div className="border-b border-border-default px-4 py-3">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]">
+            <SkeletonBlock className="h-10 w-full rounded-lg" />
+            <SkeletonBlock className="h-10 w-full rounded-lg" />
+            <SkeletonBlock className="h-10 w-40 rounded-lg" />
+          </div>
+        </div>
+        <RouteTableSkeleton variant="recurring-payments" />
+      </DashboardWorkspaceCard>
     </DashboardWorkspaceOverviewPanel>
   );
 }
@@ -496,19 +503,29 @@ export function RecurringPaymentDetailSkeleton() {
       data-loading-layout="recurring-payment-detail"
       aria-busy="true"
     >
-      <div className="mx-auto max-w-6xl space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-2">
-            <SkeletonBlock className="h-9 w-48" />
-            <SkeletonBlock className="h-4 w-80 max-w-full" />
+      <div className="flex min-h-full w-full flex-col gap-6">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
+          <div className="flex min-w-0 flex-wrap items-start gap-x-12 gap-y-4">
+            {["to", "amount", "frequency"].map((stat) => (
+              <div key={stat} className="space-y-2">
+                <SkeletonBlock className="h-4 w-16" />
+                <SkeletonBlock className="h-8 w-36" />
+              </div>
+            ))}
           </div>
           <SkeletonBlock className="h-9 w-28 rounded-[10px]" />
         </div>
-        <SkeletonBlock className="h-20 w-full rounded-lg" />
-        <div className="rounded-lg border border-border-default px-4">
-          <DetailRowsSkeleton />
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+          {["payment", "wallets"].map((section) => (
+            <section key={section} className="space-y-3">
+              <SkeletonBlock className="h-5 w-28" />
+              <div className="rounded-lg border border-border-default bg-surface-raised px-4">
+                <DetailRowsSkeleton count={6} />
+              </div>
+            </section>
+          ))}
         </div>
-        <Card className="gap-4 bg-surface-raised">
+        <Card className="min-h-0 flex-1 gap-4 bg-surface-raised">
           <WorkspaceCardHeaderSkeleton withAction={false} />
           <CardContent>
             <div className="space-y-3">

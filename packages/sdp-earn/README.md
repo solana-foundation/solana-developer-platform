@@ -26,7 +26,12 @@ Companion docs:
 - **One shared portfolio wallet per (organization, environment, provider).**
   Choosing a curator (optionally with a custom split) sets the shared wallet's
   strategy weights. Enforced by a DB unique constraint
-  (`earn_provider_wallets`, migration 0035).
+  (`earn_provider_wallets`, migration 0049). This is SDP's product model, not a
+  provider constraint: Ground has no concept of an SDP organization, one Ground
+  account holds many portfolio wallets, and every SDP org shares a single account
+  per environment. A provider account's other wallets therefore belong to other
+  orgs — which is why a provider console's account-wide total will exceed what any
+  one org sees in SDP.
 - **Solana-only surface.** Deposits are funded by sending USDC/USDT on Solana
   to the wallet's deposit address (`solana_devnet` in sandbox, `solana` in
   production); withdrawals settle to a Solana address the org controls. Ground
@@ -107,6 +112,15 @@ real on-chain states:
 | `bridge` | Mid-flight across a CCTP domain |
 | `external_payout` | Leaving toward a withdrawal destination |
 | `unknown` | Forward-compatible fallback (never guess) |
+
+Position **labels** are synthesized from kind + token, not passed through:
+Ground names a position after the chain its value currently sits on (e.g. idle
+cash reads `"USDT (Ethereum Sepolia)"`), and no other chain may reach a wire type
+or the UI (invariant 5). Only `yield_source` keeps the provider's label — that is
+the vault's product name, carries no chain, and is what a reader matches to the
+catalogue. The value is never hidden, only the chain wording: off-rail cash still
+counts toward the wallet total Ground reports, so dropping the position would
+leave a total its positions don't sum to.
 
 ### Cross-chain: token lanes are preserved
 
@@ -197,9 +211,10 @@ apps/sdp-api/src/
                                    the shared-wallet family; strategies/
                                    positions/movements/quotes are the
                                    catalogue + per-strategy families.
-  db/migrations/postgres/0034,0035 earn_strategies, earn_positions,
-                                   earn_movements, earn_nav_snapshots;
-                                   earn_provider_wallets (shared-wallet link).
+  db/migrations/postgres/0048,0049 earn_strategies, earn_positions,
+                                   earn_movements, earn_nav_snapshots (0048);
+                                   earn_provider_wallets (0049, shared-wallet
+                                   link).
   db/repositories/earn.*           Row types + Postgres impl (open-string
                                    provider columns; dispatch must go through
                                    the fail-closed resolver).
@@ -266,6 +281,24 @@ Two things write `earn_strategies`, and only one of them is a production path.
   carries the `seed-demo-` `provider_reference` prefix and
   `riskMetadata.seedFixture`. `--clean` deletes **only** prefixed rows, so it can
   never remove a row the live cron synced.
+- **It also links one program, and that part is NOT a fixture.** The seed points
+  your primary local org at one of the team's real Ground *sandbox* portfolio
+  wallets, so the dashboard opens onto live provider state (real allocation, real
+  forward APY, a real Solana deposit address) rather than an empty onboarding
+  screen. One org, one program — the same unique constraint production enforces,
+  so the seed never hands an org a second wallet, and other local orgs stay
+  unlinked. The wallet is shared with teammates: funding it, re-weighting it
+  through the wizard, or withdrawing from it changes what they see. Re-run the
+  seed after your first Clerk sign-in and it moves its own link onto your real
+  org; a program you created through the wizard is never moved. `--clean` removes
+  the link, never the Ground wallet.
+  The seeded program starts at **$0** deliberately — it is an all-Solana/USDC
+  wallet you fund yourself via its devnet deposit address. Pointing the seed at a
+  funded sandbox wallet instead would surface a withdrawable balance SDP cannot
+  withdraw, because those balances sit off the Solana rail while
+  `balance.withdrawableUsd` reports a wallet-level total.
+  Full local-dev detail: `CLAUDE.md` → "Get a program — one org, one portfolio
+  wallet".
 - **Commands**
 
   ```bash

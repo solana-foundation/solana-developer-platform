@@ -19,13 +19,69 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export const RECURRING_PAYMENTS_PAGE_SIZE = 100;
 
+export const RECURRING_LIST_DEFAULT_PAGE_SIZE = 25;
+
+export const RECURRING_PAYMENT_STATUSES = [
+  "pending_activation",
+  "activating",
+  "active",
+  "updating",
+  "canceling",
+  "resuming",
+  "paused",
+  "canceled",
+  "expired",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
+
 export type RecurringPaymentAction = "activate" | "collect" | "cancel" | "resume";
 
 export interface RecurringPaymentsListOptions {
   page?: number;
   pageSize?: number;
-  status?: PaymentRecurringPaymentStatus;
+  status?: PaymentRecurringPaymentStatus | null;
   counterpartyId?: string;
+}
+
+export interface RecurringPaymentsListState {
+  page: number;
+  pageSize: number;
+  status: PaymentRecurringPaymentStatus | null;
+}
+
+function firstParamValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function parseListInteger(value: string | undefined, fallback: number): number {
+  if (!value || !/^\d+$/.test(value)) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * Parses the recurring list's server-driven pagination and filter state from
+ * route search params, rejecting anything outside the known vocabulary.
+ *
+ * @param params - The raw route search params.
+ * @returns The validated list state.
+ */
+export function parseRecurringPaymentsListParams(
+  params: Record<string, string | string[] | undefined>
+): RecurringPaymentsListState {
+  const status = firstParamValue(params.status);
+  return {
+    page: parseListInteger(firstParamValue(params.page), 1),
+    pageSize: Math.min(
+      parseListInteger(firstParamValue(params.pageSize), RECURRING_LIST_DEFAULT_PAGE_SIZE),
+      RECURRING_PAYMENTS_PAGE_SIZE
+    ),
+    status:
+      status && (RECURRING_PAYMENT_STATUSES as readonly string[]).includes(status)
+        ? (status as PaymentRecurringPaymentStatus)
+        : null,
+  };
 }
 
 interface ClientRecurringPaymentsListOptions extends RecurringPaymentsListOptions {
