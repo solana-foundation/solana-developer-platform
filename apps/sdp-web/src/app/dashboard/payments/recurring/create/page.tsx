@@ -44,10 +44,8 @@ export default async function RecurringPaymentCreatePage() {
       const issuedTokenSymbolsByMint = Object.fromEntries(
         (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
       );
-      const issuedTokenImageUrlsByMint = Object.fromEntries(
-        (issuedTokenSymbolsResult.data ?? []).flatMap((token) =>
-          token.imageUrl ? [[token.mintAddress, token.imageUrl] as const] : []
-        )
+      const issuedTokensByMint = Object.fromEntries(
+        (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token])
       );
 
       return (
@@ -58,7 +56,7 @@ export default async function RecurringPaymentCreatePage() {
               walletsResult.ok ? null : (walletsResult.error ?? "Unable to load wallets")
             }
             issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
-            issuedTokenImageUrlsByMint={issuedTokenImageUrlsByMint}
+            issuedTokensByMint={issuedTokensByMint}
             counterpartiesResult={{
               ok: counterpartiesResult.ok,
               data: counterpartiesResult.data,

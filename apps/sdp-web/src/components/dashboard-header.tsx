@@ -544,6 +544,13 @@ export function getDashboardPageConfig(
     return {
       title: t("Shared.dashboardShell.recurringPayment"),
       contentWidthClass: "max-w-none",
+      headerTabs: {
+        tabs: [
+          { id: "details", label: t("DashboardPayments.recurring.details") },
+          { id: "history", label: t("DashboardPayments.recurring.collectionHistory") },
+        ],
+        hideOnMobile: false,
+      },
       backAction: {
         href: "/dashboard/payments/recurring",
         label: t("Shared.dashboardShell.backToRecurringPayments"),

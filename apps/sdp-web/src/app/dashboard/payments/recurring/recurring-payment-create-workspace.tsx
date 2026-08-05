@@ -1,12 +1,7 @@
 "use client";
 
 import { decimalScale, isDecimalString } from "@sdp/solana/amount";
-import {
-  type Counterparty,
-  type CounterpartyAccount,
-  type PaymentsDashboardWallet,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+import type { Counterparty, CounterpartyAccount, PaymentsDashboardWallet } from "@sdp/types";
 import { PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -19,7 +14,13 @@ import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
-import { amountInputPlaceholder, isSolBalance, shortenAddress } from "../payments-overview.utils";
+import {
+  amountInputPlaceholder,
+  isSolBalance,
+  resolveTokenByMint,
+  shortenAddress,
+} from "../payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import {
   type CounterpartiesResult,
   fetchAllCounterparties,
@@ -40,7 +41,7 @@ interface RecurringPaymentCreateWorkspaceProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
-  issuedTokenImageUrlsByMint: Record<string, string>;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   counterpartiesResult: CounterpartiesResult;
 }
 
@@ -225,7 +226,7 @@ export function RecurringPaymentCreateWorkspace({
   wallets,
   walletsError,
   issuedTokenSymbolsByMint,
-  issuedTokenImageUrlsByMint,
+  issuedTokensByMint,
   counterpartiesResult,
 }: RecurringPaymentCreateWorkspaceProps) {
   const t = useTranslations();
@@ -347,22 +348,23 @@ export function RecurringPaymentCreateWorkspace({
   );
   const assetSelectOptions = useMemo(
     () =>
-      assetOptions.map((asset) => ({
-        value: asset.value,
-        label: asset.label,
-        icon: (
-          <TokenMark
-            mint={asset.value}
-            symbol={asset.label}
-            logoUrl={issuedTokenImageUrlsByMint[asset.value]}
-            size="xs"
-          />
-        ),
-        badge: WELL_KNOWN_TOKEN_BY_MINT.has(asset.value)
-          ? undefined
-          : t("DashboardPayments.recurring.custom"),
-      })),
-    [assetOptions, issuedTokenImageUrlsByMint, t]
+      assetOptions.map((asset) => {
+        const token = resolveTokenByMint(asset.value, issuedTokensByMint, asset.label);
+        return {
+          value: asset.value,
+          label: token.tokenName,
+          icon: (
+            <TokenMark
+              mint={asset.value}
+              symbol={token.tokenName}
+              logoUrl={token.metadataImageUrl}
+              size="xs"
+            />
+          ),
+          badge: token.isWellKnown ? undefined : t("Shared.SharedComponents.customToken"),
+        };
+      }),
+    [assetOptions, issuedTokensByMint, t]
   );
   const nonSolBalanceCount =
     selectedWallet?.balances?.filter((balance) => !isSolBalance(balance)).length ?? 0;
@@ -828,6 +830,7 @@ export function RecurringPaymentCreateWorkspace({
                 id="recurring-payment-first-collection"
                 value={fields.firstCollectionAt}
                 onChange={(value) => setField("firstCollectionAt", value)}
+                disablePast
                 size="xl"
               />
               {fields.firstCollectionAt && !firstCollectionAtIsValid(fields.firstCollectionAt) ? (

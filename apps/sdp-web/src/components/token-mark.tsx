@@ -63,16 +63,30 @@ function toMonogram(symbol: string): string {
   return trimmed.slice(0, 3).toUpperCase();
 }
 
-export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: TokenMarkProps) {
+/**
+ * Resolves a mint to its display symbol and bundled logo. Logos only resolve
+ * through mints verified against the well-known registry — a symbol alone
+ * must never resolve one, since token names are self-reported and an issued
+ * token named "USDC" would otherwise wear Circle's mark.
+ *
+ * @param mint - Mint address; resolves a well-known token when it matches one.
+ * @param symbol - Display symbol fallback for mints outside the registry.
+ * @returns The mint's display symbol and bundled logo path.
+ */
+function resolveMark(
+  mint?: string | null,
+  symbol?: string | null
+): { displaySymbol: string; logo: string | undefined } {
   const wellKnown = mint ? WELL_KNOWN_TOKEN_BY_MINT.get(mint.trim()) : undefined;
   const displaySymbol = wellKnown?.symbol ?? symbol?.trim() ?? "";
-
-  // Logos only render for mints verified against the well-known registry. A
-  // symbol alone must never resolve one: token names are self-reported, so an
-  // issued token named "USDC" would otherwise wear Circle's mark.
   const logo = wellKnown
     ? TOKEN_LOGOS[wellKnown.symbol.toUpperCase() as WellKnownTokenSymbol]
     : undefined;
+  return { displaySymbol, logo };
+}
+
+export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: TokenMarkProps) {
+  const { displaySymbol, logo } = resolveMark(mint, symbol);
 
   const { box, text, px } = SIZE_STYLES[size];
 
