@@ -13,6 +13,7 @@ import {
 } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
+import { Badge } from "./badge";
 import { Input } from "./input";
 import { Label } from "./label";
 import { Modal } from "./modal";
@@ -40,6 +41,8 @@ export interface ComboboxOption {
   value: string;
   label: string;
   description?: string;
+  icon?: ReactNode;
+  badge?: string;
 }
 
 interface ComboboxProps {
@@ -168,7 +171,9 @@ export function Combobox({
       <span className="min-w-0 flex-1 text-left">
         {selected ? (
           <span className="flex min-w-0 items-center gap-2">
+            {selected.icon ? <span className="shrink-0">{selected.icon}</span> : null}
             <span className="truncate text-primary">{selected.label}</span>
+            {selected.badge ? <Badge className="shrink-0">{selected.badge}</Badge> : null}
             {selected.description ? (
               <span className="truncate text-sm text-tertiary">{selected.description}</span>
             ) : null}
@@ -263,8 +268,12 @@ export function Combobox({
                   close();
                 }}
               >
+                {option.icon ? <span className="shrink-0">{option.icon}</span> : null}
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-primary">{option.label}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-primary">{option.label}</span>
+                    {option.badge ? <Badge className="shrink-0">{option.badge}</Badge> : null}
+                  </span>
                   {option.description ? (
                     <span className="block truncate text-sm text-tertiary">
                       {option.description}

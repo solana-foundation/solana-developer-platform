@@ -468,6 +468,80 @@ describe("GroundEarnClient.getPortfolioWallet", () => {
     assert.equal(snapshot.solanaDepositAddress, "So1anaMainnetDepositAddr");
   });
 
+  // ADR 0002 invariant 5: no other chain's rails may reach a wire type or the
+  // UI. Ground names non-yield positions after the chain the value sits on, so
+  // these labels are synthesized rather than passed through. Payload shapes here
+  // are the real ones observed against Ground's sandbox.
+  it("never surfaces a provider position label carrying a non-Solana chain", async () => {
+    stubGroundFetch({
+      body: groundWallet({
+        positions: [
+          {
+            id: "cash:ethereum_sepolia:usdt",
+            kind: "cash",
+            chain: "ethereum_sepolia",
+            label: "USDT (Ethereum Sepolia)",
+            token: "usdt",
+            valueUsd: "5.000000",
+          },
+          {
+            id: "bridge_1",
+            kind: "bridge",
+            chain: "base",
+            label: "USDC bridging via Base",
+            token: "usdc",
+            valueUsd: "3.000000",
+          },
+          {
+            id: "payout_1",
+            kind: "external_payout",
+            chain: "ethereum",
+            label: "Payout to Ethereum",
+            valueUsd: "1.000000",
+          },
+          {
+            id: "future_1",
+            kind: "some_future_kind",
+            label: "Restaked on Arbitrum",
+            valueUsd: "2.000000",
+          },
+        ],
+      }),
+    });
+
+    const snapshot = await client.getPortfolioWallet(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    assert.deepEqual(
+      snapshot.positions.map((position) => [position.kind, position.label, position.valueUsd]),
+      [
+        ["cash", "Cash (USDT)", "5.000000"],
+        ["bridge", "In transit (USDC)", "3.000000"],
+        ["external_payout", "Withdrawal in progress", "1.000000"],
+        ["unknown", "Other holding", "2.000000"],
+      ]
+    );
+    // The values still add up — only the chain wording is withheld.
+    assert.equal(
+      snapshot.positions.reduce((sum, position) => sum + Number(position.valueUsd), 0),
+      11
+    );
+    const rendered = JSON.stringify(snapshot);
+    for (const chain of ["sepolia", "ethereum", "base", "arbitrum"]) {
+      assert.ok(
+        !rendered.toLowerCase().includes(chain),
+        `snapshot leaked non-Solana chain "${chain}"`
+      );
+    }
+  });
+
+  it("keeps the provider's own label for yield sources, which joins to the catalogue", async () => {
+    stubGroundFetch({ body: groundWallet() });
+
+    const snapshot = await client.getPortfolioWallet(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    assert.equal(snapshot.positions[0]?.label, "Morpho Gauntlet USDC");
+  });
+
   it("treats in-flight and unknown provider statuses as busy, keeping the raw status", async () => {
     stubGroundFetch(
       { body: groundWallet({ status: "withdrawal_and_rebalance_active" }) },

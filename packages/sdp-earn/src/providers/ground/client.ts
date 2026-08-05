@@ -8,8 +8,10 @@ import {
   type EarnPortfolioDeposit,
   type EarnPortfolioDepositsPage,
   type EarnPortfolioPosition,
+  type EarnPortfolioPositionKind,
   type EarnPortfolioProcessingEstimate,
   type EarnPortfolioTargetAllocations,
+  type EarnPortfolioToken,
   type EarnPortfolioWalletSnapshot,
   type EarnPortfolioWalletStatus,
   type EarnPortfolioWithdrawal,
@@ -330,14 +332,55 @@ function normalizeWalletStatus(status: string): EarnPortfolioWalletStatus {
   return WALLET_STATUS_BY_GROUND_STATUS[status] ?? "busy";
 }
 
+/**
+ * Position label for SDP's wire types and UI.
+ *
+ * Ground labels a position with the chain the value currently sits on — e.g.
+ * "USDT (Ethereum Sepolia)" for idle cash. SDP's surface is Solana-only
+ * (ADR 0002 invariant 5: no other chain's addresses or rails may leak into wire
+ * types or UI), and Ground's routing between chains is provider plumbing we
+ * never expose, so every kind except `yield_source` gets a label synthesized
+ * here from kind + token. `yield_source` keeps the provider's label: that is the
+ * vault's product name, carries no chain, and is what a reader matches against
+ * the strategy catalogue.
+ *
+ * The VALUE is never hidden — only the chain wording. Off-rail cash still counts
+ * toward the wallet total Ground reports, so dropping the position outright
+ * would leave a total its positions do not sum to.
+ */
+function positionLabel(
+  kind: EarnPortfolioPositionKind,
+  providerLabel: string,
+  token: EarnPortfolioToken | undefined
+): string {
+  if (kind === "yield_source") {
+    return providerLabel;
+  }
+  const suffix = token ? ` (${token.toUpperCase()})` : "";
+  switch (kind) {
+    case "cash":
+      return `Cash${suffix}`;
+    case "bridge":
+      return `In transit${suffix}`;
+    case "external_payout":
+      return `Withdrawal in progress${suffix}`;
+    default:
+      // `unknown` is the forward-compatible fallback: a kind this build does not
+      // recognize could carry anything in its label, so it never passes through.
+      return `Other holding${suffix}`;
+  }
+}
+
 function mapPosition(position: GroundWalletPosition): EarnPortfolioPosition {
+  const kind = narrow(EARN_PORTFOLIO_POSITION_KINDS, position.kind) ?? "unknown";
+  const token = narrow(EARN_PORTFOLIO_TOKENS, position.token);
   return {
-    kind: narrow(EARN_PORTFOLIO_POSITION_KINDS, position.kind) ?? "unknown",
-    label: position.label,
+    kind,
+    label: positionLabel(kind, position.label, token),
     valueUsd: position.valueUsd,
     pct: position.pct ?? undefined,
     yieldSourceId: position.yieldSourceId ?? undefined,
-    token: narrow(EARN_PORTFOLIO_TOKENS, position.token),
+    token,
   };
 }
 
