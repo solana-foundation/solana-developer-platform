@@ -1,7 +1,6 @@
 "use server";
 
 import type { CustodyProvider, OrganizationRpcProvider } from "@sdp/types";
-import { revalidatePath } from "next/cache";
 import {
   initializeOnboardingCustodyAction,
   type OnboardingProvisionedWallet,
@@ -71,7 +70,11 @@ export async function completeOrganizationOnboardingAction(input: {
       method: "POST",
       body: JSON.stringify({ custodyProvider: input.custodyProvider }),
     });
-    revalidatePath("/dashboard", "layout");
+    // Deliberately no layout revalidation here: it re-renders the onboarding
+    // route mid-transition, and that page redirects once setup is complete,
+    // killing the completion panel before it paints. The panel's exits are
+    // full document navigations, so every server boundary is fresh on the way
+    // out without it.
     return { status: "success", wallet: walletResult.wallet };
   } catch (error) {
     return {
