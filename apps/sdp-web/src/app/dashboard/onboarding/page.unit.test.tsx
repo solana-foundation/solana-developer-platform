@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { shouldRedirectToOrganizationOnboarding } from "@/lib/onboarding-route-guard";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
@@ -15,6 +16,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: mocks.auth,
+}));
+vi.mock("@clerk/nextjs", () => ({
+  OrganizationSwitcher: () => <div data-testid="organization-switcher" />,
 }));
 vi.mock("next/navigation", () => ({
   redirect: vi.fn((path: string) => {
@@ -219,9 +223,7 @@ describe("OrganizationOnboardingPage", () => {
 });
 
 describe("member without setup access", () => {
-  it("is given an action rather than a dead end", async () => {
-    // The card explained why they could not continue and then stopped, leaving a
-    // non-admin with nowhere to go from the route they had just been sent to.
+  beforeEach(() => {
     mocks.organizationFetch.mockResolvedValue({
       linked: true,
       organization: { id: "org_test" },
@@ -235,10 +237,22 @@ describe("member without setup access", () => {
         version: 1,
       },
     });
+  });
 
+  it("is given an action rather than a dead end", async () => {
+    // The card explained why they could not continue and then stopped, leaving a
+    // non-admin with nowhere to go from the route they had just been sent to.
     const markup = await renderPage();
 
     expect(markup).toContain("DashboardCustody.onboardingAdminTitle");
-    expect(markup).toContain("/dashboard/settings");
+    expect(markup).toContain("organization-switcher");
+  });
+
+  it("does not offer an in-app link, which the shell would bounce straight back", () => {
+    // `shouldRedirectToOrganizationOnboarding` is true for every path outside
+    // /dashboard/onboarding while setup is incomplete, so linking anywhere in the
+    // dashboard sends them back to this card. Settings was the previous target and
+    // also hides its members list from anyone who cannot manage the organization.
+    expect(shouldRedirectToOrganizationOnboarding("not_started", "/dashboard/settings")).toBe(true);
   });
 });
