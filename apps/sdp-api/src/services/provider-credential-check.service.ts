@@ -2,7 +2,7 @@ import { normalizePrivyWalletId } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
 import type { Context } from "hono";
-import { type DatabaseClient, getDb } from "@/db";
+import { asTransactionalClient, type DatabaseClient, getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
@@ -12,7 +12,7 @@ import {
   notFound,
   providerUnavailable,
 } from "@/lib/errors";
-import { isPrivyByokEnabled } from "@/lib/feature-flags";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
@@ -23,6 +23,7 @@ import {
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
 import { type ProvisionPrivyResult, provisionPrivyWallet } from "@/services/custody/provisioning";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { getProviderAvailability } from "@/services/provider-availability.service";
 import {
   mapProviderCredential,
@@ -139,6 +140,7 @@ export async function checkProviderCredential(
   let providerCredential: ProviderCredentialSecretRow;
   try {
     providerCredential = await persistInstallCheckOutcome({
+      env: c.env,
       db,
       organizationId: auth.organizationId,
       projectId,
@@ -313,7 +315,7 @@ async function assertInstallCheckEnabled(
   db: DatabaseClient,
   organizationId: string
 ): Promise<void> {
-  if (!isPrivyByokEnabled(env)) {
+  if (!isCustodyConnectionRuntimeEnabled(env, "privy")) {
     throw forbidden(INSTALL_CHECK_DISABLED_MESSAGE);
   }
 
@@ -416,6 +418,7 @@ function isWalletListResponse(value: unknown): value is { data: unknown[] } {
 }
 
 async function persistInstallCheckOutcome(params: {
+  env: Env;
   db: DatabaseClient;
   organizationId: string;
   projectId: string;
@@ -461,6 +464,15 @@ async function persistInstallCheckOutcome(params: {
         if (!updated) {
           throw conflict(INSTALL_CHECK_CONFLICT_MESSAGE);
         }
+        await new CustodyRuntimeTargets(
+          asTransactionalClient(tx),
+          params.env,
+          new Map()
+        ).selectCompletedConnectionIfEligible({
+          organizationId: params.organizationId,
+          projectId: params.projectId,
+          connectionId: target.connection.id,
+        });
         return { ...target.credential, ...updated };
       }
 

@@ -395,13 +395,16 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
                 c.last_check_status, c.last_check_at, c.last_check_failure_code,
                 c.default_custody_wallet_id,
                 w.wallet_id, w.public_key, w.label AS wallet_label, w.custody_connection_id,
+                (SELECT default_custody_connection_id
+                 FROM custody_scope_defaults
+                 WHERE organization_id = ? AND project_id = ?) AS selected_connection_id,
                 (SELECT COUNT(*) FROM custody_wallets) AS wallet_count
          FROM provider_credentials pc
          JOIN custody_connections c ON c.provider_credential_id = pc.id
          LEFT JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
          WHERE pc.id = ?`
       )
-      .bind(CREDENTIAL_ID)
+      .bind(ORGANIZATION_ID, PROJECT_ID, CREDENTIAL_ID)
       .first<{
         credential_status: string;
         last_validated_at: string | null;
@@ -415,6 +418,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
         public_key: string | null;
         wallet_label: string | null;
         custody_connection_id: string | null;
+        selected_connection_id: string | null;
         wallet_count: number;
       }>();
     expect(state).toMatchObject({
@@ -433,6 +437,7 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       public_key: PRIVY_WALLET_ADDRESS,
       wallet_label: WALLET_LABEL,
       custody_connection_id: CONNECTION_ID,
+      selected_connection_id: CONNECTION_ID,
       wallet_count: 1,
     });
     expect(state?.setup_metadata).toEqual({
