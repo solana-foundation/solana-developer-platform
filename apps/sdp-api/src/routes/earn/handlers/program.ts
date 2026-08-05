@@ -332,21 +332,26 @@ export const previewEarnProgramWithdrawal = async (c: AppContext) => {
  * A server-minted random id therefore cannot be the fallback: it is fresh per
  * HTTP attempt, so it guarantees exactly the double-send it appears to guard
  * against. Callers get two ways to supply a stable key — an explicit
- * `requestId`, or the platform-wide `Idempotency-Key` header, scoped here so
- * one org's key can never resolve to another's withdrawal — and a request
+ * `requestId`, or the platform-wide `Idempotency-Key` header — and a request
  * carrying neither is refused rather than silently made unsafe.
+ *
+ * A header-derived id is scoped to the PROGRAM WALLET it withdraws from. Every
+ * SDP organization shares one provider account, so two organizations picking
+ * the same header value must not resolve to one provider request; the wallet
+ * ref is unique per (organization, environment, provider) by DB constraint, so
+ * it separates them and names the thing the money actually leaves.
  */
-function resolveWithdrawalRequestId(c: AppContext, requestId: string | undefined): string {
+function resolveWithdrawalRequestId(
+  c: AppContext,
+  requestId: string | undefined,
+  providerWalletRef: string
+): string {
   if (requestId) {
     return requestId;
   }
   const idempotencyKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
   if (idempotencyKey) {
-    const auth = getAuth(c);
-    return deriveProviderRequestId(
-      ["earn_program_withdrawal", auth.organizationId, resolveSdpEnvironment(c)],
-      idempotencyKey
-    );
+    return deriveProviderRequestId(["earn_program_withdrawal", providerWalletRef], idempotencyKey);
   }
   throw badRequest(
     `A withdrawal needs an idempotency key that is stable across retries: send requestId (UUIDv4) or the ${IDEMPOTENCY_KEY_HEADER} header. Without one, a retried request would pay out twice.`
@@ -363,7 +368,7 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
 
   const withdrawal = await client.createPortfolioWithdrawal(earnRuntime(c), {
     providerWalletRef: row.provider_wallet_ref,
-    requestId: resolveWithdrawalRequestId(c, body.requestId),
+    requestId: resolveWithdrawalRequestId(c, body.requestId, row.provider_wallet_ref),
     amountUsd: body.amountUsd,
     token: body.token,
     destinationAddress: body.destinationAddress,
