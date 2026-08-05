@@ -135,9 +135,7 @@ export async function initializeCustody(formData: FormData) {
  * previously discarded this and left the user with no evidence of what setup
  * created for them.
  */
-async function initializeCustodyWallet(
-  formData: FormData
-): Promise<OnboardingProvisionedWallet> {
+async function initializeCustodyWallet(formData: FormData): Promise<OnboardingProvisionedWallet> {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
