@@ -181,101 +181,6 @@ export class CustodyRuntimeTargets {
     return getTransactionSigner(adapter, target.wallet);
   }
 
-  async selectCompletedConnectionIfEligible(params: {
-    organizationId: string;
-    projectId: string;
-    connectionId: string;
-  }): Promise<boolean> {
-    return this.db.transaction(async (tx) => {
-      await lockProject(tx, params.organizationId, params.projectId);
-
-      const connection = await tx.queryOne<{
-        id: string;
-        provider: string;
-        status: string;
-      }>(
-        `SELECT id, provider, status
-         FROM custody_connections
-         WHERE id = ? AND organization_id = ? AND project_id = ?
-         FOR UPDATE`,
-        [params.connectionId, params.organizationId, params.projectId]
-      );
-      if (connection?.status !== "active") {
-        throw conflict("Completed Custody Connection is unavailable");
-      }
-
-      const provider = this.parseProvider(connection.provider);
-      if (!isCustodyConnectionRuntimeEnabled(this.env, provider)) {
-        return false;
-      }
-
-      const scopeDefault = await findProjectScopeDefault(
-        tx,
-        params.organizationId,
-        params.projectId,
-        true
-      );
-      if (scopeDefault?.default_custody_connection_id === params.connectionId) {
-        return true;
-      }
-      if (scopeDefault?.default_custody_connection_id) {
-        const selectedConnection = await tx.queryOne<{ status: string }>(
-          `SELECT status
-           FROM custody_connections
-           WHERE id = ? AND organization_id = ? AND project_id = ?
-           FOR UPDATE`,
-          [scopeDefault.default_custody_connection_id, params.organizationId, params.projectId]
-        );
-        if (selectedConnection?.status === "active") {
-          return false;
-        }
-      }
-
-      const otherActiveConnection = await tx.queryOne<{ id: string }>(
-        `SELECT id
-         FROM custody_connections
-         WHERE organization_id = ?
-           AND project_id = ?
-           AND status = 'active'
-           AND id <> ?
-         LIMIT 1
-         FOR UPDATE`,
-        [params.organizationId, params.projectId, params.connectionId]
-      );
-      if (otherActiveConnection) {
-        return false;
-      }
-
-      const currentConfig = await findEffectiveConfig(tx, params.organizationId, params.projectId);
-      if (currentConfig && currentConfig.provider !== provider) {
-        return false;
-      }
-
-      if (scopeDefault) {
-        await tx.execute(
-          `UPDATE custody_scope_defaults
-           SET default_custody_connection_id = ?, updated_at = sdp_iso_now()
-           WHERE id = ?`,
-          [params.connectionId, scopeDefault.id]
-        );
-      } else {
-        await tx.execute(
-          `INSERT INTO custody_scope_defaults (
-             id, organization_id, project_id, default_custody_connection_id
-           ) VALUES (?, ?, ?, ?)`,
-          [
-            `csd_${crypto.randomUUID()}`,
-            params.organizationId,
-            params.projectId,
-            params.connectionId,
-          ]
-        );
-      }
-
-      return true;
-    });
-  }
-
   private async resolveEffective(
     organizationId: string,
     projectId: string | undefined
@@ -838,23 +743,6 @@ async function findOrganizationScopeDefault(
      ${lock ? "FOR UPDATE" : ""}`,
     [organizationId]
   );
-}
-
-async function lockProject(
-  db: DatabaseExecutor,
-  organizationId: string,
-  projectId: string
-): Promise<void> {
-  const project = await db.queryOne<{ id: string }>(
-    `SELECT id
-     FROM projects
-     WHERE id = ? AND organization_id = ? AND status = 'active'
-     FOR UPDATE`,
-    [projectId, organizationId]
-  );
-  if (!project) {
-    throw conflict("Project is unavailable for custody target selection");
-  }
 }
 
 function mapConfig(row: ConfigRow, provider: CustodyProvider): SigningConfigRecord {
