@@ -23,11 +23,20 @@ function serializeCheckpoint(sequence, headHash) {
   return JSON.stringify({ sequence, headHash });
 }
 
+function serializePendingCheckpoint(previousCheckpoint, nextCheckpoint) {
+  return JSON.stringify({
+    pending: true,
+    previous: previousCheckpoint ? JSON.parse(previousCheckpoint) : null,
+    next: JSON.parse(nextCheckpoint),
+  });
+}
+
 function parseCheckpoint(value) {
   if (value === null) return { sequence: 0, headHash: null };
   try {
     const parsed = JSON.parse(value);
     if (
+      !("pending" in parsed) &&
       Number.isSafeInteger(parsed.sequence) &&
       parsed.sequence > 0 &&
       typeof parsed.headHash === "string" &&
@@ -198,6 +207,21 @@ async function appendCheckpoint(client, redis, options) {
         ? null
         : serializeCheckpoint(Number(row.ledger_sequence) - 1, row.previous_entry_hash);
     const next = serializeCheckpoint(Number(row.ledger_sequence), row.entry_hash);
+    const pending = serializePendingCheckpoint(expected, next);
+    // Establish evidence of the next sealed row before committing PostgreSQL.
+    // A verifier that races the commit sees `pending` and fails closed, so a
+    // privileged tail deletion cannot restore agreement with the predecessor.
+    const witnessed = await redis.eval(
+      ADVANCE_CHECKPOINT_LUA,
+      1,
+      EXTERNAL_CHECKPOINT_KEY,
+      expected === null ? "missing" : "present",
+      expected ?? "",
+      pending
+    );
+    if (witnessed !== 1) {
+      throw new Error("External audit-ledger pending witness was not established");
+    }
     await client.query("COMMIT");
     transactionOpen = false;
 
@@ -205,8 +229,8 @@ async function appendCheckpoint(client, redis, options) {
       ADVANCE_CHECKPOINT_LUA,
       1,
       EXTERNAL_CHECKPOINT_KEY,
-      expected === null ? "missing" : "present",
-      expected ?? "",
+      "present",
+      pending,
       next
     );
     if (advanced !== 1) {
