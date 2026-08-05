@@ -9,11 +9,11 @@ import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
 import { formatDisplayAmount, shortenAddress } from "../../payments-overview.utils";
 import { fetchPaymentsWallets } from "../../payments-page.data";
+import { RecurringPaymentDetailWorkspace } from "../recurring-payment-detail-workspace";
 import {
   fetchRecurringPaymentById,
   fetchRecurringPaymentCollectionAttempts,
 } from "../recurring-payments.data";
-import { RecurringPaymentDetailWorkspace } from "../recurring-payments-workspace";
 
 export const dynamic = "force-dynamic";
 
