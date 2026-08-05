@@ -8,6 +8,14 @@ import dashboardPolicies from "../../messages/en/dashboard-policies.json";
 import dashboardPrivateChannels from "../../messages/en/dashboard-private-channels.json";
 import shared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
+import esDashboardApprovals from "../../messages/es/dashboard-approvals.json";
+import esDashboardCustody from "../../messages/es/dashboard-custody.json";
+import esDashboardIssuance from "../../messages/es/dashboard-issuance.json";
+import esDashboardPayments from "../../messages/es/dashboard-payments.json";
+import esDashboardPolicies from "../../messages/es/dashboard-policies.json";
+import esDashboardPrivateChannels from "../../messages/es/dashboard-private-channels.json";
+import esShared from "../../messages/es/shared.json";
+import es from "../../messages/es.json";
 import frDashboardApprovals from "../../messages/fr/dashboard-approvals.json";
 import frDashboardCustody from "../../messages/fr/dashboard-custody.json";
 // No fr/dashboard-earn.json: product branches ship English source only; the
@@ -72,6 +80,19 @@ function mergeLocalizedValue(fallback: unknown, localized: unknown): unknown {
   );
 }
 
+const esCatalog = {
+  ...es,
+  ...esDashboardApprovals,
+  ...esDashboardCustody,
+  ...esDashboardIssuance,
+  ...esDashboardPayments,
+  ...esDashboardPolicies,
+  ...esDashboardPrivateChannels,
+  Shared: esShared,
+} satisfies LocalizedMessages<Messages>;
+
+const esMessages = mergeLocalizedMessages(enMessages, esCatalog);
+
 const frCatalog = {
   ...fr,
   ...frDashboardApprovals,
@@ -110,6 +131,7 @@ export type TranslationValues = Record<string, string | number>;
 
 const messagesByLocale: Record<AppLocale, Messages> = {
   en: enMessages,
+  es: esMessages,
   fr: frMessages,
   pt: ptMessages,
 };
