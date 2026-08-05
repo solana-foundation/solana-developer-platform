@@ -91,24 +91,25 @@ export async function POST(request: Request) {
       return response;
     }
 
+    // Reject empty apiKey: the previous fallback silently executed under the
+    // caller's dashboard session, escalating scope past the selected key.
     const normalizedApiKey = typeof payload.apiKey === "string" ? payload.apiKey.trim() : "";
-    const headers: Record<string, string> = {};
-    const client = await createSdpApiClient(trace.childContext("route.playground.execute.api"));
+    if (!normalizedApiKey) {
+      return failureResponse(trace, 400, "API key is required");
+    }
 
-    if (normalizedApiKey) {
-      const verification = await client.request("/internal/playground/api-key/verify", {
-        method: "POST",
-        body: JSON.stringify({ apiKey: normalizedApiKey }),
-      });
-      if (!verification.ok) {
-        return failureResponse(trace, 403, "API key is not available for the selected project");
-      }
-      headers.Authorization = `Bearer ${normalizedApiKey}`;
+    const client = await createSdpApiClient(trace.childContext("route.playground.execute.api"));
+    const verification = await client.request("/internal/playground/api-key/verify", {
+      method: "POST",
+      body: JSON.stringify({ apiKey: normalizedApiKey }),
+    });
+    if (!verification.ok) {
+      return failureResponse(trace, 403, "API key is not available for the selected project");
     }
 
     const response = await client.request(path, {
       method,
-      headers,
+      headers: { Authorization: `Bearer ${normalizedApiKey}` },
       body:
         method !== "GET" && payload.body !== null && payload.body !== undefined
           ? JSON.stringify(payload.body)
