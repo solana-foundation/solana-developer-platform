@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchTransactionFilterOptions } from "./transactions-filter-options";
+import { assetFilterOptions, fetchTransactionFilterOptions } from "./transactions-filter-options";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -187,5 +187,44 @@ describe("asset options", () => {
     expect(options.assets).toEqual([]);
     expect(options.wallets).toEqual([{ id: "wallet-1", label: "Treasury" }]);
     expect(options.counterparties).toEqual([{ id: "cp-1", label: "Acme" }]);
+  });
+});
+
+describe("the currently filtered asset", () => {
+  const USDC_DEVNET = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
+  it("names a deep-linked mint while the options are still loading", () => {
+    // Clicking a holding on the home page lands here with the mint already in the
+    // URL, and these options arrive later over SWR. Labelling the value with
+    // itself put the 44-character address back on screen for that whole window.
+    const assets = assetFilterOptions(USDC_DEVNET, []);
+
+    expect(assets).toHaveLength(1);
+    expect(assets[0].id).toBe(USDC_DEVNET);
+    expect(assets[0].label).toBe("USDC");
+    expect(assets[0].label).not.toBe(USDC_DEVNET);
+  });
+
+  it("shortens a mint the catalogue cannot name rather than printing all 44", () => {
+    const unknown = "MintNobodyHasEverIssued1111111111111111111111";
+
+    const [asset] = assetFilterOptions(unknown, []);
+
+    expect(asset.id).toBe(unknown);
+    expect(asset.label).not.toBe(unknown);
+    expect(asset.label.length).toBeLessThan(unknown.length);
+  });
+
+  it("prefers the option the aggregate already resolved", () => {
+    const assets = assetFilterOptions(USDC_DEVNET, [{ id: USDC_DEVNET, label: "USDC" }]);
+
+    expect(assets).toHaveLength(1);
+    expect(assets[0].label).toBe("USDC");
+  });
+
+  it("leaves the options untouched when nothing is filtered", () => {
+    const options = [{ id: USDC_DEVNET, label: "USDC" }];
+
+    expect(assetFilterOptions(undefined, options)).toEqual(options);
   });
 });

@@ -112,3 +112,27 @@ export async function fetchTransactionFilterOptions(
     assets: uniqueOptions(assetOptions),
   };
 }
+
+/**
+ * The asset options plus whatever the filter is currently pointed at.
+ *
+ * A filter can name a token the organization no longer holds, and a deep link
+ * from a holding arrives with the mint already in the URL while these options are
+ * still loading over SWR. Both cases need the current value to stay selectable,
+ * and both used the mint as its own label — which put the 44-character address
+ * back on screen that this filter exists to keep off it.
+ *
+ * @param value - The selected asset, a mint address, or undefined for "all".
+ * @param options - Asset options resolved from the wallet aggregate.
+ * @returns The options to render, with the current value present and named.
+ */
+export function assetFilterOptions(
+  value: string | undefined,
+  options: Array<{ id: string; label: string }>
+): Array<{ id: string; label: string }> {
+  const assets = [...options];
+  if (value && !assets.some((asset) => asset.id === value)) {
+    assets.unshift({ id: value, label: resolveTransferTokenLabel(value) ?? value });
+  }
+  return assets;
+}

@@ -30,6 +30,7 @@ import { RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
 import {
+  assetFilterOptions,
   fetchTransactionFilterOptions,
   type TransactionFilterOptions,
 } from "./transactions-filter-options";
@@ -109,12 +110,7 @@ function AssetFilter({
   onChange: (value: string | undefined) => void;
 }) {
   const t = useTranslations();
-  const assets = [...options];
-  // A filter can point at a token the organization no longer holds — keep it
-  // selectable rather than silently resetting to "all assets".
-  if (value && !assets.some((asset) => asset.id === value)) {
-    assets.unshift({ id: value, label: value });
-  }
+  const assets = assetFilterOptions(value, options);
 
   return (
     <SelectFilter
