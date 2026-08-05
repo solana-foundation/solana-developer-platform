@@ -517,6 +517,31 @@ describe("TokenService", () => {
       expect((await storedSupply("tok_cap_settled_burn"))?.total_supply_cached).toBe("0");
     });
 
+    it("applies settled burn supply exactly once across retries", async () => {
+      const tokenId = "tok_cap_retry_burn";
+      const transactionId = "ttx_cap_retry_burn";
+      await insertCappedToken(tokenId, "1000000000", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'burn', 'confirmed', '{}', ?)`
+        )
+        .bind(transactionId, tokenId, TEST_ORG.id, TEST_PROJECT_API_KEY.id)
+        .run();
+
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
+      expect(
+        await db
+          .prepare("SELECT supply_bookkeeping_applied_at FROM issuance_transactions WHERE id = ?")
+          .bind(transactionId)
+          .first<{ supply_bookkeeping_applied_at: string | null }>()
+      ).toMatchObject({ supply_bookkeeping_applied_at: expect.any(String) });
+    });
+
     it("refuses a cap that a mint outran between the check and the write", async () => {
       await insertCappedToken("tok_cap_lost_race", "500000000", "1000000000");
       const originalPrepare = db.prepare.bind(db);

@@ -203,6 +203,9 @@ export const executeForceBurn = async (c: AppContext) => {
       transaction: tx,
       action: "force_burn",
     });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.forceBurn.amount);
+    }
     return success(c, { transaction });
   }
 
@@ -243,7 +246,7 @@ export const executeForceBurn = async (c: AppContext) => {
       slot: Number(result.slot),
     });
 
-    await tokenService.updateSupply(tokenId, parsed.data.forceBurn.amount, "burn");
+    await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.forceBurn.amount);
 
     return success(c, { transaction: updatedTx });
   } catch (error) {

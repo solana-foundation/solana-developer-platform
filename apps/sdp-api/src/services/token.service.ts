@@ -1359,6 +1359,64 @@ export class TokenService {
   }
 
   /**
+   * Apply a settled burn's cached-supply delta exactly once.
+   *
+   * The chain effect cannot be rolled back, so an idempotent request must be
+   * able to retry this bookkeeping after a database failure without subtracting
+   * twice. Locking the transaction row and committing its marker with the
+   * supply change makes both the initial request and every replay safe.
+   */
+  async applySettledBurnSupply(
+    transactionId: string,
+    tokenId: string,
+    amount: string
+  ): Promise<void> {
+    const tokenScope = this.tenantTokenScope("t");
+    await this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.supply_bookkeeping_applied_at, t.decimals
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(transactionId, tokenId, ...tokenScope.values)
+        .first<{ supply_bookkeeping_applied_at: string | null; decimals: number }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+      if (row.supply_bookkeeping_applied_at !== null) return;
+
+      const deltaBaseUnits = parseDecimalAmount(amount, row.decimals).toString();
+      const now = new Date().toISOString();
+      const tokenMutation = this.tenantMutationScope();
+      const updatedToken = await tx
+        .prepare(
+          `UPDATE issued_tokens
+           SET total_supply_cached = GREATEST(
+                 COALESCE(total_supply_cached, '0')::numeric - ?::numeric,
+                 0
+               )::text,
+               total_supply_updated_at = ?,
+               updated_at = ?
+           WHERE id = ?${tokenMutation.clause}`
+        )
+        .bind(deltaBaseUnits, now, now, tokenId, ...tokenMutation.values)
+        .run();
+      if (updatedToken !== 1) throw new Error("TOKEN_NOT_FOUND");
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET supply_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND supply_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, transactionId, tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_SUPPLY_MARKER_CONFLICT");
+    });
+  }
+
+  /**
    * Move the cached supply by a base-unit delta, in one statement.
    *
    * The arithmetic belongs in SQL. Reading the total, changing it in memory and

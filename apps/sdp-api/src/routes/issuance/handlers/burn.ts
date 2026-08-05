@@ -304,6 +304,9 @@ export const executeBurn = async (c: AppContext) => {
       transaction: tx,
       action: "burn",
     });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.burn.amount);
+    }
     return success(c, { transaction });
   }
   const auditIntent = await auditService.beginCritical(c, {
@@ -360,7 +363,7 @@ export const executeBurn = async (c: AppContext) => {
     const updatedTx = await persistSettledTransaction(tokenService, tx, evidence);
 
     // Update token supply
-    await tokenService.updateSupply(tokenId, parsed.data.burn.amount, "burn");
+    await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.burn.amount);
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
