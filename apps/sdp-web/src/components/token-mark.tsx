@@ -2,6 +2,7 @@
 
 import { WELL_KNOWN_TOKEN_BY_MINT, type WellKnownTokenSymbol } from "@sdp/types";
 import Image from "next/image";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -87,6 +88,7 @@ function resolveMark(
 
 export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: TokenMarkProps) {
   const { displaySymbol, logo } = resolveMark(mint, symbol);
+  const [logoUrlFailed, setLogoUrlFailed] = useState(false);
 
   const { box, text, px } = SIZE_STYLES[size];
 
@@ -105,7 +107,7 @@ export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: Tok
     );
   }
 
-  if (logoUrl) {
+  if (logoUrl && !logoUrlFailed) {
     return (
       <span
         className={cn(
@@ -116,7 +118,12 @@ export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: Tok
         aria-hidden="true"
       >
         {/* biome-ignore lint/performance/noImgElement: issuer-supplied external logo URL; next/image can't be configured for arbitrary hosts. */}
-        <img src={logoUrl} alt="" className="h-full w-full object-cover" />
+        <img
+          src={logoUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setLogoUrlFailed(true)}
+        />
       </span>
     );
   }

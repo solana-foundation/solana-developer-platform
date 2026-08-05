@@ -708,12 +708,12 @@ export function RecurringPaymentDetailWorkspace({
 
         <RecurringPaymentLifecycleBand status={recurringPayment.status} actionError={actionError} />
 
-        <div className="grid items-start gap-6 lg:grid-cols-2">
-          <section className="space-y-3">
+        <div className="grid gap-6 lg:grid-cols-2">
+          <section className="flex flex-col gap-3">
             <h3 className="text-sm font-medium text-primary">
               {t("DashboardPayments.recurring.detailPaymentSection")}
             </h3>
-            <div className="rounded-lg border border-border-default bg-surface-raised px-4">
+            <div className="flex-1 rounded-lg border border-border-default bg-surface-raised px-4">
               <div className="divide-y divide-border-default">
                 <DetailRow label={t("DashboardPayments.status")}>
                   <RecurringPaymentStatusBadge status={recurringPayment.status} />
@@ -784,20 +784,40 @@ export function RecurringPaymentDetailWorkspace({
                 <DetailRow label={t("DashboardPayments.recurring.nextPayment")}>
                   {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt, t)}
                 </DetailRow>
+                <DetailRow label={t("DashboardPayments.recurring.paymentReference")}>
+                  <CopyableValue value={recurringPayment.id} label={paymentReferenceLabel} />
+                </DetailRow>
               </div>
             </div>
           </section>
-          <section className="space-y-3">
+          <section className="flex flex-col gap-3">
             <h3 className="text-sm font-medium text-primary">
               {t("DashboardPayments.recurring.detailWalletsSection")}
             </h3>
-            <div className="rounded-lg border border-border-default bg-surface-raised px-4">
+            <div className="flex-1 rounded-lg border border-border-default bg-surface-raised px-4">
               <div className="divide-y divide-border-default">
                 <div className="group flex min-h-12 items-center justify-between gap-4 py-3">
                   <span className="shrink-0 text-sm text-secondary">
                     {t("DashboardPayments.recurring.fundingWallet")}
                   </span>
                   <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
+                    {isEditable ? (
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="ghost"
+                        disabled={controlsDisabled || wallets.length === 0}
+                        aria-label={t("DashboardPayments.recurring.edit")}
+                        className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+                        onClick={() => {
+                          setSelectedWalletId(recurringPayment.sourceWalletId);
+                          setWalletValidationError(null);
+                          setEditingWallet(true);
+                        }}
+                      >
+                        <PencilIcon className="size-4" />
+                      </Button>
+                    ) : null}
                     {wallet ? (
                       <EntityLink
                         href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
@@ -812,23 +832,6 @@ export function RecurringPaymentDetailWorkspace({
                         value={wallet.publicKey}
                         label={shortenAddress(wallet.publicKey)}
                       />
-                    ) : null}
-                    {isEditable ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={controlsDisabled || wallets.length === 0}
-                        className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-                        iconLeft={<PencilIcon className="size-4" />}
-                        onClick={() => {
-                          setSelectedWalletId(recurringPayment.sourceWalletId);
-                          setWalletValidationError(null);
-                          setEditingWallet(true);
-                        }}
-                      >
-                        {t("DashboardPayments.recurring.edit")}
-                      </Button>
                     ) : null}
                   </span>
                 </div>
@@ -867,9 +870,6 @@ export function RecurringPaymentDetailWorkspace({
                     ) : null}
                   </span>
                 </div>
-                <DetailRow label={t("DashboardPayments.recurring.paymentReference")}>
-                  <CopyableValue value={recurringPayment.id} label={paymentReferenceLabel} />
-                </DetailRow>
                 <DetailRow label={t("DashboardPayments.recurring.subscriptionAccount")}>
                   <ExplorerValue value={recurringPayment.subscriptionPda} kind="address" />
                 </DetailRow>

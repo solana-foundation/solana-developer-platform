@@ -251,7 +251,7 @@ function Picker({
                 defaultMonth={selectedDate}
                 onSelect={selectDate}
                 captionLayout="dropdown"
-                startMonth={disablePast ? new Date() : new Date(currentYear - 10, 0)}
+                startMonth={disablePast ? new Date() : new Date(currentYear - 100, 0)}
                 endMonth={new Date(currentYear + 10, 11)}
                 disabled={disablePast ? { before: new Date() } : undefined}
                 className="w-full"
