@@ -134,11 +134,15 @@ export async function submitPrivyCredentialAction(
     );
   } catch (error) {
     const { status, message } = extractApiMessage(error);
-    if (status === 409) {
-      // A conflicting setup already exists in this scope (for example an
-      // active legacy config); surface the server's explanation as-is.
-      return { status: "error", message };
+    if (status !== null) {
+      // The server answered, so the submission definitively did not commit.
+      // Conflicts and validation rejections are terminal for this attempt;
+      // routing them into the frozen-replay state would trap the user
+      // replaying a request that can only fail the same way.
+      return { status: "failed", message: message || t("DashboardCustody.byokSubmitFailed") };
     }
+    // No response at all: the POST may have committed server-side, which is
+    // the only case the frozen verbatim replay exists for.
     return {
       status: "error",
       message: message || t("DashboardCustody.byokSubmitFailed"),
