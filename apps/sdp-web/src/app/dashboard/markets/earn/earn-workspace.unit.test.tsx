@@ -4,8 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnProgramState } from "./earn-program-data";
 
+// Values-aware identity translations, so assertions can pin interpolations
+// (e.g. the trimmed share "programShare(80)").
 vi.mock("@/i18n/provider", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, string | number>) =>
+    values ? `${key}(${Object.values(values).join(",")})` : key,
   useLocale: () => "en",
 }));
 
@@ -34,6 +37,9 @@ const data = vi.hoisted(() => ({
 vi.mock("./earn-program-data", () => ({
   useEarnProgram: () => data.program,
   useEarnStrategies: () => data.strategies,
+  // The workspace also reads the provider pin, so the hero counts exactly what
+  // the deposit flow will offer rather than every synced row.
+  EARN_PORTFOLIO_PROVIDER: "ground",
 }));
 
 import { EarnWorkspace } from "./earn-workspace";
@@ -45,9 +51,10 @@ function strategy(partial: {
   id: string;
   providerReference: string;
   name: string;
-  curator?: string;
-  riskTier?: string;
   currentApy?: string;
+  liquidityTerm?: EarnStrategy["liquidityTerm"];
+  redemptionDelayDays?: number;
+  underlyingSource?: string;
 }): EarnStrategy {
   return {
     id: partial.id,
@@ -58,12 +65,14 @@ function strategy(partial: {
     depositMints: [USDC],
     apyType: "variable",
     currentApy: partial.currentApy ?? "0.05",
-    liquidityTerm: "instant",
-    riskMetadata: {
-      ...(partial.curator ? { curator: partial.curator } : {}),
-      ...(partial.riskTier ? { riskTier: partial.riskTier } : {}),
-      tvlUsd: 12_000_000,
-    },
+    liquidityTerm: partial.liquidityTerm ?? "instant",
+    ...(partial.redemptionDelayDays === undefined
+      ? {}
+      : { redemptionDelayDays: partial.redemptionDelayDays }),
+    ...(partial.underlyingSource === undefined
+      ? {}
+      : { underlyingSource: partial.underlyingSource }),
+    riskMetadata: { tvlUsd: 12_000_000 },
     status: "active",
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
@@ -75,25 +84,22 @@ const CATALOGUE: EarnStrategy[] = [
     id: "earn_strategy_1",
     providerReference: "morpho-gauntlet-usdc",
     name: "Morpho Gauntlet USDC",
-    curator: "gauntlet",
-    riskTier: "balanced",
     currentApy: "0.062",
+    underlyingSource: "morpho",
   }),
   strategy({
     id: "earn_strategy_2",
     providerReference: "morpho-steakhouse-usdc",
     name: "Morpho Steakhouse USDC",
-    curator: "steakhouse",
-    riskTier: "conservative",
     currentApy: "0.045",
   }),
   strategy({
     id: "earn_strategy_3",
-    providerReference: "syrup-usdc",
-    name: "Syrup USDC",
-    curator: "sentora",
-    riskTier: "enhanced",
+    providerReference: "ground-jaaa-usdc-vault",
+    name: "Ground JAAA USDC",
     currentApy: "0.084",
+    liquidityTerm: "delayed",
+    redemptionDelayDays: 2,
   }),
 ];
 
@@ -106,43 +112,46 @@ beforeEach(() => {
   data.strategies.isLoading = false;
 });
 
+describe("EarnWorkspace while the program is still loading", () => {
+  it("shows the skeleton and never flashes the onboarding hero", () => {
+    // state stays undefined (in flight). Rendering the hero here flashed
+    // onboarding at program holders for a beat, then yanked it away.
+    data.program.isLoading = true;
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).not.toContain("DashboardEarn.overview.startTitle");
+    expect(html).not.toContain("DashboardEarn.overview.startAction");
+    expect(html).toContain("aria-busy");
+  });
+});
+
 describe("EarnWorkspace with no program yet", () => {
   beforeEach(() => {
     data.program.state = { kind: "none" };
   });
 
-  it("renders the positions empty state and deposit entry", () => {
+  it("renders the empty program state and a single deposit entry point", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
-    expect(html).toContain("DashboardEarn.overview.positionsTitle");
-    expect(html).toContain("DashboardEarn.overview.positionsEmpty");
+    expect(html).toContain("DashboardEarn.overview.programTitle");
+    expect(html).toContain("DashboardEarn.overview.programEmpty");
     expect(html).toContain('href="/dashboard/markets/earn/deposit"');
   });
 
-  it("renders one onboarding card per live curator with its start link", () => {
+  it("leads the hero with live catalogue facts rather than curator cards", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
-    for (const [id, label] of [
-      ["steakhouse", "Steakhouse Financial"],
-      ["gauntlet", "Gauntlet"],
-      ["sentora", "Sentora"],
-    ] as const) {
-      expect(html).toContain(label);
-      expect(html).toContain(`href="/dashboard/markets/earn/deposit?curator=${id}"`);
-    }
+    expect(html).toContain("DashboardEarn.overview.startTitle");
+    expect(html).toContain("DashboardEarn.overview.startStatStrategies");
+    expect(html).toContain("DashboardEarn.overview.startStatTopApy");
+    expect(html).toContain("DashboardEarn.overview.startStatAccess");
+    // Three active strategies, best rate 8.4%, and at least one instant source.
+    expect(html).toContain(">3<");
+    expect(html).toContain("8.4%");
+    expect(html).toContain("DashboardEarn.liquidity.instant");
   });
 
-  it("shows the program decision hierarchy: APY lead, fit, risk, liquidity, assets", () => {
+  it("never routes through a curator, the removed first step", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
-    expect(html).toContain("DashboardEarn.overview.indicativeApyRange");
-    expect(html).toContain("DashboardEarn.overview.bestFor");
-    expect(html).toContain("DashboardEarn.overview.riskRange");
-    expect(html).toContain("DashboardEarn.overview.liquidityRange");
-    expect(html).toContain("DashboardEarn.overview.fundingAssets");
-  });
-
-  it("keeps underlying holdings available behind each program drawer", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
-    expect(html).toContain("DashboardEarn.overview.underlyingHoldings");
-    expect(html).toContain("sdp-collapse");
+    expect(html).not.toContain("curator");
+    expect(html).not.toContain("Gauntlet");
   });
 });
 
@@ -154,6 +163,7 @@ describe("EarnWorkspace with an active program", () => {
         provider: "ground",
         label: "Treasury earn",
         createdAt: TIMESTAMP,
+        yield: { currentApy: "0.058", earnedUsd: "1250.75", positions: [] },
         wallet: {
           providerWalletRef: "wallet-ref-1",
           status: "ready",
@@ -181,13 +191,10 @@ describe("EarnWorkspace with an active program", () => {
               yieldSourceId: "morpho-steakhouse-usdc",
               token: "usdc",
             },
-            { kind: "cash", label: "Cash", valueUsd: "5000.00", pct: 4 },
+            { kind: "cash", label: "Cash (USDC)", valueUsd: "5000.00", pct: 4, token: "usdc" },
           ],
           allocations: {
-            usdc: [
-              { yieldSourceId: "morpho-gauntlet-usdc", weightBps: 8000 },
-              { yieldSourceId: "morpho-steakhouse-usdc", weightBps: 2000 },
-            ],
+            usdc: [{ yieldSourceId: "morpho-gauntlet-usdc", weightBps: 10_000 }],
           },
         },
       },
@@ -201,21 +208,52 @@ describe("EarnWorkspace with an active program", () => {
     expect(html).toContain("DashboardEarn.overview.withdrawableBalance");
     expect(html).toContain("$125,000.50");
     expect(html).toContain("$1,250.75");
+    expect(html).toContain("5.8%");
   });
 
-  it("groups yield-source positions by curator and cash separately", () => {
+  it("lists holdings flat and deployed-first, with no curator grouping", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
-    expect(html).toContain("Gauntlet");
-    expect(html).toContain("Steakhouse Financial");
-    expect(html).toContain("DashboardEarn.overview.cashGroupTitle");
-    expect(html).toContain("DashboardEarn.overview.curatorManaged");
+    expect(html).toContain("DashboardEarn.overview.holdingsTitle");
+    const gauntlet = html.indexOf("Morpho Gauntlet USDC");
+    const steakhouse = html.indexOf("Morpho Steakhouse USDC");
+    const cash = html.indexOf("Cash (USDC)");
+    expect(gauntlet).toBeGreaterThan(-1);
+    expect(steakhouse).toBeGreaterThan(gauntlet);
+    // Cash is not deployed, so it sorts last regardless of value.
+    expect(cash).toBeGreaterThan(steakhouse);
   });
 
-  it("offers the portfolio-level withdraw action and hides the curator hero", () => {
+  it("renders the provider's position label verbatim so no chain name is rebuilt", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).toContain("Cash (USDC)");
+  });
+
+  it("explains what each cash slice is waiting for, from the target allocations", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    // The USDC lane targets a yield source, so its cash deploys on rebalance.
+    expect(html).toContain("DashboardEarn.overview.cashDeploys");
+  });
+
+  it("shows a trimmed share only where value sits behind it", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).toContain("DashboardEarn.overview.programShare(80)");
+    expect(html).not.toContain("programShare(80.0)");
+  });
+
+  it("keeps the deposit address one copy away on the dashboard", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).toContain("DashboardEarn.overview.depositAddressLabel");
+    expect(html).toContain("7M6bFd…7F3WcQ");
+  });
+
+  it("offers the two managing verbs and keeps deposit as the address row", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("DashboardEarn.overview.withdraw");
-    expect(html).not.toContain("DashboardEarn.overview.curatorsTitle");
-    expect(html).not.toContain('href="/dashboard/markets/earn/deposit?curator=');
+    expect(html).toContain("DashboardEarn.overview.changeStrategy");
+    // Depositing is the address row, not a wizard — nothing here says deposit
+    // except the row itself.
+    expect(html).toContain("DashboardEarn.overview.depositAddressLabel");
+    expect(html).not.toContain("DashboardEarn.overview.startTitle");
   });
 });
 
@@ -224,11 +262,10 @@ describe("EarnWorkspace when the provider is not configured", () => {
     data.program.state = { kind: "unconfigured" };
   });
 
-  it("renders a quiet notice and keeps the curator hero from the live catalogue", () => {
+  it("renders a quiet notice and keeps the catalogue-backed hero", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("DashboardEarn.overview.providerNotConfigured");
-    expect(html).toContain("DashboardEarn.overview.curatorsTitle");
-    expect(html).toContain("Gauntlet");
+    expect(html).toContain("DashboardEarn.overview.startTitle");
   });
 });
 
