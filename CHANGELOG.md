@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.55.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.54.0...v0.55.0) (2026-08-05)
+
+### Features
+
+* **i18n:** add complete Latin American Spanish (es) UI translation catalogs ([#1047](https://github.com/solana-foundation/solana-developer-platform/pull/1047)) ([704275a](https://github.com/solana-foundation/solana-developer-platform/commit/704275a15fec637c56c19c6dc732e4ae4ff3d3fc))
+* **web:** rework policy audit detail and surface wallet-control actions ([#1115](https://github.com/solana-foundation/solana-developer-platform/pull/1115)) ([c79e58f](https://github.com/solana-foundation/solana-developer-platform/commit/c79e58f75783bcd227520828369c5b9d9f395bbb))
+* **web:** polish recurring payment create flow ([#1111](https://github.com/solana-foundation/solana-developer-platform/pull/1111)) ([64235fa](https://github.com/solana-foundation/solana-developer-platform/commit/64235fa58c6822473b44e3ef13b9521609fce153))
+
+### Bug Fixes
+
+* **web:** align wallet card skeleton button margin and update policy e2e flow ([#1117](https://github.com/solana-foundation/solana-developer-platform/pull/1117)) ([43bf5cb](https://github.com/solana-foundation/solana-developer-platform/commit/43bf5cb5fda2b807e766de243214d835947e1254))
+
 ## [0.54.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.53.0...v0.54.0) (2026-08-04)
 
 ### Features
