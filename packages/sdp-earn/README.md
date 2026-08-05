@@ -53,10 +53,10 @@ Ground's [Portfolio Wallets API](https://docs.groundtech.co/docs/portfolio-walle
 | `apyBps` | `current_apy` decimal string (integer math, `356 → "0.0356"`) |
 | `processingPolicies.redeem` | `liquidity_term`: `instant` when 0, else `delayed` + `redemption_delay_days` (ceil to days) |
 | Yield-source id / name / protocol | `risk_metadata.curator` (known ids → `morpho-<curator>-<token>` convention → protocol fallback) |
-| `allocations[].type` (treasury/CLO vs lending/reserve) | `source_kind`: `rwa` / `defi` (dominant allocation) |
+| `allocations[].type` (observed: `market`, `liquidity`, `loan`, `reserve`, `rwa`, `treasury`) | `source_kind`: `rwa` / `defi` (dominant allocation; `rwa` + `treasury` are the RWA side) |
 | `mode` | only `active` sources are listed; `buy_only` is excluded (would trap funds — ADR 0002 exit-safety) |
 | Portfolio wallet (`POST /v2/wallets`, `GET /v2/wallets/{id}`) | The org's shared program: `earn_provider_wallets.provider_wallet_ref` |
-| Strategy weights | `PUT /v1/earn/program` allocations (percent, 0.1 grid, sum = 100 per token group) → Ground target weights |
+| Strategy weights | `PUT /v1/earn/program` allocations (percent, 0.1 grid, sum = 100 per token group) → Ground target weights. Takes an idempotent `requestId` forwarded on BOTH branches (`POST /v2/wallets` on create, `PATCH /v2/wallets/{id}/strategy` on update) — Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
 | `depositAddresses.solana{,_devnet}` | The program's funding address (only Solana is surfaced) |
 | Deposits / withdrawals / previews | `GET /v1/earn/program/deposits`, `POST /v1/earn/program/withdrawal-preview`, `POST /v1/earn/program/withdrawals` (idempotent `requestId`) |
 

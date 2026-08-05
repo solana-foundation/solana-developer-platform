@@ -146,6 +146,7 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 | Web typecheck fails in `.next/dev/types` | stale generated cache: `rm -rf apps/sdp-web/.next/dev/types` |
 | Dashboard shows empty onboarding, but a program exists in the DB | it is linked to another local org — re-run `db:seed:earn` to move it to the org you sign into |
 | `GET /v1/earn/program` → 404 with the dev API key | that key is the test org's, which has no program by design (§4b) |
+| A key you minted yourself returns `strategies: []` **and** program 404 | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox program, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive Ground's **production** API from a laptop. |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows your org's one wallet (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
 
