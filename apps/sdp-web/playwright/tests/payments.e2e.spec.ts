@@ -102,7 +102,9 @@ test.describe
 
       await app.getByRole("button", { name: "Asset", exact: true }).click();
       await expect(page.getByRole("button", { name: /^SOL(?:\s|$)/ })).toHaveCount(0);
-      await page.getByRole("button", { name: recurringTokenSymbol, exact: true }).click();
+      await page
+        .getByRole("button", { name: new RegExp(`^${recurringTokenSymbol}( Custom)?$`) })
+        .click();
 
       await app.getByLabel("Amount", { exact: true }).fill("7.5");
       await app.getByRole("button", { name: "Billing interval", exact: true }).click();
