@@ -146,7 +146,7 @@ describe("AuditService", () => {
     ).rejects.toBeInstanceOf(AuditPersistenceError);
   });
 
-  it("never advances the external checkpoint when the database commit fails", async () => {
+  it("leaves a fail-closed pending witness when the database commit fails", async () => {
     const { db, checkpoint } = createAuditWriter({ commitFailAt: 1 });
 
     await expect(
@@ -156,11 +156,17 @@ describe("AuditService", () => {
       })
     ).rejects.toBeInstanceOf(AuditPersistenceError);
 
-    expect(checkpoint.compareAndSet).not.toHaveBeenCalled();
-    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBeNull();
+    expect(checkpoint.compareAndSet).toHaveBeenCalledOnce();
+    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBe(
+      JSON.stringify({
+        pending: true,
+        previous: null,
+        next: { sequence: 1, headHash: hashForSequence(1) },
+      })
+    );
   });
 
-  it("repairs one committed-row lag before admitting the next insert", async () => {
+  it("rolls back when the pending witness cannot be established and allows a safe retry", async () => {
     const { db, queryOne, checkpoint } = createAuditWriter();
     const audit = new AuditService(db as never, checkpoint);
     await audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" });
@@ -175,17 +181,21 @@ describe("AuditService", () => {
 
     expect(insertedCalls(queryOne)).toHaveLength(3);
     expect(checkpoint.compareAndSet).toHaveBeenNthCalledWith(
-      3,
+      4,
       AUDIT_LEDGER_CHECKPOINT_KEY,
       JSON.stringify({ sequence: 1, headHash: hashForSequence(1) }),
-      JSON.stringify({ sequence: 2, headHash: hashForSequence(2) })
+      JSON.stringify({
+        pending: true,
+        previous: { sequence: 1, headHash: hashForSequence(1) },
+        next: { sequence: 2, headHash: hashForSequence(2) },
+      })
     );
     await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBe(
-      JSON.stringify({ sequence: 3, headHash: hashForSequence(3) })
+      JSON.stringify({ sequence: 2, headHash: hashForSequence(2) })
     );
   });
 
-  it("never adopts sequence one when the external checkpoint is missing", async () => {
+  it("retries sequence one safely when its pending witness was not established", async () => {
     const { db, queryOne, checkpoint } = createAuditWriter();
     vi.mocked(checkpoint.compareAndSet).mockResolvedValueOnce(false);
     const audit = new AuditService(db as never, checkpoint);
@@ -195,11 +205,13 @@ describe("AuditService", () => {
     ).rejects.toBeInstanceOf(AuditPersistenceError);
     await expect(
       audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
-    ).rejects.toBeInstanceOf(AuditPersistenceError);
+    ).resolves.toBeUndefined();
 
-    expect(insertedCalls(queryOne)).toHaveLength(1);
-    expect(checkpoint.compareAndSet).toHaveBeenCalledTimes(1);
-    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBeNull();
+    expect(insertedCalls(queryOne)).toHaveLength(2);
+    expect(checkpoint.compareAndSet).toHaveBeenCalledTimes(3);
+    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBe(
+      JSON.stringify({ sequence: 1, headHash: hashForSequence(1) })
+    );
   });
 
   it("fails closed instead of repairing a checkpoint more than one row behind", async () => {
