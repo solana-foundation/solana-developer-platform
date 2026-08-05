@@ -929,6 +929,38 @@ describe("GroundEarnClient.getPortfolioWithdrawal", () => {
   });
 });
 
+describe("GroundEarnClient Solana routability guard", () => {
+  it("refuses a USDT withdrawal preview before any network call", async () => {
+    const fetchMock = stubGroundFetch({ body: {} });
+
+    await assert.rejects(
+      client.previewPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        amountUsd: "1",
+        token: "usdt",
+      }),
+      earnError("BAD_REQUEST", /USDC only/)
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  it("refuses a USDT withdrawal create before any network call", async () => {
+    const fetchMock = stubGroundFetch({ body: {} });
+
+    await assert.rejects(
+      client.createPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        requestId: "44444444-4444-4444-8444-444444444444",
+        amountUsd: "1",
+        token: "usdt",
+        destinationAddress: "DestAddr1111111111111111111111111111111111",
+      }),
+      earnError("BAD_REQUEST", /USDC only/)
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+});
+
 describe("GroundEarnClient withdrawal approval parking", () => {
   it("folds a pending_customer_approval payout leg into pending_approval", async () => {
     stubGroundFetch({

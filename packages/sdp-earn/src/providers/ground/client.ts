@@ -70,11 +70,27 @@ const GROUND_SOLANA_CHAINS = { sandbox: "solana_devnet", production: "solana" } 
  * withdrawals only"; USDT rides Ethereum — mainnet in production, Sepolia in
  * sandbox). A source outside this set can never be funded from or paid out to
  * the Solana addresses SDP surfaces, so `listStrategies` keeps it out of the
- * catalogue on every cluster, and the dashboard's withdraw-token whitelist
+ * catalogue on every cluster, withdrawal preview/create refuse it before any
+ * network call (`assertSolanaRoutable` — Ground's own rejection is wire text
+ * partners can't act on), and the dashboard's withdraw-token whitelist
  * mirrors this set (apps/sdp-web/src/app/dashboard/markets/earn/
  * earn-withdraw-modal.tsx, `SOLANA_PAYOUT_TOKENS`).
  */
 const GROUND_SOLANA_ROUTED_TOKENS: ReadonlySet<string> = new Set(["usdc"]);
+
+/**
+ * Fail fast on a token Ground cannot route on Solana rails. Gates on a static
+ * provider constraint only — never availability or enablement — so it cannot
+ * trap funds a withdrawal could otherwise move (ADR 0002): Ground itself
+ * refuses these requests, just with provider wire text.
+ */
+function assertSolanaRoutable(token: EarnPortfolioToken): void {
+  if (!GROUND_SOLANA_ROUTED_TOKENS.has(token)) {
+    throw badRequest(
+      `Ground cannot pay out ${token.toUpperCase()} on Solana — Solana rails carry USDC only`
+    );
+  }
+}
 
 interface GroundConfig {
   baseUrl: string;
@@ -773,6 +789,7 @@ export class GroundEarnClient
     ctx: EarnRuntimeContext,
     input: EarnPortfolioWithdrawalPreviewInput
   ): Promise<EarnPortfolioWithdrawalPreview> {
+    assertSolanaRoutable(input.token);
     const config = readGroundConfig(ctx);
     const preview = await providerFetchJson<
       GroundWithdrawalPreview,
@@ -799,6 +816,7 @@ export class GroundEarnClient
     ctx: EarnRuntimeContext,
     input: EarnPortfolioWithdrawalCreateInput
   ): Promise<EarnPortfolioWithdrawal> {
+    assertSolanaRoutable(input.token);
     const config = readGroundConfig(ctx);
     const withdrawal = await providerFetchJson<
       GroundWithdrawal,

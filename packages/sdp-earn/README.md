@@ -127,8 +127,9 @@ leave a total its positions don't sum to.
 Ground never converts between USDC and USDT. USDC may bridge **within CCTP
 domains**; USDT stays on Ethereum. That is why USDT sources never enter SDP's
 catalogue at all — `GROUND_SOLANA_ROUTED_TOKENS` (client.ts) pins Ground's
-Solana rails to USDC, so an un-routable source is excluded on every cluster —
-and why `bridge` is a first-class position kind. SDP's product surface stays
+Solana rails to USDC, so an un-routable source is excluded on every cluster
+and withdrawal preview/create refuse un-routable tokens before any network
+call — and why `bridge` is a first-class position kind. SDP's product surface stays
 Solana-only — the other chains are provider plumbing.
 
 Ground confirmed (2026-08-05) that **sandbox supports both `ethereum_sepolia`
