@@ -318,7 +318,11 @@ export async function initializeOnboardingCustodyAction(
   const t = await getTranslations();
   try {
     const wallet = await initializeCustodyWallet(formData);
-    revalidateWalletPaths();
+    // No revalidation here: any revalidatePath from this action invalidates the
+    // client router cache and re-runs the onboarding route, whose server page
+    // redirects once setup is complete, sweeping the completion panel away
+    // after a beat. The panel exits through full document navigations, which
+    // fetch fresh state without any help.
     return {
       status: "success",
       wallet: wallet ? { publicKey: wallet.publicKey, walletId: wallet.walletId } : null,
