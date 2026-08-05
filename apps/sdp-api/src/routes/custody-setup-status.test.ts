@@ -250,14 +250,90 @@ describe("custody setup status", () => {
     expect(JSON.stringify(privy)).not.toContain("ccon_setup_status_pending");
   });
 
-  it("puts an active connection ahead of a legacy config", async () => {
+  it("keeps reporting the config while signing still resolves through it", async () => {
     await seedLegacyConfig("privy", "cust_cfg_setup_status_both");
     await seedCredential();
     await seedConnection("ccon_setup_status_active", "active");
 
     const privy = statusFor(await fetchSetupStatus(), "privy");
     expect(privy?.hasLegacyConfig).toBe(true);
-    expect(privy?.effectiveTargetType).toBe("connection");
+    expect(privy?.connectionCounts.active).toBe(1);
+    // Signing never resolves through a connection today, so calling one the
+    // effective target would report a migration that has not happened.
+    expect(privy?.effectiveTargetType).toBe("config");
+  });
+
+  it("does not call a connection the signing target while nothing signs through it", async () => {
+    await seedCredential();
+    await seedConnection("ccon_setup_status_only", "active");
+
+    const privy = statusFor(await fetchSetupStatus(), "privy");
+    expect(privy?.connectionCounts.active).toBe(1);
+    expect(privy?.hasLegacyConfig).toBe(false);
+    expect(privy?.effectiveTargetType).toBe("none");
+  });
+
+  it("counts an inherited organization config as installed for a project", async () => {
+    // Signing falls back to the organization scope when a project has no config
+    // of its own, so the project is installed even though it owns no row.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        "cust_cfg_setup_status_org_scope",
+        TEST_ORG.id,
+        null,
+        "privy",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "active"
+      )
+      .run();
+
+    const privy = statusFor(await fetchSetupStatus(), "privy");
+    expect(privy?.hasLegacyConfig).toBe(true);
+    expect(privy?.effectiveTargetType).toBe("config");
+  });
+
+  it("does not count another project's config as inherited", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        "prj_setup_status_sibling",
+        TEST_ORG.id,
+        "Sibling",
+        "sibling-setup-status",
+        "sandbox",
+        "active",
+        TEST_USER.id
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        "cust_cfg_setup_status_sibling",
+        TEST_ORG.id,
+        "prj_setup_status_sibling",
+        "privy",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "active"
+      )
+      .run();
+
+    const privy = statusFor(await fetchSetupStatus(), "privy");
+    expect(privy?.hasLegacyConfig).toBe(false);
+    expect(privy?.effectiveTargetType).toBe("none");
   });
 
   it("creates nothing while reading", async () => {

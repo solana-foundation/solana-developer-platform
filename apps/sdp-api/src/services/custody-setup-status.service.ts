@@ -34,15 +34,17 @@ function isKnownProvider(value: string): value is CustodyProvider {
   return (CUSTODY_PROVIDERS as readonly string[]).includes(value);
 }
 
-function resolveTargetType(input: {
-  hasActiveConnection: boolean;
-  hasLegacyConfig: boolean;
-}): CustodyEffectiveTargetType {
-  // A Connection is the newer target and wins when both exist, which is the
-  // state a migrated provider passes through.
-  if (input.hasActiveConnection) {
-    return "connection";
-  }
+/**
+ * What actually backs signing right now — not what has been set up.
+ *
+ * An active Connection deliberately does NOT make this `connection`: signing
+ * resolves exclusively through custody configs today (`signing.service.ts` never
+ * reads `custody_connections`), so reporting a Connection as the signing target
+ * would describe a runtime that does not exist and show a migration that has not
+ * happened. `connection` becomes reachable when Connection-backed signing lands.
+ * Callers that need to see Connections have `connectionCounts`.
+ */
+function resolveTargetType(input: { hasLegacyConfig: boolean }): CustodyEffectiveTargetType {
   return input.hasLegacyConfig ? "config" : "none";
 }
 
@@ -59,9 +61,19 @@ export async function getCustodySetupStatus(
   organizationId: string,
   projectId: string | undefined
 ): Promise<CustodySetupStatusResponse> {
-  // Branch the predicate rather than comparing a bare placeholder to NULL:
+  // Branch the predicates rather than comparing a bare placeholder to NULL:
   // Postgres cannot infer a type for `? IS NULL` and rejects the statement.
-  const projectPredicate = projectId ? "AND project_id = ?" : "AND project_id IS NULL";
+  //
+  // Configs and Connections resolve differently on purpose. Config lookup falls
+  // back to the organization scope when a project has none of its own
+  // (`signing.service.ts` getScopeAndFallbackConfigs, `custody-config.store.ts`
+  // findActive), so a project signing through an inherited config must not be
+  // reported as uninstalled — that would invite a second install. Connections
+  // carry no such fallback and stay strictly in scope.
+  const configPredicate = projectId
+    ? "AND (project_id = ? OR project_id IS NULL)"
+    : "AND project_id IS NULL";
+  const connectionPredicate = projectId ? "AND project_id = ?" : "AND project_id IS NULL";
   const scopeParams = projectId ? [organizationId, projectId] : [organizationId];
 
   const [connectionRows, configRows] = await Promise.all([
@@ -69,7 +81,7 @@ export async function getCustodySetupStatus(
       `SELECT provider, status, COUNT(*) AS total
          FROM custody_connections
         WHERE organization_id = ?
-          ${projectPredicate}
+          ${connectionPredicate}
         GROUP BY provider, status`,
       scopeParams
     ),
@@ -77,7 +89,7 @@ export async function getCustodySetupStatus(
       `SELECT DISTINCT provider
          FROM custody_configs
         WHERE organization_id = ?
-          ${projectPredicate}
+          ${configPredicate}
           AND status = 'active'`,
       scopeParams
     ),
@@ -102,10 +114,7 @@ export async function getCustodySetupStatus(
     return {
       provider,
       hasLegacyConfig,
-      effectiveTargetType: resolveTargetType({
-        hasActiveConnection: connectionCounts.active > 0,
-        hasLegacyConfig,
-      }),
+      effectiveTargetType: resolveTargetType({ hasLegacyConfig }),
       connectionCounts,
     };
   });
