@@ -18,6 +18,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "DELETE /",
       "GET /config",
       "GET /configs",
+      "GET /setup-status",
       "GET /switch-options",
       "POST /",
       "POST /default-wallet",
