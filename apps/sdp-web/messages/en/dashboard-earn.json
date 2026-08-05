@@ -47,9 +47,11 @@
       "title": "Withdraw",
       "description": "Funds leave the shared portfolio and settle to a Solana address you control.",
       "amountLabel": "Amount",
-      "available": "{amount} withdrawable",
+      "available": "{amount} withdrawable as {token}",
       "useMax": "Max",
       "tokenLabel": "Stablecoin",
+      "tokenOption": "{token} — {amount}",
+      "tokenOptionNoPayout": "{token} — {amount} · no Solana payout",
       "destinationLabel": "Destination address",
       "destinationPlaceholder": "Solana address",
       "previewTitle": "Withdrawal preview",
@@ -68,13 +70,13 @@
       "statusCancelled": "Cancelled",
       "done": "Done",
       "errorAmountRequired": "Enter an amount greater than zero.",
-      "errorExceedsWithdrawable": "Amount exceeds the withdrawable balance.",
+      "errorExceedsWithdrawable": "Amount exceeds the withdrawable {token} balance.",
       "errorDestinationInvalid": "Enter a valid Solana address.",
       "cancel": "Cancel",
       "confirm": "Confirm withdrawal",
       "confirming": "Confirming…",
       "previewInsufficient": "The provider can't fill this {token} withdrawal — the withdrawable balance may sit in the other stablecoin. Try a smaller amount or switch stablecoin.",
-      "previewNoSolanaPayout": "{token} doesn't pay out on Solana — the provider settles {token} withdrawals on other rails only. Withdraw USDC instead."
+      "previewNoSolanaPayout": "{token} doesn't pay out on Solana — the provider settles {token} withdrawals on Ethereum only. Withdraw USDC instead."
     },
     "deposit": {
       "progressWallet": "Wallet",

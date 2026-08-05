@@ -32,13 +32,22 @@ reintroduce fixture modules. Data flows: BFF proxies
 - `earn-program-presentation.ts` — pure per-strategy helpers shared by every
   surface: token lane, settlement days, pool size, APY, curator/protocol labels,
   liquidity copy. Every one reads a field the provider actually publishes.
-- `earn-withdraw-modal.tsx` — portfolio-level withdrawal: amount + token +
-  Solana destination; preview → confirm → submitted state. The stablecoin
-  defaults to the token with funds behind it (from token-bearing positions),
-  because `withdrawableUsd` is wallet-level while Ground fills per lane. Preview
-  failures render TRANSLATED copy naming the per-lane reality — never the
-  provider's wire text ("ground request failed with status 409" explains
-  nothing).
+- `earn-withdraw-modal.tsx` — portfolio-level withdrawal: stablecoin FIRST
+  (it scopes everything below), then amount + Solana destination; preview →
+  confirm → submitted state. The token always defaults to USDC — the one
+  stablecoin Ground pays out on Solana. Every figure the modal quotes
+  (available line, Max, amount validation, per-option amounts) is scoped to the
+  SELECTED token via `withdrawLanes()` in `earn-program-presentation.ts`,
+  because `withdrawableUsd` is wallet-level while Ground fills per lane —
+  quoting the wallet figure let Max fill an amount the lane could never pay.
+  Lane-unresolved value widens every lane's ceiling (never narrows), so an
+  incomplete catalogue join degrades to the wallet-level figure; the preview
+  stays the authority. A token Ground never routes to Solana (USDT: Ethereum
+  only, per their supported-chains doc — sandbox USDT is Ground's mock Sepolia
+  asset) is blocked AT SELECTION: inline notice, amount disabled, no preview
+  round-trip. Preview failures render TRANSLATED copy naming the per-lane
+  reality — never the provider's wire text ("ground request failed with status
+  409" explains nothing).
 - `deposit/` — the deposit flow: funding wallet → profile → filtered strategy
   browse → review, then post-confirm outcome screens. See "The deposit flow".
 - `earn-format.ts` — formatting utilities (APY, USD, token symbols).
