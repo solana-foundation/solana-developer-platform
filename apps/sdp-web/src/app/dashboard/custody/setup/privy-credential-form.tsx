@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useState, useTransition } from "react";
+import { type FormEvent, useRef, useState, useTransition } from "react";
 import {
   type PrivyByokSubmitResult,
   recheckPrivyCredentialAction,
@@ -16,7 +16,11 @@ import { useDashboardRouter } from "@/lib/use-dashboard-router";
 type CheckState =
   | { kind: "idle" }
   | { kind: "failed"; message: string }
-  | { kind: "retry_unknown"; providerCredentialId: string };
+  | { kind: "retry_unknown"; providerCredentialId: string }
+  // The POST may have committed server-side. The exact payload is frozen so a
+  // retry replays it verbatim under the same key; editing anything would make
+  // the same key carry a different fingerprint and conflict forever.
+  | { kind: "submit_unknown"; message: string; payload: FormData };
 
 const FIELD_INPUT_CLASS =
   "h-12 rounded-2xl border-border-default bg-surface-raised px-4 shadow-none";
@@ -39,6 +43,7 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
   const [appSecret, setAppSecret] = useState("");
+  const lastPayloadRef = useRef(new FormData());
 
   const privyFields = getCustodyProviderEntry("privy").storedCredentialSetup;
   if (privyFields.mode !== "self_service") {
@@ -68,9 +73,8 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
       return;
     }
     // Transport-level uncertainty: the submission may have committed, so the
-    // key is kept — resubmitting with the same key replays instead of
-    // colliding with a connection the server already created.
-    setCheck({ kind: "failed", message: result.message });
+    // key is kept and the payload is frozen for a verbatim replay.
+    setCheck({ kind: "submit_unknown", message: result.message, payload: lastPayloadRef.current });
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -81,9 +85,25 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
     }
     const formData = new FormData(form);
     formData.set("idempotencyKey", idempotencyKey);
+    lastPayloadRef.current = formData;
     startTransition(async () => {
       applyResult(await submitPrivyCredentialAction(formData));
     });
+  };
+
+  const handleReplay = (payload: FormData) => {
+    if (isPending) {
+      return;
+    }
+    startTransition(async () => {
+      applyResult(await submitPrivyCredentialAction(payload));
+    });
+  };
+
+  const handleStartOver = () => {
+    setIdempotencyKey(crypto.randomUUID());
+    setAppSecret("");
+    setCheck({ kind: "idle" });
   };
 
   const handleRecheck = (providerCredentialId: string) => {
@@ -94,6 +114,24 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
       applyResult(await recheckPrivyCredentialAction(providerCredentialId));
     });
   };
+
+  if (check.kind === "submit_unknown") {
+    return (
+      <div className="grid gap-4" data-privy-byok-submit-retry="true">
+        <p className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary">
+          {t("DashboardCustody.byokRetryUnknown")}
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <Button type="button" onClick={() => handleReplay(check.payload)} disabled={isPending}>
+            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokRetrySubmit")}
+          </Button>
+          <Button type="button" variant="secondary" onClick={handleStartOver} disabled={isPending}>
+            {t("DashboardCustody.byokStartOver")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (check.kind === "retry_unknown") {
     return (

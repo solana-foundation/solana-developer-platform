@@ -795,6 +795,8 @@
     "byokMissingFields": "Fill in every required credential field.",
     "byokSubmitFailed": "Storing the credential failed. Try again.",
     "providerStatusComingLater": "Coming later",
-    "providerRequestAccess": "Request access"
+    "providerRequestAccess": "Request access",
+    "byokRetrySubmit": "Retry submission",
+    "byokStartOver": "Start over"
   }
 }
