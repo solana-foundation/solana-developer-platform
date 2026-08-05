@@ -17,7 +17,6 @@ import {
   getConfig,
   getConfigs,
   getPublicKey,
-  getSetupStatus,
   getSwitchProviderOptions,
   getWalletAggregate,
   getWalletById,
@@ -49,8 +48,6 @@ wallets.post("/signer-check", requirePermissions("wallets:write"), signerCheck);
 // Read configuration and wallets
 wallets.get("/config", requirePermissions("wallets:read"), getConfig);
 wallets.get("/configs", requirePermissions("wallets:read"), getConfigs);
-// Registered before "/:walletId" so the literal path is not captured as an id.
-wallets.get("/setup-status", requirePermissions("wallets:read"), getSetupStatus);
 wallets.get("/", requirePermissions("wallets:read"), listWallets);
 wallets.get("/aggregate", requirePermissions("wallets:read"), getWalletAggregate);
 wallets.get("/public-key", requirePermissions("wallets:read"), getPublicKey);

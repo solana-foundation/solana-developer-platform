@@ -1,16 +1,21 @@
-import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, CustodySetupStatusResponse } from "@sdp/types";
+import type { CustodySetupStatusResponse } from "@sdp/types";
+import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import app from "@/index";
+import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import { AppError } from "@/lib/errors";
+import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
+import internalCustody from "./index";
 
 const TEST_ORG = {
   id: "org_custody_setup_status",
   name: "Custody Setup Status Org",
   slug: "custody-setup-status-org",
+  clerkId: "clerk_org_custody_setup_status",
 };
 
 const TEST_PROJECT = {
@@ -21,73 +26,90 @@ const TEST_PROJECT = {
 const TEST_USER = {
   id: "usr_custody_setup_status",
   email: "custody-setup-status@example.com",
-};
-
-const TEST_API_KEY = {
-  id: "key_custody_setup_status",
-  raw: "sk_test_custody_setup_status",
-  prefix: "sk_test_css",
-};
-
-const TEST_CACHED_API_KEY: CachedApiKey = {
-  id: TEST_API_KEY.id,
-  organizationId: TEST_ORG.id,
-  projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
-  environment: "sandbox",
-  rateLimitTier: "standard",
-  allowedIps: null,
-  signingWalletId: null,
-  status: "active",
-  expiresAt: null,
+  clerkId: "clerk_custody_setup_status",
 };
 
 const CREDENTIAL_ID = "pcred_setup_status_privy";
 
-async function seedBaseline(): Promise<void> {
-  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+function encodeJwtPart(value: Record<string, unknown>): string {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
 
-  await getDb(env).batch([
-    getDb(env)
+function createJwt(payload: ClerkJwtPayload): string {
+  return `${encodeJwtPart({ alg: "RS256", typ: "JWT" })}.${encodeJwtPart(payload)}.signature`;
+}
+
+function buildApp(options: { injectJwt?: boolean } = {}) {
+  const payload: ClerkJwtPayload = {
+    sub: TEST_USER.clerkId,
+    org_id: TEST_ORG.clerkId,
+    org_role: "org:admin",
+    email: TEST_USER.email,
+  };
+  const token = createJwt(payload);
+  const app = new Hono<{ Bindings: Env }>();
+
+  app.use("*", kvStoreMiddleware());
+  app.use("*", async (c, next) => {
+    if (options.injectJwt !== false) {
+      c.set("verifiedClerkJwt", { token, payload });
+    }
+    c.set("requestId", "req_custody_setup_status");
+    await next();
+  });
+  app.route("/internal/dashboard/custody", internalCustody);
+  app.onError((error, c) => {
+    if (error instanceof AppError) {
+      return c.json(
+        { error: error.toResponse().error, meta: { requestId: c.get("requestId") } },
+        error.statusCode as 400
+      );
+    }
+    throw error;
+  });
+
+  return { app, token };
+}
+
+async function seedBaseline(): Promise<void> {
+  const db = getDb(env);
+  await db.batch([
+    db
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
-    getDb(env)
+    db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
+    db
+      .prepare(
+        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+         VALUES (?, 'clerk', ?, ?, ?)`
+      )
+      .bind("aui_custody_setup_status", TEST_USER.clerkId, TEST_USER.id, TEST_USER.email),
+    db
+      .prepare(
+        `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+         VALUES (?, 'clerk', ?, ?, ?)`
+      )
+      .bind("aoi_custody_setup_status", TEST_ORG.clerkId, TEST_ORG.id, TEST_ORG.slug),
+    db
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES (?, ?, ?, 'admin', 'active')`
+      )
+      .bind("mem_custody_setup_status", TEST_ORG.id, TEST_USER.id),
+    db
       .prepare(
         `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
       )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Setup Status Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
-    getDb(env)
+      .bind(TEST_PROJECT.id, TEST_ORG.id, "Setup Status Project", TEST_PROJECT.slug, TEST_USER.id),
+    db
       .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO project_members (id, project_id, user_id, role)
+         VALUES (?, ?, ?, 'admin')`
       )
-      .bind(
-        TEST_API_KEY.id,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        TEST_USER.id,
-        "Setup Status Test Key",
-        TEST_API_KEY.prefix,
-        keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
-        "active"
-      ),
+      .bind("pm_custody_setup_status", TEST_PROJECT.id, TEST_USER.id),
   ]);
 }
 
@@ -158,9 +180,15 @@ async function seedConnection(id: string, status: string): Promise<void> {
 }
 
 async function fetchSetupStatus(): Promise<CustodySetupStatusResponse> {
+  const { app, token } = buildApp();
   const response = await app.request(
-    "/v1/wallets/setup-status",
-    { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+    "/internal/dashboard/custody/providers",
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Project-ID": TEST_PROJECT.id,
+      },
+    },
     env
   );
   expect(response.status).toBe(200);
@@ -172,7 +200,7 @@ function statusFor(response: CustodySetupStatusResponse, provider: string) {
   return response.providers.find((entry) => entry.provider === provider);
 }
 
-describe("custody setup status", () => {
+describe("internal custody providers", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await seedBaseline();
@@ -181,6 +209,16 @@ describe("custody setup status", () => {
   afterEach(async () => {
     await clearTestDatabase(env);
     await clearKVStores(env);
+  });
+
+  it("refuses a caller with no dashboard session", async () => {
+    const { app } = buildApp({ injectJwt: false });
+    const response = await app.request(
+      "/internal/dashboard/custody/providers",
+      { headers: { "X-Project-ID": TEST_PROJECT.id } },
+      env
+    );
+    expect(response.status).toBeGreaterThanOrEqual(401);
   });
 
   it("reports a provider with no rows as installable rather than installed", async () => {
