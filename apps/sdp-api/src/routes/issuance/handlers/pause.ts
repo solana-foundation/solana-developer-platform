@@ -96,7 +96,7 @@ export const pauseToken = async (c: AppContext) => {
       action: "pause",
     });
     if (transaction.status === "confirmed") {
-      await tokenService.updateToken(tokenId, { status: "paused" });
+      await tokenService.applySettledTokenStatus(tx.id, tokenId, "paused");
     }
     return success(c, { transaction });
   }
@@ -148,7 +148,7 @@ export const pauseToken = async (c: AppContext) => {
       signature: result.signature,
       slot: Number(result.slot),
     });
-    await tokenService.updateToken(tokenId, { status: "paused" });
+    await tokenService.applySettledTokenStatus(tx.id, tokenId, "paused");
 
     return success(c, { transaction: confirmedTx });
   } catch (error) {
@@ -240,7 +240,7 @@ export const unpauseToken = async (c: AppContext) => {
       action: "unpause",
     });
     if (transaction.status === "confirmed") {
-      await tokenService.updateToken(tokenId, { status: "active" });
+      await tokenService.applySettledTokenStatus(tx.id, tokenId, "active");
     }
     return success(c, { transaction });
   }
@@ -292,7 +292,7 @@ export const unpauseToken = async (c: AppContext) => {
       signature: result.signature,
       slot: Number(result.slot),
     });
-    await tokenService.updateToken(tokenId, { status: "active" });
+    await tokenService.applySettledTokenStatus(tx.id, tokenId, "active");
 
     return success(c, { transaction: confirmedTx });
   } catch (error) {

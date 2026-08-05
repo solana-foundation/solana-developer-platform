@@ -7,15 +7,17 @@ import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditService } from "./audit.service";
 
 class MemoryCheckpointStore implements KVStore {
   private value: string | null = null;
-  private rejectNextAdvance = false;
+  private compareAndSetCalls = 0;
+  private rejectAtCall: number | null = null;
 
   reset() {
     this.value = null;
-    this.rejectNextAdvance = false;
+    this.compareAndSetCalls = 0;
+    this.rejectAtCall = null;
   }
 
-  rejectNextCompareAndSet() {
-    this.rejectNextAdvance = true;
+  rejectCompareAndSetAfter(offset = 1) {
+    this.rejectAtCall = this.compareAndSetCalls + offset;
   }
 
   get(_key: string): Promise<string | null>;
@@ -34,8 +36,9 @@ class MemoryCheckpointStore implements KVStore {
   }
 
   async compareAndSet(_key: string, expected: string | null, value: string): Promise<boolean> {
-    if (this.rejectNextAdvance) {
-      this.rejectNextAdvance = false;
+    this.compareAndSetCalls += 1;
+    if (this.compareAndSetCalls === this.rejectAtCall) {
+      this.rejectAtCall = null;
       return false;
     }
     if (this.value !== expected) return false;
@@ -103,13 +106,15 @@ describe("tamper-evident audit ledger", () => {
     expect(rows.slice(1).every((row) => row.previous_entry_hash !== null)).toBe(true);
   });
 
-  it("repairs an exact post-commit checkpoint lag before the next write", async () => {
+  it("preserves a pending witness and locks writes after checkpoint promotion fails", async () => {
     await audit.logSystem({
       action: "maintenance",
       resourceType: "audit_ledger",
       resourceId: "checkpointed_predecessor",
     });
-    checkpoint.rejectNextCompareAndSet();
+    // Establishing the pending witness succeeds, but its post-commit promotion
+    // fails. The durable pending value must remain evidence of the new row.
+    checkpoint.rejectCompareAndSetAfter(2);
     await expect(
       audit.logSystem({
         action: "maintenance",
@@ -118,40 +123,91 @@ describe("tamper-evident audit ledger", () => {
       })
     ).rejects.toMatchObject({ name: "AuditPersistenceError" });
 
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: false,
+      checkedEntries: 2,
+      externalCheckpointMatches: false,
+    });
     await expect(
       audit.logSystem({
         action: "maintenance",
         resourceType: "audit_ledger",
-        resourceId: "write_after_lag_recovery",
+        resourceId: "write_while_witness_pending",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+  });
+
+  it("rolls back the audit row when its pending witness cannot be established", async () => {
+    checkpoint.rejectCompareAndSetAfter();
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "unwitnessed_first_row",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+
+    expect(
+      await db.queryOne<{ count: number }>("SELECT count(*)::integer AS count FROM audit_logs")
+    ).toMatchObject({ count: 0 });
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "safe_retry",
       })
     ).resolves.toBeUndefined();
     await expect(audit.verifyIntegrity()).resolves.toMatchObject({
       valid: true,
-      checkedEntries: 3,
+      checkedEntries: 1,
       externalCheckpointMatches: true,
     });
-  });
-
-  it("does not recreate a missing checkpoint from sequence one", async () => {
-    checkpoint.rejectNextCompareAndSet();
-    await expect(
-      audit.logSystem({
-        action: "maintenance",
-        resourceType: "audit_ledger",
-        resourceId: "unanchored_first_row",
-      })
-    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
-
-    await expect(
-      audit.logSystem({
-        action: "maintenance",
-        resourceType: "audit_ledger",
-        resourceId: "must_not_adopt_first_row",
-      })
-    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
     expect(
       await db.queryOne<{ count: number }>("SELECT count(*)::integer AS count FROM audit_logs")
     ).toMatchObject({ count: 1 });
+  });
+
+  it("detects tail deletion during the commit-to-checkpoint-promotion window", async () => {
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "retained_prefix",
+    });
+    checkpoint.rejectCompareAndSetAfter(2);
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "committed_with_pending_witness",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+
+    try {
+      await db.execute("ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation");
+      await db.execute(
+        "ALTER TABLE audit_ledger_anchors DISABLE TRIGGER audit_ledger_anchors_reject_row_mutation"
+      );
+      await db.execute("DELETE FROM audit_ledger_anchors WHERE ledger_sequence = 2");
+      await db.execute("DELETE FROM audit_logs WHERE ledger_sequence = 2");
+    } finally {
+      await db.execute("ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation");
+      await db.execute(
+        "ALTER TABLE audit_ledger_anchors ENABLE TRIGGER audit_ledger_anchors_reject_row_mutation"
+      );
+    }
+
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: false,
+      checkedEntries: 1,
+      externalCheckpointMatches: false,
+    });
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "write_after_tail_deletion",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
   });
 
   it("blocks update and delete, including for records past retention review", async () => {

@@ -1416,6 +1416,58 @@ export class TokenService {
     });
   }
 
+  /** Atomically mirror a settled pause/unpause exactly once. */
+  async applySettledTokenStatus(
+    transactionId: string,
+    tokenId: string,
+    status: "active" | "paused"
+  ): Promise<void> {
+    const tokenScope = this.tenantTokenScope("t");
+    await this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.type, it.status, it.lifecycle_bookkeeping_applied_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(transactionId, tokenId, ...tokenScope.values)
+        .first<{
+          type: string;
+          status: string;
+          lifecycle_bookkeeping_applied_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+      const expectedType = status === "paused" ? "pause" : "unpause";
+      if (row.type !== expectedType || row.status !== "confirmed") {
+        throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+      }
+      if (row.lifecycle_bookkeeping_applied_at !== null) return;
+
+      const now = new Date().toISOString();
+      const tokenMutation = this.tenantMutationScope();
+      const updatedToken = await tx
+        .prepare(
+          `UPDATE issued_tokens SET status = ?, updated_at = ?
+           WHERE id = ?${tokenMutation.clause}`
+        )
+        .bind(status, now, tokenId, ...tokenMutation.values)
+        .run();
+      if (updatedToken !== 1) throw new Error("TOKEN_NOT_FOUND");
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET lifecycle_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND lifecycle_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, transactionId, tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_MARKER_CONFLICT");
+    });
+  }
+
   /**
    * Move the cached supply by a base-unit delta, in one statement.
    *

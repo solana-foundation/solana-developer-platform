@@ -542,6 +542,36 @@ describe("TokenService", () => {
       ).toMatchObject({ supply_bookkeeping_applied_at: expect.any(String) });
     });
 
+    it("does not replay an already-applied pause over a newer token state", async () => {
+      const tokenId = "tok_historical_pause";
+      const transactionId = "ttx_historical_pause";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params,
+             lifecycle_bookkeeping_applied_at, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'pause', 'confirmed', '{}', ?, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          "2026-08-05T00:00:00.000Z",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      await tokenService.applySettledTokenStatus(transactionId, tokenId, "paused");
+
+      expect(
+        await db
+          .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ status: string }>()
+      ).toMatchObject({ status: "active" });
+    });
+
     it("refuses a cap that a mint outran between the check and the write", async () => {
       await insertCappedToken("tok_cap_lost_race", "500000000", "1000000000");
       const originalPrepare = db.prepare.bind(db);

@@ -150,6 +150,7 @@ function parseCheckpoint(value: string | null): AuditLedgerCheckpoint {
   try {
     const parsed = JSON.parse(value) as Partial<AuditLedgerCheckpoint>;
     if (
+      !("pending" in parsed) &&
       Number.isSafeInteger(parsed.sequence) &&
       Number(parsed.sequence) > 0 &&
       typeof parsed.headHash === "string" &&
@@ -163,24 +164,21 @@ function parseCheckpoint(value: string | null): AuditLedgerCheckpoint {
   return { sequence: -1, headHash: "" };
 }
 
+function serializePendingCheckpoint(
+  previousCheckpoint: string | null,
+  nextCheckpoint: string
+): string {
+  return JSON.stringify({
+    pending: true,
+    previous: previousCheckpoint ? JSON.parse(previousCheckpoint) : null,
+    next: JSON.parse(nextCheckpoint),
+  });
+}
+
 function checkpointForHead(head: AuditLedgerHead | null): string | null {
   return head
     ? serializeCheckpoint({ sequence: head.ledger_sequence, headHash: head.entry_hash })
     : null;
-}
-
-function previousCheckpointForHead(head: AuditLedgerHead): string | null | undefined {
-  // A missing external checkpoint is ambiguous for a non-empty ledger: it can
-  // mean either a first-row post-commit crash or deletion of Redis plus every
-  // PostgreSQL suffix after sequence one. Runtime code must never establish
-  // trust from PostgreSQL alone; first-time bootstrap is an explicit operator
-  // action with a separately approved head.
-  if (head.ledger_sequence === 1) return undefined;
-  if (!head.previous_entry_hash) return undefined;
-  return serializeCheckpoint({
-    sequence: head.ledger_sequence - 1,
-    headHash: head.previous_entry_hash,
-  });
 }
 
 function assertValidCurrentHead(head: AuditLedgerHead | null): void {
@@ -210,33 +208,7 @@ async function reconcileExternalCheckpoint(
   const expectedCheckpoint = checkpointForHead(head);
   const externalCheckpoint = await checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY);
   if (externalCheckpoint === expectedCheckpoint) return expectedCheckpoint;
-
-  // PostgreSQL necessarily commits before the independent Redis CAS. A crash
-  // in that narrow interval leaves exactly one sealed row ahead of Redis.
-  // Advance only when Redis names that row's immediate predecessor and the
-  // current row's seal and anchor validated above. Wider, malformed, advanced,
-  // or forked divergence remains fail-closed as suffix deletion/tampering.
-  if (!head) {
-    throw new Error("External audit-ledger checkpoint diverged; writes are locked");
-  }
-  const previousCheckpoint = previousCheckpointForHead(head);
-  if (previousCheckpoint === undefined || externalCheckpoint !== previousCheckpoint) {
-    throw new Error("External audit-ledger checkpoint diverged; writes are locked");
-  }
-  const currentCheckpoint = serializeCheckpoint({
-    sequence: head.ledger_sequence,
-    headHash: head.entry_hash,
-  });
-
-  const repaired = await checkpointStore.compareAndSet(
-    AUDIT_LEDGER_CHECKPOINT_KEY,
-    previousCheckpoint,
-    currentCheckpoint
-  );
-  if (!repaired) {
-    throw new Error("External audit-ledger checkpoint changed during lag recovery");
-  }
-  return currentCheckpoint;
+  throw new Error("External audit-ledger checkpoint diverged; writes are locked");
 }
 
 /**
@@ -612,18 +584,31 @@ export class AuditService {
             throw new Error("Audit-ledger head changed outside the serialized writer");
           }
 
-          return {
-            expectedCheckpoint,
-            nextCheckpoint: serializeCheckpoint({
-              sequence: inserted.ledger_sequence,
-              headHash: inserted.entry_hash,
-            }),
-          };
-        },
-        async ({ expectedCheckpoint, nextCheckpoint }) => {
-          const advanced = await checkpointStore.compareAndSet(
+          const nextCheckpoint = serializeCheckpoint({
+            sequence: inserted.ledger_sequence,
+            headHash: inserted.entry_hash,
+          });
+          const pendingCheckpoint = serializePendingCheckpoint(expectedCheckpoint, nextCheckpoint);
+          // Publish the next sealed head before PostgreSQL commits. A verifier
+          // that races the commit sees an explicit pending witness and fails
+          // closed; deleting the committed tail can no longer restore agreement
+          // with the predecessor checkpoint. If commit fails after this CAS,
+          // operators must inspect and restore the witness deliberately.
+          const witnessed = await checkpointStore.compareAndSet(
             AUDIT_LEDGER_CHECKPOINT_KEY,
             expectedCheckpoint,
+            pendingCheckpoint
+          );
+          if (!witnessed) {
+            throw new Error("External audit-ledger pending witness was not established");
+          }
+
+          return { pendingCheckpoint, nextCheckpoint };
+        },
+        async ({ pendingCheckpoint, nextCheckpoint }) => {
+          const advanced = await checkpointStore.compareAndSet(
+            AUDIT_LEDGER_CHECKPOINT_KEY,
+            pendingCheckpoint,
             nextCheckpoint
           );
           if (!advanced) {
