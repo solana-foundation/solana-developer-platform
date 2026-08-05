@@ -575,7 +575,7 @@ export function HomeWorkspace({
                             </TableCell>
                             <TableCell className="hidden text-secondary md:table-cell">
                               <span className="flex min-w-0 items-center gap-2">
-                                <TokenMark symbol={tokenSymbol} size="xs" />
+                                <TokenMark mint={row.tokenMint} symbol={tokenSymbol} size="xs" />
                                 <TruncatedTableText value={tokenSymbol} className="truncate" />
                               </span>
                             </TableCell>

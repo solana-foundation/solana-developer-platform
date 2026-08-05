@@ -369,7 +369,6 @@ function auditDetailHref(
   filters: PolicyAuditFilters,
   page: number
 ): string {
-  const query = buildPolicyAuditSearchParams(filters, { page });
-  query.set("tab", "decision");
-  return `${auditHref}/${encodeURIComponent(evaluationId)}?${query}`;
+  const query = buildPolicyAuditSearchParams(filters, { page }).toString();
+  return `${auditHref}/${encodeURIComponent(evaluationId)}${query ? `?${query}` : ""}`;
 }

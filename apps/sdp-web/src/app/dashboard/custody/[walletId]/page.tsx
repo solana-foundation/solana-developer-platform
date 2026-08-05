@@ -5,7 +5,7 @@ import type {
   CustodyWalletTokenBalance,
   PaymentWalletPolicy,
 } from "@sdp/types";
-import { SlidersHorizontal } from "lucide-react";
+import { ListChecks, SlidersHorizontal } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
 import {
@@ -641,18 +641,30 @@ async function WalletControlsPanel({
             </div>
           )}
         </div>
-        <Button
-          asChild
-          variant={hasRestrictions ? "secondary" : "default"}
-          className="w-full shrink-0 sm:w-auto"
-        >
-          <Link href={policyHref}>
-            <SlidersHorizontal className="size-4" />
-            {hasRestrictions
-              ? t("DashboardCustody.reviewControls")
-              : t("DashboardCustody.startProfile")}
-          </Link>
-        </Button>
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+          <Button
+            asChild
+            variant={hasRestrictions ? "secondary" : "default"}
+            className="w-full sm:w-auto"
+          >
+            <Link href={`${policyHref}/audit`}>
+              <ListChecks className="size-4" />
+              {t("DashboardCustody.policyAuditTitle")}
+            </Link>
+          </Button>
+          <Button
+            asChild
+            variant={hasRestrictions ? "secondary" : "default"}
+            className="w-full sm:w-auto"
+          >
+            <Link href={policyHref}>
+              <SlidersHorizontal className="size-4" />
+              {hasRestrictions
+                ? t("DashboardCustody.reviewControls")
+                : t("DashboardCustody.startProfile")}
+            </Link>
+          </Button>
+        </div>
       </div>
     </section>
   );

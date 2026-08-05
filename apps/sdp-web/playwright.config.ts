@@ -90,7 +90,7 @@ export default defineConfig({
       testMatch: /.*\.e2e\.spec\.ts/,
       testIgnore: [
         /.*(issuance|auth-entry|gcp-read-only).*.e2e\.spec\.ts/,
-        /(^|\/)(payments|wallets)\.e2e\.spec\.ts$/,
+        /(^|\/)(payments-recurring|payments-transfer|wallets)\.e2e\.spec\.ts$/,
       ],
       dependencies: ["auth-setup"],
       use: {
@@ -100,7 +100,7 @@ export default defineConfig({
     },
     {
       name: "dashboard-transactions",
-      testMatch: /(^|\/)(payments|wallets)\.e2e\.spec\.ts$/,
+      testMatch: /(^|\/)(payments-recurring|payments-transfer|wallets)\.e2e\.spec\.ts$/,
       dependencies: ["auth-setup"],
       use: {
         ...devices["Desktop Chrome"],
