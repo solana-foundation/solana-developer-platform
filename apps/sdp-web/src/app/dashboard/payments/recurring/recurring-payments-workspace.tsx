@@ -35,6 +35,7 @@ import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
+import { TokenMark } from "@/components/token-mark";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,7 +67,13 @@ import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
+import {
+  formatDisplayAmount,
+  formatTimestamp,
+  resolveTokenByMint,
+  shortenAddress,
+} from "../payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import {
@@ -121,6 +128,7 @@ interface RecurringPaymentsWorkspaceProps {
   initialRecurringPayments: PaymentRecurringPayment[];
   total: number;
   listState: RecurringPaymentsListState;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   initialError?: string;
   lookupError?: string;
   wallets: RecurringPaymentWalletView[];
@@ -756,6 +764,7 @@ export function RecurringPaymentsWorkspace({
   initialRecurringPayments,
   total,
   listState,
+  issuedTokensByMint,
   initialError,
   lookupError,
   wallets,
@@ -827,11 +836,14 @@ export function RecurringPaymentsWorkspace({
   const getCounterpartyLabel = (recurringPayment: PaymentRecurringPayment) =>
     counterpartyById.get(recurringPayment.counterpartyId)?.displayName ??
     t("DashboardPayments.recurring.counterpartyUnavailable");
-  const getAmountLabel = (recurringPayment: PaymentRecurringPayment) =>
-    formatDisplayAmount(
-      recurringPayment.amount,
+  const getResolvedToken = (recurringPayment: PaymentRecurringPayment) =>
+    resolveTokenByMint(
+      recurringPayment.token,
+      issuedTokensByMint,
       resolveTokenLabel(recurringPayment.token, wallets)
     );
+  const getAmountLabel = (recurringPayment: PaymentRecurringPayment) =>
+    formatDisplayAmount(recurringPayment.amount, getResolvedToken(recurringPayment).tokenName);
 
   const needle = query.trim().toLowerCase();
   const visibleRecurringPayments = initialRecurringPayments.filter((recurringPayment) => {
@@ -994,50 +1006,74 @@ export function RecurringPaymentsWorkspace({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {visibleRecurringPayments.map((recurringPayment) => (
-                    <TableRow
-                      key={recurringPayment.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() =>
-                        router.push(
-                          `/dashboard/payments/recurring/${encodeURIComponent(recurringPayment.id)}`
-                        )
-                      }
-                      onKeyDown={(event: KeyboardEvent) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
+                  {visibleRecurringPayments.map((recurringPayment) => {
+                    const resolvedToken = getResolvedToken(recurringPayment);
+                    const wallet = walletById.get(recurringPayment.sourceWalletId);
+                    return (
+                      <TableRow
+                        key={recurringPayment.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() =>
                           router.push(
                             `/dashboard/payments/recurring/${encodeURIComponent(recurringPayment.id)}`
-                          );
+                          )
                         }
-                      }}
-                      className="cursor-pointer"
-                    >
-                      <TableCell>
-                        <RecurringPaymentStatusBadge status={recurringPayment.status} />
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        <span className="block truncate">{getAmountLabel(recurringPayment)}</span>
-                      </TableCell>
-                      <TableCell className="text-sm text-secondary">
-                        <span className="block truncate">
-                          {getCounterpartyLabel(recurringPayment)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="hidden text-sm text-secondary lg:table-cell">
-                        <span className="block truncate">{getWalletLabel(recurringPayment)}</span>
-                      </TableCell>
-                      <TableCell className="hidden text-sm text-secondary xl:table-cell">
-                        {formatPeriodHours(recurringPayment.periodHours, t)}
-                      </TableCell>
-                      <TableCell
-                        className={`${RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY} text-sm text-secondary`}
+                        onKeyDown={(event: KeyboardEvent) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            router.push(
+                              `/dashboard/payments/recurring/${encodeURIComponent(recurringPayment.id)}`
+                            );
+                          }
+                        }}
+                        className="cursor-pointer"
                       >
-                        {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt, t)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        <TableCell>
+                          <RecurringPaymentStatusBadge status={recurringPayment.status} />
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <TokenMark
+                              mint={recurringPayment.token}
+                              symbol={resolvedToken.tokenName}
+                              logoUrl={resolvedToken.metadataImageUrl}
+                              size="xs"
+                            />
+                            <span className="truncate">{getAmountLabel(recurringPayment)}</span>
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-sm text-secondary">
+                          <span className="block truncate">
+                            {getCounterpartyLabel(recurringPayment)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="hidden text-sm text-secondary lg:table-cell">
+                          {wallet ? (
+                            <Link
+                              href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
+                              onClick={(event) => event.stopPropagation()}
+                              className="block truncate underline-offset-4 hover:underline focus-visible:underline"
+                            >
+                              {getWalletLabel(recurringPayment)}
+                            </Link>
+                          ) : (
+                            <span className="block truncate">
+                              {getWalletLabel(recurringPayment)}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="hidden text-sm text-secondary xl:table-cell">
+                          {formatPeriodHours(recurringPayment.periodHours, t)}
+                        </TableCell>
+                        <TableCell
+                          className={`${RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY} text-sm text-secondary`}
+                        >
+                          {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt, t)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

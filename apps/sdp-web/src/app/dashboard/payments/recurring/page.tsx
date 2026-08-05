@@ -4,7 +4,7 @@ import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterparty } from "../counterparty/counterparty-page.data";
-import { fetchPaymentsWallets } from "../payments-page.data";
+import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../payments-page.data";
 import {
   fetchRecurringPayments,
   parseRecurringPaymentsListParams,
@@ -32,14 +32,20 @@ export default async function RecurringPaymentsPage({ searchParams }: RecurringP
     "dashboard.recurring-payments.page",
     async ({ trace, apiClient }) => {
       const t = await getTranslations();
-      const [recurringPaymentsResult, walletsResult] = await Promise.all([
+      const [recurringPaymentsResult, walletsResult, issuedTokenSymbolsResult] = await Promise.all([
         trace.step("fetch_recurring_payments", () =>
           fetchRecurringPayments(apiClient.request, t, listState)
         ),
         trace.step("fetch_wallets", () =>
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
         ),
+        trace.step("fetch_issued_token_symbols", () =>
+          fetchPaymentsIssuedTokenSymbols(apiClient.request)
+        ),
       ]);
+      const issuedTokensByMint = Object.fromEntries(
+        (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token])
+      );
       const counterpartyIds = [
         ...new Set(recurringPaymentsResult.data.map((payment) => payment.counterpartyId)),
       ];
@@ -68,6 +74,7 @@ export default async function RecurringPaymentsPage({ searchParams }: RecurringP
             initialRecurringPayments={recurringPaymentsResult.data}
             total={recurringPaymentsResult.total}
             listState={listState}
+            issuedTokensByMint={issuedTokensByMint}
             initialError={recurringPaymentsResult.error}
             wallets={walletsResult.data ?? []}
             counterparties={resolvedCounterparties.map((counterparty) => ({
