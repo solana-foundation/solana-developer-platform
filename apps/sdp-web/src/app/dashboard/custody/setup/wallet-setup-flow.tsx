@@ -95,26 +95,20 @@ function getInitialSelection(input: {
   };
 }
 
-function MoreProviders({ providers }: { providers: CustodyProviderAvailability[] }) {
+function ComingLaterProviders({ providers }: { providers: CustodyProviderAvailability[] }) {
   const t = useTranslations();
 
   if (providers.length === 0) {
     return null;
   }
 
-  // Named but not actionable. Gated providers belong here too until the
-  // credential UI exists to install them; giving them their own call to action
-  // would ship an access route this step cannot yet honour.
+  // These carry no action, so they stay a single quiet line rather than a run of
+  // full cards that would outnumber everything this organization can act on.
   return (
-    <section className="grid gap-3" data-provider-more="true">
-      <div className="space-y-1">
-        <h3 className="text-sm font-medium text-secondary">
-          {t("DashboardCustody.providerMoreProviders")}
-        </h3>
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerMoreProvidersDescription")}
-        </p>
-      </div>
+    <section className="grid gap-3" data-provider-coming-later="true">
+      <h3 className="text-sm font-medium text-secondary">
+        {t("DashboardCustody.providerStatusComingLater")}
+      </h3>
       <ul className="flex flex-wrap gap-2">
         {providers.map((provider) => (
           <li
@@ -142,9 +136,9 @@ function ProviderStep({
   selectedProvider: KnownCustodyProvider | null;
 }) {
   const t = useTranslations();
-  const selectable = availability.filter((provider) => provider.isSelectable);
-  const rest = availability.filter((provider) => !provider.isSelectable);
-  const hasSelectableProvider = selectable.length > 0;
+  const offered = availability.filter((provider) => provider.status !== "unavailable");
+  const comingLater = availability.filter((provider) => provider.status === "unavailable");
+  const hasSelectableProvider = availability.some((provider) => provider.isSelectable);
 
   return (
     <div className="grid gap-8">
@@ -158,7 +152,7 @@ function ProviderStep({
       )}
 
       {WALLET_PROVIDER_CATEGORIES.map((category) => {
-        const providers = selectable.filter((provider) => provider.entry.category === category);
+        const providers = offered.filter((provider) => provider.entry.category === category);
         if (providers.length === 0) {
           return null;
         }
@@ -179,6 +173,7 @@ function ProviderStep({
                   key={provider.entry.id}
                   onSelect={() => onSelect(provider.entry.id)}
                   isSelected={isSelected}
+                  isSelectable={provider.isSelectable}
                   advanceOnEnter={isSelected}
                   icon={<WalletProviderMark provider={provider.entry.id} size="sm" />}
                   title={provider.entry.label}
@@ -190,6 +185,19 @@ function ProviderStep({
                       </span>
                     ) : undefined
                   }
+                  action={
+                    provider.requestAccessUrl ? (
+                      <Button asChild variant="secondary">
+                        <a
+                          href={provider.requestAccessUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          {t("DashboardCustody.providerRequestAccess")}
+                        </a>
+                      </Button>
+                    ) : undefined
+                  }
                 />
               );
             })}
@@ -197,7 +205,7 @@ function ProviderStep({
         );
       })}
 
-      <MoreProviders providers={rest} />
+      <ComingLaterProviders providers={comingLater} />
     </div>
   );
 }

@@ -81,15 +81,12 @@ describe("WalletSetupFlow", () => {
     ]) {
       expect(markup).toContain(label);
     }
-    expect(markup).toContain("More providers");
+    expect(markup).toContain("Coming later");
   });
 
   it("groups the catalog by what the provider is for", () => {
-    // Privy is entitled (API) and Fireblocks is connected (Institutional).
-    const markup = renderFlowWith({
-      connectedProviders: ["fireblocks"],
-      enabledProviders: ["privy"],
-    });
+    // Privy is entitled (API) and Fireblocks offers request access (Institutional).
+    const markup = renderFlowWith({ connectedProviders: [], enabledProviders: ["privy"] });
 
     expect(markup).toMatch(/<h3[^>]*>API<\/h3>/);
     expect(markup).toMatch(/<h3[^>]*>Institutional<\/h3>/);
@@ -98,32 +95,29 @@ describe("WalletSetupFlow", () => {
     );
   });
 
-  it("drops every category heading when nothing is selectable", () => {
+  it("drops a category heading when nothing in it is on offer", () => {
     const markup = renderFlowWith({ connectedProviders: [], enabledProviders: [] });
 
     expect(markup).not.toMatch(/<h3[^>]*>API<\/h3>/);
-    expect(markup).not.toMatch(/<h3[^>]*>Institutional<\/h3>/);
-    expect(markup).toContain("More providers");
+    expect(markup).toMatch(/<h3[^>]*>Institutional<\/h3>/);
   });
 
-  it("names a gated provider without offering an access route this step cannot honour", () => {
+  it("routes a gated provider to request access rather than a dead card", () => {
     const markup = renderFlowWith({ connectedProviders: [], enabledProviders: [] });
 
-    expect(markup).toContain("Fireblocks");
-    // The request-access flow is a separate piece of work; shipping the link
-    // here would promise a route the setup step does not implement.
-    expect(markup).not.toContain("typeform");
-    expect(markup).not.toContain("Request access");
+    expect(markup).toContain("https://solanafoundation.typeform.com/to/wShiq9SN");
+    expect(markup).toContain("Request access");
+    expect(markup).toMatch(/rel="noreferrer noopener"/);
   });
 
-  it("promotes a gated provider to a real card once it is connected", () => {
+  it("does not offer request access once the gated provider is connected", () => {
     const markup = renderFlowWith({
       connectedProviders: ["fireblocks"],
       enabledProviders: [],
     });
 
+    expect(markup).not.toContain("https://solanafoundation.typeform.com/to/wShiq9SN");
     expect(markup).toContain("Active");
-    expect(markup.match(/aria-pressed=/g)).toHaveLength(1);
   });
 
   it("keeps unusable providers out of the selectable set", () => {
@@ -131,17 +125,17 @@ describe("WalletSetupFlow", () => {
 
     // Privy is the only entitled provider, so it is the only pressable card.
     expect(markup.match(/aria-pressed=/g)).toHaveLength(1);
-    expect(markup).toContain('data-provider-more="true"');
+    expect(markup).toContain('data-provider-selectable="false"');
   });
 
   it("keeps providers with no action out of the card list so the usable ones lead", () => {
     const markup = renderFlowWith({ connectedProviders: [], enabledProviders: ["privy"] });
 
-    // Only Privy earns a card; the other nine are named in the compact group.
-    expect(markup.match(/data-provider-selection-card="true"/g)).toHaveLength(1);
-    expect(markup).toContain('data-provider-more="true"');
+    // Only Privy (available) and Fireblocks (request access) earn a card; the
+    // remaining eight are named in the compact group.
+    expect(markup.match(/data-provider-selection-card="true"/g)).toHaveLength(2);
+    expect(markup).toContain('data-provider-coming-later="true"');
     expect(markup).toContain("Turnkey");
-    expect(markup).toContain("Fireblocks");
   });
 
   it("explains why nothing can be selected instead of emptying the page", () => {

@@ -8,6 +8,8 @@ import {
 export interface CustodyProviderAvailability {
   entry: CustodyProviderCatalogEntry;
   status: CustodyProviderDisplayStatus;
+  /** Present only while a gated provider still needs an access request. */
+  requestAccessUrl?: string;
   isSelectable: boolean;
 }
 
@@ -56,6 +58,10 @@ export function resolveCustodyProviderAvailability(input: {
     return {
       entry,
       status,
+      requestAccessUrl:
+        status === "request_access" && entry.storedCredentialSetup.mode === "request_access"
+          ? entry.storedCredentialSetup.requestAccessUrl
+          : undefined,
       isSelectable: SELECTABLE_STATUSES.has(status),
     };
   });
