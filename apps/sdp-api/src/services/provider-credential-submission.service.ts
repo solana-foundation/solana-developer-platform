@@ -705,10 +705,6 @@ async function classifySetup(
   lock = false
 ): Promise<SetupPlan> {
   const connections = await store.listProjectConnections(organizationId, projectId, { lock });
-  const activeLegacyConfig = await store.hasActiveProjectLegacyConfig(organizationId, projectId);
-  if (activeLegacyConfig) {
-    throw new SetupConflict();
-  }
 
   const nonDeactivated = connections.filter((connection) => connection.status !== "deactivated");
   if (nonDeactivated.length === 0) {
