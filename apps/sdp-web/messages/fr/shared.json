@@ -132,8 +132,7 @@
     "invalidApiKeyFormat": "Format de clé API invalide. Utilisez une clé brute comme sk_test_... ou sk_live_... avec un suffixe valide.",
     "playgroundExecutionFailed": "Échec de l’exécution Playground.",
     "requestExecutionFailed": "Échec de l’exécution de la requête.",
-    "invalidJsonField": "{field} doit contenir un JSON valide.",
-    "customToken": "Personnalisé"
+    "invalidJsonField": "{field} doit contenir un JSON valide."
   },
   "dashboardShell": {
     "workspace": "Espace de travail",

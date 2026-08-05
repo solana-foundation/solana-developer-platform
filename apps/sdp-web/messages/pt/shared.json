@@ -132,8 +132,7 @@
     "invalidJsonField": "{field} deve conter um JSON válido.",
     "invalidApiKeyFormat": "Formato de chave de API inválido. Use um valor de chave bruto como sk_test_... ou sk_live_... com um sufixo válido.",
     "playgroundExecutionFailed": "Falha na execução do Playground.",
-    "requestExecutionFailed": "Falha na execução da requisição.",
-    "customToken": "Personalizado"
+    "requestExecutionFailed": "Falha na execução da requisição."
   },
   "dashboardShell": {
     "workspace": "Espaço de trabalho",
