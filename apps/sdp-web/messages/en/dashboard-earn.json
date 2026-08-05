@@ -209,7 +209,6 @@
       "walletSearchPlaceholder": "Name or address",
       "walletsFiltered": "No wallet matches that search.",
       "goToWallets": "Open Wallets",
-      "walletDefaultBadge": "Default",
       "walletHolding": "{amount} {token}",
       "reviewWalletAddress": "Address"
     }

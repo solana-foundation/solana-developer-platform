@@ -3,6 +3,7 @@
 import type { CustodyWalletSummary } from "@sdp/types";
 import { ExternalLinkIcon, LockIcon, PlusIcon, ShieldCheckIcon } from "lucide-react";
 import { useId, useMemo, useState } from "react";
+import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-catalog";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,11 +62,14 @@ function WalletRow({
             <span className="text-base font-medium tracking-tight text-primary" id={nameId}>
               {walletDisplayName(wallet, t("DashboardEarn.deposit.walletUnnamed"))}
             </span>
-            {/* Not a Badge: Badge is status-only in this design system, and
-                "default wallet" is a label. */}
-            {wallet.isDefaultProvider ? (
+            {/* The custodian, not a "Default" flag: which platform signs for
+                this wallet is the fact that matters when choosing where funds
+                are sent from — and most orgs' wallet is literally named
+                "Default wallet", so a Default chip beside it read as noise.
+                (Not a Badge: Badge is status-only in this design system.) */}
+            {wallet.provider ? (
               <span className="rounded-md bg-fill px-2 py-1 text-[11px] font-medium text-secondary">
-                {t("DashboardEarn.deposit.walletDefaultBadge")}
+                {formatCustodyProviderName(wallet.provider)}
               </span>
             ) : null}
           </span>
