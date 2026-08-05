@@ -223,6 +223,8 @@ function RecurringPaymentActionsMenu({
   pendingAction,
   actionError,
   disabled,
+  editable,
+  onEdit,
   onAction,
   onCancel,
 }: {
@@ -231,6 +233,8 @@ function RecurringPaymentActionsMenu({
   pendingAction: RecurringPaymentAction | null;
   actionError: DetailActionError | null;
   disabled?: boolean;
+  editable: boolean;
+  onEdit: () => void;
   onAction: (action: RecurringPaymentAction) => void;
   onCancel: () => void;
 }) {
@@ -254,6 +258,10 @@ function RecurringPaymentActionsMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuItem onSelect={onEdit} disabled={!editable || actionsDisabled}>
+          <PencilIcon className="size-4" />
+          <span>{t("DashboardPayments.recurring.editPayment")}</span>
+        </DropdownMenuItem>
         {primaryAction ? (
           <DropdownMenuItem
             onSelect={() => onAction(primaryAction.action)}
@@ -365,34 +373,21 @@ export function RecurringPaymentDetailWorkspace({
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
-  const [editingWallet, setEditingWallet] = useState(false);
+  const [editingPayment, setEditingPayment] = useState(false);
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [paymentValidationError, setPaymentValidationError] = useState<string | null>(null);
   const [selectedWalletId, setSelectedWalletId] = useState(recurringPayment.sourceWalletId);
-  const [walletValidationError, setWalletValidationError] = useState<string | null>(null);
-  const [savingWallet, setSavingWallet] = useState(false);
-  const [editingReceivingAccount, setEditingReceivingAccount] = useState(false);
   const [selectedReceivingAccountId, setSelectedReceivingAccountId] = useState(
     recurringPayment.counterpartyAccountId
   );
-  const [receivingAccountValidationError, setReceivingAccountValidationError] = useState<
-    string | null
-  >(null);
-  const [savingReceivingAccount, setSavingReceivingAccount] = useState(false);
-  const [editingBillingInterval, setEditingBillingInterval] = useState(false);
   const [selectedSchedulePreset, setSelectedSchedulePreset] = useState<SchedulePreset>(
     schedulePresetForPeriodHours(recurringPayment.periodHours)
   );
   const [selectedCustomPeriodHours, setSelectedCustomPeriodHours] = useState(
     String(recurringPayment.periodHours)
   );
-  const [billingIntervalValidationError, setBillingIntervalValidationError] = useState<
-    string | null
-  >(null);
-  const [savingBillingInterval, setSavingBillingInterval] = useState(false);
   const [selectedToken, setSelectedToken] = useState(recurringPayment.token);
-  const [editingAmount, setEditingAmount] = useState(false);
   const [selectedAmount, setSelectedAmount] = useState(recurringPayment.amount);
-  const [amountValidationError, setAmountValidationError] = useState<string | null>(null);
-  const [savingAmount, setSavingAmount] = useState(false);
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceWalletId);
@@ -408,12 +403,7 @@ export function RecurringPaymentDetailWorkspace({
   const dueNow =
     recurringPayment.status === "active" && isDueNow(recurringPayment.nextCollectionDueAt);
   const isEditable = canEditRecurringPayment(recurringPayment.status);
-  const controlsDisabled =
-    Boolean(pendingAction) ||
-    savingWallet ||
-    savingReceivingAccount ||
-    savingBillingInterval ||
-    savingAmount;
+  const controlsDisabled = Boolean(pendingAction) || savingPayment;
 
   const submitAction = async (action: RecurringPaymentAction) => {
     if (pendingAction) {
@@ -443,197 +433,91 @@ export function RecurringPaymentDetailWorkspace({
     }
   };
 
-  const submitSourceWallet = async (walletId = selectedWalletId) => {
-    if (controlsDisabled) {
-      return;
-    }
-    if (!walletId) {
-      setWalletValidationError(t("DashboardPayments.recurring.selectFundingWallet"));
-      return;
-    }
-    if (walletId === recurringPayment.sourceWalletId) {
-      setWalletValidationError(
-        t("DashboardPayments.recurring.alreadyFundingWallet", { wallet: sourceWalletLabel })
-      );
-      return;
-    }
-
-    setWalletValidationError(null);
-    setSavingWallet(true);
-    const toastId = toast.loading(t("DashboardPayments.recurring.updatingFundingWallet"), {
-      position: "bottom-right",
-    });
-    try {
-      await updateRecurringPayment(recurringPayment.id, { sourceWalletId: walletId }, undefined, t);
-      toast.success(t("DashboardPayments.recurring.fundingWalletUpdated"), {
-        id: toastId,
-        position: "bottom-right",
-      });
-      setEditingWallet(false);
-      router.refresh();
-    } catch (error) {
-      toast.error(t("DashboardPayments.recurring.fundingWalletUpdateFailed"), {
-        id: toastId,
-        description:
-          error instanceof Error
-            ? error.message
-            : t("DashboardPayments.recurring.paymentUpdateFailed"),
-        position: "bottom-right",
-      });
-    } finally {
-      setSavingWallet(false);
-    }
-  };
-
-  const closeFundingWalletModal = () => {
-    setSelectedWalletId(recurringPayment.sourceWalletId);
-    setWalletValidationError(null);
-    setEditingWallet(false);
-  };
-
-  const submitReceivingAccount = async (accountId = selectedReceivingAccountId) => {
-    if (controlsDisabled) {
-      return;
-    }
-    if (!accountId) {
-      setReceivingAccountValidationError(t("DashboardPayments.recurring.selectReceivingWallet"));
-      return;
-    }
-    if (accountId === recurringPayment.counterpartyAccountId) {
-      setReceivingAccountValidationError(
-        t("DashboardPayments.recurring.alreadyReceivingWallet", { wallet: receivingAccountLabel })
-      );
-      return;
-    }
-
-    setReceivingAccountValidationError(null);
-    setSavingReceivingAccount(true);
-    const toastId = toast.loading(t("DashboardPayments.recurring.updatingReceivingWallet"), {
-      position: "bottom-right",
-    });
-    try {
-      await updateRecurringPayment(
-        recurringPayment.id,
-        { counterpartyAccountId: accountId },
-        undefined,
-        t
-      );
-      toast.success(t("DashboardPayments.recurring.receivingWalletUpdated"), {
-        id: toastId,
-        position: "bottom-right",
-      });
-      setEditingReceivingAccount(false);
-      router.refresh();
-    } catch (error) {
-      toast.error(t("DashboardPayments.recurring.receivingWalletUpdateFailed"), {
-        id: toastId,
-        description:
-          error instanceof Error
-            ? error.message
-            : t("DashboardPayments.recurring.paymentUpdateFailed"),
-        position: "bottom-right",
-      });
-    } finally {
-      setSavingReceivingAccount(false);
-    }
-  };
-
-  const closeReceivingAccountModal = () => {
-    setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
-    setReceivingAccountValidationError(null);
-    setEditingReceivingAccount(false);
-  };
-
-  const submitBillingInterval = async () => {
-    if (controlsDisabled) {
-      return;
-    }
-    const periodHours = parsePeriodHours(selectedSchedulePreset, selectedCustomPeriodHours);
-    if (!periodHours) {
-      setBillingIntervalValidationError(t("DashboardPayments.recurring.invalidInterval"));
-      return;
-    }
-    if (periodHours === recurringPayment.periodHours) {
-      setBillingIntervalValidationError(
-        t("DashboardPayments.recurring.alreadySet", { value: formatPeriodHours(periodHours, t) })
-      );
-      return;
-    }
-
-    setBillingIntervalValidationError(null);
-    setSavingBillingInterval(true);
-    const toastId = toast.loading(t("DashboardPayments.recurring.updatingBillingInterval"), {
-      position: "bottom-right",
-    });
-    try {
-      await updateRecurringPayment(recurringPayment.id, { periodHours }, undefined, t);
-      toast.success(t("DashboardPayments.recurring.billingIntervalUpdated"), {
-        id: toastId,
-        position: "bottom-right",
-      });
-      setEditingBillingInterval(false);
-      router.refresh();
-    } catch (error) {
-      toast.error(t("DashboardPayments.recurring.billingIntervalUpdateFailed"), {
-        id: toastId,
-        description:
-          error instanceof Error
-            ? error.message
-            : t("DashboardPayments.recurring.paymentUpdateFailed"),
-        position: "bottom-right",
-      });
-    } finally {
-      setSavingBillingInterval(false);
-    }
-  };
-
-  const closeBillingIntervalModal = () => {
+  const openPaymentEditor = () => {
+    setSelectedAmount(recurringPayment.amount);
+    setSelectedToken(recurringPayment.token);
     setSelectedSchedulePreset(schedulePresetForPeriodHours(recurringPayment.periodHours));
     setSelectedCustomPeriodHours(String(recurringPayment.periodHours));
-    setBillingIntervalValidationError(null);
-    setEditingBillingInterval(false);
+    setSelectedWalletId(recurringPayment.sourceWalletId);
+    setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
+    setPaymentValidationError(null);
+    setEditingPayment(true);
   };
 
-  const submitAmount = async () => {
+  const closePaymentEditor = () => {
+    setPaymentValidationError(null);
+    setEditingPayment(false);
+  };
+
+  const submitPayment = async () => {
     if (controlsDisabled) {
       return;
     }
     const amount = selectedAmount.trim();
     if (!amountIsValid(amount)) {
-      setAmountValidationError(t("DashboardPayments.recurring.invalidAmount"));
+      setPaymentValidationError(t("DashboardPayments.recurring.invalidAmount"));
+      return;
+    }
+    const periodHours = parsePeriodHours(selectedSchedulePreset, selectedCustomPeriodHours);
+    if (!periodHours) {
+      setPaymentValidationError(t("DashboardPayments.recurring.invalidInterval"));
       return;
     }
     if (!selectedToken) {
-      setAmountValidationError(t("DashboardPayments.recurring.selectCurrency"));
+      setPaymentValidationError(t("DashboardPayments.recurring.selectCurrency"));
       return;
     }
-    const updates: { amount?: string; token?: string } = {};
+    if (!selectedWalletId) {
+      setPaymentValidationError(t("DashboardPayments.recurring.selectFundingWallet"));
+      return;
+    }
+    if (!selectedReceivingAccountId) {
+      setPaymentValidationError(t("DashboardPayments.recurring.selectReceivingWallet"));
+      return;
+    }
+
+    const updates: {
+      amount?: string;
+      token?: string;
+      periodHours?: number;
+      sourceWalletId?: string;
+      counterpartyAccountId?: string;
+    } = {};
     if (amount !== recurringPayment.amount) {
       updates.amount = amount;
     }
     if (selectedToken !== recurringPayment.token) {
       updates.token = selectedToken;
     }
-    if (updates.amount === undefined && updates.token === undefined) {
-      setAmountValidationError(t("DashboardPayments.recurring.alreadySet", { value: amountLabel }));
+    if (periodHours !== recurringPayment.periodHours) {
+      updates.periodHours = periodHours;
+    }
+    if (selectedWalletId !== recurringPayment.sourceWalletId) {
+      updates.sourceWalletId = selectedWalletId;
+    }
+    if (selectedReceivingAccountId !== recurringPayment.counterpartyAccountId) {
+      updates.counterpartyAccountId = selectedReceivingAccountId;
+    }
+    if (Object.keys(updates).length === 0) {
+      setPaymentValidationError(t("DashboardPayments.recurring.noChangesToSave"));
       return;
     }
 
-    setAmountValidationError(null);
-    setSavingAmount(true);
-    const toastId = toast.loading(t("DashboardPayments.recurring.updatingAmount"), {
+    setPaymentValidationError(null);
+    setSavingPayment(true);
+    const toastId = toast.loading(t("DashboardPayments.recurring.updatingPayment"), {
       position: "bottom-right",
     });
     try {
       await updateRecurringPayment(recurringPayment.id, updates, undefined, t);
-      toast.success(t("DashboardPayments.recurring.amountUpdated"), {
+      toast.success(t("DashboardPayments.recurring.paymentUpdated"), {
         id: toastId,
         position: "bottom-right",
       });
-      setEditingAmount(false);
+      setEditingPayment(false);
       router.refresh();
     } catch (error) {
-      toast.error(t("DashboardPayments.recurring.amountUpdateFailed"), {
+      toast.error(t("DashboardPayments.recurring.paymentUpdateFailed"), {
         id: toastId,
         description:
           error instanceof Error
@@ -642,15 +526,8 @@ export function RecurringPaymentDetailWorkspace({
         position: "bottom-right",
       });
     } finally {
-      setSavingAmount(false);
+      setSavingPayment(false);
     }
-  };
-
-  const closeAmountModal = () => {
-    setSelectedAmount(recurringPayment.amount);
-    setSelectedToken(recurringPayment.token);
-    setAmountValidationError(null);
-    setEditingAmount(false);
   };
 
   const resolvedToken = resolveTokenByMint(
@@ -698,9 +575,9 @@ export function RecurringPaymentDetailWorkspace({
             dueNow={dueNow}
             pendingAction={pendingAction}
             actionError={actionError}
-            disabled={
-              savingWallet || savingReceivingAccount || savingBillingInterval || savingAmount
-            }
+            editable={isEditable}
+            onEdit={openPaymentEditor}
+            disabled={savingPayment}
             onAction={(action) => void submitAction(action)}
             onCancel={() => setCancelConfirmOpen(true)}
           />
@@ -731,12 +608,7 @@ export function RecurringPaymentDetailWorkspace({
                         disabled={controlsDisabled}
                         aria-label={t("DashboardPayments.recurring.edit")}
                         className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-                        onClick={() => {
-                          setSelectedAmount(recurringPayment.amount);
-                          setSelectedToken(recurringPayment.token);
-                          setAmountValidationError(null);
-                          setEditingAmount(true);
-                        }}
+                        onClick={openPaymentEditor}
                       >
                         <PencilIcon className="size-4" />
                       </Button>
@@ -763,14 +635,7 @@ export function RecurringPaymentDetailWorkspace({
                         disabled={controlsDisabled}
                         aria-label={t("DashboardPayments.recurring.edit")}
                         className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-                        onClick={() => {
-                          setSelectedSchedulePreset(
-                            schedulePresetForPeriodHours(recurringPayment.periodHours)
-                          );
-                          setSelectedCustomPeriodHours(String(recurringPayment.periodHours));
-                          setBillingIntervalValidationError(null);
-                          setEditingBillingInterval(true);
-                        }}
+                        onClick={openPaymentEditor}
                       >
                         <PencilIcon className="size-4" />
                       </Button>
@@ -809,11 +674,7 @@ export function RecurringPaymentDetailWorkspace({
                         disabled={controlsDisabled || wallets.length === 0}
                         aria-label={t("DashboardPayments.recurring.edit")}
                         className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-                        onClick={() => {
-                          setSelectedWalletId(recurringPayment.sourceWalletId);
-                          setWalletValidationError(null);
-                          setEditingWallet(true);
-                        }}
+                        onClick={openPaymentEditor}
                       >
                         <PencilIcon className="size-4" />
                       </Button>
@@ -848,11 +709,7 @@ export function RecurringPaymentDetailWorkspace({
                         disabled={controlsDisabled || counterpartyAccounts.length === 0}
                         aria-label={t("DashboardPayments.recurring.edit")}
                         className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-                        onClick={() => {
-                          setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
-                          setReceivingAccountValidationError(null);
-                          setEditingReceivingAccount(true);
-                        }}
+                        onClick={openPaymentEditor}
                       >
                         <PencilIcon className="size-4" />
                       </Button>
@@ -911,24 +768,24 @@ export function RecurringPaymentDetailWorkspace({
         />
 
         <Modal
-          isOpen={editingWallet}
-          ariaLabel={t("DashboardPayments.recurring.editFundingWallet")}
-          onClose={savingWallet ? undefined : closeFundingWalletModal}
+          isOpen={editingPayment}
+          ariaLabel={t("DashboardPayments.recurring.editPayment")}
+          onClose={savingPayment ? undefined : closePaymentEditor}
           size="sm"
         >
           <form
             className="space-y-5 p-6"
             onSubmit={(event) => {
               event.preventDefault();
-              void submitSourceWallet();
+              void submitPayment();
             }}
           >
             <div className="space-y-1">
               <h2 className="text-lg font-medium tracking-tight text-primary">
-                {t("DashboardPayments.recurring.editFundingWallet")}
+                {t("DashboardPayments.recurring.editPayment")}
               </h2>
               <p className="text-sm text-secondary">
-                {t("DashboardPayments.recurring.editFundingWalletDescription")}
+                {t("DashboardPayments.recurring.editPaymentDescription")}
               </p>
             </div>
             <Combobox
@@ -936,7 +793,7 @@ export function RecurringPaymentDetailWorkspace({
               value={selectedWalletId}
               onChange={(value) => {
                 setSelectedWalletId(value);
-                setWalletValidationError(null);
+                setPaymentValidationError(null);
               }}
               options={wallets.map((entry) => ({
                 value: entry.walletId,
@@ -944,142 +801,31 @@ export function RecurringPaymentDetailWorkspace({
                 description: shortenAddress(entry.publicKey),
               }))}
               placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
-              searchPlaceholder={t("DashboardPayments.recurring.searchWallets")}
               icon={<WalletIcon />}
-              disabled={savingWallet}
-              validationError={walletValidationError ?? undefined}
-              onEnterSelect={(value) => {
-                setSelectedWalletId(value);
-                setWalletValidationError(null);
-                void submitSourceWallet(value);
-              }}
+              disabled={savingPayment || wallets.length === 0}
             />
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={savingWallet}
-                onClick={closeFundingWalletModal}
-              >
-                {t("DashboardPayments.recurring.cancel")}
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={savingWallet}
-                iconLeft={
-                  savingWallet ? (
-                    <Loader2Icon className="size-4 shrink-0 animate-spin" />
-                  ) : undefined
-                }
-              >
-                {t("DashboardPayments.recurring.save")}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-
-        <Modal
-          isOpen={editingReceivingAccount}
-          ariaLabel={t("DashboardPayments.recurring.editReceivingWallet")}
-          onClose={savingReceivingAccount ? undefined : closeReceivingAccountModal}
-          size="sm"
-        >
-          <form
-            className="space-y-5 p-6"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submitReceivingAccount();
-            }}
-          >
-            <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-primary">
-                {t("DashboardPayments.recurring.editReceivingWallet")}
-              </h2>
-              <p className="text-sm text-secondary">
-                {t("DashboardPayments.recurring.editReceivingWalletDescription")}
-              </p>
-            </div>
             <Combobox
               label={t("DashboardPayments.recurring.receivingWallet")}
               value={selectedReceivingAccountId}
               onChange={(value) => {
                 setSelectedReceivingAccountId(value);
-                setReceivingAccountValidationError(null);
+                setPaymentValidationError(null);
               }}
-              options={counterpartyAccounts.map((account) => {
-                const address = accountAddress(account);
-                return {
-                  value: account.id,
-                  label: accountLabel(account, account.id),
-                  description: shortenAddress(address),
-                };
-              })}
+              options={counterpartyAccounts.map((account) => ({
+                value: account.id,
+                label: accountLabel(account, account.id),
+                description: shortenAddress(accountAddress(account)),
+              }))}
               placeholder={t("DashboardPayments.recurring.selectReceivingWallet")}
-              searchPlaceholder={t("DashboardPayments.recurring.searchWallets")}
               icon={<WalletIcon />}
-              disabled={savingReceivingAccount}
-              validationError={receivingAccountValidationError ?? undefined}
-              onEnterSelect={(value) => {
-                setSelectedReceivingAccountId(value);
-                setReceivingAccountValidationError(null);
-                void submitReceivingAccount(value);
-              }}
+              disabled={savingPayment || counterpartyAccounts.length === 0}
             />
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={savingReceivingAccount}
-                onClick={closeReceivingAccountModal}
-              >
-                {t("DashboardPayments.recurring.cancel")}
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={savingReceivingAccount}
-                iconLeft={
-                  savingReceivingAccount ? (
-                    <Loader2Icon className="size-4 shrink-0 animate-spin" />
-                  ) : undefined
-                }
-              >
-                {t("DashboardPayments.recurring.save")}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-
-        <Modal
-          isOpen={editingAmount}
-          ariaLabel={t("DashboardPayments.recurring.editAmount")}
-          onClose={savingAmount ? undefined : closeAmountModal}
-          size="sm"
-        >
-          <form
-            className="space-y-5 p-6"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submitAmount();
-            }}
-          >
-            <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-primary">
-                {t("DashboardPayments.recurring.editAmount")}
-              </h2>
-              <p className="text-sm text-secondary">
-                {t("DashboardPayments.recurring.editAmountDescription")}
-              </p>
-            </div>
             <Combobox
               label={t("DashboardPayments.recurring.currency")}
               value={selectedToken}
               onChange={(value) => {
                 setSelectedToken(value);
-                setAmountValidationError(null);
+                setPaymentValidationError(null);
               }}
               options={assetOptions}
               placeholder={
@@ -1089,7 +835,7 @@ export function RecurringPaymentDetailWorkspace({
               }
               searchPlaceholder={t("DashboardPayments.ramps.searchCurrencies")}
               icon={<CreditCardIcon />}
-              disabled={savingAmount || assetOptions.length === 0}
+              disabled={savingPayment || assetOptions.length === 0}
             />
             <div className="space-y-2">
               <Label htmlFor="recurring-payment-edit-amount">
@@ -1099,117 +845,63 @@ export function RecurringPaymentDetailWorkspace({
                 id="recurring-payment-edit-amount"
                 inputMode="decimal"
                 value={selectedAmount}
-                disabled={savingAmount}
-                aria-invalid={Boolean(amountValidationError)}
+                disabled={savingPayment}
                 onChange={(event) => {
                   setSelectedAmount(event.currentTarget.value);
-                  setAmountValidationError(null);
+                  setPaymentValidationError(null);
                 }}
                 placeholder="0.00"
               />
-              {amountValidationError ? (
-                <p className="text-sm text-error">{amountValidationError}</p>
-              ) : null}
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={savingAmount}
-                onClick={closeAmountModal}
-              >
-                {t("DashboardPayments.recurring.cancel")}
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={savingAmount}
-                iconLeft={
-                  savingAmount ? (
-                    <Loader2Icon className="size-4 shrink-0 animate-spin" />
-                  ) : undefined
-                }
-              >
-                {t("DashboardPayments.recurring.save")}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-
-        <Modal
-          isOpen={editingBillingInterval}
-          ariaLabel={t("DashboardPayments.recurring.editBillingInterval")}
-          onClose={savingBillingInterval ? undefined : closeBillingIntervalModal}
-          size="sm"
-        >
-          <form
-            className="space-y-5 p-6"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submitBillingInterval();
-            }}
-          >
-            <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-primary">
-                {t("DashboardPayments.recurring.editBillingInterval")}
-              </h2>
-              <p className="text-sm text-secondary">
-                {t("DashboardPayments.recurring.editBillingIntervalDescription")}
-              </p>
             </div>
             <Combobox
               label={t("DashboardPayments.recurring.billingInterval")}
               value={selectedSchedulePreset}
               onChange={(value) => {
                 setSelectedSchedulePreset(value as SchedulePreset);
-                setBillingIntervalValidationError(null);
+                setPaymentValidationError(null);
               }}
               options={getSchedulePresets(t)}
               searchable={false}
               icon={<RepeatIcon />}
-              disabled={savingBillingInterval}
+              disabled={savingPayment}
             />
             {selectedSchedulePreset === "custom" ? (
               <div className="space-y-2">
-                <Label htmlFor="recurring-payment-edit-period-hours">
+                <Label htmlFor="recurring-payment-edit-hours">
                   {t("DashboardPayments.recurring.intervalHours")}
                 </Label>
                 <Input
-                  id="recurring-payment-edit-period-hours"
+                  id="recurring-payment-edit-hours"
                   inputMode="numeric"
                   value={selectedCustomPeriodHours}
-                  disabled={savingBillingInterval}
-                  aria-invalid={Boolean(billingIntervalValidationError)}
+                  disabled={savingPayment}
                   onChange={(event) => {
                     setSelectedCustomPeriodHours(event.currentTarget.value);
-                    setBillingIntervalValidationError(null);
+                    setPaymentValidationError(null);
                   }}
                   placeholder="24"
                 />
-                {billingIntervalValidationError ? (
-                  <p className="text-sm text-error">{billingIntervalValidationError}</p>
-                ) : null}
               </div>
-            ) : billingIntervalValidationError ? (
-              <p className="text-sm text-error">{billingIntervalValidationError}</p>
+            ) : null}
+            {paymentValidationError ? (
+              <p className="text-sm text-error">{paymentValidationError}</p>
             ) : null}
             <div className="flex justify-end gap-2">
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                disabled={savingBillingInterval}
-                onClick={closeBillingIntervalModal}
+                disabled={savingPayment}
+                onClick={closePaymentEditor}
               >
                 {t("DashboardPayments.recurring.cancel")}
               </Button>
               <Button
                 type="submit"
                 size="sm"
-                disabled={savingBillingInterval}
+                disabled={savingPayment}
                 iconLeft={
-                  savingBillingInterval ? (
+                  savingPayment ? (
                     <Loader2Icon className="size-4 shrink-0 animate-spin" />
                   ) : undefined
                 }

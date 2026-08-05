@@ -923,7 +923,10 @@
       "cancelPayment": "Cancel payment",
       "save": "Save",
       "subscriptionAccount": "Subscription account",
-      "openAccount": "Open account in explorer"
+      "openAccount": "Open account in explorer",
+      "editPaymentDescription": "Update the payment's wallets, amount, and schedule.",
+      "paymentUpdated": "Recurring payment updated.",
+      "noChangesToSave": "No changes to save."
     },
     "transactions": {
       "searchPlaceholder": "Search ID, signature, address, reference, or counterparty (3+ characters)",
