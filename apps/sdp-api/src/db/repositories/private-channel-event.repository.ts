@@ -44,6 +44,12 @@ export interface ListPrivateChannelEventsParams {
   instanceId: string;
   family?: PrivateChannelEventFamily;
   type?: string;
+  status?: PrivateChannelEventStatus;
+  /**
+   * Member-scoped viewer. When set, channel-less events are narrowed to
+   * lifecycle events plus events this SDP user authored. Omit for full viewers.
+   */
+  viewerUserId?: string;
   /** Capped at 100 by callers. */
   limit: number;
   /** Cursor: occurred_at of the last row from the previous page. */
@@ -57,6 +63,14 @@ export interface ListProjectPrivateChannelEventsParams {
   projectId: string;
   family?: PrivateChannelEventFamily;
   type?: string;
+  status?: PrivateChannelEventStatus;
+  /**
+   * Member-scoped viewer. When set, the feed is narrowed to the member's
+   * channels plus the channel-less events this SDP user authored, and to
+   * channel-less lifecycle events once they belong to at least one channel.
+   * Omit for full viewers.
+   */
+  viewer?: { channelIds: string[]; userId: string };
   /** Capped at 100 by callers. */
   limit: number;
   /** Cursor: occurred_at of the last row from the previous page. */
@@ -72,8 +86,10 @@ export interface PrivateChannelEventRepositoryContext {
 export interface PrivateChannelEventRepository {
   insert(input: PrivateChannelEventWriteInput): Promise<PrivateChannelEventRow>;
   /**
-   * Channel feed: events for this channel, plus instance-level events
-   * (channel_id IS NULL) so lifecycle like instance.connected appears in the feed.
+   * Channel feed: events for this channel, plus non-transfer instance-level
+   * events so lifecycle like instance.connected appears without pulling unrelated
+   * channel-less financial events into every channel. Member viewers only see
+   * the channel-less events they authored, alongside lifecycle.
    */
   listByChannel(
     params: ListPrivateChannelEventsParams
