@@ -14,6 +14,7 @@ export {
   initializeSigning,
   switchSigning,
 } from "./handlers/provider";
+export { getSetupStatus } from "./handlers/setup-status";
 export { signerCheck } from "./handlers/signer-check";
 export {
   createWallet,
