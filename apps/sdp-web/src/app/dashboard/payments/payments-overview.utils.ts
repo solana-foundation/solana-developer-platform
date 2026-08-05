@@ -151,6 +151,23 @@ export function amountInputPlaceholder(decimals: number): string {
   return decimals <= 0 ? "0" : `0.${"0".repeat(decimals)}`;
 }
 
+/**
+ * Checks that a stored URL is safe to render as a link target: parseable and
+ * http(s). `new URL` alone accepts `javascript:` and `data:` schemes, which
+ * must never reach an href.
+ *
+ * @param value - The candidate URL.
+ * @returns Whether the value parses as an http or https URL.
+ */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 export interface ResolvedTokenPresentation {
   /** Issued-token id (`tok_…`) when the mint belongs to a token issued on SDP. */
   tokenId: string | null;

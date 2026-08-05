@@ -284,7 +284,11 @@ export const createRecurringPaymentSchema = z.object({
     .positive()
     .max(24 * 365),
   firstCollectionAt: firstCollectionAtTimestampSchema.optional(),
-  metadataUri: z.string().url().max(128).optional(),
+  metadataUri: z
+    .string()
+    .url({ protocol: /^https?$/ })
+    .max(128)
+    .optional(),
 });
 
 export const updateRecurringPaymentSchema = z
@@ -302,7 +306,12 @@ export const updateRecurringPaymentSchema = z
       .optional(),
     firstCollectionAt: firstCollectionAtTimestampSchema.nullable().optional(),
     nextCollectionDueAt: recurringTimestampSchema.nullable().optional(),
-    metadataUri: z.string().url().max(128).nullable().optional(),
+    metadataUri: z
+      .string()
+      .url({ protocol: /^https?$/ })
+      .max(128)
+      .nullable()
+      .optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided",
@@ -337,7 +346,11 @@ export const createSubscriptionPlanSchema = z.object({
   planPda: solanaAddressSchema("planPda").optional(),
   destinationAddress: solanaAddressSchema("destinationAddress").optional(),
   pullerWalletId: z.string().min(1).optional(),
-  metadataUri: z.string().url().max(128).optional(),
+  metadataUri: z
+    .string()
+    .url({ protocol: /^https?$/ })
+    .max(128)
+    .optional(),
   status: paymentSubscriptionPlanStatusSchema.default("draft"),
 });
 
@@ -346,7 +359,12 @@ export const updateSubscriptionPlanSchema = z
     planPda: solanaAddressSchema("planPda").nullable().optional(),
     destinationAddress: solanaAddressSchema("destinationAddress").nullable().optional(),
     pullerWalletId: z.string().min(1).nullable().optional(),
-    metadataUri: z.string().url().max(128).nullable().optional(),
+    metadataUri: z
+      .string()
+      .url({ protocol: /^https?$/ })
+      .max(128)
+      .nullable()
+      .optional(),
     status: paymentSubscriptionPlanStatusSchema.optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
@@ -357,7 +375,11 @@ export const prepareSubscriptionPlanCreateSchema = z.object({
   destinations: z.array(solanaAddressSchema("destinations entry")).max(4).optional(),
   pullers: z.array(solanaAddressSchema("pullers entry")).max(4).optional(),
   endTs: u64StringSchema.optional(),
-  metadataUri: z.string().url().max(128).optional(),
+  metadataUri: z
+    .string()
+    .url({ protocol: /^https?$/ })
+    .max(128)
+    .optional(),
 });
 
 export const listSubscriptionPlansQuerySchema = z.object({

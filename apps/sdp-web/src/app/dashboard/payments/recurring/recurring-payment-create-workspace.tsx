@@ -16,6 +16,7 @@ import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
 import {
   amountInputPlaceholder,
+  isHttpUrl,
   isSolBalance,
   resolveTokenByMint,
   shortenAddress,
@@ -175,12 +176,7 @@ function metadataUriIsValid(value: string): boolean {
   if (trimmed.length > 128) {
     return false;
   }
-  try {
-    new URL(trimmed);
-    return true;
-  } catch {
-    return false;
-  }
+  return isHttpUrl(trimmed);
 }
 
 function firstCollectionAtIsValid(value: string): boolean {

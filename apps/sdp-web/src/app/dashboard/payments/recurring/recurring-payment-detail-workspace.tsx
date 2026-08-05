@@ -39,7 +39,12 @@ import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
-import { formatTimestamp, resolveTokenByMint, shortenAddress } from "../payments-overview.utils";
+import {
+  formatTimestamp,
+  isHttpUrl,
+  resolveTokenByMint,
+  shortenAddress,
+} from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
@@ -711,15 +716,10 @@ export function RecurringPaymentDetailWorkspace({
   return (
     <DashboardWorkspaceOverviewPanel>
       <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col gap-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 space-y-1">
-            <h2 className="text-3xl font-medium tracking-tight text-primary">
-              {t("DashboardPayments.recurring.payment")}
-            </h2>
-            <p className="truncate text-sm text-secondary">
-              {counterpartyLabel} · {amountLabel} · {scheduleLabel}
-            </p>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <p className="min-w-0 truncate text-base font-medium text-primary">
+            {counterpartyLabel} · {amountLabel} · {scheduleLabel}
+          </p>
           <RecurringPaymentActionsMenu
             status={recurringPayment.status}
             dueNow={dueNow}
@@ -933,7 +933,7 @@ export function RecurringPaymentDetailWorkspace({
                     <CopyableValue value={recurringPayment.id} label={paymentReferenceLabel} />
                   </DetailRow>
                   <DetailRow label={t("DashboardPayments.recurring.metadata")}>
-                    {recurringPayment.metadataUri ? (
+                    {recurringPayment.metadataUri && isHttpUrl(recurringPayment.metadataUri) ? (
                       <a
                         href={recurringPayment.metadataUri}
                         target="_blank"
@@ -942,6 +942,10 @@ export function RecurringPaymentDetailWorkspace({
                       >
                         {t("DashboardPayments.recurring.openMetadata")}
                       </a>
+                    ) : recurringPayment.metadataUri ? (
+                      <span className="block max-w-64 truncate text-tertiary">
+                        {recurringPayment.metadataUri}
+                      </span>
                     ) : (
                       <span className="text-tertiary">
                         {t("DashboardPayments.recurring.notSet")}
