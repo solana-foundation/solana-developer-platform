@@ -784,6 +784,8 @@
     "apiKeyClearBindingsConfirmationRequired": "Confirm Clear bindings before saving this binding change.",
     "policyAssetsInWallet": "In this wallet",
     "policyAssetsCommon": "Common tokens",
-    "policyAssetsIssued": "Your tokens"
+    "policyAssetsIssued": "Your tokens",
+    "providerStatusComingLater": "Coming later",
+    "providerRequestAccess": "Request access"
   }
 }
