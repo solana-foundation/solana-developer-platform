@@ -264,7 +264,9 @@ export function IntegrationsCatalog({
             </Button>
           ) : null}
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        {/* Family and status are two independent axes; stacking them keeps the
+            row from reading as one undifferentiated strip of pills. */}
+        <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2" data-integrations-family-pills="true">
             {familyPills.map((family) => (
               <FilterPill
