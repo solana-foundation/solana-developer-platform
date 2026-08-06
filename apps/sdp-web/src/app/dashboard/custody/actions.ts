@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigsResponse } from "@sdp/types";
+import type { CustodyConfigsResponse, InitializeSigningResponse } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
@@ -130,7 +130,12 @@ export async function initializeCustody(formData: FormData) {
   redirect("/dashboard/wallets");
 }
 
-async function initializeCustodyWallet(formData: FormData) {
+/**
+ * Returns the wallet the call provisioned so callers can show it. Onboarding
+ * previously discarded this and left the user with no evidence of what setup
+ * created for them.
+ */
+async function initializeCustodyWallet(formData: FormData): Promise<OnboardingProvisionedWallet> {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -167,10 +172,11 @@ async function initializeCustodyWallet(formData: FormData) {
   const client = await createSdpApiClient();
 
   try {
-    await client.fetch("/v1/wallets/initialize", {
+    const initialized = await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    return { publicKey: initialized.publicKey, walletId: initialized.walletId };
   } catch (error) {
     const apiError = parseApiActionError(error);
 
@@ -179,7 +185,20 @@ async function initializeCustodyWallet(formData: FormData) {
       apiError.message.includes("Signing already initialized for org")
     ) {
       const configurations = await client.fetch<CustodyConfigsResponse>("/v1/wallets/configs");
-      const readyConfiguration = configurations.configs.some(
+
+      // Repair must never cross providers. If another provider already owns the
+      // default configuration, "repairing" with setDefault would silently flip
+      // the organization's signing default to whatever provider this caller
+      // submitted; changing providers is the switch flow's decision, behind its
+      // own confirmation. Surface the conflict instead.
+      const defaultConfiguration = configurations.configs.find(
+        (configuration) => configuration.isDefault
+      );
+      if (defaultConfiguration && defaultConfiguration.provider !== provider) {
+        throw error;
+      }
+
+      const readyConfiguration = configurations.configs.find(
         (configuration) =>
           configuration.provider === provider &&
           configuration.isDefault &&
@@ -187,20 +206,30 @@ async function initializeCustodyWallet(formData: FormData) {
       );
 
       if (readyConfiguration) {
-        return;
+        // Already provisioned by an earlier attempt; the configuration carries
+        // the wallet, so completion can still show it.
+        return {
+          publicKey: readyConfiguration.publicKey,
+          walletId: readyConfiguration.defaultWalletId as string,
+        };
       }
 
       // Repair a provider connection whose first wallet did not finish
       // persisting instead of leaving the organization trapped in onboarding.
-      await client.fetch("/v1/wallets", {
-        method: "POST",
-        body: JSON.stringify({
-          provider,
-          label: walletLabel,
-          purpose: "root",
-          setDefault: true,
-        }),
-      });
+      // This endpoint nests its wallet, unlike initialize.
+      const repaired = await client.fetch<{ wallet: { walletId: string; publicKey: string } }>(
+        "/v1/wallets",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            provider,
+            label: walletLabel,
+            purpose: "root",
+            setDefault: true,
+          }),
+        }
+      );
+      return { publicKey: repaired.wallet.publicKey, walletId: repaired.wallet.walletId };
     } else {
       throw error;
     }
@@ -240,6 +269,22 @@ async function createCustodyWalletForProvider(formData: FormData) {
   });
 }
 
+/** A provisioned wallet is `null` when an earlier attempt had already created it. */
+export interface OnboardingProvisionedWallet {
+  publicKey: string;
+  walletId: string;
+}
+
+export type OnboardingCustodyActionResult =
+  | {
+      status: "success";
+      wallet: OnboardingProvisionedWallet;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
 export type WalletSetupActionResult =
   | {
       status: "success";
@@ -267,12 +312,19 @@ export async function initializeCustodySetupAction(
 
 export async function initializeOnboardingCustodyAction(
   formData: FormData
-): Promise<WalletSetupActionResult> {
+): Promise<OnboardingCustodyActionResult> {
   const t = await getTranslations();
   try {
-    await initializeCustodyWallet(formData);
-    revalidateWalletPaths();
-    return { status: "success" };
+    const wallet = await initializeCustodyWallet(formData);
+    // No revalidation here: any revalidatePath from this action invalidates the
+    // client router cache and re-runs the onboarding route, whose server page
+    // redirects once setup is complete, sweeping the completion panel away
+    // after a beat. The panel exits through full document navigations, which
+    // fetch fresh state without any help.
+    return {
+      status: "success",
+      wallet: { publicKey: wallet.publicKey, walletId: wallet.walletId },
+    };
   } catch (error) {
     return {
       status: "error",
