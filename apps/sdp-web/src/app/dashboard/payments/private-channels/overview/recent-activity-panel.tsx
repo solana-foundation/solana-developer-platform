@@ -46,11 +46,14 @@ interface Props {
   initialEvents: PrivateChannelEventDto[];
   /** Channel id → display name, for the Channel column. */
   channelNames: Record<string, string>;
+  /** The initial events load failed — distinguish "couldn't load" from "none yet". */
+  loadError: boolean;
 }
 
-export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
+export function RecentActivityPanel({ initialEvents, channelNames, loadError }: Props) {
   const t = useTranslations();
   const [events, setEvents] = useState(initialEvents);
+  const [loadFailed, setLoadFailed] = useState(loadError);
   const [refreshing, startRefresh] = useTransition();
 
   function handleRefresh() {
@@ -58,7 +61,9 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
       const result = await loadProjectEventsAction({ limit: 50 });
       if (result.ok) {
         setEvents(result.data.events);
+        setLoadFailed(false);
       } else {
+        setLoadFailed(true);
         toast.error(t("DashboardPrivateChannels.overview.activityLoadError"));
       }
     });
@@ -90,11 +95,7 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
         </CardAction>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
-        {events.length === 0 ? (
-          <p className="py-8 text-center text-sm text-secondary">
-            {t("DashboardPrivateChannels.overview.activityEmpty")}
-          </p>
-        ) : (
+        {events.length > 0 ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
               <TableHeader>
@@ -143,6 +144,14 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
               </TableBody>
             </Table>
           </div>
+        ) : loadFailed ? (
+          <p className="py-8 text-center text-sm text-error">
+            {t("DashboardPrivateChannels.overview.activityLoadError")}
+          </p>
+        ) : (
+          <p className="py-8 text-center text-sm text-secondary">
+            {t("DashboardPrivateChannels.overview.activityEmpty")}
+          </p>
         )}
       </CardContent>
       <CardFooter>

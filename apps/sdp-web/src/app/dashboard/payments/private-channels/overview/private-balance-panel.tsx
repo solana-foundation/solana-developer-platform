@@ -12,9 +12,16 @@ interface Props {
   walletsHref: string;
   /** Whether an instance is connected — the Wallets link is only shown when it is. */
   connected: boolean;
+  /** The verified-wallets load failed — distinguish "couldn't load" from "none configured". */
+  loadError: boolean;
 }
 
-export async function PrivateBalancePanel({ channelBalances, walletsHref, connected }: Props) {
+export async function PrivateBalancePanel({
+  channelBalances,
+  walletsHref,
+  connected,
+  loadError,
+}: Props) {
   const t = await getTranslations();
   const balances = aggregateBalancesByMint(channelBalances);
 
@@ -24,7 +31,11 @@ export async function PrivateBalancePanel({ channelBalances, walletsHref, connec
         <CardTitle>{t("DashboardPrivateChannels.overview.privateBalanceTitle")}</CardTitle>
       </CardHeader>
       <CardContent className="flex-1">
-        {balances.length === 0 ? (
+        {loadError ? (
+          <p className="text-sm text-error">
+            {t("DashboardPrivateChannels.overview.privateBalanceLoadError")}
+          </p>
+        ) : balances.length === 0 ? (
           <p className="text-sm text-secondary">
             {t("DashboardPrivateChannels.overview.privateBalanceNoWallet")}
           </p>

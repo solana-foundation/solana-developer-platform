@@ -1,5 +1,5 @@
-import type { PrivateChannelDto, PrivateChannelEventDto, SolanaCluster } from "@sdp/types";
-import { WELL_KNOWN_TOKEN_BY_MINT, wellKnownMint } from "@sdp/types";
+import type { PrivateChannelDto, PrivateChannelEventDto } from "@sdp/types";
+import { inferCluster, WELL_KNOWN_TOKEN_BY_MINT, wellKnownMint } from "@sdp/types";
 import type { WalletChannelBalance } from "../private-channels-page.data";
 
 /** A mint the connected member holds a channel balance in. */
@@ -53,12 +53,13 @@ export function aggregateBalancesByMint(
  * no SDP API exposes it yet, so this mirrors the server's single-mint assumption
  * (USDC for the instance's cluster — see services/private-channels/mint.ts). When
  * an allowed-mints endpoint lands, swap this for its result.
+ *
+ * Cluster is derived with the shared `inferCluster` so the web and the API agree:
+ * an unrecognized RPC URL is devnet (the sandbox default), never mainnet — a
+ * mismatch here would advertise the wrong USDC mint against devnet balances.
  */
 export function allowedTokensForInstance(instance: { chainRpcUrl: string }): AllowedToken[] {
-  const cluster: SolanaCluster = instance.chainRpcUrl.includes("devnet")
-    ? "devnet"
-    : "mainnet-beta";
-  const usdc = wellKnownMint("USDC", cluster);
+  const usdc = wellKnownMint("USDC", inferCluster(instance.chainRpcUrl));
   return usdc ? [{ mint: usdc, symbol: "USDC" }] : [];
 }
 

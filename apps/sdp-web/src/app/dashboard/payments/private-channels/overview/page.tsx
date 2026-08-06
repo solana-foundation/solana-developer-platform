@@ -68,6 +68,7 @@ export default async function PrivateChannelsOverviewPage() {
           channelBalances={channelBalances}
           walletsHref={PRIVATE_CHANNELS_WALLETS_PATH}
           connected={isConnected}
+          loadError={!wallets.ok}
         />
         <AllowedTokensPanel instance={instance} />
       </div>
@@ -77,6 +78,7 @@ export default async function PrivateChannelsOverviewPage() {
         <RecentActivityPanel
           initialEvents={events.data.events}
           channelNames={channelNameById(channels.data)}
+          loadError={!events.ok}
         />
       ) : null}
     </div>

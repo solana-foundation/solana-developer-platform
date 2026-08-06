@@ -55,7 +55,7 @@
       "activityRefresh": "Refresh",
       "activityViewAll": "View all activity",
       "activityEmpty": "No private activity yet.",
-      "activityLoadError": "Couldn't refresh activity.",
+      "activityLoadError": "Couldn't load activity.",
       "colStatus": "Status",
       "colType": "Type",
       "colToken": "Token",
@@ -69,6 +69,7 @@
       "colWallet": "Wallet",
       "colBalance": "Channel balance",
       "privateBalanceNoWallet": "No configured wallet",
+      "privateBalanceLoadError": "Couldn't load your private balance.",
       "viewWallets": "View wallets",
       "defaultChannelLabel": "Default channel"
     },
