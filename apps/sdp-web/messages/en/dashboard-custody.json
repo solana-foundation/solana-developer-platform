@@ -785,6 +785,11 @@
     "policyAssetsInWallet": "In this wallet",
     "policyAssetsCommon": "Common tokens",
     "policyAssetsIssued": "Your tokens",
+    "onboardingDoneTitle": "Your workspace is ready",
+    "onboardingDoneBody": "{provider} is connected and your first wallet is live.",
+    "onboardingDoneWalletHeading": "Your first wallet",
+    "onboardingDoneGoToDashboard": "Go to dashboard",
+    "onboardingDoneViewWallets": "View wallets",
     "providerStatusComingLater": "Coming later",
     "providerRequestAccess": "Request access"
   }
