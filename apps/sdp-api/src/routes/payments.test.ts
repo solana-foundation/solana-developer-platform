@@ -6532,7 +6532,7 @@ describe("Payments routes", () => {
       counterpartyId: null,
       sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
       destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-      token: "SOL",
+      token: SOL_MINT,
       amount: "0.1",
       memo: null,
       type: "transfer",
@@ -6552,7 +6552,7 @@ describe("Payments routes", () => {
       idempotencyFingerprint: buildPaymentTransferFingerprint({
         sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
+        token: SOL_MINT,
         amount: "0.1",
         memo: undefined,
         type: "transfer",
@@ -8790,6 +8790,21 @@ describe("Payments routes", () => {
         expect(walletRes.status).toBe(200);
         const walletBody = (await walletRes.json()) as { data: Array<{ id: string }> };
         expect(walletBody.data.map((transfer) => transfer.id)).toEqual(["xfr_native_sol_pending"]);
+      }
+
+      for (const filter of ["USDC", "usdc", DEVNET_USDC_MINT]) {
+        const res = await app.request(
+          `/v1/payments/transfers?token=${filter}`,
+          {
+            method: "GET",
+            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: Array<{ id: string }> };
+        expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_usdc"]);
       }
     });
 

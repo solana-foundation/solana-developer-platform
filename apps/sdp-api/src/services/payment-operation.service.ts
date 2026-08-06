@@ -90,10 +90,11 @@ export function isNativePaymentToken(token: string): boolean {
 }
 
 /**
- * Maps native SOL aliases and well-known token symbols to the configured
- * cluster's mint; anything else passes through as a mint address. Native SOL
- * canonicalizes to the wrapped SOL mint so `token` values compare uniformly —
- * dispatch between native and SPL paths goes through {@link isNativePaymentToken},
+ * Maps native SOL aliases and well-known token symbols (case-insensitive) to
+ * the configured cluster's mint; anything else passes through as a mint
+ * address, byte-exact since base58 is case-sensitive. Native SOL canonicalizes
+ * to the wrapped SOL mint so `token` values compare uniformly — dispatch
+ * between native and SPL paths goes through {@link isNativePaymentToken},
  * never string equality against the mint.
  */
 export function normalizePaymentToken(token: string, env: RpcEnv): string {
@@ -101,7 +102,7 @@ export function normalizePaymentToken(token: string, env: RpcEnv): string {
     return SOL_MINT;
   }
 
-  const symbol = token.trim();
+  const symbol = token.trim().toUpperCase();
   if (!isWellKnownTokenSymbol(symbol)) {
     return token;
   }
