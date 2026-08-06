@@ -46,6 +46,17 @@ class MemoryCheckpointStore implements KVStore {
     return true;
   }
 
+  async compareAndDelete(_key: string, expected: string): Promise<boolean> {
+    this.compareAndSetCalls += 1;
+    if (this.compareAndSetCalls === this.rejectAtCall) {
+      this.rejectAtCall = null;
+      return false;
+    }
+    if (this.value !== expected) return false;
+    this.value = null;
+    return true;
+  }
+
   async list() {
     return { keys: [] };
   }

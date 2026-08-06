@@ -213,13 +213,15 @@ describe("database client connection management", () => {
     };
     const db = createDatabaseClient("postgresql://node-post-commit-failure/sdp");
     const afterCommit = vi.fn();
+    const afterRollback = vi.fn();
 
     const operation = db.lockedTransactionWithPostCommit?.(
       "audit-checkpoint",
       async (tx) => {
         await tx.execute("INSERT INTO audit_logs (id) VALUES (?)", ["aud_1"]);
       },
-      afterCommit
+      afterCommit,
+      afterRollback
     );
     if (!operation) throw new Error("locked post-commit transactions are unavailable");
     await expect(operation).rejects.toBe(commitFailure);
@@ -234,6 +236,37 @@ describe("database client connection management", () => {
       expect.objectContaining({ text: "SELECT pg_advisory_unlock(hashtext($1))" }),
     ]);
     expect(afterCommit).not.toHaveBeenCalled();
+    expect(afterRollback).toHaveBeenCalledOnce();
+    expect(afterRollback).toHaveBeenCalledWith(undefined);
+  });
+
+  it("does not run an external rollback action when PostgreSQL cannot confirm rollback", async () => {
+    const commitFailure = new Error("commit failed");
+    const rollbackFailure = new Error("connection lost during rollback");
+    pgMock.poolClientQuery = async () => {
+      const client = pgMock.pools[0]?.connectedClients[0];
+      const latestQuery = client?.queries.at(-1)?.[0];
+      if (latestQuery === "COMMIT") throw commitFailure;
+      if (latestQuery === "ROLLBACK") throw rollbackFailure;
+      return { rows: [], rowCount: 0 };
+    };
+    const db = createDatabaseClient("postgresql://node-ambiguous-commit/sdp");
+    const afterRollback = vi.fn();
+
+    const operation = db.lockedTransactionWithPostCommit?.(
+      "audit-checkpoint",
+      async (tx) => {
+        await tx.execute("INSERT INTO audit_logs (id) VALUES (?)", ["aud_1"]);
+      },
+      vi.fn(),
+      afterRollback
+    );
+    if (!operation) throw new Error("locked post-commit transactions are unavailable");
+    await expect(operation).rejects.toBe(commitFailure);
+
+    expect(afterRollback).not.toHaveBeenCalled();
+    const client = pgMock.pools[0]?.connectedClients[0];
+    expect(client?.release).toHaveBeenCalledWith(rollbackFailure);
   });
 
   it("discards the pooled connection when rollback fails", async () => {

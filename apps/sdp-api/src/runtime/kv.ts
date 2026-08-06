@@ -43,6 +43,8 @@ export interface KVStore {
    * expected value. `null` means the key must not exist.
    */
   compareAndSet(key: string, expected: string | null, value: string): Promise<boolean>;
+  /** Atomically delete a key only when its current value exactly matches. */
+  compareAndDelete(key: string, expected: string): Promise<boolean>;
   list(): Promise<KVListResult>;
   admitSlidingWindow(
     currentKey: string,

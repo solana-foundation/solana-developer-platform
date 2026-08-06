@@ -17,6 +17,11 @@ function createMemoryCheckpointStore(): KVStore {
       value = next;
       return true;
     }),
+    compareAndDelete: vi.fn(async (_key: string, expected: string) => {
+      if (value !== expected) return false;
+      value = null;
+      return true;
+    }),
     list: vi.fn(async () => ({ keys: [] })),
     admitSlidingWindow: vi.fn(),
   };
@@ -37,6 +42,7 @@ function createAuditWriter(
 ) {
   let committedSequence = options.initialCommittedSequence ?? 0;
   let pendingSequence: number | null = null;
+  let commitFailAt = options.commitFailAt;
   const queryOne = vi.fn(async (query: string, params: readonly unknown[] = []) => {
     if (
       query.includes("FROM audit_logs") &&
@@ -71,12 +77,15 @@ function createAuditWriter(
       async (
         _lockKey: string,
         callback: (tx: { queryOne: typeof queryOne }) => Promise<unknown>,
-        afterCommit: (result: unknown) => Promise<void>
+        afterCommit: (result: unknown) => Promise<void>,
+        afterRollback?: (result: unknown) => Promise<void>
       ) => {
         pendingSequence = null;
         const result = await callback({ queryOne });
-        if (pendingSequence !== null && options.commitFailAt === pendingSequence) {
+        if (pendingSequence !== null && commitFailAt === pendingSequence) {
+          commitFailAt = undefined;
           pendingSequence = null;
+          await afterRollback?.(result);
           throw new Error("commit unavailable");
         }
         if (pendingSequence !== null) {
@@ -146,8 +155,38 @@ describe("AuditService", () => {
     ).rejects.toBeInstanceOf(AuditPersistenceError);
   });
 
-  it("leaves a fail-closed pending witness when the database commit fails", async () => {
+  it("restores the exact checkpoint after a confirmed database rollback", async () => {
+    const { db, queryOne, checkpoint } = createAuditWriter({ commitFailAt: 1 });
+    const audit = new AuditService(db as never, checkpoint);
+
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+      })
+    ).rejects.toBeInstanceOf(AuditPersistenceError);
+
+    expect(checkpoint.compareAndDelete).toHaveBeenCalledWith(
+      AUDIT_LEDGER_CHECKPOINT_KEY,
+      JSON.stringify({
+        pending: true,
+        previous: null,
+        next: { sequence: 1, headHash: hashForSequence(1) },
+      })
+    );
+    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBeNull();
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+      })
+    ).resolves.toBeUndefined();
+    expect(insertedCalls(queryOne)).toHaveLength(2);
+  });
+
+  it("fails closed when the exact pending witness cannot be restored after rollback", async () => {
     const { db, checkpoint } = createAuditWriter({ commitFailAt: 1 });
+    vi.mocked(checkpoint.compareAndDelete).mockResolvedValueOnce(false);
 
     await expect(
       new AuditService(db as never, checkpoint).logSystem({
@@ -156,13 +195,26 @@ describe("AuditService", () => {
       })
     ).rejects.toBeInstanceOf(AuditPersistenceError);
 
-    expect(checkpoint.compareAndSet).toHaveBeenCalledOnce();
+    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toContain('"pending":true');
+  });
+
+  it("restores a committed predecessor after a later database rollback", async () => {
+    const { db, checkpoint } = createAuditWriter({ commitFailAt: 2 });
+    const audit = new AuditService(db as never, checkpoint);
+    await audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" });
+
+    await expect(
+      audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
+    ).rejects.toBeInstanceOf(AuditPersistenceError);
     await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBe(
-      JSON.stringify({
-        pending: true,
-        previous: null,
-        next: { sequence: 1, headHash: hashForSequence(1) },
-      })
+      JSON.stringify({ sequence: 1, headHash: hashForSequence(1) })
+    );
+
+    await expect(
+      audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
+    ).resolves.toBeUndefined();
+    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBe(
+      JSON.stringify({ sequence: 2, headHash: hashForSequence(2) })
     );
   });
 

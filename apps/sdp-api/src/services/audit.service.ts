@@ -250,9 +250,11 @@ async function reconcileExternalCheckpoint(
   // A pending witness whose `next` value is the current, valid PostgreSQL
   // head proves that PostgreSQL committed and only the post-commit promotion
   // was interrupted. Finalizing that exact CAS is safe. We deliberately do
-  // not roll a pending witness back when PostgreSQL matches `previous`: that
-  // state is indistinguishable from privileged committed-tail deletion and
-  // remains locked for operator investigation.
+  // not roll a stale pending witness back when PostgreSQL matches `previous`:
+  // that state is indistinguishable from privileged committed-tail deletion
+  // and remains locked for operator investigation. The originating writer
+  // may restore its exact witness only while PostgreSQL positively confirms
+  // that same transaction rolled back and the session lock is still held.
   const pending = parsePendingCheckpoint(externalCheckpoint);
   const predecessorMatches =
     pending !== null &&
@@ -656,8 +658,9 @@ export class AuditService {
           // Publish the next sealed head before PostgreSQL commits. A verifier
           // that races the commit sees an explicit pending witness and fails
           // closed; deleting the committed tail can no longer restore agreement
-          // with the predecessor checkpoint. If commit fails after this CAS,
-          // operators must inspect and restore the witness deliberately.
+          // with the predecessor checkpoint. A confirmed rollback restores this
+          // exact witness while the session lock remains held; an ambiguous crash
+          // or lost commit outcome remains locked for operator investigation.
           const witnessed = await checkpointStore.compareAndSet(
             AUDIT_LEDGER_CHECKPOINT_KEY,
             expectedCheckpoint,
@@ -667,7 +670,7 @@ export class AuditService {
             throw new Error("External audit-ledger pending witness was not established");
           }
 
-          return { pendingCheckpoint, nextCheckpoint };
+          return { expectedCheckpoint, pendingCheckpoint, nextCheckpoint };
         },
         async ({ pendingCheckpoint, nextCheckpoint }) => {
           const advanced = await checkpointStore.compareAndSet(
@@ -678,6 +681,27 @@ export class AuditService {
           if (!advanced) {
             throw new Error(
               "External audit-ledger checkpoint did not advance after commit; writes are locked"
+            );
+          }
+        },
+        async ({ expectedCheckpoint, pendingCheckpoint }) => {
+          const restored =
+            expectedCheckpoint === null
+              ? await checkpointStore.compareAndDelete(
+                  AUDIT_LEDGER_CHECKPOINT_KEY,
+                  pendingCheckpoint
+                )
+              : await checkpointStore.compareAndSet(
+                  AUDIT_LEDGER_CHECKPOINT_KEY,
+                  pendingCheckpoint,
+                  expectedCheckpoint
+                );
+          if (
+            !restored &&
+            (await checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY)) !== expectedCheckpoint
+          ) {
+            throw new Error(
+              "External audit-ledger pending witness was not restored after rollback; writes are locked"
             );
           }
         }

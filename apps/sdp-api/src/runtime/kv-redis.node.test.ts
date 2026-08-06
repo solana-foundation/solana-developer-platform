@@ -102,6 +102,18 @@ describe("RedisKVStore (HOO-510)", () => {
     });
   });
 
+  describe("compareAndDelete", () => {
+    it("deletes only the exact current value", async () => {
+      const store = new RedisKVStore(raw, "test");
+      await store.put("head", "pending");
+
+      expect(await store.compareAndDelete("head", "stale")).toBe(false);
+      expect(await store.get("head")).toBe("pending");
+      expect(await store.compareAndDelete("head", "pending")).toBe(true);
+      expect(await store.get("head")).toBeNull();
+    });
+  });
+
   describe("list() via SCAN", () => {
     it("returns all keys for the store's prefix, with prefix stripped", async () => {
       const store = new RedisKVStore(raw, "test");

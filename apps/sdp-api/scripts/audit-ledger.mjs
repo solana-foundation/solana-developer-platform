@@ -19,6 +19,18 @@ redis.call('SET', KEYS[1], ARGV[3])
 return 1
 `;
 
+const RESTORE_ROLLED_BACK_CHECKPOINT_LUA = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return 0
+end
+if ARGV[2] == 'missing' then
+  redis.call('DEL', KEYS[1])
+else
+  redis.call('SET', KEYS[1], ARGV[3])
+end
+return 1
+`;
+
 function serializeCheckpoint(sequence, headHash) {
   return JSON.stringify({ sequence, headHash });
 }
@@ -253,6 +265,7 @@ async function appendCheckpoint(client, redis, options) {
   // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
   await client.query("SELECT pg_advisory_lock(hashtext($1))", [AUDIT_LEDGER_SESSION_LOCK_KEY]);
   let transactionOpen = false;
+  let rollbackCheckpoint = null;
   try {
     await finalizeCommittedPendingCheckpoint(client, redis);
     const before = await inspect(client, redis);
@@ -304,6 +317,7 @@ async function appendCheckpoint(client, redis, options) {
     if (witnessed !== 1) {
       throw new Error("External audit-ledger pending witness was not established");
     }
+    rollbackCheckpoint = { expected, pending };
     await client.query("COMMIT");
     transactionOpen = false;
 
@@ -321,8 +335,33 @@ async function appendCheckpoint(client, redis, options) {
       );
     }
   } catch (error) {
+    let rollbackConfirmed = false;
     if (transactionOpen) {
-      await client.query("ROLLBACK").catch(() => {});
+      try {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        rollbackConfirmed = true;
+      } catch {
+        // An ambiguous transaction outcome must leave the witness fail-closed.
+      }
+    }
+    if (rollbackConfirmed && rollbackCheckpoint) {
+      const { expected, pending } = rollbackCheckpoint;
+      const restored = await redis.eval(
+        RESTORE_ROLLED_BACK_CHECKPOINT_LUA,
+        1,
+        EXTERNAL_CHECKPOINT_KEY,
+        pending,
+        expected === null ? "missing" : "present",
+        expected ?? ""
+      );
+      const current = await redis.get(EXTERNAL_CHECKPOINT_KEY);
+      if (restored !== 1 && current !== expected) {
+        throw new AggregateError(
+          [error, new Error("External pending witness could not be restored after rollback")],
+          "Audit checkpoint transaction rolled back but external recovery failed"
+        );
+      }
     }
     throw error;
   } finally {
