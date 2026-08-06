@@ -21,6 +21,12 @@ import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import {
+  approvedWalletOperationAttemptId,
+  approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
+  walletOperationExecutionRequest,
+} from "@/services/policy/approved-operation-replay";
+import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
   walletOperationActorFromAuth,
@@ -69,23 +75,34 @@ export const signerCheck = async (c: AppContext) => {
   }
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, resolvedWalletId);
-  await enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
+  const policyScope = getRequestTenantScope(c);
+  const policyInput = {
     organizationId: auth.organizationId,
     projectId: auth.projectId,
     custodyWalletId: policyWallet?.id ?? null,
     walletId: resolvedWalletId,
     apiKeyId: auth.apiKeyId,
     actor: walletOperationActorFromAuth(auth),
-    operationFamily: "raw_sign",
-    operationType: "custody_signer_check",
+    operationFamily: "raw_sign" as const,
+    operationType: "custody_signer_check" as const,
     context: {
       memo,
     },
     rawPayload: {
       requestedWalletId: parsed.data.walletId ?? null,
       memo,
+      executionRequest: walletOperationExecutionRequest(c, parsed.data),
     },
-  });
+  };
+  const approvedOperationId = approvedWalletOperationId(c);
+  const attemptId = approvedWalletOperationAttemptId(c);
+  await enforceWalletOperationPolicy(
+    c.env,
+    policyScope,
+    policyInput,
+    approvedOperationId,
+    attemptId
+  );
 
   try {
     const signer = await createOrgSigner(
@@ -135,6 +152,7 @@ export const signerCheck = async (c: AppContext) => {
     const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
     const txEncoder = getTransactionEncoder();
     const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+    await beginApprovedWalletOperationEffect(c);
     const signature = await feePayment.signAndSend(txBytes);
 
     const confirmation = await confirmTransaction(rpc, signature, {
