@@ -118,8 +118,20 @@ export function PrivyCredentialForm({
     // is in flight, unmounting here would discard the only replay state.
     onRecoveryLockChange?.(true);
     startTransition(async () => {
-      applyResult(await submitPrivyCredentialAction(formData));
+      applyResult(await submitSafely(formData));
     });
+  };
+
+  // A rejected action call is the same uncertainty as a transport error inside
+  // it: the POST may have committed with the response lost. Left unguarded, the
+  // rejection would skip every branch that settles the recovery lock; mapped to
+  // `error`, the frozen payload and retained key stay the recovery path.
+  const submitSafely = async (payload: FormData): Promise<PrivyByokSubmitResult> => {
+    try {
+      return await submitPrivyCredentialAction(payload);
+    } catch {
+      return { status: "error", message: "" };
+    }
   };
 
   const handleReplay = (payload: FormData) => {
@@ -127,7 +139,7 @@ export function PrivyCredentialForm({
       return;
     }
     startTransition(async () => {
-      applyResult(await submitPrivyCredentialAction(payload));
+      applyResult(await submitSafely(payload));
     });
   };
 
@@ -136,7 +148,13 @@ export function PrivyCredentialForm({
       return;
     }
     startTransition(async () => {
-      applyResult(await recheckPrivyCredentialAction(providerCredentialId));
+      try {
+        applyResult(await recheckPrivyCredentialAction(providerCredentialId));
+      } catch {
+        // The check is idempotent and the credential survives server-side, so
+        // a lost action response leaves the current recovery state valid; stay
+        // on it with the same re-check still offered.
+      }
     });
   };
 

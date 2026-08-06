@@ -183,6 +183,50 @@ describe("PrivyCredentialForm", () => {
     await waitFor(() => expect(onLock).toHaveBeenLastCalledWith(false));
   });
 
+  it("treats a rejected submit call as an unknown outcome with the replay intact", async () => {
+    const onLock = vi.fn();
+    vi.mocked(submitPrivyCredentialAction)
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockResolvedValueOnce({ status: "success" });
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <PrivyCredentialForm formId="byok-reject-test" onRecoveryLockChange={onLock} />
+      </I18nProvider>
+    );
+
+    await fillAndSubmit(user);
+    // The POST may have committed before the call rejected: the lock must hold
+    // and the frozen payload must still be replayable under the same key.
+    await screen.findByRole("button", { name: "Retry submission" });
+    expect(onLock).toHaveBeenLastCalledWith(true);
+
+    await user.click(screen.getByRole("button", { name: "Retry submission" }));
+    await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
+    expect(submittedKey(1)).toBe(submittedKey(0));
+    await waitFor(() => expect(onLock).toHaveBeenLastCalledWith(false));
+  });
+
+  it("stays on the recovery screen when a re-check call rejects", async () => {
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
+      status: "retry_unknown",
+      providerCredentialId: "pcred_1",
+    });
+    vi.mocked(recheckPrivyCredentialAction)
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockResolvedValueOnce({ status: "success" });
+    const user = userEvent.setup();
+    renderForm();
+
+    await fillAndSubmit(user);
+    await user.click(await screen.findByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledTimes(1));
+    // The re-check is idempotent, so a lost response keeps the same screen and
+    // the same offer rather than discarding the stored credential's state.
+    await user.click(await screen.findByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(push.mock.calls[0]?.[0]).toBe("/dashboard/wallets"));
+  });
+
   it("offers a safe re-check instead of resubmitting after an unknown outcome", async () => {
     vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
       status: "retry_unknown",
