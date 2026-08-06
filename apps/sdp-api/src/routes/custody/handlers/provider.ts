@@ -4,7 +4,7 @@ import { SigningError } from "@sdp/custody/signing";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";
-import { isPrivyByokEnabled } from "@/lib/feature-flags";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
@@ -366,6 +366,10 @@ async function assertFreshPrivyLegacySetupAllowed(
     throw badRequest("Project scope is required");
   }
 
+  if (!isCustodyConnectionRuntimeEnabled(c.env, "privy")) {
+    return;
+  }
+
   const blockingConnection = await getDb(c.env)
     .prepare(
       `SELECT id
@@ -388,7 +392,7 @@ async function assertFreshPrivyLegacySetupAllowed(
   }
 
   const availability = await getProviderAvailability(c.env, getDb(c.env), organizationId);
-  if (availability.providers.custody.privy.entitled && isPrivyByokEnabled(c.env)) {
+  if (availability.providers.custody.privy.entitled) {
     throw forbidden("New Privy setup must use stored credentials");
   }
 }
