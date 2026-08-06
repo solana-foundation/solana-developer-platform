@@ -8,12 +8,11 @@ import {
   fetchPolicyAuditContext,
   fetchPolicyEvaluation,
   fetchPolicyEvaluationNeighbors,
-  firstSearchParam,
   PolicyAuditRequestError,
   parsePolicyAuditFilters,
 } from "../../policy-audit.data";
 import { PolicyAuditLoadError } from "../../policy-audit.shared";
-import { PolicyAuditDetail, type PolicyAuditDetailTab } from "../../policy-audit-detail";
+import { PolicyAuditDetail } from "../../policy-audit-detail";
 
 export const dynamic = "force-dynamic";
 
@@ -38,8 +37,6 @@ export default async function WalletPolicyAuditDetailPage({
   const policyEvaluationId = decodeURIComponent(resolvedParams.policyEvaluationId);
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
   const filters = parsePolicyAuditFilters(resolvedSearchParams);
-  const tab = parseDetailTab(resolvedSearchParams.tab);
-  const selectedRevisionId = firstSearchParam(resolvedSearchParams.revision);
 
   try {
     const apiClient = await createSdpApiClient();
@@ -59,8 +56,6 @@ export default async function WalletPolicyAuditDetailPage({
           userNames={context.userNames}
           neighbors={neighbors}
           filters={filters}
-          tab={tab}
-          selectedRevisionId={selectedRevisionId}
           locale={locale}
           t={t}
         />
@@ -70,13 +65,12 @@ export default async function WalletPolicyAuditDetailPage({
     if (error instanceof PolicyAuditRequestError && error.status === 404) notFound();
     return (
       <DashboardWorkspaceOverviewPanel>
-        <PolicyAuditLoadError backHref={policyHref} t={t} />
+        <PolicyAuditLoadError
+          backHref={`${policyHref}/audit`}
+          backLabel={t("DashboardCustody.policyAuditBackToAudit")}
+          t={t}
+        />
       </DashboardWorkspaceOverviewPanel>
     );
   }
-}
-
-function parseDetailTab(value: string | string[] | undefined): PolicyAuditDetailTab {
-  const tab = firstSearchParam(value);
-  return tab === "request" || tab === "revisions" ? tab : "decision";
 }

@@ -139,7 +139,7 @@ export function OnchainSendStepContent({
         />
         <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
           <div className="flex flex-col gap-2">
-            <Label className="text-sm font-medium text-tertiary" htmlFor="onchain-send-amount">
+            <Label className="text-tertiary" htmlFor="onchain-send-amount">
               {t("DashboardPayments.onchainSend.amount")}
             </Label>
             <Input
@@ -180,7 +180,7 @@ export function OnchainSendStepContent({
         </div>
         <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
         <div className="flex flex-col gap-2">
-          <Label className="text-sm font-medium text-tertiary" htmlFor="onchain-send-memo">
+          <Label className="text-tertiary" htmlFor="onchain-send-memo">
             {t("DashboardPayments.onchainSend.memoOptional")}
           </Label>
           <Input

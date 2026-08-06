@@ -121,7 +121,7 @@ export function CurrencyPairSelector() {
     <div className="flex flex-col gap-4">
       <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_200px]">
         <div className="flex flex-col gap-2">
-          <Label className="text-sm font-medium text-tertiary" htmlFor={`${direction}-ramp-amount`}>
+          <Label className="text-tertiary" htmlFor={`${direction}-ramp-amount`}>
             {t("DashboardPayments.ramps.amount")}
           </Label>
           <Input

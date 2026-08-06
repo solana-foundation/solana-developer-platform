@@ -44,7 +44,7 @@ export default async function WalletPolicyAuditPage({
     ]);
 
     return (
-      <DashboardWorkspaceOverviewPanel>
+      <DashboardWorkspaceOverviewPanel className="flex flex-col">
         <PolicyAuditList
           walletId={resolvedWalletId}
           walletLabel={context.wallet.label?.trim() || context.wallet.walletId}
@@ -62,7 +62,11 @@ export default async function WalletPolicyAuditPage({
     if (error instanceof PolicyAuditRequestError && error.status === 404) notFound();
     return (
       <DashboardWorkspaceOverviewPanel>
-        <PolicyAuditLoadError backHref={policyHref} t={t} />
+        <PolicyAuditLoadError
+          backHref={policyHref}
+          backLabel={t("DashboardCustody.policyAuditBackToWalletControls")}
+          t={t}
+        />
       </DashboardWorkspaceOverviewPanel>
     );
   }

@@ -129,8 +129,9 @@ pending redemption, settles on the provider's T+n webhook (or poll).
 carrying `provider` + `declaredSupport`, filled in method-by-method), the
 portfolio-wallet capability (`EarnPortfolioWalletProvider` +
 `supportsPortfolioWallets` in `@sdp/earn/capabilities`), the
-`earn_provider_wallets` table (migration `0035`, one shared wallet per
-org+environment+provider), the catalogue-sync cron
+`earn_provider_wallets` table (migration `0049`, one shared wallet per
+org+environment+provider — SDP's model, not a provider limit: one provider
+account holds many wallets, one per org), the catalogue-sync cron
 (`cron/earn-catalogue-sync.ts`) + dev seed (`db:seed:earn` →
 `scripts/seed-earn-demo.ts`), the NAV cron task, earn webhook processors, and
 the execution endpoints + `/movements/:id/submit`.

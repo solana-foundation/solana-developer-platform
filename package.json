@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.53.0",
+  "version": "0.54.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
@@ -19,7 +19,7 @@
       "axios": "1.18.1",
       "brace-expansion": "5.0.9",
       "esbuild": "0.28.1",
-      "fast-uri": "^3.1.4",
+      "fast-uri": "3.1.5",
       "js-yaml": "4.3.0",
       "postcss": "^8.5.22",
       "protobufjs": "7.6.5",

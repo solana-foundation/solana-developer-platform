@@ -26,7 +26,12 @@ Companion docs:
 - **One shared portfolio wallet per (organization, environment, provider).**
   Choosing a curator (optionally with a custom split) sets the shared wallet's
   strategy weights. Enforced by a DB unique constraint
-  (`earn_provider_wallets`, migration 0035).
+  (`earn_provider_wallets`, migration 0049). This is SDP's product model, not a
+  provider constraint: Ground has no concept of an SDP organization, one Ground
+  account holds many portfolio wallets, and every SDP org shares a single account
+  per environment. A provider account's other wallets therefore belong to other
+  orgs — which is why a provider console's account-wide total will exceed what any
+  one org sees in SDP.
 - **Solana-only surface.** Deposits are funded by sending USDC/USDT on Solana
   to the wallet's deposit address (`solana_devnet` in sandbox, `solana` in
   production); withdrawals settle to a Solana address the org controls. Ground
@@ -48,10 +53,10 @@ Ground's [Portfolio Wallets API](https://docs.groundtech.co/docs/portfolio-walle
 | `apyBps` | `current_apy` decimal string (integer math, `356 → "0.0356"`) |
 | `processingPolicies.redeem` | `liquidity_term`: `instant` when 0, else `delayed` + `redemption_delay_days` (ceil to days) |
 | Yield-source id / name / protocol | `risk_metadata.curator` (known ids → `morpho-<curator>-<token>` convention → protocol fallback) |
-| `allocations[].type` (treasury/CLO vs lending/reserve) | `source_kind`: `rwa` / `defi` (dominant allocation) |
+| `allocations[].type` (observed: `market`, `liquidity`, `loan`, `reserve`, `rwa`, `treasury`) | `source_kind`: `rwa` / `defi` (dominant allocation; `rwa` + `treasury` are the RWA side) |
 | `mode` | only `active` sources are listed; `buy_only` is excluded (would trap funds — ADR 0002 exit-safety) |
 | Portfolio wallet (`POST /v2/wallets`, `GET /v2/wallets/{id}`) | The org's shared program: `earn_provider_wallets.provider_wallet_ref` |
-| Strategy weights | `PUT /v1/earn/program` allocations (percent, 0.1 grid, sum = 100 per token group) → Ground target weights |
+| Strategy weights | `PUT /v1/earn/program` allocations (percent, 0.1 grid, sum = 100 per token group) → Ground target weights. Takes an idempotent `requestId` forwarded on BOTH branches (`POST /v2/wallets` on create, `PATCH /v2/wallets/{id}/strategy` on update) — Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
 | `depositAddresses.solana{,_devnet}` | The program's funding address (only Solana is surfaced) |
 | Deposits / withdrawals / previews | `GET /v1/earn/program/deposits`, `POST /v1/earn/program/withdrawal-preview`, `POST /v1/earn/program/withdrawals` (idempotent `requestId`) |
 
@@ -108,31 +113,73 @@ real on-chain states:
 | `external_payout` | Leaving toward a withdrawal destination |
 | `unknown` | Forward-compatible fallback (never guess) |
 
+Position **labels** are synthesized from kind + token, not passed through:
+Ground names a position after the chain its value currently sits on (e.g. idle
+cash reads `"USDT (Ethereum Sepolia)"`), and no other chain may reach a wire type
+or the UI (invariant 5). Only `yield_source` keeps the provider's label — that is
+the vault's product name, carries no chain, and is what a reader matches to the
+catalogue. The value is never hidden, only the chain wording: off-rail cash still
+counts toward the wallet total Ground reports, so dropping the position would
+leave a total its positions don't sum to.
+
 ### Cross-chain: token lanes are preserved
 
 Ground never converts between USDC and USDT. USDC may bridge **within CCTP
-domains**; USDT stays on Ethereum. That is why USDT is production-only in our
-declared support, and why `bridge` is a first-class position kind. SDP's product
-surface stays Solana-only — the other chains are provider plumbing.
+domains**; USDT stays on Ethereum. That is why USDT sources never enter SDP's
+catalogue at all — `GROUND_SOLANA_ROUTED_TOKENS` (client.ts) pins Ground's
+Solana rails to USDC, so an un-routable source is excluded on every cluster
+and withdrawal preview/create refuse un-routable tokens before any network
+call — and why `bridge` is a first-class position kind. SDP's product surface stays
+Solana-only — the other chains are provider plumbing.
 
-### Withdrawals unwind in reverse — and need an approval we have NOT built
+Ground confirmed (2026-08-05) that **sandbox supports both `ethereum_sepolia`
+and `solana_devnet`**; Solana flows in sandbox ride the `solana_devnet` chain
+key. Both environments' keys are hard-set in `GROUND_SOLANA_CHAINS`
+(providers/ground/client.ts) — the enforcement point for the Solana-only
+mandate: every wallet flow sends `config.chain` from that constant, never a
+caller-supplied chain. Sandbox USDT (Ground's mock Sepolia asset) stays
+Sepolia-only — the withdrawal API enumerates `ethereum_sepolia` as its single
+valid USDT destination — and Ground's sandbox USDT faucet
+(`POST /v2/sandbox/faucets/usdt`) funds Sepolia addresses only, so exercising
+the Solana lane in sandbox means devnet USDC.
+
+### Withdrawals unwind in reverse — approval is policy-conditional, and we surface it
 
 Redemption reverses the flow: vaults settle, the wallet claims stablecoin, and
 Ground pays out to the destination address. Payout legs may settle at different
-times, and **each leg requires its own approval**.
+times, and each leg can gate on its own customer approval.
 
-> **Known gap.** Ground's approval model is customer-controlled Turnkey signing:
-> *"Ground does not stamp the Turnkey approval for you."* The customer's signer
-> produces the stamp off Ground's servers via
-> `GET /v2/turnkey/activities/pending` →
-> `POST /v2/turnkey/activity-approval-request` → local stamp →
-> `POST /v2/turnkey/activities/{activityId}/vote`.
-> **`GroundEarnClient` implements none of those.** We submit
-> `POST …/withdrawals` and poll status, so a submitted withdrawal may park in
-> pending approval. Ground's docs do not say whether customer-side signing is
-> mandatory or only applies when signing keys are configured, nor what a new
-> wallet defaults to. Resolve empirically — create a sandbox wallet, submit a
-> withdrawal, observe — before anyone relies on the exit path.
+> **Resolved 2026-08-05** (previously this module's known gap). Customer-side
+> Turnkey stamping is **NOT required by default**: a sandbox withdrawal on a
+> wallet with no approval policy settled end to end ($5 USDT → Sepolia, wallet
+> `5fe239ad…`, withdrawal `907001f5…`) while
+> `GET /v2/turnkey/activities/pending` stayed empty for the entire lifecycle —
+> no stamp, no vote, funds paid out. The approval flow engages only when an
+> org-level approval policy is in place; Ground's docs tie that to production
+> withdrawal limits (`403 withdrawal_policy_required` — *"Production
+> withdrawal limit reached. Contact Ground to increase your limit."*).
+>
+> When a policy IS engaged, Ground parks the affected **payout leg** in
+> `pending_customer_approval` while the withdrawal's top-level status keeps
+> reading `processing` — the parked state is invisible to a top-level poll.
+> `GroundEarnClient` therefore folds a parked leg up into the distinct
+> `pending_approval` wire status, and implements the full approval surface as
+> an optional capability behind `supportsWithdrawalApprovals`
+> (capabilities.ts): `listPendingWithdrawalApprovals` →
+> `createWithdrawalApprovalRequest` (returns the exact `stampPayload` string
+> the signer must stamp — never re-serialize it) →
+> `submitWithdrawalApprovalVote`. The stamp itself is produced by the
+> customer-held Turnkey signer, outside Ground and outside SDP — SDP relays
+> payloads and stamps, never keys. Under the shared-account model that signer
+> is **account-level (platform ops), not per-SDP-org**: before production
+> enablement (PRO-1635), confirm with Ground whether our production account
+> carries an approval policy and who holds the signer.
+
+Sandbox settlement timing (observed 2026-08-05): the payout leg took ~10.5
+minutes against a "typical 30s" processing estimate, and the withdrawal-level
+`completedAt` was stamped at plan-acceptance (~9s in), long before the leg
+actually settled — read the leg/step `completedAt` for real settlement timing,
+and treat the preview's estimate as indicative only.
 
 ### Custody boundary (say this out loud to customers)
 
@@ -197,9 +244,10 @@ apps/sdp-api/src/
                                    the shared-wallet family; strategies/
                                    positions/movements/quotes are the
                                    catalogue + per-strategy families.
-  db/migrations/postgres/0034,0035 earn_strategies, earn_positions,
-                                   earn_movements, earn_nav_snapshots;
-                                   earn_provider_wallets (shared-wallet link).
+  db/migrations/postgres/0048,0049 earn_strategies, earn_positions,
+                                   earn_movements, earn_nav_snapshots (0048);
+                                   earn_provider_wallets (0049, shared-wallet
+                                   link).
   db/repositories/earn.*           Row types + Postgres impl (open-string
                                    provider columns; dispatch must go through
                                    the fail-closed resolver).
@@ -266,6 +314,24 @@ Two things write `earn_strategies`, and only one of them is a production path.
   carries the `seed-demo-` `provider_reference` prefix and
   `riskMetadata.seedFixture`. `--clean` deletes **only** prefixed rows, so it can
   never remove a row the live cron synced.
+- **It also links one program, and that part is NOT a fixture.** The seed points
+  your primary local org at one of the team's real Ground *sandbox* portfolio
+  wallets, so the dashboard opens onto live provider state (real allocation, real
+  forward APY, a real Solana deposit address) rather than an empty onboarding
+  screen. One org, one program — the same unique constraint production enforces,
+  so the seed never hands an org a second wallet, and other local orgs stay
+  unlinked. The wallet is shared with teammates: funding it, re-weighting it
+  through the wizard, or withdrawing from it changes what they see. Re-run the
+  seed after your first Clerk sign-in and it moves its own link onto your real
+  org; a program you created through the wizard is never moved. `--clean` removes
+  the link, never the Ground wallet.
+  The seeded program starts at **$0** deliberately — it is an all-Solana/USDC
+  wallet you fund yourself via its devnet deposit address. Pointing the seed at a
+  funded sandbox wallet instead would surface a withdrawable balance SDP cannot
+  withdraw, because those balances sit off the Solana rail while
+  `balance.withdrawableUsd` reports a wallet-level total.
+  Full local-dev detail: `CLAUDE.md` → "Get a program — one org, one portfolio
+  wallet".
 - **Commands**
 
   ```bash

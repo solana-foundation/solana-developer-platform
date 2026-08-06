@@ -12,11 +12,23 @@ invariants.
   (capability of providers that support it).
 - `PUT /program` / `GET /program` — the **shared portfolio wallet**, ONE per
   (org, environment, provider) — unique constraint in `earn_provider_wallets`
-  (migration 0035). PUT is idempotent create-or-update: first call creates the
+  (migration 0049). This is SDP's product model, not a provider limit: one
+  provider account can hold many portfolio wallets, and SDP gives each org
+  exactly one of them. PUT is idempotent create-or-update: first call creates the
   provider wallet + row (concurrent races surface the unique violation as 409);
   later calls update strategy weights. Allocation weights validate on a 0.1
   grid summing to exactly 100 per token group, and every `yieldSourceId` must
   exist as an **active** synced strategy for that provider+environment.
+  Two optional body fields carry real invariants:
+  - `requestId` (UUIDv4) is the caller-owned idempotency key, forwarded to the
+    provider on BOTH branches. Providers replay the original response for a
+    matching payload and conflict on a mismatch, so a client must mint a NEW id
+    whenever the allocation changes. Absent ⇒ the provider client mints one per
+    call, which is NOT idempotent: a double-submit fires two mutations.
+  `label` is write-once: the update branch never forwards it and there is no
+  repository update path, so a rename silently no-ops. The row has no mutable
+  columns — a source-wallet field was tried and reverted (see the web
+  CLAUDE.md), so do not add one without a consumer.
 - `GET /program/deposits`, `POST /program/withdrawal-preview`,
   `POST /program/withdrawals`, `GET /program/withdrawals/:ref` — funding
   tracking + portfolio-level withdrawals (Solana destinations only).
@@ -42,6 +54,15 @@ invariants.
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for
   providers lacking the surface.
+- Withdrawal approval is a SECOND optional capability
+  (`supportsWithdrawalApprovals`) with **no public route on purpose**: casting
+  a vote needs the account-level Turnkey signer (platform ops — one shared
+  Ground account per environment), so exposing list/request/vote under
+  `/v1/earn` would hand org API keys an approval surface they must never
+  hold. Orgs see a parked withdrawal as `status: pending_approval` on
+  `GET /program/withdrawals/:ref` (derived by the provider client from payout
+  legs; approval is policy-conditional, not default — see
+  `packages/sdp-earn/README.md` → "Withdrawals unwind in reverse").
 - Provider ids from DB rows are open strings — always dispatch via
   `resolveEarnProviderClient`.
 - Catalogue writes happen ONLY via the sync cron
