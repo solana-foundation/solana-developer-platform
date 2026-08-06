@@ -82,6 +82,24 @@ describe("IntegrationsCatalog filtering", () => {
     expect(labels).toEqual(["Privy", "Helius"]);
   });
 
+  it("narrows to what the organization can set up itself", async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await user.click(screen.getByRole("button", { name: "Ready to connect" }));
+
+    expect(visibleRowLabels()).toEqual(["Para", "Alchemy"]);
+  });
+
+  it("narrows to what still needs an access request", async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await user.click(screen.getByRole("button", { name: "Request access" }));
+
+    expect(visibleRowLabels()).toEqual(["Fireblocks"]);
+  });
+
   it("searches across families and clears back to everything", async () => {
     const user = userEvent.setup();
     renderCatalog();
