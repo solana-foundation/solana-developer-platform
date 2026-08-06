@@ -214,7 +214,9 @@
     "backToApprovals": "Back to approvals",
     "members": "Members",
     "allowlist": "Allowlist",
-    "integrations": "Integrations"
+    "integrations": "Integrations",
+    "holdings": "Holdings",
+    "backToHome": "Back to Home"
   },
   "validation": {
     "allowlistValueRequired": "Allowlist value is required",
@@ -278,7 +280,20 @@
     "paymentsActivityUnavailable": "Payments activity is unavailable right now.",
     "issuanceActivityUnavailable": "Issuance activity is unavailable right now.",
     "failedToLoadActivity": "Failed to load dashboard activity",
-    "balanceDataUnavailable": "Balance data is unavailable right now."
+    "balanceDataUnavailable": "Balance data is unavailable right now.",
+    "viewAllHoldings": "View all holdings",
+    "holdingsEmpty": "This organization holds no tokens yet.",
+    "holdingsToken": "Token",
+    "holdingsAmount": "Amount",
+    "holdingsValue": "Value",
+    "holdingsShare": "Share",
+    "holdingsNotPriced": "Not priced",
+    "holdingsShareUnmeasured": "—",
+    "holdingsShareBelowOne": "<1%",
+    "holdingsSharePercent": "{percent}%",
+    "holdingsUnavailable": "Holdings are unavailable right now.",
+    "holdingsCount": "{count} tokens",
+    "holdingsCountSingle": "1 token"
   },
   "integrations": {
     "pageDescription": "Every provider SDP can run for this organization, with what is connected and what to do next. Custody installs from Wallets; other families are provisioned per deployment.",
