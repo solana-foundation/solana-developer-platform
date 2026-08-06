@@ -253,6 +253,62 @@ function actionPageConfig(config: {
   };
 }
 
+/** Title for a Private Channels sub-view, from its route segment. */
+function privateChannelsSubPageTitle(
+  t: ReturnType<typeof useTranslations>,
+  segment: string
+): string {
+  switch (segment) {
+    case "instance":
+      return t("DashboardPrivateChannels.tabs.instance");
+    case "channels":
+      return t("DashboardPrivateChannels.tabs.channels");
+    case "deposit":
+      return t("DashboardPrivateChannels.tabs.deposit");
+    case "transfer":
+      return t("DashboardPrivateChannels.tabs.transfer");
+    case "withdraw":
+      return t("DashboardPrivateChannels.tabs.withdraw");
+    case "members":
+      return t("DashboardPrivateChannels.tabs.members");
+    case "events":
+      return t("DashboardPrivateChannels.tabs.events");
+    default:
+      return t("Shared.dashboardShell.privateChannels");
+  }
+}
+
+/**
+ * Header config for the Private Channels segment. The Overview hub is a plain
+ * section title; every other view is entered from the Overview and so carries a
+ * "Back to private channels" action. Returns null for non-PC routes.
+ */
+function getPrivateChannelsRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (!pathname.startsWith("/dashboard/payments/private-channels")) {
+    return null;
+  }
+  const isHub =
+    pathname === "/dashboard/payments/private-channels" ||
+    pathname.startsWith("/dashboard/payments/private-channels/overview");
+  if (isHub) {
+    return {
+      title: t("Shared.dashboardShell.privateChannels"),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  return {
+    title: privateChannelsSubPageTitle(t, pathname.split("/")[4] ?? ""),
+    contentWidthClass: "max-w-none",
+    backAction: {
+      href: "/dashboard/payments/private-channels/overview",
+      label: t("Shared.dashboardShell.backToPrivateChannels"),
+    },
+  };
+}
+
 function getCounterpartyRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
@@ -555,13 +611,9 @@ export function getDashboardPageConfig(
       },
     };
   }
-  if (pathname.startsWith("/dashboard/payments/private-channels")) {
-    // Private Channels navigates via its own tab strip, so the header shows a plain
-    // section title with no "Back to Payments" action.
-    return {
-      title: t("Shared.dashboardShell.privateChannels"),
-      contentWidthClass: "max-w-none",
-    };
+  const privateChannelsConfig = getPrivateChannelsRoutePageConfig(pathname, t);
+  if (privateChannelsConfig) {
+    return privateChannelsConfig;
   }
   if (pathname.startsWith("/dashboard/payments/")) {
     const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>

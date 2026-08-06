@@ -26,13 +26,34 @@ function shorten(value: string, head = 6, tail = 6): string {
   return value.length > head + tail + 1 ? `${value.slice(0, head)}…${value.slice(-tail)}` : value;
 }
 
-function Field({ label, value, title }: { label: string; value: string; title?: string }) {
+/** A label/value pair; when `href` is set the value is a link. */
+function Field({
+  label,
+  value,
+  title,
+  href,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+  href?: string;
+}) {
   return (
     <div className="space-y-0.5">
       <div className="text-xs text-tertiary">{label}</div>
-      <div className="truncate text-sm text-primary" title={title ?? value}>
-        {value}
-      </div>
+      {href ? (
+        <Link
+          href={href}
+          className="block truncate text-sm text-info hover:underline"
+          title={title ?? value}
+        >
+          {value}
+        </Link>
+      ) : (
+        <div className="truncate text-sm text-primary" title={title ?? value}>
+          {value}
+        </div>
+      )}
     </div>
   );
 }
@@ -43,9 +64,22 @@ interface Props {
   overview: PrivateChannelInstanceOverview | null;
   /** Where the "Connect" link points when disconnected. */
   connectHref: string;
+  /** The Instance view — the address links here to manage/disconnect. */
+  instanceHref: string;
+  /** The Channels view — the default channel links here. */
+  channelsHref: string;
+  /** Name of the instance's default channel, if one is provisioned. */
+  defaultChannelName: string | null;
 }
 
-export async function ConnectedInstancePanel({ instance, overview, connectHref }: Props) {
+export async function ConnectedInstancePanel({
+  instance,
+  overview,
+  connectHref,
+  instanceHref,
+  channelsHref,
+  defaultChannelName,
+}: Props) {
   const t = await getTranslations();
 
   const status =
@@ -71,7 +105,15 @@ export async function ConnectedInstancePanel({ instance, overview, connectHref }
               label={t("DashboardPrivateChannels.overview.instanceAddressLabel")}
               value={shorten(instance.escrowInstanceAddr)}
               title={instance.escrowInstanceAddr}
+              href={instanceHref}
             />
+            {defaultChannelName ? (
+              <Field
+                label={t("DashboardPrivateChannels.overview.defaultChannelLabel")}
+                value={defaultChannelName}
+                href={channelsHref}
+              />
+            ) : null}
             <Field
               label={t("DashboardPrivateChannels.overview.gatewayUrlLabel")}
               value={instance.gatewayUrl}

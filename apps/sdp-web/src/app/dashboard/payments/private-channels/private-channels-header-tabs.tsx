@@ -9,9 +9,10 @@ import { useTranslations } from "@/i18n/provider";
 //   2. Append { id, labelKey, href, requiresActive: true } to the list.
 //
 // Overview is always visible (even when no instance is connected — it surfaces the
-// "Not connected" state and a connect link). There is no Instance tab: connecting
-// is reached from the Overview's Connected-instance card. The Events feed has no tab
-// either — it's reached from the Overview's "All activity" link.
+// "Not connected" state and a connect link). There is no Instance or Channels tab:
+// the instance (connect/disconnect) and channels are reached from links in the
+// Overview's Connected-instance card. The Events feed has no tab either — it's
+// reached from the Overview's "All activity" link.
 const TABS = [
   {
     id: "overview",
@@ -20,9 +21,9 @@ const TABS = [
     requiresActive: false,
   },
   {
-    id: "channels",
-    labelKey: "DashboardPrivateChannels.tabs.channels",
-    href: "/dashboard/payments/private-channels/channels",
+    id: "members",
+    labelKey: "DashboardPrivateChannels.tabs.members",
+    href: "/dashboard/payments/private-channels/members",
     requiresActive: true,
   },
   {
@@ -41,12 +42,6 @@ const TABS = [
     id: "withdraw",
     labelKey: "DashboardPrivateChannels.tabs.withdraw",
     href: "/dashboard/payments/private-channels/withdraw",
-    requiresActive: true,
-  },
-  {
-    id: "members",
-    labelKey: "DashboardPrivateChannels.tabs.members",
-    href: "/dashboard/payments/private-channels/members",
     requiresActive: true,
   },
 ] as const;

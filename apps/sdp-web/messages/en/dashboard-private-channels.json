@@ -69,7 +69,10 @@
       "allowedTokensEmpty": "Connect an instance to see its allowed tokens.",
       "walletsTitle": "Wallets",
       "colWallet": "Wallet",
-      "colBalance": "Channel balance"
+      "colBalance": "Channel balance",
+      "privateBalanceNoWallet": "No configured wallet",
+      "viewWallets": "View wallets",
+      "defaultChannelLabel": "Default channel"
     },
     "verifiedWallets": {
       "title": "Verified wallets",

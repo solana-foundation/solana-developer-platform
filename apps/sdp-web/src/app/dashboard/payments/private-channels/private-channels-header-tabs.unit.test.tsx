@@ -21,22 +21,20 @@ import { PrivateChannelsHeaderTabs } from "./private-channels-header-tabs";
 afterEach(cleanup);
 
 describe("PrivateChannelsHeaderTabs", () => {
-  it("places Transfer between Deposit and Withdraw for connected instances", () => {
+  it("shows Members next to Overview and the transfer flow tabs for connected instances", () => {
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <PrivateChannelsHeaderTabs isConnected />
       </I18nProvider>
     );
 
+    // Instance, Channels and Events have no tab — they're reached from Overview links.
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
       "Overview",
-      "Channels",
+      "Members",
       "Deposit",
       "Transfer",
       "Withdraw",
-      "Members",
-      "Events",
-      "Instance",
     ]);
   });
 });

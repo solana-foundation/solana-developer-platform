@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { TokenMark } from "@/components/token-mark";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
@@ -7,9 +8,11 @@ import { aggregateBalancesByMint, formatTokenAmount } from "./overview-data";
 interface Props {
   /** Per-(wallet) channel balances, keyed by wallet pubkey. */
   channelBalances: Record<string, WalletChannelBalance>;
+  /** Anchor to the Wallets table, shown when no balances exist. */
+  walletsHref: string;
 }
 
-export async function PrivateBalancePanel({ channelBalances }: Props) {
+export async function PrivateBalancePanel({ channelBalances, walletsHref }: Props) {
   const t = await getTranslations();
   const balances = aggregateBalancesByMint(channelBalances);
 
@@ -20,9 +23,14 @@ export async function PrivateBalancePanel({ channelBalances }: Props) {
       </CardHeader>
       <CardContent>
         {balances.length === 0 ? (
-          <p className="text-sm text-secondary">
-            {t("DashboardPrivateChannels.overview.privateBalanceEmpty")}
-          </p>
+          <div className="space-y-2 text-sm">
+            <p className="text-secondary">
+              {t("DashboardPrivateChannels.overview.privateBalanceNoWallet")}
+            </p>
+            <Link href={walletsHref} className="text-info hover:underline">
+              {t("DashboardPrivateChannels.overview.viewWallets")}
+            </Link>
+          </div>
         ) : (
           <ul className="space-y-3">
             {balances.map((balance) => (

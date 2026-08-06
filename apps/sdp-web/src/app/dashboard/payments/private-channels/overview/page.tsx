@@ -1,8 +1,5 @@
 import { createSdpApiClient } from "@/lib/sdp-api";
-import {
-  PRIVATE_CHANNELS_INSTANCE_PATH,
-  requirePrivateChannelsAccess,
-} from "../private-channels-access";
+import { requirePrivateChannelsAccess } from "../private-channels-access";
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
 import {
   loadChannelBalances,
@@ -11,6 +8,10 @@ import {
   loadOverview,
   loadWalletVerification,
 } from "../private-channels-page.data";
+import {
+  PRIVATE_CHANNELS_CHANNELS_PATH,
+  PRIVATE_CHANNELS_INSTANCE_PATH,
+} from "../private-channels-routes";
 import { AllowedTokensPanel } from "./allowed-tokens-panel";
 import { ConnectedInstancePanel } from "./connected-instance-panel";
 import { channelNameById } from "./overview-data";
@@ -38,6 +39,7 @@ export default async function PrivateChannelsOverviewPage() {
   }
   const instance = overview.data?.instance ?? null;
   const instanceOverview = overview.data?.overview ?? null;
+  const defaultChannelName = channels.data.find((channel) => channel.isDefault)?.name ?? null;
 
   // Channel balances only exist for verified wallets — unverified reads would 403.
   const channelBalances = wallets.ok
@@ -54,8 +56,11 @@ export default async function PrivateChannelsOverviewPage() {
           instance={instance}
           overview={instanceOverview}
           connectHref={PRIVATE_CHANNELS_INSTANCE_PATH}
+          instanceHref={PRIVATE_CHANNELS_INSTANCE_PATH}
+          channelsHref={PRIVATE_CHANNELS_CHANNELS_PATH}
+          defaultChannelName={defaultChannelName}
         />
-        <PrivateBalancePanel channelBalances={channelBalances} />
+        <PrivateBalancePanel channelBalances={channelBalances} walletsHref="#pc-wallets" />
         <AllowedTokensPanel instance={instance} />
       </div>
 
@@ -64,12 +69,14 @@ export default async function PrivateChannelsOverviewPage() {
         channelNames={channelNameById(channels.data)}
       />
 
-      <WalletsTable
-        verifiedWallets={wallets.ok ? wallets.data.verified : []}
-        custodyWallets={wallets.ok ? wallets.data.custody : []}
-        channelBalances={channelBalances}
-        loadError={!wallets.ok}
-      />
+      <div id="pc-wallets">
+        <WalletsTable
+          verifiedWallets={wallets.ok ? wallets.data.verified : []}
+          custodyWallets={wallets.ok ? wallets.data.custody : []}
+          channelBalances={channelBalances}
+          loadError={!wallets.ok}
+        />
+      </div>
     </div>
   );
 }
