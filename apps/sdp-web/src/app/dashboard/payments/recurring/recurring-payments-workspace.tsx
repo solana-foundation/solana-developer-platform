@@ -170,7 +170,7 @@ export function RecurringPaymentsWorkspace({
 
   return (
     <DashboardWorkspaceOverviewPanel className="flex min-h-0 flex-col overflow-hidden">
-      <DashboardWorkspaceCard>
+      <DashboardWorkspaceCard clamp>
         <div className="border-b border-border-default px-4 py-3">
           <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]">
             <Input

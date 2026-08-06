@@ -274,6 +274,72 @@ export interface EarnPortfolioAddressBookEntryResult {
   entryRef: string;
 }
 
+export type EarnWithdrawalApprovalAction = "approve" | "reject";
+
+/**
+ * One provider-side signing activity parked on customer approval, joined with
+ * whatever withdrawal context the provider reports. `providerStatus` and
+ * `kind` are provider vocabulary passed through open. The destination fields
+ * are provider plumbing that may name non-Solana rails — they exist for
+ * operator correlation and must be re-synthesized before ever reaching wire
+ * types or UI (ADR 0002 invariant 5).
+ */
+export interface EarnPendingWithdrawalApproval {
+  approvalRef: string;
+  providerStatus: string;
+  kind?: string;
+  withdrawalRef?: string;
+  withdrawalLegRef?: string;
+  providerWalletRef?: string;
+  destinationChain?: string;
+  destinationToken?: string;
+  destinationAddress?: string;
+  amountNativeUnits?: string;
+  firstSeenAt?: string;
+}
+
+export interface EarnWithdrawalApprovalRequestInput {
+  approvalRef: string;
+  action: EarnWithdrawalApprovalAction;
+}
+
+/**
+ * The payload the customer's signer must stamp. `signingPayload` is the exact
+ * string to sign, byte-for-byte — re-serializing `providerRequest` can reorder
+ * keys and invalidate the signature. `providerRequest` is echoed unmodified
+ * into the vote submission so the provider can verify what was signed.
+ */
+export interface EarnWithdrawalApprovalRequest {
+  approvalRef: string;
+  action: EarnWithdrawalApprovalAction;
+  signingPayload: string;
+  providerRequest: Record<string, unknown>;
+}
+
+/**
+ * Signature produced by the customer's signer, outside SDP and outside the
+ * provider. Either an opaque string or a header pair, matching the shapes
+ * signer SDKs emit.
+ */
+export type EarnWithdrawalApprovalStamp = string | { headerName: string; headerValue: string };
+
+export interface EarnWithdrawalApprovalVoteInput {
+  approvalRef: string;
+  action: EarnWithdrawalApprovalAction;
+  stamp: EarnWithdrawalApprovalStamp;
+  /** The untouched `providerRequest` from `createWithdrawalApprovalRequest`. */
+  providerRequest: Record<string, unknown>;
+}
+
+export interface EarnWithdrawalApprovalVoteResult {
+  action: EarnWithdrawalApprovalAction;
+  /** The provider recorded this vote. */
+  applied: boolean;
+  /** The activity had already reached a terminal state before this vote. */
+  alreadyResolved: boolean;
+  providerStatus?: string;
+}
+
 /**
  * Optional capability: managed portfolio wallets (one omnibus wallet whose
  * funds spread across yield sources by a target strategy). Declared the same
@@ -332,4 +398,26 @@ export interface EarnPortfolioWalletProvider extends EarnVaultProvider {
     ctx: EarnRuntimeContext,
     input: EarnPortfolioAddressBookEntryInput
   ): Promise<EarnPortfolioAddressBookEntryResult>;
+}
+
+/**
+ * Optional capability: customer-approval flows for withdrawal payouts. Some
+ * providers gate payout legs on a customer-side signature (Ground: Turnkey
+ * consensus voting, engaged by an org-level approval policy rather than by
+ * default). SDP relays the provider's signing payload and the customer's
+ * stamp; the signing key itself never enters SDP — if no signer is available,
+ * this capability surfaces the parked state but cannot advance it. Discovered
+ * via `supportsWithdrawalApprovals` (capabilities.ts), never provider-id
+ * checks.
+ */
+export interface EarnWithdrawalApprovalProvider extends EarnVaultProvider {
+  listPendingWithdrawalApprovals(ctx: EarnRuntimeContext): Promise<EarnPendingWithdrawalApproval[]>;
+  createWithdrawalApprovalRequest(
+    ctx: EarnRuntimeContext,
+    input: EarnWithdrawalApprovalRequestInput
+  ): Promise<EarnWithdrawalApprovalRequest>;
+  submitWithdrawalApprovalVote(
+    ctx: EarnRuntimeContext,
+    input: EarnWithdrawalApprovalVoteInput
+  ): Promise<EarnWithdrawalApprovalVoteResult>;
 }

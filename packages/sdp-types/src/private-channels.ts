@@ -511,3 +511,35 @@ export interface PrivateChannelEventListEnvelope {
   /** Opaque cursor for the next page; null when there are no more events. */
   nextCursor: string | null;
 }
+
+/**
+ * Payload fields safe to show viewers without raw-payload access. The API strips
+ * everything else from `payload`, so any field a client reads must be listed
+ * here or it will be missing for non-admins.
+ */
+export const PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS = [
+  "amount",
+  "mint",
+  "sender",
+  "recipient",
+  "pubkey",
+  "signature",
+  "failureReason",
+  "reason",
+  "message",
+  "name",
+  "gatewayUrl",
+  "latencyMs",
+  "confirmedAt",
+  "depositId",
+  "withdrawalId",
+  "transferId",
+  "walletId",
+  "senderWalletId",
+  "privateChannelUserId",
+  "targetUserId",
+  "membershipId",
+] as const;
+
+export type PrivateChannelEventDisplayPayloadKey =
+  (typeof PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS)[number];
