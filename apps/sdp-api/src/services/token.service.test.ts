@@ -738,6 +738,56 @@ describe("TokenService", () => {
       ).toMatchObject({ lifecycle_bookkeeping_applied_at: expect.any(String) });
     });
 
+    it("promotes journaled freeze evidence while applying its lifecycle mirror", async () => {
+      const tokenId = "tok_freeze_journaled_settlement";
+      const transactionId = "ttx_freeze_journaled_settlement";
+      const accountAddress = "account_freeze_journaled_settlement";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params,
+             signature, slot, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'freeze', 'pending', ?, ?, 100, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ accountAddress }),
+          "sig_freeze_journaled_settlement",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      const frozenAccount = await tokenService.applySettledAccountFreezeState({
+        transactionId,
+        tokenId,
+        accountAddress,
+        state: "frozen",
+        actorId: TEST_PROJECT_API_KEY.id,
+        reason: "Journaled settlement",
+      });
+
+      expect(frozenAccount).toMatchObject({
+        accountAddress,
+        reason: "Journaled settlement",
+        unfrozenAt: null,
+      });
+      expect(
+        await db
+          .prepare(
+            `SELECT status, lifecycle_bookkeeping_applied_at
+             FROM issuance_transactions WHERE id = ?`
+          )
+          .bind(transactionId)
+          .first<{ status: string; lifecycle_bookkeeping_applied_at: string | null }>()
+      ).toMatchObject({
+        status: "confirmed",
+        lifecycle_bookkeeping_applied_at: expect.any(String),
+      });
+    });
+
     it("does not replay an older authority change over a newer settled authority", async () => {
       const tokenId = "tok_authority_replay_order";
       const olderId = "ttx_authority_older";

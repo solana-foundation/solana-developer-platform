@@ -1443,7 +1443,7 @@ export class TokenService {
     await this.db.transaction(async (tx) => {
       const row = await tx
         .prepare(
-          `SELECT it.type, it.status, it.slot, it.created_at,
+          `SELECT it.type, it.status, it.signature, it.slot, it.created_at,
                   it.lifecycle_bookkeeping_applied_at
            FROM issuance_transactions it
            JOIN issued_tokens t ON t.id = it.token_id
@@ -1454,17 +1454,25 @@ export class TokenService {
         .first<{
           type: string;
           status: string;
+          signature: string | null;
           slot: number | null;
           created_at: string;
           lifecycle_bookkeeping_applied_at: string | null;
         }>();
       if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
       const expectedType = status === "paused" ? "pause" : "unpause";
-      if (row.type !== expectedType || row.status !== "confirmed") {
+      if (row.type !== expectedType) {
         throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
       }
-      if (row.lifecycle_bookkeeping_applied_at !== null) return;
-      if (row.slot === null) throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+      if (row.lifecycle_bookkeeping_applied_at !== null) {
+        if (row.status !== "confirmed") {
+          throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+        }
+        return;
+      }
+
+      const now = new Date().toISOString();
+      await this.promoteJournaledLifecycleTransaction(tx, transactionId, tokenId, row, now);
 
       const newer = await tx
         .prepare(
@@ -1483,7 +1491,6 @@ export class TokenService {
         .bind(tokenId, row.slot, row.slot, row.created_at, row.slot, row.created_at, transactionId)
         .first<{ exists: number }>();
 
-      const now = new Date().toISOString();
       if (!newer) {
         const tokenMutation = this.tenantMutationScope();
         const updatedToken = await tx
@@ -1524,7 +1531,8 @@ export class TokenService {
     return this.db.transaction(async (tx) => {
       const row = await tx
         .prepare(
-          `SELECT it.type, it.status, it.slot, it.created_at, it.operation_params,
+          `SELECT it.type, it.status, it.signature, it.slot, it.created_at,
+                  it.operation_params,
                   it.lifecycle_bookkeeping_applied_at
            FROM issuance_transactions it
            JOIN issued_tokens t ON t.id = it.token_id
@@ -1535,6 +1543,7 @@ export class TokenService {
         .first<{
           type: string;
           status: string;
+          signature: string | null;
           slot: number | null;
           created_at: string;
           operation_params: string;
@@ -1543,7 +1552,7 @@ export class TokenService {
       if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
 
       const expectedType = input.state === "frozen" ? "freeze" : "unfreeze";
-      if (row.type !== expectedType || row.status !== "confirmed") {
+      if (row.type !== expectedType) {
         throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
       }
 
@@ -1565,10 +1574,20 @@ export class TokenService {
         .first<FrozenAccountRow>();
 
       if (row.lifecycle_bookkeeping_applied_at !== null) {
-        if (!existing) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+        if (row.status !== "confirmed" || !existing) {
+          throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+        }
         return this.mapRowToFrozenAccount(existing);
       }
-      if (row.slot === null) throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+
+      const now = new Date().toISOString();
+      await this.promoteJournaledLifecycleTransaction(
+        tx,
+        input.transactionId,
+        input.tokenId,
+        row,
+        now
+      );
 
       const newer = await tx
         .prepare(
@@ -1600,7 +1619,6 @@ export class TokenService {
         )
         .first<{ exists: number }>();
 
-      const now = new Date().toISOString();
       let frozenAccount = existing;
       if (!newer) {
         frozenAccount = await this.applyAccountFreezeMirror(tx, input, existing, now);
@@ -1620,6 +1638,42 @@ export class TokenService {
 
       return this.mapRowToFrozenAccount(frozenAccount);
     });
+  }
+
+  /**
+   * The settlement fallback deliberately persists only the chain receipt when
+   * the normal confirmed-status write fails. Promote that durable pending row
+   * inside the same transaction as lifecycle bookkeeping so the completed
+   * operation can return success without waiting for an idempotent replay.
+   *
+   * Status history is intentionally not retried here: it is auxiliary, and it
+   * may be the part of the normal write that failed after status was updated.
+   */
+  private async promoteJournaledLifecycleTransaction(
+    tx: DatabaseExecutor,
+    transactionId: string,
+    tokenId: string,
+    row: { status: string; signature: string | null; slot: number | null },
+    now: string
+  ): Promise<void> {
+    if (row.status === "confirmed") {
+      if (row.slot === null) throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+      return;
+    }
+    if (row.status !== "pending" || !row.signature || row.slot === null) {
+      throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+    }
+
+    const promoted = await tx
+      .prepare(
+        `UPDATE issuance_transactions
+         SET status = 'confirmed', error = NULL, updated_at = ?
+         WHERE id = ? AND token_id = ? AND status = 'pending'
+           AND signature = ? AND slot = ?`
+      )
+      .bind(now, transactionId, tokenId, row.signature, row.slot)
+      .run();
+    if (promoted !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_PROMOTION_CONFLICT");
   }
 
   private async applyAccountFreezeMirror(
