@@ -34,8 +34,8 @@ function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>
           },
           { provider: "alchemy", label: "Alchemy", status: "available" },
         ]}
-        ramps={[{ provider: "moonpay", label: "MoonPay", status: "unavailable" }]}
-        compliance={[{ provider: "range", label: "Range", status: "unavailable" }]}
+        ramps={[{ provider: "moonpay", label: "MoonPay", status: "enabled" }]}
+        compliance={[{ provider: "range", label: "Range", status: "request_access" }]}
       />
     </I18nProvider>
   );
@@ -97,19 +97,38 @@ describe("IntegrationsCatalog filtering", () => {
 
     await user.click(screen.getByRole("button", { name: "Request access" }));
 
-    expect(visibleRowLabels()).toEqual(["Fireblocks"]);
+    const labels = visibleRowLabels();
+    // Only providers whose access the SDP team grants collect here: the manual
+    // custody set and unactivated compliance.
+    for (const gated of ["Fireblocks", "IBM Digital Asset Haven", "Range"]) {
+      expect(labels).toContain(gated);
+    }
+    // Enabled rails and generally available providers are excluded — an
+    // enabled ramp and an uncredentialed general provider are not requests.
+    expect(labels).not.toContain("MoonPay");
+    expect(labels).not.toContain("Privy");
+    expect(labels).not.toContain("Para");
+    expect(labels).not.toContain("Turnkey");
   });
 
-  it("narrows to what is listed but has no path yet", async () => {
+  it("narrows to what this deployment has not credentialed", async () => {
     const user = userEvent.setup();
     renderCatalog();
 
-    await user.click(screen.getByRole("button", { name: "Not available" }));
+    await user.click(screen.getByRole("button", { name: "Not configured" }));
 
     const labels = visibleRowLabels();
-    expect(labels).toContain("MoonPay");
-    expect(labels).toContain("Range");
-    expect(labels).not.toContain("Privy");
+    // Turnkey is generally available but has no credentials in this fixture.
+    expect(labels).toContain("Turnkey");
+    expect(labels).not.toContain("Fireblocks");
+    expect(labels).not.toContain("IBM Digital Asset Haven");
+  });
+
+  it("offers no filter that would imply an integration does not exist", () => {
+    renderCatalog();
+
+    expect(screen.queryByRole("button", { name: "Not available" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pending" })).toBeNull();
   });
 
   it("searches across families and clears back to everything", async () => {

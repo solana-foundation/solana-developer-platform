@@ -34,8 +34,9 @@ const STATUS_FILTERS: StatusFilter[] = [
   "all",
   "active",
   "available",
+  "enabled",
   "request_access",
-  "unavailable",
+  "not_configured",
 ];
 
 function statusLabel(status: IntegrationStatus | "all", t: Translate): string {
@@ -46,12 +47,12 @@ function statusLabel(status: IntegrationStatus | "all", t: Translate): string {
       return t("Shared.integrations.statusActive");
     case "available":
       return t("Shared.integrations.statusAvailable");
-    case "pending":
-      return t("Shared.integrations.statusPending");
+    case "enabled":
+      return t("Shared.integrations.statusEnabled");
     case "request_access":
       return t("Shared.integrations.statusRequestAccess");
     default:
-      return t("Shared.integrations.statusNotAvailable");
+      return t("Shared.integrations.statusNotConfigured");
   }
 }
 
@@ -62,7 +63,7 @@ function StatusBadge({ status, t }: { status: IntegrationStatus; t: Translate })
         "shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium",
         status === "active"
           ? "bg-surface-raised text-secondary ring-1 ring-border-subtle"
-          : status === "unavailable"
+          : status === "not_configured"
             ? "bg-fill-subtle text-tertiary"
             : "bg-fill-subtle text-secondary"
       )}

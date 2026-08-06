@@ -8,11 +8,11 @@ export function IntegrationsSkeleton() {
       <div className="space-y-3">
         <div className="h-11 w-full max-w-md rounded-2xl bg-fill-subtle" />
         {/* Two rows, matching the family and status pill rows the loaded
-            catalog renders. */}
+            catalog renders: five family pills, six status pills. */}
         <div className="flex flex-col gap-2">
           {[
             [48, 104, 84, 92, 116],
-            [104, 96, 132, 120, 108],
+            [104, 96, 132, 84, 148, 120],
           ].map((row) => (
             <div key={row.join()} className="flex flex-wrap gap-2">
               {row.map((width) => (

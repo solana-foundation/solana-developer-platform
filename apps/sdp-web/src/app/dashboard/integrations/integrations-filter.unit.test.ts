@@ -11,7 +11,7 @@ const ROWS: FilterableIntegration[] = [
   { family: "custody", provider: "privy", label: "Privy", status: "active" },
   { family: "custody", provider: "fireblocks", label: "Fireblocks", status: "request_access" },
   { family: "rpc", provider: "helius", label: "Helius", status: "active" },
-  { family: "ramps", provider: "moonpay", label: "MoonPay", status: "unavailable" },
+  { family: "ramps", provider: "moonpay", label: "MoonPay", status: "enabled" },
 ];
 
 describe("integration filters", () => {

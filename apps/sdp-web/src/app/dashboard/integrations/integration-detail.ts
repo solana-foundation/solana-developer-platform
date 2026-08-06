@@ -1,4 +1,5 @@
 import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS, ORGANIZATION_RPC_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
 import {
   CUSTODY_PROVIDER_CATALOG,
   type CustodyProviderCatalogEntry,
@@ -17,22 +18,30 @@ export interface IntegrationDetail {
   family: IntegrationFamily;
   provider: string;
   label: string;
-  status: IntegrationStatus;
-  /** Connection state could not be read; the status is entitlement-only. */
-  statusUnknown?: boolean;
+  /**
+   * `unknown` only when the connection lookup failed, so the page can say it
+   * cannot read the state rather than guessing one and offering a wrong action.
+   */
+  status: IntegrationStatus | "unknown";
   descriptionKey?: MessageKey;
   custodyEntry?: CustodyProviderCatalogEntry;
   requestAccessUrl?: string;
 }
 
+/**
+ * Derived from the same constants the catalog renders from. Hand-written id
+ * lists drifted silently — a newly added ramp got a card that then 404'd on
+ * click, because nothing typed the literals against the provider unions.
+ */
+const KNOWN_NON_CUSTODY_PROVIDERS: ReadonlySet<string> = new Set<string>([
+  ...ORGANIZATION_RPC_PROVIDERS,
+  ...RAMP_PROVIDERS,
+  ...COMPLIANCE_PROVIDERS,
+]);
+
 export function isKnownIntegrationProvider(id: string): boolean {
   return (
-    CUSTODY_PROVIDER_CATALOG.some((entry) => entry.id === id) ||
-    ["alchemy", "helius", "nodit", "quicknode", "triton", "validationcloud", "default"].includes(
-      id
-    ) ||
-    ["moonpay", "lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe"].includes(id) ||
-    ["range", "elliptic", "trm", "chainalysis"].includes(id)
+    CUSTODY_PROVIDER_CATALOG.some((entry) => entry.id === id) || KNOWN_NON_CUSTODY_PROVIDERS.has(id)
   );
 }
 
@@ -55,8 +64,7 @@ export function resolveIntegrationDetail(input: {
         family: "custody",
         provider: entry.id,
         label: entry.label,
-        status: "unavailable",
-        statusUnknown: true,
+        status: "unknown",
         descriptionKey: entry.descriptionKey,
         custodyEntry: entry,
       };

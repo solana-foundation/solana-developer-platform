@@ -10,22 +10,23 @@ import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import type { IntegrationDetail } from "../integration-detail";
-import type { IntegrationStatus } from "../integrations-status";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 
-function statusKey(status: IntegrationStatus): Parameters<Translate>[0] {
+function statusKey(status: IntegrationDetail["status"]): Parameters<Translate>[0] {
   switch (status) {
     case "active":
       return "Shared.integrations.statusActive";
     case "available":
       return "Shared.integrations.statusAvailable";
-    case "pending":
-      return "Shared.integrations.statusPending";
+    case "enabled":
+      return "Shared.integrations.statusEnabled";
     case "request_access":
       return "Shared.integrations.statusRequestAccess";
+    case "not_configured":
+      return "Shared.integrations.statusNotConfigured";
     default:
-      return "Shared.integrations.statusNotAvailable";
+      return "Shared.integrations.statusUnknown";
   }
 }
 
@@ -74,7 +75,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
   // With the connection state unreadable, no state-dependent action is honest.
-  if (detail.statusUnknown) {
+  if (detail.status === "unknown") {
     return null;
   }
   if (detail.family === "custody" && detail.status === "active") {
@@ -135,9 +136,7 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
                 {detail.label}
               </h1>
               <span className="shrink-0 whitespace-nowrap rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
-                {detail.statusUnknown
-                  ? t("Shared.integrations.statusUnknown")
-                  : t(statusKey(detail.status))}
+                {t(statusKey(detail.status))}
               </span>
             </div>
             <p className="text-sm text-tertiary">
@@ -186,40 +185,46 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
         </Section>
       ) : null}
 
-      {entry ? (
-        <Section title={t("Shared.integrations.detailHowItConnects")}>
-          {entry.storedCredentialSetup.mode === "self_service" ? (
-            <div className="space-y-3">
-              <p className="max-w-2xl text-sm leading-6 text-secondary">
-                {t("Shared.integrations.connectSelfServe")}
-              </p>
-              <p className="text-xs font-medium tracking-wide text-tertiary uppercase">
-                {t("Shared.integrations.connectYouWillNeed")}
-              </p>
-              <ul className="flex flex-wrap gap-2">
-                {entry.storedCredentialSetup.fields
-                  .filter((field) => field.key !== "credentialLabel" && field.key !== "scope")
-                  .map((field) => (
-                    <li
-                      key={field.key}
-                      className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
-                    >
-                      {t(field.labelKey)}
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          ) : entry.storedCredentialSetup.mode === "request_access" ? (
+      {/* Every status that is not "Connected" asks the reader to do something,
+          so this section always renders: a provider must never say "request
+          access" without saying anywhere how the request is made. */}
+      <Section title={t("Shared.integrations.detailHowItConnects")}>
+        {entry?.storedCredentialSetup.mode === "self_service" ? (
+          <div className="space-y-3">
             <p className="max-w-2xl text-sm leading-6 text-secondary">
-              {t("Shared.integrations.connectByArrangement")}
+              {t("Shared.integrations.connectSelfServe")}
             </p>
-          ) : (
-            <p className="max-w-2xl text-sm leading-6 text-secondary">
-              {t("Shared.integrations.connectManaged")}
+            <p className="text-xs font-medium tracking-wide text-tertiary uppercase">
+              {t("Shared.integrations.connectYouWillNeed")}
             </p>
-          )}
-        </Section>
-      ) : null}
+            <ul className="flex flex-wrap gap-2">
+              {entry.storedCredentialSetup.fields
+                .filter((field) => field.key !== "credentialLabel" && field.key !== "scope")
+                .map((field) => (
+                  <li
+                    key={field.key}
+                    className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
+                  >
+                    {t(field.labelKey)}
+                  </li>
+                ))}
+            </ul>
+          </div>
+        ) : entry?.availability === "manual" || detail.status === "request_access" ? (
+          // Manual providers, whether or not a request route is wired yet
+          // (HOO-775): access is granted by the SDP team, and the page must say
+          // so even when the header has no request button to offer.
+          <p className="max-w-2xl text-sm leading-6 text-secondary">
+            {t("Shared.integrations.connectByArrangement")}
+          </p>
+        ) : (
+          // Generally available providers riding deployment credentials, and
+          // the deployment-wide rails: the SDP operator turns these on.
+          <p className="max-w-2xl text-sm leading-6 text-secondary">
+            {t("Shared.integrations.connectManaged")}
+          </p>
+        )}
+      </Section>
 
       <Section title={t("Shared.integrations.detailResources")}>
         {/* The access request already leads the header; repeating it here read

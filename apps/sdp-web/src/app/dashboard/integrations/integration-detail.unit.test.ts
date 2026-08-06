@@ -33,17 +33,38 @@ describe("integration detail", () => {
     expect(detail?.requestAccessUrl).toContain("typeform");
   });
 
+  it("gives a gated provider without an established route no URL at all", () => {
+    // IBM Haven's request route is HOO-775; until it exists the page explains
+    // the arrangement instead of borrowing another provider's form.
+    const detail = resolveIntegrationDetail({ provider: "ibm_haven", ...INPUTS });
+    expect(detail?.status).toBe("request_access");
+    expect(detail?.requestAccessUrl).toBeUndefined();
+  });
+
   it("resolves every non-custody family", () => {
     expect(resolveIntegrationDetail({ provider: "helius", ...INPUTS })?.family).toBe("rpc");
-    expect(resolveIntegrationDetail({ provider: "moonpay", ...INPUTS })?.status).toBe("active");
+    expect(resolveIntegrationDetail({ provider: "moonpay", ...INPUTS })?.status).toBe("enabled");
     expect(resolveIntegrationDetail({ provider: "range", ...INPUTS })?.family).toBe("compliance");
   });
 
   it("keeps a known custody provider reachable when connection state is unknown", () => {
     const detail = resolveIntegrationDetail({ ...INPUTS, provider: "privy", custody: null });
     expect(detail).not.toBeNull();
-    expect(detail?.statusUnknown).toBe(true);
+    expect(detail?.status).toBe("unknown");
     expect(detail?.custodyEntry?.id).toBe("privy");
+  });
+
+  it("recognises every provider the catalog can render, without a hand-written list", () => {
+    // Guards the drift Opeyemi flagged: a newly added ramp used to get a card
+    // that 404'd on click, because the id lists here were literals.
+    for (const family of [INPUTS.rpc, INPUTS.ramps, INPUTS.compliance]) {
+      for (const row of family) {
+        expect(isKnownIntegrationProvider(row.provider)).toBe(true);
+      }
+    }
+    for (const row of INPUTS.custody) {
+      expect(isKnownIntegrationProvider(row.entry.id)).toBe(true);
+    }
   });
 
   it("rejects unknown providers before any data fetch", () => {

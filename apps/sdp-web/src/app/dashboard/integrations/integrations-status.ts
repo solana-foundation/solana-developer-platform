@@ -13,17 +13,30 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 
 /**
- * One vocabulary across every provider family, matching the custody setup step:
- * `active` is installed and working, `available` can be set up from here,
- * `request_access` is gated behind a conversation, `unavailable` is visible so
- * the catalog is honest about what exists, with no action attached.
+ * One vocabulary across every provider family, aligned with the
+ * remove-signup-waitlist decision map. Every provider this catalog lists is
+ * built and runnable, so a status only ever answers "what is my next step":
+ *
+ * - `active` — running for this organization now. Only families that hold a
+ *   real per-organization link (a custody connection, the selected RPC) may
+ *   report it; a deployment-wide rail is never "connected" to anyone.
+ * - `available` — the organization can use or set this up from here.
+ * - `enabled` — a deployment-wide rail (ramps, compliance) that is on for this
+ *   organization; there is nothing to connect.
+ * - `request_access` — organization access the SDP team grants (HOO-772/775).
+ * - `not_configured` — environment availability: this deployment does not hold
+ *   the provider's credentials. Never shown for manual providers, and never
+ *   phrased as organization access (decision-map.md #4).
+ *
+ * Nothing here may imply a provider does not exist — the row is the claim
+ * that it does.
  */
 export type IntegrationStatus =
   | "active"
   | "available"
-  | "pending"
+  | "enabled"
   | "request_access"
-  | "unavailable";
+  | "not_configured";
 
 export interface IntegrationEntry<TProvider extends string = string> {
   provider: TProvider;
@@ -91,12 +104,7 @@ export function resolveCustodyIntegrations(input: {
   connectedProviders: readonly KnownCustodyProvider[];
   enabledProviders: readonly KnownCustodyProvider[];
 }): CustodyProviderAvailability[] {
-  // The local signer is a self-hosted deployment mode, not an integration an
-  // organization can go get; its copy even names a deployment env var. It
-  // earns a card only where it is genuinely the active signer.
-  return resolveCustodyProviderAvailability(input).filter(
-    (provider) => provider.entry.id !== "local" || provider.status === "active"
-  );
+  return resolveCustodyProviderAvailability(input);
 }
 
 /**
@@ -113,8 +121,14 @@ export function resolveRpcIntegrations(input: {
     (provider) => provider !== "default" || input.selectedProvider === "default"
   ).map((provider) => {
     const entry = input.entries[provider];
+    // Every RPC provider is generally available; an unconfigured one lacks a
+    // URL in this deployment, which is never organization access.
     const status: IntegrationStatus =
-      provider === input.selectedProvider ? "active" : entry?.enabled ? "available" : "unavailable";
+      provider === input.selectedProvider
+        ? "active"
+        : entry?.enabled
+          ? "available"
+          : "not_configured";
     return {
       provider,
       label: RPC_PROVIDER_LABELS[provider],
@@ -124,37 +138,48 @@ export function resolveRpcIntegrations(input: {
   });
 }
 
-function entitledEntryStatus(entry: ProviderAvailabilityEntry | undefined): IntegrationStatus {
-  if (!entry?.entitled) {
-    return "unavailable";
-  }
-  if (entry.configured && entry.enabled) {
-    return "active";
-  }
-  // Entitled but not runnable from the dashboard: these families are
-  // provisioned by deployment configuration, not self-serve setup, so there is
-  // no install action to offer yet.
-  return "unavailable";
+/**
+ * A deployment-wide rail is on or off; no organization ever connects one, so
+ * these families never report `active`. All three flags, not just `enabled`:
+ * the API derives it as entitled && configured, so anything less than
+ * agreement between them is a payload we should not read a promise out of.
+ */
+function railIsOn(entry: ProviderAvailabilityEntry | undefined): boolean {
+  return entry?.entitled === true && entry.configured && entry.enabled;
 }
 
+/** Every ramp is generally available; off means uncredentialed here, never gated. */
 export function resolveRampIntegrations(
   entries: Partial<Record<RampProviderId, ProviderAvailabilityEntry>>
 ): IntegrationEntry<RampProviderId>[] {
   return RAMP_PROVIDERS.map((provider) => ({
     provider,
     label: RAMP_PROVIDER_LABELS[provider],
-    status: entitledEntryStatus(entries[provider]),
+    status: railIsOn(entries[provider]) ? "enabled" : "not_configured",
     descriptionKey: RAMP_DESCRIPTION_KEYS[provider],
   }));
 }
 
+/**
+ * Every compliance provider is manual: the SDP team activates it per
+ * organization. Activated but uncredentialed is the one case where the
+ * deployment, not access, is what is missing.
+ */
 export function resolveComplianceIntegrations(
   entries: Partial<Record<ComplianceProviderId, ProviderAvailabilityEntry>>
 ): IntegrationEntry<ComplianceProviderId>[] {
-  return COMPLIANCE_PROVIDERS.map((provider) => ({
-    provider,
-    label: COMPLIANCE_PROVIDER_LABELS[provider],
-    status: entitledEntryStatus(entries[provider]),
-    descriptionKey: COMPLIANCE_DESCRIPTION_KEYS[provider],
-  }));
+  return COMPLIANCE_PROVIDERS.map((provider) => {
+    const entry = entries[provider];
+    const status: IntegrationStatus = railIsOn(entry)
+      ? "enabled"
+      : entry?.entitled
+        ? "not_configured"
+        : "request_access";
+    return {
+      provider,
+      label: COMPLIANCE_PROVIDER_LABELS[provider],
+      status,
+      descriptionKey: COMPLIANCE_DESCRIPTION_KEYS[provider],
+    };
+  });
 }

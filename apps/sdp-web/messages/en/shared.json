@@ -284,9 +284,9 @@
     "pageDescription": "Every provider SDP can run for this organization, with what is connected and what to do next. Custody installs from Wallets; other families are provisioned per deployment.",
     "statusActive": "Connected",
     "statusAvailable": "Ready to connect",
+    "statusEnabled": "Enabled",
     "statusRequestAccess": "Request access",
-    "statusPending": "Pending",
-    "statusNotAvailable": "Not available",
+    "statusNotConfigured": "Not configured",
     "ctaConfigure": "Configure",
     "ctaManage": "Manage",
     "ctaRequestAccess": "Request access",
@@ -328,7 +328,7 @@
     "capabilitySigning": "Transaction signing",
     "connectSelfServe": "Connect this provider yourself using credentials from your own account. Secrets are write-only and never shown again after submission.",
     "connectYouWillNeed": "You will need",
-    "connectByArrangement": "Available by arrangement. Request access and the team will set up the connection with you.",
+    "connectByArrangement": "Available by arrangement. The SDP team grants access and sets up the connection with your organization.",
     "connectManaged": "Provisioned per deployment. This provider is configured by your SDP operator rather than self-serve."
   }
 }

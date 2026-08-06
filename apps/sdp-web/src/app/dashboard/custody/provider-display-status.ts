@@ -30,10 +30,11 @@ function resolveStatus(input: {
   if (isEnabled) {
     return "available";
   }
-  if (entry.storedCredentialSetup.mode === "request_access") {
-    return "request_access";
-  }
-  return "unavailable";
+  // Not enabled splits along the launch classification: a manual provider is
+  // organization access the SDP team grants, a general provider is open to
+  // everyone and only lacks credentials in this deployment. Neither may read
+  // as the other, and neither may read as the provider not existing.
+  return entry.availability === "manual" ? "request_access" : "not_configured";
 }
 
 /**
@@ -48,21 +49,32 @@ export function resolveCustodyProviderAvailability(input: {
   const connected = new Set(input.connectedProviders);
   const enabled = new Set(input.enabledProviders);
 
-  return CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).map((entry) => {
-    const status = resolveStatus({
-      entry,
-      isConnected: connected.has(entry.id),
-      isEnabled: enabled.has(entry.id),
-    });
+  return (
+    CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible)
+      .map((entry) => {
+        const status = resolveStatus({
+          entry,
+          isConnected: connected.has(entry.id),
+          isEnabled: enabled.has(entry.id),
+        });
 
-    return {
-      entry,
-      status,
-      requestAccessUrl:
-        status === "request_access" && entry.storedCredentialSetup.mode === "request_access"
-          ? entry.storedCredentialSetup.requestAccessUrl
-          : undefined,
-      isSelectable: SELECTABLE_STATUSES.has(status),
-    };
-  });
+        return {
+          entry,
+          status,
+          // Per-provider, environment-configurable, and only Fireblocks has
+          // one today; wiring routes for the rest is HOO-775.
+          requestAccessUrl:
+            status === "request_access" && entry.storedCredentialSetup.mode === "request_access"
+              ? entry.storedCredentialSetup.requestAccessUrl
+              : undefined,
+          isSelectable: SELECTABLE_STATUSES.has(status),
+        };
+      })
+      // The local signer is a self-hosted deployment mode, not an integration an
+      // organization can go and get — its copy even names a deployment env var.
+      // Where the deployment runs one it is genuinely active or ready; where it
+      // does not, naming it "not configured" would invite configuring it, so it
+      // earns no row at all.
+      .filter((provider) => provider.entry.id !== "local" || provider.status !== "not_configured")
+  );
 }
