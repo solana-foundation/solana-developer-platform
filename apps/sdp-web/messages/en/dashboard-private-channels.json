@@ -50,7 +50,6 @@
       "privateBalanceEmpty": "No channel balance yet.",
       "allowedTokensTitle": "Allowed tokens",
       "allowedTag": "Allowed",
-      "viewAllTokens": "View all tokens",
       "activityTitle": "Recent private activity",
       "activityNewTransfer": "New private transfer",
       "activityRefresh": "Refresh",

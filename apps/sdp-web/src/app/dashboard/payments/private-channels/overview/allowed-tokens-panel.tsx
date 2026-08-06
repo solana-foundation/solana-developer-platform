@@ -1,13 +1,9 @@
 import type { PrivateChannelInstance } from "@sdp/types";
-import Link from "next/link";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
 import { allowedTokensForInstance } from "./overview-data";
-
-/** Placeholder — the allowed-tokens management page is not built yet. */
-const ALL_TOKENS_HREF = "/dashboard/payments/private-channels/tokens";
 
 interface Props {
   /** The active instance, or null when nothing is connected. */
@@ -19,11 +15,11 @@ export async function AllowedTokensPanel({ instance }: Props) {
   const tokens = instance ? allowedTokensForInstance(instance) : [];
 
   return (
-    <Card className="flex h-full flex-col">
+    <Card className="h-full">
       <CardHeader>
         <CardTitle>{t("DashboardPrivateChannels.overview.allowedTokensTitle")}</CardTitle>
       </CardHeader>
-      <CardContent className="flex-1">
+      <CardContent>
         {tokens.length === 0 ? (
           <p className="text-sm text-secondary">
             {t("DashboardPrivateChannels.overview.allowedTokensEmpty")}
@@ -42,13 +38,6 @@ export async function AllowedTokensPanel({ instance }: Props) {
           </ul>
         )}
       </CardContent>
-      {tokens.length === 0 ? null : (
-        <CardFooter>
-          <Link href={ALL_TOKENS_HREF} className="text-sm text-info hover:underline">
-            {t("DashboardPrivateChannels.overview.viewAllTokens")}
-          </Link>
-        </CardFooter>
-      )}
     </Card>
   );
 }
