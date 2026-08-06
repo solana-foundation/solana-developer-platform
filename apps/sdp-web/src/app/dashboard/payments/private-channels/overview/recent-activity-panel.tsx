@@ -26,6 +26,9 @@ import { eventMint } from "./overview-data";
 const TRANSFER_HREF = "/dashboard/payments/private-channels/transfer";
 const ALL_ACTIVITY_HREF = "/dashboard/payments/private-channels/events";
 
+/** The overview only previews the most recent activity — the rest lives on the events page. */
+const MAX_RECENT_EVENTS = 10;
+
 function formatWhen(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
@@ -55,6 +58,8 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
   }
 
   const none = t("DashboardPrivateChannels.overview.valueNone");
+  // Events arrive newest-first; preview only the most recent — "View all" has the rest.
+  const recentEvents = events.slice(0, MAX_RECENT_EVENTS);
 
   return (
     <Card>
@@ -83,7 +88,7 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
             {t("DashboardPrivateChannels.overview.activityEmpty")}
           </p>
         ) : (
-          <div className="max-h-[50vh] overflow-y-auto">
+          <div className="max-h-[45vh] overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -95,7 +100,7 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {events.map((event) => {
+                {recentEvents.map((event) => {
                   const mint = eventMint(event);
                   const symbol = mint ? (WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? null) : null;
                   const channelName = event.channelId ? channelNames[event.channelId] : null;
