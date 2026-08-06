@@ -17,6 +17,7 @@ import { AppError } from "@/lib/errors";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { rootLogger } from "@/runtime/logger";
+import { reserveMintSupplyAtApprovedEffectBoundary } from "@/services/policy/approved-operation-replay";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -329,6 +330,128 @@ describe("Issuance Routes", () => {
 
     // Cache API key in KV
     await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
+  });
+
+  describe("approved mint submission boundary", () => {
+    async function seedExecutingMintOperation(params: {
+      id: string;
+      attemptId: string;
+      leaseExpiresAt: string;
+    }) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO wallet_operations
+             (id, organization_id, project_id, wallet_id, api_key_id, source,
+              operation_family, operation_type, raw_payload, status,
+              execution_started_at, execution_attempt_id, execution_lease_expires_at,
+              execution_attempts)
+           VALUES (?, ?, ?, ?, ?, 'api', 'issuance', 'issuance_mint_execute',
+                   '{}'::jsonb, 'executing', ?, ?, ?, 1)`
+        )
+        .bind(
+          params.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          "wallet_approved_mint_boundary",
+          TEST_PROJECT_API_KEY.id,
+          new Date().toISOString(),
+          params.attemptId,
+          params.leaseExpiresAt
+        )
+        .run();
+    }
+
+    function approvedMintContext(operationId: string, attemptId: string) {
+      const values: Record<string, unknown> = {
+        apiKey: TEST_PROJECT_CACHED_KEY,
+        projectId: TEST_PROJECT.id,
+        approvedWalletOperationId: operationId,
+        approvedWalletOperationAttemptId: attemptId,
+      };
+      return {
+        env,
+        get(key: string) {
+          return values[key];
+        },
+      } as never;
+    }
+
+    it("does not reserve supply after the approved execution lease expires", async () => {
+      const token = await seedIssuedToken({ id: "tok_approved_mint_expired" });
+      await getDb(env)
+        .prepare(
+          "UPDATE issued_tokens SET total_supply_cached = '100', max_supply = '1000' WHERE id = ?"
+        )
+        .bind(token.id)
+        .run();
+      await seedExecutingMintOperation({
+        id: "wop_approved_mint_expired",
+        attemptId: "attempt_approved_mint_expired",
+        leaseExpiresAt: "2000-01-01T00:00:00.000Z",
+      });
+
+      await expect(
+        reserveMintSupplyAtApprovedEffectBoundary(
+          approvedMintContext("wop_approved_mint_expired", "attempt_approved_mint_expired"),
+          token.id,
+          "200"
+        )
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: "Approved-operation execution lease was lost",
+      });
+
+      const state = await getDb(env)
+        .prepare(
+          `SELECT token.total_supply_cached, operation.execution_effect_started_at
+           FROM issued_tokens token
+           CROSS JOIN wallet_operations operation
+           WHERE token.id = ? AND operation.id = ?`
+        )
+        .bind(token.id, "wop_approved_mint_expired")
+        .first<{ total_supply_cached: string; execution_effect_started_at: string | null }>();
+      expect(state).toEqual({
+        total_supply_cached: "100",
+        execution_effect_started_at: null,
+      });
+    });
+
+    it("rolls back the effect fence when the atomic cap reservation is refused", async () => {
+      const token = await seedIssuedToken({ id: "tok_approved_mint_capped" });
+      await getDb(env)
+        .prepare(
+          "UPDATE issued_tokens SET total_supply_cached = '900', max_supply = '1000' WHERE id = ?"
+        )
+        .bind(token.id)
+        .run();
+      await seedExecutingMintOperation({
+        id: "wop_approved_mint_capped",
+        attemptId: "attempt_approved_mint_capped",
+        leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+      });
+
+      await expect(
+        reserveMintSupplyAtApprovedEffectBoundary(
+          approvedMintContext("wop_approved_mint_capped", "attempt_approved_mint_capped"),
+          token.id,
+          "200"
+        )
+      ).rejects.toMatchObject({ code: "MAX_SUPPLY_EXCEEDED" });
+
+      const state = await getDb(env)
+        .prepare(
+          `SELECT token.total_supply_cached, operation.execution_effect_started_at
+           FROM issued_tokens token
+           CROSS JOIN wallet_operations operation
+           WHERE token.id = ? AND operation.id = ?`
+        )
+        .bind(token.id, "wop_approved_mint_capped")
+        .first<{ total_supply_cached: string; execution_effect_started_at: string | null }>();
+      expect(state).toEqual({
+        total_supply_cached: "900",
+        execution_effect_started_at: null,
+      });
+    });
   });
 
   describe("GET /v1/issuance/tokens/{tokenId}/transactions", () => {
@@ -3414,11 +3537,9 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(200);
     });
 
-    // When an allowlist token has on-chain ABL active (ablListAddress populated),
-    // mint to a fresh destination auto-adds the wallet to the on-chain list and
-    // mirrors it into token_allowlists, instead of rejecting with
-    // NOT_ON_TOKEN_ALLOWLIST. Without this, the SDK's permissionless-thaw step
-    // fails because the destination ATA is frozen and not on the on-chain list.
+    // The execute route may auto-add a destination to an on-chain ABL after
+    // policy enforcement. The prepare route is deliberately read-only and only
+    // succeeds when the destination is already on-chain.
     describe("on-chain allowlist auto-add on mint", () => {
       const ablList = TEST_SOLANA_ADDRESSES.wallet3;
       const signerAddress = TEST_SOLANA_ADDRESSES.wallet2;
@@ -3445,7 +3566,7 @@ describe("Issuance Routes", () => {
           .run();
       };
 
-      it("auto-adds destination to on-chain allowlist on prepare mint", async () => {
+      it("rejects prepare mint without mutating an absent on-chain allowlist entry", async () => {
         await seedAblListAddress();
 
         const createOrgSignerSpy = vi
@@ -3477,13 +3598,11 @@ describe("Issuance Routes", () => {
             env
           );
 
-          expect(res.status).toBe(200);
-          expect(addToListSpy).toHaveBeenCalledTimes(1);
-          expect(addToListSpy).toHaveBeenCalledWith({
-            list: ablList,
-            wallet: freshDestination,
-          });
-          expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as { error: { code: string } };
+          expect(body.error.code).toBe("NOT_ON_TOKEN_ALLOWLIST");
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(prepareMintToSpy).not.toHaveBeenCalled();
 
           const entry = await getDb(env)
             .prepare(
@@ -3491,26 +3610,7 @@ describe("Issuance Routes", () => {
             )
             .bind(allowlistTokenId, freshDestination)
             .first<{ id: string }>();
-          expect(entry?.id).toMatch(/^tal_/);
-
-          const body = (await res.json()) as { data: { transaction: { id: string } } };
-          const transactionId = body.data.transaction.id;
-          const audit = await getDb(env)
-            .prepare(
-              `SELECT metadata FROM audit_logs
-               WHERE action = 'mint' AND resource_type = 'token_transaction'
-                 AND resource_id = ?
-               LIMIT 1`
-            )
-            .bind(transactionId)
-            .first<{ metadata: string }>();
-          expect(audit).not.toBeNull();
-          const meta = JSON.parse(audit?.metadata ?? "{}") as {
-            mode: string;
-            addedToAllowlist: boolean;
-          };
-          expect(meta.mode).toBe("prepare");
-          expect(meta.addedToAllowlist).toBe(true);
+          expect(entry).toBeNull();
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
@@ -3519,21 +3619,18 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("reports addedToAllowlist when the on-chain add errors but membership is confirmed", async () => {
+      it("prepares for an existing on-chain entry without mutating the DB mirror", async () => {
         await seedAblListAddress();
 
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
           .mockResolvedValueOnce({ address: signerAddress } as never);
-        // First check (before add) sees the wallet absent; the recheck after the
-        // add error sees it present — the transient-error / TOCTOU recovery path.
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
-          .mockResolvedValueOnce(false)
           .mockResolvedValueOnce(true);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
-          .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
+          .mockResolvedValueOnce(undefined as never);
         const prepareMintToSpy = vi
           .spyOn(MosaicService.prototype, "prepareMintTo")
           .mockResolvedValueOnce(mockPreparedMint as never);
@@ -3555,7 +3652,7 @@ describe("Issuance Routes", () => {
           );
 
           expect(res.status).toBe(200);
-          expect(addToListSpy).toHaveBeenCalledTimes(1);
+          expect(addToListSpy).not.toHaveBeenCalled();
           expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
 
           const entry = await getDb(env)
@@ -3564,7 +3661,7 @@ describe("Issuance Routes", () => {
             )
             .bind(allowlistTokenId, freshDestination)
             .first<{ id: string }>();
-          expect(entry?.id).toMatch(/^tal_/);
+          expect(entry).toBeNull();
 
           const body = (await res.json()) as { data: { transaction: { id: string } } };
           const transactionId = body.data.transaction.id;
@@ -3582,7 +3679,7 @@ describe("Issuance Routes", () => {
             addedToAllowlist: boolean;
           };
           expect(meta.mode).toBe("prepare");
-          expect(meta.addedToAllowlist).toBe(true);
+          expect(meta.addedToAllowlist).toBe(false);
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
@@ -3603,9 +3700,9 @@ describe("Issuance Routes", () => {
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockResolvedValueOnce(undefined as never);
-        const prepareMintToSpy = vi
-          .spyOn(MosaicService.prototype, "prepareMintTo")
-          .mockResolvedValueOnce(mockPreparedMint as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
 
         // First call: simulate a parallel request having beaten us to the INSERT
         // — we don't own the row. Second call (the re-assert) succeeds, modeling
@@ -3627,7 +3724,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -3644,12 +3741,12 @@ describe("Issuance Routes", () => {
           expect(res.status).toBe(200);
           expect(addToListSpy).toHaveBeenCalledTimes(1);
           expect(addAllowlistEntryStrictSpy).toHaveBeenCalledTimes(2);
-          expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
-          prepareMintToSpy.mockRestore();
+          mintToSpy.mockRestore();
           addAllowlistEntryStrictSpy.mockRestore();
         }
       });
@@ -4283,13 +4380,13 @@ describe("Issuance Routes", () => {
           .spyOn(MosaicService.prototype, "addToList")
           .mockRejectedValueOnce(new Error("RPC confirmation timeout"))
           .mockResolvedValueOnce(undefined as never);
-        const prepareMintToSpy = vi
-          .spyOn(MosaicService.prototype, "prepareMintTo")
-          .mockResolvedValueOnce(mockPreparedMint as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
 
         try {
           const failedRes = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -4317,7 +4414,7 @@ describe("Issuance Routes", () => {
           // Retry on the same address with the on-chain add succeeding must
           // not be blocked by a stale "revoked" row from the prior rollback.
           const retryRes = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -4343,7 +4440,7 @@ describe("Issuance Routes", () => {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
-          prepareMintToSpy.mockRestore();
+          mintToSpy.mockRestore();
         }
       });
 
@@ -4375,11 +4472,11 @@ describe("Issuance Routes", () => {
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(false);
         const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
-        const prepareMintToSpy = vi.spyOn(MosaicService.prototype, "prepareMintTo");
+        const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -4407,13 +4504,13 @@ describe("Issuance Routes", () => {
 
           // The mint must not have proceeded any further on-chain.
           expect(addToListSpy).not.toHaveBeenCalled();
-          expect(prepareMintToSpy).not.toHaveBeenCalled();
+          expect(mintToSpy).not.toHaveBeenCalled();
         } finally {
           statusSpy.mockRestore();
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
-          prepareMintToSpy.mockRestore();
+          mintToSpy.mockRestore();
         }
       });
     });

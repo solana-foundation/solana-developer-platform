@@ -27,6 +27,7 @@ import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
+import { tryApprovedOperationReplayAuth } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
 
@@ -475,6 +476,9 @@ export function unifiedAuthMiddleware(
   options: { allowSession?: boolean; allowClerk?: boolean } = {}
 ) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    if (await tryApprovedOperationReplayAuth(c)) {
+      return next();
+    }
     // Try API key first
     const apiKey = extractApiKey(c);
     if (apiKey && looksLikeApiKey(apiKey)) {
