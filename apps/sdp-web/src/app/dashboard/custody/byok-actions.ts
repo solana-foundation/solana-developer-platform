@@ -18,18 +18,18 @@ interface ProviderCredentialCheckResult {
   check: {
     status: "success" | "failed" | "retry_unknown";
     checkedAt: string;
-    failureStage?: string;
-    failureCode?: string;
   };
 }
 
 /**
  * What the credential form renders next.
  *
- * `failed` is terminal for the submitted secret — conclusively invalid
- * credentials are removed server-side, so the retry is a fresh submission and
- * the client must mint a NEW idempotency key. `retry_unknown` keeps the
- * credential; the safe move is re-running the check against the same id.
+ * `failed` is terminal for this attempt: either the provider conclusively
+ * rejected the credential (which the server then removes), or the server
+ * refused the check in a way no re-check can change. The retry is a fresh
+ * submission and the client must mint a NEW idempotency key. `retry_unknown`
+ * keeps the credential; the safe move is re-running the check against the
+ * same id.
  */
 export type PrivyByokSubmitResult =
   | { status: "success" }
@@ -66,9 +66,19 @@ async function runCheck(providerCredentialId: string): Promise<PrivyByokSubmitRe
       { method: "POST", body: JSON.stringify({}) }
     );
   } catch (error) {
+    // A definite refusal (no access, credential gone, unresolvable conflict)
+    // answers the same way on every re-check, so offering "check again" would
+    // trap the user in a loop; surface it as terminal with the server's
+    // explanation instead.
+    const { status, message } = extractApiMessage(error);
+    if (status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429) {
+      return {
+        status: "failed",
+        message: message || t("DashboardCustody.byokCheckFailed"),
+      };
+    }
     // The check may have run to completion server-side even though the response
     // never arrived; re-checking the same credential is safe and idempotent.
-    void extractApiMessage(error);
     return { status: "retry_unknown", providerCredentialId };
   }
 
@@ -80,13 +90,10 @@ async function runCheck(providerCredentialId: string): Promise<PrivyByokSubmitRe
   if (result.check.status === "retry_unknown") {
     return { status: "retry_unknown", providerCredentialId };
   }
-  return {
-    status: "failed",
-    message:
-      result.check.failureCode === "invalid_credentials"
-        ? t("DashboardCustody.byokInvalidCredentials")
-        : t("DashboardCustody.byokCheckFailed"),
-  };
+  // A completed check only reports `failed` when the provider conclusively
+  // rejected the credential; every other failure maps to `retry_unknown`
+  // server-side, and the response carries no failure detail beyond the status.
+  return { status: "failed", message: t("DashboardCustody.byokInvalidCredentials") };
 }
 
 /**
