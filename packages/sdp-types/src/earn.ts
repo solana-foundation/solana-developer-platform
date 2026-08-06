@@ -329,8 +329,17 @@ export interface EarnPortfolioDepositsPage {
   nextCursor: string | null;
 }
 
+/**
+ * `pending_approval` is synthesized by the provider client, never reported
+ * top-level by the provider: Ground parks the affected payout leg in
+ * `pending_customer_approval` (awaiting a customer-side Turnkey stamp) while
+ * the withdrawal itself keeps saying `processing`, so the client folds a
+ * parked leg up into this distinct status — a withdrawal waiting on an
+ * approval must be legible, not an indefinite `processing`.
+ */
 export const EARN_PORTFOLIO_WITHDRAWAL_STATUSES = [
   "processing",
+  "pending_approval",
   "completed",
   "partially_completed",
   "failed",

@@ -1115,35 +1115,78 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it("blocks only an active exact-project legacy Privy config", async () => {
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs (
-           id, organization_id, project_id, provider, config_encrypted,
-           encryption_version, status
-         ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'active')`
-      )
-      .bind("cust_active_exact_project", ORGANIZATION_ID, PROJECT_ID)
-      .run();
+  it("admits a pending Connection beside the selected active Project Config", async () => {
+    const db = getDb(env);
+    const configId = "cust_active_exact_project";
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO custody_configs (
+             id, organization_id, project_id, provider, config_encrypted,
+             encryption_version, default_wallet_id, status
+           ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'legacy-wallet', 'active')`
+        )
+        .bind(configId, ORGANIZATION_ID, PROJECT_ID),
+      db
+        .prepare(
+          `INSERT INTO custody_wallets (
+             id, custody_config_id, wallet_id, public_key, label, status
+           ) VALUES (
+             'cwal_active_exact_project', ?, 'legacy-wallet',
+             'legacy-public-key', 'Legacy wallet', 'active'
+           )`
+        )
+        .bind(configId),
+      db
+        .prepare(
+          `INSERT INTO custody_scope_defaults (
+             id, organization_id, project_id, default_custody_config_id
+           ) VALUES ('csd_active_exact_project', ?, ?, ?)`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID, configId),
+    ]);
+    const readLegacyState = () =>
+      db
+        .prepare(
+          `SELECT c.id AS config_id, c.config_encrypted, c.default_wallet_id,
+                  c.status AS config_status, w.id AS custody_wallet_id,
+                  w.wallet_id, w.public_key, w.status AS wallet_status,
+                  w.custody_config_id, w.custody_connection_id,
+                  d.default_custody_config_id, d.default_custody_connection_id
+           FROM custody_configs c
+           JOIN custody_wallets w ON w.custody_config_id = c.id
+           JOIN custody_scope_defaults d
+             ON d.organization_id = c.organization_id AND d.project_id = c.project_id
+           WHERE c.id = ?`
+        )
+        .bind(configId)
+        .first();
+    const legacyBefore = await readLegacyState();
     const { app, token } = buildApp();
 
-    const blocked = await submit(app, token, {
-      key: "legacy-active-conflict",
+    const response = await submit(app, token, {
+      key: "legacy-active-coexistence",
     });
-    expect(blocked.status).toBe(409);
-    expect(await blocked.json()).toMatchObject({
-      error: {
-        code: "CONFLICT",
-        message: "Privy custody setup already exists for this project",
-      },
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+    expect(body.data.providerCredential).toMatchObject({
+      provider: "privy",
+      projectId: PROJECT_ID,
+      status: "pending",
     });
-    expect(factory).not.toHaveBeenCalled();
+    expect(await getConnectionForCredential(body.data.providerCredential.id)).toMatchObject({
+      project_id: PROJECT_ID,
+      provider: "privy",
+      status: "pending",
+    });
     expect(await getDomainCounts()).toEqual({
-      credentials: 0,
-      connections: 0,
-      wallets: 0,
+      credentials: 1,
+      connections: 1,
+      wallets: 1,
     });
+    expect(await readLegacyState()).toEqual(legacyBefore);
   });
 
   it("allows an inactive exact-project config and active organization fallback", async () => {

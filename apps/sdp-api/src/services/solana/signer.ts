@@ -90,11 +90,12 @@ export async function createSigner(env: Env): Promise<TransactionSigner> {
 }
 
 /**
- * Create a transaction signer for an organization with scope default resolution.
+ * Create a transaction signer for an organization with custody runtime-target resolution.
  *
  * Resolution order:
- * 1. Project default config (if projectId provided)
- * 2. Organization default config
+ * 1. Enabled Project Connection target (if selected)
+ * 2. Retained Project Config
+ * 3. Organization Config fallback
  *
  * This is the recommended signer factory for production use. It enables
  * per-organization signing keys with explicit DB-backed provider selection.

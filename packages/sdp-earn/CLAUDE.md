@@ -146,6 +146,7 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 | Web typecheck fails in `.next/dev/types` | stale generated cache: `rm -rf apps/sdp-web/.next/dev/types` |
 | Dashboard shows empty onboarding, but a program exists in the DB | it is linked to another local org — re-run `db:seed:earn` to move it to the org you sign into |
 | `GET /v1/earn/program` → 404 with the dev API key | that key is the test org's, which has no program by design (§4b) |
+| A key you minted yourself returns `strategies: []` **and** program 404 | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox program, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive Ground's **production** API from a laptop. |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows your org's one wallet (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
 
@@ -178,6 +179,20 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
   missing for an id in `EARN_PROVIDERS`.
 - All HTTP goes through `providerFetch`/`providerFetchJson` (src/fetch.ts) —
   never raw `fetch` in a client.
+- **Chain keys are HARD-SET in `GROUND_SOLANA_CHAINS`**
+  (providers/ground/client.ts): sandbox = `solana_devnet`, production =
+  `solana`. Ground confirmed (2026-08-05) sandbox supports both Ethereum
+  Sepolia and Solana devnet — Solana flows in sandbox use the `solana_devnet`
+  key. Every wallet flow sends `config.chain` from the constant; no SDP flow
+  may ever take a caller-supplied chain. SDP only cares about Solana. Sandbox
+  mock USDT and Ground's sandbox faucet (`POST /v2/sandbox/faucets/usdt`) are
+  Sepolia-only, so exercising the Solana lane locally means devnet USDC to the
+  wallet's deposit address (§4b).
+- Withdrawal approval is **policy-conditional, not default** (resolved
+  2026-08-05 — README → "Withdrawals unwind in reverse"). A payout leg parked
+  in `pending_customer_approval` must surface as the `pending_approval` wire
+  status, never as indefinite `processing`; the approval surface is the
+  optional capability behind `supportsWithdrawalApprovals` (capabilities.ts).
 - Tests: node:test (`pnpm --filter @sdp/earn test`), **no network** — stub
   global fetch per the canonical pattern in src/fetch.test.ts and
   providers/ground/client.test.ts. Every new client method needs mapping +

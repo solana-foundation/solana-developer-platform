@@ -42,20 +42,21 @@ afterEach(() => {
 });
 
 describe("emitTransferEvent", () => {
-  it("emits a channel-scoped transfer event with the financial payload", async () => {
-    await emitTransferEvent(ENV, TRANSFER, "transfer.transfer.submitted", "pending");
+  it("emits an actor-scoped transfer event with sender wallet context in its payload", async () => {
+    await emitTransferEvent(ENV, TRANSFER, "transfer.transfer.submitted", "pending", "usr_sender");
 
     expect(emit).toHaveBeenCalledWith({
       organizationId: "org_event_test",
       projectId: "prj_event_test",
       instanceId: "pci_event_test",
-      channelId: "pch_event_test",
-      sdpUserId: null,
+      channelId: null,
+      sdpUserId: "usr_sender",
       family: "transfer",
       type: "transfer.transfer.submitted",
       status: "pending",
       payload: {
         transferId: "pct_event_test",
+        senderWalletId: TRANSFER.sender_wallet_id,
         sender: TRANSFER.sender,
         recipient: TRANSFER.recipient,
         amount: "2.5",
@@ -69,7 +70,7 @@ describe("emitTransferEvent", () => {
     emit.mockRejectedValueOnce(new Error("event sink unavailable"));
 
     await expect(
-      emitTransferEvent(ENV, TRANSFER, "transfer.transfer.submitted", "pending")
+      emitTransferEvent(ENV, TRANSFER, "transfer.transfer.submitted", "pending", "usr_sender")
     ).resolves.toBeUndefined();
   });
 });

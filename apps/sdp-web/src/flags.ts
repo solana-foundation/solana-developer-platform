@@ -136,7 +136,7 @@ export const earn = flag<boolean, DashboardFlagEntities>({
   identify: identifyDashboardEntities,
   defaultValue: flagDefault("EARN_ENABLED", false),
   description:
-    "Show the Earn workspace (curator programs, allocations, deposits, withdrawals). A sub-module of Markets, so it also requires the markets flag.",
+    "Show the Earn workspace (strategy catalogue, deposits, withdrawals). A sub-module of Markets, so it also requires the markets flag.",
   options: [
     { value: false, label: "Hidden" },
     { value: true, label: "Enabled" },

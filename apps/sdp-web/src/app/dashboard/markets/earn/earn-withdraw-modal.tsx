@@ -3,12 +3,13 @@
 import {
   EARN_PORTFOLIO_TOKENS,
   type EarnPortfolioBalance,
+  type EarnPortfolioPosition,
   type EarnPortfolioToken,
   type EarnPortfolioWithdrawal,
   type EarnPortfolioWithdrawalPreview,
 } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,12 @@ import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
-import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
+import {
+  createEarnWithdrawal,
+  previewEarnWithdrawal,
+  useEarnStrategies,
+} from "./earn-program-data";
+import { withdrawLanes } from "./earn-program-presentation";
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -31,11 +37,28 @@ const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 const PREVIEW_DEBOUNCE_MS = 400;
 
+/**
+ * Stablecoins Ground pays out on the Solana rail — a GROUND constraint, not an
+ * SDP preference, mirrored from `GROUND_SOLANA_ROUTED_TOKENS` in the provider
+ * client (packages/sdp-earn/src/providers/ground/client.ts; Ground's
+ * supported-chains doc: "Solana = USDC deposits and withdrawals only", USDT
+ * rides Ethereum). SDP's surface is Solana-only, so tokens outside this set
+ * are not offered AT ALL — they can never complete a withdrawal here, and the
+ * same constraint already keeps their strategies out of the catalogue.
+ */
+const SOLANA_PAYOUT_TOKENS: ReadonlySet<EarnPortfolioToken> = new Set(["usdc"]);
+
+/** The withdraw token choices: only lanes Ground can actually pay out. */
+const WITHDRAW_TOKEN_OPTIONS = EARN_PORTFOLIO_TOKENS.filter((candidate) =>
+  SOLANA_PAYOUT_TOKENS.has(candidate)
+);
+
 const WITHDRAWAL_STATUS_BADGES: Record<
   EarnPortfolioWithdrawal["status"],
   { variant: "success" | "warning" | "danger"; key: MessageKey }
 > = {
   processing: { variant: "warning", key: "DashboardEarn.withdraw.statusProcessing" },
+  pending_approval: { variant: "warning", key: "DashboardEarn.withdraw.statusPendingApproval" },
   completed: { variant: "success", key: "DashboardEarn.withdraw.statusCompleted" },
   partially_completed: {
     variant: "warning",
@@ -103,7 +126,7 @@ type PreviewState =
   | { phase: "idle" }
   | { phase: "loading" }
   | { phase: "ready"; preview: EarnPortfolioWithdrawalPreview }
-  | { phase: "error"; message: string };
+  | { phase: "error" };
 
 function ProcessingEstimateLine({
   estimate,
@@ -131,7 +154,13 @@ function ProcessingEstimateLine({
   );
 }
 
-function WithdrawPreviewPanel({ preview }: { preview: PreviewState }) {
+function WithdrawPreviewPanel({
+  preview,
+  token,
+}: {
+  preview: PreviewState;
+  token: EarnPortfolioToken;
+}) {
   const t = useTranslations();
   if (preview.phase === "idle") return null;
   return (
@@ -141,8 +170,11 @@ function WithdrawPreviewPanel({ preview }: { preview: PreviewState }) {
         <p className="mt-1 text-xs text-secondary">{t("DashboardEarn.withdraw.previewLoading")}</p>
       ) : null}
       {preview.phase === "error" ? (
+        // Translated, never the provider's wire text. Only Solana-payable
+        // tokens are offered at all, so the one user-explainable failure
+        // left is lane funds; the preview stays the authority on the lane.
         <p className="mt-1 text-xs text-error" role="alert">
-          {preview.message}
+          {t("DashboardEarn.withdraw.previewInsufficient", { token: token.toUpperCase() })}
         </p>
       ) : null}
       {preview.phase === "ready" ? (
@@ -223,6 +255,8 @@ function WithdrawalCreatedView({
 
 interface EarnWithdrawModalProps {
   balance: EarnPortfolioBalance;
+  /** Live portfolio slices; power the per-stablecoin available figures. */
+  positions: readonly EarnPortfolioPosition[];
   onClose: () => void;
   /** Fired once a withdrawal is accepted, so the caller can refresh balances. */
   onWithdrawalCreated: () => void;
@@ -236,12 +270,16 @@ interface EarnWithdrawModalProps {
  */
 export function EarnWithdrawModal({
   balance,
+  positions,
   onClose,
   onWithdrawalCreated,
 }: EarnWithdrawModalProps) {
   const t = useTranslations();
   const contentRef = useEarnModalFocus();
+  const { strategies } = useEarnStrategies();
   const [amountInput, setAmountInput] = useState("");
+  // Always USDC: the one stablecoin Ground pays out on Solana, so it is the
+  // right anchor regardless of where the balance happens to sit.
   const [token, setToken] = useState<EarnPortfolioToken>("usdc");
   const [destinationInput, setDestinationInput] = useState("");
   const [preview, setPreview] = useState<PreviewState>({ phase: "idle" });
@@ -249,10 +287,29 @@ export function EarnWithdrawModal({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [created, setCreated] = useState<EarnPortfolioWithdrawal | null>(null);
 
-  const withdrawable = Number(balance.withdrawableUsd);
+  const walletWithdrawable = Number(balance.withdrawableUsd);
+  // Everything the modal promises is scoped to the SELECTED token, because
+  // Ground fills withdrawals per stablecoin lane while `withdrawableUsd` is
+  // wallet-level — quoting the wallet figure invited "Max" to fill an amount
+  // the selected lane could never pay. Lane-unresolved value widens every
+  // lane's ceiling (never narrows it), so this can only degrade toward the
+  // old wallet-level behaviour; the preview stays the authority.
+  const lanes = useMemo(() => withdrawLanes(positions, strategies ?? []), [positions, strategies]);
+  const availableUsdFor = (candidate: EarnPortfolioToken) =>
+    Math.min(walletWithdrawable, (lanes.totals.get(candidate) ?? 0) + lanes.unattributedUsd);
+  const tokenAvailable = availableUsdFor(token);
+  // As an input value: an exact provider string when wallet-capped, else the
+  // lane sum trimmed to the API's 6-decimal contract.
+  const tokenAvailableInput =
+    tokenAvailable === walletWithdrawable
+      ? balance.withdrawableUsd
+      : tokenAvailable
+          .toFixed(6)
+          .replace(/(\.\d*?)0+$/, "$1")
+          .replace(/\.$/, "");
   const amount = amountInput.trim();
   const amountShapeValid = USD_AMOUNT_PATTERN.test(amount) && Number(amount) > 0;
-  const amountValid = amountShapeValid && Number(amount) <= withdrawable;
+  const amountValid = amountShapeValid && Number(amount) <= tokenAvailable;
   const destination = destinationInput.trim();
   const destinationValid = SOLANA_ADDRESS_PATTERN.test(destination);
 
@@ -292,9 +349,7 @@ export function EarnWithdrawModal({
       const result = await previewEarnWithdrawal({ amountUsd: amount, token }, controller.signal);
       if (controller.signal.aborted) return;
       setPreview(
-        result.ok
-          ? { phase: "ready", preview: result.data.data.preview }
-          : { phase: "error", message: result.error }
+        result.ok ? { phase: "ready", preview: result.data.data.preview } : { phase: "error" }
       );
     }, PREVIEW_DEBOUNCE_MS);
     return () => {
@@ -356,6 +411,36 @@ export function EarnWithdrawModal({
           {t("DashboardEarn.withdraw.description")}
         </p>
 
+        {/* Token FIRST: it scopes everything below. Each option carries its
+            lane's figure, so the choice is made on facts rather than
+            discovered as a refusal after typing an amount. */}
+        <div className="mt-4 space-y-2">
+          <p className="text-sm font-medium text-primary">
+            {t("DashboardEarn.withdraw.tokenLabel")}
+          </p>
+          <Select
+            ariaLabel={t("DashboardEarn.withdraw.tokenLabel")}
+            value={token}
+            disabled={submitting}
+            onValueChange={(nextToken) => {
+              if (!nextToken || nextToken === token) return;
+              setToken(nextToken as EarnPortfolioToken);
+              // A different lane is different money — an amount typed against
+              // one says nothing about the other.
+              setAmountInput("");
+            }}
+          >
+            {WITHDRAW_TOKEN_OPTIONS.map((candidate) => (
+              <SelectItem key={candidate} value={candidate}>
+                {t("DashboardEarn.withdraw.tokenOption", {
+                  token: candidate.toUpperCase(),
+                  amount: formatUsd(availableUsdFor(candidate)),
+                })}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
+
         <div className="mt-4 space-y-2">
           <Label htmlFor="earn-withdraw-amount">{t("DashboardEarn.withdraw.amountLabel")}</Label>
           <Input
@@ -375,8 +460,8 @@ export function EarnWithdrawModal({
             iconRight={
               <button
                 type="button"
-                disabled={submitting || withdrawable <= 0}
-                onClick={() => setAmountInput(balance.withdrawableUsd)}
+                disabled={submitting || tokenAvailable <= 0}
+                onClick={() => setAmountInput(tokenAvailableInput)}
                 className="pointer-events-auto text-xs font-medium text-primary"
               >
                 {t("DashboardEarn.withdraw.useMax")}
@@ -385,36 +470,19 @@ export function EarnWithdrawModal({
           />
           <p id="earn-withdraw-available" className="text-xs text-secondary">
             {t("DashboardEarn.withdraw.available", {
-              amount: formatUsd(balance.withdrawableUsd),
+              amount: formatUsd(tokenAvailable),
+              token: token.toUpperCase(),
             })}
           </p>
           {amountInput && !amountValid ? (
             <p id="earn-withdraw-error" className="text-xs text-error" role="alert">
               {amountShapeValid
-                ? t("DashboardEarn.withdraw.errorExceedsWithdrawable")
+                ? t("DashboardEarn.withdraw.errorExceedsWithdrawable", {
+                    token: token.toUpperCase(),
+                  })
                 : t("DashboardEarn.withdraw.errorAmountRequired")}
             </p>
           ) : null}
-        </div>
-
-        <div className="mt-4 space-y-2">
-          <p className="text-sm font-medium text-primary">
-            {t("DashboardEarn.withdraw.tokenLabel")}
-          </p>
-          <Select
-            ariaLabel={t("DashboardEarn.withdraw.tokenLabel")}
-            value={token}
-            disabled={submitting}
-            onValueChange={(nextToken) => {
-              if (nextToken) setToken(nextToken as EarnPortfolioToken);
-            }}
-          >
-            {EARN_PORTFOLIO_TOKENS.map((candidate) => (
-              <SelectItem key={candidate} value={candidate}>
-                {candidate.toUpperCase()}
-              </SelectItem>
-            ))}
-          </Select>
         </div>
 
         <div className="mt-4 space-y-2">
@@ -441,7 +509,7 @@ export function EarnWithdrawModal({
           ) : null}
         </div>
 
-        <WithdrawPreviewPanel preview={preview} />
+        <WithdrawPreviewPanel preview={preview} token={token} />
 
         {submitError ? (
           <p className="mt-4 text-xs text-error" role="alert">
