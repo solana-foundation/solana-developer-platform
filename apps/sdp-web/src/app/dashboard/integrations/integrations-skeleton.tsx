@@ -7,9 +7,18 @@ export function IntegrationsSkeleton() {
       </div>
       <div className="space-y-3">
         <div className="h-11 w-full max-w-md rounded-2xl bg-fill-subtle" />
-        <div className="flex flex-wrap gap-2">
-          {[56, 96, 72, 80, 104].map((width) => (
-            <div key={width} className="h-8 rounded-full bg-fill-subtle" style={{ width }} />
+        {/* Two rows, matching the family and status pill rows the loaded
+            catalog renders. */}
+        <div className="flex flex-col gap-2">
+          {[
+            [48, 104, 84, 92, 116],
+            [104, 96, 132, 120, 108],
+          ].map((row) => (
+            <div key={row.join()} className="flex flex-wrap gap-2">
+              {row.map((width) => (
+                <div key={width} className="h-8 rounded-full bg-fill-subtle" style={{ width }} />
+              ))}
+            </div>
           ))}
         </div>
       </div>
