@@ -7587,7 +7587,7 @@ describe("Payments routes", () => {
           direction: "inbound",
           signature: observedSig,
           status: "confirmed",
-          token: "USDC",
+          token: DEVNET_USDC_MINT,
         });
         expect(body.data[0]?.id).toMatch(/^xfr_observed_/);
       } finally {

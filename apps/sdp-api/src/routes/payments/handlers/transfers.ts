@@ -75,7 +75,6 @@ import {
   createSignatureHistoryRpc,
   dedupeSignatureHistory,
   mapSettledWithConcurrency,
-  resolveObservedTokenSymbols,
   resolveWalletTokenAccountAddresses,
   SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
 } from "./observed-transfers";
@@ -1299,14 +1298,12 @@ export async function listTransfers(c: AppContext) {
     const missingObservedSignatures = onChainSigs.filter(
       (signatureInfo) => !confirmedSignatures.has(String(signatureInfo.signature))
     );
-    const tokenSymbolsByMint = await resolveObservedTokenSymbols(c.env);
     const observedRows = await buildObservedTransfersForSignatures(
       c.env,
       missingObservedSignatures,
       {
         organizationId: auth.organizationId,
         projectId: auth.projectId,
-        tokenSymbolsByMint,
         walletIdsByAddress,
       }
     );

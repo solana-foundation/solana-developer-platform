@@ -374,13 +374,24 @@ describe("buildPolicyAssetOptions", () => {
     expect(options.filter((option) => option.mint === SOL_HOLDING.mint)).toHaveLength(1);
   });
 
-  const ISSUED_ACME = { token: "ACME", name: "Acme Token", mint: "MintAcme" };
+  const ISSUED_ACME = {
+    token: "ACME",
+    name: "Acme Token",
+    mint: "MintAcme",
+    imageUrl: "https://cdn.example/acme.png",
+  };
 
   it("offers issued tokens as their own source", () => {
     const options = buildPolicyAssetOptions([SOL_HOLDING], "sandbox", [ISSUED_ACME]);
     const acme = options.find((option) => option.mint === ISSUED_ACME.mint);
 
-    expect(acme).toMatchObject({ token: "ACME", name: "Acme Token", source: "issued" });
+    expect(acme).toMatchObject({
+      token: "ACME",
+      name: "Acme Token",
+      imageUrl: "https://cdn.example/acme.png",
+      sdpIssued: true,
+      source: "issued",
+    });
   });
 
   it("keeps an issued token the wallet holds in the wallet group with its balance", () => {
@@ -389,7 +400,13 @@ describe("buildPolicyAssetOptions", () => {
     const entries = options.filter((option) => option.mint === ISSUED_ACME.mint);
 
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ source: "wallet", uiAmount: "5000" });
+    expect(entries[0]).toMatchObject({
+      source: "wallet",
+      uiAmount: "5000",
+      name: "Acme Token",
+      imageUrl: "https://cdn.example/acme.png",
+      sdpIssued: true,
+    });
   });
 
   it("prefers the issued entry over a colliding well-known mint", () => {

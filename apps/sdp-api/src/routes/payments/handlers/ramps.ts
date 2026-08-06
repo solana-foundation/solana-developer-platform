@@ -19,8 +19,15 @@ import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provi
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import { isSolanaCryptoAsset, SOLANA_ASSET_TO_RAIL } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
+import { getSolanaConfig, type RpcEnv } from "@sdp/rpc";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
+import {
+  isWellKnownTokenSymbol,
+  type PaymentRampEstimate,
+  type PaymentRampQuote,
+  type RampProviderEstimateResult,
+  wellKnownMint,
+} from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
@@ -272,6 +279,29 @@ function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus
   return quote.status;
 }
 
+/**
+ * Resolves the quoted crypto symbol to the mint recorded on the transfer row,
+ * keeping ramp rows on the same token-is-a-mint contract as every other
+ * transfer. Ramp rails only quote well-known symbols, so an unresolvable
+ * symbol is a corridor bug and fails loudly.
+ *
+ * @param cryptoToken - The quoted crypto currency symbol, e.g. "USDC".
+ * @param env - Worker env used to resolve the active cluster.
+ * @returns The mint address for the active cluster.
+ */
+function rampTransferTokenMint(cryptoToken: string, env: RpcEnv): string {
+  const symbol = cryptoToken.trim().toUpperCase();
+  if (!isWellKnownTokenSymbol(symbol)) {
+    throw badRequest(`Unsupported ramp crypto token: ${cryptoToken}`);
+  }
+  const cluster = getSolanaConfig(env).network;
+  const mint = wellKnownMint(symbol, cluster);
+  if (!mint) {
+    throw badRequest(`${symbol} is not available on ${cluster}`);
+  }
+  return mint;
+}
+
 async function persistRampQuoteTransfer(
   c: AppContext,
   input: PersistRampQuoteTransferInput
@@ -296,7 +326,7 @@ async function persistRampQuoteTransfer(
     counterpartyId: input.counterparty.id,
     sourceAddress: isOnramp ? null : input.walletAddress,
     destinationAddress: isOnramp ? input.walletAddress : null,
-    token: input.cryptoToken,
+    token: rampTransferTokenMint(input.cryptoToken, c.env),
     amount: input.cryptoAmount,
     memo: null,
     type: input.direction,

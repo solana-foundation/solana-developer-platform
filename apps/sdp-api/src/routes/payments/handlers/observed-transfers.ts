@@ -2,9 +2,8 @@ import { getSolanaConfig } from "@sdp/rpc";
 import { withHeliusApiKey } from "@sdp/rpc/relay";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { SOL_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { getDb } from "@/db";
 import type {
   PaymentTransferDirection as TransferDirection,
   PaymentTransferRow as TransferRow,
@@ -76,7 +75,6 @@ interface ParsedTransactionResponse {
 interface ObservedTransferContext {
   organizationId: string;
   projectId: string | null;
-  tokenSymbolsByMint: Map<string, string>;
   walletIdsByAddress: Map<string, string>;
 }
 
@@ -112,21 +110,6 @@ function resolveSignatureHistoryRpcUrl(env: Env): string {
   return env.SOLANA_RPC_HELIUS_URL
     ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
     : getSolanaConfig(env).rpcUrl;
-}
-
-function resolveObservedTokenSymbol(mint: string, tokenSymbolsByMint: Map<string, string>): string {
-  const normalizedMint = mint.trim();
-  const known = tokenSymbolsByMint.get(normalizedMint)?.trim();
-  if (known) {
-    return known;
-  }
-
-  const wellKnownSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint)?.symbol;
-  if (wellKnownSymbol) {
-    return wellKnownSymbol;
-  }
-
-  return normalizedMint;
 }
 
 function resolveParsedAccountKey(accountKey: string | ParsedAccountKey | undefined): string | null {
@@ -333,37 +316,6 @@ export async function resolveWalletTokenAccountAddresses(
   }
 }
 
-export async function resolveObservedTokenSymbols(env: Env): Promise<Map<string, string>> {
-  const symbolsByMint = new Map<string, string>();
-
-  try {
-    const result = await getDb(env)
-      .prepare(
-        `SELECT mint_address, symbol
-         FROM issued_tokens
-        WHERE mint_address IS NOT NULL
-          AND deployed_at IS NOT NULL`
-      )
-      .all<{
-        mint_address?: string | null;
-        symbol?: string | null;
-      }>();
-
-    for (const row of result.results ?? []) {
-      const mint = row.mint_address?.trim();
-      if (!mint) {
-        continue;
-      }
-
-      symbolsByMint.set(mint, row.symbol?.trim() || mint);
-    }
-  } catch {
-    // Ignore symbol resolution failures and fall back to mint addresses.
-  }
-
-  return symbolsByMint;
-}
-
 async function fetchParsedTransaction(
   env: Env,
   signature: string
@@ -491,7 +443,7 @@ function buildObservedTransferRows(
         counterparty_id: null,
         source_address: sourceAddress,
         destination_address: destinationAddress,
-        token: "SOL",
+        token: SOL_MINT,
         amount: formatDecimalAmount(lamports, 9),
         memo: null,
         type: "transfer",
@@ -571,7 +523,7 @@ function buildObservedTransferRows(
         counterparty_id: null,
         source_address: readInstructionInfoString(info, "mintAuthority") ?? mint,
         destination_address: destinationOwner ?? destinationTokenAccount,
-        token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
+        token: mint,
         amount: resolvedUiAmount,
         memo: null,
         type: "transfer",
@@ -660,7 +612,7 @@ function buildObservedTransferRows(
       counterparty_id: null,
       source_address: sourceOwner ?? sourceTokenAccount,
       destination_address: destinationOwner ?? destinationTokenAccount,
-      token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
+      token: mint,
       amount: resolvedUiAmount,
       memo: null,
       type: "transfer",
