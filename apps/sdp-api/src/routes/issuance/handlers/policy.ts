@@ -2,6 +2,10 @@ import type { Token } from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import {
+  approvedWalletOperationAttemptId,
+  approvedWalletOperationId,
+} from "@/services/policy/approved-operation-replay";
+import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
   walletOperationActorFromAuth,
@@ -28,27 +32,33 @@ export async function enforceIssuanceWalletOperationPolicy(
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, input.auth, input.walletId);
 
-  await enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
-    organizationId: input.auth.organizationId,
-    projectId: input.token.projectId,
-    custodyWalletId: policyWallet?.id ?? null,
-    walletId: input.walletId,
-    apiKeyId: input.auth.apiKeyId,
-    actor: walletOperationActorFromAuth(input.auth),
-    operationFamily: "issuance",
-    operationType: input.operationType,
-    asset: input.token.symbol,
-    amount: input.amount ?? null,
-    destination: input.destination ?? null,
-    context: {
-      tokenId: input.token.id,
-      tokenSymbol: input.token.symbol,
-      mintAddress: input.token.mintAddress,
+  await enforceWalletOperationPolicy(
+    c.env,
+    getRequestTenantScope(c),
+    {
+      organizationId: input.auth.organizationId,
+      projectId: input.token.projectId,
+      custodyWalletId: policyWallet?.id ?? null,
+      walletId: input.walletId,
+      apiKeyId: input.auth.apiKeyId,
+      actor: walletOperationActorFromAuth(input.auth),
+      operationFamily: "issuance",
+      operationType: input.operationType,
+      asset: input.token.symbol,
+      amount: input.amount ?? null,
+      destination: input.destination ?? null,
+      context: {
+        tokenId: input.token.id,
+        tokenSymbol: input.token.symbol,
+        mintAddress: input.token.mintAddress,
+      },
+      rawPayload: {
+        tokenId: input.token.id,
+        mintAddress: input.token.mintAddress,
+        ...(input.rawPayload ?? {}),
+      },
     },
-    rawPayload: {
-      tokenId: input.token.id,
-      mintAddress: input.token.mintAddress,
-      ...(input.rawPayload ?? {}),
-    },
-  });
+    approvedWalletOperationId(c),
+    approvedWalletOperationAttemptId(c)
+  );
 }
