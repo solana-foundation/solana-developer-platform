@@ -100,6 +100,18 @@ describe("IntegrationsCatalog filtering", () => {
     expect(visibleRowLabels()).toEqual(["Fireblocks"]);
   });
 
+  it("narrows to what is listed but has no path yet", async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await user.click(screen.getByRole("button", { name: "Not available" }));
+
+    const labels = visibleRowLabels();
+    expect(labels).toContain("MoonPay");
+    expect(labels).toContain("Range");
+    expect(labels).not.toContain("Privy");
+  });
+
   it("searches across families and clears back to everything", async () => {
     const user = userEvent.setup();
     renderCatalog();

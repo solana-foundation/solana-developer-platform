@@ -30,7 +30,13 @@ import type { IntegrationEntry, IntegrationStatus } from "./integrations-status"
 
 type Translate = ReturnType<typeof useTranslations>;
 
-const STATUS_FILTERS: StatusFilter[] = ["all", "active", "available", "request_access"];
+const STATUS_FILTERS: StatusFilter[] = [
+  "all",
+  "active",
+  "available",
+  "request_access",
+  "unavailable",
+];
 
 function statusLabel(status: IntegrationStatus | "all", t: Translate): string {
   switch (status) {
