@@ -20,25 +20,31 @@ export default async function PrivateChannelsEventsPage() {
   const events = await loadEvents(client);
 
   return (
-    <div className="mx-auto w-full max-w-5xl">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("DashboardPrivateChannels.events.title")}</CardTitle>
-          <CardDescription>{t("DashboardPrivateChannels.events.description")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {events.ok ? (
-            <EventsList
-              initialEvents={events.data.events}
-              initialHasMore={events.data.hasMore}
-              initialNextCursor={events.data.nextCursor}
-              canViewRawPayload={canViewRawPayload}
-            />
-          ) : (
-            <PrivateChannelsLoadError message={events.error} />
-          )}
-        </CardContent>
-      </Card>
+    // Payments routes are viewport-locked (see dashboard-shell): the segment renders in an
+    // `overflow-hidden` box with the shell's usual padding dropped. Re-add side/bottom
+    // padding and let this page scroll its own content so a long events list stays
+    // reachable instead of overflowing the viewport.
+    <div className="h-full min-h-0 w-full overflow-y-auto px-3 pt-2 pb-5 md:px-6 md:pb-6">
+      <div className="mx-auto w-full max-w-5xl">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("DashboardPrivateChannels.events.title")}</CardTitle>
+            <CardDescription>{t("DashboardPrivateChannels.events.description")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {events.ok ? (
+              <EventsList
+                initialEvents={events.data.events}
+                initialHasMore={events.data.hasMore}
+                initialNextCursor={events.data.nextCursor}
+                canViewRawPayload={canViewRawPayload}
+              />
+            ) : (
+              <PrivateChannelsLoadError message={events.error} />
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
