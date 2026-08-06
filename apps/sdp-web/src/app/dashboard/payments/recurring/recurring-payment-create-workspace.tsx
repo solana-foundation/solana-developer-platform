@@ -346,6 +346,7 @@ export function RecurringPaymentCreateWorkspace({
     () =>
       assetOptions.map((asset) => {
         const token = resolveTokenByMint(asset.value, issuedTokensByMint, asset.label);
+        const sdpMinted = token.tokenId !== null;
         return {
           value: asset.value,
           label: token.tokenName,
@@ -357,7 +358,8 @@ export function RecurringPaymentCreateWorkspace({
               size="xs"
             />
           ),
-          badge: token.isWellKnown ? undefined : t("Shared.SharedComponents.customToken"),
+          badge: sdpMinted ? t("Shared.SharedComponents.sdpMintedToken") : undefined,
+          badgeVariant: sdpMinted ? ("primary" as const) : undefined,
         };
       }),
     [assetOptions, issuedTokensByMint, t]
