@@ -485,6 +485,19 @@ function mapWalletOperationRow(row: Record<string, unknown>): WalletOperationRow
     raw_payload: asPostgresJsonObject(row.raw_payload),
     idempotency_key: (row.idempotency_key as string | null | undefined) ?? null,
     status: row.status as WalletOperationRow["status"],
+    execution_started_at: (row.execution_started_at as string | null | undefined) ?? null,
+    execution_completed_at: (row.execution_completed_at as string | null | undefined) ?? null,
+    execution_error: (row.execution_error as string | null | undefined) ?? null,
+    execution_result:
+      row.execution_result === null || row.execution_result === undefined
+        ? null
+        : asPostgresJsonObject(row.execution_result),
+    execution_attempt_id: (row.execution_attempt_id as string | null | undefined) ?? null,
+    execution_lease_expires_at:
+      (row.execution_lease_expires_at as string | null | undefined) ?? null,
+    execution_effect_started_at:
+      (row.execution_effect_started_at as string | null | undefined) ?? null,
+    execution_attempts: Number(row.execution_attempts ?? 0),
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -588,6 +601,11 @@ function mapApprovalRequestDetailRow(row: Record<string, unknown>): ApprovalRequ
     amount: (row.amount as string | null | undefined) ?? null,
     destination: (row.destination as string | null | undefined) ?? null,
     operation_status: row.operation_status as ApprovalRequestDetailRow["operation_status"],
+    operation_execution_started_at:
+      (row.operation_execution_started_at as string | null | undefined) ?? null,
+    operation_execution_completed_at:
+      (row.operation_execution_completed_at as string | null | undefined) ?? null,
+    operation_execution_error: (row.operation_execution_error as string | null | undefined) ?? null,
     operation_created_at: row.operation_created_at as string,
     operation_updated_at: row.operation_updated_at as string,
     policy_evaluation_id: (row.policy_evaluation_id as string | null | undefined) ?? null,
@@ -711,6 +729,9 @@ async function listApprovalRequestDetailsInternal(
          wo.amount,
          wo.destination,
          wo.status AS operation_status,
+         wo.execution_started_at AS operation_execution_started_at,
+         wo.execution_completed_at AS operation_execution_completed_at,
+         wo.execution_error AS operation_execution_error,
          wo.created_at AS operation_created_at,
          wo.updated_at AS operation_updated_at,
          pe.id AS policy_evaluation_id,
@@ -1917,6 +1938,188 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         .first<Record<string, unknown>>();
 
       return row ? mapWalletOperationRow(row) : null;
+    },
+
+    async claimWalletOperationExecution(walletOperationId: string, executionAttemptId: string) {
+      if (!(await tenantOwnsRow(db, scope, "wallet_operations", walletOperationId))) {
+        return null;
+      }
+      const now = new Date().toISOString();
+      const leaseExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+      const row = await db
+        .prepare(
+          `UPDATE wallet_operations wo
+           SET execution_started_at = ?,
+               execution_attempt_id = ?,
+               execution_lease_expires_at = ?,
+               execution_attempts = execution_attempts + 1,
+               execution_completed_at = NULL,
+               execution_result = NULL,
+               execution_effect_started_at = NULL,
+               execution_error = NULL,
+               updated_at = ?
+           WHERE wo.id = ?
+             AND wo.organization_id = ?
+             AND wo.project_id IS NOT DISTINCT FROM ?
+             AND wo.status = 'executing'
+             AND wo.execution_effect_started_at IS NULL
+             AND (
+               wo.execution_started_at IS NULL
+               OR wo.execution_lease_expires_at IS NULL
+               OR wo.execution_lease_expires_at <= ?
+             )
+             AND EXISTS (
+               SELECT 1 FROM approval_requests ar
+               WHERE ar.wallet_operation_id = wo.id AND ar.status = 'approved'
+             )
+           RETURNING *`
+        )
+        .bind(
+          now,
+          executionAttemptId,
+          leaseExpiresAt,
+          now,
+          walletOperationId,
+          scope.organizationId,
+          scope.projectId,
+          now
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapWalletOperationRow(row) : null;
+    },
+
+    async renewWalletOperationExecutionLease(walletOperationId, executionAttemptId) {
+      const now = new Date().toISOString();
+      const leaseExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+      const result = await db
+        .prepare(
+          `UPDATE wallet_operations
+           SET execution_lease_expires_at = ?,
+               updated_at = ?
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
+             AND status = 'executing'
+             AND execution_attempt_id = ?
+             AND execution_lease_expires_at > ?`
+        )
+        .bind(
+          leaseExpiresAt,
+          now,
+          walletOperationId,
+          scope.organizationId,
+          scope.projectId,
+          executionAttemptId,
+          now
+        )
+        .run();
+
+      return result === 1;
+    },
+
+    async beginWalletOperationExecutionEffect(walletOperationId, executionAttemptId) {
+      const now = new Date().toISOString();
+      const result = await db
+        .prepare(
+          `UPDATE wallet_operations
+           SET execution_effect_started_at = COALESCE(execution_effect_started_at, ?),
+               updated_at = ?
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
+             AND status = 'executing'
+             AND execution_attempt_id = ?
+             AND execution_lease_expires_at > ?`
+        )
+        .bind(
+          now,
+          now,
+          walletOperationId,
+          scope.organizationId,
+          scope.projectId,
+          executionAttemptId,
+          now
+        )
+        .run();
+
+      return result === 1;
+    },
+
+    async completeWalletOperationExecution(input) {
+      const now = new Date().toISOString();
+      const row = await db
+        .prepare(
+          `UPDATE wallet_operations
+           SET status = ?,
+               execution_completed_at = ?,
+               execution_result = ?::jsonb,
+               execution_error = ?,
+               execution_lease_expires_at = NULL,
+               updated_at = ?
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
+             AND status = 'executing'
+             AND execution_started_at IS NOT NULL
+             AND execution_attempt_id = ?
+             AND execution_lease_expires_at > ?
+           RETURNING *`
+        )
+        .bind(
+          input.status,
+          now,
+          input.result == null ? null : JSON.stringify(input.result),
+          input.error ?? null,
+          now,
+          input.walletOperationId,
+          scope.organizationId,
+          scope.projectId,
+          input.executionAttemptId,
+          now
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapWalletOperationRow(row) : null;
+    },
+
+    async isApprovalGroupMember(approvalGroupId: string, userId: string) {
+      const row = await db
+        .prepare(
+          `SELECT 1 AS allowed
+           FROM approval_groups ag
+           INNER JOIN approval_group_members agm ON agm.approval_group_id = ag.id
+           WHERE ag.id = ?
+             AND ag.organization_id = ?
+             AND ag.project_id IS NOT DISTINCT FROM ?
+             AND ag.status = 'active'
+             AND agm.user_id = ?
+             AND agm.role = 'approver'
+           LIMIT 1`
+        )
+        .bind(approvalGroupId, scope.organizationId, scope.projectId, userId)
+        .first<{ allowed: number }>();
+
+      return row?.allowed === 1;
+    },
+
+    async getApiKeyCreatorUserId(apiKeyId: string) {
+      // Approval ownership is organization-wide when the caller has an
+      // organization scope, while project-scoped callers remain isolated to
+      // their project.
+      const row = await db
+        .prepare(
+          `SELECT created_by
+           FROM api_keys
+           WHERE id = ?
+             AND organization_id = ?
+             AND (?::text IS NULL OR project_id IS NOT DISTINCT FROM ?)
+           LIMIT 1`
+        )
+        .bind(apiKeyId, scope.organizationId, scope.projectId, scope.projectId)
+        .first<{ created_by: string | null }>();
+
+      return row?.created_by ?? null;
     },
 
     async createPolicyEvaluation(input: CreatePolicyEvaluationInput) {

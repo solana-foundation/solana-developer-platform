@@ -9,6 +9,7 @@ import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 
 export async function runCronJob(): Promise<void> {
   const env = getProcessEnv();
@@ -21,7 +22,10 @@ export async function runCronJob(): Promise<void> {
 
   initNodeSentry(getSentryOptions(env));
 
-  const work = () => trackPendingTransfers(env);
+  const work = async () => {
+    await trackPendingTransfers(env);
+    await recoverApprovedWalletOperations(env);
+  };
   try {
     await (isSentryEnabled(env)
       ? nodeObservability.withMonitor(PENDING_TRANSFERS_MONITOR, work, {
