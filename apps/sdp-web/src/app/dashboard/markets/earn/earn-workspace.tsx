@@ -69,7 +69,16 @@ function buildHoldings(
       .map((strategy) => [strategy.providerReference, strategy] as const)
   );
 
-  return [...positions]
+  return positions
+    .filter(
+      // Ground keeps reporting a lane's residual cash bucket at $0 after it
+      // drains (e.g. the Sepolia USDT lane once emptied) — provider plumbing,
+      // not a holding. Zero-value non-strategy slices say nothing actionable
+      // on SDP's Solana-only surface, so they never render. NONZERO value
+      // always renders, whatever rail it sits on: hiding real dollars would
+      // leave this list not summing to the wallet total Ground reports.
+      (position) => position.kind === "yield_source" || Number(position.valueUsd) > 0
+    )
     .map((position) => ({
       position,
       strategy:

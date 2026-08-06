@@ -652,6 +652,7 @@ describe("Private Channels — transfer access and routes", () => {
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
         channelId: CHANNEL_ID,
+        sdpUserId: ACTOR_USER_ID,
         wallet: expect.objectContaining({
           walletId: ACTOR_WALLET_ID,
           publicKey: ACTOR_ADDRESS,

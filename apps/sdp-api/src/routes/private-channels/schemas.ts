@@ -1,5 +1,8 @@
 import { privateChannelInstanceInputSchema } from "@sdp/private-channels";
-import { PRIVATE_CHANNEL_EVENT_FAMILY_VALUES } from "@sdp/types";
+import {
+  PRIVATE_CHANNEL_EVENT_FAMILY_VALUES,
+  PRIVATE_CHANNEL_EVENT_STATUS_VALUES,
+} from "@sdp/types";
 import { z } from "zod";
 import { privateChannelTransferAmountSchema } from "@/lib/private-channel-transfer-amount";
 
@@ -114,6 +117,7 @@ export const transferListQuerySchema = z.object({
 export const privateChannelEventsQuerySchema = z.object({
   family: z.enum(PRIVATE_CHANNEL_EVENT_FAMILY_VALUES).optional(),
   type: z.string().min(1).optional(),
+  status: z.enum(PRIVATE_CHANNEL_EVENT_STATUS_VALUES).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   before: z.string().min(1).optional(),
 });
