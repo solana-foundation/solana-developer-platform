@@ -51,28 +51,17 @@ async function recoverFreezeAccountReplay(options: {
     throw badRequest(transaction.error ?? "Previous freeze request failed");
   }
 
-  let frozenAccount = await options.tokenService.getFrozenAccount(
-    options.tokenId,
-    options.tokenAccount,
-    true
-  );
-  if (!frozenAccount && transaction.status === "confirmed") {
-    try {
-      frozenAccount = await options.tokenService.freezeAccount({
-        tokenId: options.tokenId,
-        accountAddress: options.tokenAccount,
-        frozenBy: options.actorId,
-        reason: options.reason,
-      });
-    } catch (error) {
-      if (!(error instanceof Error) || error.message !== "ACCOUNT_ALREADY_FROZEN") throw error;
-      frozenAccount = await options.tokenService.getFrozenAccount(
-        options.tokenId,
-        options.tokenAccount,
-        true
-      );
-    }
-  }
+  const frozenAccount =
+    transaction.status === "confirmed"
+      ? await options.tokenService.applySettledAccountFreezeState({
+          transactionId: transaction.id,
+          tokenId: options.tokenId,
+          accountAddress: options.tokenAccount,
+          state: "frozen",
+          actorId: options.actorId,
+          reason: options.reason,
+        })
+      : await options.tokenService.getFrozenAccount(options.tokenId, options.tokenAccount, true);
   if (!frozenAccount) {
     throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
   }
@@ -97,18 +86,16 @@ async function recoverUnfreezeAccountReplay(options: {
     throw badRequest(transaction.error ?? "Previous unfreeze request failed");
   }
 
-  let frozenAccount = await options.tokenService.getFrozenAccount(
-    options.tokenId,
-    options.tokenAccount,
-    true
-  );
-  if (frozenAccount && frozenAccount.unfrozenAt === null && transaction.status === "confirmed") {
-    frozenAccount = await options.tokenService.unfreezeAccount(
-      options.tokenId,
-      options.tokenAccount,
-      options.actorId
-    );
-  }
+  const frozenAccount =
+    transaction.status === "confirmed"
+      ? await options.tokenService.applySettledAccountFreezeState({
+          transactionId: transaction.id,
+          tokenId: options.tokenId,
+          accountAddress: options.tokenAccount,
+          state: "unfrozen",
+          actorId: options.actorId,
+        })
+      : await options.tokenService.getFrozenAccount(options.tokenId, options.tokenAccount, true);
   if (!frozenAccount) {
     throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
   }
@@ -366,10 +353,12 @@ export const freezeAccount = async (c: AppContext) => {
     });
 
     // Record in database after durable settlement evidence exists.
-    const frozenAccount = await tokenService.freezeAccount({
+    const frozenAccount = await tokenService.applySettledAccountFreezeState({
+      transactionId: tx.id,
       tokenId,
       accountAddress: tokenAccount,
-      frozenBy: auth.id,
+      state: "frozen",
+      actorId: auth.id,
       reason: parsed.data.reason,
     });
 
@@ -574,7 +563,13 @@ export const unfreezeAccount = async (c: AppContext) => {
     });
 
     // Update database record after durable settlement evidence exists.
-    const frozenAccount = await tokenService.unfreezeAccount(tokenId, tokenAccount, auth.id);
+    const frozenAccount = await tokenService.applySettledAccountFreezeState({
+      transactionId: tx.id,
+      tokenId,
+      accountAddress: tokenAccount,
+      state: "unfrozen",
+      actorId: auth.id,
+    });
 
     const response: FrozenAccountResponse = {
       frozenAccount: {

@@ -31,6 +31,10 @@ import {
 } from "./access-control";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { enforceIssuanceWalletOperationPolicy } from "./policy";
+import {
+  persistSettledTransaction,
+  persistSettledTransactionThenOutcome,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -62,47 +66,14 @@ function parseSettledMintEvidence(metadata: Record<string, unknown>): SettledMin
   };
 }
 
-function confirmedMintTransaction(
-  transaction: TokenTransaction,
-  evidence: SettledMintEvidence
-): TokenTransaction {
-  return {
-    ...transaction,
-    status: "confirmed",
-    signature: evidence.signature,
-    slot: evidence.slot,
-    params: { ...transaction.params, tokenAccount: evidence.tokenAccount },
-    updatedAt: new Date().toISOString(),
-  };
-}
-
 async function persistSettledMintTransaction(
   tokenService: TokenService,
   transaction: TokenTransaction,
   evidence: SettledMintEvidence
 ): Promise<TokenTransaction> {
-  try {
-    return await tokenService.updateTransaction(transaction.id, {
-      status: "confirmed",
-      signature: evidence.signature,
-      slot: evidence.slot,
-      params: {
-        ...transaction.params,
-        tokenAccount: evidence.tokenAccount,
-      },
-    });
-  } catch (error) {
-    getLogger().error(
-      {
-        event: "settled_mint_transaction_persistence_failed",
-        transactionId: transaction.id,
-        signature: evidence.signature,
-        error: error instanceof Error ? error.message : "Unknown error",
-      },
-      "Settled mint could not update its transaction row; durable audit evidence will repair idempotent replay"
-    );
-    return confirmedMintTransaction(transaction, evidence);
-  }
+  return persistSettledTransaction(tokenService, transaction, evidence, {
+    tokenAccount: evidence.tokenAccount,
+  });
 }
 
 async function recoverSettledMintReplay(
@@ -111,6 +82,14 @@ async function recoverSettledMintReplay(
   transaction: TokenTransaction
 ): Promise<TokenTransaction> {
   if (transaction.status !== "pending") return transaction;
+  const journaledEvidence = parseSettledMintEvidence({
+    ...transaction.params,
+    signature: transaction.signature,
+    slot: transaction.slot,
+  });
+  if (journaledEvidence) {
+    return persistSettledMintTransaction(tokenService, transaction, journaledEvidence);
+  }
   const outcome = await auditService.findCriticalOutcome({
     organizationId: transaction.organizationId,
     action: "mint",
@@ -647,18 +626,20 @@ export const executeMint = async (c: AppContext) => {
       slot: Number(result.slot),
       tokenAccount: settledTokenAccount,
     };
-    const settledTransaction = await persistSettledMintTransaction(
+    const settledTransaction = await persistSettledTransactionThenOutcome({
       tokenService,
-      tx,
-      settledEvidence
-    );
-    await auditService.completeCritical(c, auditIntent, {
-      metadata: {
-        signature: result.signature,
-        slot: result.slot.toString(),
-        tokenAccount: settledTokenAccount,
-        addedToAllowlist,
-      },
+      transaction: tx,
+      evidence: settledEvidence,
+      params: { tokenAccount: settledTokenAccount },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+            tokenAccount: settledTokenAccount,
+            addedToAllowlist,
+          },
+        }),
     });
 
     return success(c, {

@@ -623,6 +623,121 @@ describe("TokenService", () => {
       ).toMatchObject({ status: "active" });
     });
 
+    it("does not replay an older pause over a newer settled unpause", async () => {
+      const tokenId = "tok_pause_replay_order";
+      const olderId = "ttx_pause_older";
+      const newerId = "ttx_unpause_newer";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, slot,
+             initiated_by_key_id, created_at, updated_at
+           ) VALUES
+             (?, ?, ?, 'pause', 'confirmed', '{}', 100, ?, ?, ?),
+             (?, ?, ?, 'unpause', 'confirmed', '{}', 101, ?, ?, ?)`
+        )
+        .bind(
+          olderId,
+          tokenId,
+          TEST_ORG.id,
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:00:00.000Z",
+          "2026-08-05T00:00:00.000Z",
+          newerId,
+          tokenId,
+          TEST_ORG.id,
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:01:00.000Z",
+          "2026-08-05T00:01:00.000Z"
+        )
+        .run();
+
+      await tokenService.applySettledTokenStatus(newerId, tokenId, "active");
+      await tokenService.applySettledTokenStatus(olderId, tokenId, "paused");
+
+      expect(
+        await db
+          .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ status: string }>()
+      ).toMatchObject({ status: "active" });
+      expect(
+        await db
+          .prepare(
+            `SELECT lifecycle_bookkeeping_applied_at
+             FROM issuance_transactions WHERE id = ?`
+          )
+          .bind(olderId)
+          .first<{ lifecycle_bookkeeping_applied_at: string | null }>()
+      ).toMatchObject({ lifecycle_bookkeeping_applied_at: expect.any(String) });
+    });
+
+    it("does not replay an older unfreeze over a newer settled refreeze", async () => {
+      const tokenId = "tok_freeze_replay_order";
+      const accountAddress = "account_freeze_replay_order";
+      const olderId = "ttx_unfreeze_older";
+      const newerId = "ttx_freeze_newer";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, slot,
+             initiated_by_key_id, created_at, updated_at
+           ) VALUES
+             (?, ?, ?, 'unfreeze', 'confirmed', ?, 100, ?, ?, ?),
+             (?, ?, ?, 'freeze', 'confirmed', ?, 101, ?, ?, ?)`
+        )
+        .bind(
+          olderId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ accountAddress }),
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:00:00.000Z",
+          "2026-08-05T00:00:00.000Z",
+          newerId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ accountAddress }),
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:01:00.000Z",
+          "2026-08-05T00:01:00.000Z"
+        )
+        .run();
+
+      await tokenService.applySettledAccountFreezeState({
+        transactionId: newerId,
+        tokenId,
+        accountAddress,
+        state: "frozen",
+        actorId: TEST_PROJECT_API_KEY.id,
+        reason: "Refrozen",
+      });
+      const replayed = await tokenService.applySettledAccountFreezeState({
+        transactionId: olderId,
+        tokenId,
+        accountAddress,
+        state: "unfrozen",
+        actorId: TEST_PROJECT_API_KEY.id,
+      });
+
+      expect(replayed).toMatchObject({
+        accountAddress,
+        reason: "Refrozen",
+        unfrozenAt: null,
+      });
+      expect(
+        await db
+          .prepare(
+            `SELECT lifecycle_bookkeeping_applied_at
+             FROM issuance_transactions WHERE id = ?`
+          )
+          .bind(olderId)
+          .first<{ lifecycle_bookkeeping_applied_at: string | null }>()
+      ).toMatchObject({ lifecycle_bookkeeping_applied_at: expect.any(String) });
+    });
+
     it("does not replay an older authority change over a newer settled authority", async () => {
       const tokenId = "tok_authority_replay_order";
       const olderId = "ttx_authority_older";

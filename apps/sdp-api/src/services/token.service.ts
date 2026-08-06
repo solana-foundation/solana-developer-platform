@@ -1443,7 +1443,8 @@ export class TokenService {
     await this.db.transaction(async (tx) => {
       const row = await tx
         .prepare(
-          `SELECT it.type, it.status, it.lifecycle_bookkeeping_applied_at
+          `SELECT it.type, it.status, it.slot, it.created_at,
+                  it.lifecycle_bookkeeping_applied_at
            FROM issuance_transactions it
            JOIN issued_tokens t ON t.id = it.token_id
            WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
@@ -1453,6 +1454,8 @@ export class TokenService {
         .first<{
           type: string;
           status: string;
+          slot: number | null;
+          created_at: string;
           lifecycle_bookkeeping_applied_at: string | null;
         }>();
       if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
@@ -1461,17 +1464,37 @@ export class TokenService {
         throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
       }
       if (row.lifecycle_bookkeeping_applied_at !== null) return;
+      if (row.slot === null) throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions newer
+           WHERE newer.token_id = ?
+             AND newer.type IN ('pause', 'unpause')
+             AND newer.status = 'confirmed'
+             AND (
+               newer.slot > ?
+               OR (newer.slot = ? AND newer.created_at > ?)
+               OR (newer.slot = ? AND newer.created_at = ? AND newer.id > ?)
+             )
+           LIMIT 1`
+        )
+        .bind(tokenId, row.slot, row.slot, row.created_at, row.slot, row.created_at, transactionId)
+        .first<{ exists: number }>();
 
       const now = new Date().toISOString();
-      const tokenMutation = this.tenantMutationScope();
-      const updatedToken = await tx
-        .prepare(
-          `UPDATE issued_tokens SET status = ?, updated_at = ?
-           WHERE id = ?${tokenMutation.clause}`
-        )
-        .bind(status, now, tokenId, ...tokenMutation.values)
-        .run();
-      if (updatedToken !== 1) throw new Error("TOKEN_NOT_FOUND");
+      if (!newer) {
+        const tokenMutation = this.tenantMutationScope();
+        const updatedToken = await tx
+          .prepare(
+            `UPDATE issued_tokens SET status = ?, updated_at = ?
+             WHERE id = ?${tokenMutation.clause}`
+          )
+          .bind(status, now, tokenId, ...tokenMutation.values)
+          .run();
+        if (updatedToken !== 1) throw new Error("TOKEN_NOT_FOUND");
+      }
 
       const marked = await tx
         .prepare(
@@ -1483,6 +1506,189 @@ export class TokenService {
         .run();
       if (marked !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_MARKER_CONFLICT");
     });
+  }
+
+  /**
+   * Mirror a settled freeze/unfreeze without allowing an older replay to
+   * overwrite a later on-chain transition for the same token account.
+   */
+  async applySettledAccountFreezeState(input: {
+    transactionId: string;
+    tokenId: string;
+    accountAddress: string;
+    state: "frozen" | "unfrozen";
+    actorId: string;
+    reason?: string;
+  }): Promise<FrozenAccount> {
+    const tokenScope = this.tenantTokenScope("t");
+    return this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.type, it.status, it.slot, it.created_at, it.operation_params,
+                  it.lifecycle_bookkeeping_applied_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(input.transactionId, input.tokenId, ...tokenScope.values)
+        .first<{
+          type: string;
+          status: string;
+          slot: number | null;
+          created_at: string;
+          operation_params: string;
+          lifecycle_bookkeeping_applied_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+
+      const expectedType = input.state === "frozen" ? "freeze" : "unfreeze";
+      if (row.type !== expectedType || row.status !== "confirmed") {
+        throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+      }
+
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      const recordedAccount = params.tokenAccountAddress ?? params.accountAddress;
+      if (recordedAccount !== input.accountAddress) {
+        throw new Error("TOKEN_TRANSACTION_LIFECYCLE_PARAMS_MISMATCH");
+      }
+
+      const existing = await tx
+        .prepare(
+          `SELECT id, token_id, account_address, reason, frozen_at, frozen_by,
+                  unfrozen_at, unfrozen_by
+           FROM frozen_accounts
+           WHERE token_id = ? AND account_address = ?
+           FOR UPDATE`
+        )
+        .bind(input.tokenId, input.accountAddress)
+        .first<FrozenAccountRow>();
+
+      if (row.lifecycle_bookkeeping_applied_at !== null) {
+        if (!existing) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+        return this.mapRowToFrozenAccount(existing);
+      }
+      if (row.slot === null) throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions newer
+           WHERE newer.token_id = ?
+             AND newer.type IN ('freeze', 'unfreeze')
+             AND newer.status = 'confirmed'
+             AND COALESCE(
+               newer.operation_params::jsonb ->> 'tokenAccountAddress',
+               newer.operation_params::jsonb ->> 'accountAddress'
+             ) = ?
+             AND (
+               newer.slot > ?
+               OR (newer.slot = ? AND newer.created_at > ?)
+               OR (newer.slot = ? AND newer.created_at = ? AND newer.id > ?)
+             )
+           LIMIT 1`
+        )
+        .bind(
+          input.tokenId,
+          input.accountAddress,
+          row.slot,
+          row.slot,
+          row.created_at,
+          row.slot,
+          row.created_at,
+          input.transactionId
+        )
+        .first<{ exists: number }>();
+
+      const now = new Date().toISOString();
+      let frozenAccount = existing;
+      if (!newer) {
+        frozenAccount = await this.applyAccountFreezeMirror(tx, input, existing, now);
+      }
+
+      if (!frozenAccount) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET lifecycle_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND lifecycle_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, input.transactionId, input.tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_MARKER_CONFLICT");
+
+      return this.mapRowToFrozenAccount(frozenAccount);
+    });
+  }
+
+  private async applyAccountFreezeMirror(
+    tx: DatabaseExecutor,
+    input: {
+      tokenId: string;
+      accountAddress: string;
+      state: "frozen" | "unfrozen";
+      actorId: string;
+      reason?: string;
+    },
+    existing: FrozenAccountRow | null,
+    now: string
+  ): Promise<FrozenAccountRow> {
+    if (input.state === "frozen") {
+      if (existing?.unfrozen_at === null) return existing;
+      if (existing) {
+        const updated = await tx
+          .prepare(
+            `UPDATE frozen_accounts
+             SET reason = ?, frozen_at = ?, frozen_by = ?,
+                 unfrozen_at = NULL, unfrozen_by = NULL
+             WHERE id = ?
+             RETURNING id, token_id, account_address, reason, frozen_at, frozen_by,
+                       unfrozen_at, unfrozen_by`
+          )
+          .bind(input.reason ?? null, now, input.actorId, existing.id)
+          .first<FrozenAccountRow>();
+        if (!updated) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+        return updated;
+      }
+
+      const inserted = await tx
+        .prepare(
+          `INSERT INTO frozen_accounts (
+             id, token_id, account_address, reason, frozen_at, frozen_by,
+             unfrozen_at, unfrozen_by
+           ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
+           RETURNING id, token_id, account_address, reason, frozen_at, frozen_by,
+                     unfrozen_at, unfrozen_by`
+        )
+        .bind(
+          `frz_${crypto.randomUUID()}`,
+          input.tokenId,
+          input.accountAddress,
+          input.reason ?? null,
+          now,
+          input.actorId
+        )
+        .first<FrozenAccountRow>();
+      if (!inserted) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+      return inserted;
+    }
+
+    if (!existing) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+    if (existing.unfrozen_at !== null) return existing;
+
+    const updated = await tx
+      .prepare(
+        `UPDATE frozen_accounts
+         SET unfrozen_at = ?, unfrozen_by = ?
+         WHERE id = ?
+         RETURNING id, token_id, account_address, reason, frozen_at, frozen_by,
+                   unfrozen_at, unfrozen_by`
+      )
+      .bind(now, input.actorId, existing.id)
+      .first<FrozenAccountRow>();
+    if (!updated) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+    return updated;
   }
 
   /**
