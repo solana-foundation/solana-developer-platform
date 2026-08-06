@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { supportsPortfolioWallets } from "./capabilities";
+import { supportsPortfolioWallets, supportsWithdrawalApprovals } from "./capabilities";
 import { EARN_PROVIDER_CLIENTS } from "./index";
 import { GroundEarnClient } from "./providers/ground/client";
 
@@ -28,5 +28,25 @@ describe("supportsPortfolioWallets", () => {
       }
     );
     assert.equal(supportsPortfolioWallets(partial), false);
+  });
+});
+
+describe("supportsWithdrawalApprovals", () => {
+  it("narrows the Ground client to the withdrawal-approval capability", () => {
+    assert.equal(supportsWithdrawalApprovals(new GroundEarnClient()), true);
+  });
+
+  it("rejects stub clients that do not implement the capability", () => {
+    assert.equal(supportsWithdrawalApprovals(EARN_PROVIDER_CLIENTS.veda), false);
+    assert.equal(supportsWithdrawalApprovals(EARN_PROVIDER_CLIENTS.upshift), false);
+    assert.equal(supportsWithdrawalApprovals(EARN_PROVIDER_CLIENTS.perena), false);
+  });
+
+  it("rejects a partial implementation rather than failing mid-flow", () => {
+    const partial: typeof EARN_PROVIDER_CLIENTS.veda = Object.assign(
+      Object.create(EARN_PROVIDER_CLIENTS.veda) as typeof EARN_PROVIDER_CLIENTS.veda,
+      { listPendingWithdrawalApprovals: async () => [] }
+    );
+    assert.equal(supportsWithdrawalApprovals(partial), false);
   });
 });
