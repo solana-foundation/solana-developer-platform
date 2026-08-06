@@ -16,6 +16,10 @@ import { useDashboardRouter } from "@/lib/use-dashboard-router";
 type CheckState =
   | { kind: "idle" }
   | { kind: "failed"; message: string }
+  // The server refused the check but keeps the credential and its pending
+  // connection, so a fresh submission would be rejected as an existing setup;
+  // re-checking the same credential is the only path that can still converge.
+  | { kind: "refused"; message: string; providerCredentialId: string }
   | { kind: "retry_unknown"; providerCredentialId: string }
   // The POST may have committed server-side. The exact payload is frozen so a
   // retry replays it verbatim under the same key; editing anything would make
@@ -61,10 +65,8 @@ export function PrivyCredentialForm({
     labelField && "defaultValue" in labelField ? (labelField.defaultValue ?? "") : "";
 
   const applyResult = (result: PrivyByokSubmitResult) => {
-    if (result.status === "success" || result.status === "failed") {
-      onRecoveryLockChange?.(false);
-    }
     if (result.status === "success") {
+      onRecoveryLockChange?.(false);
       router.refresh();
       router.push("/dashboard/wallets");
       return;
@@ -75,9 +77,22 @@ export function PrivyCredentialForm({
       return;
     }
     if (result.status === "failed") {
+      if (result.providerCredentialId) {
+        // The refusal left the stored credential and its pending connection
+        // behind, so re-checking that id is the only move that can still
+        // converge; leaving now would strand it.
+        onRecoveryLockChange?.(true);
+        setCheck({
+          kind: "refused",
+          message: result.message,
+          providerCredentialId: result.providerCredentialId,
+        });
+        return;
+      }
       // Terminal for this attempt: the rejected credential was removed
       // server-side, so the next submit is a fresh one — fresh key, and the
       // rejected secret is cleared rather than left to be typed onto.
+      onRecoveryLockChange?.(false);
       setIdempotencyKey(crypto.randomUUID());
       setAppSecret("");
       setCheck({ kind: "failed", message: result.message });
@@ -138,6 +153,28 @@ export function PrivyCredentialForm({
         <div>
           <Button type="button" onClick={() => handleReplay(check.payload)} disabled={isPending}>
             {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokRetrySubmit")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (check.kind === "refused") {
+    return (
+      <div className="grid gap-4" data-privy-byok-refused="true">
+        <p
+          role="alert"
+          className="rounded-2xl border border-error-border bg-error-bg px-5 py-4 text-sm leading-6 text-error"
+        >
+          {check.message}
+        </p>
+        <div>
+          <Button
+            type="button"
+            onClick={() => handleRecheck(check.providerCredentialId)}
+            disabled={isPending}
+          >
+            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokCheckAgain")}
           </Button>
         </div>
       </div>

@@ -87,14 +87,23 @@ describe("recheckPrivyCredentialAction", () => {
 
   it.each([
     [403, "Install checks are not enabled for this organization"],
-    [404, "Provider credential not found"],
     [409, "Privy wallet cannot be reconciled"],
-  ])("treats a %i refusal as terminal with the server's message", async (status, message) => {
+  ])("treats a %i refusal as terminal but keeps the credential re-checkable", async (status, message) => {
     client.fetch.mockRejectedValue(apiError(status, message));
 
     await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
       status: "failed",
       message,
+      providerCredentialId: "pcred_test",
+    });
+  });
+
+  it("treats a 404 as terminal without an id because the credential is gone", async () => {
+    client.fetch.mockRejectedValue(apiError(404, "Provider credential not found"));
+
+    await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
+      status: "failed",
+      message: "Provider credential not found",
     });
   });
 

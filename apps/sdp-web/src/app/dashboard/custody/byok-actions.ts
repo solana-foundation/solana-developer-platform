@@ -33,7 +33,11 @@ interface ProviderCredentialCheckResult {
  */
 export type PrivyByokSubmitResult =
   | { status: "success" }
-  | { status: "failed"; message: string }
+  // `providerCredentialId` is present when the refusal leaves the stored
+  // credential and its pending connection behind server-side: a fresh
+  // submission would be rejected as an existing setup, so re-checking the
+  // same credential is the only move that can still converge.
+  | { status: "failed"; message: string; providerCredentialId?: string }
   | { status: "retry_unknown"; providerCredentialId: string }
   | { status: "error"; message: string };
 
@@ -66,15 +70,23 @@ async function runCheck(providerCredentialId: string): Promise<PrivyByokSubmitRe
       { method: "POST", body: JSON.stringify({}) }
     );
   } catch (error) {
-    // A definite refusal (no access, credential gone, unresolvable conflict)
-    // answers the same way on every re-check, so offering "check again" would
-    // trap the user in a loop; surface it as terminal with the server's
-    // explanation instead.
+    // A definite refusal answers the same way on every re-check, so selling it
+    // as "re-checking is safe" would trap the user in a loop; surface it as
+    // terminal with the server's explanation instead.
     const { status, message } = extractApiMessage(error);
     if (status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429) {
+      if (status === 404) {
+        // The credential no longer exists server-side, so a fresh submission
+        // is the correct recovery.
+        return { status: "failed", message: message || t("DashboardCustody.byokCheckFailed") };
+      }
+      // Everything else (no access, unresolvable conflict) leaves the stored
+      // credential pending; keep its id so the user can still re-check once
+      // the cause is fixed.
       return {
         status: "failed",
         message: message || t("DashboardCustody.byokCheckFailed"),
+        providerCredentialId,
       };
     }
     // The check may have run to completion server-side even though the response

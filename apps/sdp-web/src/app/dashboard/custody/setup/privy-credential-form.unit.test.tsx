@@ -152,6 +152,36 @@ describe("PrivyCredentialForm", () => {
     expect(screen.queryByRole("button", { name: "Connect and verify" })).toBeNull();
   });
 
+  it("keeps a refused credential re-checkable instead of resetting to a doomed resubmit", async () => {
+    const onLock = vi.fn();
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
+      status: "failed",
+      message: "Install checks are not enabled for this organization",
+      providerCredentialId: "pcred_1",
+    });
+    vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({ status: "success" });
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <PrivyCredentialForm formId="byok-refused-test" onRecoveryLockChange={onLock} />
+      </I18nProvider>
+    );
+
+    await fillAndSubmit(user);
+    // The server refused but kept the pending connection: the reason is shown,
+    // the form (whose fresh submission would be rejected) is gone, and the
+    // stored credential stays re-checkable.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Install checks are not enabled");
+    expect(screen.queryByLabelText("Privy app secret")).toBeNull();
+    expect(onLock).toHaveBeenLastCalledWith(true);
+
+    await user.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("pcred_1"));
+    await waitFor(() => expect(push.mock.calls[0]?.[0]).toBe("/dashboard/wallets"));
+    await waitFor(() => expect(onLock).toHaveBeenLastCalledWith(false));
+  });
+
   it("offers a safe re-check instead of resubmitting after an unknown outcome", async () => {
     vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
       status: "retry_unknown",
