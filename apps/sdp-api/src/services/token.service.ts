@@ -1652,6 +1652,29 @@ export class TokenService {
   }
 
   /**
+   * Remove a transaction record that is known not to have reached an external
+   * submission boundary. Approved-operation recovery uses this to release its
+   * durable idempotency key after a fenced attempt fails before submission.
+   */
+  async deleteUnsubmittedTransaction(transactionId: string): Promise<boolean> {
+    const tenant = this.tenantTokenScope("token");
+    const row = await this.db
+      .prepare(
+        `DELETE FROM issuance_transactions AS tx
+         USING issued_tokens AS token
+         WHERE tx.id = ?
+           AND tx.token_id = token.id
+           AND tx.status = 'pending'
+           AND tx.signature IS NULL
+           AND tx.serialized_tx IS NULL${tenant.clause}
+         RETURNING tx.id`
+      )
+      .bind(transactionId, ...tenant.values)
+      .first<{ id: string }>();
+    return row?.id === transactionId;
+  }
+
+  /**
    * Update a token transaction
    */
   async updateTransaction(

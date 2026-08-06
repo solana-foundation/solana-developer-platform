@@ -219,7 +219,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/custody/handlers/signer-check.ts",
       section: "export const signerCheck",
-      before: "await enforceWalletOperationPolicy(c.env",
+      before: "await enforceWalletOperationPolicy(",
       after: "const signer = await createOrgSigner(",
     },
     replay: [
