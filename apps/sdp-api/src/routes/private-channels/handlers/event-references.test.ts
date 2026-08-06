@@ -1,4 +1,8 @@
-import type { CachedSession, PrivateChannelEventReferencesEnvelope } from "@sdp/types";
+import type {
+  ApiKeyWalletBinding,
+  CachedSession,
+  PrivateChannelEventReferencesEnvelope,
+} from "@sdp/types";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -21,6 +25,9 @@ const CUSTODY_CONFIG_ID = "ccfg_event_refs_test";
 const CUSTODY_WALLET_ROW_ID = "cwlt_event_refs_test";
 const WALLET_ID = "wallet_event_refs";
 const PUBLIC_KEY = "RefsTreasuryPubkey11111111111111111111";
+const OTHER_WALLET_ROW_ID = "cwlt_event_refs_other";
+const OTHER_WALLET_ID = "wallet_event_refs_other";
+const OTHER_PUBLIC_KEY = "RefsOtherPubkey1111111111111111111111";
 const ISSUED_TOKEN_MINT = "RefsIssuedMint111111111111111111111111";
 
 function attachErrorHandler(app: Hono<{ Bindings: Env }>) {
@@ -55,7 +62,7 @@ function buildApp(
   return attachErrorHandler(app);
 }
 
-function buildApiKeyApp(projectId: string) {
+function buildApiKeyApp(projectId: string, walletBindings: ApiKeyWalletBinding[] = []) {
   const app = new Hono<{ Bindings: Env }>();
   app.use("*", async (c, next) => {
     c.set("apiKey", {
@@ -66,6 +73,7 @@ function buildApiKeyApp(projectId: string) {
       permissions: ["*"],
       environment: "sandbox",
       signingWalletId: null,
+      walletBindings,
     });
     c.set("projectId", PROJECT_ID);
     await next();
@@ -147,9 +155,20 @@ describe("Private Channels event references handler", () => {
       .prepare(
         `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, 'Treasury Wallet', 'transfer', 'active')`
+         VALUES
+           (?, ?, ?, ?, 'Treasury Wallet', 'transfer', 'active'),
+           (?, ?, ?, ?, 'Other Wallet', 'transfer', 'active')`
       )
-      .bind(CUSTODY_WALLET_ROW_ID, CUSTODY_CONFIG_ID, WALLET_ID, PUBLIC_KEY)
+      .bind(
+        CUSTODY_WALLET_ROW_ID,
+        CUSTODY_CONFIG_ID,
+        WALLET_ID,
+        PUBLIC_KEY,
+        OTHER_WALLET_ROW_ID,
+        CUSTODY_CONFIG_ID,
+        OTHER_WALLET_ID,
+        OTHER_PUBLIC_KEY
+      )
       .run();
     await db
       .prepare(
@@ -194,9 +213,10 @@ describe("Private Channels event references handler", () => {
     const body = (await response.json()) as { data: PrivateChannelEventReferencesEnvelope };
     expect(body.data.references[PUBLIC_KEY]).toBe("Treasury Wallet");
     expect(body.data.references[CHANNEL_ID]).toBeUndefined();
+    expect(body.data.references[INSTANCE_ID]).toBeUndefined();
   });
 
-  it("returns channel, wallet, member, and token names for a project member", async () => {
+  it("returns channel, wallet, member, token, and instance names for a project member", async () => {
     const app = buildApp(USER_ID);
     const response = await app.request("/events/references", {}, env);
     expect(response.status).toBe(200);
@@ -207,8 +227,7 @@ describe("Private Channels event references handler", () => {
     expect(body.data.references[PRIVATE_CHANNEL_USER_ID]).toBe("Ada Lovelace");
     expect(body.data.references[USER_ID]).toBe("Ada Lovelace");
     expect(body.data.references[ISSUED_TOKEN_MINT]).toBe("RFS");
-    // Gateway URLs are for full viewers only.
-    expect(body.data.references[INSTANCE_ID]).toBeUndefined();
+    expect(body.data.references[INSTANCE_ID]).toBe("http://gw");
   });
 
   it("omits wallet labels for a caller without wallets:read", async () => {
@@ -244,5 +263,18 @@ describe("Private Channels event references handler", () => {
     const body = (await response.json()) as { data: PrivateChannelEventReferencesEnvelope };
     expect(body.data.references[CHANNEL_ID]).toBe("Treasury");
     expect(body.data.references[PUBLIC_KEY]).toBe("Treasury Wallet");
+  });
+
+  it("limits wallet labels to the API key wallet bindings", async () => {
+    const app = buildApiKeyApp(PROJECT_ID, [
+      { walletId: WALLET_ID, permissions: ["wallets:read"] },
+    ]);
+    const response = await app.request("/events/references", {}, env);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: PrivateChannelEventReferencesEnvelope };
+    expect(body.data.references[PUBLIC_KEY]).toBe("Treasury Wallet");
+    expect(body.data.references[WALLET_ID]).toBe("Treasury Wallet");
+    expect(body.data.references[OTHER_PUBLIC_KEY]).toBeUndefined();
+    expect(body.data.references[OTHER_WALLET_ID]).toBeUndefined();
   });
 });

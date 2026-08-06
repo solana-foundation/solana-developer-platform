@@ -111,6 +111,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const { rows, hasMore } = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 50,
     });
     expect(hasMore).toBe(false);
@@ -136,6 +137,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const { rows } = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 10,
     });
     expect(rows).toHaveLength(1);
@@ -163,6 +165,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
       family: PRIVATE_CHANNEL_EVENT_FAMILIES.ERROR,
+      viewer: { scope: "all" },
       limit: 10,
     });
     expect(byFamily.rows).toHaveLength(1);
@@ -172,6 +175,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
       type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_CHANNEL_CREATED,
+      viewer: { scope: "all" },
       limit: 10,
     });
     expect(byType.rows).toHaveLength(1);
@@ -207,7 +211,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const { rows } = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
-      viewerUserId: TEST_USER.id,
+      viewer: { scope: "member", channelIds: [TEST_CHANNEL_ID], userId: TEST_USER.id },
       limit: 10,
     });
 
@@ -253,7 +257,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const { rows } = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      viewer: { channelIds: [TEST_CHANNEL_ID], userId: TEST_USER.id },
+      viewer: { scope: "member", channelIds: [TEST_CHANNEL_ID], userId: TEST_USER.id },
       limit: 10,
     });
 
@@ -285,7 +289,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const { rows } = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      viewer: { channelIds: [], userId: TEST_USER.id },
+      viewer: { scope: "member", channelIds: [], userId: TEST_USER.id },
       limit: 10,
     });
 
@@ -312,6 +316,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
       status: PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
+      viewer: { scope: "all" },
       limit: 10,
     });
     expect(channel.rows.map((row) => row.id)).toEqual(["pce_status_failed"]);
@@ -320,6 +325,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
+      viewer: { scope: "all" },
       limit: 10,
     });
     expect(project.rows.map((row) => row.id)).toEqual(["pce_status_info"]);
@@ -333,6 +339,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page1 = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 2,
     });
     expect(page1.rows.map((r) => r.id)).toEqual(["pce_c", "pce_b"]);
@@ -341,6 +348,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page2 = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 2,
       beforeOccurredAt: page1.rows[1]?.occurred_at,
       beforeId: page1.rows[1]?.id,
@@ -358,6 +366,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page1 = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 2,
     });
     expect(page1.rows.map((r) => r.id)).toEqual(["pce_t3", "pce_t2"]);
@@ -366,6 +375,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page2 = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 2,
       beforeOccurredAt: page1.rows[1]?.occurred_at,
       beforeId: page1.rows[1]?.id,
@@ -381,6 +391,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const { rows } = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 10,
     });
     // Denormalized rows: deleting the channel does not remove its events.
@@ -407,6 +418,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const { rows, hasMore } = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      viewer: { scope: "all" },
       limit: 50,
     });
     expect(hasMore).toBe(false);
@@ -421,6 +433,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page1 = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      viewer: { scope: "all" },
       limit: 2,
     });
     expect(page1.rows.map((r) => r.id)).toEqual(["pce_x3", "pce_x2"]);
@@ -429,6 +442,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page2 = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      viewer: { scope: "all" },
       limit: 2,
       beforeOccurredAt: page1.rows[1]?.occurred_at,
       beforeId: page1.rows[1]?.id,
@@ -439,6 +453,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const other = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: "prj_other",
+      viewer: { scope: "all" },
       limit: 50,
     });
     expect(other.rows).toHaveLength(0);

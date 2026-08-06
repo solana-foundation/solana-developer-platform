@@ -137,7 +137,7 @@ export async function listChannelEvents(c: AppContext) {
     family,
     type,
     status,
-    viewerUserId: viewer.scope === "member" ? viewer.userId : undefined,
+    viewer,
     limit,
     beforeOccurredAt: cursor?.occurredAt,
     beforeId: cursor?.id,
@@ -164,10 +164,7 @@ export async function listProjectEvents(c: AppContext) {
     family,
     type,
     status,
-    viewer:
-      viewer.scope === "member"
-        ? { channelIds: viewer.channelIds, userId: viewer.userId }
-        : undefined,
+    viewer,
     limit,
     beforeOccurredAt: cursor?.occurredAt,
     beforeId: cursor?.id,

@@ -186,7 +186,8 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     const rows = await repo.listReferences({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      includeWalletLabels: true,
+      walletScope: { scope: "all" },
+      viewer: { scope: "all" },
     });
 
     const byKey = Object.fromEntries(rows.map((row) => [row.key, row]));
@@ -243,8 +244,8 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     const rows = await repo.listReferences({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      includeWalletLabels: true,
-      viewer: { channelIds: [CHANNEL_A], userId: TEST_USER.id },
+      walletScope: { scope: "all" },
+      viewer: { scope: "member", channelIds: [CHANNEL_A], userId: TEST_USER.id },
     });
 
     const byKey = Object.fromEntries(rows.map((row) => [row.key, row]));
@@ -257,9 +258,9 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     expect(byKey[PUBLIC_KEY]?.name).toBe("Treasury Wallet");
     expect(byKey[WALLET_ID]?.name).toBe("Treasury Wallet");
 
-    // Token symbols are public on-chain data; gateway URLs are infrastructure.
+    // Token symbols and the visible instance resolve for channel members.
     expect(byKey[ISSUED_TOKEN_MINT]?.name).toBe("ITT");
-    expect(byKey[TEST_INSTANCE_ID]).toBeUndefined();
+    expect(byKey[TEST_INSTANCE_ID]?.name).toBe("http://gw");
 
     // Viewer themselves resolve; co-member on CHANNEL_B does not.
     expect(byKey[PCU_A]?.name).toBe("Ada Lovelace");
@@ -272,8 +273,8 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     const rows = await repo.listReferences({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      includeWalletLabels: false,
-      viewer: { channelIds: [CHANNEL_A], userId: TEST_USER.id },
+      walletScope: { scope: "none" },
+      viewer: { scope: "member", channelIds: [CHANNEL_A], userId: TEST_USER.id },
     });
 
     const byKey = Object.fromEntries(rows.map((row) => [row.key, row]));
@@ -298,8 +299,8 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     const rows = await repo.listReferences({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      includeWalletLabels: true,
-      viewer: { channelIds: [CHANNEL_A], userId: TEST_USER.id },
+      walletScope: { scope: "all" },
+      viewer: { scope: "member", channelIds: [CHANNEL_A], userId: TEST_USER.id },
     });
 
     const byKey = Object.fromEntries(rows.map((row) => [row.key, row]));
@@ -311,8 +312,8 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     const rows = await repo.listReferences({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      includeWalletLabels: true,
-      viewer: { channelIds: [], userId: TEST_USER.id },
+      walletScope: { scope: "all" },
+      viewer: { scope: "member", channelIds: [], userId: TEST_USER.id },
     });
 
     const byKey = Object.fromEntries(rows.map((row) => [row.key, row]));

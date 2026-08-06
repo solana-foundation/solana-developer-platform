@@ -32,12 +32,13 @@ export function createPostgresPrivateChannelReferenceRepository(
 ): PrivateChannelReferenceRepository {
   return {
     async listReferences(params: ListPrivateChannelReferencesParams) {
-      const { organizationId, projectId, includeWalletLabels, viewer } = params;
+      const { organizationId, projectId, walletScope, viewer } = params;
 
       // Empty for full viewers, so the same branch serves both scopes.
-      const viewerChannels = viewer ? "AND pc.id = ANY(?::text[])" : "";
-      const viewerMembers = viewer
-        ? `AND (
+      const viewerChannels = viewer.scope === "member" ? "AND pc.id = ANY(?::text[])" : "";
+      const viewerMembers =
+        viewer.scope === "member"
+          ? `AND (
              pcu.user_id = ?
              OR EXISTS (
                SELECT 1
@@ -46,7 +47,7 @@ export function createPostgresPrivateChannelReferenceRepository(
                   AND m.channel_id = ANY(?::text[])
              )
            )`
-        : "";
+          : "";
 
       const branches: ReferenceBranch[] = [
         // Channels: a member only resolves names for channels they belong to.
@@ -57,9 +58,10 @@ export function createPostgresPrivateChannelReferenceRepository(
                  WHERE pc.organization_id = ?
                    AND pc.project_id = ?
                    ${viewerChannels}`,
-          binds: viewer
-            ? [organizationId, projectId, viewer.channelIds]
-            : [organizationId, projectId],
+          binds:
+            viewer.scope === "member"
+              ? [organizationId, projectId, viewer.channelIds]
+              : [organizationId, projectId],
         },
 
         // Members are keyed by private-channel-user id and by SDP user id. A
@@ -73,9 +75,10 @@ export function createPostgresPrivateChannelReferenceRepository(
                  WHERE pcu.organization_id = ?
                    AND pcu.project_id = ?
                    ${viewerMembers}`,
-          binds: viewer
-            ? [organizationId, projectId, viewer.userId, viewer.channelIds]
-            : [organizationId, projectId],
+          binds:
+            viewer.scope === "member"
+              ? [organizationId, projectId, viewer.userId, viewer.channelIds]
+              : [organizationId, projectId],
         },
 
         // Tokens the project issued, so a mint address can read as its symbol.
@@ -92,10 +95,11 @@ export function createPostgresPrivateChannelReferenceRepository(
         },
       ];
 
-      // Payloads reference a wallet by address or by id, so one row per key names
-      // both. Custody scopes these reads on wallets:read alone (no per-key wallet
-      // bindings, see resolveWalletFilters), so matching that gate is enough.
-      if (includeWalletLabels) {
+      // Organization/project scope is always applied. Selected scope additionally
+      // mirrors API-key wallet bindings.
+      if (walletScope.scope !== "none") {
+        const selectedWalletClause =
+          walletScope.scope === "selected" ? "AND w.wallet_id = ANY(?::text[])" : "";
         branches.push({
           sql: `SELECT 'wallet' AS kind, k.key AS key,
                        COALESCE(NULLIF(w.label, ''), w.wallet_id) AS name
@@ -103,14 +107,18 @@ export function createPostgresPrivateChannelReferenceRepository(
                   JOIN custody_configs cc ON cc.id = w.custody_config_id
                   CROSS JOIN unnest(ARRAY[w.public_key, w.wallet_id]) AS k(key)
                  WHERE cc.organization_id = ?
-                   AND (cc.project_id IS NULL OR cc.project_id = ?)`,
-          binds: [organizationId, projectId],
+                   AND (cc.project_id IS NULL OR cc.project_id = ?)
+                   ${selectedWalletClause}`,
+          binds:
+            walletScope.scope === "all"
+              ? [organizationId, projectId]
+              : [organizationId, projectId, walletScope.walletIds],
         });
       }
 
-      // Gateway URLs are infrastructure endpoints, and the instance lifecycle
-      // events carrying them have no channel, so members never see those events.
-      if (!viewer) {
+      // Members with a channel can see channel-less instance lifecycle events;
+      // members without one cannot.
+      if (viewer.scope === "all" || viewer.channelIds.length > 0) {
         branches.push({
           sql: `SELECT 'instance' AS kind, pci.id AS key, pci.gateway_url AS name
                   FROM private_channel_instances pci

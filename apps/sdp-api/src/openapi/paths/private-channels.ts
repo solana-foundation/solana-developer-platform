@@ -508,7 +508,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "List display-name references for events",
     operationId: "listPrivateChannelEventReferences",
     description:
-      "Flat id→name dictionary for enriching Private Channels event feeds: channel names, custody wallet labels (by pubkey and wallet id), member display names (by private-channel-user id and SDP user id), issued-token symbols (by mint address), and instance gateway URLs. Channels and members follow the same viewer rules as the events feed, so a member-scoped caller only resolves their own channels and co-members and receives no instance URLs. Token symbols are project-wide, and wallet labels require the same `wallets:read` the custody endpoints require.",
+      "Flat id→name dictionary for enriching Private Channels event feeds: channel names, custody wallet labels (by pubkey and wallet id), member display names (by private-channel-user id and SDP user id), issued-token symbols (by mint address), and instance gateway URLs. Channels, members, and instances follow the same viewer rules as the events feed. Token symbols are project-wide, and wallet labels follow the same `wallets:read` and selected-wallet scope as the custody endpoints.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

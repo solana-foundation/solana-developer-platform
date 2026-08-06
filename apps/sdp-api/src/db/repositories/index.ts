@@ -223,6 +223,7 @@ export type {
   PrivateChannelEventRepository,
   PrivateChannelEventRepositoryContext,
   PrivateChannelEventRow,
+  PrivateChannelEventViewerScope,
   PrivateChannelEventWriteInput,
 } from "./private-channel-event.repository";
 export { generatePrivateChannelEventId } from "./private-channel-event.repository";
@@ -245,6 +246,7 @@ export type {
   ListPrivateChannelReferencesParams,
   PrivateChannelReferenceRepository,
   PrivateChannelReferenceRow,
+  PrivateChannelReferenceWalletScope,
 } from "./private-channel-reference.repository";
 export { createPostgresPrivateChannelReferenceRepository } from "./private-channel-reference.repository.postgres";
 export type {
