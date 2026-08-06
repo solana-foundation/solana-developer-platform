@@ -186,6 +186,7 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     const rows = await repo.listReferences({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      includeWalletLabels: true,
     });
 
     const byKey = Object.fromEntries(rows.map((row) => [row.key, row]));
@@ -242,6 +243,7 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     const rows = await repo.listReferences({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      includeWalletLabels: true,
       viewer: { channelIds: [CHANNEL_A], userId: TEST_USER.id },
     });
 
@@ -266,6 +268,23 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     expect(byKey[USER_B]).toBeUndefined();
   });
 
+  it("omits wallet labels when the caller cannot read wallets", async () => {
+    const rows = await repo.listReferences({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      includeWalletLabels: false,
+      viewer: { channelIds: [CHANNEL_A], userId: TEST_USER.id },
+    });
+
+    const byKey = Object.fromEntries(rows.map((row) => [row.key, row]));
+    expect(byKey[PUBLIC_KEY]).toBeUndefined();
+    expect(byKey[WALLET_ID]).toBeUndefined();
+    expect(byKey[BLANK_LABEL_PUBLIC_KEY]).toBeUndefined();
+    // Everything the caller may read still resolves.
+    expect(byKey[CHANNEL_A]?.name).toBe("Treasury");
+    expect(byKey[ISSUED_TOKEN_MINT]?.name).toBe("ITT");
+  });
+
   it("includes co-members who share a channel with the viewer", async () => {
     const db = getDb(env);
     await db
@@ -279,6 +298,7 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     const rows = await repo.listReferences({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      includeWalletLabels: true,
       viewer: { channelIds: [CHANNEL_A], userId: TEST_USER.id },
     });
 
@@ -291,6 +311,7 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
     const rows = await repo.listReferences({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      includeWalletLabels: true,
       viewer: { channelIds: [], userId: TEST_USER.id },
     });
 

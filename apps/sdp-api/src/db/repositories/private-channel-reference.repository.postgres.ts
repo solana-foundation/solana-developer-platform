@@ -32,7 +32,7 @@ export function createPostgresPrivateChannelReferenceRepository(
 ): PrivateChannelReferenceRepository {
   return {
     async listReferences(params: ListPrivateChannelReferencesParams) {
-      const { organizationId, projectId, viewer } = params;
+      const { organizationId, projectId, includeWalletLabels, viewer } = params;
 
       // Empty for full viewers, so the same branch serves both scopes.
       const viewerChannels = viewer ? "AND pc.id = ANY(?::text[])" : "";
@@ -60,20 +60,6 @@ export function createPostgresPrivateChannelReferenceRepository(
           binds: viewer
             ? [organizationId, projectId, viewer.channelIds]
             : [organizationId, projectId],
-        },
-
-        // Payloads reference a wallet by address or by id, so one row per key
-        // names both. Not viewer-narrowed: custody labels are already readable by
-        // anyone holding wallets:read, which every role with payments:read has.
-        {
-          sql: `SELECT 'wallet' AS kind, k.key AS key,
-                       COALESCE(NULLIF(w.label, ''), w.wallet_id) AS name
-                  FROM custody_wallets w
-                  JOIN custody_configs cc ON cc.id = w.custody_config_id
-                  CROSS JOIN unnest(ARRAY[w.public_key, w.wallet_id]) AS k(key)
-                 WHERE cc.organization_id = ?
-                   AND (cc.project_id IS NULL OR cc.project_id = ?)`,
-          binds: [organizationId, projectId],
         },
 
         // Members are keyed by private-channel-user id and by SDP user id. A
@@ -105,6 +91,22 @@ export function createPostgresPrivateChannelReferenceRepository(
           binds: [organizationId, projectId],
         },
       ];
+
+      // Payloads reference a wallet by address or by id, so one row per key names
+      // both. Custody scopes these reads on wallets:read alone (no per-key wallet
+      // bindings, see resolveWalletFilters), so matching that gate is enough.
+      if (includeWalletLabels) {
+        branches.push({
+          sql: `SELECT 'wallet' AS kind, k.key AS key,
+                       COALESCE(NULLIF(w.label, ''), w.wallet_id) AS name
+                  FROM custody_wallets w
+                  JOIN custody_configs cc ON cc.id = w.custody_config_id
+                  CROSS JOIN unnest(ARRAY[w.public_key, w.wallet_id]) AS k(key)
+                 WHERE cc.organization_id = ?
+                   AND (cc.project_id IS NULL OR cc.project_id = ?)`,
+          binds: [organizationId, projectId],
+        });
+      }
 
       // Gateway URLs are infrastructure endpoints, and the instance lifecycle
       // events carrying them have no channel, so members never see those events.

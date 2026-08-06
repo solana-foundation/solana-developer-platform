@@ -33,7 +33,10 @@ function attachErrorHandler(app: Hono<{ Bindings: Env }>) {
   return app;
 }
 
-function buildApp(userId: string, permissions: CachedSession["permissions"] = ["payments:read"]) {
+function buildApp(
+  userId: string,
+  permissions: CachedSession["permissions"] = ["payments:read", "wallets:read"]
+) {
   const app = new Hono<{ Bindings: Env }>();
   const session: CachedSession = {
     id: `ses_${userId}`,
@@ -206,6 +209,16 @@ describe("Private Channels event references handler", () => {
     expect(body.data.references[ISSUED_TOKEN_MINT]).toBe("RFS");
     // Gateway URLs are for full viewers only.
     expect(body.data.references[INSTANCE_ID]).toBeUndefined();
+  });
+
+  it("omits wallet labels for a caller without wallets:read", async () => {
+    const app = buildApp(USER_ID, ["payments:read"]);
+    const response = await app.request("/events/references", {}, env);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: PrivateChannelEventReferencesEnvelope };
+    expect(body.data.references[PUBLIC_KEY]).toBeUndefined();
+    expect(body.data.references[WALLET_ID]).toBeUndefined();
+    expect(body.data.references[CHANNEL_ID]).toBe("Treasury");
   });
 
   it("returns the full dictionary, gateway URL included, for projects:write viewers", async () => {

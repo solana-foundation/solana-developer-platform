@@ -1,3 +1,4 @@
+import { hasPermission } from "@sdp/types";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import type { AppContext } from "../context";
@@ -6,12 +7,12 @@ import { resolveEventViewer } from "../event-access";
 
 /**
  * GET /events/references — flat id→name dictionary for event enrichment.
- * Channels and members follow the same viewer rules as the events feed;
- * wallet labels and issued-token symbols are project-wide, since both are
- * already readable through their own endpoints.
+ * Channels and members follow the same viewer rules as the events feed.
+ * Issued-token symbols are project-wide (public on-chain data), and wallet
+ * labels need the same wallets:read the custody endpoints require.
  */
 export async function listPrivateChannelEventReferences(c: AppContext) {
-  const { organizationId } = getAuth(c);
+  const { organizationId, permissions } = getAuth(c);
   const projectId = requireProjectId(c);
   const viewer = await resolveEventViewer(c);
   if (viewer.scope === "none") {
@@ -21,6 +22,7 @@ export async function listPrivateChannelEventReferences(c: AppContext) {
   const rows = await getPrivateChannelReferenceRepository(c).listReferences({
     organizationId,
     projectId,
+    includeWalletLabels: hasPermission(permissions, "wallets:read"),
     viewer:
       viewer.scope === "member"
         ? { channelIds: viewer.channelIds, userId: viewer.userId }
