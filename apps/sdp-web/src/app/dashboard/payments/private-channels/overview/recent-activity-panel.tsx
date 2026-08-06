@@ -9,7 +9,14 @@ import { toast } from "sonner";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -62,7 +69,7 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
   const recentEvents = events.slice(0, MAX_RECENT_EVENTS);
 
   return (
-    <Card>
+    <Card className="flex min-h-0 flex-1 flex-col">
       <CardHeader>
         <CardTitle>{t("DashboardPrivateChannels.overview.activityTitle")}</CardTitle>
         <CardAction className="flex items-center gap-2">
@@ -82,13 +89,13 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="flex min-h-0 flex-1 flex-col">
         {events.length === 0 ? (
           <p className="py-8 text-center text-sm text-secondary">
             {t("DashboardPrivateChannels.overview.activityEmpty")}
           </p>
         ) : (
-          <div className="max-h-[45vh] overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -137,10 +144,12 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
             </Table>
           </div>
         )}
-        <Link href={ALL_ACTIVITY_HREF} className="inline-block text-sm text-info hover:underline">
+      </CardContent>
+      <CardFooter>
+        <Link href={ALL_ACTIVITY_HREF} className="text-sm text-info hover:underline">
           {t("DashboardPrivateChannels.overview.activityViewAll")}
         </Link>
-      </CardContent>
+      </CardFooter>
     </Card>
   );
 }

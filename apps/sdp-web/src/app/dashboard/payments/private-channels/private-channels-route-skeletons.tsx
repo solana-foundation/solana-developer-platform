@@ -38,7 +38,7 @@ function SkeletonTabs() {
 /** Three summary panels over the activity and wallets tables. */
 export function PrivateChannelsOverviewSkeleton() {
   return (
-    <div className="h-full min-h-0 w-full space-y-4 overflow-y-auto px-3 py-5 md:p-6">
+    <div className="h-full min-h-0 w-full space-y-4 overflow-y-auto px-3 pt-2 pb-5 md:px-6 md:pb-6">
       <SkeletonTabs />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {PANEL_IDS.map((id) => (
@@ -53,18 +53,16 @@ export function PrivateChannelsOverviewSkeleton() {
           </Card>
         ))}
       </div>
-      {["pc-skeleton-activity", "pc-skeleton-wallets"].map((section) => (
-        <Card key={section}>
-          <CardHeader>
-            <SkeletonBlock className="h-5 w-52" />
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {LIST_ROW_IDS.map((id) => (
-              <SkeletonBlock className="h-9 w-full" key={`${section}-${id}`} />
-            ))}
-          </CardContent>
-        </Card>
-      ))}
+      <Card>
+        <CardHeader>
+          <SkeletonBlock className="h-5 w-52" />
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {LIST_ROW_IDS.map((id) => (
+            <SkeletonBlock className="h-9 w-full" key={`pc-skeleton-activity-${id}`} />
+          ))}
+        </CardContent>
+      </Card>
     </div>
   );
 }

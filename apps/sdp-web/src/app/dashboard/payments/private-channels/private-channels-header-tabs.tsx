@@ -61,7 +61,7 @@ export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
   const activeId = visible.find((tab) => pathname.startsWith(tab.href))?.id ?? visible[0].id;
 
   return (
-    <div className="mb-6">
+    <div className="mb-4">
       <Tabs
         bordered
         value={activeId}
