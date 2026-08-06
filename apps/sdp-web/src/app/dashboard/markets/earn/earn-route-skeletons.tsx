@@ -50,12 +50,14 @@ export function EarnDepositSkeleton() {
         <div className="mx-auto w-full max-w-4xl pb-8">
           <SkeletonBlock className="h-7 w-64" />
           <SkeletonBlock className="mt-2 h-4 w-96 max-w-full" />
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            {SKELETON_ITEM_IDS.slice(0, 2).map((id) => (
+          {/* Mirrors the flow's first step: a framed note above a stacked list
+              of selectable funding-wallet rows. */}
+          <SkeletonBlock className="mt-6 h-20 w-full rounded-2xl" />
+          <div className="mt-5 grid gap-3">
+            {SKELETON_ITEM_IDS.map((id) => (
               <SkeletonBlock key={id} className="h-28 w-full rounded-2xl" />
             ))}
           </div>
-          <SkeletonBlock className="mt-6 h-14 w-full rounded-xl" />
         </div>
       </div>
       <div className="shrink-0 border-t border-border-default px-4 py-4 md:px-6">

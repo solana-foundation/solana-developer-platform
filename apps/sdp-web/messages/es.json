@@ -1,0 +1,33 @@
+{
+  "Metadata": {
+    "title": "Solana Developer Platform",
+    "description": "Dashboard SDP"
+  },
+  "Home": {
+    "solanaLogo": "Solana",
+    "docs": "Docs",
+    "dashboard": "Dashboard",
+    "title": "Construye cualquier producto financiero sin preocuparte por la infraestructura",
+    "description": "Ya sea que estés emitiendo una stablecoin, orquestando pagos transfronterizos o tokenizando activos del mundo real, SDP ofrece las APIs y la infraestructura más confiables para lograrlo.",
+    "trySdp": "Prueba SDP",
+    "contactUs": "Contáctanos",
+    "joinWaitlist": "Únete a la lista de espera"
+  },
+  "NotFound": {
+    "solanaLogo": "Solana",
+    "title": "Página no encontrada",
+    "description": "La página que buscas no existe o es posible que se haya movido.",
+    "backToDashboard": "Volver al dashboard",
+    "goHome": "Ir al inicio"
+  },
+  "Feedback": {
+    "label": "Comentarios"
+  },
+  "Error": {
+    "tryAgain": "Reintentar",
+    "reportIssue": "Reportar este problema",
+    "viewTitle": "No se pudo cargar esta vista",
+    "viewDescription": "Ocurrió un error al cargar esta página. El resto del dashboard sigue funcionando, así que puedes reintentarlo o continuar.",
+    "reference": "Referencia {digest}"
+  }
+}
