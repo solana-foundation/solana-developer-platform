@@ -38,12 +38,12 @@ export function extractBearerToken(c: Context<{ Bindings: Env }>): string | null
 }
 
 /**
- * A JWT template claim is only trusted when it actually looks like an address.
+ * A Clerk custom claim is only trusted when it actually looks like an address.
  * An invalid shortcode is not substituted by Clerk — it arrives verbatim, e.g.
  * `{{user.primary_email_address.email_address}}` — and that string was being
  * persisted as a user's email, then rendered throughout the dashboard.
  *
- * Rejecting it here means a misconfigured template surfaces as a failed login
+ * Rejecting it here means a misconfigured claim surfaces as a failed login
  * rather than as silent corruption that spreads and needs a data repair.
  */
 export function isPlausibleEmail(value: string | undefined | null): value is string {
@@ -63,7 +63,6 @@ export function resolveClerkEmail(payload: ClerkJwtPayload): string | null {
 export function resolveClerkConfig(env: Env) {
   const issuer = env.CLERK_ISSUER?.trim();
   const jwksUrl = env.CLERK_JWKS_URL?.trim();
-  const audience = env.CLERK_AUDIENCE?.trim();
 
   if (!issuer && !jwksUrl) {
     throw internalError("Clerk auth is not configured");
@@ -78,7 +77,6 @@ export function resolveClerkConfig(env: Env) {
   return {
     issuer,
     jwksUrl: resolvedJwksUrl,
-    audience: audience || undefined,
   };
 }
 
@@ -88,7 +86,6 @@ export async function verifyClerkJwt(token: string, env: Env): Promise<ClerkJwtP
 
   const { payload } = await jwtVerify(token, jwks, {
     issuer: config.issuer,
-    audience: config.audience,
   });
 
   return payload as ClerkJwtPayload;

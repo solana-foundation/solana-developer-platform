@@ -94,7 +94,7 @@ export interface AuditLogEntry {
 /**
  * An identity value fit to show a human, or null.
  *
- * A misconfigured Clerk JWT template passes unknown shortcodes through unsubstituted, so
+ * A misconfigured Clerk token customization passes unknown shortcodes through unsubstituted, so
  * a user row can hold a literal `{{...}}` placeholder where its email or name belongs.
  * Printed verbatim it reads as a rendering bug rather than the data problem it is, so it
  * is treated as absent and the generic actor label stands in instead.
