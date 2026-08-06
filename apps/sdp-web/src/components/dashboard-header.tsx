@@ -555,6 +555,14 @@ export function getDashboardPageConfig(
       },
     };
   }
+  if (pathname.startsWith("/dashboard/payments/private-channels")) {
+    // Private Channels navigates via its own tab strip, so the header shows a plain
+    // section title with no "Back to Payments" action.
+    return {
+      title: t("Shared.dashboardShell.privateChannels"),
+      contentWidthClass: "max-w-none",
+    };
+  }
   if (pathname.startsWith("/dashboard/payments/")) {
     const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
       pathname.startsWith(item.href)

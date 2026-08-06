@@ -63,7 +63,13 @@
       "colToken": "Token",
       "colChannel": "Channel",
       "colCreated": "Created",
-      "valueNone": "—"
+      "valueNone": "—",
+      "statusNotConnected": "Not connected",
+      "connectLink": "Connect to a Private Channels instance",
+      "allowedTokensEmpty": "Connect an instance to see its allowed tokens.",
+      "walletsTitle": "Wallets",
+      "colWallet": "Wallet",
+      "colBalance": "Channel balance"
     },
     "verifiedWallets": {
       "title": "Verified wallets",

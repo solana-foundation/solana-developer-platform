@@ -57,7 +57,7 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
   const none = t("DashboardPrivateChannels.overview.valueNone");
 
   return (
-    <Card className="flex min-h-0 flex-1 flex-col">
+    <Card>
       <CardHeader>
         <CardTitle>{t("DashboardPrivateChannels.overview.activityTitle")}</CardTitle>
         <CardAction className="flex items-center gap-2">
@@ -77,13 +77,13 @@ export function RecentActivityPanel({ initialEvents, channelNames }: Props) {
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+      <CardContent className="space-y-3">
         {events.length === 0 ? (
           <p className="py-8 text-center text-sm text-secondary">
             {t("DashboardPrivateChannels.overview.activityEmpty")}
           </p>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="max-h-[50vh] overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>

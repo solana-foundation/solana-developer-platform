@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import {
   PRIVATE_CHANNELS_INSTANCE_PATH,
@@ -17,6 +16,7 @@ import { ConnectedInstancePanel } from "./connected-instance-panel";
 import { channelNameById } from "./overview-data";
 import { PrivateBalancePanel } from "./private-balance-panel";
 import { RecentActivityPanel } from "./recent-activity-panel";
+import { WalletsTable } from "./wallets-table";
 
 export default async function PrivateChannelsOverviewPage() {
   await requirePrivateChannelsAccess();
@@ -29,14 +29,15 @@ export default async function PrivateChannelsOverviewPage() {
     loadEvents(client),
   ]);
 
-  // `ok` with no data is the expected "no active instance" 404 — route to connect.
-  if (overview.ok && !overview.data) {
-    redirect(PRIVATE_CHANNELS_INSTANCE_PATH);
-  }
-  // A genuine overview failure: keep the user here and surface the error.
-  if (!overview.data) {
+  // The overview always renders — even with no connected instance, in which case it
+  // shows the "Not connected" state and a connect link. Only a genuine load failure
+  // (not the expected "no active instance" 404, which resolves to ok+null data) keeps
+  // the user on an error screen.
+  if (!overview.ok) {
     return <PrivateChannelsLoadError message={overview.error} />;
   }
+  const instance = overview.data?.instance ?? null;
+  const instanceOverview = overview.data?.overview ?? null;
 
   // Channel balances only exist for verified wallets — unverified reads would 403.
   const channelBalances = wallets.ok
@@ -44,26 +45,30 @@ export default async function PrivateChannelsOverviewPage() {
     : {};
 
   return (
-    // Payments routes are viewport-locked (see dashboard-shell): the page renders in
-    // an `overflow-hidden flex-1` container with the shell's usual `px-3 py-5 md:p-6`
-    // padding dropped. So this page (1) re-adds that padding — a full-bleed layout
-    // gets no side gutter from `mx-auto max-w-*` centering the way narrow siblings do —
-    // and (2) is a full-height flex column: the summary row stays fixed while the
-    // activity panel fills the remaining height and scrolls internally, instead of
-    // overflowing below the locked viewport.
-    <div className="flex h-full min-h-0 w-full flex-col gap-4 px-3 py-5 md:p-6">
-      <div className="grid shrink-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    // Payments routes are viewport-locked (see dashboard-shell): the page renders in an
+    // `overflow-hidden` box with the shell's usual `px-3 py-5 md:p-6` padding dropped.
+    // So this full-bleed page re-adds that padding and scrolls its own content.
+    <div className="h-full min-h-0 w-full space-y-4 overflow-y-auto px-3 py-5 md:p-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <ConnectedInstancePanel
-          instance={overview.data.instance}
-          overview={overview.data.overview}
+          instance={instance}
+          overview={instanceOverview}
+          connectHref={PRIVATE_CHANNELS_INSTANCE_PATH}
         />
         <PrivateBalancePanel channelBalances={channelBalances} />
-        <AllowedTokensPanel instance={overview.data.instance} />
+        <AllowedTokensPanel instance={instance} />
       </div>
 
       <RecentActivityPanel
         initialEvents={events.data.events}
         channelNames={channelNameById(channels.data)}
+      />
+
+      <WalletsTable
+        verifiedWallets={wallets.ok ? wallets.data.verified : []}
+        custodyWallets={wallets.ok ? wallets.data.custody : []}
+        channelBalances={channelBalances}
+        loadError={!wallets.ok}
       />
     </div>
   );

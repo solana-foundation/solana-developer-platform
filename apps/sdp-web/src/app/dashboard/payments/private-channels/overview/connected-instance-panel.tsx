@@ -1,4 +1,5 @@
 import type { PrivateChannelInstance, PrivateChannelInstanceOverview } from "@sdp/types";
+import Link from "next/link";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
@@ -37,13 +38,23 @@ function Field({ label, value, title }: { label: string; value: string; title?: 
 }
 
 interface Props {
-  instance: PrivateChannelInstance;
-  overview: PrivateChannelInstanceOverview;
+  /** The active instance + its overview, or null when nothing is connected. */
+  instance: PrivateChannelInstance | null;
+  overview: PrivateChannelInstanceOverview | null;
+  /** Where the "Connect" link points when disconnected. */
+  connectHref: string;
 }
 
-export async function ConnectedInstancePanel({ instance, overview }: Props) {
+export async function ConnectedInstancePanel({ instance, overview, connectHref }: Props) {
   const t = await getTranslations();
-  const status = connectionStatus(t, overview.gateway.health);
+
+  const status =
+    instance && overview
+      ? connectionStatus(t, overview.gateway.health)
+      : {
+          variant: "default" as const,
+          label: t("DashboardPrivateChannels.overview.statusNotConnected"),
+        };
 
   return (
     <Card className="h-full">
@@ -54,15 +65,23 @@ export async function ConnectedInstancePanel({ instance, overview }: Props) {
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Field
-          label={t("DashboardPrivateChannels.overview.instanceAddressLabel")}
-          value={shorten(instance.escrowInstanceAddr)}
-          title={instance.escrowInstanceAddr}
-        />
-        <Field
-          label={t("DashboardPrivateChannels.overview.gatewayUrlLabel")}
-          value={instance.gatewayUrl}
-        />
+        {instance ? (
+          <>
+            <Field
+              label={t("DashboardPrivateChannels.overview.instanceAddressLabel")}
+              value={shorten(instance.escrowInstanceAddr)}
+              title={instance.escrowInstanceAddr}
+            />
+            <Field
+              label={t("DashboardPrivateChannels.overview.gatewayUrlLabel")}
+              value={instance.gatewayUrl}
+            />
+          </>
+        ) : (
+          <Link href={connectHref} className="text-sm text-info hover:underline">
+            {t("DashboardPrivateChannels.overview.connectLink")}
+          </Link>
+        )}
       </CardContent>
     </Card>
   );
