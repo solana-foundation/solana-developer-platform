@@ -261,6 +261,7 @@ describe("Earn program — PUT create-or-update", () => {
     expect(createWallet).toHaveBeenCalledWith(expect.objectContaining({ environment: "sandbox" }), {
       label: "Treasury",
       allocations: VALID_ALLOCATIONS,
+      requestId: undefined,
     });
     expect(updateStrategy).not.toHaveBeenCalled();
 
@@ -286,8 +287,63 @@ describe("Earn program — PUT create-or-update", () => {
       {
         providerWalletRef: WALLET_REF,
         allocations: VALID_ALLOCATIONS,
+        requestId: undefined,
       }
     );
+  });
+
+  it("forwards a caller-minted requestId on both the create and update branches", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const createWallet = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
+    const updateStrategy = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy")
+      .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWallet").mockResolvedValue(WALLET_SNAPSHOT);
+
+    // Without this key the provider mints its own per call, so a double-submitted
+    // confirm fires two independent mutations.
+    const createRequestId = "3f1d5a2e-9b64-4c7f-8a10-2d5e6f7a8b90";
+    const updateRequestId = "5c2e7b41-8d36-4a92-bf05-1e4c9a7d3b28";
+
+    const created = await requestEarn("PUT", "/v1/earn/program", {
+      provider: "ground",
+      allocations: VALID_ALLOCATIONS,
+      requestId: createRequestId,
+    });
+    expect(created.status).toBe(201);
+    expect(createWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "sandbox" }),
+      expect.objectContaining({ requestId: createRequestId })
+    );
+
+    const updated = await requestEarn("PUT", "/v1/earn/program", {
+      provider: "ground",
+      allocations: VALID_ALLOCATIONS,
+      requestId: updateRequestId,
+    });
+    expect(updated.status).toBe(200);
+    expect(updateStrategy).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "sandbox" }),
+      expect.objectContaining({ requestId: updateRequestId })
+    );
+  });
+
+  it("rejects a requestId that is not a UUIDv4", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+
+    const res = await requestEarn("PUT", "/v1/earn/program", {
+      provider: "ground",
+      allocations: VALID_ALLOCATIONS,
+      requestId: "not-a-uuid",
+    });
+
+    expect(res.status).toBe(400);
+    expect(createWallet).not.toHaveBeenCalled();
   });
 
   it("rejects allocations referencing yield sources outside the synced catalogue", async () => {

@@ -53,10 +53,10 @@ Ground's [Portfolio Wallets API](https://docs.groundtech.co/docs/portfolio-walle
 | `apyBps` | `current_apy` decimal string (integer math, `356 → "0.0356"`) |
 | `processingPolicies.redeem` | `liquidity_term`: `instant` when 0, else `delayed` + `redemption_delay_days` (ceil to days) |
 | Yield-source id / name / protocol | `risk_metadata.curator` (known ids → `morpho-<curator>-<token>` convention → protocol fallback) |
-| `allocations[].type` (treasury/CLO vs lending/reserve) | `source_kind`: `rwa` / `defi` (dominant allocation) |
+| `allocations[].type` (observed: `market`, `liquidity`, `loan`, `reserve`, `rwa`, `treasury`) | `source_kind`: `rwa` / `defi` (dominant allocation; `rwa` + `treasury` are the RWA side) |
 | `mode` | only `active` sources are listed; `buy_only` is excluded (would trap funds — ADR 0002 exit-safety) |
 | Portfolio wallet (`POST /v2/wallets`, `GET /v2/wallets/{id}`) | The org's shared program: `earn_provider_wallets.provider_wallet_ref` |
-| Strategy weights | `PUT /v1/earn/program` allocations (percent, 0.1 grid, sum = 100 per token group) → Ground target weights |
+| Strategy weights | `PUT /v1/earn/program` allocations (percent, 0.1 grid, sum = 100 per token group) → Ground target weights. Takes an idempotent `requestId` forwarded on BOTH branches (`POST /v2/wallets` on create, `PATCH /v2/wallets/{id}/strategy` on update) — Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
 | `depositAddresses.solana{,_devnet}` | The program's funding address (only Solana is surfaced) |
 | Deposits / withdrawals / previews | `GET /v1/earn/program/deposits`, `POST /v1/earn/program/withdrawal-preview`, `POST /v1/earn/program/withdrawals` (idempotent `requestId`) |
 
@@ -125,28 +125,61 @@ leave a total its positions don't sum to.
 ### Cross-chain: token lanes are preserved
 
 Ground never converts between USDC and USDT. USDC may bridge **within CCTP
-domains**; USDT stays on Ethereum. That is why USDT is production-only in our
-declared support, and why `bridge` is a first-class position kind. SDP's product
-surface stays Solana-only — the other chains are provider plumbing.
+domains**; USDT stays on Ethereum. That is why USDT sources never enter SDP's
+catalogue at all — `GROUND_SOLANA_ROUTED_TOKENS` (client.ts) pins Ground's
+Solana rails to USDC, so an un-routable source is excluded on every cluster
+and withdrawal preview/create refuse un-routable tokens before any network
+call — and why `bridge` is a first-class position kind. SDP's product surface stays
+Solana-only — the other chains are provider plumbing.
 
-### Withdrawals unwind in reverse — and need an approval we have NOT built
+Ground confirmed (2026-08-05) that **sandbox supports both `ethereum_sepolia`
+and `solana_devnet`**; Solana flows in sandbox ride the `solana_devnet` chain
+key. Both environments' keys are hard-set in `GROUND_SOLANA_CHAINS`
+(providers/ground/client.ts) — the enforcement point for the Solana-only
+mandate: every wallet flow sends `config.chain` from that constant, never a
+caller-supplied chain. Sandbox USDT (Ground's mock Sepolia asset) stays
+Sepolia-only — the withdrawal API enumerates `ethereum_sepolia` as its single
+valid USDT destination — and Ground's sandbox USDT faucet
+(`POST /v2/sandbox/faucets/usdt`) funds Sepolia addresses only, so exercising
+the Solana lane in sandbox means devnet USDC.
+
+### Withdrawals unwind in reverse — approval is policy-conditional, and we surface it
 
 Redemption reverses the flow: vaults settle, the wallet claims stablecoin, and
 Ground pays out to the destination address. Payout legs may settle at different
-times, and **each leg requires its own approval**.
+times, and each leg can gate on its own customer approval.
 
-> **Known gap.** Ground's approval model is customer-controlled Turnkey signing:
-> *"Ground does not stamp the Turnkey approval for you."* The customer's signer
-> produces the stamp off Ground's servers via
-> `GET /v2/turnkey/activities/pending` →
-> `POST /v2/turnkey/activity-approval-request` → local stamp →
-> `POST /v2/turnkey/activities/{activityId}/vote`.
-> **`GroundEarnClient` implements none of those.** We submit
-> `POST …/withdrawals` and poll status, so a submitted withdrawal may park in
-> pending approval. Ground's docs do not say whether customer-side signing is
-> mandatory or only applies when signing keys are configured, nor what a new
-> wallet defaults to. Resolve empirically — create a sandbox wallet, submit a
-> withdrawal, observe — before anyone relies on the exit path.
+> **Resolved 2026-08-05** (previously this module's known gap). Customer-side
+> Turnkey stamping is **NOT required by default**: a sandbox withdrawal on a
+> wallet with no approval policy settled end to end ($5 USDT → Sepolia, wallet
+> `5fe239ad…`, withdrawal `907001f5…`) while
+> `GET /v2/turnkey/activities/pending` stayed empty for the entire lifecycle —
+> no stamp, no vote, funds paid out. The approval flow engages only when an
+> org-level approval policy is in place; Ground's docs tie that to production
+> withdrawal limits (`403 withdrawal_policy_required` — *"Production
+> withdrawal limit reached. Contact Ground to increase your limit."*).
+>
+> When a policy IS engaged, Ground parks the affected **payout leg** in
+> `pending_customer_approval` while the withdrawal's top-level status keeps
+> reading `processing` — the parked state is invisible to a top-level poll.
+> `GroundEarnClient` therefore folds a parked leg up into the distinct
+> `pending_approval` wire status, and implements the full approval surface as
+> an optional capability behind `supportsWithdrawalApprovals`
+> (capabilities.ts): `listPendingWithdrawalApprovals` →
+> `createWithdrawalApprovalRequest` (returns the exact `stampPayload` string
+> the signer must stamp — never re-serialize it) →
+> `submitWithdrawalApprovalVote`. The stamp itself is produced by the
+> customer-held Turnkey signer, outside Ground and outside SDP — SDP relays
+> payloads and stamps, never keys. Under the shared-account model that signer
+> is **account-level (platform ops), not per-SDP-org**: before production
+> enablement (PRO-1635), confirm with Ground whether our production account
+> carries an approval policy and who holds the signer.
+
+Sandbox settlement timing (observed 2026-08-05): the payout leg took ~10.5
+minutes against a "typical 30s" processing estimate, and the withdrawal-level
+`completedAt` was stamped at plan-acceptance (~9s in), long before the leg
+actually settled — read the leg/step `completedAt` for real settlement timing,
+and treat the preview's estimate as indicative only.
 
 ### Custody boundary (say this out loud to customers)
 

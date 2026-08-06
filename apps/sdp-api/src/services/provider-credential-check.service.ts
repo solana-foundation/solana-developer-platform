@@ -12,7 +12,7 @@ import {
   notFound,
   providerUnavailable,
 } from "@/lib/errors";
-import { isPrivyByokEnabled } from "@/lib/feature-flags";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
@@ -313,7 +313,7 @@ async function assertInstallCheckEnabled(
   db: DatabaseClient,
   organizationId: string
 ): Promise<void> {
-  if (!isPrivyByokEnabled(env)) {
+  if (!isCustodyConnectionRuntimeEnabled(env, "privy")) {
     throw forbidden(INSTALL_CHECK_DISABLED_MESSAGE);
   }
 
