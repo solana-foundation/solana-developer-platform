@@ -2,10 +2,16 @@ import { hashString } from "@sdp/payments/hash";
 import { requireEnv } from "@sdp/payments/ramps/shared";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db";
-import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError, conflict, forbidden, internalError, providerUnavailable } from "@/lib/errors";
-import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
+import {
+  AppError,
+  conflict,
+  forbidden,
+  internalError,
+  notFound,
+  providerUnavailable,
+} from "@/lib/errors";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -15,16 +21,22 @@ import {
   CredentialSecretStoreError,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
-import { getProviderAvailability } from "@/services/provider-availability.service";
+import { isStoredCustodySetupEnabled } from "@/services/provider-availability.service";
 import {
-  hasPinnedProviderAccountIdentity,
+  decideInstallation,
+  type InstallationConflictReason,
+  installationFactsFromConnection,
+} from "@/services/provider-credential-installation";
+import {
   type ProjectConnectionState,
   type ProviderCredentialRow,
   ProviderCredentialStore,
 } from "@/services/stores/provider-credential.store";
 import type { Env } from "@/types/env";
 
-const SETUP_CONFLICT_MESSAGE = "Privy custody setup already exists for this project";
+const UNFINISHED_INSTALLATION_MESSAGE =
+  "A Privy custody installation is already in progress for this project";
+const REPLACEMENT_CONFLICT_MESSAGE = "Custody Connection cannot accept replacement credentials";
 const PROVISIONING_DISABLED_MESSAGE =
   "Stored credential provisioning is disabled for this provider";
 
@@ -33,7 +45,7 @@ interface SubmitPrivyCredentialInput {
   walletLabel?: string;
   fields: {
     credentialLabel: string;
-    scope: "organization" | "project";
+    scope: "project";
     appId: string;
     appSecret: string;
   };
@@ -52,11 +64,11 @@ export interface SafeProviderCredential {
 
 interface ProviderCredentialSubmissionResult {
   providerCredential: SafeProviderCredential;
+  connectionId: string;
 }
 
 type SetupPlan =
-  | { kind: "first_install" }
-  | { kind: "reinstall" }
+  | { kind: "fresh" }
   | {
       kind: "replacement";
       connection: ProjectConnectionState;
@@ -87,6 +99,7 @@ interface SubmissionContext {
   store: ProviderCredentialStore;
   audit: AuditService;
   auditBase: SubmissionAuditBase;
+  replacementConnectionId: string | null;
 }
 
 interface PreparedSubmission extends SubmissionContext {
@@ -102,8 +115,15 @@ interface StoredSubmission extends PreparedSubmission {
 }
 
 class SetupConflict extends Error {
-  constructor(readonly connectionId?: string) {
-    super(SETUP_CONFLICT_MESSAGE);
+  constructor(
+    readonly reason?: InstallationConflictReason,
+    readonly connectionId?: string
+  ) {
+    super(
+      reason === "unfinished_installation_exists"
+        ? UNFINISHED_INSTALLATION_MESSAGE
+        : REPLACEMENT_CONFLICT_MESSAGE
+    );
   }
 }
 
@@ -112,7 +132,25 @@ export async function submitProviderCredential(
   input: SubmitPrivyCredentialInput,
   idempotencyKey: string
 ): Promise<ProviderCredentialSubmissionResult> {
-  const context = createSubmissionContext(c, input, idempotencyKey);
+  return submitProviderCredentialIntent(c, input, idempotencyKey, null);
+}
+
+export async function replaceProviderCredential(
+  c: Context<{ Bindings: Env }>,
+  connectionId: string,
+  input: SubmitPrivyCredentialInput,
+  idempotencyKey: string
+): Promise<ProviderCredentialSubmissionResult> {
+  return submitProviderCredentialIntent(c, input, idempotencyKey, connectionId);
+}
+
+async function submitProviderCredentialIntent(
+  c: Context<{ Bindings: Env }>,
+  input: SubmitPrivyCredentialInput,
+  idempotencyKey: string,
+  replacementConnectionId: string | null
+): Promise<ProviderCredentialSubmissionResult> {
+  const context = createSubmissionContext(c, input, idempotencyKey, replacementConnectionId);
   const fingerprint = await computeSubmissionFingerprint(context);
   const replay = await loadReplay(context);
   if (replay) {
@@ -139,13 +177,14 @@ export async function submitProviderCredential(
 function createSubmissionContext(
   c: Context<{ Bindings: Env }>,
   input: SubmitPrivyCredentialInput,
-  idempotencyKey: string
+  idempotencyKey: string,
+  replacementConnectionId: string | null
 ): SubmissionContext {
   const auth = getAuth(c);
   const organizationId = auth.organizationId;
   const projectId = requireProjectId(c);
   const userId = auth.userId;
-  if (!userId || auth.authType !== "clerk") {
+  if (!userId || auth.authType === "api_key") {
     throw internalError();
   }
 
@@ -170,6 +209,7 @@ function createSubmissionContext(
     store,
     audit,
     auditBase,
+    replacementConnectionId,
   };
 }
 
@@ -195,6 +235,7 @@ async function computeSubmissionFingerprint(context: SubmissionContext): Promise
       projectId: context.projectId,
       input: context.input,
       pepper,
+      replacementConnectionId: context.replacementConnectionId,
     });
   } catch {
     await auditFailure(context.c, context.audit, context.auditBase, {
@@ -219,14 +260,8 @@ async function enforceProvisioningGate(
   context: SubmissionContext,
   fingerprint: string
 ): Promise<ProviderCredentialSubmissionResult | null> {
-  const availability = await getProviderAvailability(
-    context.c.env,
-    context.db,
-    context.organizationId
-  );
   if (
-    !availability.providers.custody.privy.entitled ||
-    !isCustodyConnectionRuntimeEnabled(context.c.env, "privy")
+    !(await isStoredCustodySetupEnabled(context.c.env, context.db, context.organizationId, "privy"))
   ) {
     const lateReplay = await resolveLateReplay({
       ...context,
@@ -249,7 +284,7 @@ async function prepareSetup(
   try {
     return {
       kind: "plan",
-      plan: await classifySetup(context.store, context.organizationId, context.projectId),
+      plan: await classifySetup(context),
     };
   } catch (error) {
     if (error instanceof SetupConflict) {
@@ -264,7 +299,10 @@ async function prepareSetup(
         reason: "setup_conflict",
         connectionId: error.connectionId,
       });
-      throw conflict(SETUP_CONFLICT_MESSAGE);
+      throw setupConflictResponse(error);
+    }
+    if (error instanceof AppError) {
+      throw error;
     }
     await auditFailure(context.c, context.audit, context.auditBase, {
       reason: "database_failure",
@@ -431,16 +469,15 @@ async function runSubmissionTransaction(submission: StoredSubmission): Promise<T
     if (concurrentReplay) {
       return {
         kind: "replay",
-        result: await resolveReplay(concurrentReplay, submission.fingerprint),
+        result: await resolveReplay(
+          { ...submission, store: txStore },
+          concurrentReplay,
+          submission.fingerprint
+        ),
       };
     }
 
-    const lockedPlan = await classifySetup(
-      txStore,
-      submission.organizationId,
-      submission.projectId,
-      true
-    );
+    const lockedPlan = await classifySetup({ ...submission, store: txStore }, true);
     assertSameSetupPlan(submission.preflightPlan, lockedPlan);
 
     const version =
@@ -472,7 +509,7 @@ async function runSubmissionTransaction(submission: StoredSubmission): Promise<T
 
     return {
       kind: "committed",
-      result: mapSubmissionResult(providerCredential),
+      result: mapSubmissionResult(providerCredential, submission.connectionId),
     };
   });
 }
@@ -504,7 +541,7 @@ async function persistConnection(
     pendingWalletLabel: submission.input.walletLabel,
   });
   if (!updated) {
-    throw new SetupConflict(lockedPlan.connection.id);
+    throw new SetupConflict(undefined, lockedPlan.connection.id);
   }
 }
 
@@ -515,7 +552,11 @@ async function recoverTransactionFailure(
   const reconciliation = await reconcileTransactionOutcome(submission);
   if (reconciliation.kind === "found") {
     if (reconciliation.replay.id === submission.providerCredentialId) {
-      const committed = await resolveReplay(reconciliation.replay, submission.fingerprint);
+      const committed = await resolveReplay(
+        submission,
+        reconciliation.replay,
+        submission.fingerprint
+      );
       await auditSubmissionSuccess(submission, committed);
       return committed;
     }
@@ -560,7 +601,7 @@ async function recoverTransactionFailure(
       storageBackend: submission.stored.storageBackend,
       compensationOutcome,
     });
-    throw conflict(SETUP_CONFLICT_MESSAGE);
+    throw setupConflictResponse(error);
   }
 
   if (error instanceof AppError && error.code === "CONFLICT") {
@@ -574,6 +615,18 @@ async function recoverTransactionFailure(
     throw error;
   }
 
+  if (isUnfinishedInstallationUniqueViolation(error)) {
+    const setupError = new SetupConflict("unfinished_installation_exists", submission.connectionId);
+    await auditFailure(submission.c, submission.audit, submission.auditBase, {
+      reason: "setup_conflict",
+      resourceId: submission.providerCredentialId,
+      connectionId: submission.connectionId,
+      storageBackend: submission.stored.storageBackend,
+      compensationOutcome,
+    });
+    throw setupConflictResponse(setupError);
+  }
+
   await auditFailure(submission.c, submission.audit, submission.auditBase, {
     reason: "database_failure",
     resourceId: submission.providerCredentialId,
@@ -582,6 +635,16 @@ async function recoverTransactionFailure(
     compensationOutcome,
   });
   throw internalError();
+}
+
+function isUnfinishedInstallationUniqueViolation(error: unknown): boolean {
+  return (
+    isPostgresUniqueViolation(error) &&
+    typeof error === "object" &&
+    error !== null &&
+    "constraint" in error &&
+    error.constraint === "idx_custody_connections_privy_unfinished"
+  );
 }
 
 async function reconcileTransactionOutcome(
@@ -621,6 +684,7 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
   projectId: string;
   input: SubmitPrivyCredentialInput;
   pepper: string;
+  replacementConnectionId?: string | null;
 }): Promise<string> {
   const canonical = JSON.stringify(
     normalizeForFingerprint({
@@ -629,6 +693,9 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
       target: {
         organizationId: params.organizationId,
         projectId: params.projectId,
+        ...(params.replacementConnectionId && {
+          connectionId: params.replacementConnectionId,
+        }),
       },
       provider: params.input.provider,
       walletLabel: params.input.walletLabel,
@@ -639,15 +706,27 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
 }
 
 async function resolveReplay(
+  context: Pick<SubmissionContext, "store" | "organizationId" | "projectId">,
   replay: ProviderCredentialRow,
   fingerprint: string
 ): Promise<ProviderCredentialSubmissionResult> {
   await resolveIdempotencyReplay(async () => replay, fingerprint);
-  return mapSubmissionResult(replay);
+  const connectionIds = await context.store.findConnectionIdsForCredentialLineage(
+    context.organizationId,
+    context.projectId,
+    replay.id
+  );
+  if (connectionIds.length !== 1) {
+    throw internalError();
+  }
+  return mapSubmissionResult(replay, connectionIds[0] as string);
 }
 
 async function resolveReplayWithAudit(
-  context: Pick<SubmissionContext, "c" | "audit" | "auditBase">,
+  context: Pick<
+    SubmissionContext,
+    "c" | "audit" | "auditBase" | "store" | "organizationId" | "projectId"
+  >,
   replay: ProviderCredentialRow,
   fingerprint: string,
   failure?: {
@@ -656,7 +735,7 @@ async function resolveReplayWithAudit(
   }
 ): Promise<ProviderCredentialSubmissionResult> {
   try {
-    return await resolveReplay(replay, fingerprint);
+    return await resolveReplay(context, replay, fingerprint);
   } catch (error) {
     if (error instanceof AppError && error.code === "CONFLICT") {
       await auditFailure(context.c, context.audit, context.auditBase, {
@@ -680,6 +759,7 @@ async function resolveLateReplay(params: {
     scope: "organization" | "project";
   };
   organizationId: string;
+  projectId: string;
   idempotencyKey: string;
   fingerprint: string;
 }): Promise<ProviderCredentialSubmissionResult | null> {
@@ -699,51 +779,70 @@ async function resolveLateReplay(params: {
 }
 
 async function classifySetup(
-  store: ProviderCredentialStore,
-  organizationId: string,
-  projectId: string,
+  context: Pick<
+    SubmissionContext,
+    "store" | "organizationId" | "projectId" | "replacementConnectionId"
+  >,
   lock = false
 ): Promise<SetupPlan> {
-  const connections = await store.listProjectConnections(organizationId, projectId, { lock });
-
-  const nonDeactivated = connections.filter((connection) => connection.status !== "deactivated");
-  if (nonDeactivated.length === 0) {
-    return connections.length === 0 ? { kind: "first_install" } : { kind: "reinstall" };
+  if (!context.replacementConnectionId) {
+    const connections = await context.store.listProjectConnections(
+      context.organizationId,
+      context.projectId,
+      { lock }
+    );
+    const unfinished = connections.find(
+      (connection) => connection.status === "pending" || connection.status === "checking"
+    );
+    if (unfinished) {
+      throw new SetupConflict("unfinished_installation_exists", unfinished.id);
+    }
+    return { kind: "fresh" };
   }
 
-  if (nonDeactivated.length !== 1) {
-    throw new SetupConflict(nonDeactivated[0]?.id);
+  const connection = await context.store.findInstallationConnection(
+    context.organizationId,
+    context.projectId,
+    context.replacementConnectionId,
+    { lock }
+  );
+  if (!connection) {
+    throw notFound("Custody Connection");
+  }
+  const nowMs = await context.store.getDatabaseNowMs();
+  const decision = decideInstallation(
+    installationFactsFromConnection(connection, nowMs, true)
+  ).replace;
+  if (decision.kind !== "execute") {
+    throw new SetupConflict(
+      decision.kind === "conflict" ? decision.reason : undefined,
+      connection.id
+    );
   }
 
-  const connection = nonDeactivated[0] as ProjectConnectionState;
-  if (
-    connection.status !== "failed" ||
-    connection.credential_status !== "failed_validation" ||
-    connection.activated_at !== null ||
-    connection.default_custody_wallet_id !== null ||
-    hasPinnedProviderAccountIdentity(connection.setup_metadata)
-  ) {
-    throw new SetupConflict(connection.id);
-  }
-
-  const currentCredential = await store.findCredential(connection.provider_credential_id, { lock });
+  const currentCredential = await context.store.findCredential(connection.provider_credential_id, {
+    lock,
+  });
   if (
     currentCredential?.status !== "failed_validation" ||
     currentCredential.credential_version !== connection.credential_version
   ) {
-    throw new SetupConflict(connection.id);
+    throw new SetupConflict(undefined, connection.id);
   }
 
-  return {
-    kind: "replacement",
-    connection,
-    currentCredential,
-  };
+  return { kind: "replacement", connection, currentCredential };
+}
+
+function setupConflictResponse(error: SetupConflict): AppError {
+  return conflict(error.message, error.reason ? { reason: error.reason } : undefined);
 }
 
 function assertSameSetupPlan(preflight: SetupPlan, locked: SetupPlan): void {
   if (preflight.kind !== locked.kind) {
-    throw new SetupConflict(locked.kind === "replacement" ? locked.connection.id : undefined);
+    throw new SetupConflict(
+      undefined,
+      locked.kind === "replacement" ? locked.connection.id : undefined
+    );
   }
   if (
     preflight.kind === "replacement" &&
@@ -753,15 +852,17 @@ function assertSameSetupPlan(preflight: SetupPlan, locked: SetupPlan): void {
       preflight.currentCredential.credential_version !==
         locked.currentCredential.credential_version)
   ) {
-    throw new SetupConflict(locked.connection.id);
+    throw new SetupConflict(undefined, locked.connection.id);
   }
 }
 
 function mapSubmissionResult(
-  providerCredential: ProviderCredentialRow
+  providerCredential: ProviderCredentialRow,
+  connectionId: string
 ): ProviderCredentialSubmissionResult {
   return {
     providerCredential: mapProviderCredential(providerCredential),
+    connectionId,
   };
 }
 
