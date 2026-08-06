@@ -8757,6 +8757,7 @@ describe("Payments routes", () => {
     it("matches native SOL rows whether the token filter is SOL, sol, or the mint", async () => {
       await seedTransfer({ id: "xfr_native_sol", status: "confirmed", token: SOL_MINT });
       await seedTransfer({ id: "xfr_usdc", status: "confirmed", token: DEVNET_USDC_MINT });
+      await seedTransfer({ id: "xfr_native_sol_pending", status: "pending", token: SOL_MINT });
 
       for (const filter of ["SOL", "sol", SOL_MINT]) {
         const res = await app.request(
@@ -8770,7 +8771,25 @@ describe("Payments routes", () => {
 
         expect(res.status).toBe(200);
         const body = (await res.json()) as { data: Array<{ id: string }> };
-        expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_native_sol"]);
+        expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
+          "xfr_native_sol",
+          "xfr_native_sol_pending",
+        ]);
+
+        // The wallet-scoped merged path fetches non-chain rows through a
+        // separate SQL query; the filter must be normalized there as well.
+        const walletRes = await app.request(
+          `/v1/payments/transfers?wallet=${TEST_WALLET_ID}&token=${filter}`,
+          {
+            method: "GET",
+            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(walletRes.status).toBe(200);
+        const walletBody = (await walletRes.json()) as { data: Array<{ id: string }> };
+        expect(walletBody.data.map((transfer) => transfer.id)).toEqual(["xfr_native_sol_pending"]);
       }
     });
 

@@ -1333,7 +1333,7 @@ export async function listTransfers(c: AppContext) {
         statuses: nonChainStatuses,
         types: transferTypes,
         provider,
-        token,
+        token: tokenFilter,
         direction,
         createdAtFrom: from,
         createdAtTo: to,
