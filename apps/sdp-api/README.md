@@ -309,9 +309,9 @@ See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for
 
 ### Reconciliation cron
 
-- **Transfer reconciliation** can run via the dedicated Cloud Run Job (`src/job.ts`). Web service replicas skip in-process cron by default when `K_SERVICE` is set (`DISABLE_CRON=false` opts a service back in).
+- **Transfer reconciliation** and **approved wallet-operation recovery** are the two ungated jobs: they register on every in-process `startCron` and both also run in the dedicated Cloud Run Job (`src/job.ts`). Web service replicas skip in-process cron by default when `K_SERVICE` is set (`DISABLE_CRON=false` opts a service back in).
 - **Recurring payment collection**, **Private Channels deposit/withdrawal reconcilers**, and the **Earn strategy-catalogue sync** register only on in-process `startCron` (`src/cron/runner.ts`) when their respective env gates are enabled (`PAYMENTS_RECURRING_COLLECTION_ENABLED`, `PRIVATE_CHANNELS_ENABLED`, and `MARKETS_ENABLED` plus `EARN_ENABLED`). That path covers self-hosted and explicitly opted-in services.
-- **TODO:** the Cloud Run Job is transfers-only, so on managed deployments the Private Channels reconcilers and the Earn catalogue sync run only on a service replica that opts back in with `DISABLE_CRON=false`. Decide whether that job (or a second one) should run them instead, so production does not depend on an opted-in replica.
+- **TODO:** the Cloud Run Job runs only the two ungated jobs above, so on managed deployments the recurring-payment collection, the Private Channels reconcilers, and the Earn catalogue sync run only on a service replica that opts back in with `DISABLE_CRON=false`. Decide whether that job (or a second one) should run them instead, so production does not depend on an opted-in replica.
 
 ## Contributing
 
