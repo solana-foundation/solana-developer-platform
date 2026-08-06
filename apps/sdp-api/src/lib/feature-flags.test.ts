@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isAssetProfilesEnabled,
+  isCustodyConnectionRuntimeEnabled,
   isEarnEnabled,
   isMarketsEnabled,
   isPrivateChannelsEnabled,
@@ -88,6 +89,16 @@ describe("isPrivyByokEnabled", () => {
         PRIVY_BYOK_ENABLED: flag,
       })
     ).toBe(true);
+  });
+});
+
+describe("isCustodyConnectionRuntimeEnabled", () => {
+  it("uses the Privy rollout flag only for Privy Connections", () => {
+    expect(isCustodyConnectionRuntimeEnabled({ PRIVY_BYOK_ENABLED: "true" }, "privy")).toBe(true);
+    expect(isCustodyConnectionRuntimeEnabled({ PRIVY_BYOK_ENABLED: "false" }, "privy")).toBe(false);
+    expect(isCustodyConnectionRuntimeEnabled({ PRIVY_BYOK_ENABLED: "true" }, "turnkey")).toBe(
+      false
+    );
   });
 });
 
