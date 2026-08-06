@@ -11,13 +11,13 @@ import {
 import {
   PRIVATE_CHANNELS_CHANNELS_PATH,
   PRIVATE_CHANNELS_INSTANCE_PATH,
+  PRIVATE_CHANNELS_WALLETS_PATH,
 } from "../private-channels-routes";
 import { AllowedTokensPanel } from "./allowed-tokens-panel";
 import { ConnectedInstancePanel } from "./connected-instance-panel";
 import { channelNameById } from "./overview-data";
 import { PrivateBalancePanel } from "./private-balance-panel";
 import { RecentActivityPanel } from "./recent-activity-panel";
-import { WalletsTable } from "./wallets-table";
 
 export default async function PrivateChannelsOverviewPage() {
   await requirePrivateChannelsAccess();
@@ -60,7 +60,10 @@ export default async function PrivateChannelsOverviewPage() {
           channelsHref={PRIVATE_CHANNELS_CHANNELS_PATH}
           defaultChannelName={defaultChannelName}
         />
-        <PrivateBalancePanel channelBalances={channelBalances} walletsHref="#pc-wallets" />
+        <PrivateBalancePanel
+          channelBalances={channelBalances}
+          walletsHref={PRIVATE_CHANNELS_WALLETS_PATH}
+        />
         <AllowedTokensPanel instance={instance} />
       </div>
 
@@ -68,15 +71,6 @@ export default async function PrivateChannelsOverviewPage() {
         initialEvents={events.data.events}
         channelNames={channelNameById(channels.data)}
       />
-
-      <div id="pc-wallets">
-        <WalletsTable
-          verifiedWallets={wallets.ok ? wallets.data.verified : []}
-          custodyWallets={wallets.ok ? wallets.data.custody : []}
-          channelBalances={channelBalances}
-          loadError={!wallets.ok}
-        />
-      </div>
     </div>
   );
 }

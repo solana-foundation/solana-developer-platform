@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { TokenMark } from "@/components/token-mark";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
 import type { WalletChannelBalance } from "../private-channels-page.data";
 import { aggregateBalancesByMint, formatTokenAmount } from "./overview-data";
@@ -8,7 +8,7 @@ import { aggregateBalancesByMint, formatTokenAmount } from "./overview-data";
 interface Props {
   /** Per-(wallet) channel balances, keyed by wallet pubkey. */
   channelBalances: Record<string, WalletChannelBalance>;
-  /** Anchor to the Wallets table, shown when no balances exist. */
+  /** The Wallets page — reached from the footer link (there is no Wallets tab). */
   walletsHref: string;
 }
 
@@ -17,20 +17,15 @@ export async function PrivateBalancePanel({ channelBalances, walletsHref }: Prop
   const balances = aggregateBalancesByMint(channelBalances);
 
   return (
-    <Card className="h-full">
+    <Card className="flex h-full flex-col">
       <CardHeader>
         <CardTitle>{t("DashboardPrivateChannels.overview.privateBalanceTitle")}</CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex-1">
         {balances.length === 0 ? (
-          <div className="space-y-2 text-sm">
-            <p className="text-secondary">
-              {t("DashboardPrivateChannels.overview.privateBalanceNoWallet")}
-            </p>
-            <Link href={walletsHref} className="text-info hover:underline">
-              {t("DashboardPrivateChannels.overview.viewWallets")}
-            </Link>
-          </div>
+          <p className="text-sm text-secondary">
+            {t("DashboardPrivateChannels.overview.privateBalanceNoWallet")}
+          </p>
         ) : (
           <ul className="space-y-3">
             {balances.map((balance) => (
@@ -49,6 +44,11 @@ export async function PrivateBalancePanel({ channelBalances, walletsHref }: Prop
           </ul>
         )}
       </CardContent>
+      <CardFooter>
+        <Link href={walletsHref} className="text-sm text-info hover:underline">
+          {t("DashboardPrivateChannels.overview.viewWallets")}
+        </Link>
+      </CardFooter>
     </Card>
   );
 }

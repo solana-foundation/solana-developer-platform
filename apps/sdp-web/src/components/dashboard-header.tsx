@@ -271,6 +271,8 @@ function privateChannelsSubPageTitle(
       return t("DashboardPrivateChannels.tabs.withdraw");
     case "members":
       return t("DashboardPrivateChannels.tabs.members");
+    case "wallets":
+      return t("DashboardPrivateChannels.overview.walletsTitle");
     case "events":
       return t("DashboardPrivateChannels.tabs.events");
     default:
