@@ -130,20 +130,6 @@ export class ProviderCredentialStore {
     );
   }
 
-  async hasActiveProjectLegacyConfig(organizationId: string, projectId: string): Promise<boolean> {
-    const row = await this.db.queryOne<{ id: string }>(
-      `SELECT id
-       FROM custody_configs
-       WHERE organization_id = ?
-         AND project_id = ?
-         AND provider = 'privy'
-         AND status = 'active'
-       LIMIT 1`,
-      [organizationId, projectId]
-    );
-    return row !== null;
-  }
-
   async findCredentialForInstallCheck(
     organizationId: string,
     id: string,

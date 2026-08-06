@@ -5,7 +5,7 @@ import { type DatabaseClient, getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, forbidden, internalError, providerUnavailable } from "@/lib/errors";
-import { isPrivyByokEnabled } from "@/lib/feature-flags";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -224,7 +224,10 @@ async function enforceProvisioningGate(
     context.db,
     context.organizationId
   );
-  if (!availability.providers.custody.privy.entitled || !isPrivyByokEnabled(context.c.env)) {
+  if (
+    !availability.providers.custody.privy.entitled ||
+    !isCustodyConnectionRuntimeEnabled(context.c.env, "privy")
+  ) {
     const lateReplay = await resolveLateReplay({
       ...context,
       fingerprint,
@@ -702,10 +705,6 @@ async function classifySetup(
   lock = false
 ): Promise<SetupPlan> {
   const connections = await store.listProjectConnections(organizationId, projectId, { lock });
-  const activeLegacyConfig = await store.hasActiveProjectLegacyConfig(organizationId, projectId);
-  if (activeLegacyConfig) {
-    throw new SetupConflict();
-  }
 
   const nonDeactivated = connections.filter((connection) => connection.status !== "deactivated");
   if (nonDeactivated.length === 0) {

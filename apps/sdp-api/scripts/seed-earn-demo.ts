@@ -325,8 +325,10 @@ function seededReference(strategy: SeedStrategy): string {
 
 /**
  * Curators publish risk tiers; Ground reports none, so fixtures band by APY.
- * This is the one field here the sync does not produce, kept because the
- * dashboard's tier copy (EARN_RISK_TIERS) is otherwise dead in local dev.
+ * This is the one field here the sync does not produce, and **nothing renders
+ * it** — the dashboard dropped tier copy precisely because it only ever showed
+ * up against these fixtures. Kept as open metadata for a future provider that
+ * does publish a tier; do not build UI on it until one does.
  */
 function riskTierForApy(apy: string): string {
   const rate = Number(apy);

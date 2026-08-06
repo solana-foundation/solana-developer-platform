@@ -3,6 +3,7 @@
 import { Check, Clipboard } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
+import { HighlightedCode, isHighlightLanguage } from "@/lib/shiki-code";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 
@@ -63,9 +64,17 @@ export function CodeBlock({
         copyButton
       )}
       <div className={cn("overflow-auto py-3.5", viewportClassName)}>
-        <pre className="m-0 w-max min-w-full bg-transparent px-4 pr-10 font-mono text-[13px] leading-6 text-primary">
-          <code data-language={language}>{code}</code>
-        </pre>
+        {language && isHighlightLanguage(language) ? (
+          // Real syntax highlighting for the languages Shiki is themed for;
+          // same shared css-variables theme as the API playground.
+          <div className="px-4 pr-10 font-mono">
+            <HighlightedCode content={code} language={language} />
+          </div>
+        ) : (
+          <pre className="m-0 w-max min-w-full bg-transparent px-4 pr-10 font-mono text-[13px] leading-6 text-primary">
+            <code data-language={language}>{code}</code>
+          </pre>
+        )}
       </div>
     </figure>
   );
