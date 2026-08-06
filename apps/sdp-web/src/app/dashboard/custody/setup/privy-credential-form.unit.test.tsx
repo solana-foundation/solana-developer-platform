@@ -169,12 +169,13 @@ describe("PrivyCredentialForm", () => {
 
     await fillAndSubmit(user);
     // The server refused but kept the pending connection: the reason is shown,
-    // the form (whose fresh submission would be rejected) is gone, and the
-    // stored credential stays re-checkable.
+    // the form (whose fresh submission would be rejected) is gone, the stored
+    // credential stays re-checkable, and the lock is released so the user can
+    // still back out of a refusal that needs an external fix first.
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Install checks are not enabled");
     expect(screen.queryByLabelText("Privy app secret")).toBeNull();
-    expect(onLock).toHaveBeenLastCalledWith(true);
+    expect(onLock).toHaveBeenLastCalledWith(false);
 
     await user.click(screen.getByRole("button", { name: "Check again" }));
     await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("pcred_1"));

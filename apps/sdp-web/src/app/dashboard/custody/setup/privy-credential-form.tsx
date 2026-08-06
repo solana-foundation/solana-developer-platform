@@ -79,9 +79,10 @@ export function PrivyCredentialForm({
     if (result.status === "failed") {
       if (result.providerCredentialId) {
         // The refusal left the stored credential and its pending connection
-        // behind, so re-checking that id is the only move that can still
-        // converge; leaving now would strand it.
-        onRecoveryLockChange?.(true);
+        // behind server-side, so offer the re-check that can still converge —
+        // but release the lock: a deterministic refusal may need an external
+        // fix first, and the pending connection survives leaving this step.
+        onRecoveryLockChange?.(false);
         setCheck({
           kind: "refused",
           message: result.message,
