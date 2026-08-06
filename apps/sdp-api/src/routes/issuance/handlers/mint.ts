@@ -8,7 +8,13 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
-import { AuditService } from "@/services/audit.service";
+import { type AuditIntent, AuditService } from "@/services/audit.service";
+import {
+  approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
+  reserveMintSupplyAtApprovedEffectBoundary,
+  walletOperationExecutionRequest,
+} from "@/services/policy/approved-operation-replay";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
@@ -198,6 +204,7 @@ async function rollbackCreatedAllowlistEntry(
  * Throws when the on-chain write fails and membership cannot be confirmed.
  */
 async function syncDestinationToOnChainAllowlist(opts: {
+  c: AppContext;
   tokenService: TokenService;
   mosaic: ReturnType<typeof createIssuanceMosaicService>;
   tokenId: string;
@@ -246,6 +253,7 @@ async function syncDestinationToOnChainAllowlist(opts: {
   }
 
   try {
+    await beginApprovedWalletOperationEffect(opts.c);
     await opts.mosaic.addToList({
       list: listAddress,
       wallet: opts.destination,
@@ -336,20 +344,22 @@ export const prepareMint = async (c: AppContext) => {
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
-  // For allowlist tokens with on-chain ABL, sync the destination wallet to
-  // the on-chain list (and DB mirror) before preparing the mint tx so the
-  // SDK's permissionless-thaw can succeed when the client submits.
-  const addedToAllowlist = ablListAddress
-    ? await syncDestinationToOnChainAllowlist({
-        tokenService,
-        mosaic,
-        tokenId,
-        ablListAddress,
-        destinationRaw: parsed.data.mint.destination,
-        destination,
-        addedBy: auth.id,
-      })
-    : false;
+  // Preparation must not mutate on-chain compliance state. A destination that
+  // is not already on the ABL can only be added by the execute route after its
+  // wallet-operation policy and approval gate have run.
+  if (ablListAddress) {
+    const existingStatus = await tokenService.getAllowlistEntryStatusByAddress(
+      tokenId,
+      parsed.data.mint.destination
+    );
+    if (existingStatus === "revoked") {
+      throw new AppError("DESTINATION_REVOKED");
+    }
+    const listAddress = assertValidAddress(ablListAddress, "ablListAddress");
+    if (!(await mosaic.isWalletOnList(listAddress, destination))) {
+      throw new AppError("NOT_ON_TOKEN_ALLOWLIST");
+    }
+  }
 
   const prepared = await mosaic.prepareMintTo({
     mint: mintAddress,
@@ -417,7 +427,7 @@ export const prepareMint = async (c: AppContext) => {
       destination: parsed.data.mint.destination,
       amount: parsed.data.mint.amount,
       mode: "prepare",
-      addedToAllowlist,
+      addedToAllowlist: false,
     },
   });
 
@@ -432,6 +442,34 @@ export const prepareMint = async (c: AppContext) => {
     simulation,
   });
 };
+
+async function recordPreSubmissionMintFailure(options: {
+  c: AppContext;
+  auditService: AuditService;
+  auditIntent: AuditIntent;
+  tokenService: TokenService;
+  transactionId: string;
+  error: unknown;
+}): Promise<void> {
+  const errorMessage = options.error instanceof Error ? options.error.message : "Unknown error";
+  await options.auditService.completeCritical(options.c, options.auditIntent, {
+    status: "failure",
+    metadata: { error: errorMessage },
+  });
+
+  // A failed approved replay that never reserved supply did not cross the
+  // mint submission boundary. Release its durable idempotency key so a
+  // recovered execution can retry instead of replaying a stale failure.
+  const removedPreEffectReplay = approvedWalletOperationId(options.c)
+    ? await options.tokenService.deleteUnsubmittedTransaction(options.transactionId)
+    : false;
+  if (!removedPreEffectReplay) {
+    await options.tokenService.updateTransaction(options.transactionId, {
+      status: "failed",
+      error: errorMessage,
+    });
+  }
+}
 
 export const executeMint = async (c: AppContext) => {
   const { tokenId } = c.req.param();
@@ -496,6 +534,7 @@ export const executeMint = async (c: AppContext) => {
       destination: parsed.data.mint.destination,
       amount: parsed.data.mint.amount,
       memo: parsed.data.mint.memo ?? null,
+      executionRequest: walletOperationExecutionRequest(c, parsed.data),
     },
   });
 
@@ -512,6 +551,7 @@ export const executeMint = async (c: AppContext) => {
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
   const addedToAllowlist = ablListAddress
     ? await syncDestinationToOnChainAllowlist({
+        c,
         tokenService,
         mosaic,
         tokenId,
@@ -593,10 +633,11 @@ export const executeMint = async (c: AppContext) => {
         feePayer: signer.address,
       },
       async () => {
-        reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
-        if (reservedSupply === null) {
-          throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
-        }
+        reservedSupply = await reserveMintSupplyAtApprovedEffectBoundary(
+          c,
+          tokenId,
+          amountBaseUnits.toString()
+        );
       }
     );
 
@@ -626,13 +667,13 @@ export const executeMint = async (c: AppContext) => {
     });
   } catch (error) {
     if (reservedSupply === null) {
-      await auditService.completeCritical(c, auditIntent, {
-        status: "failure",
-        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
-      });
-      await tokenService.updateTransaction(tx.id, {
-        status: "failed",
-        error: error instanceof Error ? error.message : "Unknown error",
+      await recordPreSubmissionMintFailure({
+        c,
+        auditService,
+        auditIntent,
+        tokenService,
+        transactionId: tx.id,
+        error,
       });
     }
 
