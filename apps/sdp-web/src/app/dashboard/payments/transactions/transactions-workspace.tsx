@@ -30,6 +30,7 @@ import { RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
 import {
+  assetFilterOptions,
   fetchTransactionFilterOptions,
   type TransactionFilterOptions,
 } from "./transactions-filter-options";
@@ -91,21 +92,40 @@ const TYPE_LABELS = {
   offramp: "DashboardPayments.transactions.offramp",
 } as const satisfies Record<TransactionTypeFilter, MessageKey>;
 
-function AssetFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+/**
+ * Held tokens, by symbol.
+ *
+ * Was a free-text input, which could not work by hand: the filter matches
+ * `pt.token` exactly and that column stores a mint, so typing "USDC" never
+ * matched anything, and arriving from a holding put a 44-character address on
+ * screen. The option value carries the mint; the label carries the symbol.
+ */
+function AssetFilter({
+  value,
+  options,
+  onChange,
+}: {
+  value: string | undefined;
+  options: Array<{ id: string; label: string }>;
+  onChange: (value: string | undefined) => void;
+}) {
   const t = useTranslations();
+  const assets = assetFilterOptions(value, options);
 
   return (
-    <FieldWithLabel
-      htmlFor="transactions-asset"
+    <SelectFilter
       label={t("DashboardPayments.transactions.filterAsset")}
+      value={value}
+      allLabel={t("DashboardPayments.transactions.allAssets")}
+      ariaLabel={t("DashboardPayments.transactions.filterAsset")}
+      onChange={onChange}
     >
-      <Input
-        id="transactions-asset"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={t("DashboardPayments.transactions.assetPlaceholder")}
-      />
-    </FieldWithLabel>
+      {assets.map((asset) => (
+        <SelectItem key={asset.id} value={asset.id}>
+          {asset.label}
+        </SelectItem>
+      ))}
+    </SelectFilter>
   );
 }
 
@@ -285,7 +305,13 @@ function AdvancedFilters({
           </SelectItem>
         ))}
       </SelectFilter>
-      <AssetFilter value={assetValue} onChange={onAssetChange} />
+      <AssetFilter
+        value={assetValue || undefined}
+        options={options?.assets ?? []}
+        // Routed through the same setter the text input used, so the debounced
+        // filter plumbing keeps a single path rather than gaining a second one.
+        onChange={(asset) => onAssetChange(asset ?? "")}
+      />
       {/* The range keeps the API's separate from/to values while presenting one
           connected selection, so users cannot accidentally invert the dates. */}
       <FieldWithLabel
