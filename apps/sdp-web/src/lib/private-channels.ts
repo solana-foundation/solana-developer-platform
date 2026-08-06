@@ -5,7 +5,9 @@ import type {
   PrivateChannelBalance,
   PrivateChannelDeposit,
   PrivateChannelDto,
+  PrivateChannelEventFamily,
   PrivateChannelEventListEnvelope,
+  PrivateChannelEventStatus,
   PrivateChannelHealth,
   PrivateChannelInstance,
   PrivateChannelInstanceEnvelope,
@@ -19,8 +21,9 @@ import type {
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export interface FetchPrivateChannelEventsParams {
-  family?: string;
+  family?: PrivateChannelEventFamily;
   type?: string;
+  status?: PrivateChannelEventStatus;
   limit?: number;
   before?: string;
 }
@@ -214,6 +217,7 @@ export function fetchPrivateChannelEvents(
   const query = new URLSearchParams();
   if (params.family) query.set("family", params.family);
   if (params.type) query.set("type", params.type);
+  if (params.status) query.set("status", params.status);
   if (params.limit != null) query.set("limit", String(params.limit));
   if (params.before) query.set("before", params.before);
   const qs = query.toString();
