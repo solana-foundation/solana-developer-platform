@@ -34,6 +34,7 @@ import {
   formatDisplayAmount,
   resolveTransferTokenLabel,
 } from "./payments/payments-overview.utils";
+import { tokenActivityHref } from "./tokens/holdings-links";
 
 interface HomeWorkspaceProps {
   totalBalance: number | null;
@@ -149,6 +150,7 @@ function BalanceAllocation({
       percent: slice.sharePercent,
       value: slice.usdValue ?? 0,
       fill: allocationFill(index),
+      href: tokenActivityHref(slice.mint),
     })),
     ...(breakdown.otherPricedCount > 0
       ? [
@@ -164,6 +166,7 @@ function BalanceAllocation({
             percent: breakdown.otherPricedSharePercent,
             value: breakdown.otherPricedUsd,
             fill: allocationFill(breakdown.priced.length),
+            href: "/dashboard/tokens",
           },
         ]
       : []),
@@ -187,9 +190,9 @@ function BalanceAllocation({
               fills merging into a single block. */}
           <div className="flex h-2.5 w-full gap-0.5 overflow-hidden">
             {segments.map((segment) => (
-              <button
+              <Link
                 key={segment.key}
-                type="button"
+                href={segment.href}
                 aria-label={`${segment.label} ${Math.round(segment.percent)}%`}
                 onMouseEnter={() => setHovered(segment.key)}
                 onMouseLeave={() => setHovered(null)}
@@ -211,7 +214,10 @@ function BalanceAllocation({
                 {/* Row highlight is pure CSS. Driving it from mouse handlers on a
                     plain element is a keyboard trap — the segment button above owns
                     the interaction, and this only mirrors it. */}
-                <div
+                <Link
+                  href={segment.href}
+                  onMouseEnter={() => setHovered(segment.key)}
+                  onMouseLeave={() => setHovered(null)}
                   className={cn(
                     "flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none",
                     hovered === segment.key ? "bg-fill-subtle" : "bg-transparent"
@@ -234,7 +240,7 @@ function BalanceAllocation({
                   <span className="w-28 shrink-0 text-right text-[15px] font-medium text-primary tabular-nums">
                     {formatCurrencyAmount(segment.value, locale)}
                   </span>
-                </div>
+                </Link>
               </li>
             ))}
           </ul>
@@ -247,8 +253,9 @@ function BalanceAllocation({
           {breakdown.unpriced.map((slice) => {
             const symbol = symbolFor(slice);
             return (
-              <div
+              <Link
                 key={slice.mint}
+                href={tokenActivityHref(slice.mint)}
                 className="flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none"
               >
                 <TokenMark mint={slice.mint} symbol={symbol} size="sm" />
@@ -258,20 +265,36 @@ function BalanceAllocation({
                 <span className="shrink-0 text-[15px] text-secondary tabular-nums">
                   {formatDisplayAmount(slice.uiAmount, symbol)}
                 </span>
-              </div>
+              </Link>
             );
           })}
           {breakdown.otherUnpricedCount > 0 ? (
-            <p className="px-2 pt-1 text-[13px] text-tertiary">
+            /* Was a dead count with no affordance — the holdings page is what it
+               was implicitly promising all along. */
+            <Link
+              href="/dashboard/tokens"
+              className="inline-block px-2 pt-1 text-[13px] text-primary underline underline-offset-2"
+            >
               {breakdown.otherUnpricedCount === 1
                 ? t("Shared.homeWorkspace.singleMoreToken")
                 : t("Shared.homeWorkspace.moreTokensCount", {
                     count: breakdown.otherUnpricedCount,
                   })}
-            </p>
+            </Link>
           ) : null}
         </div>
       ) : null}
+
+      {/* A summary capped at four priced and four unpriced holdings needs somewhere
+          to send anyone holding more than it shows. Sits after the rows rather than
+          between the header and the bar, where it split the two apart and read as a
+          gap in the card. */}
+      <Link
+        href="/dashboard/tokens"
+        className="inline-block text-[13px] text-primary underline underline-offset-2"
+      >
+        {t("Shared.homeWorkspace.viewAllHoldings")}
+      </Link>
     </div>
   );
 }
