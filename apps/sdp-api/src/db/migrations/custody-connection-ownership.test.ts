@@ -170,4 +170,114 @@ describe("custody Connection ownership constraints", () => {
       /provider_credentials_secret_location_check/
     );
   });
+
+  it("supports Config-only, dual, and Connection-only scope defaults", async () => {
+    await insertCredential("pcred_scope_default");
+    await insertConnection("cconn_scope_default", "pcred_scope_default");
+
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults (
+           id, organization_id, project_id, default_custody_config_id
+         ) VALUES ('csd_scope_default', ?, ?, ?)`
+      )
+      .bind(ORGANIZATION_ID, PROJECT_ID, CONFIG_ID)
+      .run();
+
+    await getDb(env)
+      .prepare(
+        `UPDATE custody_scope_defaults
+         SET default_custody_connection_id = 'cconn_scope_default'
+         WHERE id = 'csd_scope_default'`
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `UPDATE custody_scope_defaults
+         SET default_custody_config_id = NULL
+         WHERE id = 'csd_scope_default'`
+      )
+      .run();
+
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE custody_scope_defaults
+           SET default_custody_connection_id = NULL
+           WHERE id = 'csd_scope_default'`
+        )
+        .run()
+    ).rejects.toThrow(/custody_scope_defaults_has_target/);
+  });
+
+  it("rejects Organization-scoped and foreign-Project Connection defaults", async () => {
+    await insertCredential("pcred_scoped_connection");
+    await insertConnection("cconn_scoped_connection", "pcred_scoped_connection");
+
+    await expect(
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_scope_defaults (
+             id, organization_id, project_id,
+             default_custody_config_id, default_custody_connection_id
+           ) VALUES ('csd_org_connection', ?, NULL, ?, 'cconn_scoped_connection')`
+        )
+        .bind(ORGANIZATION_ID, CONFIG_ID)
+        .run()
+    ).rejects.toThrow(/custody_scope_defaults_connection_project_only/);
+
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (
+           id, organization_id, name, slug, environment, status, created_by
+         ) VALUES (
+           'prj_foreign_connection_default', ?, 'Foreign default',
+           'foreign-connection-default', 'sandbox', 'active', ?
+         )`
+      )
+      .bind(ORGANIZATION_ID, USER_ID)
+      .run();
+
+    await expect(
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_scope_defaults (
+             id, organization_id, project_id,
+             default_custody_config_id, default_custody_connection_id
+           ) VALUES (
+             'csd_foreign_connection', ?, 'prj_foreign_connection_default',
+             ?, 'cconn_scoped_connection'
+           )`
+        )
+        .bind(ORGANIZATION_ID, CONFIG_ID)
+        .run()
+    ).rejects.toThrow(/custody_scope_defaults_default_custody_connection_id_fkey/);
+  });
+
+  it("does not cascade-delete retained Config or Connection targets", async () => {
+    await insertCredential("pcred_retained_target");
+    await insertConnection("cconn_retained_target", "pcred_retained_target");
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults (
+           id, organization_id, project_id,
+           default_custody_config_id, default_custody_connection_id
+         ) VALUES ('csd_retained_target', ?, ?, ?, 'cconn_retained_target')`
+      )
+      .bind(ORGANIZATION_ID, PROJECT_ID, CONFIG_ID)
+      .run();
+
+    await expect(
+      getDb(env).prepare("DELETE FROM custody_configs WHERE id = ?").bind(CONFIG_ID).run()
+    ).rejects.toThrow(/custody_scope_defaults_default_custody_config_id_fkey/);
+    await expect(
+      getDb(env).prepare("DELETE FROM custody_connections WHERE id = 'cconn_retained_target'").run()
+    ).rejects.toThrow(/custody_scope_defaults_default_custody_connection_id_fkey/);
+
+    expect(
+      await getDb(env)
+        .prepare("SELECT id FROM custody_scope_defaults WHERE id = 'csd_retained_target'")
+        .first()
+    ).not.toBeNull();
+  });
 });

@@ -26,6 +26,7 @@ import { providerFetchJson } from "../../fetch";
 import { bearerAuthHeader } from "../../shared";
 import type {
   EarnDeclaredStrategySupport,
+  EarnPendingWithdrawalApproval,
   EarnPortfolioAddressBookEntryInput,
   EarnPortfolioAddressBookEntryResult,
   EarnPortfolioDepositsInput,
@@ -39,6 +40,12 @@ import type {
   EarnPortfolioWithdrawalPreviewInput,
   EarnPortfolioWithdrawalStatusInput,
   EarnRuntimeContext,
+  EarnWithdrawalApprovalAction,
+  EarnWithdrawalApprovalProvider,
+  EarnWithdrawalApprovalRequest,
+  EarnWithdrawalApprovalRequestInput,
+  EarnWithdrawalApprovalVoteInput,
+  EarnWithdrawalApprovalVoteResult,
   ProviderStrategySnapshot,
 } from "../../types";
 import { StubEarnClient } from "../stub";
@@ -46,8 +53,44 @@ import { StubEarnClient } from "../stub";
 const GROUND_SANDBOX_API_URL = "https://sandbox.groundtech.co";
 const GROUND_PRODUCTION_API_URL = "https://production.groundtech.co";
 
-/** Solana rails per environment — the only chains SDP surfaces to Ground. */
+/**
+ * Solana rails per environment — the ONLY chains SDP surfaces to Ground, and
+ * this constant is the enforcement point: every wallet flow sends
+ * `config.chain` from here, never a caller-supplied chain. Ground confirmed
+ * (2026-08-05) that sandbox supports both `ethereum_sepolia` and
+ * `solana_devnet`; `solana_devnet` is the chain key for Solana flows in
+ * sandbox. SDP's product surface is Solana-only, so the other rails stay
+ * provider plumbing we never emit.
+ */
 const GROUND_SOLANA_CHAINS = { sandbox: "solana_devnet", production: "solana" } as const;
+
+/**
+ * Stablecoins Ground routes on its SOLANA rails — a GROUND constraint, not an
+ * SDP preference (their supported-chains doc: "Solana = USDC deposits and
+ * withdrawals only"; USDT rides Ethereum — mainnet in production, Sepolia in
+ * sandbox). A source outside this set can never be funded from or paid out to
+ * the Solana addresses SDP surfaces, so `listStrategies` keeps it out of the
+ * catalogue on every cluster, withdrawal preview/create refuse it before any
+ * network call (`assertSolanaRoutable` — Ground's own rejection is wire text
+ * partners can't act on), and the dashboard's withdraw-token whitelist
+ * mirrors this set (apps/sdp-web/src/app/dashboard/markets/earn/
+ * earn-withdraw-modal.tsx, `SOLANA_PAYOUT_TOKENS`).
+ */
+const GROUND_SOLANA_ROUTED_TOKENS: ReadonlySet<string> = new Set(["usdc"]);
+
+/**
+ * Fail fast on a token Ground cannot route on Solana rails. Gates on a static
+ * provider constraint only — never availability or enablement — so it cannot
+ * trap funds a withdrawal could otherwise move (ADR 0002): Ground itself
+ * refuses these requests, just with provider wire text.
+ */
+function assertSolanaRoutable(token: EarnPortfolioToken): void {
+  if (!GROUND_SOLANA_ROUTED_TOKENS.has(token)) {
+    throw badRequest(
+      `Ground cannot pay out ${token.toUpperCase()} on Solana — Solana rails carry USDC only`
+    );
+  }
+}
 
 interface GroundConfig {
   baseUrl: string;
@@ -70,6 +113,29 @@ function readGroundConfig(ctx: EarnRuntimeContext): GroundConfig {
     headers: { Authorization: bearerAuthHeader(apiKey) },
     chain: GROUND_SOLANA_CHAINS[ctx.environment],
   };
+}
+
+/**
+ * Encode a provider reference for use as ONE URL path segment.
+ *
+ * Every request here carries the platform's Ground API key, and that key is
+ * account-wide — one Ground account serves every SDP org. So a reference that
+ * reaches the path unencoded is not a broken URL, it is a request-forgery
+ * primitive: the WHATWG URL parser resolves `..` segments, so an id of
+ * `../../wallets?` turns `/v2/turnkey/activities/<id>/vote` into
+ * `/v2/wallets?/vote` — a different, authenticated endpoint. Refs originate
+ * variously from the DB, from provider responses, and from request path
+ * params, so they are all treated as untrusted here, at the one layer that
+ * builds the URL. Encoding (not format validation) is the fix: provider id
+ * formats drift, while percent-encoding is correct for any opaque id and
+ * leaves UUID-shaped refs byte-identical.
+ */
+function pathSegment(reference: string, name: string): string {
+  const trimmed = reference.trim();
+  if (!trimmed) {
+    throw badRequest(`Ground ${name} is required`);
+  }
+  return encodeURIComponent(trimmed);
 }
 
 // --- Ground wire shapes (docs.groundtech.co, verified 2026-08-03) ---
@@ -167,6 +233,21 @@ interface GroundDeposit {
   completedAt?: string | null;
 }
 
+interface GroundPayoutLegStep {
+  state: string;
+}
+
+/**
+ * Payout legs settle independently and each can gate on its own customer
+ * approval (docs: get-withdrawal). Only the statuses matter to SDP — the
+ * withdrawal-level `pending_approval` derivation below reads them; every other
+ * leg field (labels, tx detail) stays provider plumbing we do not map.
+ */
+interface GroundPayoutLeg {
+  status: string;
+  steps?: GroundPayoutLegStep[] | null;
+}
+
 interface GroundWithdrawal {
   id: string;
   amountRequestedUsd?: string | null;
@@ -176,6 +257,7 @@ interface GroundWithdrawal {
   destinationToken?: string | null;
   status: string;
   failureReason?: string | null;
+  payoutLegs?: GroundPayoutLeg[] | null;
   createdAt: string;
   completedAt?: string | null;
 }
@@ -190,6 +272,49 @@ interface GroundWithdrawalPreview {
     typicalMinDuration: string;
     typicalMaxDuration: string;
   } | null;
+}
+
+/**
+ * Ground's customer-approval model, empirically resolved 2026-08-05 (sandbox)
+ * plus docs.groundtech.co: approval is NOT the default — a withdrawal on an
+ * org without an approval policy pays out with no Turnkey activity ever
+ * appearing. When a policy IS engaged (production withdrawal limits answer
+ * `403 withdrawal_policy_required`), the affected payout leg parks in
+ * `pending_customer_approval` and a pending activity shows up here. The stamp
+ * comes from the customer-held Turnkey signer, outside Ground and outside SDP:
+ * these endpoints only carry payloads and stamps, never keys.
+ */
+interface GroundTurnkeyActivity {
+  turnkeyActivityId: string;
+  /** Turnkey vocabulary, e.g. ACTIVITY_STATUS_CONSENSUS_NEEDED — kept open. */
+  status: string;
+  activityKind?: string | null;
+  withdrawalId?: string | null;
+  withdrawalLegId?: string | null;
+  portfolioWalletId?: string | null;
+  destinationChain?: string | null;
+  destinationToken?: string | null;
+  destinationAddress?: string | null;
+  displayAmountNativeUnits?: string | null;
+  firstSeenAt?: string;
+}
+
+interface GroundTurnkeyApprovalRequest {
+  activityId: string;
+  action: EarnWithdrawalApprovalAction;
+  turnkeyRequest: Record<string, unknown>;
+  /** JSON string form of turnkeyRequest — the exact bytes the signer stamps. */
+  stampPayload: string;
+}
+
+interface GroundTurnkeyVoteResult {
+  action: EarnWithdrawalApprovalAction;
+  approved?: boolean;
+  rejected?: boolean;
+  alreadyCompleted?: boolean;
+  alreadyTerminal?: boolean;
+  status?: string;
+  resultStatus?: string | null;
 }
 
 // --- Normalization helpers ---
@@ -426,10 +551,28 @@ function mapDeposit(deposit: GroundDeposit): EarnPortfolioDeposit {
   };
 }
 
+/**
+ * Ground never reports approval-parking at the withdrawal level: the top-level
+ * status stays `processing` while the affected payout leg (or a step inside
+ * it) sits in `pending_customer_approval` awaiting the customer's Turnkey
+ * stamp. Read both levels — the docs put the state in each enum.
+ */
+function withdrawalAwaitsApproval(withdrawal: GroundWithdrawal): boolean {
+  return (withdrawal.payoutLegs ?? []).some(
+    (leg) =>
+      leg.status === "pending_customer_approval" ||
+      (leg.steps ?? []).some((step) => step.state === "pending_customer_approval")
+  );
+}
+
 function mapWithdrawal(withdrawal: GroundWithdrawal): EarnPortfolioWithdrawal {
+  const status = narrow(EARN_PORTFOLIO_WITHDRAWAL_STATUSES, withdrawal.status) ?? "processing";
   return {
     withdrawalRef: withdrawal.id,
-    status: narrow(EARN_PORTFOLIO_WITHDRAWAL_STATUSES, withdrawal.status) ?? "processing",
+    // Fold a parked leg up into the distinct wire status, but never override
+    // a terminal status — leg states are history once the withdrawal settles.
+    status:
+      status === "processing" && withdrawalAwaitsApproval(withdrawal) ? "pending_approval" : status,
     amountRequestedUsd: withdrawal.amountRequestedUsd ?? undefined,
     amountPaidUsd: withdrawal.amountPaidUsd ?? undefined,
     feeUsd: withdrawal.feeUsd ?? undefined,
@@ -438,6 +581,22 @@ function mapWithdrawal(withdrawal: GroundWithdrawal): EarnPortfolioWithdrawal {
     failureReason: withdrawal.failureReason ?? undefined,
     createdAt: withdrawal.createdAt,
     completedAt: withdrawal.completedAt ?? undefined,
+  };
+}
+
+function mapTurnkeyActivity(activity: GroundTurnkeyActivity): EarnPendingWithdrawalApproval {
+  return {
+    approvalRef: activity.turnkeyActivityId,
+    providerStatus: activity.status,
+    kind: activity.activityKind ?? undefined,
+    withdrawalRef: activity.withdrawalId ?? undefined,
+    withdrawalLegRef: activity.withdrawalLegId ?? undefined,
+    providerWalletRef: activity.portfolioWalletId ?? undefined,
+    destinationChain: activity.destinationChain ?? undefined,
+    destinationToken: activity.destinationToken ?? undefined,
+    destinationAddress: activity.destinationAddress ?? undefined,
+    amountNativeUnits: activity.displayAmountNativeUnits ?? undefined,
+    firstSeenAt: activity.firstSeenAt ?? undefined,
   };
 }
 
@@ -455,18 +614,25 @@ function parseUsdAmount(value: string): number {
 /**
  * Ground vault-infra client (docs.groundtech.co). Implements the live
  * strategy catalogue plus the full portfolio-wallet capability against
- * Ground's Portfolio Wallets API. Environment picks everything: sandbox uses
+ * Ground's Portfolio Wallets API, and the withdrawal-approval capability
+ * against its Turnkey endpoints. Environment picks everything: sandbox uses
  * GROUND_SANDBOX_API_KEY / sandbox host / solana_devnet, production uses
  * GROUND_API_KEY / production host / solana. Per-strategy deposit/withdraw
  * quoting stays NOT_IMPLEMENTED from the stub base — Ground moves money at
  * the portfolio level, not per vault.
  */
-export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWalletProvider {
+export class GroundEarnClient
+  extends StubEarnClient
+  implements EarnPortfolioWalletProvider, EarnWithdrawalApprovalProvider
+{
   readonly provider = "ground" as const;
   readonly declaredSupport: EarnDeclaredStrategySupport = {
     sourceKinds: ["defi", "rwa"],
-    // Ground's depositToken enum is usdc|usdt only — no USDG.
-    depositTokens: ["USDC", "USDT"],
+    // Ground's depositToken enum is usdc|usdt only — no USDG — and USDT is
+    // further excluded because Ground routes Solana rails as USDC-only
+    // (GROUND_SOLANA_ROUTED_TOKENS): a USDT source never reaches SDP's
+    // catalogue in any environment, so declaring it would only mask drift.
+    depositTokens: ["USDC"],
   };
 
   override async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
@@ -493,6 +659,13 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
         // take deposits at all. Delisting is also how a paused source drains
         // from the depositable set (catalogue-sync re-asserts `active`).
         if (source.mode !== "active") {
+          continue;
+        }
+        // A token Ground cannot route on Solana is un-fundable and un-exitable
+        // through SDP's Solana-only surface on ANY cluster — never catalogue it
+        // (GROUND_SOLANA_ROUTED_TOKENS; this is Ground's rail support, not a
+        // cluster/mint question like the check below).
+        if (!GROUND_SOLANA_ROUTED_TOKENS.has(source.depositToken.toLowerCase())) {
           continue;
         }
         const symbol = source.depositToken.toUpperCase();
@@ -556,7 +729,7 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
     const config = readGroundConfig(ctx);
     const result = await providerFetchJson<GroundWalletYield>(
       this.provider,
-      `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/yield`,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/yield`,
       { method: "GET", headers: config.headers }
     );
     const positions = (result.positions ?? []).map((position) => ({
@@ -581,7 +754,7 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
     const config = readGroundConfig(ctx);
     const wallet = await providerFetchJson<GroundWallet>(
       this.provider,
-      `${config.baseUrl}/v2/wallets/${input.providerWalletRef}`,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}`,
       { method: "GET", headers: config.headers }
     );
     return {
@@ -610,11 +783,15 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
     const result = await providerFetchJson<
       { strategyAllocations: GroundStrategyAllocations },
       { requestId: string; allocations: EarnPortfolioAllocationInput }
-    >(this.provider, `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/strategy`, {
-      method: "PATCH",
-      headers: config.headers,
-      body: { requestId: input.requestId ?? crypto.randomUUID(), allocations: input.allocations },
-    });
+    >(
+      this.provider,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/strategy`,
+      {
+        method: "PATCH",
+        headers: config.headers,
+        body: { requestId: input.requestId ?? crypto.randomUUID(), allocations: input.allocations },
+      }
+    );
     return { allocations: mapTargetAllocations(result.strategyAllocations) };
   }
 
@@ -623,7 +800,10 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
     input: EarnPortfolioDepositsInput
   ): Promise<EarnPortfolioDepositsPage> {
     const config = readGroundConfig(ctx);
-    const url = new URL(`/v2/wallets/${input.providerWalletRef}/deposits`, config.baseUrl);
+    const url = new URL(
+      `/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/deposits`,
+      config.baseUrl
+    );
     if (input.cursor) {
       url.searchParams.set("cursor", input.cursor);
     }
@@ -639,19 +819,24 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
     ctx: EarnRuntimeContext,
     input: EarnPortfolioWithdrawalPreviewInput
   ): Promise<EarnPortfolioWithdrawalPreview> {
+    assertSolanaRoutable(input.token);
     const config = readGroundConfig(ctx);
     const preview = await providerFetchJson<
       GroundWithdrawalPreview,
       { destinationChain: string; token: string; amountUsd: number }
-    >(this.provider, `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/withdrawal-preview`, {
-      method: "POST",
-      headers: config.headers,
-      body: {
-        destinationChain: config.chain,
-        token: input.token,
-        amountUsd: parseUsdAmount(input.amountUsd),
-      },
-    });
+    >(
+      this.provider,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/withdrawal-preview`,
+      {
+        method: "POST",
+        headers: config.headers,
+        body: {
+          destinationChain: config.chain,
+          token: input.token,
+          amountUsd: parseUsdAmount(input.amountUsd),
+        },
+      }
+    );
     return {
       amountRequestedUsd: preview.amountRequestedUsd ?? undefined,
       feeUsd: preview.feeUsd,
@@ -665,6 +850,7 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
     ctx: EarnRuntimeContext,
     input: EarnPortfolioWithdrawalCreateInput
   ): Promise<EarnPortfolioWithdrawal> {
+    assertSolanaRoutable(input.token);
     const config = readGroundConfig(ctx);
     const withdrawal = await providerFetchJson<
       GroundWithdrawal,
@@ -675,19 +861,23 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
         amountUsd: number;
         destinationAddress: string;
       }
-    >(this.provider, `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/withdrawals`, {
-      method: "POST",
-      headers: config.headers,
-      body: {
-        // Caller-owned idempotency key: Ground replays the original response
-        // for a matching payload and 409s (request_id_conflict) on a mismatch.
-        requestId: input.requestId,
-        destinationChain: config.chain,
-        token: input.token,
-        amountUsd: parseUsdAmount(input.amountUsd),
-        destinationAddress: input.destinationAddress,
-      },
-    });
+    >(
+      this.provider,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/withdrawals`,
+      {
+        method: "POST",
+        headers: config.headers,
+        body: {
+          // Caller-owned idempotency key: Ground replays the original response
+          // for a matching payload and 409s (request_id_conflict) on a mismatch.
+          requestId: input.requestId,
+          destinationChain: config.chain,
+          token: input.token,
+          amountUsd: parseUsdAmount(input.amountUsd),
+          destinationAddress: input.destinationAddress,
+        },
+      }
+    );
     return mapWithdrawal(withdrawal);
   }
 
@@ -698,7 +888,7 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
     const config = readGroundConfig(ctx);
     const withdrawal = await providerFetchJson<GroundWithdrawal>(
       this.provider,
-      `${config.baseUrl}/v2/wallets/${input.providerWalletRef}/withdrawals/${input.withdrawalRef}`,
+      `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/withdrawals/${pathSegment(input.withdrawalRef, "withdrawal reference")}`,
       { method: "GET", headers: config.headers }
     );
     return mapWithdrawal(withdrawal);
@@ -718,5 +908,77 @@ export class GroundEarnClient extends StubEarnClient implements EarnPortfolioWal
       body: { address: input.address, chain: config.chain, label: input.label },
     });
     return { entryRef: result.entry };
+  }
+
+  async listPendingWithdrawalApprovals(
+    ctx: EarnRuntimeContext
+  ): Promise<EarnPendingWithdrawalApproval[]> {
+    const config = readGroundConfig(ctx);
+    const result = await providerFetchJson<{ activities: GroundTurnkeyActivity[] }>(
+      this.provider,
+      `${config.baseUrl}/v2/turnkey/activities/pending`,
+      { method: "GET", headers: config.headers }
+    );
+    return result.activities.map(mapTurnkeyActivity);
+  }
+
+  async createWithdrawalApprovalRequest(
+    ctx: EarnRuntimeContext,
+    input: EarnWithdrawalApprovalRequestInput
+  ): Promise<EarnWithdrawalApprovalRequest> {
+    const config = readGroundConfig(ctx);
+    const result = await providerFetchJson<
+      GroundTurnkeyApprovalRequest,
+      { activityId: string; action: EarnWithdrawalApprovalAction }
+    >(this.provider, `${config.baseUrl}/v2/turnkey/activity-approval-request`, {
+      method: "POST",
+      headers: config.headers,
+      body: { activityId: input.approvalRef, action: input.action },
+    });
+    return {
+      approvalRef: result.activityId,
+      action: result.action,
+      // stampPayload verbatim: the signer must stamp these exact bytes, so
+      // this client never re-serializes turnkeyRequest into a payload itself.
+      signingPayload: result.stampPayload,
+      providerRequest: result.turnkeyRequest,
+    };
+  }
+
+  async submitWithdrawalApprovalVote(
+    ctx: EarnRuntimeContext,
+    input: EarnWithdrawalApprovalVoteInput
+  ): Promise<EarnWithdrawalApprovalVoteResult> {
+    const config = readGroundConfig(ctx);
+    const customerApprovalStamp =
+      typeof input.stamp === "string"
+        ? input.stamp
+        : { stampHeaderName: input.stamp.headerName, stampHeaderValue: input.stamp.headerValue };
+    const result = await providerFetchJson<
+      GroundTurnkeyVoteResult,
+      {
+        action: EarnWithdrawalApprovalAction;
+        customerApprovalStamp: typeof customerApprovalStamp;
+        turnkeyRequest: Record<string, unknown>;
+      }
+    >(
+      this.provider,
+      `${config.baseUrl}/v2/turnkey/activities/${pathSegment(input.approvalRef, "approval reference")}/vote`,
+      {
+        method: "POST",
+        headers: config.headers,
+        body: {
+          action: input.action,
+          customerApprovalStamp,
+          turnkeyRequest: input.providerRequest,
+        },
+      }
+    );
+    return {
+      action: input.action,
+      applied: input.action === "approve" ? result.approved === true : result.rejected === true,
+      alreadyResolved: result.alreadyCompleted === true || result.alreadyTerminal === true,
+      providerStatus: result.resultStatus ?? result.status ?? undefined,
+    };
   }
 }

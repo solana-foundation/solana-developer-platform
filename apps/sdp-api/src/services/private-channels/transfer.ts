@@ -46,6 +46,8 @@ export interface CreateChannelTransferInput {
   organizationId: string;
   projectId: string;
   channelId: string;
+  /** SDP user initiating the transfer; copied onto every activity event. */
+  sdpUserId: string;
   /** The already-resolved SDP custody wallet selected by the acting user. */
   wallet: CustodyWallet;
   /**
@@ -305,7 +307,8 @@ export async function createChannelTransfer(
       env,
       failed,
       PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_FAILED,
-      PRIVATE_CHANNEL_EVENT_STATUSES.FAILED
+      PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
+      input.sdpUserId
     );
     return mapPrivateChannelTransferRow(failed);
   };
@@ -339,7 +342,8 @@ export async function createChannelTransfer(
     env,
     latest,
     PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
-    PRIVATE_CHANNEL_EVENT_STATUSES.PENDING
+    PRIVATE_CHANNEL_EVENT_STATUSES.PENDING,
+    input.sdpUserId
   );
 
   const settled = await confirmAndPersistTransfer(env, repo, {
@@ -355,14 +359,16 @@ export async function createChannelTransfer(
         env,
         latest,
         PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_CONFIRMED,
-        PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED
+        PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED,
+        input.sdpUserId
       );
     } else if (latest.status === "failed") {
       await emitTransferEvent(
         env,
         latest,
         PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_FAILED,
-        PRIVATE_CHANNEL_EVENT_STATUSES.FAILED
+        PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
+        input.sdpUserId
       );
     }
   }
