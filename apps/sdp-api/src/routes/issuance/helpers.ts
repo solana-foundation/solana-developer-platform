@@ -1,6 +1,6 @@
 import type { TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { type DatabaseClient, getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { createMosaicService, type MosaicFeePayment } from "@/services/issuance/mosaic";
@@ -27,8 +27,10 @@ export const requireProjectScope = (c: AppContext) => {
  * The only tenant-facing TokenService construction path. Its scope comes from
  * authenticated middleware state, never request-controlled headers or bodies.
  */
-export const getTenantTokenService = (c: AppContext): TokenService =>
-  new TokenService(getDb(c.env), getRequestTenantScope(c));
+export const getTenantTokenService = (
+  c: AppContext,
+  db: DatabaseClient = getDb(c.env)
+): TokenService => new TokenService(db, getRequestTenantScope(c));
 
 export const createIssuanceMosaicService = (
   c: AppContext,
