@@ -18,6 +18,10 @@ import {
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
+import {
+  APPROVED_WALLET_OPERATIONS_CRON,
+  runApprovedWalletOperationRecovery,
+} from "./approved-wallet-operations";
 import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSync } from "./earn-catalogue-sync";
 import { PENDING_DEPOSITS_CRON, runPendingDepositsReconciliation } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
@@ -74,6 +78,19 @@ export function startCron(deps: CronDeps): CronHandle | null {
   let stopping = false;
 
   const tasks: ScheduledTask[] = [];
+
+  tasks.push(
+    schedule(APPROVED_WALLET_OPERATIONS_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runApprovedWalletOperationRecovery({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
 
   tasks.push(
     schedule(PENDING_TRANSFERS_CRON, () => {

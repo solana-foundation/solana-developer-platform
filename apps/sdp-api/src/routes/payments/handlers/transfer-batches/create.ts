@@ -5,9 +5,15 @@ import type {
   PaymentTransferBatchRow,
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
-import { badRequest, internalError } from "@/lib/errors";
+import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
+import { AppError, badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
+import {
+  approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
+  runApprovedWalletOperationEffectTransaction,
+} from "@/services/policy/approved-operation-replay";
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../../context";
 import { createTransferBatchSchema } from "../../schemas";
@@ -20,6 +26,56 @@ import {
   chunkInstructionGroups,
   DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
 } from "./transaction";
+
+type TransferBatchResponse = Awaited<ReturnType<typeof buildTransferBatchResponse>>;
+
+async function assertApprovedBatchReplayCompleted(
+  c: AppContext,
+  response: TransferBatchResponse
+): Promise<void> {
+  if (!approvedWalletOperationId(c)) {
+    return;
+  }
+
+  const transfersById = new Map(
+    response.transfers.map((transfer) => [transfer.id, transfer] as const)
+  );
+  const incomplete =
+    response.batch.status === "pending" ||
+    response.recipients.length !== response.batch.recipientCount ||
+    response.recipients.some((recipient) => {
+      if (recipient.status === "pending") {
+        return true;
+      }
+      if (recipient.status !== "processing" && recipient.status !== "confirmed") {
+        return false;
+      }
+      return !recipient.transferId || !transfersById.get(recipient.transferId)?.signature;
+    });
+  if (!incomplete) {
+    return;
+  }
+
+  // The atomic creation path cannot expose a batch before its approval fence.
+  // Fence legacy/inconsistent state before failing so recovery cannot convert
+  // a stranded batch into a successful approved operation.
+  await beginApprovedWalletOperationEffect(c);
+  throw new AppError(
+    "CONFLICT",
+    "Approved transfer batch is incomplete and requires manual reconciliation"
+  );
+}
+
+async function respondToTransferBatchReplay(
+  c: AppContext,
+  batch: PaymentTransferBatchRow,
+  organizationId: string,
+  projectId: string
+) {
+  const response = await buildTransferBatchResponse(c, batch, organizationId, projectId);
+  await assertApprovedBatchReplayCompleted(c, response);
+  return success(c, response);
+}
 
 /**
  * POST /transfer-batches — creates the batch aggregate, submits all chunks
@@ -75,14 +131,11 @@ export async function createTransferBatch(c: AppContext) {
       idempotencyFingerprint
     );
     if (replay) {
-      return success(
+      return respondToTransferBatchReplay(
         c,
-        await buildTransferBatchResponse(
-          c,
-          replay,
-          resolved.scope.auth.organizationId,
-          resolved.projectId
-        )
+        replay,
+        resolved.scope.auth.organizationId,
+        resolved.projectId
       );
     }
   }
@@ -121,35 +174,37 @@ export async function createTransferBatch(c: AppContext) {
   let batch: PaymentTransferBatchRow;
   let recipientRows: PaymentTransferRecipientRow[];
   try {
-    const created = await batchRepository.createTransferBatchWithRecipients({
-      batch: {
-        organizationId: resolved.scope.auth.organizationId,
-        projectId: resolved.projectId,
-        externalId: parsed.data.externalId ?? null,
-        sourceWalletId: resolved.sourceWallet.walletId,
-        sourceAddress: resolved.sourceAddress,
-        token: resolved.tokenContext.token,
-        status: "processing",
-        totalAmount: resolved.totalAmount,
-        recipientCount: resolved.recipients.length,
-        transactionCount: chunks.length,
-        options: parsed.data.options ?? {},
-        initiatedByKeyId: resolved.scope.auth.id,
-        idempotencyKey,
-        idempotencyFingerprint,
-      },
-      recipients: resolved.recipients.map((recipient) => ({
-        organizationId: resolved.scope.auth.organizationId,
-        projectId: resolved.projectId,
-        externalId: recipient.externalId,
-        counterpartyId: recipient.counterpartyId,
-        counterpartyAccountId: recipient.counterpartyAccountId,
-        destinationAddress: recipient.destinationAddress,
-        amount: recipient.amount,
-        status: "pending",
-        error: null,
-      })),
-    });
+    const created = await runApprovedWalletOperationEffectTransaction(c, (db) =>
+      createPostgresPaymentTransferBatchesRepository(db).createTransferBatchWithRecipients({
+        batch: {
+          organizationId: resolved.scope.auth.organizationId,
+          projectId: resolved.projectId,
+          externalId: parsed.data.externalId ?? null,
+          sourceWalletId: resolved.sourceWallet.walletId,
+          sourceAddress: resolved.sourceAddress,
+          token: resolved.tokenContext.token,
+          status: "processing",
+          totalAmount: resolved.totalAmount,
+          recipientCount: resolved.recipients.length,
+          transactionCount: chunks.length,
+          options: parsed.data.options ?? {},
+          initiatedByKeyId: resolved.scope.auth.id,
+          idempotencyKey,
+          idempotencyFingerprint,
+        },
+        recipients: resolved.recipients.map((recipient) => ({
+          organizationId: resolved.scope.auth.organizationId,
+          projectId: resolved.projectId,
+          externalId: recipient.externalId,
+          counterpartyId: recipient.counterpartyId,
+          counterpartyAccountId: recipient.counterpartyAccountId,
+          destinationAddress: recipient.destinationAddress,
+          amount: recipient.amount,
+          status: "pending",
+          error: null,
+        })),
+      })
+    );
     batch = created.batch;
     recipientRows = created.recipients;
   } catch (error) {
@@ -162,14 +217,11 @@ export async function createTransferBatch(c: AppContext) {
         idempotencyFingerprint
       );
       if (replay) {
-        return success(
+        return respondToTransferBatchReplay(
           c,
-          await buildTransferBatchResponse(
-            c,
-            replay,
-            resolved.scope.auth.organizationId,
-            resolved.projectId
-          )
+          replay,
+          resolved.scope.auth.organizationId,
+          resolved.projectId
         );
       }
     }

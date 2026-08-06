@@ -1004,7 +1004,9 @@
       "filterWallet": "Wallet",
       "filterCounterparty": "Counterparty",
       "filterProvider": "Provider",
-      "filterAsset": "Asset"
+      "filterAsset": "Asset",
+      "noAssetMatchesDescription": "Balances are read from the chain, while this table lists transfers SDP recorded. A token funded outside SDP shows a balance with no transfers here.",
+      "allAssets": "All assets"
     },
     "requests": {
       "loadFailed": "Unable to load payment requests",
