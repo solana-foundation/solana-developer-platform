@@ -250,6 +250,16 @@ describe("internal custody connections", () => {
     // Infinity survives `|| 0` and must not reach the SQL OFFSET.
     const infinite = await listConnections("?limit=Infinity&offset=1e309");
     expect(infinite.pagination).toEqual({ limit: 50, offset: 0, total: 3 });
+
+    // A finite offset past MAX_SAFE_INTEGER would overflow the bigint the SQL
+    // OFFSET binds to; the clamp turns it into an empty page instead of a 500.
+    const oversized = await listConnections("?offset=1e308");
+    expect(oversized.pagination).toEqual({
+      limit: 20,
+      offset: Number.MAX_SAFE_INTEGER,
+      total: 3,
+    });
+    expect(oversized.connections).toHaveLength(0);
   });
 
   it("does not leak another project's connections", async () => {
