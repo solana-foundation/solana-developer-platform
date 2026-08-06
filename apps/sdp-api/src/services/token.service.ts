@@ -1855,6 +1855,29 @@ export class TokenService {
       return;
     }
 
+    if (role === "metadata") {
+      const updated = await tx
+        .prepare(
+          `UPDATE issued_tokens
+           SET metadata_authority = ?, updated_at = ?
+           WHERE id = ?${tokenMutation.clause}`
+        )
+        .bind(newAuthority, now, tokenId, ...tokenMutation.values)
+        .run();
+      if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+
+      // Older rows may still carry the authority in the legacy extension. It
+      // takes precedence when tokens are mapped, so remove it atomically with
+      // the canonical column update instead of leaving a stale authority visible.
+      await tx
+        .prepare(
+          "DELETE FROM issued_token_extensions WHERE token_id = ? AND extension = 'metadataAuthority'"
+        )
+        .bind(tokenId)
+        .run();
+      return;
+    }
+
     if (role !== "permanentDelegate") return;
 
     const updated = await tx

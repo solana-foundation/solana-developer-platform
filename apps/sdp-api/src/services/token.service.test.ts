@@ -840,6 +840,64 @@ describe("TokenService", () => {
       ).toMatchObject({ authority_bookkeeping_applied_at: expect.any(String) });
     });
 
+    it("mirrors a settled metadata authority and removes a stale legacy override", async () => {
+      const tokenId = "tok_metadata_authority_settled";
+      const transactionId = "ttx_metadata_authority_settled";
+      const newAuthority = "metadata_authority_new";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issued_token_extensions (id, token_id, extension, config)
+           VALUES (?, ?, 'metadataAuthority', ?)`
+        )
+        .bind("tex_metadata_authority_legacy", tokenId, JSON.stringify("metadata_authority_old"))
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, slot,
+             initiated_by_key_id
+           ) VALUES (?, ?, ?, 'update_authority', 'confirmed', ?, 100, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ role: "metadata", newAuthority }),
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      await tokenService.applySettledTokenAuthority(
+        transactionId,
+        tokenId,
+        "metadata",
+        newAuthority
+      );
+
+      expect(
+        await db
+          .prepare("SELECT metadata_authority FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ metadata_authority: string | null }>()
+      ).toEqual({ metadata_authority: newAuthority });
+      expect(
+        await db
+          .prepare(
+            "SELECT config FROM issued_token_extensions WHERE token_id = ? AND extension = 'metadataAuthority'"
+          )
+          .bind(tokenId)
+          .first<{ config: string | null }>()
+      ).toBeNull();
+      await expect(
+        tokenService.getToken({
+          tokenId,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+        })
+      ).resolves.toMatchObject({ metadataAuthority: newAuthority });
+    });
+
     it("refuses a cap that a mint outran between the check and the write", async () => {
       await insertCappedToken("tok_cap_lost_race", "500000000", "1000000000");
       const originalPrepare = db.prepare.bind(db);
