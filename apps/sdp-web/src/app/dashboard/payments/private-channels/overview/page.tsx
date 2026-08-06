@@ -39,6 +39,7 @@ export default async function PrivateChannelsOverviewPage() {
   }
   const instance = overview.data?.instance ?? null;
   const instanceOverview = overview.data?.overview ?? null;
+  const isConnected = instance !== null;
   const defaultChannelName = channels.data.find((channel) => channel.isDefault)?.name ?? null;
 
   // Channel balances only exist for verified wallets — unverified reads would 403.
@@ -66,14 +67,18 @@ export default async function PrivateChannelsOverviewPage() {
         <PrivateBalancePanel
           channelBalances={channelBalances}
           walletsHref={PRIVATE_CHANNELS_WALLETS_PATH}
+          connected={isConnected}
         />
         <AllowedTokensPanel instance={instance} />
       </div>
 
-      <RecentActivityPanel
-        initialEvents={events.data.events}
-        channelNames={channelNameById(channels.data)}
-      />
+      {/* Activity only exists once an instance is connected — hide the panel until then. */}
+      {isConnected ? (
+        <RecentActivityPanel
+          initialEvents={events.data.events}
+          channelNames={channelNameById(channels.data)}
+        />
+      ) : null}
     </div>
   );
 }

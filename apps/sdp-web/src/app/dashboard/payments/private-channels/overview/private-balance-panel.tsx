@@ -10,9 +10,11 @@ interface Props {
   channelBalances: Record<string, WalletChannelBalance>;
   /** The Wallets page — reached from the footer link (there is no Wallets tab). */
   walletsHref: string;
+  /** Whether an instance is connected — the Wallets link is only shown when it is. */
+  connected: boolean;
 }
 
-export async function PrivateBalancePanel({ channelBalances, walletsHref }: Props) {
+export async function PrivateBalancePanel({ channelBalances, walletsHref, connected }: Props) {
   const t = await getTranslations();
   const balances = aggregateBalancesByMint(channelBalances);
 
@@ -44,11 +46,13 @@ export async function PrivateBalancePanel({ channelBalances, walletsHref }: Prop
           </ul>
         )}
       </CardContent>
-      <CardFooter>
-        <Link href={walletsHref} className="text-sm text-info hover:underline">
-          {t("DashboardPrivateChannels.overview.viewWallets")}
-        </Link>
-      </CardFooter>
+      {connected ? (
+        <CardFooter>
+          <Link href={walletsHref} className="text-sm text-info hover:underline">
+            {t("DashboardPrivateChannels.overview.viewWallets")}
+          </Link>
+        </CardFooter>
+      ) : null}
     </Card>
   );
 }

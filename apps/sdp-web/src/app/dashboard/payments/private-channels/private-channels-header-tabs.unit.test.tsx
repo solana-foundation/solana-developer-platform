@@ -37,4 +37,14 @@ describe("PrivateChannelsHeaderTabs", () => {
       "Withdraw",
     ]);
   });
+
+  it("shows only the Overview tab when no instance is connected", () => {
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <PrivateChannelsHeaderTabs isConnected={false} />
+      </I18nProvider>
+    );
+
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Overview"]);
+  });
 });

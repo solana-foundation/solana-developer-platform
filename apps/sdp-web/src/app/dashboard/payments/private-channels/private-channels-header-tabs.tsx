@@ -55,8 +55,10 @@ export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
   const pathname = usePathname();
   const t = useTranslations();
 
+  // When no instance is connected only Overview is visible; still render the strip so the
+  // sub-views (e.g. Instance) keep a consistent header and a way back to the Overview.
   const visible = TABS.filter((tab) => isConnected || !tab.requiresActive);
-  if (visible.length < 2) return null;
+  if (visible.length === 0) return null;
 
   const activeId = visible.find((tab) => pathname.startsWith(tab.href))?.id ?? visible[0].id;
 
