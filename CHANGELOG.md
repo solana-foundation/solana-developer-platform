@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.56.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.55.0...v0.56.0) (2026-08-06)
+
+### Features
+
+* **web:** give every token holding a page to open ([#1091](https://github.com/solana-foundation/solana-developer-platform/pull/1091)) ([e9bd859](https://github.com/solana-foundation/solana-developer-platform/commit/e9bd859f48e4fd2f411cd2da54f1195f667d77a3))
+* **web:** end onboarding by showing what setup created ([#1123](https://github.com/solana-foundation/solana-developer-platform/pull/1123)) ([d97b1c3](https://github.com/solana-foundation/solana-developer-platform/commit/d97b1c339768b9f77ddbaea648cb65a515b02cd0))
+
+### Bug Fixes
+
+* **policy:** execute approved wallet operations ([#1096](https://github.com/solana-foundation/solana-developer-platform/pull/1096)) ([781e229](https://github.com/solana-foundation/solana-developer-platform/commit/781e229df314e78ff9f4f11e629b7bca8fa174c7))
+* **web:** show token symbols in the transactions asset filter ([#1114](https://github.com/solana-foundation/solana-developer-platform/pull/1114)) ([5436c58](https://github.com/solana-foundation/solana-developer-platform/commit/5436c58e37ddc68bcf63b41974d80e6cf925f7fd))
+
 ## [0.55.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.54.0...v0.55.0) (2026-08-06)
 
 ### Features
