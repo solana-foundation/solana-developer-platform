@@ -239,6 +239,8 @@ interface GroundDeposit {
   id: string;
   amount: string;
   token: string;
+  /** Rail the deposit arrived on — gates whether its identifiers surface. */
+  chain?: string | null;
   fromAddress?: string | null;
   txHash?: string | null;
   status?: string | null;
@@ -645,7 +647,16 @@ function mapTargetAllocations(
   return mapped;
 }
 
-function mapDeposit(deposit: GroundDeposit): EarnPortfolioDeposit {
+function mapDeposit(deposit: GroundDeposit, solanaChain: string): EarnPortfolioDeposit {
+  // Same rule as position labels and the deposit-address selection, applied to
+  // deposit provenance: the VALUE always surfaces, another rail's identifiers
+  // never do (ADR 0002 invariant 5). A shared Ground wallet is fundable on
+  // non-Solana rails (the sandbox USDT faucet is Sepolia-only), and passing
+  // those rows' fields through verbatim put an Ethereum 0x address in the
+  // dashboard and an Ethereum tx hash in a field named transactionSignature.
+  // Gate on the deposit's own rail; an absent chain withholds the identifiers
+  // rather than guessing — the row, amount, token, and status still render.
+  const onSolanaRail = deposit.chain === solanaChain;
   return {
     id: deposit.id,
     amountUsd: deposit.amount,
@@ -653,8 +664,8 @@ function mapDeposit(deposit: GroundDeposit): EarnPortfolioDeposit {
     // is drift; surface it as usdc rather than dropping the funds from view.
     token: narrow(EARN_PORTFOLIO_TOKENS, deposit.token) ?? "usdc",
     status: narrow(EARN_PORTFOLIO_DEPOSIT_STATUSES, deposit.status) ?? "processing",
-    fromAddress: deposit.fromAddress ?? undefined,
-    transactionSignature: deposit.txHash ?? undefined,
+    fromAddress: onSolanaRail ? (deposit.fromAddress ?? undefined) : undefined,
+    transactionSignature: onSolanaRail ? (deposit.txHash ?? undefined) : undefined,
     createdAt: deposit.createdAt,
     completedAt: deposit.completedAt ?? undefined,
   };
@@ -891,7 +902,10 @@ export class GroundEarnClient
       url.toString(),
       { method: "GET", headers: config.headers }
     );
-    return { deposits: page.data.map(mapDeposit), nextCursor: page.nextCursor };
+    return {
+      deposits: page.data.map((deposit) => mapDeposit(deposit, config.chain)),
+      nextCursor: page.nextCursor,
+    };
   }
 
   async previewPortfolioWithdrawal(
