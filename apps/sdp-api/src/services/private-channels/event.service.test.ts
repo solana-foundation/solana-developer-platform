@@ -4,7 +4,7 @@ import {
   PRIVATE_CHANNEL_EVENT_TYPES,
 } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
-import { rootLogger } from "@/runtime/logger";
+import { getLogger } from "@/runtime/logger";
 import type { PrivateChannelEventRecord, PrivateChannelEventSink } from "./event.service";
 import { PrivateChannelEventService } from "./event.service";
 
@@ -24,9 +24,11 @@ function baseInput(overrides: Record<string, unknown> = {}) {
 describe("PrivateChannelEventService", () => {
   it("builds a full record and fans out to all sinks", async () => {
     const seen: string[] = [];
+    const captured: { event: PrivateChannelEventRecord | null } = { event: null };
     const sinkA: PrivateChannelEventSink = {
       name: "a",
       handle(event) {
+        captured.event = event;
         seen.push(`a:${event.id}:${event.type}`);
         expect(event.id).toMatch(/^pce_/);
         expect(event.channelId).toBeNull();
@@ -64,7 +66,7 @@ describe("PrivateChannelEventService", () => {
         ran.push("ok");
       },
     };
-    const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(getLogger(), "error").mockImplementation(() => {});
 
     const service = new PrivateChannelEventService([throwing, ok]);
     await expect(service.emit(baseInput())).resolves.toBeUndefined();
