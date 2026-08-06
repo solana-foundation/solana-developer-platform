@@ -451,6 +451,18 @@ export function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     };
   }
+  if (pathname === "/dashboard/tokens") {
+    // Reached from the home allocation card, so it carries a way back rather than
+    // relying on the sidebar, which does not list it.
+    return {
+      title: t("Shared.dashboardShell.holdings"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard",
+        label: t("Shared.dashboardShell.backToHome"),
+      },
+    };
+  }
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: t("Shared.dashboardShell.wallets"),
