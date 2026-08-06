@@ -45,7 +45,9 @@ internalCustody.get("/connections", async (c) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const limit = Math.min(Math.max(Math.trunc(Number(c.req.query("limit") ?? 20) || 20), 1), 50);
-  const offset = Math.max(Math.trunc(Number(c.req.query("offset") ?? 0) || 0), 0);
+  // `|| 0` catches NaN but not Infinity, which must not reach the SQL OFFSET.
+  const rawOffset = Number(c.req.query("offset") ?? 0);
+  const offset = Number.isFinite(rawOffset) ? Math.max(Math.trunc(rawOffset), 0) : 0;
 
   const store = new ProviderCredentialStore(getDb(c.env));
   const { connections, total } = await store.listProjectConnectionsPage(

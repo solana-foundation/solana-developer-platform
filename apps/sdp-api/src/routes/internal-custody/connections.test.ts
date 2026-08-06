@@ -246,6 +246,10 @@ describe("internal custody connections", () => {
     // Fractional values must be truncated before they reach PostgreSQL.
     const fractional = await listConnections("?limit=1.5&offset=1.9");
     expect(fractional.pagination).toEqual({ limit: 1, offset: 1, total: 3 });
+
+    // Infinity survives `|| 0` and must not reach the SQL OFFSET.
+    const infinite = await listConnections("?limit=Infinity&offset=1e309");
+    expect(infinite.pagination).toEqual({ limit: 50, offset: 0, total: 3 });
   });
 
   it("does not leak another project's connections", async () => {
