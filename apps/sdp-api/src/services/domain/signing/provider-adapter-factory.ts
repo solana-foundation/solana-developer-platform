@@ -50,6 +50,12 @@ type AdapterFactory<TParsed extends ProviderConfigRecord = ProviderConfigRecord>
   context: AdapterFactoryContext<TParsed>
 ) => Promise<SigningPort>;
 
+export interface PrivyCredentialAdapterInput {
+  appId: string;
+  appSecret: string;
+  defaultWalletId: string;
+}
+
 class LifecycleOnlyAdapter implements SigningPort {
   constructor(public readonly providerId: string) {}
 
@@ -297,4 +303,26 @@ export async function createAdapterFromEncryptedConfig(
   // handler-less promise as an unhandled rejection — dropping the await fails
   // shared-module test runs and would log rejection noise in production.
   return await factory({ env, orgId, record, parsed, cipher });
+}
+
+export function createPrivyAdapterFromCredential(
+  env: Env,
+  input: PrivyCredentialAdapterInput
+): SigningPort {
+  if (!input.appId || !input.appSecret || !input.defaultWalletId) {
+    throw new SigningError(
+      "Privy credential or default wallet is unavailable",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  return new KeychainPrivyAdapter({
+    appId: input.appId,
+    appSecret: input.appSecret,
+    defaultWalletId: input.defaultWalletId,
+    apiBaseUrl: env.PRIVY_API_BASE_URL,
+    requestDelayMs: parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS, {
+      envVarName: "PRIVY_REQUEST_DELAY_MS",
+    }),
+  });
 }

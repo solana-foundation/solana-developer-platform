@@ -194,19 +194,32 @@ describe("legacy Privy setup admission", () => {
   it.each([
     "initialize",
     "switch",
-  ] as const)("returns the stored-connection conflict from /%s even after flag rollback", async (path) => {
+  ] as const)("ignores stored Connection state on /%s after flag rollback", async (path) => {
     env.PRIVY_BYOK_ENABLED = "false";
+    env.PRIVY_APP_ID = "legacy-app-id";
+    env.PRIVY_APP_SECRET = "legacy-app-secret";
+    env.CUSTODY_ENCRYPTION_KEY = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "wallet_rollback",
+      address: "LegacyRollbackPublicKey",
+    });
     await seedBlockingConnection();
 
     const response = await request(path);
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(201);
     expect(await response.json()).toMatchObject({
-      error: {
-        code: "CONFLICT",
-        message: "Privy custody setup already exists for this project",
+      data: {
+        walletId: "privy_wallet_rollback",
+        publicKey: "LegacyRollbackPublicKey",
       },
     });
+    expect(
+      await getDb(env)
+        .prepare("SELECT status FROM custody_connections WHERE id = ?")
+        .bind("cconn_privy_byok_admission")
+        .first()
+    ).toEqual({ status: "pending" });
   });
 
   it("preserves the initialize conflict for an active exact-project Config", async () => {
@@ -237,6 +250,7 @@ describe("legacy Privy setup admission", () => {
     env.PRIVY_APP_ID = "legacy-app-id";
     env.PRIVY_APP_SECRET = "legacy-app-secret";
     await seedLegacyConfig("active");
+    await seedBlockingConnection();
     await getDb(env)
       .prepare(
         `INSERT INTO custody_wallets (
