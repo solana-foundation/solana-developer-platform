@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
 }));
 
-vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({
   revalidatePath: mocks.revalidatePath,
 }));
@@ -99,18 +98,17 @@ describe("recheckPrivyCredentialAction", () => {
     });
   });
 
-  it.each([
-    [500],
-    [408],
-    [429],
-  ])("keeps a %i response re-checkable because the outcome is unknown", async (status) => {
-    client.fetch.mockRejectedValue(apiError(status, "try later"));
+  it.each([[500], [408], [429]])(
+    "keeps a %i response re-checkable because the outcome is unknown",
+    async (status) => {
+      client.fetch.mockRejectedValue(apiError(status, "try later"));
 
-    await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
-      status: "retry_unknown",
-      providerCredentialId: "pcred_test",
-    });
-  });
+      await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
+        status: "retry_unknown",
+        providerCredentialId: "pcred_test",
+      });
+    }
+  );
 
   it("keeps a transport failure re-checkable", async () => {
     client.fetch.mockRejectedValue(new Error("fetch failed"));
@@ -122,7 +120,7 @@ describe("recheckPrivyCredentialAction", () => {
   });
 });
 
-describe("submitPrivyCredentialAction", () => {
+describe("submitPrivyCredentialAction outcome classification", () => {
   const client = { fetch: vi.fn() };
 
   beforeEach(() => {
@@ -142,12 +140,20 @@ describe("submitPrivyCredentialAction", () => {
     expect(client.fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("surfaces a submit conflict as an error with the server's message", async () => {
-    client.fetch.mockRejectedValue(apiError(409, "An active custody setup already exists"));
+  it("treats any answered HTTP error as terminal, never as replayable", async () => {
+    client.fetch.mockRejectedValueOnce(apiError(409, "Privy custody setup already exists"));
 
+    // A definitive conflict must not enter the frozen-replay loop.
     await expect(submitPrivyCredentialAction(submitForm())).resolves.toEqual({
-      status: "error",
-      message: "An active custody setup already exists",
+      status: "failed",
+      message: "Privy custody setup already exists",
     });
+  });
+
+  it("keeps a response-less failure in the unknown, replayable state", async () => {
+    client.fetch.mockRejectedValueOnce(new Error("fetch failed: socket hang up"));
+
+    const result = await submitPrivyCredentialAction(submitForm());
+    expect(result.status).toBe("error");
   });
 });

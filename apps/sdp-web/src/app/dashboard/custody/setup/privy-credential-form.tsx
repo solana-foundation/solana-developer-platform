@@ -36,7 +36,14 @@ const FIELD_INPUT_CLASS =
  * - A `retry_unknown` outcome re-checks the same credential rather than
  *   resubmitting; the credential and secret are already stored server-side.
  */
-export function PrivyCredentialForm({ formId }: { formId: string }) {
+export function PrivyCredentialForm({
+  formId,
+  onRecoveryLockChange,
+}: {
+  formId: string;
+  /** True while leaving this form would strand a stored credential or key. */
+  onRecoveryLockChange?: (locked: boolean) => void;
+}) {
   const t = useTranslations();
   const router = useDashboardRouter();
   const [isPending, startTransition] = useTransition();
@@ -54,12 +61,16 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
     labelField && "defaultValue" in labelField ? (labelField.defaultValue ?? "") : "";
 
   const applyResult = (result: PrivyByokSubmitResult) => {
+    if (result.status === "success" || result.status === "failed") {
+      onRecoveryLockChange?.(false);
+    }
     if (result.status === "success") {
       router.refresh();
       router.push("/dashboard/wallets");
       return;
     }
     if (result.status === "retry_unknown") {
+      onRecoveryLockChange?.(true);
       setCheck({ kind: "retry_unknown", providerCredentialId: result.providerCredentialId });
       return;
     }
@@ -74,6 +85,7 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
     }
     // Transport-level uncertainty: the submission may have committed, so the
     // key is kept and the payload is frozen for a verbatim replay.
+    onRecoveryLockChange?.(true);
     setCheck({ kind: "submit_unknown", message: result.message, payload: lastPayloadRef.current });
   };
 
@@ -86,6 +98,9 @@ export function PrivyCredentialForm({ formId }: { formId: string }) {
     const formData = new FormData(form);
     formData.set("idempotencyKey", idempotencyKey);
     lastPayloadRef.current = formData;
+    // Locked from the moment the POST leaves: if it commits while the response
+    // is in flight, unmounting here would discard the only replay state.
+    onRecoveryLockChange?.(true);
     startTransition(async () => {
       applyResult(await submitPrivyCredentialAction(formData));
     });
