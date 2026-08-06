@@ -42,8 +42,13 @@ invariants.
 - `GET /program/deposits`, `POST /program/withdrawal-preview`,
   `POST /program/withdrawals`, `GET /program/withdrawals/:ref` — funding
   tracking + portfolio-level withdrawals (Solana destinations only).
-- `GET /positions|/movements` — per-strategy families (currently unused by the
-  portfolio flow; kept for per-strategy providers).
+- `GET /positions|/movements` — read `earn_positions`/`earn_movements`, tables
+  **nothing writes in V1**: their writer was the execution path, which the
+  portfolio-wallet model shipped without, so these serve permanently empty
+  ledgers. Live truth is the program surface (provider snapshot per request).
+  Do not wire writers here, and do not remove the routes, without PRO-1628 —
+  that decision (ledger vs live-only) lands as an ADR 0002 addendum; see the
+  "Ledger vs live" callout in docs/architecture/earn-v1-data-flow.md.
 
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 

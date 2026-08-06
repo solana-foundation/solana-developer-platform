@@ -57,16 +57,34 @@ flowchart LR
 |---|---|---|---|
 | Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) |
 | APY / NAV / TVL | `earn_nav_snapshots` (DB time series) | NAV cron ← provider `getNav` **and/or** on-chain share-price read via RPC relay (open decision below) | Cron cadence (e.g. 15m) |
-| Positions | `earn_positions` (DB ledger) | Written by execution path; **verified** against on-chain share-token balances via Helius DAS / RPC (reconciliation cron) | Ledger = immediate; reconcile = cron |
-| Deposits/withdrawals | `earn_movements` (DB ledger) | Execution endpoints write `pending`; settled via provider webhook (primary) + status-poll cron (backstop) — same ack-then-reconcile shape as ramps | Webhook ≈ real-time |
+| Positions | `earn_positions` (DB ledger) — **design only; no V1 writer, see callout** | Written by execution path; **verified** against on-chain share-token balances via Helius DAS / RPC (reconciliation cron) | Ledger = immediate; reconcile = cron |
+| Deposits/withdrawals | `earn_movements` (DB ledger) — **design only; no V1 writer, see callout** | Execution endpoints write `pending`; settled via provider webhook (primary) + status-poll cron (backstop) — same ack-then-reconcile shape as ramps | Webhook ≈ real-time |
 | Quotes (rate previews) | Live passthrough | Provider `quoteDeposit`/`quoteWithdrawal`, no DB | Real-time |
 | Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
+> **Ledger vs live — how it actually sits today (open, PRO-1628).** The two
+> ledger rows above are the execution-era *design*, and **nothing in V1 writes
+> them**. This is stranding, not ambiguity: the ledger's writer was the
+> execution endpoints, and the portfolio-wallet model shipped without them
+> (PRO-1634), so migration 0048's tables and the `/v1/earn/positions` +
+> `/v1/earn/movements` routes serve **permanently empty ledgers** a partner
+> could mistake for authoritative. The operative source of truth for anything
+> money-shaped is the provider, live: `GET /v1/earn/program` reads positions
+> and balances from the wallet snapshot per request, and withdrawals are
+> created and polled directly against the provider with no SDP row (which is
+> why the caller's idempotency key is the entire duplicate-defense on that
+> path). PRO-1628 settles it — either wire the ledger from observed movements
+> plus a reconcile cron, or stay live-only and remove/document the dead
+> surface — and the decision lands as an ADR 0002 addendum. Whichever way,
+> the provider remains the authority; a ledger would relay and reconcile
+> provider truth, never replace it.
+
 **No new indexer.** V1 needs no event-sourced chain indexer: catalogue and NAV
 come from provider APIs (optionally cross-checked on-chain), and position truth
-is SDP's own ledger reconciled against token balances the existing Helius DAS
-service can already read. If V2 needs richer on-chain history (per-block share
+is the live provider snapshot today — or, should the ledger option win
+PRO-1628, SDP's own ledger reconciled against token balances the existing
+Helius DAS service can already read. If V2 needs richer on-chain history (per-block share
 price, protocol events), that's the point to evaluate an indexer — not V1.
 
 ## Deposit execution (the real thing)
