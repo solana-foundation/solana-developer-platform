@@ -98,17 +98,18 @@ describe("recheckPrivyCredentialAction", () => {
     });
   });
 
-  it.each([[500], [408], [429]])(
-    "keeps a %i response re-checkable because the outcome is unknown",
-    async (status) => {
-      client.fetch.mockRejectedValue(apiError(status, "try later"));
+  it.each([
+    [500],
+    [408],
+    [429],
+  ])("keeps a %i response re-checkable because the outcome is unknown", async (status) => {
+    client.fetch.mockRejectedValue(apiError(status, "try later"));
 
-      await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
-        status: "retry_unknown",
-        providerCredentialId: "pcred_test",
-      });
-    }
-  );
+    await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
+      status: "retry_unknown",
+      providerCredentialId: "pcred_test",
+    });
+  });
 
   it("keeps a transport failure re-checkable", async () => {
     client.fetch.mockRejectedValue(new Error("fetch failed"));
