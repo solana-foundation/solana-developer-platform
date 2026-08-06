@@ -34,8 +34,11 @@ export default async function PrivateChannelsOverviewPage() {
   // shows the "Not connected" state and a connect link. Only a genuine load failure
   // (not the expected "no active instance" 404, which resolves to ok+null data) keeps
   // the user on an error screen.
-  if (!overview.ok) {
-    return <PrivateChannelsLoadError message={overview.error} />;
+  // Channels feed both the connected-instance summary and activity labels, so their
+  // fallback cannot produce a truthful partial page. Surface that failure just like
+  // the overview request instead of presenting missing channel data as an empty state.
+  if (!overview.ok || !channels.ok) {
+    return <PrivateChannelsLoadError message={overview.error ?? channels.error} />;
   }
   const instance = overview.data?.instance ?? null;
   const instanceOverview = overview.data?.overview ?? null;
