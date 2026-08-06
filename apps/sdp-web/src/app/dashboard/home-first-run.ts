@@ -26,18 +26,21 @@ export function resolveHomeHeroState(input: {
   totalBalance: number | null;
   balancesUnavailable: boolean;
 }): HomeHeroState {
-  if (input.walletCount === 0) {
-    return { kind: "first_run" };
-  }
-
-  // An organization that holds nothing and one whose balance feed just failed
-  // both arrive here with an empty `balances` — the page defaults the aggregate
-  // to `[]` when the request does not succeed. Only the first is genuinely
-  // empty, so a failure has to fall through to the hero that can report it.
-  // Treating it as `provisioned_empty` would tell an established organization to
-  // get started and silently drop the error it should be seeing.
+  // An organization that holds nothing and one whose feeds just failed arrive
+  // here looking identical — the page defaults the aggregate to `[]` and the
+  // wallet count to zero when the requests do not succeed. Only the first is
+  // genuinely empty, and the page suppresses this flag when the wallet request
+  // succeeded with an empty list, so an unavailable feed means neither the
+  // count nor the balances can be trusted. It has to win before the first-run
+  // check: classifying the failure as `first_run` or `provisioned_empty` would
+  // tell an established organization to get started and silently drop the
+  // error only the populated hero can report.
   if (input.balancesUnavailable) {
     return { kind: "populated", hasPricedValue: input.totalBalance !== null };
+  }
+
+  if (input.walletCount === 0) {
+    return { kind: "first_run" };
   }
 
   // Reuses the holdings rule the allocation card already applies to this same

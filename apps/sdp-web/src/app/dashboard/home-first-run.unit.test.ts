@@ -105,9 +105,11 @@ describe("resolveHomeHeroState", () => {
     expect(result).toEqual({ kind: "populated", hasPricedValue: false });
   });
 
-  it("still shows first run when there are no wallets at all, feed or no feed", () => {
-    // A failed feed says nothing about wallet count, which comes from its own
-    // request, so the genuinely empty organization keeps its own panel.
+  it("does not call a zero wallet count first run when the feeds failed", () => {
+    // When both requests fail the page defaults the wallet count to zero, so a
+    // zero here is indistinguishable from an established organization behind a
+    // down API. The page suppresses `balancesUnavailable` when the wallet
+    // request genuinely answered with an empty list, so the failure hero wins.
     const result = resolveHomeHeroState({
       walletCount: 0,
       balances: [],
@@ -115,6 +117,6 @@ describe("resolveHomeHeroState", () => {
       balancesUnavailable: true,
     });
 
-    expect(result).toEqual({ kind: "first_run" });
+    expect(result).toEqual({ kind: "populated", hasPricedValue: false });
   });
 });
