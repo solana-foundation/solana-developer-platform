@@ -677,6 +677,28 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       expect(a?.[1]?.requestId).not.toBe(b?.[1]?.requestId);
     });
 
+    it("refuses a withdrawal carrying both key sources", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      // The trap this guards: a retry layer that preserves headers while the
+      // request layer mints a fresh body id per attempt keeps Idempotency-Key
+      // stable and varies requestId. Any precedence rule would follow the
+      // varying one and book a SECOND withdrawal, so refuse the ambiguity.
+      const res = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody({ requestId: "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d" }),
+        { "Idempotency-Key": "checkout-9f2b" }
+      );
+
+      expect(res.status).toBe(400);
+      expect(createWithdrawal).not.toHaveBeenCalled();
+    });
+
     it("refuses a withdrawal carrying no idempotency key at all", async () => {
       await seedAuth();
       await seedProgramWallet();

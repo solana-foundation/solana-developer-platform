@@ -120,7 +120,7 @@ export function earnApiSnippets({
           // Required on this route, and the only thing that makes a retry
           // safe: the same value replays the original withdrawal instead of
           // paying out twice. Send the Idempotency-Key header instead if you
-          // prefer — one or the other, never neither.
+          // prefer — exactly one of the two, never both and never neither.
           requestId: "<uuid_v4>",
           amountUsd: "1000.00",
           token: withdrawalToken,

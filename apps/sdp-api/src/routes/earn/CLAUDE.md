@@ -12,9 +12,13 @@ invariants.
   refuses a request carrying none. The provider dedupes a withdrawal on the
   request id alone and SDP persists no row for one, so that id is the entire
   defence against a retried request paying out twice — a server-minted random
-  id is fresh per attempt and would *cause* the double-send. Accepts either
-  `requestId` (UUIDv4, verbatim) or the `Idempotency-Key` header, which
-  `deriveProviderRequestId` hashes into a stable id scoped by org+environment.
+  id is fresh per attempt and would *cause* the double-send. Accepts EXACTLY
+  one of `requestId` (UUIDv4) or the `Idempotency-Key` header — both and
+  neither are 400s, because no precedence rule can tell which of two sources a
+  caller's retry keeps stable, and following the wrong one pays out twice.
+  Whichever arrives, `deriveProviderRequestId` hashes it into a stable id
+  scoped by the program wallet, so two tenants sharing the provider account
+  cannot collide on the same pasted key.
   Ground validates the shape strictly (`400 requestId must be a valid UUID v4`
   on anything else, verified 2026-08-05), which is why that derivation stamps
   version 4 despite being derived rather than random.

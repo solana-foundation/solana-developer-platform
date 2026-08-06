@@ -348,13 +348,28 @@ export const previewEarnProgramWithdrawal = async (c: AppContext) => {
  * provider request on a retry, which is the only property they rely on. The
  * value SDP returns for tracking is the provider's own withdrawal ref, never
  * this id.
+ *
+ * Exactly ONE source is accepted, and sending both is refused rather than
+ * resolved by precedence. Two sources cannot be ranked safely: a client whose
+ * retry layer preserves headers while its request layer mints a fresh body id
+ * per attempt would keep `Idempotency-Key` stable and vary `requestId`, and
+ * any precedence rule silently follows the varying one — a second withdrawal,
+ * not a replay. That is the exact failure this function exists to prevent, so
+ * ambiguity fails loud at integration time instead of paying out twice in
+ * production. Neither source is likewise refused, for the same reason.
  */
 function resolveWithdrawalRequestId(
   c: AppContext,
   requestId: string | undefined,
   providerWalletRef: string
 ): string {
-  const callerKey = requestId ?? c.req.header(IDEMPOTENCY_KEY_HEADER);
+  const headerKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
+  if (requestId && headerKey) {
+    throw badRequest(
+      `Send requestId or the ${IDEMPOTENCY_KEY_HEADER} header, not both: SDP cannot tell which one your retry keeps stable, and following the wrong one would pay out twice.`
+    );
+  }
+  const callerKey = requestId ?? headerKey;
   if (!callerKey) {
     throw badRequest(
       `A withdrawal needs an idempotency key that is stable across retries: send requestId (UUIDv4) or the ${IDEMPOTENCY_KEY_HEADER} header. Without one, a retried request would pay out twice.`
