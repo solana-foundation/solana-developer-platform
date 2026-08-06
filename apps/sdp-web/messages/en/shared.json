@@ -213,7 +213,9 @@
     "backToPayments": "Back to payments",
     "backToApprovals": "Back to approvals",
     "members": "Members",
-    "allowlist": "Allowlist"
+    "allowlist": "Allowlist",
+    "holdings": "Holdings",
+    "backToHome": "Back to Home"
   },
   "validation": {
     "allowlistValueRequired": "Allowlist value is required",
@@ -277,6 +279,19 @@
     "paymentsActivityUnavailable": "Payments activity is unavailable right now.",
     "issuanceActivityUnavailable": "Issuance activity is unavailable right now.",
     "failedToLoadActivity": "Failed to load dashboard activity",
-    "balanceDataUnavailable": "Balance data is unavailable right now."
+    "balanceDataUnavailable": "Balance data is unavailable right now.",
+    "viewAllHoldings": "View all holdings",
+    "holdingsEmpty": "This organization holds no tokens yet.",
+    "holdingsToken": "Token",
+    "holdingsAmount": "Amount",
+    "holdingsValue": "Value",
+    "holdingsShare": "Share",
+    "holdingsNotPriced": "Not priced",
+    "holdingsShareUnmeasured": "—",
+    "holdingsShareBelowOne": "<1%",
+    "holdingsSharePercent": "{percent}%",
+    "holdingsUnavailable": "Holdings are unavailable right now.",
+    "holdingsCount": "{count} tokens",
+    "holdingsCountSingle": "1 token"
   }
 }
