@@ -562,6 +562,26 @@ describe("TokenService", () => {
       ).toMatchObject({ supply_bookkeeping_applied_at: expect.any(String) });
     });
 
+    it("does not reapply a historical burn marked by the migration", async () => {
+      const tokenId = "tok_cap_historical_burn";
+      const transactionId = "ttx_cap_historical_burn";
+      const appliedAt = "2026-08-05T00:00:00.000Z";
+      await insertCappedToken(tokenId, "1000000000", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params,
+             supply_bookkeeping_applied_at, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'burn', 'confirmed', '{}', ?, ?)`
+        )
+        .bind(transactionId, tokenId, TEST_ORG.id, appliedAt, TEST_PROJECT_API_KEY.id)
+        .run();
+
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1000000000");
+    });
+
     it("does not subtract a settled burn twice after on-chain supply reconciliation", async () => {
       const tokenId = "tok_cap_reconciled_burn";
       const transactionId = "ttx_cap_reconciled_burn";
