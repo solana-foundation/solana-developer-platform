@@ -282,8 +282,8 @@
   },
   "integrations": {
     "pageDescription": "Every provider SDP can run for this organization, with what is connected and what to do next. Custody installs from Wallets; other families are provisioned per deployment.",
-    "statusActive": "Active",
-    "statusAvailable": "Available",
+    "statusActive": "Connected",
+    "statusAvailable": "Ready to connect",
     "statusRequestAccess": "Request access",
     "statusPending": "Pending",
     "statusNotAvailable": "Not available",

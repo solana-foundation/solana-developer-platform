@@ -76,7 +76,7 @@ describe("IntegrationsCatalog filtering", () => {
     const user = userEvent.setup();
     renderCatalog();
 
-    await user.click(screen.getByRole("button", { name: "Active" }));
+    await user.click(screen.getByRole("button", { name: "Connected" }));
 
     const labels = visibleRowLabels();
     expect(labels).toEqual(["Privy", "Helius"]);
