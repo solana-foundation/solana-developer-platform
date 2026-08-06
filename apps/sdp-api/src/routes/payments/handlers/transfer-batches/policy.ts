@@ -1,6 +1,11 @@
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { assertWalletPolicyAllowsTransferWithRows } from "@/services/payments/wallet-policy";
 import {
+  approvedWalletOperationAttemptId,
+  approvedWalletOperationId,
+  walletOperationExecutionRequest,
+} from "@/services/policy/approved-operation-replay";
+import {
   enforceWalletOperationPolicy,
   recordLegacyWalletPolicyDenial,
   walletOperationActorFromAuth,
@@ -23,36 +28,43 @@ export async function enforceBatchPolicies(
   resolved: ResolvedBatchRequest,
   input: CreateTransferBatchInput
 ): Promise<void> {
-  const enforcement = await enforceWalletOperationPolicy(c.env, getRequestTenantScope(c), {
-    organizationId: resolved.scope.auth.organizationId,
-    projectId: resolved.scope.auth.projectId,
-    custodyWalletId: resolved.sourceWallet.id,
-    walletId: resolved.sourceWallet.walletId,
-    apiKeyId: resolved.scope.auth.apiKeyId,
-    actor: walletOperationActorFromAuth(resolved.scope.auth),
-    operationFamily: "payment",
-    operationType: "payment_transfer_batch_execute",
-    asset: resolved.tokenContext.token,
-    amount: resolved.totalAmount,
-    destination: null,
-    context: {
-      sourceAddress: resolved.sourceAddress,
-      recipientCount: resolved.recipients.length,
-      transactionCount: null,
+  const enforcement = await enforceWalletOperationPolicy(
+    c.env,
+    getRequestTenantScope(c),
+    {
+      organizationId: resolved.scope.auth.organizationId,
+      projectId: resolved.scope.auth.projectId,
+      custodyWalletId: resolved.sourceWallet.id,
+      walletId: resolved.sourceWallet.walletId,
+      apiKeyId: resolved.scope.auth.apiKeyId,
+      actor: walletOperationActorFromAuth(resolved.scope.auth),
+      operationFamily: "payment",
+      operationType: "payment_transfer_batch_execute",
+      asset: resolved.tokenContext.token,
+      amount: resolved.totalAmount,
+      destination: null,
+      context: {
+        sourceAddress: resolved.sourceAddress,
+        recipientCount: resolved.recipients.length,
+        transactionCount: null,
+      },
+      rawPayload: {
+        externalId: input.externalId ?? null,
+        source: input.source,
+        token: input.token,
+        recipients: input.recipients.map((recipient) => ({
+          externalId: recipient.externalId ?? null,
+          counterpartyId: recipient.counterpartyId,
+          counterpartyAccountId: recipient.counterpartyAccountId,
+          amount: recipient.amount,
+        })),
+        options: input.options ?? null,
+        executionRequest: walletOperationExecutionRequest(c, input),
+      },
     },
-    rawPayload: {
-      externalId: input.externalId ?? null,
-      source: input.source,
-      token: input.token,
-      recipients: input.recipients.map((recipient) => ({
-        externalId: recipient.externalId ?? null,
-        counterpartyId: recipient.counterpartyId,
-        counterpartyAccountId: recipient.counterpartyAccountId,
-        amount: recipient.amount,
-      })),
-      options: input.options ?? null,
-    },
-  });
+    approvedWalletOperationId(c),
+    approvedWalletOperationAttemptId(c)
+  );
 
   try {
     const repository = getPaymentsRepository(c);
