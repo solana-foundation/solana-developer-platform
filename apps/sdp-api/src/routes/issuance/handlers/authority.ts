@@ -7,7 +7,6 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import {
   approvedWalletOperationId,
@@ -15,7 +14,6 @@ import {
   runApprovedWalletOperationEffectTransaction,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
-import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -243,7 +241,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   });
 
   const { transaction: tx, replayed } = await runApprovedWalletOperationEffectTransaction(c, (db) =>
-    new TokenService(db, getRequestTenantScope(c)).createTransaction({
+    getTenantTokenService(c, db).createTransaction({
       tokenId,
       organizationId: auth.organizationId,
       type: "update_authority",
