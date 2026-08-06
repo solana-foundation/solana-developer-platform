@@ -79,14 +79,15 @@ export async function beginApprovedWalletOperationEffect(
 }
 
 /**
- * Commit an approved replay's effect fence and its final local pre-submit
+ * Commit an approved replay's effect fence and its first durable pre-submit
  * mutation together. Without the shared transaction, a lease can expire after
- * the mutation commits but before the fence is written, leaving state that a
- * recovered attempt would apply a second time.
+ * the mutation commits but before the fence is written. A recovered attempt
+ * could then mistake that durable state for a completed idempotent replay even
+ * though no external submission occurred.
  *
  * Normal requests run the mutation directly without an execution fence.
  */
-async function runApprovedWalletOperationEffectTransaction<T>(
+export async function runApprovedWalletOperationEffectTransaction<T>(
   c: Context<{ Bindings: Env }>,
   mutation: (db: DatabaseClient) => Promise<T>
 ): Promise<T> {

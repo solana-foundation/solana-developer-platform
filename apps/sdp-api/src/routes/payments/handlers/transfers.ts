@@ -2,7 +2,11 @@ import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { MAX_SAFE_BASE_UNITS, parseDecimalAmount } from "@sdp/solana/amount";
-import type { Permission, PrivateTransferRequest } from "@sdp/types";
+import {
+  type Permission,
+  type PrivateTransferRequest,
+  SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
+} from "@sdp/types";
 import type { Address } from "@solana/kit";
 import {
   addSignersToTransactionMessage,
@@ -25,6 +29,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
+  type PaymentsRepository,
   RAMP_TRANSFER_TYPES,
   type PaymentTransferDirection as TransferDirection,
   type PaymentTransferRow as TransferRow,
@@ -32,6 +37,7 @@ import {
   type PaymentTransferType as TransferType,
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories/payments.repository";
+import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { getAuth } from "@/lib/auth";
 import { AppError, accountFrozen, badRequest, badRequestQuery, solanaRpcError } from "@/lib/errors";
 import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
@@ -50,6 +56,7 @@ import {
   approvedWalletOperationAttemptId,
   approvedWalletOperationId,
   beginApprovedWalletOperationEffect,
+  runApprovedWalletOperationEffectTransaction,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
 import {
@@ -117,7 +124,7 @@ export async function resolveWalletFromParams(
 }
 
 async function resolveTransferIdempotencyReplay(
-  repository: ReturnType<typeof getPaymentsRepository>,
+  repository: PaymentsRepository,
   organizationId: string,
   projectId: string | null,
   idempotencyKey: string,
@@ -150,8 +157,6 @@ async function createTransferRecord(
     providerData?: Record<string, unknown>;
   }
 ): Promise<{ row: TransferRow; replayed: boolean }> {
-  const repository = getPaymentsRepository(c);
-
   const idempotencyKey = input.idempotencyKey ?? null;
   const idempotencyFingerprint = idempotencyKey
     ? buildPaymentTransferFingerprint({
@@ -165,56 +170,60 @@ async function createTransferRecord(
       })
     : null;
 
-  if (idempotencyKey && idempotencyFingerprint) {
-    const existing = await resolveTransferIdempotencyReplay(
-      repository,
-      input.organizationId,
-      input.projectId,
-      idempotencyKey,
-      idempotencyFingerprint
-    );
-    if (existing) {
-      return { row: existing, replayed: true };
-    }
-  }
-
   try {
-    const createdRow = await repository.createTransfer({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      walletId: input.walletId,
-      counterpartyId: null,
-      sourceAddress: input.sourceAddress,
-      destinationAddress: input.destinationAddress,
-      token: input.token,
-      amount: input.amount,
-      memo: input.memo ?? null,
-      type: input.type ?? "transfer",
-      direction: input.direction ?? "outbound",
-      status: input.status ?? "pending",
-      provider: null,
-      providerReference: null,
-      deliveryMode: null,
-      fiatCurrency: null,
-      fiatAmount: null,
-      providerData: input.providerData ?? {},
-      serializedTx: input.serializedTx ?? null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: input.initiatedByKeyId ?? null,
-      idempotencyKey,
-      idempotencyFingerprint,
+    return await runApprovedWalletOperationEffectTransaction(c, async (db) => {
+      const repository = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
+
+      if (idempotencyKey && idempotencyFingerprint) {
+        const existing = await resolveTransferIdempotencyReplay(
+          repository,
+          input.organizationId,
+          input.projectId,
+          idempotencyKey,
+          idempotencyFingerprint
+        );
+        if (existing) {
+          return { row: existing, replayed: true };
+        }
+      }
+
+      const createdRow = await repository.createTransfer({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        walletId: input.walletId,
+        counterpartyId: null,
+        sourceAddress: input.sourceAddress,
+        destinationAddress: input.destinationAddress,
+        token: input.token,
+        amount: input.amount,
+        memo: input.memo ?? null,
+        type: input.type ?? "transfer",
+        direction: input.direction ?? "outbound",
+        status: input.status ?? "pending",
+        provider: null,
+        providerReference: null,
+        deliveryMode: null,
+        fiatCurrency: null,
+        fiatAmount: null,
+        providerData: input.providerData ?? {},
+        serializedTx: input.serializedTx ?? null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: input.initiatedByKeyId ?? null,
+        idempotencyKey,
+        idempotencyFingerprint,
+      });
+
+      if (!createdRow) {
+        throw new AppError("INTERNAL_ERROR", "Failed to create payment transfer record");
+      }
+
+      return { row: createdRow, replayed: false };
     });
-
-    if (!createdRow) {
-      throw new AppError("INTERNAL_ERROR", "Failed to create payment transfer record");
-    }
-
-    return { row: createdRow, replayed: false };
   } catch (error) {
     if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
       const existing = await resolveTransferIdempotencyReplay(
-        repository,
+        getPaymentsRepository(c),
         input.organizationId,
         input.projectId,
         idempotencyKey,
@@ -226,6 +235,28 @@ async function createTransferRecord(
     }
     throw error;
   }
+}
+
+async function assertApprovedTransferReplayCompleted(c: AppContext, transfer: TransferRow) {
+  if (!approvedWalletOperationId(c)) {
+    return;
+  }
+
+  const completed =
+    transfer.signature !== null &&
+    SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.some((status) => status === transfer.status);
+  if (completed) {
+    return;
+  }
+
+  // This can only be legacy state created by the pre-atomic implementation or
+  // external database damage. Fence it before failing so recovery never turns
+  // the incomplete idempotency replay into a successful approved operation.
+  await beginApprovedWalletOperationEffect(c);
+  throw new AppError(
+    "CONFLICT",
+    "Approved transfer execution is incomplete and requires manual reconciliation"
+  );
 }
 
 async function enforcePaymentTransferOperationPolicy(
@@ -934,6 +965,7 @@ export async function createTransfer(c: AppContext) {
       })
     );
     if (replay) {
+      await assertApprovedTransferReplayCompleted(c, replay);
       return success(c, buildTransferReplayPayload(replay));
     }
   }
@@ -995,6 +1027,7 @@ export async function createTransfer(c: AppContext) {
     });
 
     if (replayed) {
+      await assertApprovedTransferReplayCompleted(c, transfer);
       return success(c, buildTransferReplayPayload(transfer));
     }
 
@@ -1045,6 +1078,7 @@ export async function createTransfer(c: AppContext) {
   });
 
   if (replayed) {
+    await assertApprovedTransferReplayCompleted(c, transfer);
     return success(c, buildTransferReplayPayload(transfer));
   }
 

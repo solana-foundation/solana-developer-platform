@@ -30,7 +30,9 @@ import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
+import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
+import { buildPaymentTransferFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
@@ -6369,6 +6371,11 @@ describe("Payments routes", () => {
       .prepare("SELECT status FROM payment_transfers")
       .all<{ status: string }>();
     expect(transfers.results).toEqual([{ status: "confirmed" }]);
+    const fencedOperation = await getDb(env)
+      .prepare("SELECT execution_effect_started_at FROM wallet_operations WHERE id = ?")
+      .bind(walletOperationId)
+      .first<{ execution_effect_started_at: string | null }>();
+    expect(fencedOperation?.execution_effect_started_at).toBeTruthy();
 
     const replayedApproval = await approve();
     expect(replayedApproval.status).toBe(200);
@@ -6465,6 +6472,119 @@ describe("Payments routes", () => {
       .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
       .first<{ count: number | string }>();
     expect(Number(transferCount?.count ?? 0)).toBe(1);
+  });
+
+  it("fails recovery closed for an incomplete idempotent transfer", async () => {
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-incomplete-replay",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    const idempotencyKey = "approved-incomplete-transfer";
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    expect(pendingResponse.status).toBe(202);
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+    const scope = createTenantScope({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+    });
+    const policyRepository = createPostgresPolicyRepository(getDb(env), scope);
+    await policyRepository.updateApprovalRequestStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      approvalRequestId,
+      status: "approved",
+      operationStatus: "executing",
+      resolvedBy: TEST_API_KEY.id,
+    });
+    await policyRepository.claimWalletOperationExecution(walletOperationId, "interrupted-attempt");
+
+    const stranded = await createPostgresPaymentsRepository(getDb(env), scope).createTransfer({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "0.1",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: TEST_API_KEY.id,
+      idempotencyKey,
+      idempotencyFingerprint: buildPaymentTransferFingerprint({
+        sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "0.1",
+        memo: undefined,
+        type: "transfer",
+      }),
+    });
+    if (!stranded) {
+      throw new Error("Expected the stranded transfer fixture to be created");
+    }
+    expect(stranded).toMatchObject({ status: "processing", signature: null });
+    await getDb(env)
+      .prepare(
+        `UPDATE wallet_operations
+         SET execution_lease_expires_at = '2000-01-01T00:00:00.000Z'
+         WHERE id = ?`
+      )
+      .bind(walletOperationId)
+      .run();
+
+    expect(await recoverApprovedWalletOperations(env)).toBe(1);
+    const recovered = await policyRepository.getWalletOperationById(walletOperationId);
+    expect(recovered).toMatchObject({
+      status: "failed",
+      execution_attempts: 2,
+    });
+    expect(recovered?.execution_effect_started_at).toBeTruthy();
+    expect(recovered?.execution_error).toContain(
+      "Approved transfer execution is incomplete and requires manual reconciliation"
+    );
+
+    const unchanged = await getDb(env)
+      .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
+      .bind(stranded.id)
+      .first<{ status: string; signature: string | null }>();
+    expect(unchanged).toEqual({ status: "processing", signature: null });
   });
 
   it("requires manual reconciliation when an expired execution crossed its effect fence", async () => {
