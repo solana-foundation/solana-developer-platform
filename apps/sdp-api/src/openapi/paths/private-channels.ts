@@ -13,6 +13,7 @@ import {
   privateChannelDepositListSchema,
   privateChannelDepositSchema,
   privateChannelEventListSchema,
+  privateChannelEventReferencesSchema,
   privateChannelEventsQuerySchema,
   privateChannelHealthQuerySchema,
   privateChannelHealthSchema,
@@ -497,6 +498,27 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(successResponseSchema(privateChannelEventListSchema)),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/private-channels/events/references",
+    tags: [TAG],
+    summary: "List display-name references for events",
+    operationId: "listPrivateChannelEventReferences",
+    description:
+      "Flat id→name dictionary for enriching Private Channels event feeds: channel names, custody wallet labels (by pubkey and wallet id), member display names (by private-channel-user id and SDP user id), issued-token symbols (by mint address), and instance gateway URLs. Channels and members follow the same viewer rules as the events feed, so a member-scoped caller only resolves their own channels and co-members and receives no instance URLs; wallet labels and token symbols are project-wide.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+    },
+    responses: {
+      200: {
+        description: "Reference dictionary",
+        content: jsonContent(successResponseSchema(privateChannelEventReferencesSchema)),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
     },
   });
 

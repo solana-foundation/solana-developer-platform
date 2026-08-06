@@ -512,6 +512,11 @@ export interface PrivateChannelEventListEnvelope {
   nextCursor: string | null;
 }
 
+/** Flat id→name dictionary returned by GET /v1/private-channels/events/references. */
+export interface PrivateChannelEventReferencesEnvelope {
+  references: Record<string, string>;
+}
+
 /**
  * Payload fields safe to show viewers without raw-payload access. The API strips
  * everything else from `payload`, so any field a client reads must be listed

@@ -7,7 +7,7 @@ import {
   type PrivateChannelEventDto,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -119,9 +119,22 @@ function renderEvents(
         initialHasMore={props.initialHasMore ?? false}
         initialNextCursor={props.initialNextCursor ?? null}
         canViewRawPayload={props.canViewRawPayload ?? false}
+        names={props.names}
       />
     </I18nProvider>
   );
+}
+
+/**
+ * Every event renders twice — a stacked list below `lg`, a table from `lg` up — and
+ * jsdom applies no CSS, so row assertions have to name the layout they mean.
+ */
+function eventTable() {
+  return within(screen.getByRole("table"));
+}
+
+function eventStack() {
+  return within(screen.getByRole("list"));
 }
 
 function deferred<T>() {
@@ -145,10 +158,127 @@ describe("EventsList", () => {
     renderEvents({ initialEvents: [makeTransferEvent("pce_transfer")] });
 
     expect(
-      screen.getByText(`12.50 USDC from ${shortenAddress(SENDER)} to ${shortenAddress(RECIPIENT)}`)
+      eventTable().getByText(
+        `12.50 USDC from ${shortenAddress(SENDER)} to ${shortenAddress(RECIPIENT)}`
+      )
     ).toBeTruthy();
     expect(document.body.textContent).not.toContain('{"transferId"');
     expect(document.body.textContent).not.toContain("[object Object]");
+  });
+
+  it("renders wallet and channel names when a names map is provided", () => {
+    renderEvents({
+      initialEvents: [
+        makeTransferEvent("pce_transfer", {
+          channelId: "pch_treasury",
+        }),
+      ],
+      names: {
+        [SENDER]: "Treasury Wallet",
+        [RECIPIENT]: "Payroll Wallet",
+        pch_treasury: "Treasury",
+      },
+    });
+
+    expect(
+      eventTable().getByText("12.50 USDC from Treasury Wallet to Payroll Wallet")
+    ).toBeTruthy();
+    expect(eventTable().getByText("Treasury")).toBeTruthy();
+    expect(
+      eventStack().getByText("12.50 USDC from Treasury Wallet to Payroll Wallet")
+    ).toBeTruthy();
+    expect(eventStack().getByText("Treasury")).toBeTruthy();
+  });
+
+  it("falls back to shortened addresses when the names map has no match", () => {
+    renderEvents({
+      initialEvents: [makeTransferEvent("pce_transfer")],
+      names: {},
+    });
+
+    expect(
+      eventTable().getByText(
+        `12.50 USDC from ${shortenAddress(SENDER)} to ${shortenAddress(RECIPIENT)}`
+      )
+    ).toBeTruthy();
+  });
+
+  it("opens the detail modal from a stacked row, without a details column to reach", async () => {
+    const user = userEvent.setup();
+    renderEvents({ initialEvents: [makeTransferEvent("pce_transfer")] });
+
+    const stackedRow = eventStack().getByRole("button");
+    expect(stackedRow.textContent).toContain("Member transfer confirmed");
+    expect(stackedRow.textContent).toContain("Confirmed");
+    expect(eventStack().queryByText("View details")).toBeNull();
+
+    await user.click(stackedRow);
+
+    expect(
+      await screen.findByRole("dialog", { name: "Member transfer confirmed event details" })
+    ).toBeTruthy();
+  });
+
+  it("shows a name row above each reference in the detail modal", async () => {
+    const user = userEvent.setup();
+    renderEvents({
+      initialEvents: [
+        makeTransferEvent("pce_transfer", {
+          channelId: "pch_treasury",
+          instanceId: "pci_production",
+        }),
+      ],
+      names: {
+        [SENDER]: "Treasury Wallet",
+        [RECIPIENT]: "Payroll Wallet",
+        pch_treasury: "Treasury",
+        pci_production: "https://gateway.example",
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: /View details/i }));
+
+    const rows = Array.from(document.querySelectorAll("dl dt")).map((term) => [
+      term.textContent,
+      term.nextElementSibling?.textContent,
+    ]);
+
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        ["Token", "USDC"],
+        ["Mint", USDC_MINT],
+        ["Sender wallet", "Treasury Wallet"],
+        ["Sender", SENDER],
+        ["Recipient wallet", "Payroll Wallet"],
+        ["Recipient", RECIPIENT],
+        ["Channel", "Treasury"],
+        ["Channel ID", "pch_treasury"],
+        ["Gateway", "https://gateway.example"],
+        ["Instance ID", "pci_production"],
+      ])
+    );
+
+    // Each name sits directly above the reference it names.
+    const labels = rows.map(([label]) => label);
+    expect(labels.indexOf("Channel")).toBe(labels.indexOf("Channel ID") - 1);
+    expect(labels.indexOf("Gateway")).toBe(labels.indexOf("Instance ID") - 1);
+  });
+
+  it("omits the token row when the mint has no known symbol", async () => {
+    const user = userEvent.setup();
+    const unknownMint = "UnknownMint111111111111111111111111111111";
+    renderEvents({
+      initialEvents: [
+        makeTransferEvent("pce_transfer", {
+          payload: { transferId: "pct_unknown", amount: "1.00", mint: unknownMint },
+        }),
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: /View details/i }));
+
+    expect(screen.queryByText("Token")).toBeNull();
+    expect(screen.getByText(unknownMint)).toBeTruthy();
   });
 
   it("formats row amounts for the English locale without losing precision", () => {
@@ -166,7 +296,7 @@ describe("EventsList", () => {
     });
 
     expect(
-      screen.getByText(
+      eventTable().getByText(
         `12,345,678,901,234,567,890.50 USDC from ${shortenAddress(SENDER)} to ${shortenAddress(RECIPIENT)}`
       )
     ).toBeTruthy();
@@ -190,7 +320,7 @@ describe("EventsList", () => {
     );
 
     // FR private-channels catalog is release-bot owned; product branches fall back to EN copy.
-    const summary = [...document.querySelectorAll("span")].find((element) =>
+    const summary = [...screen.getByRole("table").querySelectorAll("span")].find((element) =>
       element.textContent?.includes("USDC from")
     );
     expect(summary?.textContent).toBe(
@@ -238,7 +368,7 @@ describe("EventsList", () => {
       });
     });
     expect(screen.queryByText("Channel created")).toBeNull();
-    expect(screen.getByText("Member transfer confirmed")).toBeTruthy();
+    expect(eventTable().getByText("Member transfer confirmed")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
@@ -250,10 +380,14 @@ describe("EventsList", () => {
       });
     });
     expect(
-      screen.getByText(`4.00 USDC from ${shortenAddress(RECIPIENT)} to ${shortenAddress(SENDER)}`)
+      eventTable().getByText(
+        `4.00 USDC from ${shortenAddress(RECIPIENT)} to ${shortenAddress(SENDER)}`
+      )
     ).toBeTruthy();
     expect(
-      screen.getByText(`12.50 USDC from ${shortenAddress(SENDER)} to ${shortenAddress(RECIPIENT)}`)
+      eventTable().getByText(
+        `12.50 USDC from ${shortenAddress(SENDER)} to ${shortenAddress(RECIPIENT)}`
+      )
     ).toBeTruthy();
   });
 
@@ -308,7 +442,7 @@ describe("EventsList", () => {
     await waitFor(() => {
       expect(mocks.toastError).toHaveBeenCalledWith("Events could not be loaded. Try again.");
     });
-    expect(screen.getByText("Channel created")).toBeTruthy();
+    expect(eventTable().getByText("Channel created")).toBeTruthy();
     expect((familyFilter as HTMLSelectElement).value).toBe("all");
   });
 
@@ -463,7 +597,7 @@ describe("EventsList", () => {
       ],
     });
 
-    expect(screen.getByText("No additional details")).toBeTruthy();
+    expect(eventTable().getByText("No additional details")).toBeTruthy();
     expect(document.body.textContent).not.toContain("[object Object]");
   });
 });

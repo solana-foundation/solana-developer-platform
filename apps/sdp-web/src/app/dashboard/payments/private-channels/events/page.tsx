@@ -6,7 +6,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
-import { loadEvents } from "../private-channels-page.data";
+import { loadEventReferences, loadEvents } from "../private-channels-page.data";
 import { EventsList } from "./events-list";
 
 export default async function PrivateChannelsEventsPage() {
@@ -17,7 +17,7 @@ export default async function PrivateChannelsEventsPage() {
   const canViewRawPayload = hasPermission(permissions, "org:admin");
 
   const client = await createSdpApiClient();
-  const events = await loadEvents(client);
+  const [events, references] = await Promise.all([loadEvents(client), loadEventReferences(client)]);
 
   return (
     <div className="mx-auto w-full max-w-5xl">
@@ -33,6 +33,7 @@ export default async function PrivateChannelsEventsPage() {
               initialHasMore={events.data.hasMore}
               initialNextCursor={events.data.nextCursor}
               canViewRawPayload={canViewRawPayload}
+              names={references.data}
             />
           ) : (
             <PrivateChannelsLoadError message={events.error} />
