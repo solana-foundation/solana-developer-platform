@@ -8,6 +8,12 @@ import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
+import {
+  approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
+  runApprovedWalletOperationEffectTransaction,
+  walletOperationExecutionRequest,
+} from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -223,6 +229,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       role,
       currentAuthority: currentAuthorityRaw,
       newAuthority,
+      executionRequest: walletOperationExecutionRequest(c, parsed.data),
     },
   });
 
@@ -233,21 +240,36 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     params: parsed.data,
   });
 
-  const { transaction: tx, replayed } = await tokenService.createTransaction({
-    tokenId,
-    organizationId: auth.organizationId,
-    type: "update_authority",
-    params: {
-      role,
-      currentAuthority: currentAuthorityRaw,
-      newAuthority,
-    },
-    idempotencyKey: idempotencyMetadata.idempotencyKey,
-    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
-    initiatedByKeyId: auth.id,
-  });
+  const { transaction: tx, replayed } = await runApprovedWalletOperationEffectTransaction(c, (db) =>
+    getTenantTokenService(c, db).createTransaction({
+      tokenId,
+      organizationId: auth.organizationId,
+      type: "update_authority",
+      params: {
+        role,
+        currentAuthority: currentAuthorityRaw,
+        newAuthority,
+      },
+      idempotencyKey: idempotencyMetadata.idempotencyKey,
+      idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
+      initiatedByKeyId: auth.id,
+    })
+  );
 
   if (replayed) {
+    if (
+      approvedWalletOperationId(c) &&
+      (!tx.signature || (tx.status !== "confirmed" && tx.status !== "finalized"))
+    ) {
+      // The atomic path cannot create this shape. Fail closed for rows left by
+      // an older deployment instead of presenting an unsubmitted authority
+      // update as a completed approval.
+      await beginApprovedWalletOperationEffect(c);
+      throw new AppError(
+        "CONFLICT",
+        "Approved authority update is incomplete and requires manual reconciliation"
+      );
+    }
     return success(c, { transaction: tx });
   }
 
@@ -260,6 +282,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.updateAuthority({
       mint: mintAddress,
       role: mapAuthorityRole(role),
