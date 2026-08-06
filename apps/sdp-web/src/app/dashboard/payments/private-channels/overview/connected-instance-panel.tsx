@@ -114,10 +114,6 @@ export async function ConnectedInstancePanel({
                 href={channelsHref}
               />
             ) : null}
-            <Field
-              label={t("DashboardPrivateChannels.overview.gatewayUrlLabel")}
-              value={instance.gatewayUrl}
-            />
           </>
         ) : (
           <Link href={connectHref} className="text-sm text-info hover:underline">

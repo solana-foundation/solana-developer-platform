@@ -46,7 +46,6 @@
       "statusDegraded": "Degraded",
       "statusUnreachable": "Unreachable",
       "instanceAddressLabel": "Instance address",
-      "gatewayUrlLabel": "Gateway",
       "privateBalanceTitle": "Private balance",
       "privateBalanceEmpty": "No channel balance yet.",
       "allowedTokensTitle": "Allowed tokens",
