@@ -614,12 +614,11 @@ export function TransactionsWorkspace({
                 aria-controls="payments-transaction-advanced-filters"
                 onClick={() => setFiltersOpen((open) => !open)}
               >
+                {/* No count badge here: "N active" renders directly below on the
+                    same condition, so the badge repeated it in a less useful form —
+                    a bare number, crowded against the button edge, next to a line
+                    that says what the number actually means and offers to clear it. */}
                 {t("DashboardPayments.transactions.filters")}
-                {advancedFilterCount > 0 ? (
-                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[11px] text-white">
-                    {advancedFilterCount}
-                  </span>
-                ) : null}
               </Button>
               <Button
                 type="button"
