@@ -335,27 +335,32 @@ export const previewEarnProgramWithdrawal = async (c: AppContext) => {
  * `requestId`, or the platform-wide `Idempotency-Key` header — and a request
  * carrying neither is refused rather than silently made unsafe.
  *
- * A header-derived id is scoped to the PROGRAM WALLET it withdraws from. Every
- * SDP organization shares one provider account, so two organizations picking
- * the same header value must not resolve to one provider request; the wallet
- * ref is unique per (organization, environment, provider) by DB constraint, so
- * it separates them and names the thing the money actually leaves.
+ * Whichever way it arrives, the caller's key is DERIVED against the program
+ * wallet rather than forwarded as given. Every SDP organization shares one
+ * provider account, so a key is only unique to a tenant once something tenant-
+ * specific is mixed in: two organizations pasting the same placeholder UUID
+ * would otherwise land on one provider request, and the second would either be
+ * refused or answered with a replay of the first organization's withdrawal.
+ * The wallet ref is unique per (organization, environment, provider) by DB
+ * constraint, so it separates them and names the thing the money leaves.
+ *
+ * Deriving costs the caller nothing: the same key still reproduces the same
+ * provider request on a retry, which is the only property they rely on. The
+ * value SDP returns for tracking is the provider's own withdrawal ref, never
+ * this id.
  */
 function resolveWithdrawalRequestId(
   c: AppContext,
   requestId: string | undefined,
   providerWalletRef: string
 ): string {
-  if (requestId) {
-    return requestId;
+  const callerKey = requestId ?? c.req.header(IDEMPOTENCY_KEY_HEADER);
+  if (!callerKey) {
+    throw badRequest(
+      `A withdrawal needs an idempotency key that is stable across retries: send requestId (UUIDv4) or the ${IDEMPOTENCY_KEY_HEADER} header. Without one, a retried request would pay out twice.`
+    );
   }
-  const idempotencyKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
-  if (idempotencyKey) {
-    return deriveProviderRequestId(["earn_program_withdrawal", providerWalletRef], idempotencyKey);
-  }
-  throw badRequest(
-    `A withdrawal needs an idempotency key that is stable across retries: send requestId (UUIDv4) or the ${IDEMPOTENCY_KEY_HEADER} header. Without one, a retried request would pay out twice.`
-  );
+  return deriveProviderRequestId(["earn_program_withdrawal", providerWalletRef], callerKey);
 }
 
 export const createEarnProgramWithdrawal = async (c: AppContext) => {

@@ -13,6 +13,7 @@ import {
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
 import app from "@/index";
+import { deriveProviderRequestId } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -567,22 +568,63 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       ...extra,
     });
 
-    it("passes a caller-owned requestId to the provider verbatim", async () => {
+    it("keeps a caller-owned requestId stable across retries without forwarding it raw", async () => {
       await seedAuth();
       await seedProgramWallet();
       const createWithdrawal = vi
         .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
+      // Every org shares one provider account, so a key that reached the
+      // provider verbatim would let two tenants collide on the same pasted
+      // UUID — one of them getting the other's withdrawal replayed back.
       const callerKey = "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d";
-      const res = await requestEarn(
+      const first = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody({ requestId: callerKey })
+      );
+      const retry = await requestEarn(
         "POST",
         "/v1/earn/program/withdrawals",
         withdrawalBody({ requestId: callerKey })
       );
 
+      expect(first.status).toBe(201);
+      expect(retry.status).toBe(201);
+      const sent = createWithdrawal.mock.calls[0]?.[1]?.requestId;
+      expect(sent).not.toBe(callerKey);
+      expect(sent).toMatch(UUID_V4_PATTERN);
+      // The property the caller actually depends on survives the derivation.
+      expect(createWithdrawal.mock.calls[1]?.[1]?.requestId).toBe(sent);
+    });
+
+    it("sends a key no other organization could produce from the same input", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      // The boilerplate case: every tenant pastes the same placeholder UUID.
+      // One provider account serves them all, so an unscoped key would make
+      // the second tenant's withdrawal collide with the first's. (A v4-shaped
+      // placeholder — the RFC's own 123e4567… example is v1 and the schema
+      // rejects it outright.)
+      const shared = "00000000-0000-4000-8000-000000000000";
+      const res = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody({ requestId: shared })
+      );
+
       expect(res.status).toBe(201);
-      expect(createWithdrawal.mock.calls[0]?.[1]?.requestId).toBe(callerKey);
+      const sent = createWithdrawal.mock.calls[0]?.[1]?.requestId;
+      expect(sent).toBe(deriveProviderRequestId(["earn_program_withdrawal", WALLET_REF], shared));
+      // A different program wallet — i.e. any other org — cannot reach it.
+      expect(sent).not.toBe(
+        deriveProviderRequestId(["earn_program_withdrawal", "another-org-wallet"], shared)
+      );
     });
 
     it("derives the same provider key every time from one Idempotency-Key", async () => {
