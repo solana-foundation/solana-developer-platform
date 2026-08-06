@@ -43,6 +43,8 @@ import {
 } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
+  isNativePaymentToken,
+  normalizePaymentToken,
   type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
@@ -435,7 +437,7 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
 }) {
   const { c, operation, privateTransfer, memo } = params;
 
-  if (operation.token === "SOL") {
+  if (isNativePaymentToken(operation.token)) {
     throw new AppError(
       "BAD_REQUEST",
       "MagicBlock private transfers support SPL tokens only. Provide a token mint address."
@@ -1032,7 +1034,7 @@ export async function createTransfer(c: AppContext) {
   }
 
   try {
-    if (operation.token === "SOL") {
+    if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(
         c,
         operation.sourceWallet,
@@ -1123,6 +1125,9 @@ export async function listTransfers(c: AppContext) {
     throw new AppError("BAD_REQUEST", "type must match the requested transfer category");
   }
   const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
+  // Rows store mints, so a symbol or native-SOL filter must be normalized to
+  // the same canonical mint before either the in-memory or SQL comparison.
+  const tokenFilter = token ? normalizePaymentToken(token, c.env) : undefined;
   const hasProvider = provider !== undefined;
   const hasProviderReference = providerReference !== undefined;
   const hasExactProviderReference = hasProvider && hasProviderReference;
@@ -1323,7 +1328,7 @@ export async function listTransfers(c: AppContext) {
         if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
         if (provider && row.provider !== provider) return false;
         if (statuses && !statuses.includes(row.status)) return false;
-        if (token && row.token !== token) return false;
+        if (tokenFilter && row.token !== tokenFilter) return false;
         if (direction && row.direction !== direction) return false;
         if (transferTypeSet && !transferTypeSet.has(row.type)) return false;
         if (from && row.created_at < from) return false;
@@ -1373,7 +1378,7 @@ export async function listTransfers(c: AppContext) {
       walletAddress: walletId ? walletAddress : unresolvedDatabaseWalletAddress,
       counterpartyId,
       search,
-      token,
+      token: tokenFilter,
       direction,
       statuses,
       types: transferTypes,

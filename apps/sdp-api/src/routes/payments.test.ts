@@ -6,6 +6,7 @@ import {
   type CachedApiKey,
   type PolicyDefaultAction,
   type PolicyRule,
+  SOL_MINT,
   type TokenStatus,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
@@ -5931,9 +5932,10 @@ describe("Payments routes", () => {
     );
     expect(transfersRes.status).toBe(200);
     const transfersBody = (await transfersRes.json()) as {
-      data: [{ rampsMemo: Record<string, string> }];
+      data: [{ rampsMemo: Record<string, string>; token: string }];
     };
     expect(transfersBody.data[0].rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
+    expect(transfersBody.data[0].token).toBe(DEVNET_USDC_MINT);
     fetchSpy.mockRestore();
   });
 
@@ -6268,7 +6270,7 @@ describe("Payments routes", () => {
         TEST_WALLET_ID,
         TEST_SOLANA_ADDRESSES.wallet1,
         TEST_SOLANA_ADDRESSES.wallet2,
-        "SOL",
+        SOL_MINT,
         "1.4",
         null,
         "transfer",
@@ -8065,7 +8067,7 @@ describe("Payments routes", () => {
         counterpartyId,
         source: TEST_SOLANA_ADDRESSES.wallet1,
         destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "USDC",
+        token: DEVNET_USDC_MINT,
         memo: "Quarterly invoice",
         type: "offramp",
         direction: "outbound",
@@ -8144,6 +8146,26 @@ describe("Payments routes", () => {
       expect(mismatchedFilter.data).toEqual([]);
       expect(mismatchedFilter.meta.total).toBe(0);
       expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
+    });
+
+    it("matches native SOL rows whether the token filter is SOL, sol, or the mint", async () => {
+      await seedTransfer({ id: "xfr_native_sol", status: "confirmed", token: SOL_MINT });
+      await seedTransfer({ id: "xfr_usdc", status: "confirmed", token: DEVNET_USDC_MINT });
+
+      for (const filter of ["SOL", "sol", SOL_MINT]) {
+        const res = await app.request(
+          `/v1/payments/transfers?token=${filter}`,
+          {
+            method: "GET",
+            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: Array<{ id: string }> };
+        expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_native_sol"]);
+      }
     });
 
     it("filters by status when status query param is provided", async () => {
