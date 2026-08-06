@@ -28,7 +28,3 @@ UPDATE payment_transfers
 UPDATE payment_transfer_batches
    SET token = 'So11111111111111111111111111111111111111112'
  WHERE token = 'SOL';
-
-UPDATE payment_recurring_payments
-   SET token = 'So11111111111111111111111111111111111111112'
- WHERE token = 'SOL';
