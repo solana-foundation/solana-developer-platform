@@ -93,6 +93,7 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     channelId: CHANNEL_ID,
+    sdpUserId: "usr_transfer_test",
     wallet,
     // Resolved by the route's access seam in production; the service never derives it.
     signer: senderSigner,
@@ -338,14 +339,16 @@ describe("createChannelTransfer", () => {
       TEST_ENV,
       expect.objectContaining({ status: "submitted", signature: SIGNATURE }),
       "transfer.transfer.submitted",
-      "pending"
+      "pending",
+      "usr_transfer_test"
     );
     expect(transferEvents.emitTransferEvent).toHaveBeenNthCalledWith(
       2,
       TEST_ENV,
       expect.objectContaining({ status: "confirmed", signature: SIGNATURE }),
       "transfer.transfer.confirmed",
-      "confirmed"
+      "confirmed",
+      "usr_transfer_test"
     );
     expect(result).toMatchObject({ status: "confirmed", signature: SIGNATURE });
 
@@ -393,7 +396,8 @@ describe("createChannelTransfer", () => {
       TEST_ENV,
       expect.objectContaining({ status: "failed" }),
       "transfer.transfer.failed",
-      "failed"
+      "failed",
+      "usr_transfer_test"
     );
   });
 
@@ -461,7 +465,8 @@ describe("createChannelTransfer", () => {
       TEST_ENV,
       expect.objectContaining({ status: "failed" }),
       "transfer.transfer.failed",
-      "failed"
+      "failed",
+      "usr_transfer_test"
     );
     expect(solanaRpc.sendTransaction).toHaveBeenCalledTimes(2);
   });

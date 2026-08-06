@@ -237,7 +237,7 @@ describe("home and payments route loading states", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentsLoading />);
 
     expect(markup).toContain("grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]");
-    expect(markup).toContain("flex min-w-0 flex-1 flex-col overflow-hidden");
+    expect(markup).toContain("flex min-w-0 grow flex-col overflow-hidden");
     expect(markup).toContain("table-scroll-container overflow-x-auto");
   });
 

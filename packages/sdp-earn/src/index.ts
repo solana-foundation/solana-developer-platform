@@ -6,7 +6,7 @@ import { UpshiftEarnClient } from "./providers/upshift/client";
 import { VedaEarnClient } from "./providers/veda/client";
 import type { EarnVaultProvider } from "./types";
 
-export { supportsPortfolioWallets } from "./capabilities";
+export { supportsPortfolioWallets, supportsWithdrawalApprovals } from "./capabilities";
 export {
   badRequest,
   insufficientLiquidity,
@@ -32,6 +32,7 @@ export type {
   EarnMovementStatusInput,
   EarnMovementStatusResult,
   EarnNavInput,
+  EarnPendingWithdrawalApproval,
   EarnPortfolioAddressBookEntryInput,
   EarnPortfolioAddressBookEntryResult,
   EarnPortfolioDepositsInput,
@@ -48,6 +49,13 @@ export type {
   EarnSettlementEvent,
   EarnVaultProvider,
   EarnWebhookValidationContext,
+  EarnWithdrawalApprovalAction,
+  EarnWithdrawalApprovalProvider,
+  EarnWithdrawalApprovalRequest,
+  EarnWithdrawalApprovalRequestInput,
+  EarnWithdrawalApprovalStamp,
+  EarnWithdrawalApprovalVoteInput,
+  EarnWithdrawalApprovalVoteResult,
   EarnWithdrawalIntent,
   EarnWithdrawalQuote,
   EarnWithdrawalQuoteInput,
