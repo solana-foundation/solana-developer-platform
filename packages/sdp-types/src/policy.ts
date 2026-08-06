@@ -134,6 +134,9 @@ export interface WalletApprovalRequestOperationSummary {
   amount: string | null;
   destination: string | null;
   status: WalletOperationStatus;
+  executionStartedAt: string | null;
+  executionCompletedAt: string | null;
+  executionError: string | null;
   createdAt: string;
   updatedAt: string;
 }

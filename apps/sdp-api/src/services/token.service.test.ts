@@ -122,6 +122,26 @@ describe("TokenService", () => {
       .run();
   });
 
+  it("releases an unsubmitted transaction's idempotency key for approved recovery", async () => {
+    const input = {
+      tokenId: "tok_freeze_refreeze",
+      organizationId: TEST_ORG.id,
+      type: "mint" as const,
+      params: { destination: "wallet_approved_recovery", amount: "1" },
+      idempotencyKey: "approved-mint-recovery",
+      idempotencyFingerprint: "approved-mint-recovery-fingerprint",
+    };
+    const first = await tokenService.createTransaction(input);
+
+    await expect(tokenService.deleteUnsubmittedTransaction(first.transaction.id)).resolves.toBe(
+      true
+    );
+    const retry = await tokenService.createTransaction(input);
+
+    expect(retry.replayed).toBe(false);
+    expect(retry.transaction.id).not.toBe(first.transaction.id);
+  });
+
   it("reuses the existing frozen-account row after unfreeze", async () => {
     const firstFreeze = await tokenService.freezeAccount({
       tokenId: "tok_freeze_refreeze",

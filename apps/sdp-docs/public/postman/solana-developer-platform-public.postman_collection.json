@@ -475,7 +475,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/approve",
-            "description": "Approves a pending wallet operation approval request."
+            "description": "Approves a pending wallet operation approval request. The resolver must differ from the requester, including across a user session and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned."
           }
         },
         {
@@ -484,7 +484,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/reject",
-            "description": "Rejects a pending wallet operation approval request."
+            "description": "Rejects a pending wallet operation approval request. The resolver must differ from the requester, including across a user session and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned."
           }
         },
         {
@@ -493,7 +493,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/cancel",
-            "description": "Cancels a pending wallet operation approval request."
+            "description": "Cancels a pending wallet operation approval request. The requester may cancel its own request; otherwise the resolver must be an active member of the assigned approval group, or an organization/API admin when no group is assigned. A user and the API keys they created are treated as the same requester."
           }
         },
         {

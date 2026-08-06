@@ -615,6 +615,9 @@
                   "amount": "example",
                   "destination": "example",
                   "status": "pending_approval",
+                  "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                  "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                  "executionError": "example",
                   "createdAt": "2025-01-01T00:00:00.000Z",
                   "updatedAt": "2025-01-01T00:00:00.000Z"
                 },
@@ -687,6 +690,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -758,6 +764,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -829,6 +838,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -900,6 +912,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -3908,10 +3923,6 @@
                 "value": "AMD"
               },
               {
-                "label": "ANG",
-                "value": "ANG"
-              },
-              {
                 "label": "AOA",
                 "value": "AOA"
               },
@@ -3942,10 +3953,6 @@
               {
                 "label": "BDT",
                 "value": "BDT"
-              },
-              {
-                "label": "BGN",
-                "value": "BGN"
               },
               {
                 "label": "BHD",
@@ -4014,10 +4021,6 @@
               {
                 "label": "CRC",
                 "value": "CRC"
-              },
-              {
-                "label": "CUC",
-                "value": "CUC"
               },
               {
                 "label": "CUP",
@@ -4110,10 +4113,6 @@
               {
                 "label": "HNL",
                 "value": "HNL"
-              },
-              {
-                "label": "HRK",
-                "value": "HRK"
               },
               {
                 "label": "HTG",
@@ -4384,10 +4383,6 @@
                 "value": "SLE"
               },
               {
-                "label": "SLL",
-                "value": "SLL"
-              },
-              {
                 "label": "SOS",
                 "value": "SOS"
               },
@@ -4402,10 +4397,6 @@
               {
                 "label": "STN",
                 "value": "STN"
-              },
-              {
-                "label": "SVC",
-                "value": "SVC"
               },
               {
                 "label": "SYP",
@@ -4681,10 +4672,6 @@
                 "value": "AMD"
               },
               {
-                "label": "ANG",
-                "value": "ANG"
-              },
-              {
                 "label": "AOA",
                 "value": "AOA"
               },
@@ -4715,10 +4702,6 @@
               {
                 "label": "BDT",
                 "value": "BDT"
-              },
-              {
-                "label": "BGN",
-                "value": "BGN"
               },
               {
                 "label": "BHD",
@@ -4787,10 +4770,6 @@
               {
                 "label": "CRC",
                 "value": "CRC"
-              },
-              {
-                "label": "CUC",
-                "value": "CUC"
               },
               {
                 "label": "CUP",
@@ -4883,10 +4862,6 @@
               {
                 "label": "HNL",
                 "value": "HNL"
-              },
-              {
-                "label": "HRK",
-                "value": "HRK"
               },
               {
                 "label": "HTG",
@@ -5157,10 +5132,6 @@
                 "value": "SLE"
               },
               {
-                "label": "SLL",
-                "value": "SLL"
-              },
-              {
                 "label": "SOS",
                 "value": "SOS"
               },
@@ -5175,10 +5146,6 @@
               {
                 "label": "STN",
                 "value": "STN"
-              },
-              {
-                "label": "SVC",
-                "value": "SVC"
               },
               {
                 "label": "SYP",
@@ -5839,10 +5806,6 @@
                 "value": "AMD"
               },
               {
-                "label": "ANG",
-                "value": "ANG"
-              },
-              {
                 "label": "AOA",
                 "value": "AOA"
               },
@@ -5873,10 +5836,6 @@
               {
                 "label": "BDT",
                 "value": "BDT"
-              },
-              {
-                "label": "BGN",
-                "value": "BGN"
               },
               {
                 "label": "BHD",
@@ -5945,10 +5904,6 @@
               {
                 "label": "CRC",
                 "value": "CRC"
-              },
-              {
-                "label": "CUC",
-                "value": "CUC"
               },
               {
                 "label": "CUP",
@@ -6041,10 +5996,6 @@
               {
                 "label": "HNL",
                 "value": "HNL"
-              },
-              {
-                "label": "HRK",
-                "value": "HRK"
               },
               {
                 "label": "HTG",
@@ -6315,10 +6266,6 @@
                 "value": "SLE"
               },
               {
-                "label": "SLL",
-                "value": "SLL"
-              },
-              {
                 "label": "SOS",
                 "value": "SOS"
               },
@@ -6333,10 +6280,6 @@
               {
                 "label": "STN",
                 "value": "STN"
-              },
-              {
-                "label": "SVC",
-                "value": "SVC"
               },
               {
                 "label": "SYP",
@@ -7349,7 +7292,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true\n}",
+            "defaultValue": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
             "required": true
           }
         ],
