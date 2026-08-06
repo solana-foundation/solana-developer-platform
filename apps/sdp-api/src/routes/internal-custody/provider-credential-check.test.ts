@@ -18,6 +18,7 @@ const PROJECT_ID = "prj_provider_credential_check";
 const USER_ID = "usr_provider_credential_check";
 const CREDENTIAL_ID = "pcred_provider_credential_check";
 const CONNECTION_ID = "cconn_provider_credential_check";
+const LEGACY_CONFIG_ID = "cust_cfg_provider_credential_check";
 const APP_ID = "privy-app-1234";
 const APP_SECRET = "exact secret";
 const WALLET_LABEL = "Treasury Wallet";
@@ -329,7 +330,32 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     await clearKVStores(env);
   });
 
-  it("validates the exact stored credential, provisions one wallet, and activates its Connection", async () => {
+  it("activates the installed Connection without changing the Project custody target", async () => {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs (
+             id, organization_id, project_id, provider, config_encrypted,
+             encryption_version, default_wallet_id, status
+           ) VALUES (?, ?, ?, 'privy', 'legacy-config', 'test', 'legacy-wallet', 'active')`
+        )
+        .bind(LEGACY_CONFIG_ID, ORGANIZATION_ID, PROJECT_ID),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets (
+             id, custody_config_id, wallet_id, public_key, status
+           ) VALUES ('cwlt_provider_credential_check_legacy', ?, 'legacy-wallet',
+                     'legacy-wallet-address', 'active')`
+        )
+        .bind(LEGACY_CONFIG_ID),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_scope_defaults (
+             id, organization_id, project_id, default_custody_config_id
+           ) VALUES ('csd_provider_credential_check', ?, ?, ?)`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID, LEGACY_CONFIG_ID),
+    ]);
     const providerFetch = stubSuccessfulPrivyProvisioning();
     const { app, token } = buildApp();
 
@@ -395,13 +421,17 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
                 c.last_check_status, c.last_check_at, c.last_check_failure_code,
                 c.default_custody_wallet_id,
                 w.wallet_id, w.public_key, w.label AS wallet_label, w.custody_connection_id,
+                d.default_custody_config_id AS selected_config_id,
+                d.default_custody_connection_id AS selected_connection_id,
                 (SELECT COUNT(*) FROM custody_wallets) AS wallet_count
          FROM provider_credentials pc
          JOIN custody_connections c ON c.provider_credential_id = pc.id
          LEFT JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
+         LEFT JOIN custody_scope_defaults d
+           ON d.organization_id = ? AND d.project_id = ?
          WHERE pc.id = ?`
       )
-      .bind(CREDENTIAL_ID)
+      .bind(ORGANIZATION_ID, PROJECT_ID, CREDENTIAL_ID)
       .first<{
         credential_status: string;
         last_validated_at: string | null;
@@ -415,6 +445,8 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
         public_key: string | null;
         wallet_label: string | null;
         custody_connection_id: string | null;
+        selected_config_id: string | null;
+        selected_connection_id: string | null;
         wallet_count: number;
       }>();
     expect(state).toMatchObject({
@@ -433,7 +465,9 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
       public_key: PRIVY_WALLET_ADDRESS,
       wallet_label: WALLET_LABEL,
       custody_connection_id: CONNECTION_ID,
-      wallet_count: 1,
+      selected_config_id: LEGACY_CONFIG_ID,
+      selected_connection_id: null,
+      wallet_count: 2,
     });
     expect(state?.setup_metadata).toEqual({
       providerAccountFingerprint:
