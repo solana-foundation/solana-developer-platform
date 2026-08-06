@@ -1,6 +1,10 @@
 "use server";
 
-import type { PrivateChannelEventListEnvelope } from "@sdp/types";
+import type {
+  PrivateChannelEventFamily,
+  PrivateChannelEventListEnvelope,
+  PrivateChannelEventStatus,
+} from "@sdp/types";
 import { fetchPrivateChannelEvents } from "@/lib/private-channels";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
@@ -11,7 +15,8 @@ export type LoadEventsResult =
 export async function loadProjectEventsAction(input?: {
   before?: string;
   limit?: number;
-  family?: string;
+  family?: PrivateChannelEventFamily;
+  status?: PrivateChannelEventStatus;
 }): Promise<LoadEventsResult> {
   try {
     const client = await createSdpApiClient();
@@ -19,6 +24,7 @@ export async function loadProjectEventsAction(input?: {
       before: input?.before,
       limit: input?.limit ?? 50,
       family: input?.family,
+      status: input?.status,
     });
     return { ok: true, data };
   } catch (error) {
