@@ -19,6 +19,7 @@ import type {
   TokenTransactionStatus,
   TokenTransactionType,
 } from "@sdp/types";
+import type { DatabaseExecutor } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
@@ -1356,6 +1357,553 @@ export class TokenService {
       deltaBaseUnits,
       operation === "mint" ? "add" : "subtract"
     );
+  }
+
+  /**
+   * Apply a settled burn's cached-supply delta exactly once.
+   *
+   * The chain effect cannot be rolled back, so an idempotent request must be
+   * able to retry this bookkeeping after a database failure without subtracting
+   * twice. Locking the transaction row and committing its marker with the
+   * supply change makes both the initial request and every replay safe.
+   */
+  async applySettledBurnSupply(
+    transactionId: string,
+    tokenId: string,
+    amount: string
+  ): Promise<void> {
+    const tokenScope = this.tenantTokenScope("t");
+    await this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.supply_bookkeeping_applied_at, it.operation_params,
+                  t.decimals, t.total_supply_updated_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(transactionId, tokenId, ...tokenScope.values)
+        .first<{
+          supply_bookkeeping_applied_at: string | null;
+          operation_params: string;
+          decimals: number;
+          total_supply_updated_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+      if (row.supply_bookkeeping_applied_at !== null) return;
+
+      const deltaBaseUnits = parseDecimalAmount(amount, row.decimals).toString();
+      const now = new Date().toISOString();
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      const baseline = params.supplyBaselineUpdatedAt;
+      const hasBaseline = baseline === null || typeof baseline === "string";
+      const supplyChangedSinceAdmission = hasBaseline && baseline !== row.total_supply_updated_at;
+
+      // A chain reconciliation after this burn was admitted already includes
+      // the settled burn. Subtracting again would undercount supply and create
+      // false mint headroom, so in that case only consume the retry marker.
+      if (!supplyChangedSinceAdmission) {
+        const tokenMutation = this.tenantMutationScope();
+        const updatedToken = await tx
+          .prepare(
+            `UPDATE issued_tokens
+             SET total_supply_cached = GREATEST(
+                   COALESCE(total_supply_cached, '0')::numeric - ?::numeric,
+                   0
+                 )::text,
+                 total_supply_updated_at = ?,
+                 updated_at = ?
+             WHERE id = ?${tokenMutation.clause}`
+          )
+          .bind(deltaBaseUnits, now, now, tokenId, ...tokenMutation.values)
+          .run();
+        if (updatedToken !== 1) throw new Error("TOKEN_NOT_FOUND");
+      }
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET supply_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND supply_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, transactionId, tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_SUPPLY_MARKER_CONFLICT");
+    });
+  }
+
+  /** Atomically mirror a settled pause/unpause exactly once. */
+  async applySettledTokenStatus(
+    transactionId: string,
+    tokenId: string,
+    status: "active" | "paused"
+  ): Promise<void> {
+    const tokenScope = this.tenantTokenScope("t");
+    await this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.type, it.status, it.signature, it.slot, it.created_at,
+                  it.lifecycle_bookkeeping_applied_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(transactionId, tokenId, ...tokenScope.values)
+        .first<{
+          type: string;
+          status: string;
+          signature: string | null;
+          slot: number | null;
+          created_at: string;
+          lifecycle_bookkeeping_applied_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+      const expectedType = status === "paused" ? "pause" : "unpause";
+      if (row.type !== expectedType) {
+        throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+      }
+      if (row.lifecycle_bookkeeping_applied_at !== null) {
+        if (row.status !== "confirmed") {
+          throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+        }
+        return;
+      }
+
+      const now = new Date().toISOString();
+      await this.promoteJournaledLifecycleTransaction(tx, transactionId, tokenId, row, now);
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions newer
+           WHERE newer.token_id = ?
+             AND newer.type IN ('pause', 'unpause')
+             AND newer.status = 'confirmed'
+             AND (
+               newer.slot > ?
+               OR (newer.slot = ? AND newer.created_at > ?)
+               OR (newer.slot = ? AND newer.created_at = ? AND newer.id > ?)
+             )
+           LIMIT 1`
+        )
+        .bind(tokenId, row.slot, row.slot, row.created_at, row.slot, row.created_at, transactionId)
+        .first<{ exists: number }>();
+
+      if (!newer) {
+        const tokenMutation = this.tenantMutationScope();
+        const updatedToken = await tx
+          .prepare(
+            `UPDATE issued_tokens SET status = ?, updated_at = ?
+             WHERE id = ?${tokenMutation.clause}`
+          )
+          .bind(status, now, tokenId, ...tokenMutation.values)
+          .run();
+        if (updatedToken !== 1) throw new Error("TOKEN_NOT_FOUND");
+      }
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET lifecycle_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND lifecycle_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, transactionId, tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_MARKER_CONFLICT");
+    });
+  }
+
+  /**
+   * Mirror a settled freeze/unfreeze without allowing an older replay to
+   * overwrite a later on-chain transition for the same token account.
+   */
+  async applySettledAccountFreezeState(input: {
+    transactionId: string;
+    tokenId: string;
+    accountAddress: string;
+    state: "frozen" | "unfrozen";
+    actorId: string;
+    reason?: string;
+  }): Promise<FrozenAccount> {
+    const tokenScope = this.tenantTokenScope("t");
+    return this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.type, it.status, it.signature, it.slot, it.created_at,
+                  it.operation_params,
+                  it.lifecycle_bookkeeping_applied_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(input.transactionId, input.tokenId, ...tokenScope.values)
+        .first<{
+          type: string;
+          status: string;
+          signature: string | null;
+          slot: number | null;
+          created_at: string;
+          operation_params: string;
+          lifecycle_bookkeeping_applied_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+
+      const expectedType = input.state === "frozen" ? "freeze" : "unfreeze";
+      if (row.type !== expectedType) {
+        throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+      }
+
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      const recordedAccount = params.tokenAccountAddress ?? params.accountAddress;
+      if (recordedAccount !== input.accountAddress) {
+        throw new Error("TOKEN_TRANSACTION_LIFECYCLE_PARAMS_MISMATCH");
+      }
+
+      const existing = await tx
+        .prepare(
+          `SELECT id, token_id, account_address, reason, frozen_at, frozen_by,
+                  unfrozen_at, unfrozen_by
+           FROM frozen_accounts
+           WHERE token_id = ? AND account_address = ?
+           FOR UPDATE`
+        )
+        .bind(input.tokenId, input.accountAddress)
+        .first<FrozenAccountRow>();
+
+      if (row.lifecycle_bookkeeping_applied_at !== null) {
+        if (row.status !== "confirmed" || !existing) {
+          throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+        }
+        return this.mapRowToFrozenAccount(existing);
+      }
+
+      const now = new Date().toISOString();
+      await this.promoteJournaledLifecycleTransaction(
+        tx,
+        input.transactionId,
+        input.tokenId,
+        row,
+        now
+      );
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions newer
+           WHERE newer.token_id = ?
+             AND newer.type IN ('freeze', 'unfreeze')
+             AND newer.status = 'confirmed'
+             AND COALESCE(
+               newer.operation_params::jsonb ->> 'tokenAccountAddress',
+               newer.operation_params::jsonb ->> 'accountAddress'
+             ) = ?
+             AND (
+               newer.slot > ?
+               OR (newer.slot = ? AND newer.created_at > ?)
+               OR (newer.slot = ? AND newer.created_at = ? AND newer.id > ?)
+             )
+           LIMIT 1`
+        )
+        .bind(
+          input.tokenId,
+          input.accountAddress,
+          row.slot,
+          row.slot,
+          row.created_at,
+          row.slot,
+          row.created_at,
+          input.transactionId
+        )
+        .first<{ exists: number }>();
+
+      let frozenAccount = existing;
+      if (!newer) {
+        frozenAccount = await this.applyAccountFreezeMirror(tx, input, existing, now);
+      }
+
+      if (!frozenAccount) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET lifecycle_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND lifecycle_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, input.transactionId, input.tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_MARKER_CONFLICT");
+
+      return this.mapRowToFrozenAccount(frozenAccount);
+    });
+  }
+
+  /**
+   * The settlement fallback deliberately persists only the chain receipt when
+   * the normal confirmed-status write fails. Promote that durable pending row
+   * inside the same transaction as lifecycle bookkeeping so the completed
+   * operation can return success without waiting for an idempotent replay.
+   *
+   * Status history is intentionally not retried here: it is auxiliary, and it
+   * may be the part of the normal write that failed after status was updated.
+   */
+  private async promoteJournaledLifecycleTransaction(
+    tx: DatabaseExecutor,
+    transactionId: string,
+    tokenId: string,
+    row: { status: string; signature: string | null; slot: number | null },
+    now: string
+  ): Promise<void> {
+    if (row.status === "confirmed") {
+      if (row.slot === null) throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+      return;
+    }
+    if (row.status !== "pending" || !row.signature || row.slot === null) {
+      throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+    }
+
+    const promoted = await tx
+      .prepare(
+        `UPDATE issuance_transactions
+         SET status = 'confirmed', error = NULL, updated_at = ?
+         WHERE id = ? AND token_id = ? AND status = 'pending'
+           AND signature = ? AND slot = ?`
+      )
+      .bind(now, transactionId, tokenId, row.signature, row.slot)
+      .run();
+    if (promoted !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_PROMOTION_CONFLICT");
+  }
+
+  private async applyAccountFreezeMirror(
+    tx: DatabaseExecutor,
+    input: {
+      tokenId: string;
+      accountAddress: string;
+      state: "frozen" | "unfrozen";
+      actorId: string;
+      reason?: string;
+    },
+    existing: FrozenAccountRow | null,
+    now: string
+  ): Promise<FrozenAccountRow> {
+    if (input.state === "frozen") {
+      if (existing?.unfrozen_at === null) return existing;
+      if (existing) {
+        const updated = await tx
+          .prepare(
+            `UPDATE frozen_accounts
+             SET reason = ?, frozen_at = ?, frozen_by = ?,
+                 unfrozen_at = NULL, unfrozen_by = NULL
+             WHERE id = ?
+             RETURNING id, token_id, account_address, reason, frozen_at, frozen_by,
+                       unfrozen_at, unfrozen_by`
+          )
+          .bind(input.reason ?? null, now, input.actorId, existing.id)
+          .first<FrozenAccountRow>();
+        if (!updated) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+        return updated;
+      }
+
+      const inserted = await tx
+        .prepare(
+          `INSERT INTO frozen_accounts (
+             id, token_id, account_address, reason, frozen_at, frozen_by,
+             unfrozen_at, unfrozen_by
+           ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
+           RETURNING id, token_id, account_address, reason, frozen_at, frozen_by,
+                     unfrozen_at, unfrozen_by`
+        )
+        .bind(
+          `frz_${crypto.randomUUID()}`,
+          input.tokenId,
+          input.accountAddress,
+          input.reason ?? null,
+          now,
+          input.actorId
+        )
+        .first<FrozenAccountRow>();
+      if (!inserted) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+      return inserted;
+    }
+
+    if (!existing) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+    if (existing.unfrozen_at !== null) return existing;
+
+    const updated = await tx
+      .prepare(
+        `UPDATE frozen_accounts
+         SET unfrozen_at = ?, unfrozen_by = ?
+         WHERE id = ?
+         RETURNING id, token_id, account_address, reason, frozen_at, frozen_by,
+                   unfrozen_at, unfrozen_by`
+      )
+      .bind(now, input.actorId, existing.id)
+      .first<FrozenAccountRow>();
+    if (!updated) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+    return updated;
+  }
+
+  /**
+   * Mirror a settled authority change without allowing an older replay to
+   * overwrite a later on-chain authority. The settlement slot is the primary
+   * ordering key; request creation time and id provide a deterministic tie
+   * break for transactions confirmed in the same slot.
+   */
+  async applySettledTokenAuthority(
+    transactionId: string,
+    tokenId: string,
+    role: "mint" | "freeze" | "permanentDelegate" | "metadata",
+    newAuthority: string | null
+  ): Promise<void> {
+    const tokenScope = this.tenantTokenScope("t");
+    await this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.type, it.status, it.slot, it.created_at, it.operation_params,
+                  it.authority_bookkeeping_applied_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(transactionId, tokenId, ...tokenScope.values)
+        .first<{
+          type: string;
+          status: string;
+          slot: number | null;
+          created_at: string;
+          operation_params: string;
+          authority_bookkeeping_applied_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+      if (row.type !== "update_authority" || row.status !== "confirmed" || row.slot === null) {
+        throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_AUTHORITY");
+      }
+      if (row.authority_bookkeeping_applied_at !== null) return;
+
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      if (params.role !== role || params.newAuthority !== newAuthority) {
+        throw new Error("TOKEN_TRANSACTION_AUTHORITY_PARAMS_MISMATCH");
+      }
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions newer
+           WHERE newer.token_id = ?
+             AND newer.type = 'update_authority'
+             AND newer.status = 'confirmed'
+             AND newer.operation_params::jsonb ->> 'role' = ?
+             AND (
+               newer.slot > ?
+               OR (newer.slot = ? AND newer.created_at > ?)
+               OR (newer.slot = ? AND newer.created_at = ? AND newer.id > ?)
+             )
+           LIMIT 1`
+        )
+        .bind(
+          tokenId,
+          role,
+          row.slot,
+          row.slot,
+          row.created_at,
+          row.slot,
+          row.created_at,
+          transactionId
+        )
+        .first<{ exists: number }>();
+
+      const now = new Date().toISOString();
+      if (!newer) {
+        await this.applyTokenAuthorityMirror(tx, tokenId, role, newAuthority, now);
+      }
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET authority_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND authority_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, transactionId, tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_AUTHORITY_MARKER_CONFLICT");
+    });
+  }
+
+  private async applyTokenAuthorityMirror(
+    tx: DatabaseExecutor,
+    tokenId: string,
+    role: "mint" | "freeze" | "permanentDelegate" | "metadata",
+    newAuthority: string | null,
+    now: string
+  ): Promise<void> {
+    const tokenMutation = this.tenantMutationScope();
+    if (role === "mint" || role === "freeze") {
+      const authorityField = role === "mint" ? "mint_authority" : "freeze_authority";
+      const enabledField = role === "mint" ? "is_mintable" : "freeze_authority_enabled";
+      const updated = await tx
+        .prepare(
+          `UPDATE issued_tokens
+           SET ${authorityField} = ?, ${enabledField} = ?, updated_at = ?
+           WHERE id = ?${tokenMutation.clause}`
+        )
+        .bind(newAuthority, newAuthority === null ? 0 : 1, now, tokenId, ...tokenMutation.values)
+        .run();
+      if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+      return;
+    }
+
+    if (role === "metadata") {
+      const updated = await tx
+        .prepare(
+          `UPDATE issued_tokens
+           SET metadata_authority = ?, updated_at = ?
+           WHERE id = ?${tokenMutation.clause}`
+        )
+        .bind(newAuthority, now, tokenId, ...tokenMutation.values)
+        .run();
+      if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+
+      // Older rows may still carry the authority in the legacy extension. It
+      // takes precedence when tokens are mapped, so remove it atomically with
+      // the canonical column update instead of leaving a stale authority visible.
+      await tx
+        .prepare(
+          "DELETE FROM issued_token_extensions WHERE token_id = ? AND extension = 'metadataAuthority'"
+        )
+        .bind(tokenId)
+        .run();
+      return;
+    }
+
+    if (role !== "permanentDelegate") return;
+
+    const updated = await tx
+      .prepare(`UPDATE issued_tokens SET updated_at = ? WHERE id = ?${tokenMutation.clause}`)
+      .bind(now, tokenId, ...tokenMutation.values)
+      .run();
+    if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+
+    if (newAuthority === null) {
+      await tx
+        .prepare(
+          "DELETE FROM issued_token_extensions WHERE token_id = ? AND extension = 'permanentDelegate'"
+        )
+        .bind(tokenId)
+        .run();
+      return;
+    }
+
+    await tx
+      .prepare(
+        `INSERT INTO issued_token_extensions (id, token_id, extension, config, created_at)
+         VALUES (?, ?, 'permanentDelegate', ?, ?)
+         ON CONFLICT(token_id, extension) DO UPDATE SET config = excluded.config`
+      )
+      .bind(`tex_${crypto.randomUUID()}`, tokenId, JSON.stringify(newAuthority), now)
+      .run();
   }
 
   /**

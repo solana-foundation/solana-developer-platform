@@ -76,13 +76,14 @@ export function createPostgresPrivateChannelEventRepository(
       // Channel-less rows carry instance-wide context. Lifecycle stays visible to
       // everyone in the channel; anything else (member/error) is only the author's
       // to see, and transfers never belong to a single channel.
-      const channelScope = params.viewerUserId
-        ? "(channel_id = ? OR (channel_id IS NULL AND (family = 'lifecycle' OR (family <> 'transfer' AND sdp_user_id = ?))))"
-        : "(channel_id = ? OR (channel_id IS NULL AND family <> 'transfer'))";
+      const channelScope =
+        params.viewer.scope === "member"
+          ? "(channel_id = ? OR (channel_id IS NULL AND (family = 'lifecycle' OR (family <> 'transfer' AND sdp_user_id = ?))))"
+          : "(channel_id = ? OR (channel_id IS NULL AND family <> 'transfer'))";
       const clauses = ["instance_id = ?", channelScope];
       const binds: (string | number | string[])[] = [params.instanceId, params.channelId];
-      if (params.viewerUserId) {
-        binds.push(params.viewerUserId);
+      if (params.viewer.scope === "member") {
+        binds.push(params.viewer.userId);
       }
 
       if (params.family) {
@@ -140,7 +141,7 @@ export function createPostgresPrivateChannelEventRepository(
         clauses.push("status = ?");
         binds.push(params.status);
       }
-      if (params.viewer) {
+      if (params.viewer.scope === "member") {
         // Instance lifecycle context comes with channel membership; a viewer who
         // belongs to no channel only keeps the channel-less events they authored.
         const channelLessScope = params.viewer.channelIds.length

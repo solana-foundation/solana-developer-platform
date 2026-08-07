@@ -51,13 +51,10 @@ export default async function PrivateChannelsOverviewPage() {
     : {};
 
   return (
-    // Payments routes are viewport-locked (see dashboard-shell): the page renders in an
-    // `overflow-hidden` box with the shell's usual padding dropped. So this full-bleed page
-    // re-adds side/bottom padding and lays out as a flex column — the summary panels take
-    // their natural height and the activity panel fills the remaining space, scrolling its
-    // own table so its "View all" footer stays pinned in view. Top padding is trimmed since
-    // the header tabs already sit just above.
-    <div className="flex h-full min-h-0 w-full flex-col gap-4 overflow-y-auto px-3 pt-2 pb-5 md:px-6 md:pb-6">
+    // The segment layout owns viewport scrolling and gutters. Keep this page height-bound
+    // so the summary panels take their natural height while the activity panel fills the
+    // remainder and scrolls only its table, leaving the "View all" footer pinned in view.
+    <div className="flex h-full min-h-0 w-full flex-col gap-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <ConnectedInstancePanel
           instance={instance}

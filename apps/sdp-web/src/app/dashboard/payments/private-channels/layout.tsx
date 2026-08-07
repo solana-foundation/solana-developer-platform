@@ -16,16 +16,22 @@ export default async function PrivateChannelsLayout({ children }: { children: Re
   const client = await createSdpApiClient();
   const instance = await loadInstance(client);
 
-  // Payments routes are viewport-locked: the shell renders this segment inside an
-  // `overflow-hidden` box of bounded height. Lay the tabs + page out as a flex column
-  // (tabs fixed, page fills the rest) so a full-height page like the overview can size
-  // to the remaining space instead of overshooting past the tabs and clipping its
-  // bottom. Natural-height sibling pages are unaffected — they sit at the top of the
-  // flex-1 area at their own height.
+  // The payments shell locks its viewport and clips overflow, so each segment owns
+  // its own scrolling. Without this the tab strip stays put but anything below the
+  // fold — long event feeds, member tables — is unreachable.
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PrivateChannelsHeaderTabs isConnected={instance.data?.isActive === true} />
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className="shrink-0">
+        <PrivateChannelsHeaderTabs isConnected={instance.data?.isActive === true} />
+      </div>
+      {/* Gutters match the shell's header padding, which locked routes don't inherit.
+          The gap under the tab strip lives here rather than on the strip so the first
+          card's ring and shadow — drawn outside its box — aren't shaved off by this
+          container's clip, and the deep bottom padding clears the fixed mobile bar
+          that hides at xl. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pt-6 pb-20 md:px-6 xl:pb-6">
+        {children}
+      </div>
     </div>
   );
 }
