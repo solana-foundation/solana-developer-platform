@@ -84,12 +84,13 @@ describe("custody provider availability", () => {
       enabledProviders: [],
     });
 
-    // Manual providers are organization access the SDP team grants. Only
-    // Fireblocks carries a request route today (HOO-775 wires the rest), so
-    // the others hold the state with no URL rather than borrowing one.
+    // Manual providers are organization access the SDP team grants, but only
+    // Fireblocks carries a request route today. Saying "request access" with
+    // no way to request it is a dead end, so the rest hold at not-configured
+    // until HOO-775 wires their routes.
     for (const id of ["ibm_haven", "dfns", "anchorage", "utila"] as const) {
       const provider = availability.find((candidate) => candidate.entry.id === id);
-      expect(provider?.status).toBe("request_access");
+      expect(provider?.status).toBe("not_configured");
       expect(provider?.requestAccessUrl).toBeUndefined();
     }
 

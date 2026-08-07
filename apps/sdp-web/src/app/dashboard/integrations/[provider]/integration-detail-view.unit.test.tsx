@@ -59,9 +59,11 @@ describe("IntegrationDetailView", () => {
 
   it("explains an unrouted gated provider without borrowing a link", async () => {
     const markup = await render("ibm_haven");
-    expect(markup).toContain("Request access");
-    // No request route exists for IBM Haven yet (HOO-775): the page must say
-    // how access is arranged and must not carry another provider's form.
+    // No request route exists for IBM Haven yet (HOO-775): the page must not
+    // claim access is requestable, must not carry another provider's form,
+    // and must still say how access is actually arranged.
+    expect(markup).toContain("Not configured");
+    expect(markup).not.toContain("Request access");
     expect(markup).not.toContain("typeform.com");
     expect(markup).toContain("Available by arrangement");
   });
