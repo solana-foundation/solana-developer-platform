@@ -32,9 +32,17 @@ function resolveStatus(input: {
   }
   // Not enabled splits along the launch classification: a manual provider is
   // organization access the SDP team grants, a general provider is open to
-  // everyone and only lacks credentials in this deployment. Neither may read
-  // as the other, and neither may read as the provider not existing.
-  return entry.availability === "manual" ? "request_access" : "not_configured";
+  // everyone and only lacks credentials in this deployment. But "request
+  // access" is a promise the page has to keep — a manual provider whose
+  // catalog entry carries no request route would say access is requestable
+  // while offering no way to request it, so until HOO-775 wires per-provider
+  // routes those hold at not-configured instead.
+  if (entry.availability === "manual") {
+    return entry.storedCredentialSetup.mode === "request_access"
+      ? "request_access"
+      : "not_configured";
+  }
+  return "not_configured";
 }
 
 /**
