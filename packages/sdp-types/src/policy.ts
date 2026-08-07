@@ -197,6 +197,7 @@ export interface WalletControlProfileRevision {
   revisionNumber: number;
   rules: PolicyRule[];
   defaultAction: PolicyDefaultAction;
+  commitMessage: string | null;
   createdBy: string | null;
   createdAt: string;
   activatedAt: string | null;

@@ -6117,6 +6117,7 @@ describe("Payments routes", () => {
           destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
           maxTransferAmount: "5",
           defaultAction: "allow",
+          commitMessage: "  Restrict raw signing and large transfers.  ",
           rules,
         }),
       },
@@ -6153,19 +6154,21 @@ describe("Payments routes", () => {
 
     const revisionRows = await getDb(env)
       .prepare(
-        `SELECT revision_number, default_action, rules
+        `SELECT revision_number, default_action, commit_message, rules
          FROM wallet_control_profile_revisions
          ORDER BY revision_number ASC`
       )
       .all<{
         revision_number: number;
         default_action: string;
+        commit_message: string | null;
         rules: unknown;
       }>();
     expect(revisionRows.results).toHaveLength(1);
     expect(revisionRows.results[0]).toMatchObject({
       revision_number: 1,
       default_action: "allow",
+      commit_message: "Restrict raw signing and large transfers.",
     });
 
     const secondRes = await app.request(

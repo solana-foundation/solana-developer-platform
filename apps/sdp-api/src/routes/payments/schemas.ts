@@ -180,6 +180,7 @@ export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnio
 
 export const updateWalletPolicySchema = z.object({
   destinationAllowlist: z.array(solanaAddressSchema("destinationAllowlist entry")).max(500),
+  commitMessage: z.string().trim().min(1).max(500).optional(),
   maxTransferAmount: z
     .string()
     .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
