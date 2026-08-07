@@ -204,8 +204,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Read an owner's channel token balance",
     operationId: "getPrivateChannelBalance",
     description:
-      "Reads an owner's token balance on the channel via the gateway (per wallet+mint; shared across the wallet's channels). `owner` accepts a walletId, wallet public key, or raw address; `mint` defaults to the instance cluster's USDC mint. A never-credited owner reads as a zero balance.",
-    security: [{ apiKeyAuth: [] }],
+      "Reads an owner's token balance on the channel via the gateway (per wallet+mint; shared across the wallet's channels). `owner` accepts a walletId, wallet public key, or raw address; `mint` defaults to the instance cluster's USDC mint. A never-credited owner reads as a zero balance. Requires a user session — API-key auth is not accepted at runtime.",
+    security: [{ sessionCookie: [] }],
     request: { headers: projectScopeHeaders, query: privateChannelBalanceQuerySchema },
     responses: {
       200: {
@@ -223,8 +223,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Create a deposit into the channel escrow",
     operationId: "createPrivateChannelDeposit",
     description:
-      "Builds, server-signs, and broadcasts an escrow deposit from a custody wallet to the instance chain (devnet), crediting `recipient` (defaults to the depositor) in the channel. Returns the deposit with its current status (submitted/confirmed, or failed). The credit (`credited`) is detected asynchronously via the gateway balance.",
-    security: [{ apiKeyAuth: [] }],
+      "Builds, server-signs, and broadcasts an escrow deposit from a custody wallet to the instance chain (devnet), crediting `recipient` (defaults to the depositor) in the channel. Returns the deposit with its current status (submitted/confirmed, or failed). The credit (`credited`) is detected asynchronously via the gateway balance. Requires a user session — API-key auth is not accepted at runtime.",
+    security: [{ sessionCookie: [] }],
     request: {
       headers: projectScopeHeaders,
       body: { content: jsonContent(createPrivateChannelDepositBodySchema) },
@@ -281,8 +281,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Create a withdrawal from the channel balance",
     operationId: "createPrivateChannelWithdrawal",
     description:
-      "Server-signs a burn of the custody wallet's channel-chain balance and broadcasts it to the gateway; the operator later releases the matching real USDC on devnet to `destination` (defaults to the owner). Returns the withdrawal with its current status (submitted/burn_confirmed, or failed). The release (`released`) is detected asynchronously from the devnet release on the instance ATA.",
-    security: [{ apiKeyAuth: [] }],
+      "Server-signs a burn of the custody wallet's channel-chain balance and broadcasts it to the gateway; the operator later releases the matching real USDC on devnet to `destination` (defaults to the owner). Returns the withdrawal with its current status (submitted/burn_confirmed, or failed). The release (`released`) is detected asynchronously from the devnet release on the instance ATA. Requires a user session — API-key auth is not accepted at runtime.",
+    security: [{ sessionCookie: [] }],
     request: {
       headers: projectScopeHeaders,
       body: { content: jsonContent(createPrivateChannelWithdrawalBodySchema) },
@@ -566,8 +566,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "List the caller's verified wallets",
     operationId: "listPrivateChannelVerifiedWallets",
     description:
-      "Lists the caller's own custody wallets that have completed SPC verification for this project.",
-    security: [{ apiKeyAuth: [] }],
+      "Lists the caller's own custody wallets that have completed SPC verification for this project. Requires a user session — under API-key auth this returns an empty list because there is no acting-member identity.",
+    security: [{ sessionCookie: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
       200: {
@@ -585,8 +585,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Verify a custody wallet with the SPC auth service",
     operationId: "verifyPrivateChannelWallet",
     description:
-      "Runs the SPC challenge → sign → verify handshake for a custody wallet (any SDP provider), then records the verification. A member may verify many wallets; idempotent per (member, instance, wallet). Requires the caller to be an invited member of the connected instance.",
-    security: [{ apiKeyAuth: [] }],
+      "Runs the SPC challenge → sign → verify handshake for a custody wallet (any SDP provider), then records the verification. A member may verify many wallets; idempotent per (member, instance, wallet). Requires the caller to be an invited member of the connected instance. Requires a user session — API-key auth is not accepted at runtime.",
+    security: [{ sessionCookie: [] }],
     request: { headers: projectScopeHeaders, params: privateChannelVerifyWalletParamSchema },
     responses: {
       200: {
@@ -606,8 +606,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Revoke a verified wallet",
     operationId: "deletePrivateChannelVerifiedWallet",
     description:
-      "Revokes a wallet verification with the SPC auth service and removes the SDP mirror row. Requires the caller to be an invited member of the connected instance.",
-    security: [{ apiKeyAuth: [] }],
+      "Revokes a wallet verification with the SPC auth service and removes the SDP mirror row. Requires the caller to be an invited member of the connected instance. Requires a user session — API-key auth is not accepted at runtime.",
+    security: [{ sessionCookie: [] }],
     request: { headers: projectScopeHeaders, params: privateChannelDeleteWalletParamSchema },
     responses: {
       200: {
