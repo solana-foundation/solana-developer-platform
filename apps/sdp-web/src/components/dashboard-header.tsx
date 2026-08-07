@@ -491,6 +491,66 @@ function getIssuanceRoutePageConfig(
   };
 }
 
+function getIntegrationsPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) {
+    return {
+      title: t("Shared.dashboardShell.integrations"),
+      contentWidthClass: "max-w-5xl",
+      backAction: {
+        href: "/dashboard/integrations",
+        label: t("Shared.integrations.backToIntegrations"),
+      },
+    };
+  }
+  if (pathname.startsWith("/dashboard/integrations")) {
+    // Card-grid page: fill the shell's wide container instead of stacking a
+    // second max-width inside the centered default and stranding gutters.
+    return { title: t("Shared.dashboardShell.integrations"), contentWidthClass: "max-w-7xl" };
+  }
+  return null;
+}
+
+/**
+ * Header config for the wallet section's three landing routes, under both the
+ * `/wallets` and legacy `/custody` prefixes. Returns null elsewhere.
+ */
+function getWalletSectionPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
+    return {
+      title: t("Shared.dashboardShell.wallets"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
+    return {
+      title: t("Shared.dashboardShell.createWallet"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
+    return {
+      title: t("Shared.dashboardShell.activateProvider"),
+      contentWidthClass: "max-w-3xl",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  return null;
+}
+
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -521,33 +581,8 @@ export function getDashboardPageConfig(
       },
     };
   }
-  if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
-    return {
-      title: t("Shared.dashboardShell.wallets"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
-    return {
-      title: t("Shared.dashboardShell.createWallet"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
-    };
-  }
-  if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
-    return {
-      title: t("Shared.dashboardShell.activateProvider"),
-      contentWidthClass: "max-w-3xl",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
-    };
-  }
+  const walletSectionPageConfig = getWalletSectionPageConfig(pathname, t);
+  if (walletSectionPageConfig) return walletSectionPageConfig;
   const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
   if (pathname === "/dashboard/policies") {
@@ -645,6 +680,10 @@ export function getDashboardPageConfig(
       backLabel: t("Shared.dashboardShell.backToPayments"),
       contentWidthClass: "max-w-none",
     });
+  }
+  const integrationsConfig = getIntegrationsPageConfig(pathname, t);
+  if (integrationsConfig) {
+    return integrationsConfig;
   }
   if (pathname.startsWith("/dashboard/settings")) {
     // Settings was the only route left on the `max-w-5xl` default, which stranded a

@@ -14,14 +14,32 @@ export const CUSTODY_PROVIDERS = [
 export type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
 export type ManagedCustodyProvider = Exclude<CustodyProvider, "local">;
 
+/**
+ * Every provider the catalog shows is built and runnable, so the status only
+ * ever answers "what is my next step" — never "does this exist". The two
+ * non-actionable states are deliberately distinct (HOO-772/775 and the
+ * remove-signup-waitlist decision map): `request_access` is organization
+ * access the SDP team grants, `not_configured` is environment availability —
+ * the deployment does not hold that provider's credentials. Presenting one as
+ * the other is how both prior vocabularies went wrong.
+ */
 export const CUSTODY_PROVIDER_DISPLAY_STATUSES = [
   "available",
   "active",
-  "pending",
   "request_access",
-  "unavailable",
+  "not_configured",
 ] as const;
 export type CustodyProviderDisplayStatus = (typeof CUSTODY_PROVIDER_DISPLAY_STATUSES)[number];
+
+/**
+ * Launch classification from the remove-signup-waitlist decision map: `general`
+ * providers are open to every organization and gate only on deployment
+ * credentials; `manual` providers additionally need the SDP team to grant the
+ * organization access.
+ */
+export const CUSTODY_PROVIDER_AVAILABILITY_CLASSES = ["general", "manual"] as const;
+export type CustodyProviderAvailabilityClass =
+  (typeof CUSTODY_PROVIDER_AVAILABILITY_CLASSES)[number];
 
 export const FULL_SIGNING_CUSTODY_PROVIDERS = [
   "fireblocks",
@@ -147,16 +165,21 @@ export type CustodyProviderSetupField = CustodyProviderSetupFieldBase &
   CustodyProviderSetupFieldInput &
   CustodyProviderSetupFieldValueHandling;
 
+/**
+ * How this provider's credentials come to exist: a self-service form, an
+ * external request route, or none — the deployment supplies them via env.
+ */
 export type CustodyProviderStoredCredentialSetup =
   | { mode: "self_service"; fields: readonly CustodyProviderSetupField[] }
   | { mode: "request_access"; requestAccessUrl: string }
-  | { mode: "unavailable" };
+  | { mode: "none" };
 
 interface CustodyProviderCatalogEntryShape {
   id: CustodyProvider;
   label: string;
   descriptionKey: string;
   category: CustodyProviderCategory;
+  availability: CustodyProviderAvailabilityClass;
   visible: boolean;
   technicalCapabilities: CustodyProviderCapabilities;
   useCases: readonly CustodyProviderUseCase[];
@@ -175,16 +198,18 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Local Signer",
     descriptionKey: "DashboardCustody.providerLocalDescription",
     category: "server",
+    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.local,
     useCases: ["issuance", "transfers"],
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   privy: {
     id: "privy",
     label: "Privy",
     descriptionKey: "DashboardCustody.providerPrivyDescription",
     category: "server",
+    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.privy,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
@@ -244,9 +269,14 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Fireblocks",
     descriptionKey: "DashboardCustody.providerFireblocksDescription",
     category: "institutional",
+    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.fireblocks,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
+    // The one provider with an established external request route. The other
+    // manual providers get a CTA when the request-access endpoint with
+    // organization/provider attribution exists (decision-map.md #4) — not a
+    // recycled link whose audience we have not confirmed.
     storedCredentialSetup: {
       mode: "request_access",
       requestAccessUrl: "https://solanafoundation.typeform.com/to/wShiq9SN",
@@ -257,70 +287,77 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Coinbase CDP",
     descriptionKey: "DashboardCustody.providerCoinbaseCdpDescription",
     category: "server",
+    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.coinbase_cdp,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   para: {
     id: "para",
     label: "Para",
     descriptionKey: "DashboardCustody.providerParaDescription",
     category: "server",
+    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.para,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   turnkey: {
     id: "turnkey",
     label: "Turnkey",
     descriptionKey: "DashboardCustody.providerTurnkeyDescription",
     category: "server",
+    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.turnkey,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   dfns: {
     id: "dfns",
     label: "DFNS",
     descriptionKey: "DashboardCustody.providerDfnsDescription",
     category: "institutional",
+    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.dfns,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   ibm_haven: {
     id: "ibm_haven",
     label: "IBM Digital Asset Haven",
     descriptionKey: "DashboardCustody.providerIbmHavenDescription",
     category: "institutional",
+    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.ibm_haven,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   anchorage: {
     id: "anchorage",
     label: "Anchorage",
     descriptionKey: "DashboardCustody.providerAnchorageDescription",
     category: "institutional",
+    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.anchorage,
     useCases: ["transfers", "compliance"],
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   utila: {
     id: "utila",
     label: "Utila",
     descriptionKey: "DashboardCustody.providerUtilaDescription",
     category: "institutional",
+    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.utila,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
 } as const satisfies CustodyProviderCatalogByIdShape;
 

@@ -20,6 +20,10 @@ import {
   ApprovalInboxSkeleton,
 } from "@/app/dashboard/approvals/approval-page-skeletons";
 import {
+  IntegrationDetailSkeleton,
+  IntegrationsSkeleton,
+} from "@/app/dashboard/integrations/integrations-skeleton";
+import {
   IssuanceCreateSkeleton,
   IssuanceDetailSkeleton,
   IssuancePageSkeleton,
@@ -129,6 +133,10 @@ function resolvePageLoadingComponent(
   switch (route) {
     case "home":
       return DashboardLoading;
+    case "integrations":
+      return IntegrationsSkeleton;
+    case "integration-detail":
+      return IntegrationDetailSkeleton;
     case "token-holdings":
       return TokenHoldingsLoading;
     case "wallets-overview":
