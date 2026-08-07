@@ -617,7 +617,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
-  const maxRetries = 2;
+  const maxRetries = 4;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const response = await fetch(rpcUrl, {
@@ -649,6 +649,7 @@ function isRetryableSolanaRpcError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
   return (
+    message.includes("internal error") ||
     message.includes("unable to complete request") ||
     message.includes("request timed out") ||
     message.includes("timed out") ||

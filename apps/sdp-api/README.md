@@ -184,7 +184,7 @@ In self-hosted mode every configured provider is automatically entitled
 regardless of organization tier. Per-org `providerOverrides` still apply as
 a disable-only mechanism.
 
-For the Clerk side of self-hosting (account creation, JWT template, webhook
+For the Clerk side of self-hosting (account creation, session token customization, webhook
 relay via an ngrok tunnel), follow [`docs/self-hosting/clerk-setup.md`](docs/self-hosting/clerk-setup.md).
 The webhook handler is the only path that creates `organizations` rows
 outside `pnpm db:seed:local`.
@@ -306,6 +306,12 @@ See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for
 - **Redis** — API-key, rate-limit, cache, and session storage
 - **Cloud Run jobs and scheduler** — Database migrations and transfer reconciliation
 - **Kora** — Optional local fee-payer service
+
+### Reconciliation cron
+
+- **Transfer reconciliation** can run via the dedicated Cloud Run Job (`src/job.ts`). Web service replicas skip in-process cron by default when `K_SERVICE` is set (`DISABLE_CRON=false` opts a service back in).
+- **Recurring payment collection** and **Private Channels deposit/withdrawal reconcilers** register only on in-process `startCron` (`src/cron/runner.ts`) when their respective env gates are enabled (`PAYMENTS_RECURRING_COLLECTION_ENABLED`, `PRIVATE_CHANNELS_ENABLED`). That path covers self-hosted and explicitly opted-in services.
+- **TODO:** the Cloud Run Job is transfers-only, so on managed deployments the Private Channels reconcilers run only on a service replica that opts back in with `DISABLE_CRON=false`. Decide whether that job (or a second one) should run them instead, so production does not depend on an opted-in replica.
 
 ## Contributing
 

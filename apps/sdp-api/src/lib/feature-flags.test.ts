@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isAssetProfilesEnabled, isPrivyByokProvisioningEnabled } from "./feature-flags";
+import {
+  isAssetProfilesEnabled,
+  isCustodyConnectionRuntimeEnabled,
+  isEarnEnabled,
+  isMarketsEnabled,
+  isPrivateChannelsEnabled,
+  isPrivyByokEnabled,
+} from "./feature-flags";
 
 describe("isAssetProfilesEnabled", () => {
   it.each([
@@ -24,7 +31,7 @@ describe("isAssetProfilesEnabled", () => {
     expect(
       isAssetProfilesEnabled({
         ENVIRONMENT: "development",
-        ASSET_PROFILES_ENABLED: flag,
+        SDP_FLAG_ASSET_PROFILES: flag,
         SDP_DEPLOYMENT_MODE: "self_hosted",
       })
     ).toBe(true);
@@ -40,7 +47,7 @@ describe("isAssetProfilesEnabled", () => {
     expect(
       isAssetProfilesEnabled({
         ENVIRONMENT: "production",
-        ASSET_PROFILES_ENABLED: flag,
+        SDP_FLAG_ASSET_PROFILES: flag,
         SDP_DEPLOYMENT_MODE: "self_hosted",
       })
     ).toBe(false);
@@ -50,27 +57,89 @@ describe("isAssetProfilesEnabled", () => {
     expect(
       isAssetProfilesEnabled({
         ENVIRONMENT: "production",
-        ASSET_PROFILES_ENABLED: flag,
+        SDP_FLAG_ASSET_PROFILES: flag,
         SDP_DEPLOYMENT_MODE: "self_hosted",
       })
     ).toBe(true);
   });
 });
 
-describe("isPrivyByokProvisioningEnabled", () => {
+describe("isPrivateChannelsEnabled", () => {
+  it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
+    expect(isPrivateChannelsEnabled({ PRIVATE_CHANNELS_ENABLED: flag })).toBe(false);
+  });
+
+  it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
+    expect(isPrivateChannelsEnabled({ PRIVATE_CHANNELS_ENABLED: flag })).toBe(true);
+  });
+});
+
+describe("isPrivyByokEnabled", () => {
   it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
     expect(
-      isPrivyByokProvisioningEnabled({
-        PRIVY_BYOK_PROVISIONING_ENABLED: flag,
+      isPrivyByokEnabled({
+        PRIVY_BYOK_ENABLED: flag,
       })
     ).toBe(false);
   });
 
   it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
     expect(
-      isPrivyByokProvisioningEnabled({
-        PRIVY_BYOK_PROVISIONING_ENABLED: flag,
+      isPrivyByokEnabled({
+        PRIVY_BYOK_ENABLED: flag,
       })
     ).toBe(true);
+  });
+});
+
+describe("isCustodyConnectionRuntimeEnabled", () => {
+  it("uses the Privy rollout flag only for Privy Connections", () => {
+    expect(isCustodyConnectionRuntimeEnabled({ PRIVY_BYOK_ENABLED: "true" }, "privy")).toBe(true);
+    expect(isCustodyConnectionRuntimeEnabled({ PRIVY_BYOK_ENABLED: "false" }, "privy")).toBe(false);
+    expect(isCustodyConnectionRuntimeEnabled({ PRIVY_BYOK_ENABLED: "true" }, "turnkey")).toBe(
+      false
+    );
+  });
+});
+
+describe("isMarketsEnabled", () => {
+  it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
+    expect(isMarketsEnabled({ MARKETS_ENABLED: flag })).toBe(false);
+  });
+
+  it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
+    expect(isMarketsEnabled({ MARKETS_ENABLED: flag })).toBe(true);
+  });
+});
+
+describe("isEarnEnabled", () => {
+  it("is disabled when both flags are unset", () => {
+    expect(isEarnEnabled({ MARKETS_ENABLED: undefined, EARN_ENABLED: undefined })).toBe(false);
+  });
+
+  it("is disabled when Markets is on but Earn is unset", () => {
+    expect(isEarnEnabled({ MARKETS_ENABLED: "true", EARN_ENABLED: undefined })).toBe(false);
+  });
+
+  // The parent gate has to win: Earn is a Markets sub-module, so disabling
+  // Markets must dark-launch Earn even with its own flag still turned on.
+  it.each([
+    undefined,
+    "",
+    "false",
+    "0",
+    "off",
+  ])("stays disabled when Earn is on but Markets is %s", (markets) => {
+    expect(isEarnEnabled({ MARKETS_ENABLED: markets, EARN_ENABLED: "true" })).toBe(false);
+  });
+
+  it.each([
+    "1",
+    "true",
+    " TRUE ",
+    "yes",
+    "on",
+  ])("honors the opt-in value %s on both flags", (flag) => {
+    expect(isEarnEnabled({ MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(true);
   });
 });

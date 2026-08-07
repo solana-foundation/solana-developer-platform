@@ -10,6 +10,7 @@ import {
 import { badRequest, notFound } from "@/lib/errors";
 import { parsePagination } from "@/lib/query";
 import { created, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { TokenService } from "@/services/token.service";
 import { emitKycApprovedForClearedEnrollments } from "@/services/workflows/clearance";
 import type { Env } from "@/types/env";
@@ -51,7 +52,10 @@ export const enrollHolder = async (c: AppContext) => {
   // instead of an FK violation surfacing as a 500.
   const counterpartyId = parsed.data.counterpartyId ?? null;
   if (counterpartyId) {
-    const counterparty = await createCounterpartiesRepository(c.env).getCounterpartyById({
+    const counterparty = await createCounterpartiesRepository(
+      c.env,
+      getRequestTenantScope(c)
+    ).getCounterpartyById({
       counterpartyId,
       organizationId: orgId,
       projectId,

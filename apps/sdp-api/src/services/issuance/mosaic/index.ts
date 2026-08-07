@@ -6,9 +6,9 @@
  */
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import type { TransactionSigner } from "@solana/kit";
 import { transactionFailed } from "@/lib/errors";
+import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 export type MosaicFeePayment = "sponsored" | "wallet";
@@ -29,10 +29,17 @@ export type MosaicFeePayment = "sponsored" | "wallet";
 export function createMosaicService(
   env: Env,
   signer: TransactionSigner,
-  feePayment: MosaicFeePayment
+  feePayment: MosaicFeePayment,
+  sponsorshipScope?: SponsorshipScope
 ): MosaicService {
+  if (feePayment === "sponsored" && env.KORA_RPC_URL && !sponsorshipScope) {
+    throw new Error("Sponsorship scope is required for Kora-backed issuance");
+  }
+
   const sponsor =
-    feePayment === "sponsored" && env.KORA_RPC_URL ? createFeePaymentAdapter(env) : undefined;
+    feePayment === "sponsored" && env.KORA_RPC_URL && sponsorshipScope
+      ? createSponsorshipFeePayment(env, sponsorshipScope)
+      : undefined;
   return new MosaicService(env, signer, sponsor, {
     // Keep on-chain failures surfacing as AppError("TRANSACTION_FAILED") so
     // the app's error handler maps them to 400 responses.

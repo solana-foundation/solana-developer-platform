@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, unauthorized } from "@/lib/errors";
 import { noContent } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { ApiKeyService } from "@/services/api-key.service";
@@ -40,7 +41,7 @@ playgroundInternal.post("/api-key/verify", requirePermissions("api-keys:read"), 
     throw unauthorized("Dashboard session required");
   }
 
-  const owned = await new ApiKeyService(getDb(c.env)).ownsUsableApiKey({
+  const owned = await new ApiKeyService(getDb(c.env), getRequestTenantScope(c)).ownsUsableApiKey({
     apiKey: parsed.data.apiKey,
     organizationId: actor.organizationId,
     projectId: requireProjectId(c),

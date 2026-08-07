@@ -1,3 +1,4 @@
+import { apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SignerCheckApiResponse } from "../helpers/api-types";
 import {
@@ -6,6 +7,8 @@ import {
   initIntegrationSuite,
   requestWithApiKey,
 } from "../helpers/integration";
+
+const { createSigningService, TEST_ORG, TEST_PROJECT } = apiTestSupport;
 
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
@@ -214,6 +217,9 @@ describe("Kora Fee Payment (Live Smoke)", () => {
   beforeAll(async () => {
     assertKoraLiveSmokeEnvConfigured();
     await initIntegrationSuite();
+    await createSigningService(env).initializePrivySigning(TEST_ORG.id, TEST_PROJECT.id, {
+      walletLabel: "Kora project root wallet",
+    });
   });
 
   afterAll(async () => {

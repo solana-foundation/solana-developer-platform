@@ -458,6 +458,15 @@ const walletApprovalRequestSchema = z
         amount: z.string().nullable().openapi({ description: "Operation amount." }),
         destination: z.string().nullable().openapi({ description: "Destination or counterparty." }),
         status: walletOperationStatusSchema,
+        executionStartedAt: isoDateTimeSchema.nullable().openapi({
+          description: "When execution was claimed after approval.",
+        }),
+        executionCompletedAt: isoDateTimeSchema.nullable().openapi({
+          description: "When approved execution reached a terminal state.",
+        }),
+        executionError: z.string().nullable().openapi({
+          description: "Execution failure message when the operation status is failed.",
+        }),
         createdAt: isoDateTimeSchema,
         updatedAt: isoDateTimeSchema,
       })

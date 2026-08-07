@@ -1,6 +1,6 @@
 import { createRpcForSdk } from "@sdp/rpc/solana";
 import { type Address, assertValidAddress } from "@sdp/solana/address";
-import type { FrozenAccountResponse } from "@sdp/types";
+import type { FrozenAccount, FrozenAccountResponse, TokenTransaction } from "@sdp/types";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -8,18 +8,100 @@ import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { freezeSchema, unfreezeSchema } from "../schemas";
 import { getTokenAccessControlMode, type TokenAccessControlMode } from "./access-control";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
+
+async function recoverFreezeAccountReplay(options: {
+  auditService: AuditService;
+  tokenService: TokenService;
+  transaction: TokenTransaction;
+  tokenId: string;
+  tokenAccount: string;
+  actorId: string;
+  reason?: string;
+}): Promise<{ transaction: TokenTransaction; frozenAccount: FrozenAccount }> {
+  const transaction = await recoverSettledTransactionReplay({
+    auditService: options.auditService,
+    tokenService: options.tokenService,
+    transaction: options.transaction,
+    action: "freeze",
+    params: {
+      accountAddress: options.tokenAccount,
+      reason: options.reason,
+      tokenAccountAddress: options.tokenAccount,
+    },
+  });
+  if (transaction.status === "failed") {
+    throw badRequest(transaction.error ?? "Previous freeze request failed");
+  }
+
+  const frozenAccount =
+    transaction.status === "confirmed"
+      ? await options.tokenService.applySettledAccountFreezeState({
+          transactionId: transaction.id,
+          tokenId: options.tokenId,
+          accountAddress: options.tokenAccount,
+          state: "frozen",
+          actorId: options.actorId,
+          reason: options.reason,
+        })
+      : await options.tokenService.getFrozenAccount(options.tokenId, options.tokenAccount, true);
+  if (!frozenAccount) {
+    throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
+  }
+  return { transaction, frozenAccount };
+}
+
+async function recoverUnfreezeAccountReplay(options: {
+  auditService: AuditService;
+  tokenService: TokenService;
+  transaction: TokenTransaction;
+  tokenId: string;
+  tokenAccount: string;
+  actorId: string;
+}): Promise<{ transaction: TokenTransaction; frozenAccount: FrozenAccount }> {
+  const transaction = await recoverSettledTransactionReplay({
+    auditService: options.auditService,
+    tokenService: options.tokenService,
+    transaction: options.transaction,
+    action: "unfreeze",
+  });
+  if (transaction.status === "failed") {
+    throw badRequest(transaction.error ?? "Previous unfreeze request failed");
+  }
+
+  const frozenAccount =
+    transaction.status === "confirmed"
+      ? await options.tokenService.applySettledAccountFreezeState({
+          transactionId: transaction.id,
+          tokenId: options.tokenId,
+          accountAddress: options.tokenAccount,
+          state: "unfrozen",
+          actorId: options.actorId,
+        })
+      : await options.tokenService.getFrozenAccount(options.tokenId, options.tokenAccount, true);
+  if (!frozenAccount) {
+    throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
+  }
+  return { transaction, frozenAccount };
+}
 
 function getMissingTokenAccountHint(accessControlMode: TokenAccessControlMode): string {
   if (accessControlMode === "blocklist") {
@@ -140,7 +222,7 @@ export const freezeAccount = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -210,46 +292,51 @@ export const freezeAccount = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    if (tx.status === "failed") {
-      throw badRequest(tx.error ?? "Previous freeze request failed");
-    }
-
-    const latestRecord = await tokenService.getFrozenAccount(tokenId, tokenAccount, true);
-    if (!latestRecord) {
-      throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
-    }
-
+    const replay = await recoverFreezeAccountReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      tokenId,
+      tokenAccount,
+      actorId: auth.id,
+      reason: parsed.data.reason,
+    });
     return created(c, {
       frozenAccount: {
-        ...latestRecord,
-        signature: tx.signature ?? undefined,
+        ...replay.frozenAccount,
+        signature: replay.transaction.signature ?? undefined,
       },
     });
   }
 
   // Execute freeze on Solana first (Token ACL-aware via Mosaic)
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "freeze",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      accountAddress: tokenAccount,
+      tokenAccountAddress: tokenAccount,
+      reason: parsed.data.reason,
+    },
+  });
+  let onChainEffectCompleted = false;
 
   try {
     const result = await mosaic.freezeAccount({
       tokenAccount,
       feePayer: signer.address,
     });
+    onChainEffectCompleted = true;
 
-    // Record in database after successful on-chain operation
-    const frozenAccount = await tokenService.freezeAccount({
-      tokenId,
-      accountAddress: tokenAccount,
-      frozenBy: auth.id,
-      reason: parsed.data.reason,
-    });
-
-    // Create transaction record for the freeze operation
-    await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
+    await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: { signature: result.signature, slot: Number(result.slot) },
       params: {
         accountAddress: tokenAccount,
         reason: parsed.data.reason,
@@ -257,22 +344,23 @@ export const freezeAccount = async (c: AppContext) => {
         signature: result.signature,
         slot: result.slot.toString(),
       },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
 
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "freeze",
-      resourceType: "frozen_account",
-      resourceId: frozenAccount.id,
-      metadata: {
-        tokenId,
-        accountAddress: tokenAccount,
-        tokenAccountAddress: tokenAccount,
-        reason: parsed.data.reason,
-        signature: result.signature,
-        slot: result.slot.toString(),
-      },
+    // Record in database after durable settlement evidence exists.
+    const frozenAccount = await tokenService.applySettledAccountFreezeState({
+      transactionId: tx.id,
+      tokenId,
+      accountAddress: tokenAccount,
+      state: "frozen",
+      actorId: auth.id,
+      reason: parsed.data.reason,
     });
 
     emitTokenOperationCompleted(c, {
@@ -292,21 +380,27 @@ export const freezeAccount = async (c: AppContext) => {
     };
     return created(c, response);
   } catch (error) {
-    if (error instanceof Error && error.message === "ACCOUNT_ALREADY_FROZEN") {
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      if (error instanceof Error && error.message === "ACCOUNT_ALREADY_FROZEN") {
+        await tokenService.updateTransaction(tx.id, {
+          status: "failed",
+          error: error.message,
+        });
+        throw new AppError("ACCOUNT_FROZEN", "Account is already frozen");
+      }
+
+      const mappedError = toFreezeOperationAppError(error, accessControlMode);
       await tokenService.updateTransaction(tx.id, {
         status: "failed",
-        error: error.message,
+        error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
       });
-      throw new AppError("ACCOUNT_FROZEN", "Account is already frozen");
-    }
-
-    const mappedError = toFreezeOperationAppError(error, accessControlMode);
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
-    });
-    if (mappedError) {
-      throw mappedError;
+      if (mappedError) {
+        throw mappedError;
+      }
     }
     throw error;
   }
@@ -316,7 +410,7 @@ export const listFrozenAccounts = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -352,7 +446,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -388,11 +482,6 @@ export const unfreezeAccount = async (c: AppContext) => {
     accessControlMode
   );
 
-  const frozen = await tokenService.isAccountFrozen(tokenId, tokenAccount);
-  if (!frozen) {
-    throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
-  }
-
   const { signer } = await resolveAuthoritySigner({
     env: c.env,
     auth,
@@ -423,55 +512,73 @@ export const unfreezeAccount = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    if (tx.status === "failed") {
-      throw badRequest(tx.error ?? "Previous unfreeze request failed");
-    }
+    const replay = await recoverUnfreezeAccountReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      tokenId,
+      tokenAccount,
+      actorId: auth.id,
+    });
+    return success(c, {
+      frozenAccount: {
+        ...replay.frozenAccount,
+        signature: replay.transaction.signature ?? undefined,
+      },
+    });
+  }
 
-    const latestRecord = await tokenService.getFrozenAccount(tokenId, tokenAccount, true);
-    if (latestRecord) {
-      return success(c, {
-        frozenAccount: {
-          ...latestRecord,
-          signature: tx.signature ?? undefined,
-        },
-      });
-    }
-
-    throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
+  const frozen = await tokenService.isAccountFrozen(tokenId, tokenAccount);
+  if (!frozen) {
+    throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
   }
 
   // Execute thaw on Solana first (Token ACL-aware via Mosaic)
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "unfreeze",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      accountAddress: tokenAccount,
+      tokenAccountAddress: tokenAccount,
+    },
+  });
+  let onChainEffectCompleted = false;
 
   try {
     const result = await mosaic.thawAccount({
       tokenAccount,
       feePayer: signer.address,
     });
+    onChainEffectCompleted = true;
 
-    // Update database record after successful on-chain operation
-    const frozenAccount = await tokenService.unfreezeAccount(tokenId, tokenAccount, auth.id);
-
-    await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
+    await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
+        signature: result.signature,
+        slot: Number(result.slot),
+      },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
 
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "unfreeze",
-      resourceType: "frozen_account",
-      resourceId: frozenAccount.id,
-      metadata: {
-        tokenId,
-        accountAddress: tokenAccount,
-        tokenAccountAddress: tokenAccount,
-        signature: result.signature,
-        slot: result.slot.toString(),
-      },
+    // Update database record after durable settlement evidence exists.
+    const frozenAccount = await tokenService.applySettledAccountFreezeState({
+      transactionId: tx.id,
+      tokenId,
+      accountAddress: tokenAccount,
+      state: "unfrozen",
+      actorId: auth.id,
     });
 
     emitTokenOperationCompleted(c, {
@@ -491,21 +598,27 @@ export const unfreezeAccount = async (c: AppContext) => {
     };
     return success(c, response);
   } catch (error) {
-    if (error instanceof Error && error.message === "ACCOUNT_NOT_FROZEN") {
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      if (error instanceof Error && error.message === "ACCOUNT_NOT_FROZEN") {
+        await tokenService.updateTransaction(tx.id, {
+          status: "failed",
+          error: error.message,
+        });
+        throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
+      }
+
+      const mappedError = toFreezeOperationAppError(error, accessControlMode);
       await tokenService.updateTransaction(tx.id, {
         status: "failed",
-        error: error.message,
+        error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
       });
-      throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
-    }
-
-    const mappedError = toFreezeOperationAppError(error, accessControlMode);
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
-    });
-    if (mappedError) {
-      throw mappedError;
+      if (mappedError) {
+        throw mappedError;
+      }
     }
     throw error;
   }

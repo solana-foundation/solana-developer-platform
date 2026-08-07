@@ -1,16 +1,25 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { getDb } from "@/db";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest } from "@/lib/errors";
-import { created } from "@/lib/response";
+import { created, success } from "@/lib/response";
 import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
+import { checkProviderCredential } from "@/services/provider-credential-check.service";
 import { submitProviderCredential } from "@/services/provider-credential-submission.service";
+import {
+  getPendingWalletLabel,
+  ProviderCredentialStore,
+} from "@/services/stores/provider-credential.store";
 import type { Env } from "@/types/env";
 
 const privyCredentialSubmissionSchema = z
   .object({
     provider: z.literal("privy"),
+    walletLabel: z.string().trim().min(1).max(100).optional(),
     fields: z
       .object({
         credentialLabel: z.string().trim().min(1),
@@ -28,6 +37,66 @@ internalCustody.use("*", credentialAdminAuthMiddleware());
 internalCustody.use("*", projectContextMiddleware());
 internalCustody.use("*", idempotencyKeyMiddleware());
 
+// Reload-safe view of setup: which connections exist for this project, where
+// each sits in its lifecycle, and the safe credential columns. This is what
+// lets the dashboard resume a pending or failed install without ever asking
+// for the secret again. Bounded, newest first; never secret material.
+internalCustody.get("/connections", async (c) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const limit = Math.min(Math.max(Math.trunc(Number(c.req.query("limit") ?? 20) || 20), 1), 50);
+  // `|| 0` catches NaN but not Infinity, and a finite value past
+  // MAX_SAFE_INTEGER would still overflow the bigint the SQL OFFSET binds to,
+  // so finite offsets are clamped on both ends.
+  const rawOffset = Number(c.req.query("offset") ?? 0);
+  const offset = Number.isFinite(rawOffset)
+    ? Math.min(Math.max(Math.trunc(rawOffset), 0), Number.MAX_SAFE_INTEGER)
+    : 0;
+
+  const store = new ProviderCredentialStore(getDb(c.env));
+  const { connections, total } = await store.listProjectConnectionsPage(
+    auth.organizationId,
+    projectId,
+    { limit, offset }
+  );
+
+  return success(c, {
+    connections: connections.map((row) => ({
+      id: row.id,
+      provider: row.provider,
+      status: row.status,
+      createdAt: row.created_at,
+      activatedAt: row.activated_at,
+      lastCheck: row.last_check_status
+        ? {
+            status: row.last_check_status,
+            at: row.last_check_at,
+            failureCode: row.last_check_failure_code,
+          }
+        : null,
+      pendingWalletLabel: getPendingWalletLabel(row.setup_metadata) ?? null,
+      providerCredential: {
+        id: row.credential_id,
+        label: row.credential_label,
+        status: row.credential_status,
+      },
+    })),
+    pagination: { limit, offset, total },
+  });
+});
+
+// What is installed per provider for this scope: legacy config presence, the
+// record that actually backs signing, and connection lifecycle counts. Internal
+// on purpose — it drives dashboard setup flows only, so it commits to no public
+// OpenAPI or API-key authorization contract while the setup model evolves.
+internalCustody.get("/providers", async (c) => {
+  const auth = getAuth(c);
+  return success(
+    c,
+    await getCustodySetupStatus(getDb(c.env), auth.organizationId, c.get("projectId"))
+  );
+});
+
 internalCustody.post("/provider-credentials", async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = privyCredentialSubmissionSchema.safeParse(body);
@@ -44,6 +113,10 @@ internalCustody.post("/provider-credentials", async (c) => {
 
   const result = await submitProviderCredential(c, parsed.data, idempotencyKey);
   return created(c, result);
+});
+
+internalCustody.post("/provider-credentials/:providerCredentialId/check", async (c) => {
+  return success(c, await checkProviderCredential(c, c.req.param("providerCredentialId")));
 });
 
 export default internalCustody;

@@ -1,4 +1,3 @@
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import {
   hasRecurringPaymentAdvancedPastDueAt,
   isRecurringPaymentCollectionActive,
@@ -30,11 +29,14 @@ import {
   type PaymentTransferRow,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
+import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { emitRecurringPaymentFailed } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
@@ -50,6 +52,13 @@ import {
 } from "./shared";
 
 const COLLECTION_STALE_AFTER_MS = RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS;
+
+function tenantScope(input: { organizationId: string; projectId: string }) {
+  return createTenantScope({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+}
 
 type RecurringCollectionSource = "manual" | "automated";
 
@@ -288,7 +297,13 @@ async function finalizeRecurringPaymentCollection(input: {
     // Recovery can safely re-run this transaction because the period updates below are CAS-guarded.
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
-    const paymentsRepo = createPostgresPaymentsRepository(tx);
+    const paymentsRepo = createPostgresPaymentsRepository(
+      tx,
+      createTenantScope({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      })
+    );
 
     const updatedTransfer = await paymentsRepo.updateTransfer({
       transferId: input.transfer.id,
@@ -446,20 +461,25 @@ async function journalRecurringPaymentCollectionError(input: {
       );
     }
     if (input.transfer && attemptJournaled !== transferJournaled) {
-      console.error("Partially journaled submitted recurring payment collection signature", {
-        attemptId: input.attempt.id,
-        attemptJournaled,
-        attemptJournalError:
-          attemptResult.status === "rejected" ? activationErrorMessage(attemptResult.reason) : null,
-        recurringPaymentId: input.recurringPaymentId,
-        submittedSignature: input.submittedSignature,
-        transferId: input.transfer.id,
-        transferJournaled,
-        transferJournalError:
-          transferResult.status === "rejected"
-            ? activationErrorMessage(transferResult.reason)
-            : null,
-      });
+      getLogger().error(
+        {
+          attempt_id: input.attempt.id,
+          attempt_journaled: attemptJournaled,
+          attempt_journal_error:
+            attemptResult.status === "rejected"
+              ? activationErrorMessage(attemptResult.reason)
+              : null,
+          recurring_payment_id: input.recurringPaymentId,
+          submitted_signature: input.submittedSignature,
+          transfer_id: input.transfer.id,
+          transfer_journaled: transferJournaled,
+          transfer_journal_error:
+            transferResult.status === "rejected"
+              ? activationErrorMessage(transferResult.reason)
+              : null,
+        },
+        "Partially journaled submitted recurring payment collection signature"
+      );
     }
     return;
   }
@@ -482,14 +502,17 @@ async function safeJournalRecurringPaymentCollectionError(input: {
   try {
     await journalRecurringPaymentCollectionError(input);
   } catch (journalError) {
-    console.error("Failed to journal recurring payment collection after failure", {
-      attemptId: input.attempt.id,
-      error: activationErrorMessage(journalError),
-      hasSubmittedSignature: input.submittedSignature !== null,
-      originalError: activationErrorMessage(input.error),
-      recurringPaymentId: input.recurringPaymentId,
-      transferId: input.transfer?.id ?? null,
-    });
+    getLogger().error(
+      {
+        attempt_id: input.attempt.id,
+        error: activationErrorMessage(journalError),
+        has_submitted_signature: input.submittedSignature !== null,
+        original_error: activationErrorMessage(input.error),
+        recurring_payment_id: input.recurringPaymentId,
+        transfer_id: input.transfer?.id ?? null,
+      },
+      "Failed to journal recurring payment collection after failure"
+    );
   }
 }
 
@@ -705,9 +728,9 @@ export async function collectRecurringPayment(input: {
   const nowIso = new Date().toISOString();
   const dueAt = input.recurringPayment.next_collection_due_at;
 
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
-  const paymentsRepo = createPaymentsRepository(input.env);
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
+  const paymentsRepo = createPaymentsRepository(input.env, tenantScope(input));
+  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
   const subscription = await subscriptionsRepo.getSubscriptionById({
     subscriptionId: input.recurringPayment.subscription_id,
     organizationId: input.organizationId,
@@ -889,7 +912,12 @@ export async function collectRecurringPayment(input: {
       input.recurringPayment.subscription_pda,
       "subscriptionPda"
     ) as Address;
-    const feePayer = await createFeePaymentAdapter(input.env).getFeePayer();
+    const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      actor: { type: "wallet", id: input.sourceWallet.walletId },
+    });
+    const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
     const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
       payer,

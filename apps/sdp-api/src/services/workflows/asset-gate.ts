@@ -1,6 +1,6 @@
 import type { AssetCategory, SelectedSetting, StoredAdvancedSettings } from "@sdp/types";
 import { getDb } from "@/db";
-import { createAssetProfilesRepository } from "@/db/repositories";
+import { createSystemAssetProfilesRepository } from "@/db/repositories";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
@@ -27,7 +27,8 @@ export async function resolveAssetGateContext(
   if (!token) {
     return null;
   }
-  const profile = await createAssetProfilesRepository(env).getActiveAssetProfileByTokenId(params);
+  const profile =
+    await createSystemAssetProfilesRepository(env).getActiveAssetProfileByTokenId(params);
   const stored = profile?.issuance_metadata?.settings as StoredAdvancedSettings | undefined;
   return {
     category: (profile?.asset_category ?? "generic") as AssetCategory,

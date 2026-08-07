@@ -12,9 +12,12 @@
     "typecheck": "vitest run --typecheck.enabled --typecheck.only --typecheck.include='src/**/*.test.ts' --passWithNoTests"
   },
   "dependencies": {
+    "@sdp/private-channels": "workspace:*",
     "@sdp/rpc": "workspace:*",
+    "@sdp/spc-escrow": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
+    "@solana/codecs": "catalog:",
     "@solana/keychain-cdp": "1.3.0",
     "@solana/keychain-para": "1.3.0",
     "@solana/kit": "catalog:"

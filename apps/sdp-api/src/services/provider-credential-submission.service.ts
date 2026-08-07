@@ -5,8 +5,9 @@ import { type DatabaseClient, getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, forbidden, internalError, providerUnavailable } from "@/lib/errors";
-import { isPrivyByokProvisioningEnabled } from "@/lib/feature-flags";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
@@ -29,6 +30,7 @@ const PROVISIONING_DISABLED_MESSAGE =
 
 interface SubmitPrivyCredentialInput {
   provider: "privy";
+  walletLabel?: string;
   fields: {
     credentialLabel: string;
     scope: "organization" | "project";
@@ -37,7 +39,7 @@ interface SubmitPrivyCredentialInput {
   };
 }
 
-interface SafeProviderCredential {
+export interface SafeProviderCredential {
   id: string;
   provider: "privy";
   label: string;
@@ -224,7 +226,7 @@ async function enforceProvisioningGate(
   );
   if (
     !availability.providers.custody.privy.entitled ||
-    !isPrivyByokProvisioningEnabled(context.c.env)
+    !isCustodyConnectionRuntimeEnabled(context.c.env, "privy")
   ) {
     const lateReplay = await resolveLateReplay({
       ...context,
@@ -488,6 +490,7 @@ async function persistConnection(
       projectId: submission.projectId,
       providerCredentialId: submission.providerCredentialId,
       providerCredentialScopeKey: providerCredential.scope_key,
+      pendingWalletLabel: submission.input.walletLabel,
       createdBy: submission.userId,
     });
     return;
@@ -498,6 +501,7 @@ async function persistConnection(
     expectedProviderCredentialId: lockedPlan.currentCredential.id,
     providerCredentialId: submission.providerCredentialId,
     providerCredentialScopeKey: providerCredential.scope_key,
+    pendingWalletLabel: submission.input.walletLabel,
   });
   if (!updated) {
     throw new SetupConflict(lockedPlan.connection.id);
@@ -627,6 +631,7 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
         projectId: params.projectId,
       },
       provider: params.input.provider,
+      walletLabel: params.input.walletLabel,
       fields: params.input.fields,
     })
   );
@@ -700,10 +705,6 @@ async function classifySetup(
   lock = false
 ): Promise<SetupPlan> {
   const connections = await store.listProjectConnections(organizationId, projectId, { lock });
-  const activeLegacyConfig = await store.hasActiveProjectLegacyConfig(organizationId, projectId);
-  if (activeLegacyConfig) {
-    throw new SetupConflict();
-  }
 
   const nonDeactivated = connections.filter((connection) => connection.status !== "deactivated");
   if (nonDeactivated.length === 0) {
@@ -764,7 +765,7 @@ function mapSubmissionResult(
   };
 }
 
-function mapProviderCredential(row: ProviderCredentialRow): SafeProviderCredential {
+export function mapProviderCredential(row: ProviderCredentialRow): SafeProviderCredential {
   const storedMetadata = parsePostgresJsonOr<Record<string, unknown>>(row.display_metadata, {});
   const appIdSuffix =
     typeof storedMetadata.appIdSuffix === "string" ? storedMetadata.appIdSuffix : undefined;
@@ -821,16 +822,19 @@ function logOrphanRisk(params: {
   requestId: string;
   reason: "secret_write_outcome_unknown" | "secret_cleanup_failed";
 }): void {
-  console.error("provider_credential_orphan_risk", {
-    providerCredentialId: params.providerCredentialId,
-    provider: "privy",
-    storageBackend: params.storageBackend,
-    ...(params.providerResourceVersion !== undefined && {
-      providerResourceVersion: params.providerResourceVersion,
-    }),
-    requestId: params.requestId,
-    reason: params.reason,
-  });
+  getLogger().error(
+    {
+      providerCredentialId: params.providerCredentialId,
+      provider: "privy",
+      storageBackend: params.storageBackend,
+      ...(params.providerResourceVersion !== undefined && {
+        providerResourceVersion: params.providerResourceVersion,
+      }),
+      requestId: params.requestId,
+      reason: params.reason,
+    },
+    "provider_credential_orphan_risk"
+  );
 }
 
 async function auditFailure(

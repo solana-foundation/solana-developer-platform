@@ -19,6 +19,13 @@ function readJson(filePath) {
   return value;
 }
 
+export function loadTranslationGuidance(guidanceFile) {
+  if (!guidanceFile || !fs.existsSync(guidanceFile)) {
+    return {};
+  }
+  return readJson(guidanceFile);
+}
+
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
@@ -129,15 +136,45 @@ export function collectMissingTranslations({ messagesDir, sourceLocale = "en" })
       const targetCatalog = fs.existsSync(targetFile) ? readJson(targetFile) : {};
       const sourceLeaves = flattenCatalog(sourceCatalog);
       const targetLeaves = flattenCatalog(targetCatalog);
+      const sourceEntries = [...sourceLeaves.entries()];
 
-      for (const [key, source] of sourceLeaves) {
+      for (const [entryIndex, [key, source]] of sourceEntries.entries()) {
         if (!targetLeaves.has(key)) {
+          const namespace = key.includes(".") ? key.slice(0, key.lastIndexOf(".")) : "<root>";
+          const nearby = sourceEntries
+            .map(([nearbyKey, nearbySource], nearbyIndex) => ({
+              key: nearbyKey,
+              source: nearbySource,
+              translation: targetLeaves.get(nearbyKey),
+              distance: Math.abs(nearbyIndex - entryIndex),
+              namespace: nearbyKey.includes(".")
+                ? nearbyKey.slice(0, nearbyKey.lastIndexOf("."))
+                : "<root>",
+            }))
+            .filter((entry) => entry.key !== key && entry.namespace === namespace)
+            .sort((left, right) => left.distance - right.distance)
+            .slice(0, 6)
+            .sort(
+              (left, right) =>
+                sourceEntries.findIndex(([key]) => key === left.key) -
+                sourceEntries.findIndex(([key]) => key === right.key)
+            )
+            .map(({ key: nearbyKey, source: nearbySource, translation }) => ({
+              key: nearbyKey,
+              source: nearbySource,
+              translation,
+            }));
+
           missing.push({
             locale,
             sourceFile: sourceRelativePath,
             targetFile: targetRelativePath,
             key,
             source,
+            context: {
+              namespace,
+              nearby,
+            },
           });
         }
       }
@@ -151,7 +188,51 @@ export function collectMissingTranslations({ messagesDir, sourceLocale = "en" })
   };
 }
 
-function validateCatalogFile({ sourceFile, targetFile, locale, targetRelativePath }) {
+function localePromptConfig(guidance, locale) {
+  const general = guidance?.default ?? {};
+  const localeConfig = guidance?.locales?.[locale] ?? {};
+  return {
+    context: {
+      general: general.context ?? {},
+      locale: localeConfig.context ?? {},
+    },
+    instructions: {
+      general: general.instructions ?? [],
+      locale: localeConfig.instructions ?? [],
+      terminology: localeConfig.terminology ?? [],
+    },
+  };
+}
+
+function terminologyErrors({ locale, entries, guidance }) {
+  const rules = guidance?.locales?.[locale]?.forbiddenTerms ?? [];
+  const errors = [];
+
+  for (const { key, value } of entries) {
+    for (const rule of rules) {
+      if (!isRecord(rule) || typeof rule.pattern !== "string") {
+        continue;
+      }
+      const expression = new RegExp(rule.pattern, rule.flags ?? "iu");
+      if (expression.test(value)) {
+        errors.push(
+          `${locale}:${key} uses discouraged "${rule.label ?? rule.pattern}"; use ${rule.preferred}`
+        );
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateTerminology({ locale, entries, guidance }) {
+  const errors = terminologyErrors({ locale, entries, guidance });
+  if (errors.length > 0) {
+    throw new Error(`Translation terminology validation failed:\n${errors.join("\n")}`);
+  }
+}
+
+function validateCatalogFile({ sourceFile, targetFile, locale, targetRelativePath, guidance }) {
   const sourceCatalog = readJson(sourceFile);
   const targetCatalog = fs.existsSync(targetFile) ? readJson(targetFile) : {};
   const sourceLeaves = flattenCatalog(sourceCatalog);
@@ -175,10 +256,18 @@ function validateCatalogFile({ sourceFile, targetFile, locale, targetRelativePat
     }
   }
 
+  errors.push(
+    ...terminologyErrors({
+      locale,
+      entries: [...targetLeaves].map(([key, value]) => ({ key, value })),
+      guidance,
+    })
+  );
+
   return errors;
 }
 
-export function validateCatalogs({ messagesDir, sourceLocale = "en" }) {
+export function validateCatalogs({ messagesDir, sourceLocale = "en", guidance = {} }) {
   const sourceFiles = catalogFiles(messagesDir, sourceLocale);
   const locales = availableLocales(messagesDir, sourceLocale);
   const errors = [];
@@ -193,6 +282,7 @@ export function validateCatalogs({ messagesDir, sourceLocale = "en" }) {
           targetFile: path.join(messagesDir, targetRelativePath),
           locale,
           targetRelativePath,
+          guidance,
         })
       );
     }
@@ -298,7 +388,7 @@ export function extractPlaceholderTokens(value) {
   return tokens.sort();
 }
 
-function validateAgentTranslations(entries, translations) {
+function validateAgentTranslations(entries, translations, guidance) {
   const expected = new Map(
     entries.map((entry) => [`${entry.sourceFile}\u0000${entry.key}`, entry])
   );
@@ -337,6 +427,14 @@ function validateAgentTranslations(entries, translations) {
     throw new Error(`Translation agent omitted keys: ${missing.join(", ")}`);
   }
 
+  for (const [locale, localeEntries] of Map.groupBy(result, (entry) => entry.locale)) {
+    validateTerminology({
+      locale,
+      entries: localeEntries.map(({ key, value }) => ({ key, value })),
+      guidance,
+    });
+  }
+
   return result;
 }
 
@@ -371,38 +469,101 @@ function translationOutputSchema(entries) {
   };
 }
 
-function parseAgentResult(body) {
-  const events = body
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
-
-  const failure = events.find(
-    (event) => event.type === "session.failed" || event.type === "turn.failed"
-  );
-  if (failure) {
-    throw new Error(`Translation agent failed: ${failure.data?.message ?? "unknown error"}`);
+function parseAgentEvent(line) {
+  let event;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(event)) {
+    return undefined;
   }
 
-  const completed = [...events].reverse().find((event) => event.type === "result.completed");
-  const translations = completed?.data?.result?.translations;
+  if (event.type === "session.failed" || event.type === "turn.failed") {
+    throw new Error(`Translation agent failed: ${event.data?.message ?? "unknown error"}`);
+  }
+  if (event.type !== "result.completed") {
+    return undefined;
+  }
+
+  const translations = event.data?.result?.translations;
   if (!Array.isArray(translations)) {
     throw new Error("Translation agent returned no structured translations");
   }
   return translations;
 }
 
+function parseAgentResult(body) {
+  let completed;
+  for (const line of body
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean)) {
+    const translations = parseAgentEvent(line);
+    if (translations !== undefined) {
+      completed = translations;
+      break;
+    }
+  }
+  if (completed === undefined) {
+    throw new Error("Translation agent returned no structured translations");
+  }
+  return completed;
+}
+
+async function readAgentResult(stream) {
+  if (!stream.body || typeof stream.body.getReader !== "function") {
+    return parseAgentResult(await stream.text());
+  }
+
+  const reader = stream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        newlineIndex = buffer.indexOf("\n");
+        if (!line) {
+          continue;
+        }
+
+        const translations = parseAgentEvent(line);
+        if (translations !== undefined) {
+          await reader.cancel().catch(() => {});
+          return translations;
+        }
+      }
+
+      if (done) {
+        const translations = parseAgentEvent(buffer.trim());
+        if (translations !== undefined) {
+          return translations;
+        }
+        break;
+      }
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  throw new Error("Translation agent returned no structured translations");
+}
+
 async function requestTranslations({
   locale,
   entries,
+  guidance,
   agentUrl,
   agentUsername,
   agentPassword,
@@ -414,10 +575,14 @@ async function requestTranslations({
   const body = {
     message: JSON.stringify({
       targetLocale: locale,
-      translations: entries.map(({ sourceFile, key, source }) => ({
+      // Preserve the guidance envelope so a release remains compatible while
+      // the independently deployed Eve prompt rolls forward.
+      guidance: localePromptConfig(guidance, locale),
+      translations: entries.map(({ sourceFile, key, source, context }) => ({
         file: sourceFile,
         key,
         source,
+        context,
       })),
       outputShape: [{ file: "same file", key: "same key", translation: "translated value" }],
     }),
@@ -457,7 +622,7 @@ async function requestTranslations({
         throw new Error(`Translation agent stream returned HTTP ${stream.status}`);
       }
 
-      return validateAgentTranslations(entries, parseAgentResult(await stream.text()));
+      return validateAgentTranslations(entries, await readAgentResult(stream), guidance);
     } catch (error) {
       if (attempt >= maxRetries) {
         throw error;
@@ -471,6 +636,7 @@ async function requestTranslations({
 
 export async function translateMissingEntries({
   missing,
+  guidance = {},
   agentUrl,
   agentUsername,
   agentPassword,
@@ -521,6 +687,7 @@ export async function translateMissingEntries({
         ...(await requestTranslations({
           locale,
           entries: batch,
+          guidance,
           agentUrl,
           agentUsername,
           agentPassword,

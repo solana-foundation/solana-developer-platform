@@ -13,6 +13,7 @@
 
 import type { Token } from "@sdp/types";
 import { getDb } from "@/db";
+import { createTenantScope } from "@/lib/tenant-scope";
 import {
   assertDestinationAllowedByControlList,
   getOnChainAllowlistMutationForMint,
@@ -20,7 +21,7 @@ import {
 import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
@@ -102,7 +103,13 @@ export async function preflightWalletPolicy(
       auth as Parameters<typeof resolvePolicyCustodyWallet>[1],
       walletId
     );
-    await enforceWalletOperationPolicy(env, {
+    // The execution row's org/project are the trusted tenant identity here — they were
+    // stamped at enqueue time from the authenticated rule, not from any payload.
+    const scope = createTenantScope({
+      organizationId: ctx.execution.organization_id,
+      projectId: ctx.execution.project_id,
+    });
+    await enforceWalletOperationPolicy(env, scope, {
       organizationId: ctx.execution.organization_id,
       projectId: ctx.execution.project_id,
       custodyWalletId: policyWallet?.id ?? null,

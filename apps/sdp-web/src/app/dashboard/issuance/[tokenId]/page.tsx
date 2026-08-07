@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import type { AssetProfile, Token } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
-import { assetProfiles } from "@/flags";
+import { alphaledgerTokenizationEngine, assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -102,12 +102,14 @@ function mapAssetProfile(payload: unknown): AssetProfile | null {
 }
 
 export default async function IssuanceTokenManagementPage({ params }: TokenManagementPageProps) {
-  const [t, { userId, orgId }, { tokenId }, assetProfilesEnabled] = await Promise.all([
-    getTranslations(),
-    auth(),
-    params,
-    assetProfiles(),
-  ]);
+  const [t, { userId, orgId }, { tokenId }, assetProfilesEnabled, alphaledgerEngineEnabled] =
+    await Promise.all([
+      getTranslations(),
+      auth(),
+      params,
+      assetProfiles(),
+      alphaledgerTokenizationEngine(),
+    ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -182,6 +184,7 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
         <AssetManagementWorkspace
           token={tokenResult.data}
           assetProfile={assetProfile}
+          alphaledgerEngineEnabled={alphaledgerEngineEnabled}
           tokenError={
             tokenResult.error
               ? t("DashboardIssuance.errors.apiRequestFailed", {

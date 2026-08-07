@@ -8,30 +8,36 @@ import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
-import { TokenService } from "@/services/token.service";
+import {
+  approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
+  runApprovedWalletOperationEffectTransaction,
+  walletOperationExecutionRequest,
+} from "@/services/policy/approved-operation-replay";
 import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { updateAuthoritySchema } from "../schemas";
 import {
   type AuthorityRole,
+  createResolvedAuthoritySigner,
   resolveAuthoritySigner,
+  resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { enforceIssuanceWalletOperationPolicy } from "./policy";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicAuthorityRole = Parameters<MosaicService["prepareUpdateAuthority"]>[0]["role"];
-
-type AuthorityUpdate = {
-  mintAuthority?: string | null;
-  isMintable?: boolean;
-  freezeAuthority?: string | null;
-  isFreezable?: boolean;
-  permanentDelegate?: string | null;
-};
 
 const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
   switch (role) {
@@ -59,7 +65,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -100,7 +106,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     requestedWalletId: parsed.data.signingWalletId,
     currentAuthority: currentAuthorityRaw,
   });
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   const prepared = await mosaic.prepareUpdateAuthority({
     mint: mintAddress,
@@ -168,7 +174,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -196,7 +202,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     throw badRequest("Current authority is not available for this token");
   }
 
-  const { signer, walletId } = await resolveAuthoritySigner({
+  const { walletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
     token,
@@ -220,6 +226,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       role,
       currentAuthority: currentAuthorityRaw,
       newAuthority,
+      executionRequest: walletOperationExecutionRequest(c, parsed.data),
     },
   });
 
@@ -230,27 +237,67 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     params: parsed.data,
   });
 
-  const { transaction: tx, replayed } = await tokenService.createTransaction({
-    tokenId,
-    organizationId: auth.organizationId,
-    type: "update_authority",
-    params: {
-      role,
-      currentAuthority: currentAuthorityRaw,
-      newAuthority,
-    },
-    idempotencyKey: idempotencyMetadata.idempotencyKey,
-    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
-    initiatedByKeyId: auth.id,
-  });
+  const { transaction: tx, replayed } = await runApprovedWalletOperationEffectTransaction(c, (db) =>
+    getTenantTokenService(c, db).createTransaction({
+      tokenId,
+      organizationId: auth.organizationId,
+      type: "update_authority",
+      params: {
+        role,
+        currentAuthority: currentAuthorityRaw,
+        newAuthority,
+      },
+      idempotencyKey: idempotencyMetadata.idempotencyKey,
+      idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
+      initiatedByKeyId: auth.id,
+    })
+  );
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    return success(c, { transaction: tx });
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "update_authority",
+    });
+    if (
+      approvedWalletOperationId(c) &&
+      (!transaction.signature ||
+        (transaction.status !== "confirmed" && transaction.status !== "finalized"))
+    ) {
+      // Settlement recovery above may repair a pending row from durable audit
+      // evidence. If it cannot, fail closed rather than presenting an
+      // unsubmitted authority update as a completed approval.
+      await beginApprovedWalletOperationEffect(c);
+      throw new AppError(
+        "CONFLICT",
+        "Approved authority update is incomplete and requires manual reconciliation"
+      );
+    }
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledTokenAuthority(tx.id, tokenId, role, newAuthority);
+    }
+    return success(c, { transaction });
   }
 
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const signer = await createResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    walletId,
+    currentAuthority: currentAuthorityRaw,
+  });
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "update_authority",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: { tokenId, role, newAuthority, mode: "execute" },
+  });
+  let onChainEffectCompleted = false;
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.updateAuthority({
       mint: mintAddress,
       role: mapAuthorityRole(role),
@@ -258,44 +305,25 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       newAuthority,
       feePayer: signer,
     });
+    onChainEffectCompleted = true;
 
-    const updatedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
-
-    const updates: AuthorityUpdate = {};
-    if (role === "mint") {
-      updates.mintAuthority = newAuthority;
-      updates.isMintable = newAuthority !== null;
-    }
-    if (role === "freeze") {
-      updates.freezeAuthority = newAuthority;
-      updates.isFreezable = newAuthority !== null;
-    }
-    if (role === "permanentDelegate") {
-      updates.permanentDelegate = newAuthority;
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await tokenService.updateTokenAuthorities(tokenId, updates);
-    }
-
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "update_authority",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
-      metadata: {
-        tokenId,
-        role,
-        newAuthority,
+    const updatedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
         signature: result.signature,
-        slot: result.slot.toString(),
-        mode: "execute",
+        slot: Number(result.slot),
       },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
+
+    await tokenService.applySettledTokenAuthority(tx.id, tokenId, role, newAuthority);
 
     emitTokenOperationCompleted(c, {
       organizationId: orgId,
@@ -308,10 +336,16 @@ export const executeUpdateAuthority = async (c: AppContext) => {
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
     throw error;
   }
 };

@@ -1,6 +1,6 @@
 import {
-  createCounterpartiesRepository,
   createKycWalletsRepository,
+  createSystemCounterpartiesRepository,
   createWalletAssetEnrollmentsRepository,
   type KycWalletRow,
 } from "@/db/repositories";
@@ -15,7 +15,7 @@ async function resolveCounterpartyKind(env: Env, kycWallet: KycWalletRow): Promi
   if (!kycWallet.counterparty_id) {
     return null;
   }
-  const counterparty = await createCounterpartiesRepository(env).getCounterpartyById({
+  const counterparty = await createSystemCounterpartiesRepository(env).getCounterpartyById({
     counterpartyId: kycWallet.counterparty_id,
     organizationId: kycWallet.organization_id,
     projectId: kycWallet.project_id,

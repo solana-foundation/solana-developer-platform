@@ -9,6 +9,8 @@ import {
   type WorkflowExecutionRow,
   type WorkflowExecutionsRepository,
 } from "@/db/repositories";
+import { createKVStoreSet } from "@/runtime/kv-redis";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 import { dispatchWorkflowAction } from "@/services/workflows/actions";
@@ -150,14 +152,17 @@ export interface RunWorkflowExecutionsResult {
 }
 
 function logExecutionFailure(row: WorkflowExecutionRow, error: unknown): void {
-  console.error("runDueWorkflowExecutions: action threw", {
-    error: error instanceof Error ? error.message : String(error),
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-    workflowId: row.workflow_id,
-    executionId: row.id,
-    actionType: row.action_type,
-  });
+  getLogger().error(
+    {
+      error: error instanceof Error ? error.message : String(error),
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      workflowId: row.workflow_id,
+      executionId: row.id,
+      actionType: row.action_type,
+    },
+    "runDueWorkflowExecutions: action threw"
+  );
 }
 
 type AuditTerminal = (
@@ -256,28 +261,37 @@ export async function runDueWorkflowExecutions(
 ): Promise<RunWorkflowExecutionsResult> {
   const repo = createWorkflowExecutionsRepository(env);
   const workflowsRepo = createAssetWorkflowsRepository(env);
-  const audit = new AuditService(getDb(env));
+  // System audit writers require the external checkpoint store (fail-closed ledger).
+  const audit = new AuditService(getDb(env), createKVStoreSet(env).cache);
   const result: RunWorkflowExecutionsResult = { recovered: 0, succeeded: 0, failed: 0, retried: 0 };
   const caches: TickCaches = { rules: new Map(), gates: new Map() };
 
   // Durable audit row for a terminal execution outcome (system actor → "SDP"). Only
   // terminal states are audited — transient reschedules would be noise. metadata.tokenId
-  // surfaces the event in the per-asset audit feed. Never throws (logSystem swallows).
+  // surfaces the event in the per-asset audit feed. Never throws — an audit write
+  // failure must not break the tick, so persistence errors are logged and swallowed.
   const auditTerminal: AuditTerminal = (row, status, extra) =>
-    audit.logSystem({
-      organizationId: row.organization_id,
-      action: status === "success" ? "workflow_action_executed" : "workflow_action_failed",
-      resourceType: "workflow_execution",
-      resourceId: row.id,
-      status,
-      metadata: {
-        tokenId: row.token_id,
-        workflowId: row.workflow_id,
-        triggerType: row.trigger_type,
-        actionType: row.action_type,
-        ...extra,
-      },
-    });
+    audit
+      .logSystem({
+        organizationId: row.organization_id,
+        action: status === "success" ? "workflow_action_executed" : "workflow_action_failed",
+        resourceType: "workflow_execution",
+        resourceId: row.id,
+        status,
+        metadata: {
+          tokenId: row.token_id,
+          workflowId: row.workflow_id,
+          triggerType: row.trigger_type,
+          actionType: row.action_type,
+          ...extra,
+        },
+      })
+      .catch((error: unknown) => {
+        getLogger().error(
+          { error: error instanceof Error ? error.message : String(error) },
+          "workflow engine: system audit write failed"
+        );
+      });
 
   const nowIso = now.toISOString();
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS).toISOString();

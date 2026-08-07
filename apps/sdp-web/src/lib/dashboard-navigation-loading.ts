@@ -3,10 +3,12 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   wallets: "/dashboard/wallets",
   issuance: "/dashboard/issuance",
   payments: "/dashboard/payments",
+  markets: "/dashboard/markets/earn",
   apiKeys: "/dashboard/api-keys",
   policies: "/dashboard/policies",
   approvals: "/dashboard/approvals",
   settings: "/dashboard/settings",
+  integrations: "/dashboard/integrations",
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
@@ -16,21 +18,25 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
   deposit: "/dashboard/payments/deposit",
   requests: "/dashboard/payments/requests",
   recurring: "/dashboard/payments/recurring",
+  privateChannels: "/dashboard/payments/private-channels",
 } as const;
 
 export type DashboardLoadingRoute =
   | "home"
+  | "token-holdings"
   | "wallets-overview"
   | "wallet-setup"
   | "wallet-detail"
   | "wallet-policy"
   | "wallet-policy-audit-list"
   | "wallet-policy-audit-detail"
-  | "wallet-policy-revisions"
   | "issuance-overview"
   | "issuance-create"
   | "issuance-detail"
   | "payments-overview"
+  | "earn-overview"
+  | "earn-deposit"
+  | "earn-strategy-detail"
   | "payments-transactions"
   | "payments-pay"
   | "payments-deposit"
@@ -48,6 +54,8 @@ export type DashboardLoadingRoute =
   | "approvals-list"
   | "approval-detail"
   | "settings"
+  | "integrations"
+  | "integration-detail"
   | "allowlist";
 
 function normalizePathname(pathname: string): string {
@@ -70,7 +78,6 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
   if (suffix.length < 1) return null;
   if (suffix[1] !== "policy") return "wallet-detail";
   if (suffix.length === 2) return "wallet-policy";
-  if (suffix[2] === "revisions" && suffix.length === 3) return "wallet-policy-revisions";
   if (suffix[2] === "audit" && suffix.length === 3) return "wallet-policy-audit-list";
   if (suffix[2] === "audit" && suffix.length === 4) return "wallet-policy-audit-detail";
   return null;
@@ -80,6 +87,7 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
 export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoadingRoute | null {
   const pathname = normalizePathname(rawPathname);
   if (pathname === "/dashboard") return "home";
+  if (pathname === "/dashboard/tokens") return "token-holdings";
 
   const walletRoute = resolveWalletLoadingRoute(pathname);
   if (walletRoute) return walletRoute;
@@ -87,6 +95,12 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/issuance") return "issuance-overview";
   if (pathname === "/dashboard/issuance/create") return "issuance-create";
   if (/^\/dashboard\/issuance\/[^/]+$/.test(pathname)) return "issuance-detail";
+
+  if (pathname === "/dashboard/markets/earn") return "earn-overview";
+  if (pathname === "/dashboard/markets/earn/deposit") return "earn-deposit";
+  if (/^\/dashboard\/markets\/earn\/strategies\/[^/]+$/.test(pathname)) {
+    return "earn-strategy-detail";
+  }
 
   if (pathname === "/dashboard/payments") return "payments-overview";
   if (pathname === "/dashboard/payments/transactions") return "payments-transactions";
@@ -111,6 +125,8 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/approvals") return "approvals-list";
   if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
   if (pathname === "/dashboard/settings") return "settings";
+  if (pathname === "/dashboard/integrations") return "integrations";
+  if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) return "integration-detail";
   if (pathname === "/dashboard/allowlist") return "allowlist";
 
   return null;
@@ -214,4 +230,32 @@ export function announceDashboardNavigation(targetHref: string): void {
       },
     })
   );
+}
+
+/**
+ * Whether a top-level nav destination is the one currently being viewed.
+ *
+ * Lives here rather than in the shell so the sidebar and the mobile bottom bar
+ * cannot drift apart on which tab is highlighted. Wallets deliberately claims the
+ * `/dashboard/custody` tree too — they are the same destination under two paths.
+ */
+export function isDashboardNavItemActive(pathname: string, href: string): boolean {
+  if (href === "/dashboard") {
+    // Holdings has no nav entry of its own and is only reached from the home
+    // allocation card, so Home keeps the highlight rather than the sidebar going
+    // blank while you are on it.
+    return pathname === "/dashboard" || pathname === "/dashboard/tokens";
+  }
+  if (href === "/dashboard/integrations") {
+    return (
+      pathname === "/dashboard/integrations" || pathname.startsWith("/dashboard/integrations/")
+    );
+  }
+  if (href === "/dashboard/wallets") {
+    return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
+  }
+  if (href === "/dashboard/payments") {
+    return pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
 }

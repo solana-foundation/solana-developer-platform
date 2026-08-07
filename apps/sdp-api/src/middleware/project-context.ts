@@ -10,6 +10,7 @@ export function projectContextMiddleware() {
     const apiKey = c.get("apiKey");
     if (apiKey) {
       c.set("projectId", apiKey.projectId);
+      c.set("projectEnvironment", apiKey.environment);
       return next();
     }
 
@@ -28,8 +29,9 @@ export function projectContextMiddleware() {
       throw badRequest(`Project scope is required. Provide a ${PROJECT_HEADER} header.`);
     }
 
-    const projectId = await assertProjectMembership(c, orgId, userId, requested);
-    c.set("projectId", projectId);
+    const project = await assertProjectMembership(c, orgId, userId, requested);
+    c.set("projectId", project.id);
+    c.set("projectEnvironment", project.environment);
     await next();
   };
 }
@@ -39,21 +41,21 @@ async function assertProjectMembership(
   organizationId: string,
   userId: string,
   projectId: string
-): Promise<string> {
+): Promise<{ id: string; environment: "sandbox" | "production" }> {
   const row = await getDb(c.env)
     .prepare(
-      `SELECT p.id
+      `SELECT p.id, p.environment
        FROM projects p
        JOIN project_members pm ON pm.project_id = p.id
        WHERE p.id = ? AND p.organization_id = ? AND p.status = 'active' AND pm.user_id = ?
        LIMIT 1`
     )
     .bind(projectId, organizationId, userId)
-    .first<{ id: string }>();
+    .first<{ id: string; environment: "sandbox" | "production" }>();
 
   if (!row) {
     throw forbidden("Requested project is not accessible");
   }
 
-  return row.id;
+  return row;
 }

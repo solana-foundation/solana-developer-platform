@@ -5,6 +5,7 @@ import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { LightsparkGridAmount, LightsparkRampSettlement, SdpEnvironment } from "@sdp/types";
 import { AppError, badRequest } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
+import { getLogger } from "@/runtime/logger";
 import type { AppContext, WebhookProcessor } from "./processor";
 import { applyRampSettlementEvent } from "./settlements";
 
@@ -239,7 +240,7 @@ export class LightsparkWebhookProcessor implements WebhookProcessor<unknown, Ram
 
   async process(c: AppContext, _environment: SdpEnvironment, event: RampSettlementEvent) {
     if (event.kind === "ignore") {
-      console.log(`[lightspark webhook] ignored event: ${event.reason}`);
+      getLogger().info(`[lightspark webhook] ignored event: ${event.reason}`);
       return;
     }
     await applyRampSettlementEvent(c, event);

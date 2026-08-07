@@ -1,6 +1,7 @@
 import { getDb } from "@/db";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import {
   DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
@@ -76,12 +77,15 @@ function shouldSkipCollectionError(error: unknown): boolean {
 }
 
 function logCronFailure(message: string, row: PaymentRecurringPaymentRow, error: unknown): void {
-  console.error(message, {
-    error: error instanceof Error ? error.message : String(error),
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-    recurringPaymentId: row.id,
-  });
+  getLogger().error(
+    {
+      error: error instanceof Error ? error.message : String(error),
+      organization_id: row.organization_id,
+      project_id: row.project_id,
+      recurring_payment_id: row.id,
+    },
+    message
+  );
 }
 
 async function collectRow(

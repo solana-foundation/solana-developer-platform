@@ -5,6 +5,7 @@ import { type DatabaseClient, getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { rootLogger } from "@/runtime/logger";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
 import {
   type CredentialSecretStore,
@@ -202,6 +203,7 @@ type StoredConnection = {
   provider: string;
   provider_credential_id: string;
   status: string;
+  setup_metadata: Record<string, unknown>;
   last_check_status: string | null;
   last_check_at: string | null;
   last_check_failure_code: string | null;
@@ -211,7 +213,7 @@ async function getConnectionForCredential(credentialId: string): Promise<StoredC
   const connection = await getDb(env)
     .prepare(
       `SELECT id, project_id, provider, provider_credential_id, status,
-              last_check_status, last_check_at, last_check_failure_code
+              setup_metadata, last_check_status, last_check_at, last_check_failure_code
        FROM custody_connections
        WHERE provider_credential_id = ?`
     )
@@ -266,7 +268,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     deploymentMode: env.SDP_DEPLOYMENT_MODE,
     backend: env.CREDENTIAL_SECRET_STORE_BACKEND,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
-    provisioningFlag: env.PRIVY_BYOK_PROVISIONING_ENABLED,
+    provisioningFlag: env.PRIVY_BYOK_ENABLED,
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
   };
 
@@ -277,7 +279,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = testEncryptionKey();
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = "true";
+    env.PRIVY_BYOK_ENABLED = "true";
     env.CREDENTIAL_FINGERPRINT_PEPPER = "test-credential-fingerprint-pepper-for-unit-tests";
   });
 
@@ -286,7 +288,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.SDP_DEPLOYMENT_MODE = original.deploymentMode;
     env.CREDENTIAL_SECRET_STORE_BACKEND = original.backend;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = original.provisioningFlag;
+    env.PRIVY_BYOK_ENABLED = original.provisioningFlag;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
     await clearTestDatabase(env);
     await clearKVStores(env);
@@ -296,6 +298,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
     const response = await submit(app, token, {
       key: "submit-privy-credentials-1",
+      body: { ...VALID_BODY, walletLabel: "  Treasury Wallet  " },
     });
 
     expect(response.status).toBe(201);
@@ -338,6 +341,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       provider: "privy",
       provider_credential_id: body.data.providerCredential.id,
       status: "pending",
+      setup_metadata: { pendingWalletLabel: "Treasury Wallet" },
     });
     const defaults = await getDb(env)
       .prepare("SELECT COUNT(*) AS count FROM custody_scope_defaults")
@@ -452,6 +456,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         fields: { ...VALID_BODY.fields, walletLabel: "Must not be accepted" },
       },
     ],
+    ["blank wallet label", { ...VALID_BODY, walletLabel: "   " }],
+    ["long wallet label", { ...VALID_BODY, walletLabel: "x".repeat(101) }],
     ["blank normalized app ID", { ...VALID_BODY, fields: { ...VALID_BODY.fields, appId: "   " } }],
     [
       "blank normalized label",
@@ -529,7 +535,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       appSecret: " exact secret ",
     });
 
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = undefined;
+    env.PRIVY_BYOK_ENABLED = undefined;
     await getDb(env)
       .prepare(
         `UPDATE organizations
@@ -583,7 +589,19 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     ]);
   });
 
-  it("rejects same-key payload reuse before another secret write", async () => {
+  it.each([
+    [
+      "credential secret",
+      {
+        ...VALID_BODY,
+        fields: {
+          ...VALID_BODY.fields,
+          appSecret: "different secret",
+        },
+      },
+    ],
+    ["wallet label", { ...VALID_BODY, walletLabel: "Different wallet" }],
+  ])("rejects same-key %s reuse before another secret write", async (_field, changedBody) => {
     const { app, token } = buildApp();
     expect(
       (
@@ -595,13 +613,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     const response = await submit(app, token, {
       key: "same-key-different-payload",
-      body: {
-        ...VALID_BODY,
-        fields: {
-          ...VALID_BODY.fields,
-          appSecret: "different secret",
-        },
-      },
+      body: changedBody,
     });
 
     expect(response.status).toBe(409);
@@ -628,7 +640,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   });
 
   it("denies an unseen key before constructing the secret store when the flag is off", async () => {
-    env.PRIVY_BYOK_PROVISIONING_ENABLED = undefined;
+    env.PRIVY_BYOK_ENABLED = undefined;
     const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
     const { app, token } = buildApp();
 
@@ -657,6 +669,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
     const first = await submit(app, token, {
       key: "replacement-v1",
+      body: { ...VALID_BODY, walletLabel: "First wallet" },
     });
     const firstBody = (await first.json()) as {
       data: {
@@ -674,6 +687,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "replacement-v2",
       body: {
         provider: "privy",
+        walletLabel: "Corrected wallet",
         fields: {
           credentialLabel: "Corrected organization credential",
           scope: "organization",
@@ -702,6 +716,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       id: connectionId,
       provider_credential_id: replacementBody.data.providerCredential.id,
       status: "pending",
+      setup_metadata: { pendingWalletLabel: "Corrected wallet" },
       last_check_status: null,
       last_check_at: null,
       last_check_failure_code: null,
@@ -742,6 +757,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     const oldReplay = await submit(app, token, {
       key: "replacement-v1",
+      body: { ...VALID_BODY, walletLabel: "First wallet" },
     });
     expect(oldReplay.status).toBe(201);
     expect(await oldReplay.json()).toEqual({
@@ -756,6 +772,43 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         timestamp: expect.any(String),
       },
     });
+  });
+
+  it("clears the pending wallet label when replacement omits walletLabel", async () => {
+    const { app, token } = buildApp();
+    const first = await submit(app, token, {
+      key: "replacement-clear-label-v1",
+      body: { ...VALID_BODY, walletLabel: "First wallet" },
+    });
+    const firstBody = (await first.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+    const firstCredentialId = firstBody.data.providerCredential.id;
+    const connectionId = (await getConnectionForCredential(firstCredentialId)).id;
+    await markInitialValidationFailed(getDb(env), {
+      credentialId: firstCredentialId,
+      connectionId,
+    });
+
+    const replacement = await submit(app, token, {
+      key: "replacement-clear-label-v2",
+      body: {
+        ...VALID_BODY,
+        fields: {
+          ...VALID_BODY.fields,
+          appId: "replacement-app-id",
+          appSecret: "replacement secret",
+        },
+      },
+    });
+    expect(replacement.status).toBe(201);
+    const replacementBody = (await replacement.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+
+    const connection = await getConnectionForCredential(replacementBody.data.providerCredential.id);
+    expect(connection.id).toBe(connectionId);
+    expect(connection.setup_metadata).toEqual({});
   });
 
   it.each([
@@ -827,25 +880,16 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       label: "a failed connection with a default wallet",
       key: "failed-default-wallet",
       arrange: async (db, ids) => {
-        const custodyConfigId = "cust_rejected_replacement";
         const walletId = "cwal_rejected_replacement";
         await markInitialValidationFailed(db, ids);
         await db.batch([
           db
             .prepare(
-              `INSERT INTO custody_configs (
-                 id, organization_id, project_id, provider, config_encrypted,
-                 encryption_version, status
-               ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'inactive')`
-            )
-            .bind(custodyConfigId, ORGANIZATION_ID, PROJECT_ID),
-          db
-            .prepare(
               `INSERT INTO custody_wallets (
-                 id, custody_config_id, wallet_id, public_key, label, status
+                 id, custody_connection_id, wallet_id, public_key, label, status
                ) VALUES (?, ?, 'privy-wallet-1', 'wallet-public-key-1', 'Default', 'active')`
             )
-            .bind(walletId, custodyConfigId),
+            .bind(walletId, ids.connectionId),
           db
             .prepare(
               `UPDATE custody_connections
@@ -1071,35 +1115,78 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it("blocks only an active exact-project legacy Privy config", async () => {
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs (
-           id, organization_id, project_id, provider, config_encrypted,
-           encryption_version, status
-         ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'active')`
-      )
-      .bind("cust_active_exact_project", ORGANIZATION_ID, PROJECT_ID)
-      .run();
+  it("admits a pending Connection beside the selected active Project Config", async () => {
+    const db = getDb(env);
+    const configId = "cust_active_exact_project";
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO custody_configs (
+             id, organization_id, project_id, provider, config_encrypted,
+             encryption_version, default_wallet_id, status
+           ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'legacy-wallet', 'active')`
+        )
+        .bind(configId, ORGANIZATION_ID, PROJECT_ID),
+      db
+        .prepare(
+          `INSERT INTO custody_wallets (
+             id, custody_config_id, wallet_id, public_key, label, status
+           ) VALUES (
+             'cwal_active_exact_project', ?, 'legacy-wallet',
+             'legacy-public-key', 'Legacy wallet', 'active'
+           )`
+        )
+        .bind(configId),
+      db
+        .prepare(
+          `INSERT INTO custody_scope_defaults (
+             id, organization_id, project_id, default_custody_config_id
+           ) VALUES ('csd_active_exact_project', ?, ?, ?)`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID, configId),
+    ]);
+    const readLegacyState = () =>
+      db
+        .prepare(
+          `SELECT c.id AS config_id, c.config_encrypted, c.default_wallet_id,
+                  c.status AS config_status, w.id AS custody_wallet_id,
+                  w.wallet_id, w.public_key, w.status AS wallet_status,
+                  w.custody_config_id, w.custody_connection_id,
+                  d.default_custody_config_id, d.default_custody_connection_id
+           FROM custody_configs c
+           JOIN custody_wallets w ON w.custody_config_id = c.id
+           JOIN custody_scope_defaults d
+             ON d.organization_id = c.organization_id AND d.project_id = c.project_id
+           WHERE c.id = ?`
+        )
+        .bind(configId)
+        .first();
+    const legacyBefore = await readLegacyState();
     const { app, token } = buildApp();
 
-    const blocked = await submit(app, token, {
-      key: "legacy-active-conflict",
+    const response = await submit(app, token, {
+      key: "legacy-active-coexistence",
     });
-    expect(blocked.status).toBe(409);
-    expect(await blocked.json()).toMatchObject({
-      error: {
-        code: "CONFLICT",
-        message: "Privy custody setup already exists for this project",
-      },
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+    expect(body.data.providerCredential).toMatchObject({
+      provider: "privy",
+      projectId: PROJECT_ID,
+      status: "pending",
     });
-    expect(factory).not.toHaveBeenCalled();
+    expect(await getConnectionForCredential(body.data.providerCredential.id)).toMatchObject({
+      project_id: PROJECT_ID,
+      provider: "privy",
+      status: "pending",
+    });
     expect(await getDomainCounts()).toEqual({
-      credentials: 0,
-      connections: 0,
-      wallets: 0,
+      credentials: 1,
+      connections: 1,
+      wallets: 1,
     });
+    expect(await readLegacyState()).toEqual(legacyBefore);
   });
 
   it("allows an inactive exact-project config and active organization fallback", async () => {
@@ -1178,7 +1265,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       destroyVersion: vi.fn(),
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
@@ -1201,13 +1288,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
     expect(consoleError).toHaveBeenCalledOnce();
     expect(consoleError).toHaveBeenCalledWith(
-      "provider_credential_orphan_risk",
       expect.objectContaining({
         provider: "privy",
         storageBackend: "gcp_secret_manager",
         requestId: "req_provider_credential_submit",
         reason: "secret_write_outcome_unknown",
-      })
+      }),
+      "provider_credential_orphan_risk"
     );
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("raw upstream detail");
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("exact secret");
@@ -1327,7 +1414,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       destroyVersion: vi.fn().mockRejectedValue(new Error("raw cleanup failure")),
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
@@ -1337,13 +1424,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(response.status).toBe(500);
     expect(consoleError).toHaveBeenCalledOnce();
     expect(consoleError).toHaveBeenCalledWith(
-      "provider_credential_orphan_risk",
       expect.objectContaining({
         provider: "privy",
         storageBackend: "gcp_secret_manager",
         providerResourceVersion: 11,
         reason: "secret_cleanup_failed",
-      })
+      }),
+      "provider_credential_orphan_risk"
     );
     const logged = JSON.stringify(consoleError.mock.calls);
     expect(logged).not.toContain("pcred-sensitive-name");

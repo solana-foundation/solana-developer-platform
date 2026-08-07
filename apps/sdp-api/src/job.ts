@@ -7,10 +7,12 @@ import { closeDatabasePools } from "@/db/client";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
+import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 
 export async function runCronJob(): Promise<void> {
   const env = getProcessEnv();
@@ -32,9 +34,12 @@ export async function runCronJob(): Promise<void> {
       : work();
 
   try {
-    await monitored(PENDING_TRANSFERS_MONITOR, PENDING_TRANSFERS_CRON, () =>
-      trackPendingTransfers(env)
-    );
+    // Approved-wallet-operation replay rides the pending-transfers tick (same
+    // cadence/monitor), matching the in-process cron runner.
+    await monitored(PENDING_TRANSFERS_MONITOR, PENDING_TRANSFERS_CRON, async () => {
+      await trackPendingTransfers(env);
+      await recoverApprovedWalletOperations(env);
+    });
     // The workflow engine has no other tick in the Cloud Run deployment shape (the
     // in-process cron scheduler is skipped under K_SERVICE) — without this, enqueued
     // executions would sit 'pending' forever in production.
@@ -54,7 +59,7 @@ if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
   runCronJob()
     .then(() => process.exit(0))
     .catch((err: unknown) => {
-      console.error("Reconciliation job failed:", err);
+      getLogger().error({ error: err }, "Reconciliation job failed");
       process.exit(1);
     });
 }

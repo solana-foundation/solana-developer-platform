@@ -14,7 +14,7 @@ const nextDistDir = process.env.PLAYWRIGHT_NEXT_DIST_DIR ?? ".next-playwright";
 const useNextStart = process.env.PLAYWRIGHT_USE_NEXT_START === "1";
 const webCommand = useNextStart
   ? `pnpm exec next start --hostname localhost --port ${webPort}`
-  : `pnpm exec next dev --webpack --hostname localhost --port ${webPort}`;
+  : `pnpm exec next dev --hostname localhost --port ${webPort}`;
 
 function resolveProcessEnv(): Record<string, string> {
   return Object.fromEntries(
@@ -90,7 +90,7 @@ export default defineConfig({
       testMatch: /.*\.e2e\.spec\.ts/,
       testIgnore: [
         /.*(issuance|auth-entry|gcp-read-only).*.e2e\.spec\.ts/,
-        /(^|\/)(payments|wallets)\.e2e\.spec\.ts$/,
+        /(^|\/)(payments-recurring|payments-transfer|wallets)\.e2e\.spec\.ts$/,
       ],
       dependencies: ["auth-setup"],
       use: {
@@ -100,7 +100,7 @@ export default defineConfig({
     },
     {
       name: "dashboard-transactions",
-      testMatch: /(^|\/)(payments|wallets)\.e2e\.spec\.ts$/,
+      testMatch: /(^|\/)(payments-recurring|payments-transfer|wallets)\.e2e\.spec\.ts$/,
       dependencies: ["auth-setup"],
       use: {
         ...devices["Desktop Chrome"],

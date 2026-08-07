@@ -16,6 +16,7 @@ import {
 } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { getIssuedPolicyTokens } from "./policy-assets.data";
+import { firstSearchParam } from "./policy-audit.data";
 import { WalletPolicyStartingProfileFlow } from "./wallet-policy-starting-profile-flow";
 
 interface WalletPolicyResult {
@@ -134,8 +135,10 @@ async function getComplianceScreeningEnabled(): Promise<boolean> {
 
 export default async function WalletPolicyPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ walletId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { userId, orgId } = await auth();
   if (!userId) {
@@ -145,8 +148,9 @@ export default async function WalletPolicyPage({
     redirect("/dashboard");
   }
 
-  const { walletId } = await params;
+  const [{ walletId }, resolvedSearchParams] = await Promise.all([params, searchParams]);
   const resolvedWalletId = decodeURIComponent(walletId);
+  const initialRevisionId = firstSearchParam(resolvedSearchParams.revision);
   const projectId = await getSelectedProjectId();
   if (!projectId) {
     redirect("/dashboard");
@@ -179,6 +183,7 @@ export default async function WalletPolicyPage({
       initialPolicy={policyResult.policy}
       policyError={policyResult.error}
       complianceScreeningEnabled={complianceScreeningEnabled}
+      initialRevisionId={initialRevisionId}
     />
   );
 }

@@ -64,10 +64,6 @@ export interface PaymentWalletBalancesSnapshot {
 export type RiskTone = "green" | "yellow" | "red" | "neutral";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export function getDevnetExplorerUrl(signature: string): string {
-  return `https://explorer.solana.com/tx/${encodeURIComponent(signature)}?cluster=devnet`;
-}
-
 export function toProviderLabel(value: string): string {
   const labels: Record<string, string> = {
     range: "Range",
@@ -512,8 +508,11 @@ export async function fetchWalletBalances(
 export async function updateWalletPolicy(
   walletId: string,
   policy: WalletPolicy,
-  t: Translate
+  t: Translate,
+  commitMessage?: string
 ): Promise<WalletPolicy> {
+  const trimmedCommitMessage = commitMessage?.trim();
+
   const response = await fetch(
     `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
     {
@@ -523,6 +522,7 @@ export async function updateWalletPolicy(
       },
       body: JSON.stringify({
         destinationAllowlist: policy.destinationAllowlist,
+        ...(trimmedCommitMessage ? { commitMessage: trimmedCommitMessage } : {}),
         ...(policy.maxTransferAmount ? { maxTransferAmount: policy.maxTransferAmount } : {}),
         ...(policy.maxDailyAmount ? { maxDailyAmount: policy.maxDailyAmount } : {}),
         ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),

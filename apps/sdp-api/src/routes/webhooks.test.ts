@@ -1378,6 +1378,141 @@ describe("BVNK ramp webhook", () => {
     expect(Number(transfer?.fiat_amount)).toBe(100);
   });
 
+  it("refuses to guess between ambiguous BVNK pay-in transfers", async () => {
+    const ruleId = "rule_webhook_payment_ambiguous";
+    for (const [index, createdAt] of [
+      [1, "2026-06-05T00:00:00.000Z"],
+      [2, "2026-06-05T00:01:00.000Z"],
+    ] as const) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
+             id, organization_id, project_id, wallet_id, counterparty_id,
+             source_address, destination_address, token, amount, memo, type,
+             direction, status, provider, provider_reference, delivery_mode,
+             fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+             initiated_by_key_id, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          `pt_bvnk_ambiguous_${index}`,
+          ORG_ID,
+          PROJECT_ID,
+          "wallet_bvnk_webhook",
+          COUNTERPARTY_ID,
+          null,
+          "dest",
+          "USDC",
+          null,
+          null,
+          "onramp",
+          "inbound",
+          "awaiting_payment",
+          "bvnk",
+          `bvnk_onramp_quote_ambiguous_${index}`,
+          "manual_instructions",
+          "USD",
+          "100.00",
+          JSON.stringify({ bvnk: { ruleId, fundingWalletId: WALLET_ID } }),
+          null,
+          null,
+          null,
+          createdAt,
+          createdAt
+        )
+        .run();
+    }
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:payment:payin:status-change",
+      data: {
+        customerReference: CUSTOMER_REFERENCE,
+        beneficiary: { walletId: WALLET_ID },
+        status: "COMPLETED",
+        amount: { value: 100, currencyCode: "USD" },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const rows = await getDb(env)
+      .prepare(
+        "SELECT status FROM payment_transfers WHERE id LIKE 'pt_bvnk_ambiguous_%' ORDER BY id"
+      )
+      .all<{ status: string }>();
+    expect(rows.results.map((row) => row.status)).toEqual(["awaiting_payment", "awaiting_payment"]);
+  });
+
+  it("matches a BVNK pay-in against the complete eligible transfer set", async () => {
+    const ruleId = "rule_webhook_payment_complete_set";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, counterparty_id,
+           destination_address, token, type, direction, status, provider,
+           provider_reference, delivery_mode, fiat_currency, fiat_amount,
+           provider_data, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        "pt_bvnk_complete_set_match",
+        ORG_ID,
+        PROJECT_ID,
+        "wallet_bvnk_webhook",
+        COUNTERPARTY_ID,
+        "dest",
+        "USDC",
+        "onramp",
+        "inbound",
+        "awaiting_payment",
+        "bvnk",
+        "bvnk_onramp_quote_complete_set_match",
+        "manual_instructions",
+        "USD",
+        "100.00",
+        { bvnk: { ruleId, fundingWalletId: WALLET_ID } },
+        "2026-06-05T00:00:00.000Z",
+        "2026-06-05T00:00:00.000Z"
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, counterparty_id,
+           destination_address, token, type, direction, status, provider,
+           provider_reference, delivery_mode, fiat_currency, fiat_amount,
+           provider_data, created_at, updated_at
+         )
+         SELECT
+           'pt_bvnk_complete_set_decoy_' || candidate,
+           ?, ?, ?, ?, 'dest', 'USDC', 'onramp', 'inbound', 'awaiting_payment',
+           'bvnk', 'bvnk_onramp_quote_complete_set_decoy_' || candidate,
+           'manual_instructions', 'USD', (100 + candidate)::text,
+           jsonb_build_object('bvnk', jsonb_build_object(
+             'ruleId', ?::text, 'fundingWalletId', ?::text
+           )),
+           '2026-06-05T01:00:00.000Z', '2026-06-05T01:00:00.000Z'
+         FROM generate_series(1, 100) AS candidate`
+      )
+      .bind(ORG_ID, PROJECT_ID, "wallet_bvnk_webhook", COUNTERPARTY_ID, ruleId, WALLET_ID)
+      .run();
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:payment:payin:status-change",
+      data: {
+        customerReference: CUSTOMER_REFERENCE,
+        beneficiary: { walletId: WALLET_ID },
+        status: "COMPLETED",
+        amount: { value: 100, currencyCode: "USD" },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = 'pt_bvnk_complete_set_match'")
+      .first<{ status: string }>();
+    expect(transfer?.status).toBe("completed");
+  });
+
   it("moves a BVNK off-ramp transfer to settling when a channel transaction is detected", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
     await getDb(env)

@@ -16,7 +16,7 @@ jobs:
       should_release: ${{ steps.plan.outputs.should_release }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           ref: main
@@ -51,7 +51,7 @@ jobs:
           permission-pull-requests: write
 
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           ref: main
@@ -91,7 +91,6 @@ jobs:
           git fetch origin codex/release-main
           git checkout -B codex/release-main origin/codex/release-main
           node .github/scripts/translate-missing.mjs
-          git push origin HEAD:codex/release-main
 
   publish-release:
     if: "${{ startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
@@ -109,7 +108,7 @@ jobs:
           permission-contents: write
 
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           ref: main

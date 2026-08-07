@@ -6,9 +6,16 @@
  */
 
 import { getDb } from "@/db";
+import { createKVStoreSet } from "@/runtime/kv-redis";
+import { AUDIT_LEDGER_CHECKPOINT_KEY } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 const POSTGRES_TEST_TABLES = [
+  "earn_provider_wallets",
+  "earn_nav_snapshots",
+  "earn_movements",
+  "earn_positions",
+  "earn_strategies",
   "policy_provider_sync_status",
   "policy_evaluations",
   "approval_requests",
@@ -49,12 +56,21 @@ const POSTGRES_TEST_TABLES = [
   "issued_tokens",
   "counterparty_accounts",
   "counterparties",
+  "private_channel_verified_wallets",
+  "private_channel_memberships",
+  "private_channel_users",
+  "private_channel_events",
+  "private_channel_withdrawals",
+  "private_channel_deposits",
+  "private_channels",
+  "private_channel_instances",
   "magic_links",
   "sessions",
   "project_members",
   "api_keys",
   "projects",
   "invitations",
+  "audit_ledger_anchors",
   "audit_logs",
   "auth_organization_identities",
   "auth_user_identities",
@@ -71,9 +87,10 @@ async function truncateAllTables(env: Env): Promise<void> {
     await db
       .prepare(`TRUNCATE TABLE ${POSTGRES_TEST_TABLES.join(", ")} RESTART IDENTITY CASCADE`)
       .run();
+    await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
   } catch (error) {
     throw new Error(
-      "Postgres schema is not bootstrapped. Run `pnpm db:postgres:up` and `pnpm --filter @sdp/api db:postgres:bootstrap` first.",
+      "Postgres schema is not bootstrapped. Run `pnpm infra:up` and `pnpm --filter @sdp/api db:postgres:bootstrap` first.",
       {
         cause: error,
       }

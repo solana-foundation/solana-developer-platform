@@ -43,6 +43,7 @@ import {
   getTokenChips,
   getTokenTypeLabel,
   type IssuanceTokenView,
+  tokenMarkInitial,
 } from "./issuance-token-fields";
 import { IssuanceTokenList, ManageKebab, StatHint } from "./issuance-token-list";
 import type { TokenView } from "./issuance-token-view";
@@ -214,7 +215,7 @@ function IssuanceTokenGridCard({
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-tertiary">
-                {token.symbol.slice(0, 1) || "?"}
+                {tokenMarkInitial(token.symbol)}
               </div>
             )}
           </div>
@@ -643,8 +644,7 @@ export function IssuanceWorkspace({
   if (!assetProfilesEnabled) {
     return (
       <DashboardWorkspaceTabShell
-        isPlaygroundTab={isPlaygroundTab}
-        overviewClassName={ISSUANCE_OVERVIEW_PANEL_CLASS}
+        overviewClassName="space-y-6"
         overviewKey="tokens-tab"
         overview={
           <IssuanceLegacyOverview
@@ -674,7 +674,6 @@ export function IssuanceWorkspace({
 
   return (
     <DashboardWorkspaceTabShell
-      isPlaygroundTab={isPlaygroundTab}
       overviewClassName={ISSUANCE_OVERVIEW_PANEL_CLASS}
       overviewKey="tokens-tab"
       overview={

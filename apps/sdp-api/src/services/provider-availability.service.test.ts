@@ -2,6 +2,7 @@ import { resolveOrganizationProviderEntitlements } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
+  assertEarnProviderConfigured,
   assertProviderAvailable,
   getProviderAvailability,
   syncProviderAccessFromClerk,
@@ -55,6 +56,10 @@ const providerEnvKeys = [
   "BVNK_HAWK_AUTH_ID",
   "BVNK_HAWK_SECRET_KEY",
   "BVNK_WALLET_ID",
+  "VEDA_API_KEY",
+  "VEDA_SANDBOX_API_KEY",
+  "UPSHIFT_API_KEY",
+  "UPSHIFT_SANDBOX_API_KEY",
 ] as const;
 
 type ProviderEnvKey = (typeof providerEnvKeys)[number];
@@ -469,5 +474,79 @@ describe("provider-availability.service", () => {
     expect(organization?.settings ? JSON.parse(organization.settings) : null).toEqual({
       rpcProvider: "helius",
     });
+  });
+
+  it("resolves earn entitlements as override-only, regardless of tier", () => {
+    // Earn providers require manual activation: no tier grants them by default.
+    const individual = resolveOrganizationProviderEntitlements({
+      tier: "individual",
+      providerOverrides: { earn: { veda: true } },
+    });
+    expect(individual.providers.earn.veda).toBe(true);
+    expect(individual.providers.earn.upshift).toBe(false);
+
+    const enterprise = resolveOrganizationProviderEntitlements({ tier: "enterprise" });
+    expect(enterprise.providers.earn).toEqual({
+      veda: false,
+      upshift: false,
+      perena: false,
+      ground: false,
+    });
+  });
+
+  it("reports earn provider availability from override entitlement plus configured credentials", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { veda: true } } }), TEST_ORG_ID)
+      .run();
+    env.VEDA_API_KEY = "veda_test_key";
+
+    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+
+    expect(availability.providers.earn.veda).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
+    expect(availability.providers.earn.upshift).toEqual({
+      entitled: false,
+      configured: false,
+      enabled: false,
+    });
+  });
+
+  it("re-checks earn credentials for the requested mode like ramps", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { veda: true } } }), TEST_ORG_ID)
+      .run();
+    env.VEDA_API_KEY = "veda_production_key";
+
+    await expect(
+      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "veda", false)
+    ).resolves.toBeUndefined();
+
+    await expect(
+      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "veda", true)
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: "Veda is not configured for sandbox mode.",
+    });
+  });
+
+  it("assertEarnProviderConfigured gates on credentials only, ignoring entitlement (exit safety)", () => {
+    // No earn override is granted, so zero providers are entitled, but
+    // withdrawals must still pass as long as the provider credentials exist
+    // for the mode.
+    env.VEDA_API_KEY = "veda_production_key";
+
+    expect(() => assertEarnProviderConfigured(env, "veda", false)).not.toThrow();
+
+    expect(() => assertEarnProviderConfigured(env, "veda", true)).toThrow(
+      "Veda is not configured for sandbox mode."
+    );
+    expect(() => assertEarnProviderConfigured(env, "upshift", false)).toThrow(
+      "Upshift is not configured for production mode."
+    );
   });
 });

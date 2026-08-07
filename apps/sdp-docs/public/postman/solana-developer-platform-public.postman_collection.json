@@ -475,7 +475,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/approve",
-            "description": "Approves a pending wallet operation approval request."
+            "description": "Approves a pending wallet operation approval request. The resolver must differ from the requester, including across a user session and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned."
           }
         },
         {
@@ -484,7 +484,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/reject",
-            "description": "Rejects a pending wallet operation approval request."
+            "description": "Rejects a pending wallet operation approval request. The resolver must differ from the requester, including across a user session and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned."
           }
         },
         {
@@ -493,7 +493,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/cancel",
-            "description": "Cancels a pending wallet operation approval request."
+            "description": "Cancels a pending wallet operation approval request. The requester may cancel its own request; otherwise the resolver must be an active member of the assigned approval group, or an organization/API admin when no group is assigned. A user and the API keys they created are treated as the same requester."
           }
         },
         {
@@ -782,7 +782,7 @@
             "description": "Updates stored token fields. For deployed tokens, metadata fields are also written on-chain through the current metadata authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Example Token Updated\",\n  \"symbol\": \"\",\n  \"decimals\": 0,\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true\n}",
+              "raw": "{\n  \"name\": \"Example Token Updated\",\n  \"symbol\": \"\",\n  \"decimals\": 0,\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1312,7 +1312,7 @@
             "description": "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"destinationAllowlist\": [\n    \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  ],\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"1000.00\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ]\n}",
+              "raw": "{\n  \"destinationAllowlist\": [\n    \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  ],\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"1000.00\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"

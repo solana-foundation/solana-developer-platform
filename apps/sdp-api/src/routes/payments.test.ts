@@ -30,8 +30,12 @@ import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
+import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
+import { buildPaymentTransferFingerprint } from "@/lib/idempotency";
+import { createTenantScope } from "@/lib/tenant-scope";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -447,7 +451,10 @@ async function seedWalletControlProfile(params: {
   rules: PolicyRule[];
   defaultAction?: PolicyDefaultAction;
 }): Promise<void> {
-  const repo = createPostgresPolicyRepository(getDb(env));
+  const repo = createPostgresPolicyRepository(
+    getDb(env),
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+  );
   const profile = await repo.createWalletControlProfile({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
@@ -515,6 +522,51 @@ async function seedCounterparty(params?: {
     .run();
 
   return id;
+}
+
+async function seedRampEventTransfer(params: {
+  id: string;
+  provider: "coinbase" | "moneygram";
+  providerReference: string;
+  type: "onramp" | "offramp";
+  amount?: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO payment_transfers (
+         id, organization_id, project_id, wallet_id, source_address, destination_address,
+         token, amount, memo, type, direction, status, provider, provider_reference,
+         delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+         initiated_by_key_id, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      params.id,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_WALLET_ID,
+      params.type === "offramp" ? TEST_SOLANA_ADDRESSES.wallet1 : null,
+      params.type === "onramp" ? TEST_SOLANA_ADDRESSES.wallet2 : null,
+      "USDC",
+      params.amount ?? "25",
+      null,
+      params.type,
+      params.type === "onramp" ? "inbound" : "outbound",
+      "pending",
+      params.provider,
+      params.providerReference,
+      "hosted",
+      "USD",
+      "25",
+      {},
+      null,
+      null,
+      null,
+      now,
+      now
+    )
+    .run();
 }
 
 async function seedCryptoWalletCounterpartyAccount(params: {
@@ -6021,6 +6073,11 @@ describe("Payments routes", () => {
   });
 
   it("activates immutable wallet control profile revisions from wallet policy updates", async () => {
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+      .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
+      .run();
+
     const rules = [
       {
         id: "deny-raw-signing",
@@ -6060,6 +6117,7 @@ describe("Payments routes", () => {
           destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
           maxTransferAmount: "5",
           defaultAction: "allow",
+          commitMessage: "  Restrict raw signing and large transfers.  ",
           rules,
         }),
       },
@@ -6091,24 +6149,27 @@ describe("Payments routes", () => {
     expect(updateBody.data.policy.controlProfile).toMatchObject({
       status: "active",
       revisionNumber: 1,
+      commitMessage: "Restrict raw signing and large transfers.",
       providerMappingStatus: "not_applicable",
     });
 
     const revisionRows = await getDb(env)
       .prepare(
-        `SELECT revision_number, default_action, rules
+        `SELECT revision_number, default_action, commit_message, rules
          FROM wallet_control_profile_revisions
          ORDER BY revision_number ASC`
       )
       .all<{
         revision_number: number;
         default_action: string;
+        commit_message: string | null;
         rules: unknown;
       }>();
     expect(revisionRows.results).toHaveLength(1);
     expect(revisionRows.results[0]).toMatchObject({
       revision_number: 1,
       default_action: "allow",
+      commit_message: "Restrict raw signing and large transfers.",
     });
 
     const secondRes = await app.request(
@@ -6192,6 +6253,637 @@ describe("Payments routes", () => {
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toContain("Invalid request body");
     expect(body.error.details?.errors?.rules).toContain("operationType must not be empty");
+  });
+
+  it("rejects wallet policy payloads with duplicate rule ids", async () => {
+    const updateRes = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationAllowlist: [],
+          rules: [
+            { id: "duplicated", kind: "always", action: "deny" },
+            { id: "duplicated", kind: "operation_family", families: ["ramp"], action: "allow" },
+          ],
+        }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(400);
+    const body = (await updateRes.json()) as {
+      error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
+    };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.details?.errors?.rules).toContain("Duplicate rule id: duplicated");
+  });
+
+  it("executes an approved transfer exactly once after leaving it pending", async () => {
+    const sessionId = "ses_ungrouped_payment_approver";
+    const approverUserId = "usr_ungrouped_payment_approver";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(approverUserId, "ungrouped-payment-approver@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'member', 'active')`
+        )
+        .bind("om_ungrouped_payment_approver", TEST_ORG.id, approverUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+        )
+        .bind("pm_ungrouped_payment_approver", TEST_PROJECT.id, approverUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(sessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+    ]);
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-execution",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    const apiHeaders = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+    };
+    const adminHeaders = {
+      Cookie: `sdp_session=${sessionId}`,
+      "x-project-id": TEST_PROJECT.id,
+    };
+
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: apiHeaders,
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    expect(pendingResponse.status).toBe(202);
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+    expect(approvalRequestId).toMatch(/^appr_/);
+    expect(walletOperationId).toMatch(/^wop_/);
+
+    const beforeApproval = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+      .first<{ count: number | string }>();
+    expect(Number(beforeApproval?.count ?? 0)).toBe(0);
+
+    const approvalPath = `/v1/wallets/approval-requests/${approvalRequestId}/approve`;
+    const apiKeyApproval = await app.request(
+      approvalPath,
+      { method: "POST", headers: apiHeaders },
+      env
+    );
+    expect(apiKeyApproval.status).toBe(403);
+
+    const memberApproval = await app.request(
+      approvalPath,
+      { method: "POST", headers: adminHeaders },
+      env
+    );
+    expect(memberApproval.status).toBe(403);
+    await getDb(env)
+      .prepare("UPDATE organization_members SET role = 'admin' WHERE id = ?")
+      .bind("om_ungrouped_payment_approver")
+      .run();
+
+    const approve = () => app.request(approvalPath, { method: "POST", headers: adminHeaders }, env);
+    const approvedResponse = await approve();
+    expect(approvedResponse.status).toBe(200);
+    const approvedBody = (await approvedResponse.json()) as {
+      data: {
+        approvalRequest: {
+          status: string;
+          operation: {
+            status: string;
+            executionStartedAt: string | null;
+            executionCompletedAt: string | null;
+            executionError: string | null;
+          };
+        };
+      };
+    };
+    expect(approvedBody.data.approvalRequest).toMatchObject({
+      status: "approved",
+      operation: {
+        status: "completed",
+        executionError: null,
+      },
+    });
+    expect(approvedBody.data.approvalRequest.operation.executionStartedAt).toBeTruthy();
+    expect(approvedBody.data.approvalRequest.operation.executionCompletedAt).toBeTruthy();
+
+    const transfers = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers")
+      .all<{ status: string }>();
+    expect(transfers.results).toEqual([{ status: "confirmed" }]);
+    const fencedOperation = await getDb(env)
+      .prepare("SELECT execution_effect_started_at FROM wallet_operations WHERE id = ?")
+      .bind(walletOperationId)
+      .first<{ execution_effect_started_at: string | null }>();
+    expect(fencedOperation?.execution_effect_started_at).toBeTruthy();
+
+    const replayedApproval = await approve();
+    expect(replayedApproval.status).toBe(200);
+    const transferCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+      .first<{ count: number | string }>();
+    expect(Number(transferCount?.count ?? 0)).toBe(1);
+  });
+
+  it("recovers an expired execution claim with a fenced retry", async () => {
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-recovery",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+    };
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+    const repository = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    await repository.updateApprovalRequestStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      approvalRequestId,
+      status: "approved",
+      operationStatus: "executing",
+      resolvedBy: TEST_API_KEY.id,
+    });
+    const interrupted = await repository.claimWalletOperationExecution(
+      walletOperationId,
+      "interrupted-attempt"
+    );
+    expect(interrupted?.execution_attempts).toBe(1);
+    await getDb(env)
+      .prepare(
+        `UPDATE wallet_operations
+         SET execution_lease_expires_at = '2000-01-01T00:00:00.000Z'
+         WHERE id = ?`
+      )
+      .bind(walletOperationId)
+      .run();
+
+    // The stale worker must lose terminal-write authority as soon as its lease
+    // expires, even before recovery replaces its attempt ID.
+    expect(
+      await repository.completeWalletOperationExecution({
+        walletOperationId,
+        executionAttemptId: "interrupted-attempt",
+        status: "failed",
+        error: "stale worker",
+      })
+    ).toBeNull();
+    expect(await repository.getWalletOperationById(walletOperationId)).toMatchObject({
+      status: "executing",
+      execution_attempt_id: "interrupted-attempt",
+    });
+
+    expect(await recoverApprovedWalletOperations(env)).toBe(1);
+    const recovered = await repository.getWalletOperationById(walletOperationId);
+    expect(recovered).toMatchObject({
+      status: "completed",
+      execution_attempts: 2,
+      execution_error: null,
+      execution_lease_expires_at: null,
+    });
+    expect(recovered?.execution_attempt_id).not.toBe("interrupted-attempt");
+
+    const transferCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+      .first<{ count: number | string }>();
+    expect(Number(transferCount?.count ?? 0)).toBe(1);
+  });
+
+  it("fails recovery closed for an incomplete idempotent transfer", async () => {
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-incomplete-replay",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    const idempotencyKey = "approved-incomplete-transfer";
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    expect(pendingResponse.status).toBe(202);
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+    const scope = createTenantScope({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+    });
+    const policyRepository = createPostgresPolicyRepository(getDb(env), scope);
+    await policyRepository.updateApprovalRequestStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      approvalRequestId,
+      status: "approved",
+      operationStatus: "executing",
+      resolvedBy: TEST_API_KEY.id,
+    });
+    await policyRepository.claimWalletOperationExecution(walletOperationId, "interrupted-attempt");
+
+    const stranded = await createPostgresPaymentsRepository(getDb(env), scope).createTransfer({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "0.1",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: TEST_API_KEY.id,
+      idempotencyKey,
+      idempotencyFingerprint: buildPaymentTransferFingerprint({
+        sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "0.1",
+        memo: undefined,
+        type: "transfer",
+      }),
+    });
+    if (!stranded) {
+      throw new Error("Expected the stranded transfer fixture to be created");
+    }
+    expect(stranded).toMatchObject({ status: "processing", signature: null });
+    await getDb(env)
+      .prepare(
+        `UPDATE wallet_operations
+         SET execution_lease_expires_at = '2000-01-01T00:00:00.000Z'
+         WHERE id = ?`
+      )
+      .bind(walletOperationId)
+      .run();
+
+    expect(await recoverApprovedWalletOperations(env)).toBe(1);
+    const recovered = await policyRepository.getWalletOperationById(walletOperationId);
+    expect(recovered).toMatchObject({
+      status: "failed",
+      execution_attempts: 2,
+    });
+    expect(recovered?.execution_effect_started_at).toBeTruthy();
+    expect(recovered?.execution_error).toContain(
+      "Approved transfer execution is incomplete and requires manual reconciliation"
+    );
+
+    const unchanged = await getDb(env)
+      .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
+      .bind(stranded.id)
+      .first<{ status: string; signature: string | null }>();
+    expect(unchanged).toEqual({ status: "processing", signature: null });
+  });
+
+  it("requires manual reconciliation when an expired execution crossed its effect fence", async () => {
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-ambiguous-recovery",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+    const repository = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    await repository.updateApprovalRequestStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      approvalRequestId,
+      status: "approved",
+      operationStatus: "executing",
+      resolvedBy: TEST_API_KEY.id,
+    });
+    await repository.claimWalletOperationExecution(walletOperationId, "ambiguous-attempt");
+    expect(
+      await repository.beginWalletOperationExecutionEffect(walletOperationId, "ambiguous-attempt")
+    ).toBe(true);
+    const firstEffect = await repository.getWalletOperationById(walletOperationId);
+    expect(
+      await repository.beginWalletOperationExecutionEffect(walletOperationId, "ambiguous-attempt")
+    ).toBe(true);
+    const repeatedEffect = await repository.getWalletOperationById(walletOperationId);
+    expect(repeatedEffect?.execution_effect_started_at).toBe(
+      firstEffect?.execution_effect_started_at
+    );
+    await getDb(env)
+      .prepare(
+        `UPDATE wallet_operations
+         SET execution_lease_expires_at = '2000-01-01T00:00:00.000Z'
+         WHERE id = ?`
+      )
+      .bind(walletOperationId)
+      .run();
+
+    expect(await recoverApprovedWalletOperations(env)).toBe(0);
+    const reconciled = await repository.getWalletOperationById(walletOperationId);
+    expect(reconciled).toMatchObject({
+      status: "failed",
+      execution_attempt_id: "ambiguous-attempt",
+      execution_attempts: 1,
+      execution_lease_expires_at: null,
+    });
+    expect(reconciled?.execution_effect_started_at).toBeTruthy();
+    expect(reconciled?.execution_completed_at).toBeTruthy();
+    expect(reconciled?.execution_error).toContain("manual reconciliation");
+
+    const transferCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+      .first<{ count: number | string }>();
+    expect(Number(transferCount?.count ?? 0)).toBe(0);
+  });
+
+  it("requires the configured approval-group member to approve execution", async () => {
+    const approvalGroupId = "apg_payment_execution";
+    const ownerSessionId = "ses_payment_request_owner";
+    const approverSessionId = "ses_payment_approver";
+    const approverUserId = "usr_payment_approver";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(approverUserId, "payment-approver@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'admin', 'active')`
+        )
+        .bind("om_payment_approver", TEST_ORG.id, TEST_USER.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'admin', 'active')`
+        )
+        .bind("om_payment_separate_approver", TEST_ORG.id, approverUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+        )
+        .bind("pm_payment_approver", TEST_PROJECT.id, TEST_USER.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+        )
+        .bind("pm_payment_separate_approver", TEST_PROJECT.id, approverUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(ownerSessionId, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(approverSessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO approval_groups (id, organization_id, project_id, name, status, created_by)
+           VALUES (?, ?, ?, 'Payment approvers', 'active', ?)`
+        )
+        .bind(approvalGroupId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO approval_group_members (id, approval_group_id, user_id, role)
+           VALUES (?, ?, ?, 'approver')`
+        )
+        .bind("agm_payment_approver", approvalGroupId, TEST_USER.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO approval_group_members (id, approval_group_id, user_id, role)
+           VALUES (?, ?, ?, 'approver')`
+        )
+        .bind("agm_payment_separate_approver", approvalGroupId, approverUserId),
+    ]);
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "group-approve-payment-execution",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+          approvalGroupId,
+        },
+      ],
+    });
+    const apiHeaders = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+    };
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: apiHeaders,
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string } };
+    };
+    const approvalPath = `/v1/wallets/approval-requests/${pendingBody.error.details.approvalRequestId}/approve`;
+    const ownerSessionHeaders = {
+      "Content-Type": "application/json",
+      Cookie: `sdp_session=${ownerSessionId}`,
+      "x-project-id": TEST_PROJECT.id,
+    };
+    const approverSessionHeaders = {
+      "Content-Type": "application/json",
+      Cookie: `sdp_session=${approverSessionId}`,
+      "x-project-id": TEST_PROJECT.id,
+    };
+
+    const apiKeyDecision = await app.request(
+      approvalPath,
+      { method: "POST", headers: apiHeaders },
+      env
+    );
+    expect(apiKeyDecision.status).toBe(403);
+
+    const ownerDecision = await app.request(
+      approvalPath,
+      {
+        method: "POST",
+        headers: ownerSessionHeaders,
+      },
+      env
+    );
+    expect(ownerDecision.status).toBe(403);
+    expect(await ownerDecision.json()).toMatchObject({
+      error: { message: "Approval requests must be decided by a different principal" },
+    });
+
+    const memberDecision = await app.request(
+      approvalPath,
+      {
+        method: "POST",
+        headers: approverSessionHeaders,
+      },
+      env
+    );
+    expect(memberDecision.status).toBe(200);
+    const memberBody = (await memberDecision.json()) as {
+      data: { approvalRequest: { status: string; operation: { status: string } } };
+    };
+    expect(memberBody.data.approvalRequest).toMatchObject({
+      status: "approved",
+      operation: { status: "completed" },
+    });
+
+    const selfRequested = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: ownerSessionHeaders,
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.2",
+        }),
+      },
+      env
+    );
+    expect(selfRequested.status).toBe(202);
+    const selfRequestedBody = (await selfRequested.json()) as {
+      error: { details: { approvalRequestId: string } };
+    };
+    const selfApproval = await app.request(
+      `/v1/wallets/approval-requests/${selfRequestedBody.error.details.approvalRequestId}/approve`,
+      { method: "POST", headers: ownerSessionHeaders },
+      env
+    );
+    expect(selfApproval.status).toBe(403);
+    const mixedAuthSelfApproval = await app.request(
+      `/v1/wallets/approval-requests/${selfRequestedBody.error.details.approvalRequestId}/approve`,
+      { method: "POST", headers: apiHeaders },
+      env
+    );
+    expect(mixedAuthSelfApproval.status).toBe(403);
+    expect(await mixedAuthSelfApproval.json()).toMatchObject({
+      error: { message: "Approval requests must be decided by a different principal" },
+    });
+    const mixedAuthSelfCancel = await app.request(
+      `/v1/wallets/approval-requests/${selfRequestedBody.error.details.approvalRequestId}/cancel`,
+      { method: "POST", headers: apiHeaders },
+      env
+    );
+    expect(mixedAuthSelfCancel.status).toBe(200);
   });
 
   it("blocks create transfer when projected daily total exceeds maxDailyAmount", async () => {
@@ -7365,6 +8057,48 @@ describe("Payments routes", () => {
       vi.clearAllMocks();
     });
 
+    it("matches a token filter against every form the ledger stores it in", async () => {
+      // pt.token is written inconsistently: the same asset is a mint on some rows
+      // and a bare symbol on others. An exact match returned 2 for the symbol and
+      // 1 for the mint when the right answer was 3, so either spelling has to
+      // answer with all of them. This is the HTTP hop over the repository fix.
+      const solMint = "So11111111111111111111111111111111111111112";
+      await seedTransfer({ id: "xfr_tok_sym_1", status: "confirmed", token: "SOL" });
+      await seedTransfer({ id: "xfr_tok_sym_2", status: "confirmed", token: "SOL" });
+      await seedTransfer({ id: "xfr_tok_mint_1", status: "confirmed", token: solMint });
+
+      for (const spelling of ["SOL", solMint]) {
+        const res = await app.request(
+          `/v1/payments/transfers?token=${encodeURIComponent(spelling)}`,
+          { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: Array<{ id: string }> };
+        expect(body.data.map((row) => row.id).sort()).toEqual([
+          "xfr_tok_mint_1",
+          "xfr_tok_sym_1",
+          "xfr_tok_sym_2",
+        ]);
+      }
+    });
+
+    it("does not widen a token filter to an unrelated asset", async () => {
+      await seedTransfer({ id: "xfr_tok_sol", status: "confirmed", token: "SOL" });
+      await seedTransfer({ id: "xfr_tok_usdc", status: "confirmed", token: "USDC" });
+
+      const res = await app.request(
+        "/v1/payments/transfers?token=SOL",
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string }> };
+      expect(body.data.map((row) => row.id)).toEqual(["xfr_tok_sol"]);
+    });
+
     it("returns confirmed + pending transfers when wallet filter is provided", async () => {
       const confirmedSig =
         "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
@@ -8455,5 +9189,125 @@ describe("Payments routes", () => {
 
       expect(res.status).toBe(404);
     });
+  });
+
+  it("keeps browser ramp terminal callbacks advisory", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    await seedRampEventTransfer({
+      id: "xfr_coinbase_advisory",
+      provider: "coinbase",
+      providerReference: "coinbase_order_advisory",
+      type: "onramp",
+    });
+    await seedRampEventTransfer({
+      id: "xfr_moneygram_advisory",
+      provider: "moneygram",
+      providerReference: "moneygram_session_advisory",
+      type: "onramp",
+    });
+
+    const coinbase = await app.request(
+      "/v1/payments/ramps/coinbase/events",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ kind: "committed", orderId: "coinbase_order_advisory" }),
+      },
+      env
+    );
+    const moneygram = await app.request(
+      "/v1/payments/ramps/moneygram/events",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          kind: "onramp_completed",
+          sessionId: "moneygram_session_advisory",
+          transactionId: "moneygram_transaction_advisory",
+          status: "COMPLETED",
+          amount: 25,
+        }),
+      },
+      env
+    );
+
+    expect(coinbase.status).toBe(200);
+    expect(moneygram.status).toBe(200);
+    const rows = await getDb(env)
+      .prepare(
+        `SELECT id, status, provider_data
+         FROM payment_transfers
+         WHERE id IN ('xfr_coinbase_advisory', 'xfr_moneygram_advisory')
+         ORDER BY id`
+      )
+      .all<{ id: string; status: string; provider_data: Record<string, unknown> }>();
+    expect(rows.results).toHaveLength(2);
+    for (const row of rows.results) {
+      expect(row.status).toBe("pending");
+      expect(row.provider_data).toMatchObject({ clientEvent: { advisory: true } });
+    }
+  });
+
+  it("rejects a MoneyGram crypto leg whose amount does not match the session", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    await seedRampEventTransfer({
+      id: "xfr_moneygram_amount_guard",
+      provider: "moneygram",
+      providerReference: "moneygram_session_amount_guard",
+      type: "offramp",
+      amount: "25",
+    });
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, source_address, destination_address,
+           token, amount, type, direction, status, signature, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        "xfr_moneygram_wrong_amount_leg",
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet1,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        "USDC",
+        "24",
+        "transfer",
+        "outbound",
+        "confirmed",
+        "moneygram-wrong-amount-signature",
+        now,
+        now
+      )
+      .run();
+
+    const response = await app.request(
+      "/v1/payments/ramps/moneygram/events",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          kind: "signed",
+          sessionId: "moneygram_session_amount_guard",
+          cryptoTransferId: "xfr_moneygram_wrong_amount_leg",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_moneygram_amount_guard")
+      .first<{ status: string }>();
+    expect(transfer?.status).toBe("pending");
   });
 });
