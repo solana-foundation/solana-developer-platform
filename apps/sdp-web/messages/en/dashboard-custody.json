@@ -491,6 +491,7 @@
     "onboardingPreparingDescription": "Hang tight while the Solana mark stretches its legs. We’ll take you in automatically when your workspace is ready.",
     "onboardingAdminTitle": "An admin is setting up this workspace",
     "onboardingAdminDescription": "You’ll be able to use the dashboard once an organization admin chooses the RPC and custody providers.",
+    "onboardingAdminSwitchHint": "Working somewhere else in the meantime?",
     "onboardingRpcDefaultDescription": "Use SDP-managed RPC infrastructure with no credentials to configure.",
     "onboardingRpcAlchemyDescription": "Route Solana requests through your configured Alchemy connection.",
     "onboardingRpcHeliusDescription": "Use Helius infrastructure for Solana RPC requests.",
