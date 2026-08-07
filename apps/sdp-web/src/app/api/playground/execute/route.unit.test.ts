@@ -118,34 +118,33 @@ describe("POST /api/playground/execute", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves session-authenticated execution when no API key is supplied", async () => {
-    const request = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ data: [] }), {
-        status: 200,
-        statusText: "OK",
-        headers: { "Content-Type": "application/json" },
-      })
-    );
+  it.each([
+    ["null", null],
+    ["empty string", ""],
+    ["whitespace", "   "],
+  ])("rejects requests with a %s apiKey instead of falling back to the session (Hacktron audit regression)", async (_label, apiKey) => {
+    const request = vi.fn();
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
-    const response = await POST(executeRequest(null));
+    const response = await POST(executeRequest(apiKey));
 
-    expect(response.status).toBe(200);
-    expect(request).toHaveBeenCalledTimes(1);
-    expect(request).toHaveBeenCalledWith(
-      "/v1/payments/transfers",
-      expect.objectContaining({ headers: {} })
-    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "API key is required" });
+    // No downstream call happened — no session-authed request escaped.
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("forwards documented request bodies for DELETE operations", async () => {
-    const request = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ deleted: true }), {
-        status: 200,
-        statusText: "OK",
-        headers: { "Content-Type": "application/json" },
-      })
-    );
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ deleted: true }), {
+          status: 200,
+          statusText: "OK",
+          headers: { "Content-Type": "application/json" },
+        })
+      );
     mocks.createSdpApiClient.mockResolvedValue({ request });
     const body = { provider: "anchorage", walletId: "anchorage_wallet_123" };
     const deleteRequest = new Request("https://dashboard.example.com/api/playground/execute", {
@@ -155,16 +154,16 @@ describe("POST /api/playground/execute", () => {
         method: "DELETE",
         path: "/v1/wallets",
         body,
-        apiKey: null,
+        apiKey: OWNED_API_KEY,
       }),
     });
 
     const response = await POST(deleteRequest);
 
     expect(response.status).toBe(200);
-    expect(request).toHaveBeenCalledWith("/v1/wallets", {
+    expect(request).toHaveBeenNthCalledWith(2, "/v1/wallets", {
       method: "DELETE",
-      headers: {},
+      headers: { Authorization: `Bearer ${OWNED_API_KEY}` },
       body: JSON.stringify(body),
     });
   });

@@ -24,7 +24,7 @@ function SkeletonCardHeader() {
 }
 
 /** The tab strip is rendered by the segment layout, which loads with the page. */
-function SkeletonTabs() {
+export function SkeletonTabs() {
   return (
     <div className="mb-6 flex gap-6 border-border-default border-b pb-3">
       <SkeletonBlock className="h-4 w-16" />

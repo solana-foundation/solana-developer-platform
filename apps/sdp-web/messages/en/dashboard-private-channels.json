@@ -8,7 +8,20 @@
       "withdraw": "Withdraw",
       "members": "Members",
       "events": "Events",
+      "apiPlayground": "API Playground",
       "instance": "Instance"
+    },
+    "playground": {
+      "productName": "Private Channels",
+      "getInstance": "Get instance",
+      "connectInstance": "Connect instance",
+      "probeConnection": "Probe connection",
+      "probeHealth": "Probe gateway health",
+      "createChannel": "Create channel",
+      "getDeposit": "Get deposit",
+      "getWithdrawal": "Get withdrawal",
+      "getChannel": "Get channel",
+      "channelDescriptionPlaceholder": "Ops payouts"
     },
     "common": {
       "loadError": "Something went wrong loading this section.",
