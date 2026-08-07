@@ -90,7 +90,7 @@ async function truncateAllTables(env: Env): Promise<void> {
     await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
   } catch (error) {
     throw new Error(
-      "Postgres schema is not bootstrapped. Run `pnpm db:postgres:up` and `pnpm --filter @sdp/api db:postgres:bootstrap` first.",
+      "Postgres schema is not bootstrapped. Run `pnpm infra:up` and `pnpm --filter @sdp/api db:postgres:bootstrap` first.",
       {
         cause: error,
       }
