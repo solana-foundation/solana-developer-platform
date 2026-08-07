@@ -10,7 +10,12 @@
         "max": null
       }
     },
-    "cryptos": ["sol.solana", "usdc.solana", "usdg.solana", "usdt.solana"]
+    "cryptos": [
+      "sol.solana",
+      "usdc.solana",
+      "usdg.solana",
+      "usdt.solana"
+    ]
   },
   "offramp": {
     "currencies": {
@@ -39,10 +44,6 @@
         "max": null
       },
       "BDT": {
-        "min": null,
-        "max": null
-      },
-      "BGN": {
         "min": null,
         "max": null
       },
@@ -147,10 +148,6 @@
         "max": null
       },
       "HKD": {
-        "min": null,
-        "max": null
-      },
-      "HRK": {
         "min": null,
         "max": null
       },
@@ -338,10 +335,6 @@
         "min": null,
         "max": null
       },
-      "SLL": {
-        "min": null,
-        "max": null
-      },
       "SOS": {
         "min": null,
         "max": null
@@ -415,6 +408,11 @@
         "max": null
       }
     },
-    "cryptos": ["sol.solana", "usdc.solana", "usdg.solana", "usdt.solana"]
+    "cryptos": [
+      "sol.solana",
+      "usdc.solana",
+      "usdg.solana",
+      "usdt.solana"
+    ]
   }
 }
