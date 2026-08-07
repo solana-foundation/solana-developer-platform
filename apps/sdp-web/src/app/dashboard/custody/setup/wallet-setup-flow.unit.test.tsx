@@ -81,7 +81,9 @@ describe("WalletSetupFlow", () => {
     ]) {
       expect(markup).toContain(label);
     }
-    expect(markup).toContain("Coming later");
+    // Each of these ships a working adapter, so none of them may be presented
+    // as something that has not arrived yet.
+    expect(markup).not.toContain("Coming later");
   });
 
   it("groups the catalog by what the provider is for", () => {
@@ -95,10 +97,10 @@ describe("WalletSetupFlow", () => {
     );
   });
 
-  it("drops a category heading when nothing in it is on offer", () => {
+  it("keeps both categories on the page even when none is granted yet", () => {
     const markup = renderFlowWith({ connectedProviders: [], enabledProviders: [] });
 
-    expect(markup).not.toMatch(/<h3[^>]*>API<\/h3>/);
+    expect(markup).toMatch(/<h3[^>]*>API<\/h3>/);
     expect(markup).toMatch(/<h3[^>]*>Institutional<\/h3>/);
   });
 
@@ -111,13 +113,19 @@ describe("WalletSetupFlow", () => {
   });
 
   it("does not offer request access once the gated provider is connected", () => {
-    const markup = renderFlowWith({
+    const intakeLinks = (markup: string) =>
+      (markup.match(/https:\/\/solanafoundation\.typeform\.com\/to\/wShiq9SN/g) ?? []).length;
+
+    const gated = renderFlowWith({ connectedProviders: [], enabledProviders: [] });
+    const connected = renderFlowWith({
       connectedProviders: ["fireblocks"],
       enabledProviders: [],
     });
 
-    expect(markup).not.toContain("https://solanafoundation.typeform.com/to/wShiq9SN");
-    expect(markup).toContain("Active");
+    // Connecting Fireblocks retires its own intake route and nobody else's:
+    // every provider still to be granted keeps the way to ask for it.
+    expect(intakeLinks(connected)).toBe(intakeLinks(gated) - 1);
+    expect(connected).toContain("Active");
   });
 
   it("keeps unusable providers out of the selectable set", () => {
@@ -128,13 +136,14 @@ describe("WalletSetupFlow", () => {
     expect(markup).toContain('data-provider-selectable="false"');
   });
 
-  it("keeps providers with no action out of the card list so the usable ones lead", () => {
+  it("gives every provider a card now that none of them is a dead end", () => {
     const markup = renderFlowWith({ connectedProviders: [], enabledProviders: ["privy"] });
 
-    // Only Privy (available) and Fireblocks (request access) earn a card; the
-    // remaining eight are named in the compact group.
-    expect(markup.match(/data-provider-selection-card="true"/g)).toHaveLength(2);
-    expect(markup).toContain('data-provider-coming-later="true"');
+    // Nine cards: Privy is ready to connect and the other eight can be asked
+    // for. The local signer is a deployment mode, so it is not one of them.
+    expect(markup.match(/data-provider-selection-card="true"/g)).toHaveLength(9);
+    expect(markup).not.toContain("Local Signer");
+    expect(markup).not.toContain("data-provider-coming-later");
     expect(markup).toContain("Turnkey");
   });
 
