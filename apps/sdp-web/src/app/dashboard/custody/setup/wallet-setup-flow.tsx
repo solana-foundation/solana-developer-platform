@@ -95,37 +95,6 @@ function getInitialSelection(input: {
   };
 }
 
-function ComingLaterProviders({ providers }: { providers: CustodyProviderAvailability[] }) {
-  const t = useTranslations();
-
-  if (providers.length === 0) {
-    return null;
-  }
-
-  // These carry no action, so they stay a single quiet line rather than a run of
-  // full cards that would outnumber everything this organization can act on.
-  return (
-    <section className="grid gap-3" data-provider-coming-later="true">
-      <h3 className="text-sm font-medium text-secondary">
-        {t("DashboardCustody.providerStatusComingLater")}
-      </h3>
-      <ul className="flex flex-wrap gap-2">
-        {providers.map((provider) => (
-          <li
-            key={provider.entry.id}
-            className="flex items-center gap-2 rounded-full border border-border-subtle bg-surface-raised py-1.5 pr-4 pl-2 text-sm text-tertiary"
-          >
-            <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-fill-strong opacity-60">
-              <WalletProviderMark provider={provider.entry.id} size="sm" />
-            </span>
-            {provider.entry.label}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
 function ProviderStep({
   availability,
   onSelect,
@@ -136,8 +105,6 @@ function ProviderStep({
   selectedProvider: KnownCustodyProvider | null;
 }) {
   const t = useTranslations();
-  const offered = availability.filter((provider) => provider.status !== "unavailable");
-  const comingLater = availability.filter((provider) => provider.status === "unavailable");
   const hasSelectableProvider = availability.some((provider) => provider.isSelectable);
 
   return (
@@ -152,7 +119,7 @@ function ProviderStep({
       )}
 
       {WALLET_PROVIDER_CATEGORIES.map((category) => {
-        const providers = offered.filter((provider) => provider.entry.category === category);
+        const providers = availability.filter((provider) => provider.entry.category === category);
         if (providers.length === 0) {
           return null;
         }
@@ -183,6 +150,16 @@ function ProviderStep({
                       <span className="rounded-full bg-surface-raised px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
                         {t("DashboardCustody.active")}
                       </span>
+                    ) : provider.status === "request_access" ? (
+                      // Visible but not self-serve installable (HOO-772): the
+                      // pill says why the card cannot be selected.
+                      <span className="rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
+                        {t("Shared.integrations.statusRequestAccess")}
+                      </span>
+                    ) : provider.status === "not_configured" ? (
+                      <span className="rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-tertiary">
+                        {t("Shared.integrations.statusNotConfigured")}
+                      </span>
                     ) : undefined
                   }
                   action={
@@ -204,8 +181,6 @@ function ProviderStep({
           </section>
         );
       })}
-
-      <ComingLaterProviders providers={comingLater} />
     </div>
   );
 }

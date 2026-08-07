@@ -8,8 +8,10 @@ describe("custody provider availability", () => {
       enabledProviders: [],
     });
 
+    // The self-hosted signer is the one omission: it is a deployment mode, not
+    // something an organization can be granted, so it appears only where the
+    // deployment actually runs it.
     expect(availability.map((provider) => provider.entry.id)).toEqual([
-      "local",
       "privy",
       "fireblocks",
       "coinbase_cdp",
@@ -20,6 +22,20 @@ describe("custody provider availability", () => {
       "anchorage",
       "utila",
     ]);
+  });
+
+  it("keeps the self-hosted signer whenever the deployment actually runs one", () => {
+    const enabled = resolveCustodyProviderAvailability({
+      connectedProviders: [],
+      enabledProviders: ["local"],
+    });
+    expect(enabled.find((provider) => provider.entry.id === "local")?.status).toBe("available");
+
+    const connected = resolveCustodyProviderAvailability({
+      connectedProviders: ["local"],
+      enabledProviders: [],
+    });
+    expect(connected.find((provider) => provider.entry.id === "local")?.status).toBe("active");
   });
 
   it("marks a provider with an active config as active even when it is also enabled", () => {
@@ -62,15 +78,27 @@ describe("custody provider availability", () => {
     expect(fireblocks?.requestAccessUrl).toBeUndefined();
   });
 
-  it("shows a provider with no setup route as unavailable rather than dropping it", () => {
+  it("splits not-enabled providers into access to request and credentials this deployment lacks", () => {
     const availability = resolveCustodyProviderAvailability({
       connectedProviders: [],
       enabledProviders: [],
     });
 
-    expect(availability.find((provider) => provider.entry.id === "turnkey")?.status).toBe(
-      "unavailable"
-    );
+    // Manual providers are organization access the SDP team grants. Only
+    // Fireblocks carries a request route today (HOO-775 wires the rest), so
+    // the others hold the state with no URL rather than borrowing one.
+    for (const id of ["ibm_haven", "dfns", "anchorage", "utila"] as const) {
+      const provider = availability.find((candidate) => candidate.entry.id === id);
+      expect(provider?.status).toBe("request_access");
+      expect(provider?.requestAccessUrl).toBeUndefined();
+    }
+
+    // Generally available providers gate only on deployment credentials.
+    for (const id of ["privy", "coinbase_cdp", "para", "turnkey"] as const) {
+      expect(availability.find((candidate) => candidate.entry.id === id)?.status).toBe(
+        "not_configured"
+      );
+    }
   });
 
   it("only lets active and available providers be selected", () => {
