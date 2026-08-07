@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, CheckCheck, Loader2 } from "lucide-react";
+import { Bell, CheckCheck, Loader2, type LucideIcon, Zap } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatRelativeTime } from "@/app/dashboard/activity-format-utils";
@@ -21,10 +21,15 @@ interface NotificationItem {
 
 const POLL_INTERVAL_MS = 60_000;
 const PAGE_SIZE = 15;
+const REQUEST_TIMEOUT_MS = 10_000;
 
 async function getJson<T>(url: string, init?: RequestInit): Promise<T | null> {
+  // Abort a stalled request so a hung API (e.g. a wedged DB connection) degrades to the
+  // panel's error + retry state instead of an endless spinner.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { cache: "no-store", ...init });
+    const response = await fetch(url, { cache: "no-store", ...init, signal: controller.signal });
     if (!response.ok) {
       return null;
     }
@@ -32,7 +37,25 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T | null> {
     return payload.data ?? null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
+}
+
+// Icon tile per notification type (workflow automations today; falls back to the bell).
+const TYPE_ICON: Record<string, LucideIcon> = {
+  workflow_execution: Zap,
+};
+
+// Humanize any snake_case system key left in server-composed text (e.g. an older row
+// that stored `token_operation_completed`): "token_operation_completed" → "Token
+// operation completed". A display-time safety net so no raw event key ever reaches a
+// reader, regardless of when/where the row was written.
+function humanizeKeys(text: string): string {
+  return text.replace(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g, (key) => {
+    const spaced = key.replace(/_/g, " ");
+    return `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`.replace(/\bkyc\b/gi, "KYC");
+  });
 }
 
 // Deep-link a notification to its subject (today: a token's asset profile; workflow
@@ -348,33 +371,44 @@ function NotificationPanelBody(props: {
   return (
     <div className="max-h-96 overflow-y-auto">
       <ul className="divide-y divide-border-subtle">
-        {items.map((item) => (
-          <li key={item.id}>
-            <button
-              type="button"
-              onClick={() => onItemClick(item)}
-              className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
-            >
-              <span
-                className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                  item.read_at ? "bg-transparent" : "bg-info"
-                }`}
-                aria-hidden
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-primary">
-                  {displayTitle(item)}
+        {items.map((item) => {
+          const TypeIcon = TYPE_ICON[item.type] ?? Bell;
+          const unread = !item.read_at;
+          return (
+            <li key={item.id}>
+              <button
+                type="button"
+                onClick={() => onItemClick(item)}
+                className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
+              >
+                <span
+                  className="relative flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary"
+                  aria-hidden
+                >
+                  <TypeIcon className="size-[18px]" />
+                  {unread ? (
+                    <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-info ring-2 ring-surface-raised" />
+                  ) : null}
                 </span>
-                {item.body ? (
-                  <span className="mt-0.5 block text-xs text-secondary">{item.body}</span>
-                ) : null}
-                <span className="mt-0.5 block text-xs text-tertiary">
-                  {formatRelativeTime(item.created_at, locale)}
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={`block truncate text-sm ${unread ? "font-semibold text-primary" : "font-medium text-secondary"}`}
+                  >
+                    {humanizeKeys(displayTitle(item))}
+                  </span>
+                  {item.body ? (
+                    <span className="mt-0.5 block text-xs text-secondary">
+                      {humanizeKeys(item.body)}
+                    </span>
+                  ) : null}
+                  <span className="mt-0.5 block text-xs text-tertiary">
+                    {formatRelativeTime(item.created_at, locale)}
+                  </span>
                 </span>
-              </span>
-            </button>
-          </li>
-        ))}
+              </button>
+            </li>
+          );
+        })}
       </ul>
       {items.length < total ? (
         <button

@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import { humanizeWorkflowKey } from "../labels";
 import {
   errorMessage,
   permanentFail,
@@ -116,7 +117,7 @@ async function mirrorFreeze(
       tokenId: execution.token_id,
       accountAddress: tokenAccount,
       frozenBy: `workflow:${execution.workflow_id}`,
-      reason: `Workflow: ${execution.trigger_type}`,
+      reason: `Workflow: ${humanizeWorkflowKey(execution.trigger_type)}`,
     });
     return true;
   } catch (error) {

@@ -1,6 +1,7 @@
 import type { WorkflowExecutionRow } from "@/db/repositories";
 import { addAndSyncAllowlistEntry } from "@/services/allowlist-sync";
 import type { Env } from "@/types/env";
+import { humanizeWorkflowKey } from "../labels";
 import { resolveParam, resolveTargetWallet } from "./onchain";
 import type { ActionContext, ActionExecutionResult } from "./types";
 
@@ -26,7 +27,7 @@ export async function runAllowlistAdd(
     projectId: execution.project_id,
     tokenId: execution.token_id,
     walletAddress: wallet,
-    label: resolveParam(action, "label") ?? `Auto: ${execution.trigger_type}`,
+    label: resolveParam(action, "label") ?? `Auto: ${humanizeWorkflowKey(execution.trigger_type)}`,
     addedBy: `workflow:${execution.workflow_id}`,
   });
 
