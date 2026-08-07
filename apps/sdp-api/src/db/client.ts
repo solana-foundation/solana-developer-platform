@@ -32,6 +32,20 @@ export interface DatabaseExecutor {
 export interface DatabaseClient extends DatabaseExecutor {
   batch(statements: readonly PreparedStatement[]): Promise<number[]>;
   transaction<T>(callback: (tx: DatabaseExecutor) => Promise<T>): Promise<T>;
+  /**
+   * Run a transaction while retaining a session advisory lock until an
+   * external post-commit action completes. The callback is committed before
+   * `afterCommit` runs, so an external system can never advance on a database
+   * transaction that later rolls back. When PostgreSQL confirms a rollback
+   * after the callback completed, `afterRollback` may undo external pre-commit
+   * state while the same session lock is still held.
+   */
+  lockedTransactionWithPostCommit?<T>(
+    lockKey: string,
+    callback: (tx: DatabaseExecutor) => Promise<T>,
+    afterCommit: (result: T) => Promise<void>,
+    afterRollback?: (result: T) => Promise<void>
+  ): Promise<T>;
 }
 
 interface QueryArgs {
@@ -245,6 +259,12 @@ abstract class BasePostgresClient extends PostgresExecutor implements DatabaseCl
   }
 
   abstract transaction<T>(callback: (tx: DatabaseExecutor) => Promise<T>): Promise<T>;
+  abstract lockedTransactionWithPostCommit<T>(
+    lockKey: string,
+    callback: (tx: DatabaseExecutor) => Promise<T>,
+    afterCommit: (result: T) => Promise<void>,
+    afterRollback?: (result: T) => Promise<void>
+  ): Promise<T>;
 }
 
 class PooledPostgresClient extends BasePostgresClient {
@@ -288,6 +308,78 @@ class PooledPostgresClient extends BasePostgresClient {
     }
   }
 
+  async lockedTransactionWithPostCommit<T>(
+    lockKey: string,
+    callback: (tx: DatabaseExecutor) => Promise<T>,
+    afterCommit: (result: T) => Promise<void>,
+    afterRollback?: (result: T) => Promise<void>
+  ): Promise<T> {
+    const client = await this.pool.connect();
+    let releaseError: Error | undefined;
+    let transactionOpen = false;
+    let lockHeld = false;
+    let callbackCompleted = false;
+    let callbackResult: T | undefined;
+
+    try {
+      await client.query({
+        // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+        text: "SELECT pg_advisory_lock(hashtext($1))",
+        values: [lockKey],
+      });
+      lockHeld = true;
+
+      await client.query("BEGIN");
+      transactionOpen = true;
+      const executor = new PostgresExecutor(client);
+      const result = await callback(executor);
+      callbackResult = result;
+      callbackCompleted = true;
+      await client.query("COMMIT");
+      transactionOpen = false;
+
+      await afterCommit(result);
+      return result;
+    } catch (error) {
+      let rollbackConfirmed = false;
+      if (transactionOpen) {
+        try {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          rollbackConfirmed = true;
+        } catch (rollbackError) {
+          releaseError =
+            rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+        }
+      }
+      if (rollbackConfirmed && callbackCompleted && afterRollback) {
+        try {
+          await afterRollback(callbackResult as T);
+        } catch (afterRollbackError) {
+          throw new AggregateError(
+            [error, afterRollbackError],
+            "Database transaction rolled back but its external rollback action failed"
+          );
+        }
+      }
+      throw error;
+    } finally {
+      if (lockHeld) {
+        try {
+          await client.query({
+            // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+            text: "SELECT pg_advisory_unlock(hashtext($1))",
+            values: [lockKey],
+          });
+        } catch (unlockError) {
+          releaseError =
+            unlockError instanceof Error ? unlockError : new Error(String(unlockError));
+        }
+      }
+      client.release(releaseError);
+    }
+  }
+
   close(): Promise<void> {
     return this.pool.end();
   }
@@ -325,6 +417,11 @@ export function asTransactionalClient(tx: DatabaseExecutor): DatabaseClient {
     },
     transaction<T>(callback: (executor: DatabaseExecutor) => Promise<T>) {
       return callback(tx);
+    },
+    lockedTransactionWithPostCommit() {
+      return Promise.reject(
+        new Error("A session-locked post-commit action cannot run inside an existing transaction")
+      );
     },
   };
 }

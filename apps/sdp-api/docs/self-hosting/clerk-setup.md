@@ -2,7 +2,7 @@
 
 This guide walks an operator through wiring up their own Clerk tenant for a self-hosted SDP deployment. Follow it after you have the API and dashboard running with `SDP_DEPLOYMENT_MODE=self_hosted` (see [`apps/sdp-api/README.md`](../../README.md#self-hosted-mode-no-third-party-providers)).
 
-The Clerk webhook handler is the only path that creates `organizations` rows outside `pnpm db:seed:local`. Without the steps below, sign-ups will succeed in Clerk but the API will reject every authenticated request with `Active Clerk organization required` (the JWT does not contain `org_id` by default — see step 3).
+The Clerk webhook handler is the only path that creates `organizations` rows outside `pnpm db:seed:local`. Without the steps below, sign-ups will succeed in Clerk but the API will reject every authenticated request with `Active Clerk organization required` (the session token does not contain `org_id` by default — see step 3).
 
 Time estimate: under 30 minutes against a fresh Clerk account.
 
@@ -24,7 +24,6 @@ In `apps/sdp-web/.env.local`:
 ```bash
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
 CLERK_SECRET_KEY=sk_test_...
-CLERK_JWT_TEMPLATE=sdp-api
 ```
 
 In `apps/sdp-api/.env.local`:
@@ -33,20 +32,17 @@ In `apps/sdp-api/.env.local`:
 CLERK_ISSUER=https://<your-instance>.clerk.accounts.dev
 CLERK_SECRET_KEY=sk_test_...
 CLERK_WEBHOOK_SECRET=whsec_...   # filled in step 4
-# CLERK_AUDIENCE=                # only set if you configure an audience claim in step 3
 # CLERK_JWKS_URL=                # defaults to ${CLERK_ISSUER}/.well-known/jwks.json
 ```
 
-`CLERK_ISSUER` is shown in the Clerk dashboard under **API Keys → JWT Templates → Issuer** (looks like `https://<slug>.clerk.accounts.dev` for dev instances or your custom domain in prod).
+`CLERK_ISSUER` is shown in the Clerk dashboard under **API Keys** (looks like `https://<slug>.clerk.accounts.dev` for dev instances or your custom domain in prod).
 
-## 3. Create the JWT template
+## 3. Customize the session token
 
-Clerk's default session token does not include `org_id`. Without a custom JWT template, the API will reject every request because `clerk-token.ts` requires both `sub` and `org_id` claims. This step is mandatory.
+Clerk's default session token does not include `org_id`. Without the custom claims below, the API will reject every request because `clerk-token.ts` requires both `sub` and `org_id` claims. This step is mandatory. The dashboard forwards the session token itself as the API bearer token, so the claims live in the session token — there is no JWT template and no per-request token minting.
 
-1. Clerk dashboard → **JWT Templates** → **New template** → **Blank**.
-2. **Name**: `sdp-api` (must match the `CLERK_JWT_TEMPLATE` env var set in step 2).
-3. **Token lifetime**: 60 seconds (default). The dashboard fetches a fresh token per API call.
-4. **Claims** (paste this into the editor):
+1. Clerk dashboard → **Sessions** → **Customize session token**.
+2. **Claims** (paste this into the editor):
 
    ```json
    {
@@ -57,7 +53,9 @@ Clerk's default session token does not include `org_id`. Without a custom JWT te
    }
    ```
 
-5. Save the template.
+3. Save.
+
+The `email` claim also feeds the dashboard's feature-flag targeting (`apps/sdp-web/src/flags.ts`), which matches Vercel Flags rules against the signed-in user's email from these same session claims.
 
 What each claim does:
 
@@ -133,12 +131,12 @@ In production self-hosted deployments, point Clerk directly at the deployment's 
    ```
 
    You should see one row with `clerk_organization_id` matching the org you just created.
-4. From the dashboard, navigate to any authenticated page (wallets, settings). The API call should succeed — the JWT template is verified and `sub` + `org_id` resolve correctly.
+4. From the dashboard, navigate to any authenticated page (wallets, settings). The API call should succeed — the session token is verified and `sub` + `org_id` resolve correctly.
 5. With `SDP_DEPLOYMENT_MODE=self_hosted`, the org's tier does not matter; every configured provider is entitled. If a provider picker is empty, that provider's env vars are not set in `.env.local`.
 
 ## Troubleshooting
 
-- **API returns `Active Clerk organization required`** — the JWT lacks `org_id`. Confirm `CLERK_JWT_TEMPLATE=sdp-api` in the web env, the template name in Clerk matches exactly, the payload includes `"org_id": "{{org.id}}"`, and you signed in with an active organization selected.
+- **API returns `Active Clerk organization required`** — the JWT lacks `org_id`. Confirm the session token customization (step 3) includes `"org_id": "{{org.id}}"` and you signed in with an active organization selected.
 - **Webhook signature verification fails** — `CLERK_WEBHOOK_SECRET` does not match the endpoint's signing secret in Clerk. Re-copy the secret from the endpoint detail page, restart the API.
 - **`organizations` row never appears** — the ngrok tunnel is not running, or the Clerk endpoint URL doesn't match `WEBHOOK_INGEST_DOMAIN`. Check deliveries in the ngrok inspector at `http://localhost:4040`; check the Clerk endpoint's **Message Attempts** tab for HTTP errors.
 - **Token verification fails with `unable to retrieve JWKS`** — `CLERK_ISSUER` is wrong. The default JWKS path is `${CLERK_ISSUER}/.well-known/jwks.json`; load that URL in a browser to confirm Clerk returns a JSON document.

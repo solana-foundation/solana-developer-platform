@@ -30,17 +30,13 @@ import {
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { enforceIssuanceWalletOperationPolicy } from "./policy";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicAuthorityRole = Parameters<MosaicService["prepareUpdateAuthority"]>[0]["role"];
-
-type AuthorityUpdate = {
-  mintAuthority?: string | null;
-  isMintable?: boolean;
-  freezeAuthority?: string | null;
-  isFreezable?: boolean;
-  permanentDelegate?: string | null;
-};
 
 const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
   switch (role) {
@@ -256,21 +252,32 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     })
   );
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "update_authority",
+    });
     if (
       approvedWalletOperationId(c) &&
-      (!tx.signature || (tx.status !== "confirmed" && tx.status !== "finalized"))
+      (!transaction.signature ||
+        (transaction.status !== "confirmed" && transaction.status !== "finalized"))
     ) {
-      // The atomic path cannot create this shape. Fail closed for rows left by
-      // an older deployment instead of presenting an unsubmitted authority
-      // update as a completed approval.
+      // Settlement recovery above may repair a pending row from durable audit
+      // evidence. If it cannot, fail closed rather than presenting an
+      // unsubmitted authority update as a completed approval.
       await beginApprovedWalletOperationEffect(c);
       throw new AppError(
         "CONFLICT",
         "Approved authority update is incomplete and requires manual reconciliation"
       );
     }
-    return success(c, { transaction: tx });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledTokenAuthority(tx.id, tokenId, role, newAuthority);
+    }
+    return success(c, { transaction });
   }
 
   const signer = await createResolvedAuthoritySigner({
@@ -280,6 +287,13 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     currentAuthority: currentAuthorityRaw,
   });
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "update_authority",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: { tokenId, role, newAuthority, mode: "execute" },
+  });
+  let onChainEffectCompleted = false;
 
   try {
     await beginApprovedWalletOperationEffect(c);
@@ -290,51 +304,38 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       newAuthority,
       feePayer: signer,
     });
+    onChainEffectCompleted = true;
 
-    const updatedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
-
-    const updates: AuthorityUpdate = {};
-    if (role === "mint") {
-      updates.mintAuthority = newAuthority;
-      updates.isMintable = newAuthority !== null;
-    }
-    if (role === "freeze") {
-      updates.freezeAuthority = newAuthority;
-      updates.isFreezable = newAuthority !== null;
-    }
-    if (role === "permanentDelegate") {
-      updates.permanentDelegate = newAuthority;
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await tokenService.updateTokenAuthorities(tokenId, updates);
-    }
-
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "update_authority",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
-      metadata: {
-        tokenId,
-        role,
-        newAuthority,
+    const updatedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
         signature: result.signature,
-        slot: result.slot.toString(),
-        mode: "execute",
+        slot: Number(result.slot),
       },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
+
+    await tokenService.applySettledTokenAuthority(tx.id, tokenId, role, newAuthority);
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
     throw error;
   }
 };

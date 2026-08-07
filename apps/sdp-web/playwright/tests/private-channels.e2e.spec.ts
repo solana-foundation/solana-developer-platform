@@ -82,4 +82,25 @@ test.describe
       await expect(connectButton).toBeEnabled();
       await expect(page.getByText("Gateway URL is required.")).toHaveCount(0);
     });
+
+    test("renders the API Playground tab without a connected instance", async ({ page }) => {
+      test.skip(!privateChannelsEnabled, "Requires PRIVATE_CHANNELS_ENABLED=true");
+
+      // API Playground is `requiresActive: false` — reachable before any instance
+      // is connected because the /instance endpoints are what the operator needs
+      // to bootstrap. Regressing that flag would strand the tab behind the
+      // Overview redirect chain and make the sandbox constants unreachable.
+      await page.goto("/dashboard/payments/private-channels/api-playground");
+
+      await expect(page.getByRole("button", { name: "API Playground" })).toBeVisible();
+
+      // The shell's method+title chip renders the default endpoint. Ownership
+      // check: this is the SPC playground, not somebody else's.
+      await expect(page.getByText("Get instance", { exact: true })).toBeVisible();
+
+      // Bottom action bar — the "cut off" regression that motivated the layout
+      // fix. If either button is missing, the shell height chain is broken.
+      await expect(page.getByRole("button", { name: /Run request/i })).toBeVisible();
+      await expect(page.getByRole("button", { name: /Copy Code/i })).toBeVisible();
+    });
   });
