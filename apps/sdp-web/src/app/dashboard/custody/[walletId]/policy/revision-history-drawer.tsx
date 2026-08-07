@@ -19,6 +19,17 @@ import { PolicyRevisionExplorer } from "./policy-revision-explorer";
 import { fetchWalletRevisionHistoryAction } from "./revision-history.actions";
 
 /**
+ * SWR cache key for a wallet's policy revision history; mutate it after a
+ * revision is created so the drawer refetches on next open.
+ *
+ * @param walletId - The wallet whose history is cached.
+ * @returns The cache key.
+ */
+export function walletPolicyRevisionsKey(walletId: string): string {
+  return `wallet-policy-revisions-${walletId}`;
+}
+
+/**
  * "Revision history" trigger that opens the revision explorer in a right-side
  * drawer instead of navigating to the full revisions page. History loads
  * lazily on first open so the trigger costs nothing on pages that never use
@@ -96,7 +107,7 @@ export function RevisionHistoryDrawer({
     initialRevisionId && initialRevisionId !== "latest" ? initialRevisionId : defaultRevisionId
   );
   const { data } = useSWR(
-    open && !preloaded ? `wallet-policy-revisions-${walletId}` : null,
+    open && !preloaded ? walletPolicyRevisionsKey(walletId) : null,
     () => fetchWalletRevisionHistoryAction(walletId),
     { revalidateOnFocus: false, revalidateIfStale: false, revalidateOnReconnect: false }
   );

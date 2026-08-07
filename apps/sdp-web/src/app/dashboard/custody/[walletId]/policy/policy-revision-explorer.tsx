@@ -145,7 +145,11 @@ export function PolicyRevisionExplorer({
                       <p className="min-w-0 break-words text-sm text-secondary">
                         {revision.commitMessage}
                       </p>
-                    ) : null}
+                    ) : (
+                      <p className="text-sm italic text-tertiary">
+                        {t("DashboardCustody.policyRevisionsNoMessage")}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
