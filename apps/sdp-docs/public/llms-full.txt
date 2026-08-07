@@ -4397,7 +4397,9 @@ In your Clerk development app:
 
 - Copy the publishable key, secret key, and issuer into the
   [configurator](/docs/self-hosting/configurator).
-- Create a JWT template named `sdp-api`.
+- Customize the session token (Clerk dashboard → **Sessions** → **Customize
+  session token**) with the claims from the
+  [Clerk setup guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/apps/sdp-api/docs/self-hosting/clerk-setup.md).
 - Expose your local API with the webhook tunnel: reserve a free stable domain
   at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains), set it
   as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.env.local`, and run
@@ -4421,7 +4423,7 @@ Open the [configurator](/docs/self-hosting/configurator), keep the defaults for
 the first deployment, and fill in:
 
 - `SOLANA_RPC_URL` with a devnet RPC endpoint.
-- Clerk publishable key, secret key, issuer, JWT template, and webhook secret.
+- Clerk publishable key, secret key, issuer, and webhook secret.
 - Local signing with native fee payment.
 
 The signing step generates a local Solana signer in the browser and shows the
@@ -4455,7 +4457,7 @@ If the dashboard loads but organization state does not appear, check the API log
 docker compose logs -f sdp-api
 ```
 
-Look for Clerk webhook errors, JWT template mismatches, or missing
+Look for Clerk webhook errors, session token claim mismatches, or missing
 `CLERK_WEBHOOK_SECRET`.
 
 </Step>

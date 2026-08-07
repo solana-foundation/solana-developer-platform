@@ -25,24 +25,16 @@ function getApiBaseUrl(): string {
   return base.replace(/\/$/, "");
 }
 
-type ClerkGetToken = (options?: { template?: string }) => Promise<string | null>;
+type ClerkGetToken = () => Promise<string | null>;
 
 /**
- * Acquires the sdp-api bearer token from a Clerk `getToken`, honoring
- * CLERK_JWT_TEMPLATE when configured. Takes `getToken` as a parameter because
- * server contexts get it from `auth()` while the proxy middleware gets it from
- * its `clerkMiddleware` callback.
+ * Acquires the sdp-api bearer token: the Clerk session token, whose custom
+ * claims (org_id, org_role, org_slug, email) come from the instance's
+ * session-token customization. Takes `getToken` as a parameter because server
+ * contexts get it from `auth()` while the proxy middleware gets it from its
+ * `clerkMiddleware` callback.
  */
 export async function acquireClerkToken(getToken: ClerkGetToken): Promise<string> {
-  const template = process.env.CLERK_JWT_TEMPLATE;
-  if (template) {
-    const token = await getToken({ template });
-    if (!token) {
-      throw new Error(`Failed to acquire Clerk token from template '${template}'`);
-    }
-    return token;
-  }
-
   const token = await getToken();
   if (!token) {
     throw new Error("Failed to acquire Clerk token");
@@ -214,10 +206,8 @@ function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
  * A missing project is represented by a null project client, so onboarding pages can
  * still query organization state before a project has been selected.
  *
- * `getToken` is optional and should normally be omitted. Minting a Clerk token is a
- * network round trip, and passing `getToken` bypasses the request-scoped cache that
- * the layout has usually already populated — so a page that supplied its own paid for
- * a second mint of the same token. Omitting it reuses the cached one. The parameter
+ * `getToken` is optional and should normally be omitted. Passing it bypasses the
+ * request-scoped cache that the layout has usually already populated. The parameter
  * stays for callers that hold a token source without a request-bound `auth()` context.
  */
 export async function createRequestScopedSdpApiClients({

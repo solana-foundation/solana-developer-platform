@@ -362,7 +362,7 @@ describe("Clerk auth request cache", () => {
   });
 
   /**
-   * A misconfigured Clerk JWT template stored the literal
+   * A misconfigured Clerk token customization stored the literal
    * `{{user.primary_email_address.email_address}}` as an identity email. It is matched
    * against `invitations.email` here, so an affected user silently missed their own
    * pending invitation: they were provisioned with the Clerk role instead of the invited
