@@ -508,8 +508,11 @@ export async function fetchWalletBalances(
 export async function updateWalletPolicy(
   walletId: string,
   policy: WalletPolicy,
-  t: Translate
+  t: Translate,
+  commitMessage?: string
 ): Promise<WalletPolicy> {
+  const trimmedCommitMessage = commitMessage?.trim();
+
   const response = await fetch(
     `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
     {
@@ -519,6 +522,7 @@ export async function updateWalletPolicy(
       },
       body: JSON.stringify({
         destinationAllowlist: policy.destinationAllowlist,
+        ...(trimmedCommitMessage ? { commitMessage: trimmedCommitMessage } : {}),
         ...(policy.maxTransferAmount ? { maxTransferAmount: policy.maxTransferAmount } : {}),
         ...(policy.maxDailyAmount ? { maxDailyAmount: policy.maxDailyAmount } : {}),
         ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
