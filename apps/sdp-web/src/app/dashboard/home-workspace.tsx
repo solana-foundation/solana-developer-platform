@@ -481,9 +481,12 @@ export function HomeWorkspace({
   // Not `wallets.length === 0`: onboarding provisions a wallet before it completes,
   // so a freshly onboarded organization already has one and fell through to the
   // populated hero holding nothing.
-  // `totalBalanceError` is set only when the aggregate request failed on an
-  // organization that has wallets — exactly the case where an empty `balances`
-  // means "we could not read it" rather than "there is nothing here".
+  // `totalBalanceError` is set only when the aggregate request itself failed
+  // on an organization that has wallets. That is the only failure the response
+  // exposes today: the API converts per-wallet read failures into zero rows on
+  // a 200, so an RPC blip that zeroes an established organization is not
+  // distinguishable here from genuine emptiness. Closing that requires the
+  // aggregate to report partial reads (HOO-1040).
   const heroState = resolveHomeHeroState({
     walletCount,
     balances,
