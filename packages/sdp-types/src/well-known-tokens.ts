@@ -332,3 +332,62 @@ export function wellKnownDecimals(
   const token: WellKnownToken = WELL_KNOWN_TOKENS[symbol];
   return token.mints[cluster]?.decimals;
 }
+
+/**
+ * Catalogue entries by every casing of every name they answer to.
+ *
+ * The catalogue is keyed in upper case (`JITOSOL`) while the entry carries its
+ * own display casing (`JitoSOL`), and the ledger stores the display form. So the
+ * key and the symbol are two different strings for the same asset, and a lookup
+ * that knows only one of them sees a token it does not recognise.
+ */
+const WELL_KNOWN_TOKEN_BY_NAME: ReadonlyMap<string, WellKnownTokenSymbol> = new Map(
+  (Object.keys(WELL_KNOWN_TOKENS) as WellKnownTokenSymbol[]).flatMap((key) => [
+    [key.toLowerCase(), key] as const,
+    [WELL_KNOWN_TOKENS[key].symbol.toLowerCase(), key] as const,
+  ])
+);
+
+/**
+ * Every stored form a token may appear as, given one of them.
+ *
+ * `payment_transfers.token` is not written consistently: the same asset appears
+ * as a mint address on some rows and as a bare symbol on others, including within
+ * a single transfer type. An exact match on either form therefore silently drops
+ * the rows written the other way, so a filter has to accept both.
+ *
+ * Any form resolves to the catalogue entry, and every form is emitted: the
+ * upper-case catalogue key (what the request schema normalises symbols to), the
+ * display symbol, and each cluster's mint. Anything less is asymmetric for
+ * mixed-case assets — `JitoSOL` did not expand back to the mint, and a mint
+ * did not expand to the `JITOSOL` key — so one stored form always slipped
+ * through the filter.
+ *
+ * @param token - A mint address or a well-known symbol, in any casing.
+ * @returns The distinct forms to match, always including the input itself.
+ */
+export function tokenFilterAliases(token: string): string[] {
+  const trimmed = token.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const aliases = new Set<string>([trimmed]);
+
+  // Resolve to one catalogue entry whichever form arrived, then emit every
+  // form the ledger may hold for it: the key, the display symbol and each
+  // cluster's mint. Expanding only some of these from the mint branch left
+  // mint filters blind to rows stored under the schema-normalised key.
+  const byMint = WELL_KNOWN_TOKEN_BY_MINT.get(trimmed);
+  const key = WELL_KNOWN_TOKEN_BY_NAME.get((byMint?.symbol ?? trimmed).toLowerCase());
+  if (key) {
+    const entry = WELL_KNOWN_TOKENS[key];
+    aliases.add(key);
+    aliases.add(entry.symbol);
+    for (const mint of Object.values(entry.mints)) {
+      aliases.add(mint.address);
+    }
+  }
+
+  return [...aliases];
+}
