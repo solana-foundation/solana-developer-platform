@@ -25,7 +25,7 @@ export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchem
 export const switchSigningRequestSchema = withOpenApi(switchSigningSchemaBase, {
   description:
     "Switch the active wallet signing target by provider or exact Custody Connection ID for the project resolved from the request context.",
-  example: { connectionId: "cconn_example", provider: "privy" },
+  example: { provider: "privy" },
 });
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
