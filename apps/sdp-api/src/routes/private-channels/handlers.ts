@@ -5,6 +5,7 @@ export {
   getPrivateChannelDepositById,
   listPrivateChannelDeposits,
 } from "./handlers/deposits";
+export { listPrivateChannelEventReferences } from "./handlers/event-references";
 export { listChannelEvents, listProjectEvents } from "./handlers/events";
 export { getPrivateChannelHealth } from "./handlers/health";
 export {
