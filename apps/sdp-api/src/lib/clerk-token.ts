@@ -80,12 +80,29 @@ export function resolveClerkConfig(env: Env) {
   };
 }
 
+/**
+ * The tolerance must match Clerk's DEFAULT_CLOCK_SKEW_IN_MS (5s): the dashboard
+ * forwards the session token, and Clerk's middleware treats it as valid for up
+ * to 5s past `exp`. Verifying stricter than the issuer creates a window where
+ * sdp-web forwards a token this API rejects, failing every SSR fetch in it.
+ * Mirrored as a literal because `@clerk/backend` does not export the constant.
+ */
+const CLERK_CLOCK_TOLERANCE_SECONDS = 5;
+
+/**
+ * Verifies a Clerk session token against the instance JWKS.
+ *
+ * @param token - The bearer token forwarded by the dashboard.
+ * @param env - Worker bindings holding the Clerk issuer configuration.
+ * @returns The verified JWT payload.
+ */
 export async function verifyClerkJwt(token: string, env: Env): Promise<ClerkJwtPayload> {
   const config = resolveClerkConfig(env);
   const jwks = getJwks(config.jwksUrl);
 
   const { payload } = await jwtVerify(token, jwks, {
     issuer: config.issuer,
+    clockTolerance: CLERK_CLOCK_TOLERANCE_SECONDS,
   });
 
   return payload as ClerkJwtPayload;
