@@ -32,6 +32,7 @@ export interface PolicyChangeGroup {
 
 export interface PolicyFieldLabels {
   defaultAction: string;
+  maxDailyAmount: string;
   destinationAllowlist: string;
   operationControls: string;
   operationLabel: (operation: string) => string;
@@ -51,6 +52,7 @@ type PolicyPayload = PaymentWalletPolicy & { rules: PolicyRule[] };
 export function buildPolicyFieldLabels(t: Translate): PolicyFieldLabels {
   return {
     defaultAction: t("DashboardCustody.policyDefaultAction"),
+    maxDailyAmount: t("DashboardCustody.policyCommitDailyLimit"),
     destinationAllowlist: t("DashboardCustody.policyAllowList"),
     operationControls: t("DashboardCustody.policyReviewOperationControls"),
     operationLabel: (operation) =>
@@ -478,6 +480,13 @@ export function summarizePolicyChanges(
       ? undefined
       : labels.defaultActionLabel(before.defaultAction),
     after.defaultAction === undefined ? undefined : labels.defaultActionLabel(after.defaultAction)
+  );
+  pushScalarChange(
+    rows,
+    "maxDailyAmount",
+    labels.maxDailyAmount,
+    before.maxDailyAmount,
+    after.maxDailyAmount
   );
   pushAllowlistChanges(rows, before, after, labels);
   pushOperationChanges(rows, before, after, labels);

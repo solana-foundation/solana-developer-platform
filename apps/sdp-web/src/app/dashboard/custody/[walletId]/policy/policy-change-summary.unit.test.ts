@@ -8,6 +8,7 @@ import {
 
 const LABELS: PolicyFieldLabels = {
   defaultAction: "Default decision",
+  maxDailyAmount: "Daily limit",
   destinationAllowlist: "Allow list",
   operationControls: "Operation controls",
   operationLabel: (operation) => operation.toUpperCase(),
@@ -268,6 +269,7 @@ describe("summarizePolicyChanges", () => {
 
   const FULL_POLICY = payload({
     defaultAction: "allow",
+    maxDailyAmount: "500",
     destinationAllowlist: ["3mppZAgZgF3EgXu2Jexvhzx7FDcSRUnqoVps6J9vwKCE"],
     rules: [
       {
@@ -291,6 +293,7 @@ describe("summarizePolicyChanges", () => {
     const rows = summarizePolicyChanges(payload({}), FULL_POLICY, LABELS);
     expect(rows).toEqual([
       { direction: "added", group: "defaultAction", label: "Default decision", value: "ALLOW" },
+      { direction: "added", group: "maxDailyAmount", label: "Daily limit", value: "500" },
       {
         direction: "added",
         group: "destinationAllowlist",
@@ -316,6 +319,7 @@ describe("summarizePolicyChanges", () => {
     const rows = summarizePolicyChanges(FULL_POLICY, payload({}), LABELS);
     expect(rows).toEqual([
       { direction: "removed", group: "defaultAction", label: "Default decision", value: "ALLOW" },
+      { direction: "removed", group: "maxDailyAmount", label: "Daily limit", value: "500" },
       {
         direction: "removed",
         group: "destinationAllowlist",
@@ -408,6 +412,153 @@ describe("summarizePolicyChanges", () => {
       LABELS
     );
     expect(rows).toEqual([]);
+  });
+});
+
+describe("summarizePolicyChanges field coverage", () => {
+  it("reports a daily-limit-only change", () => {
+    const rows = summarizePolicyChanges(
+      payload({ maxDailyAmount: "105" }),
+      payload({ maxDailyAmount: "200" }),
+      LABELS
+    );
+    expect(rows).toEqual([
+      { direction: "removed", group: "maxDailyAmount", label: "Daily limit", value: "105" },
+      { direction: "added", group: "maxDailyAmount", label: "Daily limit", value: "200" },
+    ]);
+  });
+
+  it("reports a per-transaction change once, via its amount rule", () => {
+    const before = payload({
+      maxTransferAmount: "100",
+      rules: [
+        {
+          id: "per-transaction-limit",
+          kind: "amount",
+          max: "100",
+          action: "allow",
+          name: "Per transaction limit",
+        },
+      ],
+    });
+    const after = payload({
+      maxTransferAmount: "150",
+      rules: [
+        {
+          id: "per-transaction-limit",
+          kind: "amount",
+          max: "150",
+          action: "allow",
+          name: "Per transaction limit",
+        },
+      ],
+    });
+    const rows = summarizePolicyChanges(before, after, LABELS);
+    expect(rows).toEqual([
+      {
+        direction: "removed",
+        group: "rule:per-transaction-limit",
+        label: "Per transaction limit",
+        value: "allow, max 100",
+      },
+      {
+        direction: "added",
+        group: "rule:per-transaction-limit",
+        label: "Per transaction limit",
+        value: "allow, max 150",
+      },
+    ]);
+  });
+
+  it("reports operation type changes as transitions", () => {
+    const before = payload({
+      rules: [
+        {
+          id: "operation-types-deny",
+          kind: "operation_type",
+          operationTypes: ["custom:op"],
+          action: "deny",
+        },
+      ],
+    });
+    const rows = summarizePolicyChanges(before, payload({}), LABELS);
+    expect(rows).toEqual([
+      {
+        direction: "removed",
+        group: "operations",
+        label: "Operation controls",
+        value: "CUSTOM:OP · deny",
+      },
+    ]);
+  });
+
+  it("reports approval rule group changes as scalar transitions", () => {
+    const before = payload({
+      rules: [
+        { id: "approval-rule", kind: "approval", approvalGroupId: "grp_1", name: "Approvals" },
+      ],
+    });
+    const after = payload({
+      rules: [
+        { id: "approval-rule", kind: "approval", approvalGroupId: "grp_2", name: "Approvals" },
+      ],
+    });
+    const rows = summarizePolicyChanges(before, after, LABELS);
+    expect(rows).toEqual([
+      { direction: "removed", group: "rule:approval-rule", label: "Approvals", value: "grp_1" },
+      { direction: "added", group: "rule:approval-rule", label: "Approvals", value: "grp_2" },
+    ]);
+  });
+
+  it("reports an always rule action change as scalar transitions", () => {
+    const before = payload({
+      rules: [{ id: "always-rule", kind: "always", action: "deny", name: "Always" }],
+    });
+    const after = payload({
+      rules: [{ id: "always-rule", kind: "always", action: "allow", name: "Always" }],
+    });
+    const rows = summarizePolicyChanges(before, after, LABELS);
+    expect(rows).toEqual([
+      { direction: "removed", group: "rule:always-rule", label: "Always", value: "deny" },
+      { direction: "added", group: "rule:always-rule", label: "Always", value: "allow" },
+    ]);
+  });
+
+  it("reports destination rule membership changes", () => {
+    const before = payload({
+      rules: [
+        {
+          id: "allowlist-destinations",
+          kind: "destination",
+          allowlist: [
+            "3mppZAgZgF3EgXu2Jexvhzx7FDcSRUnqoVps6J9vwKCE",
+            "Dq73PQAySHjTwJaUQqSoxHwszGRiZxYYGmBkzJUM2KCh",
+          ],
+          action: "allow",
+          name: "Allowed destinations",
+        },
+      ],
+    });
+    const after = payload({
+      rules: [
+        {
+          id: "allowlist-destinations",
+          kind: "destination",
+          allowlist: ["3mppZAgZgF3EgXu2Jexvhzx7FDcSRUnqoVps6J9vwKCE"],
+          action: "allow",
+          name: "Allowed destinations",
+        },
+      ],
+    });
+    const rows = summarizePolicyChanges(before, after, LABELS);
+    expect(rows).toEqual([
+      {
+        direction: "removed",
+        group: "rule:allowlist-destinations",
+        label: "Allowed destinations",
+        value: "Dq73PQ…2KCh",
+      },
+    ]);
   });
 });
 

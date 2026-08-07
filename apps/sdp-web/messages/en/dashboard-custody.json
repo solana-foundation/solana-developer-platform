@@ -403,6 +403,7 @@
     "policyReviewPreservedRules": "Includes {count} existing advanced rules.",
     "policyReviewNoRestrictions": "Nothing is restricted yet — activating would change nothing.",
     "policyCommitDrawerTitle": "Review changes",
+    "policyCommitDailyLimit": "Daily limit",
     "policyCommitEmpty": "Empty {label}",
     "policyCommitNoChanges": "No changes to display — only ordering changed.",
     "policyCommitMessage": "Commit message (optional)",
