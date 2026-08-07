@@ -240,6 +240,11 @@ export class CustodyRuntimeTargets {
       return effective;
     }
 
+    const config = await findConfigByProvider(this.db, organizationId, projectId, provider);
+    if (config?.project_id === (projectId ?? null)) {
+      return this.mapConfigTarget(config);
+    }
+
     const connections = await this.db.queryMany<ConnectionTargetRow>(
       `SELECT c.id AS connection_id, c.organization_id, c.project_id, c.provider,
               c.status AS connection_status, c.last_check_status,
@@ -274,8 +279,6 @@ export class CustodyRuntimeTargets {
     if (connections.length > 0) {
       throw conflict("Custody Connection is unavailable");
     }
-
-    const config = await findConfigByProvider(this.db, organizationId, projectId, provider);
     return config ? this.mapConfigTarget(config) : null;
   }
 

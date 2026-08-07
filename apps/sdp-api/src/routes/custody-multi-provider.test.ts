@@ -50,6 +50,8 @@ const IBM_HAVEN_CONFIG_ID = "cust_cfg_ibm_haven";
 
 let originalParaApiKey: string | undefined;
 let originalPrivyByokEnabled: string | undefined;
+let originalPrivyAppId: string | undefined;
+let originalPrivyAppSecret: string | undefined;
 
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -247,6 +249,8 @@ describe("Custody multi-provider routes", () => {
   beforeEach(async () => {
     originalParaApiKey = env.PARA_API_KEY;
     originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
+    originalPrivyAppId = env.PRIVY_APP_ID;
+    originalPrivyAppSecret = env.PRIVY_APP_SECRET;
     env.PARA_API_KEY = "para_test_api_key";
     await seedTestDatabase(env);
     await seedAuthAndConfigs();
@@ -255,6 +259,8 @@ describe("Custody multi-provider routes", () => {
   afterEach(async () => {
     env.PARA_API_KEY = originalParaApiKey;
     env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
+    env.PRIVY_APP_ID = originalPrivyAppId;
+    env.PRIVY_APP_SECRET = originalPrivyAppSecret;
     await clearTestDatabase(env);
     await clearKVStores(env);
   });
@@ -508,8 +514,10 @@ describe("Custody multi-provider routes", () => {
     expect(await res.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
   });
 
-  it("rejects a provider-only switch when multiple Connections are candidates", async () => {
+  it("keeps provider-only switching on the active Config when Connections are candidates", async () => {
     env.PRIVY_BYOK_ENABLED = "true";
+    env.PRIVY_APP_ID = "privy_test_app_id";
+    env.PRIVY_APP_SECRET = "privy_test_app_secret";
     await seedActivePrivyConnection("candidate_a");
     await seedActivePrivyConnection("candidate_b");
     await getDb(env)
@@ -534,8 +542,29 @@ describe("Custody multi-provider routes", () => {
       env
     );
 
-    expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({
+      data: {
+        configId: PRIVY_CONFIG_ID,
+        walletId: "privy_wallet_a",
+        publicKey: "privy_pubkey_a",
+      },
+    });
+    const target = await getDb(env)
+      .prepare(
+        `SELECT default_custody_config_id, default_custody_connection_id
+         FROM custody_scope_defaults
+         WHERE organization_id = ? AND project_id = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .first<{
+        default_custody_config_id: string | null;
+        default_custody_connection_id: string | null;
+      }>();
+    expect(target).toEqual({
+      default_custody_config_id: PRIVY_CONFIG_ID,
+      default_custody_connection_id: null,
+    });
   });
 
   it("lists all provider wallets by default and can opt into default-provider-only results", async () => {
