@@ -537,6 +537,387 @@ describe("TokenService", () => {
       expect((await storedSupply("tok_cap_settled_burn"))?.total_supply_cached).toBe("0");
     });
 
+    it("applies settled burn supply exactly once across retries", async () => {
+      const tokenId = "tok_cap_retry_burn";
+      const transactionId = "ttx_cap_retry_burn";
+      await insertCappedToken(tokenId, "1000000000", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'burn', 'confirmed', '{}', ?)`
+        )
+        .bind(transactionId, tokenId, TEST_ORG.id, TEST_PROJECT_API_KEY.id)
+        .run();
+
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
+      expect(
+        await db
+          .prepare("SELECT supply_bookkeeping_applied_at FROM issuance_transactions WHERE id = ?")
+          .bind(transactionId)
+          .first<{ supply_bookkeeping_applied_at: string | null }>()
+      ).toMatchObject({ supply_bookkeeping_applied_at: expect.any(String) });
+    });
+
+    it("does not reapply a historical burn marked by the migration", async () => {
+      const tokenId = "tok_cap_historical_burn";
+      const transactionId = "ttx_cap_historical_burn";
+      const appliedAt = "2026-08-05T00:00:00.000Z";
+      await insertCappedToken(tokenId, "1000000000", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params,
+             supply_bookkeeping_applied_at, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'burn', 'confirmed', '{}', ?, ?)`
+        )
+        .bind(transactionId, tokenId, TEST_ORG.id, appliedAt, TEST_PROJECT_API_KEY.id)
+        .run();
+
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1000000000");
+    });
+
+    it("does not subtract a settled burn twice after on-chain supply reconciliation", async () => {
+      const tokenId = "tok_cap_reconciled_burn";
+      const transactionId = "ttx_cap_reconciled_burn";
+      const baseline = "2026-08-05T00:00:00.000Z";
+      await insertCappedToken(tokenId, "1000000000", null);
+      await db
+        .prepare("UPDATE issued_tokens SET total_supply_updated_at = ? WHERE id = ?")
+        .bind(baseline, tokenId)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'burn', 'confirmed', ?, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ amount: "100", supplyBaselineUpdatedAt: baseline }),
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      // The chain snapshot already observes the burn's 100-token reduction.
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000");
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
+    });
+
+    it("does not replay an already-applied pause over a newer token state", async () => {
+      const tokenId = "tok_historical_pause";
+      const transactionId = "ttx_historical_pause";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params,
+             lifecycle_bookkeeping_applied_at, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'pause', 'confirmed', '{}', ?, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          "2026-08-05T00:00:00.000Z",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      await tokenService.applySettledTokenStatus(transactionId, tokenId, "paused");
+
+      expect(
+        await db
+          .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ status: string }>()
+      ).toMatchObject({ status: "active" });
+    });
+
+    it("does not replay an older pause over a newer settled unpause", async () => {
+      const tokenId = "tok_pause_replay_order";
+      const olderId = "ttx_pause_older";
+      const newerId = "ttx_unpause_newer";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, slot,
+             initiated_by_key_id, created_at, updated_at
+           ) VALUES
+             (?, ?, ?, 'pause', 'confirmed', '{}', 100, ?, ?, ?),
+             (?, ?, ?, 'unpause', 'confirmed', '{}', 101, ?, ?, ?)`
+        )
+        .bind(
+          olderId,
+          tokenId,
+          TEST_ORG.id,
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:00:00.000Z",
+          "2026-08-05T00:00:00.000Z",
+          newerId,
+          tokenId,
+          TEST_ORG.id,
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:01:00.000Z",
+          "2026-08-05T00:01:00.000Z"
+        )
+        .run();
+
+      await tokenService.applySettledTokenStatus(newerId, tokenId, "active");
+      await tokenService.applySettledTokenStatus(olderId, tokenId, "paused");
+
+      expect(
+        await db
+          .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ status: string }>()
+      ).toMatchObject({ status: "active" });
+      expect(
+        await db
+          .prepare(
+            `SELECT lifecycle_bookkeeping_applied_at
+             FROM issuance_transactions WHERE id = ?`
+          )
+          .bind(olderId)
+          .first<{ lifecycle_bookkeeping_applied_at: string | null }>()
+      ).toMatchObject({ lifecycle_bookkeeping_applied_at: expect.any(String) });
+    });
+
+    it("does not replay an older unfreeze over a newer settled refreeze", async () => {
+      const tokenId = "tok_freeze_replay_order";
+      const accountAddress = "account_freeze_replay_order";
+      const olderId = "ttx_unfreeze_older";
+      const newerId = "ttx_freeze_newer";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, slot,
+             initiated_by_key_id, created_at, updated_at
+           ) VALUES
+             (?, ?, ?, 'unfreeze', 'confirmed', ?, 100, ?, ?, ?),
+             (?, ?, ?, 'freeze', 'confirmed', ?, 101, ?, ?, ?)`
+        )
+        .bind(
+          olderId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ accountAddress }),
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:00:00.000Z",
+          "2026-08-05T00:00:00.000Z",
+          newerId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ accountAddress }),
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:01:00.000Z",
+          "2026-08-05T00:01:00.000Z"
+        )
+        .run();
+
+      await tokenService.applySettledAccountFreezeState({
+        transactionId: newerId,
+        tokenId,
+        accountAddress,
+        state: "frozen",
+        actorId: TEST_PROJECT_API_KEY.id,
+        reason: "Refrozen",
+      });
+      const replayed = await tokenService.applySettledAccountFreezeState({
+        transactionId: olderId,
+        tokenId,
+        accountAddress,
+        state: "unfrozen",
+        actorId: TEST_PROJECT_API_KEY.id,
+      });
+
+      expect(replayed).toMatchObject({
+        accountAddress,
+        reason: "Refrozen",
+        unfrozenAt: null,
+      });
+      expect(
+        await db
+          .prepare(
+            `SELECT lifecycle_bookkeeping_applied_at
+             FROM issuance_transactions WHERE id = ?`
+          )
+          .bind(olderId)
+          .first<{ lifecycle_bookkeeping_applied_at: string | null }>()
+      ).toMatchObject({ lifecycle_bookkeeping_applied_at: expect.any(String) });
+    });
+
+    it("promotes journaled freeze evidence while applying its lifecycle mirror", async () => {
+      const tokenId = "tok_freeze_journaled_settlement";
+      const transactionId = "ttx_freeze_journaled_settlement";
+      const accountAddress = "account_freeze_journaled_settlement";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params,
+             signature, slot, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'freeze', 'pending', ?, ?, 100, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ accountAddress }),
+          "sig_freeze_journaled_settlement",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      const frozenAccount = await tokenService.applySettledAccountFreezeState({
+        transactionId,
+        tokenId,
+        accountAddress,
+        state: "frozen",
+        actorId: TEST_PROJECT_API_KEY.id,
+        reason: "Journaled settlement",
+      });
+
+      expect(frozenAccount).toMatchObject({
+        accountAddress,
+        reason: "Journaled settlement",
+        unfrozenAt: null,
+      });
+      expect(
+        await db
+          .prepare(
+            `SELECT status, lifecycle_bookkeeping_applied_at
+             FROM issuance_transactions WHERE id = ?`
+          )
+          .bind(transactionId)
+          .first<{ status: string; lifecycle_bookkeeping_applied_at: string | null }>()
+      ).toMatchObject({
+        status: "confirmed",
+        lifecycle_bookkeeping_applied_at: expect.any(String),
+      });
+    });
+
+    it("does not replay an older authority change over a newer settled authority", async () => {
+      const tokenId = "tok_authority_replay_order";
+      const olderId = "ttx_authority_older";
+      const newerId = "ttx_authority_newer";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, slot,
+             initiated_by_key_id, created_at, updated_at
+           ) VALUES
+             (?, ?, ?, 'update_authority', 'confirmed', ?, 100, ?, ?, ?),
+             (?, ?, ?, 'update_authority', 'confirmed', ?, 101, ?, ?, ?)`
+        )
+        .bind(
+          olderId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ role: "mint", newAuthority: "authority_older" }),
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:00:00.000Z",
+          "2026-08-05T00:00:00.000Z",
+          newerId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ role: "mint", newAuthority: "authority_newer" }),
+          TEST_PROJECT_API_KEY.id,
+          "2026-08-05T00:01:00.000Z",
+          "2026-08-05T00:01:00.000Z"
+        )
+        .run();
+
+      await tokenService.applySettledTokenAuthority(newerId, tokenId, "mint", "authority_newer");
+      await tokenService.applySettledTokenAuthority(olderId, tokenId, "mint", "authority_older");
+
+      expect(
+        await db
+          .prepare("SELECT mint_authority FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ mint_authority: string | null }>()
+      ).toMatchObject({ mint_authority: "authority_newer" });
+      expect(
+        await db
+          .prepare(
+            `SELECT authority_bookkeeping_applied_at
+             FROM issuance_transactions WHERE id = ?`
+          )
+          .bind(olderId)
+          .first<{ authority_bookkeeping_applied_at: string | null }>()
+      ).toMatchObject({ authority_bookkeeping_applied_at: expect.any(String) });
+    });
+
+    it("mirrors a settled metadata authority and removes a stale legacy override", async () => {
+      const tokenId = "tok_metadata_authority_settled";
+      const transactionId = "ttx_metadata_authority_settled";
+      const newAuthority = "metadata_authority_new";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issued_token_extensions (id, token_id, extension, config)
+           VALUES (?, ?, 'metadataAuthority', ?)`
+        )
+        .bind("tex_metadata_authority_legacy", tokenId, JSON.stringify("metadata_authority_old"))
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, slot,
+             initiated_by_key_id
+           ) VALUES (?, ?, ?, 'update_authority', 'confirmed', ?, 100, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ role: "metadata", newAuthority }),
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      await tokenService.applySettledTokenAuthority(
+        transactionId,
+        tokenId,
+        "metadata",
+        newAuthority
+      );
+
+      expect(
+        await db
+          .prepare("SELECT metadata_authority FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ metadata_authority: string | null }>()
+      ).toEqual({ metadata_authority: newAuthority });
+      expect(
+        await db
+          .prepare(
+            "SELECT config FROM issued_token_extensions WHERE token_id = ? AND extension = 'metadataAuthority'"
+          )
+          .bind(tokenId)
+          .first<{ config: string | null }>()
+      ).toBeNull();
+      await expect(
+        tokenService.getToken({
+          tokenId,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+        })
+      ).resolves.toMatchObject({ metadataAuthority: newAuthority });
+    });
+
     it("refuses a cap that a mint outran between the check and the write", async () => {
       await insertCappedToken("tok_cap_lost_race", "500000000", "1000000000");
       const originalPrepare = db.prepare.bind(db);
