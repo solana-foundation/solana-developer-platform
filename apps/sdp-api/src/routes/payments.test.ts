@@ -6149,6 +6149,7 @@ describe("Payments routes", () => {
     expect(updateBody.data.policy.controlProfile).toMatchObject({
       status: "active",
       revisionNumber: 1,
+      commitMessage: "Restrict raw signing and large transfers.",
       providerMappingStatus: "not_applicable",
     });
 
