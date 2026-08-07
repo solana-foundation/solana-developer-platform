@@ -38,6 +38,7 @@ const history: WalletControlProfileRevisionHistory = {
         },
       ],
       defaultAction: "allow",
+      commitMessage: "Restrict assets and blocked destinations.",
       createdBy: "usr_creator",
       createdAt: "2026-08-01T10:00:00.000Z",
       activatedAt: "2026-08-01T10:05:00.000Z",
@@ -49,6 +50,7 @@ const history: WalletControlProfileRevisionHistory = {
       revisionNumber: 1,
       rules: [],
       defaultAction: "allow",
+      commitMessage: null,
       createdBy: null,
       createdAt: "2026-07-18T13:30:00.000Z",
       activatedAt: null,
@@ -109,6 +111,13 @@ describe("policy revision explorer", () => {
 
     expect(html).toContain("Active");
     expect(html).toContain("Draft");
+  });
+
+  it("shows commit messages without rendering a placeholder for revisions without one", () => {
+    const html = renderExplorer();
+
+    expect(html).toContain("Restrict assets and blocked destinations.");
+    expect(html).not.toContain("No revision message");
   });
 
   it("links destinations to the active project cluster on Solana Explorer", () => {

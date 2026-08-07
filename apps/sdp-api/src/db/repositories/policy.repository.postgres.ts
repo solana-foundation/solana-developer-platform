@@ -375,6 +375,7 @@ function mapWalletControlProfileRevisionRow(
     revision_number: row.revision_number as number,
     rules: asPostgresJsonArray(row.rules),
     default_action: row.default_action as WalletControlProfileRevisionRow["default_action"],
+    commit_message: row.commit_message as string | null,
     created_by: (row.created_by as string | null | undefined) ?? null,
     created_at: row.created_at as string,
     activated_at: (row.activated_at as string | null | undefined) ?? null,
@@ -766,7 +767,20 @@ async function getWalletControlProfileRevisionById(
   revisionId: string
 ): Promise<WalletControlProfileRevisionRow | null> {
   const row = await db
-    .prepare("SELECT * FROM wallet_control_profile_revisions WHERE id = ?")
+    .prepare(
+      `SELECT
+         id,
+         profile_id,
+         revision_number,
+         rules,
+         default_action,
+         commit_message,
+         created_by,
+         created_at,
+         activated_at
+       FROM wallet_control_profile_revisions
+       WHERE id = ?`
+    )
     .bind(revisionId)
     .first<Record<string, unknown>>();
 
@@ -1171,6 +1185,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
                revision_number,
                rules,
                default_action,
+               commit_message,
                created_by
              )
              SELECT
@@ -1178,6 +1193,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
                ?,
                COALESCE(MAX(revision_number), 0) + 1,
                ?::jsonb,
+               ?,
                ?,
                ?
              FROM wallet_control_profile_revisions
@@ -1189,6 +1205,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
             input.profileId,
             JSON.stringify(input.rules ?? []),
             input.defaultAction ?? "allow",
+            input.commitMessage === undefined ? null : input.commitMessage,
             input.createdBy ?? null,
             input.profileId
           )
@@ -1344,7 +1361,16 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       const mappedProfile = mapWalletControlProfileRow(profile);
       const revisions = await db
         .prepare(
-          `SELECT *
+          `SELECT
+             id,
+             profile_id,
+             revision_number,
+             rules,
+             default_action,
+             commit_message,
+             created_by,
+             created_at,
+             activated_at
            FROM wallet_control_profile_revisions
            WHERE profile_id = ?
            ORDER BY revision_number DESC

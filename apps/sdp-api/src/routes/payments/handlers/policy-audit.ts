@@ -51,6 +51,7 @@ function mapRevisionHistory(
       revisionNumber: revision.revision_number,
       rules: redactCredentialSecrets(revision.rules as unknown as PolicyRule[]),
       defaultAction: revision.default_action,
+      commitMessage: revision.commit_message,
       createdBy: revision.created_by,
       createdAt: revision.created_at,
       activatedAt: revision.activated_at,

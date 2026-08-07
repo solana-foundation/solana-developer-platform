@@ -56,6 +56,7 @@ function walletProfile(
       revision_number: 1,
       rules: rules as unknown as Record<string, unknown>[],
       default_action: defaultAction,
+      commit_message: null,
       created_by: "usr_1",
       created_at: "2026-06-18T00:00:00.000Z",
       activated_at: "2026-06-18T00:00:00.000Z",
