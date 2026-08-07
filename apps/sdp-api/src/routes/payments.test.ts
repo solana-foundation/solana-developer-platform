@@ -8056,6 +8056,48 @@ describe("Payments routes", () => {
       vi.clearAllMocks();
     });
 
+    it("matches a token filter against every form the ledger stores it in", async () => {
+      // pt.token is written inconsistently: the same asset is a mint on some rows
+      // and a bare symbol on others. An exact match returned 2 for the symbol and
+      // 1 for the mint when the right answer was 3, so either spelling has to
+      // answer with all of them. This is the HTTP hop over the repository fix.
+      const solMint = "So11111111111111111111111111111111111111112";
+      await seedTransfer({ id: "xfr_tok_sym_1", status: "confirmed", token: "SOL" });
+      await seedTransfer({ id: "xfr_tok_sym_2", status: "confirmed", token: "SOL" });
+      await seedTransfer({ id: "xfr_tok_mint_1", status: "confirmed", token: solMint });
+
+      for (const spelling of ["SOL", solMint]) {
+        const res = await app.request(
+          `/v1/payments/transfers?token=${encodeURIComponent(spelling)}`,
+          { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: Array<{ id: string }> };
+        expect(body.data.map((row) => row.id).sort()).toEqual([
+          "xfr_tok_mint_1",
+          "xfr_tok_sym_1",
+          "xfr_tok_sym_2",
+        ]);
+      }
+    });
+
+    it("does not widen a token filter to an unrelated asset", async () => {
+      await seedTransfer({ id: "xfr_tok_sol", status: "confirmed", token: "SOL" });
+      await seedTransfer({ id: "xfr_tok_usdc", status: "confirmed", token: "USDC" });
+
+      const res = await app.request(
+        "/v1/payments/transfers?token=SOL",
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string }> };
+      expect(body.data.map((row) => row.id)).toEqual(["xfr_tok_sol"]);
+    });
+
     it("returns confirmed + pending transfers when wallet filter is provided", async () => {
       const confirmedSig =
         "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";

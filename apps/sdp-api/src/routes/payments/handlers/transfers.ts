@@ -6,6 +6,7 @@ import {
   type Permission,
   type PrivateTransferRequest,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
+  tokenFilterAliases,
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import {
@@ -1370,13 +1371,21 @@ export async function listTransfers(c: AppContext) {
     });
 
     // 5. Apply remaining filters and sort
+    //
+    // The token test mirrors the repository's, which expands a filter to every
+    // form the ledger stores it in. Comparing against the raw parameter here
+    // would undo that on this path: rows the query correctly returned under the
+    // mint would be dropped again for not equalling the symbol that was asked
+    // for. A blank filter is likewise no filter, not a value to match.
+    const tokenMatches = tokenFilterAliases(token ?? "");
+    const tokenAliases = tokenMatches.length > 0 ? new Set(tokenMatches) : null;
     const filtered = merged
       .filter((row) => {
         if (search && !transferMatchesSearch(row, search)) return false;
         if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
         if (provider && row.provider !== provider) return false;
         if (statuses && !statuses.includes(row.status)) return false;
-        if (token && row.token !== token) return false;
+        if (tokenAliases && !tokenAliases.has(row.token)) return false;
         if (direction && row.direction !== direction) return false;
         if (transferTypeSet && !transferTypeSet.has(row.type)) return false;
         if (from && row.created_at < from) return false;
