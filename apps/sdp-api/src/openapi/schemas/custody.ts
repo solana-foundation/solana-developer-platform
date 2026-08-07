@@ -24,7 +24,8 @@ export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchem
 
 export const switchSigningRequestSchema = withOpenApi(switchSigningSchemaBase, {
   description:
-    "Switch the active wallet signing provider for the project resolved from the request context.",
+    "Switch the active wallet signing target by provider or exact Custody Connection ID for the project resolved from the request context.",
+  example: { provider: "privy" },
 });
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
@@ -120,6 +121,32 @@ export const initializeSigningResponseSchema = z
     }),
   })
   .openapi({ description: "Wallet signing initialization result." });
+
+export const switchSigningResponseSchema = z
+  .union([
+    initializeSigningResponseSchema,
+    z.object({
+      connectionId: z.string().openapi({
+        description: "Selected Custody Connection ID.",
+        example: "cconn_example",
+      }),
+      publicKey: solanaAddressSchema.openapi({
+        description: "Public key of the Connection's default wallet.",
+      }),
+      walletId: walletIdParamSchema.openapi({
+        description: "Provider wallet ID of the Connection's default wallet.",
+        example: "privy_wallet_123",
+      }),
+    }),
+  ])
+  .openapi({
+    description: "Wallet signing switch result.",
+    example: {
+      connectionId: "cconn_example",
+      publicKey: "So11111111111111111111111111111111111111112",
+      walletId: "privy_wallet_123",
+    },
+  });
 
 const custodyWalletBaseSchema = z.object({
   id: z.string().openapi({ description: "Wallet record ID.", example: "cw_example" }),

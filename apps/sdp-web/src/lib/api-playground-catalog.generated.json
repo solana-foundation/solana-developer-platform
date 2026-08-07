@@ -49,12 +49,12 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"local\"\n}",
+            "defaultValue": "{\n  \"provider\": \"privy\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
-          "configId": "cfg_example",
+          "connectionId": "cconn_example",
           "publicKey": "So11111111111111111111111111111111111111112",
           "walletId": "privy_wallet_123"
         }
