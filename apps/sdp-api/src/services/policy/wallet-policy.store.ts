@@ -100,6 +100,7 @@ function mapWalletControlProfileRevision(
     revisionNumber: row.revision_number,
     rules: row.rules as unknown as WalletControlProfileRevision["rules"],
     defaultAction: row.default_action,
+    commitMessage: row.commit_message,
     createdBy: row.created_by,
     createdAt: row.created_at,
     activatedAt: row.activated_at,

@@ -141,9 +141,11 @@ export function PolicyRevisionExplorer({
                   </div>
                   <div className="mt-3 flex items-center gap-2">
                     <UserAvatar name={creatorName} />
-                    <p className="text-sm italic text-tertiary">
-                      {t("DashboardCustody.policyRevisionsNoMessage")}
-                    </p>
+                    {revision.commitMessage ? (
+                      <p className="min-w-0 break-words text-sm text-secondary">
+                        {revision.commitMessage}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -215,6 +217,9 @@ function RevisionSnapshot({
             ) : null}
           </div>
         </div>
+        {revision.commitMessage ? (
+          <p className="mt-3 break-words text-sm text-secondary">{revision.commitMessage}</p>
+        ) : null}
       </div>
 
       <div className="pt-5">
