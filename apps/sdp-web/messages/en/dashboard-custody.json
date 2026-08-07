@@ -480,7 +480,7 @@
     "onboardingDescription": "Choose the infrastructure your organization will use.",
     "onboardingChooseRpc": "Choose your RPC provider",
     "onboardingChooseCustody": "Choose your custody provider",
-    "onboardingProvidersChangeLater": "You can change providers at any time in Settings.",
+    "onboardingProvidersChangeLater": "You can change your RPC provider later in Settings. Custody providers are connected from Wallets.",
     "onboardingNoRpcProviders": "No RPC providers are available for this organization in the current environment. Contact your SDP administrator before continuing.",
     "onboardingNoCustodyProviders": "No custody providers are available for this organization in the current environment. Contact your SDP administrator before continuing.",
     "onboardingFinish": "Finish setup",
