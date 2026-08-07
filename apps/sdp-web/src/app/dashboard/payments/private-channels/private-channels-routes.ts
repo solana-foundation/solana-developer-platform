@@ -11,3 +11,5 @@
 /** Where a page sends the operator when no instance is connected yet. */
 export const PRIVATE_CHANNELS_INSTANCE_PATH = "/dashboard/payments/private-channels/instance";
 export const PRIVATE_CHANNELS_OVERVIEW_PATH = "/dashboard/payments/private-channels/overview";
+export const PRIVATE_CHANNELS_CHANNELS_PATH = "/dashboard/payments/private-channels/channels";
+export const PRIVATE_CHANNELS_WALLETS_PATH = "/dashboard/payments/private-channels/wallets";

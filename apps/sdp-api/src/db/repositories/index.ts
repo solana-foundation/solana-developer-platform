@@ -223,6 +223,7 @@ export type {
   PrivateChannelEventRepository,
   PrivateChannelEventRepositoryContext,
   PrivateChannelEventRow,
+  PrivateChannelEventViewerScope,
   PrivateChannelEventWriteInput,
 } from "./private-channel-event.repository";
 export { generatePrivateChannelEventId } from "./private-channel-event.repository";
@@ -241,6 +242,13 @@ export {
   mapPrivateChannelInstanceRow,
 } from "./private-channel-instance.repository";
 export { createPostgresPrivateChannelInstanceRepository } from "./private-channel-instance.repository.postgres";
+export type {
+  ListPrivateChannelReferencesParams,
+  PrivateChannelReferenceRepository,
+  PrivateChannelReferenceRow,
+  PrivateChannelReferenceWalletScope,
+} from "./private-channel-reference.repository";
+export { createPostgresPrivateChannelReferenceRepository } from "./private-channel-reference.repository.postgres";
 export type {
   ClaimSettlementInput,
   PrivateChannelSettlementIntentKind,
@@ -323,6 +331,7 @@ export {
   createPrivateChannelDepositRepository,
   createPrivateChannelEventRepository,
   createPrivateChannelInstanceRepository,
+  createPrivateChannelReferenceRepository,
   createPrivateChannelRepository,
   createPrivateChannelSettlementObservationRepository,
   createPrivateChannelTransferRepository,

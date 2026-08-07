@@ -39,6 +39,10 @@ export interface PrivateChannelEventWriteInput {
   createdAt: string;
 }
 
+export type PrivateChannelEventViewerScope =
+  | { scope: "all" }
+  | { scope: "member"; channelIds: string[]; userId: string };
+
 export interface ListPrivateChannelEventsParams {
   channelId: string;
   instanceId: string;
@@ -46,10 +50,10 @@ export interface ListPrivateChannelEventsParams {
   type?: string;
   status?: PrivateChannelEventStatus;
   /**
-   * Member-scoped viewer. When set, channel-less events are narrowed to
-   * lifecycle events plus events this SDP user authored. Omit for full viewers.
+   * Event viewer scope. For members, channel-less events are narrowed to
+   * lifecycle events plus events this SDP user authored.
    */
-  viewerUserId?: string;
+  viewer: PrivateChannelEventViewerScope;
   /** Capped at 100 by callers. */
   limit: number;
   /** Cursor: occurred_at of the last row from the previous page. */
@@ -65,12 +69,11 @@ export interface ListProjectPrivateChannelEventsParams {
   type?: string;
   status?: PrivateChannelEventStatus;
   /**
-   * Member-scoped viewer. When set, the feed is narrowed to the member's
+   * Event viewer scope. For members, the feed is narrowed to the member's
    * channels plus the channel-less events this SDP user authored, and to
    * channel-less lifecycle events once they belong to at least one channel.
-   * Omit for full viewers.
    */
-  viewer?: { channelIds: string[]; userId: string };
+  viewer: PrivateChannelEventViewerScope;
   /** Capped at 100 by callers. */
   limit: number;
   /** Cursor: occurred_at of the last row from the previous page. */

@@ -11,6 +11,7 @@ import type {
 import {
   fetchCustodyWallets,
   fetchPrivateChannelBalance,
+  fetchPrivateChannelEventReferences,
   fetchPrivateChannelEvents,
   fetchPrivateChannelInstance,
   fetchPrivateChannelOverview,
@@ -105,6 +106,16 @@ export function loadEvents(
   });
 }
 
+/**
+ * Flat id→name dictionary for event enrichment. Falls back to `{}` so a failed
+ * lookup degrades to shortened addresses rather than breaking the page.
+ */
+export function loadEventReferences(
+  client: SdpApiClient
+): Promise<PrivateChannelsResult<Record<string, string>>> {
+  return toResult(() => fetchPrivateChannelEventReferences(client), {});
+}
+
 /** Verified wallets joined with the custody wallets they can be verified from. */
 export function loadWalletVerification(client: SdpApiClient): Promise<
   PrivateChannelsResult<{
@@ -128,6 +139,10 @@ export function loadWalletVerification(client: SdpApiClient): Promise<
 export interface WalletChannelBalance {
   uiAmount: string;
   mint: string;
+  /** Raw base-unit amount + decimals, kept so balances can be summed per mint
+   * without decimal-string arithmetic (the overview aggregates across wallets). */
+  amount: string;
+  decimals: number;
 }
 
 /**
@@ -147,7 +162,15 @@ export async function loadChannelBalances(
     verified.map(async (wallet): Promise<[string, WalletChannelBalance] | null> => {
       try {
         const balance = await fetchPrivateChannelBalance(client, wallet.pubkey);
-        return [wallet.pubkey, { uiAmount: balance.uiAmount, mint: balance.mint }];
+        return [
+          wallet.pubkey,
+          {
+            uiAmount: balance.uiAmount,
+            mint: balance.mint,
+            amount: balance.amount,
+            decimals: balance.decimals,
+          },
+        ];
       } catch {
         return null;
       }

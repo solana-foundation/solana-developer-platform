@@ -663,12 +663,16 @@ export function ApiPlaygroundShell({
             </div>
             <select
               aria-label={t("Shared.SharedComponents.selectApiEndpoint")}
-              className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-xl opacity-0"
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-xl bg-surface-raised text-primary opacity-0"
               value={activeEndpoint.id}
               onChange={(event) => updateEndpointInUrl(event.currentTarget.value)}
             >
               {endpoints.map((endpoint) => (
-                <option key={endpoint.id} value={endpoint.id}>
+                <option
+                  key={endpoint.id}
+                  value={endpoint.id}
+                  className="bg-surface-raised text-primary"
+                >
                   {endpoint.method} {endpoint.title}
                 </option>
               ))}

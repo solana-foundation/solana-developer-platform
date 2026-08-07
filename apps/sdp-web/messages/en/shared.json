@@ -211,6 +211,7 @@
     "receive": "Receive",
     "send": "Send",
     "backToPayments": "Back to payments",
+    "backToPrivateChannels": "Back to private channels",
     "backToApprovals": "Back to approvals",
     "members": "Members",
     "allowlist": "Allowlist",
