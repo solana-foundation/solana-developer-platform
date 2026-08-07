@@ -632,6 +632,7 @@
     "policyAuditViewApprovalRequest": "Approval request",
     "policyAuditUnavailableTitle": "Policy history unavailable",
     "policyAuditUnavailableDescription": "Wallet policy history could not be loaded right now.",
+    "policyRevisionsNoMessage": "No revision message",
     "policyRevisionsEmpty": "No policy revisions yet",
     "policyRevisionsEmptyDescription": "A revision will appear after wallet controls are saved.",
     "policyRevisionsChanges": "Changes",

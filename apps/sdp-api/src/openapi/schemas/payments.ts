@@ -98,6 +98,9 @@ const walletControlProfileSummarySchema = z
     revisionNumber: z.number().int().nullable().openapi({
       description: "Returned immutable revision number.",
     }),
+    commitMessage: z.string().nullable().openapi({
+      description: "Message describing the returned revision's changes, when provided.",
+    }),
     defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
       description: "Decision used when no rule matches.",
     }),
