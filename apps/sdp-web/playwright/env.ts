@@ -10,7 +10,6 @@ type E2EEnvCommon = {
   baseURL: string;
   clerkSecretKey: string;
   clerkPublishableKey: string;
-  clerkJwtTemplate: string;
   clerkOrgName: string;
   clerkTestEmail: string;
   sdpApiBaseUrl: string;
@@ -130,7 +129,6 @@ export function getE2EEnv(): E2EEnv {
 
   const clerkSecretKey = resolveEnvValue("CLERK_SECRET_KEY", fallback);
   const clerkPublishableKey = resolveEnvValue("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", fallback);
-  const clerkJwtTemplate = resolveEnvValue("CLERK_JWT_TEMPLATE", fallback, "sdp-api");
   const sdpApiBaseUrl =
     explicitExternalApiUrl ??
     resolveEnvValue(
@@ -165,14 +163,12 @@ export function getE2EEnv(): E2EEnv {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? BASE_URL,
     clerkSecretKey,
     clerkPublishableKey,
-    clerkJwtTemplate,
     clerkOrgName: resolveEnvValue("E2E_CLERK_ORG_NAME", fallback, DEFAULT_CLERK_TEST_ORG_NAME),
     ...identityEnv,
     sdpApiBaseUrl,
     webServerEnv: {
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKey,
       CLERK_SECRET_KEY: clerkSecretKey,
-      CLERK_JWT_TEMPLATE: clerkJwtTemplate,
       SDP_API_BASE_URL: sdpApiBaseUrl,
       NEXT_PUBLIC_SDP_API_BASE_URL: publicApiBaseUrl,
       NEXT_PUBLIC_DISABLE_SENTRY: "1",

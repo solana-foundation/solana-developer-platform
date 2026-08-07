@@ -41,7 +41,6 @@ const PLAYWRIGHT_LOCAL_MEMBER_ID = "mem_e2e_dashboard_admin";
 const PLAYWRIGHT_LOCAL_ORG_AUTH_ID = "aoi_e2e_dashboard";
 const PLAYWRIGHT_LOCAL_USER_AUTH_ID = "aui_e2e_dashboard";
 const DEFAULT_LOCAL_API_URL = "http://127.0.0.1:8788";
-const DEFAULT_CLERK_JWT_TEMPLATE = "sdp-api";
 const DEFAULT_KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app";
 const DEFAULT_SOLANA_RPC_URL = "https://api.devnet.solana.com";
 const KORA_MAX_TRANSFER_LAMPORTS = BigInt(10_000_000);
@@ -50,7 +49,6 @@ const ONE_LAMPORT = BigInt(1);
 const SOLANA_LAMPORTS_PER_SOL = 1_000_000_000;
 
 interface PlaywrightApiRuntimeEnv {
-  clerkJwtTemplate: string;
   localApiBaseUrl: string;
   koraApiKey: string | null;
   koraRpcUrl: string | null;
@@ -115,10 +113,6 @@ interface EnsureLinkedOrgOptions {
 
 function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
   return {
-    clerkJwtTemplate:
-      process.env.CLERK_JWT_TEMPLATE ??
-      process.env.NEXT_PUBLIC_CLERK_JWT_TEMPLATE ??
-      DEFAULT_CLERK_JWT_TEMPLATE,
     localApiBaseUrl: process.env.PLAYWRIGHT_API_URL ?? DEFAULT_LOCAL_API_URL,
     koraApiKey: getLocalDevVar("KORA_API_KEY"),
     koraRpcUrl: getLocalDevVar("KORA_RPC_URL") ?? DEFAULT_KORA_RPC_URL,
@@ -886,10 +880,6 @@ export async function seedCounterpartyWithSolanaAccount(
 
 export function getBootstrapApiBaseUrl(): string {
   return getPlaywrightApiRuntimeEnv().localApiBaseUrl;
-}
-
-export function getBootstrapClerkJwtTemplate(): string {
-  return getPlaywrightApiRuntimeEnv().clerkJwtTemplate;
 }
 
 export const seedLocalClerkOrganizationMapping = ensureLinkedOrg;

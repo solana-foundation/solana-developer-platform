@@ -5,8 +5,8 @@ import {
   type PrivateChannelEventDto,
   type PrivateChannelEventFamily,
 } from "@sdp/types";
-import { Loader2Icon } from "lucide-react";
-import { useState, useTransition } from "react";
+import { ChevronRightIcon, Loader2Icon } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,11 +21,7 @@ import {
 } from "@/components/ui/table";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import {
-  formatTokenAmount,
-  resolveTransferTokenLabel,
-  shortenAddress,
-} from "../../payments-overview.utils";
+import { formatTokenAmount, resolveTransferTokenLabel } from "../../payments-overview.utils";
 import { loadProjectEventsAction } from "./actions";
 import { EventDetail } from "./event-detail";
 import {
@@ -35,6 +31,7 @@ import {
   eventStatusLabel,
   eventTypeLabel,
 } from "./event-labels";
+import { type EventNames, labelFor } from "./event-names";
 import { type PrivateChannelEventSummary, summarizePrivateChannelEvent } from "./event-summary";
 
 interface Props {
@@ -42,6 +39,7 @@ interface Props {
   initialHasMore: boolean;
   initialNextCursor: string | null;
   canViewRawPayload: boolean;
+  names?: EventNames;
 }
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -68,15 +66,17 @@ function resolveFamilyFilter(value: string | null): EventFamilyFilter | null {
   return FAMILY_FILTERS.find((family) => family === value) ?? null;
 }
 
-function rowAmount(summary: PrivateChannelEventSummary, locale: string): string | undefined {
-  const token = resolveTransferTokenLabel(summary.mint);
+function rowAmount(
+  summary: PrivateChannelEventSummary,
+  locale: string,
+  names: EventNames
+): string | undefined {
+  // `names` carries mint -> symbol for the project's issued tokens; well-known
+  // mints still resolve from the shared catalogue.
+  const token = resolveTransferTokenLabel(summary.mint, names);
   const amount = summary.amount ? formatTokenAmount(summary.amount, locale) : undefined;
   if (amount && token) return `${amount} ${token}`;
   return amount ?? token;
-}
-
-function shortValue(value: string | undefined): string | undefined {
-  return value ? shortenAddress(value) : undefined;
 }
 
 function amountTo(t: Translate, amount: string | undefined, counterparty: string | undefined) {
@@ -95,21 +95,23 @@ function amountFrom(t: Translate, amount: string | undefined, counterparty: stri
 function movementSummary(
   t: Translate,
   summary: PrivateChannelEventSummary,
-  amount: string | undefined
+  amount: string | undefined,
+  names: EventNames
 ): string | undefined {
   return (
-    amountTo(t, amount, shortValue(summary.recipient)) ??
-    amountFrom(t, amount, shortValue(summary.sender))
+    amountTo(t, amount, labelFor(names, summary.recipient)) ??
+    amountFrom(t, amount, labelFor(names, summary.sender))
   );
 }
 
 function transferSummary(
   t: Translate,
   summary: PrivateChannelEventSummary,
-  amount: string | undefined
+  amount: string | undefined,
+  names: EventNames
 ): string | undefined {
-  const sender = shortValue(summary.sender);
-  const recipient = shortValue(summary.recipient);
+  const sender = labelFor(names, summary.sender);
+  const recipient = labelFor(names, summary.recipient);
   if (amount && sender && recipient) {
     return t("DashboardPrivateChannels.events.summaryTransfer", {
       amount,
@@ -126,19 +128,20 @@ function transferSummary(
 function formatRowSummary(
   t: Translate,
   summary: PrivateChannelEventSummary,
-  locale: string
+  locale: string,
+  names: EventNames
 ): string {
-  const amount = rowAmount(summary, locale);
+  const amount = rowAmount(summary, locale, names);
   const directionalSummary =
     (summary.kind === "deposit" || summary.kind === "withdrawal"
-      ? movementSummary(t, summary, amount)
+      ? movementSummary(t, summary, amount, names)
       : undefined) ??
-    (summary.kind === "transfer" ? transferSummary(t, summary, amount) : undefined);
+    (summary.kind === "transfer" ? transferSummary(t, summary, amount, names) : undefined);
   if (directionalSummary) return directionalSummary;
 
   if (summary.pubkey) {
     return t("DashboardPrivateChannels.events.summaryWallet", {
-      wallet: shortenAddress(summary.pubkey),
+      wallet: labelFor(names, summary.pubkey),
     });
   }
   if (summary.channelName) {
@@ -157,14 +160,14 @@ function formatRowSummary(
   const memberId = summary.ids.targetUserId ?? summary.ids.privateChannelUserId;
   if (memberId) {
     return t("DashboardPrivateChannels.events.summaryMember", {
-      member: shortenAddress(memberId),
+      member: labelFor(names, memberId),
     });
   }
 
   const firstId = Object.values(summary.ids)[0];
   if (firstId) {
     return t("DashboardPrivateChannels.events.summaryReference", {
-      reference: shortenAddress(firstId),
+      reference: labelFor(names, firstId),
     });
   }
 
@@ -176,6 +179,7 @@ export function EventsList({
   initialHasMore,
   initialNextCursor,
   canViewRawPayload,
+  names = {},
 }: Props) {
   const [events, setEvents] = useState(initialEvents);
   const [hasMore, setHasMore] = useState(initialHasMore);
@@ -235,6 +239,22 @@ export function EventsList({
 
   const selectedSummary = selectedEvent ? summarizePrivateChannelEvent(selectedEvent) : null;
 
+  // Derived once so the stacked and tabular layouts can never drift apart.
+  const rows = useMemo(
+    () =>
+      events.map((event) => {
+        const summary = summarizePrivateChannelEvent(event);
+        return {
+          event,
+          label: eventTypeLabel(t, event.type),
+          detail: formatRowSummary(t, summary, locale, names),
+          when: formatWhen(event.occurredAt, locale),
+          channelLabel: labelFor(names, event.channelId) ?? null,
+        };
+      }),
+    [events, locale, names, t]
+  );
+
   return (
     <div className="flex min-w-0 flex-col gap-4" aria-busy={isBusy}>
       {canViewRawPayload ? (
@@ -276,8 +296,43 @@ export function EventsList({
             : t("DashboardPrivateChannels.events.emptyFiltered")}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border-default">
-          <Table className="min-w-[760px]">
+        <>
+          {/* Below lg the five columns only fit behind a horizontal scrollbar, so each
+              event collapses into a tappable row that opens the same detail modal. */}
+          <ul className="flex flex-col divide-y divide-border-default overflow-hidden rounded-lg border border-border-default lg:hidden">
+            {rows.map((row) => (
+              <li key={row.event.id}>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
+                  onClick={() => setSelectedEvent(row.event)}
+                >
+                  <span className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="truncate text-primary text-sm">{row.label}</span>
+                      <Badge variant={EVENT_STATUS_BADGE[row.event.status] ?? "default"}>
+                        {eventStatusLabel(t, row.event.status)}
+                      </Badge>
+                    </span>
+                    <span className="block truncate text-tertiary text-xs">{row.detail}</span>
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-tertiary text-xs">
+                      <Badge variant={EVENT_FAMILY_BADGE[row.event.family] ?? "default"}>
+                        {eventFamilyLabel(t, row.event.family)}
+                      </Badge>
+                      <span className="whitespace-nowrap">{row.when}</span>
+                      {row.channelLabel ? (
+                        <span className="min-w-0 truncate">{row.channelLabel}</span>
+                      ) : null}
+                    </span>
+                  </span>
+                  <ChevronRightIcon className="size-4 shrink-0 text-tertiary" />
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          {/* Table brings its own frame and horizontal scroll, so no wrapper is needed. */}
+          <Table className="hidden [&_table]:min-w-[760px] lg:block">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-1/2">
@@ -298,67 +353,60 @@ export function EventsList({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {events.map((event) => {
-                const eventLabel = eventTypeLabel(t, event.type);
-                const summary = summarizePrivateChannelEvent(event);
-                const rowSummary = formatRowSummary(t, summary, locale);
-                return (
-                  <TableRow key={event.id}>
-                    <TableCell className="max-w-0">
-                      <div className="min-w-0">
-                        <span className="block truncate text-primary" title={eventLabel}>
-                          {eventLabel}
-                        </span>
-                        <span
-                          className="mt-0.5 block truncate text-tertiary text-xs"
-                          title={rowSummary}
-                        >
-                          {rowSummary}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={EVENT_FAMILY_BADGE[event.family] ?? "default"}>
-                        {eventFamilyLabel(t, event.family)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={EVENT_STATUS_BADGE[event.status] ?? "default"}>
-                        {eventStatusLabel(t, event.status)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="max-w-0 text-secondary">
-                      <span className="block whitespace-nowrap">
-                        {formatWhen(event.occurredAt, locale)}
+              {rows.map((row) => (
+                <TableRow key={row.event.id}>
+                  <TableCell className="max-w-0">
+                    <div className="min-w-0">
+                      <span className="block truncate text-primary" title={row.label}>
+                        {row.label}
                       </span>
-                      {event.channelId ? (
-                        <span
-                          className="mt-0.5 block truncate text-tertiary text-xs"
-                          title={event.channelId}
-                        >
-                          {event.channelId}
-                        </span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        aria-label={t("DashboardPrivateChannels.events.viewDetailsAria", {
-                          event: eventLabel,
-                        })}
-                        onClick={() => setSelectedEvent(event)}
-                        size="xs"
-                        variant="ghost"
+                      <span
+                        className="mt-0.5 block truncate text-tertiary text-xs"
+                        title={row.detail}
                       >
-                        {t("DashboardPrivateChannels.events.viewDetails")}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+                        {row.detail}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={EVENT_FAMILY_BADGE[row.event.family] ?? "default"}>
+                      {eventFamilyLabel(t, row.event.family)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={EVENT_STATUS_BADGE[row.event.status] ?? "default"}>
+                      {eventStatusLabel(t, row.event.status)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="max-w-0 text-secondary">
+                    <span className="block whitespace-nowrap">{row.when}</span>
+                    {row.channelLabel ? (
+                      <span
+                        className="mt-0.5 block truncate text-tertiary text-xs"
+                        title={row.event.channelId ?? row.channelLabel}
+                      >
+                        {row.channelLabel}
+                      </span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      type="button"
+                      aria-label={t("DashboardPrivateChannels.events.viewDetailsAria", {
+                        event: row.label,
+                      })}
+                      onClick={() => setSelectedEvent(row.event)}
+                      size="xs"
+                      variant="ghost"
+                    >
+                      {t("DashboardPrivateChannels.events.viewDetails")}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
-        </div>
+        </>
       )}
 
       {events.length > 0 && hasMore ? (
@@ -376,6 +424,7 @@ export function EventsList({
           summary={selectedSummary}
           formattedOccurredAt={formatWhen(selectedEvent.occurredAt, locale)}
           canViewRawPayload={canViewRawPayload}
+          names={names}
           onClose={() => setSelectedEvent(null)}
         />
       ) : null}

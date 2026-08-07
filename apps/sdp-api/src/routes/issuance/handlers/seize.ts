@@ -21,6 +21,10 @@ import { seizeSchema } from "../schemas";
 import { assertDestinationAllowedByControlList } from "./access-control";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -221,11 +225,32 @@ export const executeSeize = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    return success(c, { transaction: tx });
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "seize",
+    });
+    return success(c, { transaction });
   }
 
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "seize",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      source: parsed.data.seize.source,
+      destination: parsed.data.seize.destination,
+      amount: parsed.data.seize.amount,
+      delegateAuthority: permanentDelegateRaw,
+      mode: "execute",
+    },
+  });
+  let onChainEffectCompleted = false;
 
   try {
     const result = await mosaic.forceTransfer({
@@ -236,36 +261,36 @@ export const executeSeize = async (c: AppContext) => {
       permanentDelegate: signer,
       feePayer: signer,
     });
+    onChainEffectCompleted = true;
 
-    const updatedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
-
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "seize",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
-      metadata: {
-        tokenId,
-        source: parsed.data.seize.source,
-        destination: parsed.data.seize.destination,
-        amount: parsed.data.seize.amount,
-        delegateAuthority: permanentDelegateRaw,
+    const updatedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
         signature: result.signature,
-        slot: result.slot.toString(),
-        mode: "execute",
+        slot: Number(result.slot),
       },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
     throw error;
   }
 };

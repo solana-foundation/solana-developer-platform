@@ -71,7 +71,6 @@ export interface Env {
   // Clerk configuration
   CLERK_ISSUER?: string;
   CLERK_JWKS_URL?: string;
-  CLERK_AUDIENCE?: string;
   CLERK_SECRET_KEY?: string;
   CLERK_API_URL?: string;
   CLERK_WEBHOOK_SECRET?: string;

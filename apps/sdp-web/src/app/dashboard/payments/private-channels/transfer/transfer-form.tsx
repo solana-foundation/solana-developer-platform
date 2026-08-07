@@ -53,18 +53,22 @@ function walletLabel(wallet: CustodyWalletSummary): string {
   return wallet.label ? `${wallet.label} (${short})` : short;
 }
 
-function flattenRecipientOptions(
-  recipients: PrivateChannelTransferRecipientDto[]
+/**
+ * Recipients are wallets, not people, so a member holding several verified
+ * wallets yields several options. The source wallet is dropped because a
+ * transfer to itself is rejected by the API.
+ */
+function toRecipientOptions(
+  recipients: PrivateChannelTransferRecipientDto[],
+  sourcePubkey: string | undefined
 ): RecipientOption[] {
-  return recipients.flatMap((recipient) => {
-    const member = recipient.name?.trim()
-      ? `${recipient.name.trim()} (${recipient.email})`
-      : recipient.email;
-    return recipient.wallets.map((wallet) => ({
-      id: wallet.id,
-      label: `${member} · ${shortenPubkey(wallet.pubkey)}`,
-    }));
-  });
+  return recipients
+    .filter((recipient) => recipient.pubkey !== sourcePubkey)
+    .map((recipient) => {
+      const short = shortenPubkey(recipient.pubkey);
+      const walletName = recipient.walletName?.trim();
+      return { id: recipient.id, label: walletName ? `${walletName} (${short})` : short };
+    });
 }
 
 export function TransferForm({ scopeKey, ...props }: TransferFormProps) {
@@ -86,6 +90,7 @@ function TransferFormState({
   const [recipientLoad, setRecipientLoad] = useState<RecipientLoadState>({ status: "idle" });
   const [recipientReload, setRecipientReload] = useState(0);
   const [balances, setBalances] = useState<WalletBalanceView>({ channel: null, onChain: null });
+  const [balanceRefetchKey, setBalanceRefetchKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [submittedTransfer, setSubmittedTransfer] = useState<SubmittedTransfer | null>(null);
   const [isSubmitting, startTransition] = useTransition();
@@ -99,10 +104,14 @@ function TransferFormState({
    */
   const submitting = useRef(false);
 
+  const selectedSource = sourceWallets.find((wallet) => wallet.walletId === walletId);
+  const sourcePubkey = selectedSource?.publicKey;
   const recipientOptions = useMemo(
     () =>
-      recipientLoad.status === "ready" ? flattenRecipientOptions(recipientLoad.recipients) : [],
-    [recipientLoad]
+      recipientLoad.status === "ready"
+        ? toRecipientOptions(recipientLoad.recipients, sourcePubkey)
+        : [],
+    [recipientLoad, sourcePubkey]
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: recipientReload intentionally triggers a fresh server-action request.
@@ -149,6 +158,20 @@ function TransferFormState({
     };
   }, [channelId, channels.length, recipientReload, sourceWallets.length, t]);
 
+  /**
+   * Switching the source wallet to the one already chosen as recipient drops that
+   * option, so a selection that is no longer offered must not survive as state.
+   */
+  useEffect(() => {
+    if (
+      recipientVerifiedWalletId &&
+      !recipientOptions.some((option) => option.id === recipientVerifiedWalletId)
+    ) {
+      setRecipientVerifiedWalletId("");
+    }
+  }, [recipientOptions, recipientVerifiedWalletId]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: balanceRefetchKey intentionally triggers a fresh balance read.
   useEffect(() => {
     if (!walletId) {
       setBalances({ channel: null, onChain: null });
@@ -162,7 +185,7 @@ function TransferFormState({
     return () => {
       active = false;
     };
-  }, [walletId, mint]);
+  }, [walletId, mint, balanceRefetchKey]);
 
   if (channels.length === 0) {
     return (
@@ -178,7 +201,6 @@ function TransferFormState({
     );
   }
 
-  const selectedSource = sourceWallets.find((wallet) => wallet.walletId === walletId);
   const selectedRecipient = recipientOptions.find(
     (recipient) => recipient.id === recipientVerifiedWalletId
   );
@@ -193,6 +215,7 @@ function TransferFormState({
     setAmount("");
     setShowAmountError(false);
     setError(null);
+    setBalanceRefetchKey((value) => value + 1);
     setRecipientReload((value) => value + 1);
   };
 

@@ -67,7 +67,10 @@ export async function connectPrivateChannelAction(
         body: JSON.stringify({ ...parsed.data, confirmReactivate }),
       }
     );
-    revalidatePath("/dashboard/payments/private-channels/instance");
+    // Connecting flips the active instance, which changes the Overview, the header
+    // tabs and every sub-view — revalidate the whole segment, not just this page, so
+    // the post-connect redirect to the Overview renders fresh state.
+    revalidatePath("/dashboard/payments/private-channels", "layout");
     return { ok: true, instance: response.instance };
   } catch (error) {
     return interpretApiError(error);

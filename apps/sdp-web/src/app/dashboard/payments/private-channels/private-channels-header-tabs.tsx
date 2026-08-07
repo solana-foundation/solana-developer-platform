@@ -6,20 +6,24 @@ import { useTranslations } from "@/i18n/provider";
 
 // Adding a new sub-page (transfers, channels, members, …):
 //   1. Create app/dashboard/payments/private-channels/<slug>/page.tsx
-//   2. Append { id, labelKey, href, requiresActive: true } ABOVE the Instance entry
-//      (Instance always stays last so the connect/disconnect surface is at the
-//      end of the tab bar even as new features land).
+//   2. Append { id, labelKey, href, requiresActive: true } to the list.
+//
+// Overview and API Playground are always visible, including before an instance is
+// connected. There is no Instance or Channels tab: the instance
+// (connect/disconnect) and channels are reached from links in the Overview's
+// Connected-instance card. The Events feed has no tab either — it's reached from
+// the Overview's "All activity" link.
 const TABS = [
   {
     id: "overview",
     labelKey: "DashboardPrivateChannels.tabs.overview",
     href: "/dashboard/payments/private-channels/overview",
-    requiresActive: true,
+    requiresActive: false,
   },
   {
-    id: "channels",
-    labelKey: "DashboardPrivateChannels.tabs.channels",
-    href: "/dashboard/payments/private-channels/channels",
+    id: "members",
+    labelKey: "DashboardPrivateChannels.tabs.members",
+    href: "/dashboard/payments/private-channels/members",
     requiresActive: true,
   },
   {
@@ -41,22 +45,11 @@ const TABS = [
     requiresActive: true,
   },
   {
-    id: "members",
-    labelKey: "DashboardPrivateChannels.tabs.members",
-    href: "/dashboard/payments/private-channels/members",
-    requiresActive: true,
-  },
-  {
-    id: "events",
-    labelKey: "DashboardPrivateChannels.tabs.events",
-    href: "/dashboard/payments/private-channels/events",
-    // Always visible: project feed survives instance disconnect/delete.
-    requiresActive: false,
-  },
-  {
-    id: "instance",
-    labelKey: "DashboardPrivateChannels.tabs.instance",
-    href: "/dashboard/payments/private-channels/instance",
+    id: "api-playground",
+    labelKey: "DashboardPrivateChannels.tabs.apiPlayground",
+    href: "/dashboard/payments/private-channels/api-playground",
+    // Always visible: the /instance endpoints are what the operator needs
+    // before an instance is connected.
     requiresActive: false,
   },
 ] as const;
@@ -70,29 +63,28 @@ export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
   const pathname = usePathname();
   const t = useTranslations();
 
+  // Keep the always-visible destinations available before an instance is connected.
   const visible = TABS.filter((tab) => isConnected || !tab.requiresActive);
-  if (visible.length < 2) return null;
+  if (visible.length === 0) return null;
 
   const activeId = visible.find((tab) => pathname.startsWith(tab.href))?.id ?? visible[0].id;
 
   return (
-    <div className="mb-6">
-      <Tabs
-        bordered
-        value={activeId}
-        onValueChange={(value) => {
-          const next = visible.find((tab) => tab.id === value);
-          if (next) router.push(next.href);
-        }}
-      >
-        <TabList>
-          {visible.map((tab) => (
-            <Tab key={tab.id} value={tab.id}>
-              {t(tab.labelKey)}
-            </Tab>
-          ))}
-        </TabList>
-      </Tabs>
-    </div>
+    <Tabs
+      bordered
+      value={activeId}
+      onValueChange={(value) => {
+        const next = visible.find((tab) => tab.id === value);
+        if (next) router.push(next.href);
+      }}
+    >
+      <TabList>
+        {visible.map((tab) => (
+          <Tab key={tab.id} value={tab.id}>
+            {t(tab.labelKey)}
+          </Tab>
+        ))}
+      </TabList>
+    </Tabs>
   );
 }

@@ -7,6 +7,7 @@ import {
 } from "@sdp/private-channels";
 import type { PrivateChannelInstance, PrivateChannelInstanceInput } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
+import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
 import {
   type ConnectPrivateChannelResult,
   connectPrivateChannelAction,
@@ -78,6 +80,7 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
   } | null>(null);
   const [showDelete, setShowDelete] = useState(false);
   const t = useTranslations();
+  const router = useRouter();
 
   const isLocked = instance?.isActive === true;
   const busy = isTesting || isConnecting || isDisconnecting || isDeleting;
@@ -104,6 +107,8 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
       setRpcResult(null);
       setAuthResult(null);
       toast.success(t("DashboardPrivateChannels.instance.connectSuccess"));
+      // The instance is live now — take the operator to the Overview.
+      router.push(PRIVATE_CHANNELS_OVERVIEW_PATH);
       return;
     }
     if (result.kind === "validation") {
