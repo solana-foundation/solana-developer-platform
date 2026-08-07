@@ -3,14 +3,6 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
 // Stable ids rather than array indices: these lists never reorder, and biome's
 // noArrayIndexKey rule applies to skeleton rows the same as real ones.
-const DETAIL_ROW_IDS = [
-  "pc-skeleton-detail-1",
-  "pc-skeleton-detail-2",
-  "pc-skeleton-detail-3",
-  "pc-skeleton-detail-4",
-  "pc-skeleton-detail-5",
-  "pc-skeleton-detail-6",
-];
 const LIST_ROW_IDS = [
   "pc-skeleton-row-1",
   "pc-skeleton-row-2",
@@ -19,6 +11,7 @@ const LIST_ROW_IDS = [
   "pc-skeleton-row-5",
 ];
 const FIELD_IDS = ["pc-skeleton-field-1", "pc-skeleton-field-2", "pc-skeleton-field-3"];
+const PANEL_IDS = ["pc-skeleton-panel-1", "pc-skeleton-panel-2", "pc-skeleton-panel-3"];
 
 /** Card chrome shared by every Private Channels skeleton: title + description. */
 function SkeletonCardHeader() {
@@ -42,22 +35,32 @@ function SkeletonTabs() {
   );
 }
 
-/** Label/value rows — mirrors the overview's `<dl>` grid. */
+/** Three summary panels over the activity and wallets tables. */
 export function PrivateChannelsOverviewSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+    <div className="h-full min-h-0 w-full space-y-4 overflow-y-auto px-3 pt-2 pb-5 md:px-6 md:pb-6">
       <SkeletonTabs />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {PANEL_IDS.map((id) => (
+          <Card className="h-full" key={id}>
+            <CardHeader>
+              <SkeletonBlock className="h-5 w-40" />
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <SkeletonBlock className="h-4 w-3/4" />
+              <SkeletonBlock className="h-4 w-1/2" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
       <Card>
-        <SkeletonCardHeader />
-        <CardContent>
-          <div className="divide-y divide-border-subtle">
-            {DETAIL_ROW_IDS.map((id) => (
-              <div className="flex items-baseline justify-between gap-4 py-3" key={id}>
-                <SkeletonBlock className="h-4 w-28" />
-                <SkeletonBlock className="h-4 w-56" />
-              </div>
-            ))}
-          </div>
+        <CardHeader>
+          <SkeletonBlock className="h-5 w-52" />
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {LIST_ROW_IDS.map((id) => (
+            <SkeletonBlock className="h-9 w-full" key={`pc-skeleton-activity-${id}`} />
+          ))}
         </CardContent>
       </Card>
     </div>

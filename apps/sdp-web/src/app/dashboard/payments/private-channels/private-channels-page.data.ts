@@ -139,6 +139,10 @@ export function loadWalletVerification(client: SdpApiClient): Promise<
 export interface WalletChannelBalance {
   uiAmount: string;
   mint: string;
+  /** Raw base-unit amount + decimals, kept so balances can be summed per mint
+   * without decimal-string arithmetic (the overview aggregates across wallets). */
+  amount: string;
+  decimals: number;
 }
 
 /**
@@ -158,7 +162,15 @@ export async function loadChannelBalances(
     verified.map(async (wallet): Promise<[string, WalletChannelBalance] | null> => {
       try {
         const balance = await fetchPrivateChannelBalance(client, wallet.pubkey);
-        return [wallet.pubkey, { uiAmount: balance.uiAmount, mint: balance.mint }];
+        return [
+          wallet.pubkey,
+          {
+            uiAmount: balance.uiAmount,
+            mint: balance.mint,
+            amount: balance.amount,
+            decimals: balance.decimals,
+          },
+        ];
       } catch {
         return null;
       }

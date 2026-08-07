@@ -6,20 +6,24 @@ import { useTranslations } from "@/i18n/provider";
 
 // Adding a new sub-page (transfers, channels, members, …):
 //   1. Create app/dashboard/payments/private-channels/<slug>/page.tsx
-//   2. Append { id, labelKey, href, requiresActive: true } ABOVE the Instance entry
-//      (Instance always stays last so the connect/disconnect surface is at the
-//      end of the tab bar even as new features land).
+//   2. Append { id, labelKey, href, requiresActive: true } to the list.
+//
+// Overview is always visible (even when no instance is connected — it surfaces the
+// "Not connected" state and a connect link). There is no Instance or Channels tab:
+// the instance (connect/disconnect) and channels are reached from links in the
+// Overview's Connected-instance card. The Events feed has no tab either — it's
+// reached from the Overview's "All activity" link.
 const TABS = [
   {
     id: "overview",
     labelKey: "DashboardPrivateChannels.tabs.overview",
     href: "/dashboard/payments/private-channels/overview",
-    requiresActive: true,
+    requiresActive: false,
   },
   {
-    id: "channels",
-    labelKey: "DashboardPrivateChannels.tabs.channels",
-    href: "/dashboard/payments/private-channels/channels",
+    id: "members",
+    labelKey: "DashboardPrivateChannels.tabs.members",
+    href: "/dashboard/payments/private-channels/members",
     requiresActive: true,
   },
   {
@@ -40,25 +44,6 @@ const TABS = [
     href: "/dashboard/payments/private-channels/withdraw",
     requiresActive: true,
   },
-  {
-    id: "members",
-    labelKey: "DashboardPrivateChannels.tabs.members",
-    href: "/dashboard/payments/private-channels/members",
-    requiresActive: true,
-  },
-  {
-    id: "events",
-    labelKey: "DashboardPrivateChannels.tabs.events",
-    href: "/dashboard/payments/private-channels/events",
-    // Always visible: project feed survives instance disconnect/delete.
-    requiresActive: false,
-  },
-  {
-    id: "instance",
-    labelKey: "DashboardPrivateChannels.tabs.instance",
-    href: "/dashboard/payments/private-channels/instance",
-    requiresActive: false,
-  },
 ] as const;
 
 interface Props {
@@ -70,8 +55,10 @@ export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
   const pathname = usePathname();
   const t = useTranslations();
 
+  // When no instance is connected only Overview is visible; still render the strip so the
+  // sub-views (e.g. Instance) keep a consistent header and a way back to the Overview.
   const visible = TABS.filter((tab) => isConnected || !tab.requiresActive);
-  if (visible.length < 2) return null;
+  if (visible.length === 0) return null;
 
   const activeId = visible.find((tab) => pathname.startsWith(tab.href))?.id ?? visible[0].id;
 

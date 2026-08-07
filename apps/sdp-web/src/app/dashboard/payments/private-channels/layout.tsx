@@ -29,7 +29,7 @@ export default async function PrivateChannelsLayout({ children }: { children: Re
           card's ring and shadow — drawn outside its box — aren't shaved off by this
           container's clip, and the deep bottom padding clears the fixed mobile bar
           that hides at xl. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-6 pb-20 md:px-6 xl:pb-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pt-6 pb-20 md:px-6 xl:pb-6">
         {children}
       </div>
     </div>
