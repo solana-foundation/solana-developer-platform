@@ -33,11 +33,11 @@ describe("integration detail", () => {
     expect(detail?.requestAccessUrl).toContain("typeform");
   });
 
-  it("gives a gated provider without an established route no URL at all", () => {
-    // IBM Haven's request route is HOO-775; until it exists the page explains
-    // the arrangement instead of borrowing another provider's form.
+  it("holds a gated provider without an established route at not-configured", () => {
+    // IBM Haven's request route is HOO-775; until it exists the page must not
+    // say access is requestable, and must not borrow another provider's form.
     const detail = resolveIntegrationDetail({ provider: "ibm_haven", ...INPUTS });
-    expect(detail?.status).toBe("request_access");
+    expect(detail?.status).toBe("not_configured");
     expect(detail?.requestAccessUrl).toBeUndefined();
   });
 

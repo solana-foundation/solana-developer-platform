@@ -26,7 +26,10 @@ import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "./activity-format-utils";
 import { buildHomeBalanceBreakdown, countHeldTokens } from "./home-balance-breakdown";
+import { resolveHomeHeroState } from "./home-first-run";
 import type { HomeActivityExplorerRef, HomeActivityRow } from "./home-page.data";
+import { HomeQuickActions } from "./home-quick-actions";
+import { seriesColorForMint } from "./home-series-color";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { fetchHomeActivity } from "./home-workspace.data";
 import {
@@ -93,22 +96,10 @@ function ActivityAddress({
 }
 
 /**
- * Descending emphasis for descending share. The design system ships no categorical
- * chart palette, and a stacked allocation bar is a magnitude encoding rather than an
- * identity one, so a single neutral ramp is the right job — and it re-steps itself
- * per theme instead of needing a hand-picked dark variant.
+ * "Other" is a residual bucket, not a token, so it stays neutral rather than
+ * taking a categorical hue that would imply an identity it does not have.
  */
-const ALLOCATION_FILLS = [
-  "bg-primary",
-  "bg-secondary",
-  "bg-tertiary",
-  "bg-muted",
-  "bg-fill-strong",
-] as const;
-
-function allocationFill(index: number): string {
-  return ALLOCATION_FILLS[Math.min(index, ALLOCATION_FILLS.length - 1)];
-}
+const OTHER_SEGMENT_COLOR = "bg-fill-strong";
 
 /**
  * Holdings by token. The aggregate already returns the per-token rows the total is
@@ -143,13 +134,13 @@ function BalanceAllocation({
     resolveTransferTokenLabel(slice.mint, symbolsByMint) ?? slice.token;
 
   const segments = [
-    ...breakdown.priced.map((slice, index) => ({
+    ...breakdown.priced.map((slice) => ({
       key: slice.mint,
       mint: slice.mint,
       label: symbolFor(slice),
       percent: slice.sharePercent,
       value: slice.usdValue ?? 0,
-      fill: allocationFill(index),
+      fill: seriesColorForMint(slice.mint),
       href: tokenActivityHref(slice.mint),
     })),
     ...(breakdown.otherPricedCount > 0
@@ -165,7 +156,7 @@ function BalanceAllocation({
                   }),
             percent: breakdown.otherPricedSharePercent,
             value: breakdown.otherPricedUsd,
-            fill: allocationFill(breakdown.priced.length),
+            fill: OTHER_SEGMENT_COLOR,
             href: "/dashboard/tokens",
           },
         ]
@@ -324,6 +315,7 @@ function BalanceHero({
   totalBalance,
   totalBalanceError,
   totalBalanceHint,
+  hasPricedValue,
   todaysVolume,
   todaysVolumeError,
   walletCount,
@@ -336,6 +328,7 @@ function BalanceHero({
   totalBalance: number | null;
   totalBalanceError: string | null;
   totalBalanceHint: string | null;
+  hasPricedValue: boolean;
   todaysVolume: number | null;
   todaysVolumeError: string | null;
   walletCount: number;
@@ -352,14 +345,31 @@ function BalanceHero({
         <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
           <div className="min-w-0 space-y-2">
             <p className="text-[15px] text-tertiary">{t("Shared.homeWorkspace.totalBalance")}</p>
-            <p className="text-[38px] leading-none font-medium tracking-[-0.03em] text-primary tabular-nums sm:text-[46px]">
-              {totalBalanceError
-                ? t("Shared.homeWorkspace.unavailable")
-                : formatCurrencyAmount(totalBalance, locale)}
-            </p>
+            {/* An organization holding only its own issued tokens has no price feed
+                for anything it owns. Formatting that as currency printed $0.00 next
+                to real holdings, which reads as a broken number rather than an
+                absent one. */}
+            {totalBalanceError ? (
+              <p className="text-[38px] leading-none font-medium tracking-[-0.03em] text-primary tabular-nums sm:text-[46px]">
+                {t("Shared.homeWorkspace.unavailable")}
+              </p>
+            ) : hasPricedValue ? (
+              <p className="text-[38px] leading-none font-medium tracking-[-0.03em] text-primary tabular-nums sm:text-[46px]">
+                {formatCurrencyAmount(totalBalance, locale)}
+              </p>
+            ) : (
+              <>
+                <p className="text-[22px] leading-tight font-medium tracking-[-0.02em] text-primary">
+                  {t("Shared.homeWorkspace.heroUnpricedTitle")}
+                </p>
+                <p className="text-sm text-tertiary">
+                  {t("Shared.homeWorkspace.heroUnpricedBody")}
+                </p>
+              </>
+            )}
             {totalBalanceError ? (
               <p className="text-sm text-destructive-strong">{totalBalanceError}</p>
-            ) : totalBalanceHint ? (
+            ) : totalBalanceHint && hasPricedValue ? (
               <p className="text-sm text-tertiary">{totalBalanceHint}</p>
             ) : null}
           </div>
@@ -372,10 +382,11 @@ function BalanceHero({
               />
             ) : null}
             {canManageCustody ? (
-              <Button
-                asChild
-                className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
-              >
+              // Secondary, not primary. An organization with balances has already
+              // created its wallets; leading this screen with "Create Wallet" gave
+              // a setup action top billing over the numbers the page exists to
+              // show. It stays reachable, it just stops competing with them.
+              <Button asChild variant="secondary">
                 <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
               </Button>
             ) : null}
@@ -467,6 +478,21 @@ export function HomeWorkspace({
   );
   const isWalletEmptyState = wallets.length === 0;
   const heldTokenCount = countHeldTokens(balances);
+  // Not `wallets.length === 0`: onboarding provisions a wallet before it completes,
+  // so a freshly onboarded organization already has one and fell through to the
+  // populated hero holding nothing.
+  // `totalBalanceError` is set only when the aggregate request itself failed
+  // on an organization that has wallets. That is the only failure the response
+  // exposes today: the API converts per-wallet read failures into zero rows on
+  // a 200, so an RPC blip that zeroes an established organization is not
+  // distinguishable here from genuine emptiness. Closing that requires the
+  // aggregate to report partial reads (HOO-1040).
+  const heroState = resolveHomeHeroState({
+    walletCount,
+    balances,
+    totalBalance,
+    balancesUnavailable: totalBalanceError !== null,
+  });
   const totalBalanceHint = isWalletEmptyState
     ? t("Shared.homeWorkspace.createFirstWalletBalances")
     : totalBalance === null
@@ -495,13 +521,16 @@ export function HomeWorkspace({
   return (
     <div className="w-full space-y-8 py-2">
       <SectionEntry>
-        {isWalletEmptyState ? (
+        {heroState.kind === "first_run" ? (
           <FirstRunPanel canCreateWallet={dashboardAccess.capabilities.canManageCustody} />
+        ) : heroState.kind === "provisioned_empty" ? (
+          <HomeQuickActions capabilities={dashboardAccess.capabilities} />
         ) : (
           <BalanceHero
             totalBalance={totalBalance}
             totalBalanceError={totalBalanceError}
             totalBalanceHint={totalBalanceHint}
+            hasPricedValue={heroState.hasPricedValue}
             todaysVolume={todaysVolume}
             todaysVolumeError={todaysVolumeError}
             walletCount={walletCount}
