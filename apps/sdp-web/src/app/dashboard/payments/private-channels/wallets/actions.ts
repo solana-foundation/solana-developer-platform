@@ -8,7 +8,14 @@ import {
 } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
 
+const WALLETS_PATH = "/dashboard/payments/private-channels/wallets";
+// The Overview's private-balance panel reflects verified-wallet balances too.
 const OVERVIEW_PATH = "/dashboard/payments/private-channels/overview";
+
+function revalidateWalletViews(): void {
+  revalidatePath(WALLETS_PATH);
+  revalidatePath(OVERVIEW_PATH);
+}
 
 export type VerifyWalletResult =
   | { ok: true; wallet: PrivateChannelVerifiedWalletDto }
@@ -21,7 +28,7 @@ export async function verifyWalletAction(walletId: string): Promise<VerifyWallet
   try {
     const client = await createSdpApiClient();
     const wallet = await verifyPrivateChannelWallet(client, walletId);
-    revalidatePath(OVERVIEW_PATH);
+    revalidateWalletViews();
     return { ok: true, wallet };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
@@ -36,7 +43,7 @@ export async function deleteVerifiedWalletAction(
   try {
     const client = await createSdpApiClient();
     await deletePrivateChannelVerifiedWallet(client, pubkey);
-    revalidatePath(OVERVIEW_PATH);
+    revalidateWalletViews();
     return { ok: true };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
