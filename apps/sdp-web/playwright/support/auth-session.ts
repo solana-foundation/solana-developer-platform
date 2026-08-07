@@ -1,49 +1,35 @@
 import type { Browser, Page } from "@playwright/test";
-import { getE2EEnv } from "../env";
 import { authStatePath } from "./auth-state";
 import type { ClerkTestIdentity } from "./clerk-admin";
 import { resolveClerkTestIdentity } from "./clerk-admin";
 
-async function readClerkBearerToken(page: Page, template: string): Promise<string | null> {
-  return page.evaluate(
-    async ({ template }) => {
-      const clerkClient = (
-        window as unknown as {
-          Clerk?: {
-            session?: {
-              getToken: (params?: { template?: string }) => Promise<string | null>;
-            };
-          };
-        }
-      ).Clerk;
+type ClerkWindow = {
+  Clerk?: {
+    session?: {
+      getToken: () => Promise<string | null>;
+    };
+  };
+};
 
-      return clerkClient?.session?.getToken({ template }) ?? null;
-    },
-    { template }
-  );
+async function readClerkBearerToken(page: Page): Promise<string | null> {
+  return page.evaluate(async () => {
+    const clerkClient = (window as unknown as ClerkWindow).Clerk;
+
+    return clerkClient?.session?.getToken() ?? null;
+  });
 }
 
 export async function getClerkBearerToken(page: Page): Promise<string> {
-  const env = getE2EEnv();
-
   await page.goto("/dashboard/issuance", {
     waitUntil: "domcontentloaded",
   });
   await page.waitForFunction(() => {
-    const clerkClient = (
-      window as unknown as {
-        Clerk?: {
-          session?: {
-            getToken: (params?: { template?: string }) => Promise<string | null>;
-          };
-        };
-      }
-    ).Clerk;
+    const clerkClient = (window as unknown as ClerkWindow).Clerk;
 
     return Boolean(clerkClient?.session);
   });
 
-  const token = await readClerkBearerToken(page, env.clerkJwtTemplate);
+  const token = await readClerkBearerToken(page);
 
   if (!token) {
     throw new Error("Failed to acquire a Clerk JWT for Playwright bootstrap");
@@ -60,8 +46,7 @@ export async function openAuthenticatedBootstrapPage(browser: Browser): Promise<
 
 export function createClerkBearerTokenProvider(page: Page): () => Promise<string> {
   return async () => {
-    const env = getE2EEnv();
-    const token = await readClerkBearerToken(page, env.clerkJwtTemplate).catch(() => null);
+    const token = await readClerkBearerToken(page).catch(() => null);
     if (token) {
       return token;
     }

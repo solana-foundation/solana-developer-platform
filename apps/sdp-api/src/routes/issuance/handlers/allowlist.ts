@@ -310,26 +310,8 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     return noContent(c);
   }
 
-  // For on-chain lists, confirm authoritative removal before publishing the
-  // final DB state. The helper reconciles ambiguous submission errors by
-  // reading membership, so a timeout that landed still completes, while a
-  // definite failure leaves the entry accurately active and safely retryable.
-  if (token.ablListAddress) {
-    await removeExistingAllowlistEntryOnChain({
-      c,
-      organizationId: auth.organizationId,
-      projectId,
-      signingWalletId: token.signingWalletId,
-      list: assertValidAddress(token.ablListAddress, "ablListAddress"),
-      wallet: assertValidAddress(entry.address, "address"),
-    });
-  }
-
-  await tokenService.revokeAllowlistEntry(entryId);
-
-  // Audit log
   const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
+  const auditIntent = await auditService.beginCritical(c, {
     action: "revoke",
     resourceType: "token_allowlist",
     resourceId: entryId,
@@ -339,6 +321,37 @@ export const removeAllowlistEntry = async (c: AppContext) => {
       mode: token.ablListAddress ? "on-chain" : "database",
     },
   });
+  let authoritativeEffectCompleted = false;
 
-  return noContent(c);
+  try {
+    // For on-chain lists, confirm authoritative removal before publishing the
+    // final DB state. The helper reconciles ambiguous submission errors by
+    // reading membership, so a timeout that landed still completes, while a
+    // definite failure leaves the entry accurately active and safely retryable.
+    if (token.ablListAddress) {
+      await removeExistingAllowlistEntryOnChain({
+        c,
+        organizationId: auth.organizationId,
+        projectId,
+        signingWalletId: token.signingWalletId,
+        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
+        wallet: assertValidAddress(entry.address, "address"),
+      });
+      authoritativeEffectCompleted = true;
+    }
+
+    await tokenService.revokeAllowlistEntry(entryId);
+    authoritativeEffectCompleted = true;
+    await auditService.completeCritical(c, auditIntent);
+
+    return noContent(c);
+  } catch (error) {
+    if (!authoritativeEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+    }
+    throw error;
+  }
 };

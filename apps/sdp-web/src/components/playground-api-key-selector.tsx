@@ -67,12 +67,12 @@ export function PlaygroundApiKeySelector() {
 
         <select
           aria-label={t("Shared.SharedComponents.selectApiKey")}
-          className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-[14px] opacity-0"
+          className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-[14px] bg-surface-raised text-primary opacity-0"
           value={selectedPlaygroundApiKeyId ?? playgroundApiKeys[0].id}
           onChange={(event) => setSelectedPlaygroundApiKeyId(event.currentTarget.value)}
         >
           {playgroundApiKeys.map((apiKey) => (
-            <option key={apiKey.id} value={apiKey.id}>
+            <option key={apiKey.id} value={apiKey.id} className="bg-surface-raised text-primary">
               {formatApiKeyLabel(apiKey.name, apiKey.keyPrefix)}
             </option>
           ))}
