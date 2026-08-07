@@ -23,6 +23,7 @@ import { DisableControlsDialog } from "./disable-controls-dialog";
 import { IntentStep } from "./intent-step";
 import { LimitsAndAssetsStep } from "./limits-assets-step";
 import type { IssuedPolicyToken } from "./policy-assets.data";
+import { PolicyCommitDrawer } from "./policy-commit-drawer";
 import { PolicySummaryRail } from "./policy-summary-rail";
 import { ReviewStep } from "./review-step";
 import { RevisionHistoryDrawer } from "./revision-history-drawer";
@@ -91,6 +92,8 @@ export function WalletPolicyStartingProfileFlow({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationRequestedSteps, setValidationRequestedSteps] = useState<PolicyFlowStep[]>([]);
   const [disableOpen, setDisableOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
 
   useEffect(() => {
     const draft = loadPolicyDraft(window.localStorage, projectId, wallet.walletId);
@@ -207,12 +210,15 @@ export function WalletPolicyStartingProfileFlow({
     );
   }
 
-  async function activateControls() {
+  function openReviewDrawer() {
     if (Object.keys(validation).length > 0 || policyError || !isDirty) {
       toast.error(t("DashboardCustody.policyActivationValidation"), { position: "bottom-right" });
       return;
     }
+    setReviewDrawerOpen(true);
+  }
 
+  async function activateControls() {
     setIsSubmitting(true);
     const toastId = toast.loading(t("DashboardCustody.policyActivating"), {
       position: "bottom-right",
@@ -221,11 +227,14 @@ export function WalletPolicyStartingProfileFlow({
       const updated = await updateWalletPolicy(
         wallet.walletId,
         buildPolicyPayload(wallet.walletId, state),
-        t
+        t,
+        commitMessage
       );
       const returnedState = createPolicyAuthoringState(updated);
       setCurrentPolicy(updated);
       setState(returnedState);
+      setCommitMessage("");
+      setReviewDrawerOpen(false);
       setActiveFingerprint(policyStateFingerprint(wallet.walletId, returnedState));
       clearPolicyDraft(window.localStorage, projectId, wallet.walletId);
       toast.success(t("DashboardCustody.policyActive"), {
@@ -356,7 +365,7 @@ export function WalletPolicyStartingProfileFlow({
                   >
                     {t("DashboardCustody.policySaveDraft")}
                   </Button>
-                  <Button type="button" onClick={activateControls} disabled={!canActivate}>
+                  <Button type="button" onClick={openReviewDrawer} disabled={!canActivate}>
                     {isSubmitting
                       ? t("DashboardCustody.policyActivating")
                       : isDirty
@@ -443,6 +452,18 @@ export function WalletPolicyStartingProfileFlow({
         submitting={isSubmitting}
         onClose={() => setDisableOpen(false)}
         onConfirm={disableControls}
+      />
+
+      <PolicyCommitDrawer
+        open={reviewDrawerOpen}
+        onOpenChange={setReviewDrawerOpen}
+        walletId={wallet.walletId}
+        activePolicy={currentPolicy}
+        pendingState={state}
+        commitMessage={commitMessage}
+        onCommitMessageChange={setCommitMessage}
+        onConfirm={activateControls}
+        isSubmitting={isSubmitting}
       />
     </div>
   );

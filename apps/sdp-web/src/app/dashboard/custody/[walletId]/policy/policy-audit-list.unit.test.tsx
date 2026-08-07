@@ -87,6 +87,7 @@ const revisionHistory: WalletControlProfileRevisionHistory = {
       revisionNumber: 1,
       rules: [],
       defaultAction: "allow",
+      commitMessage: null,
       createdBy: null,
       createdAt: "2026-07-18T13:30:00.000Z",
       activatedAt: "2026-07-18T13:35:00.000Z",

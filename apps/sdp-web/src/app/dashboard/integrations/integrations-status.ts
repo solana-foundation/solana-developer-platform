@@ -1,0 +1,185 @@
+import type {
+  ComplianceProviderId,
+  OrganizationRpcProvider,
+  ProviderAvailabilityEntry,
+  RampProviderId,
+} from "@sdp/types";
+import { COMPLIANCE_PROVIDERS, ORGANIZATION_RPC_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
+import type { KnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
+import {
+  type CustodyProviderAvailability,
+  resolveCustodyProviderAvailability,
+} from "@/app/dashboard/custody/provider-display-status";
+import type { MessageKey } from "@/i18n/messages";
+
+/**
+ * One vocabulary across every provider family, aligned with the
+ * remove-signup-waitlist decision map. Every provider this catalog lists is
+ * built and runnable, so a status only ever answers "what is my next step":
+ *
+ * - `active` — running for this organization now. Only families that hold a
+ *   real per-organization link (a custody connection, the selected RPC) may
+ *   report it; a deployment-wide rail is never "connected" to anyone.
+ * - `available` — the organization can use or set this up from here.
+ * - `enabled` — a deployment-wide rail (ramps, compliance) that is on for this
+ *   organization; there is nothing to connect.
+ * - `request_access` — organization access the SDP team grants (HOO-772/775).
+ * - `not_configured` — environment availability: this deployment does not hold
+ *   the provider's credentials. Never shown for manual providers, and never
+ *   phrased as organization access (decision-map.md #4).
+ *
+ * Nothing here may imply a provider does not exist — the row is the claim
+ * that it does.
+ */
+export type IntegrationStatus =
+  | "active"
+  | "available"
+  | "enabled"
+  | "request_access"
+  | "not_configured";
+
+export interface IntegrationEntry<TProvider extends string = string> {
+  provider: TProvider;
+  label: string;
+  status: IntegrationStatus;
+  descriptionKey?: MessageKey;
+}
+
+const RPC_DESCRIPTION_KEYS: Record<OrganizationRpcProvider, MessageKey> = {
+  alchemy: "DashboardCustody.onboardingRpcAlchemyDescription",
+  default: "DashboardCustody.onboardingRpcDefaultDescription",
+  helius: "DashboardCustody.onboardingRpcHeliusDescription",
+  nodit: "DashboardCustody.onboardingRpcNoditDescription",
+  quicknode: "DashboardCustody.onboardingRpcQuickNodeDescription",
+  triton: "DashboardCustody.onboardingRpcTritonDescription",
+  validationcloud: "DashboardCustody.onboardingRpcValidationCloudDescription",
+};
+
+const RAMP_DESCRIPTION_KEYS: Record<RampProviderId, MessageKey> = {
+  moonpay: "Shared.integrations.rampMoonpayDescription",
+  lightspark: "Shared.integrations.rampLightsparkDescription",
+  bvnk: "Shared.integrations.rampBvnkDescription",
+  moneygram: "Shared.integrations.rampMoneygramDescription",
+  coinbase: "Shared.integrations.rampCoinbaseDescription",
+  mural: "Shared.integrations.rampMuralDescription",
+  stripe: "Shared.integrations.rampStripeDescription",
+};
+
+const COMPLIANCE_DESCRIPTION_KEYS: Record<ComplianceProviderId, MessageKey> = {
+  range: "Shared.integrations.complianceRangeDescription",
+  elliptic: "Shared.integrations.complianceEllipticDescription",
+  trm: "Shared.integrations.complianceTrmDescription",
+  chainalysis: "Shared.integrations.complianceChainalysisDescription",
+};
+
+/** Display labels for families whose ids never had UI names on main. */
+export const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
+  alchemy: "Alchemy",
+  default: "SDP RPC",
+  helius: "Helius",
+  nodit: "Nodit",
+  quicknode: "QuickNode",
+  triton: "Triton",
+  validationcloud: "Validation Cloud",
+};
+
+export const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
+  moonpay: "MoonPay",
+  lightspark: "Lightspark",
+  bvnk: "BVNK",
+  moneygram: "MoneyGram",
+  coinbase: "Coinbase",
+  mural: "Mural",
+  stripe: "Stripe",
+};
+
+export const COMPLIANCE_PROVIDER_LABELS: Record<ComplianceProviderId, string> = {
+  range: "Range",
+  elliptic: "Elliptic",
+  trm: "TRM Labs",
+  chainalysis: "Chainalysis",
+};
+
+export function resolveCustodyIntegrations(input: {
+  connectedProviders: readonly KnownCustodyProvider[];
+  enabledProviders: readonly KnownCustodyProvider[];
+}): CustodyProviderAvailability[] {
+  return resolveCustodyProviderAvailability(input);
+}
+
+/**
+ * The organization runs exactly one RPC provider, chosen in onboarding or
+ * Settings — that one is active. The rest of the enabled set is available to
+ * switch to; `default` is SDP's own key and is only worth naming while it is
+ * what the organization actually uses.
+ */
+export function resolveRpcIntegrations(input: {
+  selectedProvider: OrganizationRpcProvider | null;
+  entries: Partial<Record<OrganizationRpcProvider, ProviderAvailabilityEntry>>;
+}): IntegrationEntry<OrganizationRpcProvider>[] {
+  return ORGANIZATION_RPC_PROVIDERS.filter(
+    (provider) => provider !== "default" || input.selectedProvider === "default"
+  ).map((provider) => {
+    const entry = input.entries[provider];
+    // Every RPC provider is generally available; an unconfigured one lacks a
+    // URL in this deployment, which is never organization access.
+    const status: IntegrationStatus =
+      provider === input.selectedProvider
+        ? "active"
+        : entry?.enabled
+          ? "available"
+          : "not_configured";
+    return {
+      provider,
+      label: RPC_PROVIDER_LABELS[provider],
+      status,
+      descriptionKey: RPC_DESCRIPTION_KEYS[provider],
+    };
+  });
+}
+
+/**
+ * A deployment-wide rail is on or off; no organization ever connects one, so
+ * these families never report `active`. All three flags, not just `enabled`:
+ * the API derives it as entitled && configured, so anything less than
+ * agreement between them is a payload we should not read a promise out of.
+ */
+function railIsOn(entry: ProviderAvailabilityEntry | undefined): boolean {
+  return entry?.entitled === true && entry.configured && entry.enabled;
+}
+
+/** Every ramp is generally available; off means uncredentialed here, never gated. */
+export function resolveRampIntegrations(
+  entries: Partial<Record<RampProviderId, ProviderAvailabilityEntry>>
+): IntegrationEntry<RampProviderId>[] {
+  return RAMP_PROVIDERS.map((provider) => ({
+    provider,
+    label: RAMP_PROVIDER_LABELS[provider],
+    status: railIsOn(entries[provider]) ? "enabled" : "not_configured",
+    descriptionKey: RAMP_DESCRIPTION_KEYS[provider],
+  }));
+}
+
+/**
+ * Every compliance provider is manual: the SDP team activates it per
+ * organization. Activated but uncredentialed is the one case where the
+ * deployment, not access, is what is missing.
+ */
+export function resolveComplianceIntegrations(
+  entries: Partial<Record<ComplianceProviderId, ProviderAvailabilityEntry>>
+): IntegrationEntry<ComplianceProviderId>[] {
+  return COMPLIANCE_PROVIDERS.map((provider) => {
+    const entry = entries[provider];
+    const status: IntegrationStatus = railIsOn(entry)
+      ? "enabled"
+      : entry?.entitled
+        ? "not_configured"
+        : "request_access";
+    return {
+      provider,
+      label: COMPLIANCE_PROVIDER_LABELS[provider],
+      status,
+      descriptionKey: COMPLIANCE_DESCRIPTION_KEYS[provider],
+    };
+  });
+}
