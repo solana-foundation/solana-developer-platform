@@ -24,9 +24,12 @@ import type { MessageKey } from "@/i18n/messages";
  * - `enabled` — a deployment-wide rail (ramps, compliance) that is on for this
  *   organization; there is nothing to connect.
  * - `request_access` — organization access the SDP team grants (HOO-772/775).
+ *   For custody this is only shown when the catalog carries an actual request
+ *   route: the state is a promise of a way to ask, not just a classification.
  * - `not_configured` — environment availability: this deployment does not hold
- *   the provider's credentials. Never shown for manual providers, and never
- *   phrased as organization access (decision-map.md #4).
+ *   the provider's credentials, and never phrased as organization access
+ *   (decision-map.md #4). Manual custody providers without a wired request
+ *   route also hold here until HOO-775 gives each one a real route.
  *
  * Nothing here may imply a provider does not exist — the row is the claim
  * that it does.

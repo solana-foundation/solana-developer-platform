@@ -98,11 +98,14 @@ describe("IntegrationsCatalog filtering", () => {
     await user.click(screen.getByRole("button", { name: "Request access" }));
 
     const labels = visibleRowLabels();
-    // Only providers whose access the SDP team grants collect here: the manual
-    // custody set and unactivated compliance.
-    for (const gated of ["Fireblocks", "IBM Digital Asset Haven", "Range"]) {
+    // Only providers with a real way to ask collect here: the routed gated
+    // custody provider and unactivated compliance. A gated custody provider
+    // without a request route (IBM Haven, until HOO-775) is not a request
+    // anyone can make, so it holds at not-configured instead.
+    for (const gated of ["Fireblocks", "Range"]) {
       expect(labels).toContain(gated);
     }
+    expect(labels).not.toContain("IBM Digital Asset Haven");
     // Enabled rails and generally available providers are excluded — an
     // enabled ramp and an uncredentialed general provider are not requests.
     expect(labels).not.toContain("MoonPay");
@@ -118,10 +121,11 @@ describe("IntegrationsCatalog filtering", () => {
     await user.click(screen.getByRole("button", { name: "Not configured" }));
 
     const labels = visibleRowLabels();
-    // Turnkey is generally available but has no credentials in this fixture.
+    // Turnkey is generally available but has no credentials in this fixture,
+    // and IBM Haven is gated with no request route wired yet (HOO-775).
     expect(labels).toContain("Turnkey");
+    expect(labels).toContain("IBM Digital Asset Haven");
     expect(labels).not.toContain("Fireblocks");
-    expect(labels).not.toContain("IBM Digital Asset Haven");
   });
 
   it("offers no filter that would imply an integration does not exist", () => {
