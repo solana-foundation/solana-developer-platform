@@ -55,7 +55,8 @@ describe("WorkflowFlowGraph", () => {
     });
     expect(markup).toContain("flowWalletGap");
     // The action leg is blocked too — the rule would enqueue and permanently fail.
-    expect(markup).toContain("bg-error");
+    // Blocked status shows as a red trailing glyph (text-error), not a tinted chip.
+    expect(markup).toContain("text-error");
   });
 
   it("marks an unsupported capability as blocked with its reason", () => {
@@ -63,7 +64,7 @@ describe("WorkflowFlowGraph", () => {
       action: action({ kind: "allowlist" }, "automated", { ok: false, reason: "no_allowlist" }),
     });
     expect(markup).toContain("flowReasonNoAllowlist");
-    expect(markup).toContain("bg-error");
+    expect(markup).toContain("text-error");
   });
 
   it("always holds destructive tiers for review, with the hold-to-confirm note", () => {

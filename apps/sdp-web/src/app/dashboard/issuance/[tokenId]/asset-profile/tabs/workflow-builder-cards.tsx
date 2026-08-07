@@ -1,13 +1,14 @@
 "use client";
 
+import { Select as BaseSelect } from "@base-ui/react/select";
 import {
-  ArrowDown,
   ArrowDownToLine,
   ArrowUpFromLine,
   BadgeCheck,
   Bell,
+  Check,
+  ChevronDown,
   Coins,
-  CornerDownRight,
   FileText,
   Flame,
   HandCoins,
@@ -21,12 +22,9 @@ import {
   UserPlus,
   UserX,
   Webhook,
-  Zap,
 } from "lucide-react";
-import type { ReactNode } from "react";
-import { Badge } from "@/components/ui/badge";
+import { type ReactNode, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import type { CatalogActionView, CatalogTriggerView, ExecutionTier } from "../workflows.data";
 
 // Icons reserve a scannable identity for each trigger/action without leaning on colour
 // (SDP keeps colour for status). Missing keys fall back to a neutral glyph, so a
@@ -56,266 +54,196 @@ export const ACTION_ICONS: Record<string, LucideIcon> = {
   mint: Coins,
 };
 
-const TIER_VARIANT: Record<ExecutionTier, "success" | "warning" | "danger"> = {
-  automated: "success",
-  sensitive: "warning",
-  requires_approval: "danger",
-};
+// ── Card select (a dropdown whose options ARE the cards) ─────────────────────────────
 
-// Tier headings borrow the status palette (risk is a status): green = safe/reversible,
-// amber = disruptive, red = irreversible. The only colour on the selection surface.
-const TIER_HEADING_TONE: Record<ExecutionTier, string> = {
-  automated: "text-success",
-  sensitive: "text-warning",
-  requires_approval: "text-error",
-};
-
-const TIER_ORDER: ExecutionTier[] = ["automated", "sensitive", "requires_approval"];
-
-// Loosely-typed localizers passed down from the tab (closures over `t`) so this file
-// stays decoupled from the tab's internal helper types.
-type LabelFn = (kind: "trigger" | "action", type: string) => string;
-type DescribeFn = (kind: "trigger" | "action", type: string | null | undefined) => string | null;
-type WfFn = (k: string, values?: Record<string, string | number>) => string;
-
-// ── Selectable icon card ─────────────────────────────────────────────────────────────
-
-export function SelectableCard({
-  icon: Icon,
-  heading,
-  description,
-  badge,
-  note,
-  selected,
-  disabled,
-  onSelect,
-  ariaLabel,
-}: {
+export interface CardSelectOption {
+  value: string;
   icon: LucideIcon;
-  // `heading`, not `title`: a `title` JSX attribute is treated as user-facing copy by
-  // the i18n audit, which would then flag the i18n *keys* passed through it.
-  heading: string;
+  label: string;
   description?: string | null;
   badge?: ReactNode;
   note?: string;
-  selected: boolean;
   disabled?: boolean;
-  onSelect: () => void;
-  ariaLabel?: string;
+  // Optional heading this option groups under (e.g. a tier). Consecutive options that
+  // share a group render under one heading; order is preserved.
+  group?: string;
+}
+
+// A compact select trigger (icon + label) that opens a popover of rich cards. Built on
+// the same Base UI primitive as the shared Select, so keyboard/focus/positioning are
+// free — but the option content is a full card (icon, description, badge), not plain text.
+export function CardSelect({
+  value,
+  onValueChange,
+  placeholder,
+  ariaLabel,
+  disabled,
+  options,
+}: {
+  value: string | null;
+  onValueChange: (value: string | null) => void;
+  placeholder: string;
+  ariaLabel: string;
+  disabled?: boolean;
+  options: CardSelectOption[];
 }) {
-  // A selected card keeps its selected skin even when locked (editing) — the lock just
-  // removes the pointer, it must not read as "muted/unavailable".
-  const muted = disabled && !selected;
+  // The trigger renders the selected option's label via this value→label map.
+  const labelMap = useMemo(() => {
+    const map: Record<string, ReactNode> = {};
+    for (const option of options) {
+      map[option.value] = option.label;
+    }
+    return map;
+  }, [options]);
+
+  const selected = options.find((option) => option.value === value) ?? null;
+  const SelectedIcon = selected?.icon;
+
+  // Bucket options by group, preserving first-seen order.
+  const groups = useMemo(() => {
+    const order: string[] = [];
+    const byGroup = new Map<string, CardSelectOption[]>();
+    for (const option of options) {
+      const key = option.group ?? "";
+      const bucket = byGroup.get(key);
+      if (bucket) {
+        bucket.push(option);
+      } else {
+        byGroup.set(key, [option]);
+        order.push(key);
+      }
+    }
+    return order.map((key) => ({ key, items: byGroup.get(key) ?? [] }));
+  }, [options]);
+
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <BaseSelect.Root
+      items={labelMap}
+      value={value == null || value === "" ? null : value}
+      onValueChange={(next) => onValueChange(next)}
       disabled={disabled}
-      aria-pressed={selected}
-      aria-label={ariaLabel}
-      className={cn(
-        "group flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-1",
-        muted
-          ? "cursor-not-allowed border-border-subtle bg-fill-subtle/40 opacity-60"
-          : selected
-            ? "border-primary bg-fill-subtle"
-            : "border-border-default bg-surface-raised hover:bg-fill-subtle"
-      )}
     >
-      <span
+      <BaseSelect.Trigger
+        aria-label={ariaLabel}
         className={cn(
-          "flex size-9 shrink-0 items-center justify-center rounded-lg transition-colors",
-          selected ? "bg-fill-strong text-primary" : "bg-fill-subtle text-secondary",
-          muted ? "" : "group-hover:text-primary"
+          // Fixed height reserves the icon + label + description layout so the empty
+          // placeholder trigger is the same height as a selected one (WHEN/THEN align).
+          "group/cardselect relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-2.5 rounded-[var(--input-radius-lg)] px-3 py-1.5 text-left",
+          disabled && "pointer-events-none opacity-40"
         )}
-        aria-hidden
       >
-        <Icon className="size-4" />
-      </span>
-      <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="flex flex-wrap items-center gap-1.5">
-          <span className="text-sm font-medium text-primary">{heading}</span>
-          {badge}
-        </span>
-        {description ? (
-          <span className="line-clamp-2 block text-xs leading-4 text-tertiary">{description}</span>
-        ) : null}
-        {note ? <span className="block text-xs text-secondary">{note}</span> : null}
-      </span>
-    </button>
-  );
-}
-
-// ── Trigger selection grid ───────────────────────────────────────────────────────────
-
-export function TriggerCardGrid({
-  triggers,
-  value,
-  locked,
-  onChange,
-  label,
-  describe,
-  columns = 3,
-}: {
-  triggers: CatalogTriggerView[];
-  value: string | null;
-  // Editing a rule locks its trigger; the chosen card stays lit, the rest go inert.
-  locked?: boolean;
-  onChange: (type: string) => void;
-  label: LabelFn;
-  describe: DescribeFn;
-  columns?: 1 | 2 | 3;
-}) {
-  return (
-    <div className={cn("grid gap-2", GRID_COLS[columns])}>
-      {triggers.map((tr) => {
-        const Icon = TRIGGER_ICONS[tr.type] ?? Zap;
-        return (
-          <SelectableCard
-            key={tr.type}
-            icon={Icon}
-            heading={label("trigger", tr.type)}
-            description={describe("trigger", tr.type)}
-            selected={value === tr.type}
-            disabled={locked}
-            onSelect={() => onChange(tr.type)}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Action selection grid (grouped by tier) ──────────────────────────────────────────
-
-export function ActionCardGrid({
-  actions,
-  value,
-  locked,
-  canUseAction,
-  onChange,
-  label,
-  describe,
-  wf,
-  columns = 3,
-}: {
-  actions: CatalogActionView[];
-  value: string | null;
-  locked?: boolean;
-  canUseAction: (type: string) => boolean;
-  onChange: (type: string) => void;
-  label: LabelFn;
-  describe: DescribeFn;
-  wf: WfFn;
-  columns?: 1 | 2 | 3;
-}) {
-  // View models are resolved OUTSIDE the JSX tree on purpose: the i18n audit scans
-  // string literals inside JSX children/attributes, and would flag the i18n keys these
-  // wrapper calls (`wf`/`label`/`describe`) pass. Resolving here keeps the JSX literal-free.
-  const groups = TIER_ORDER.map((tier) => {
-    const items = actions.filter((a) => a.action.execution === tier);
-    return {
-      tier,
-      heading: wf(`tierLabels.${tier}`),
-      cards: items.map((a) => {
-        const permitted = canUseAction(a.type);
-        const unsupported = !a.support.ok;
-        return {
-          type: a.type,
-          icon: ACTION_ICONS[a.type] ?? Play,
-          heading: label("action", a.type),
-          // `blurb`, not `description`: an object property named `description` is scanned
-          // as user-facing copy by the i18n audit (it would flag the key inside).
-          blurb: describe("action", a.type),
-          tierBadge: wf(`tierLabels.${a.action.execution}`),
-          tierVariant: TIER_VARIANT[a.action.execution],
-          note: unsupported
-            ? stripSuffix(wf("unavailableSuffix"))
-            : permitted
-              ? undefined
-              : stripSuffix(wf("adminOnlySuffix")),
-          selected: value === a.type,
-          disabled: locked || unsupported || !permitted,
-        };
-      }),
-    };
-  }).filter((group) => group.cards.length > 0);
-
-  return (
-    <div className="space-y-3">
-      {groups.map((group) => (
-        <div key={group.tier} className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                "text-[11px] font-semibold uppercase tracking-wide",
-                TIER_HEADING_TONE[group.tier]
-              )}
-            >
-              {group.heading}
+        <span className="pointer-events-none absolute inset-0 rounded-[inherit] bg-fill-subtle group-[[data-popup-open]]/cardselect:shadow-[0_0_0_2px_var(--input-focus-ring)]" />
+        {selected ? (
+          // The trigger mirrors the chosen option's card content (icon + label + badge +
+          // info line) so the selection reads the same closed as it does in the list.
+          <>
+            {SelectedIcon ? (
+              <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-raised text-secondary">
+                <SelectedIcon className="size-[18px]" />
+              </span>
+            ) : null}
+            <span className="relative min-w-0 flex-1 space-y-0.5">
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span className="text-sm font-medium text-primary">{selected.label}</span>
+                {selected.badge}
+              </span>
+              {selected.description ? (
+                <span className="block truncate text-xs text-tertiary">{selected.description}</span>
+              ) : null}
             </span>
-            <span className="h-px flex-1 bg-border-subtle" aria-hidden />
-          </div>
-          <div className={cn("grid gap-2", GRID_COLS[columns])}>
-            {group.cards.map((card) => (
-              <SelectableCard
-                key={card.type}
-                icon={card.icon}
-                heading={card.heading}
-                description={card.blurb}
-                badge={<Badge variant={card.tierVariant}>{card.tierBadge}</Badge>}
-                note={card.note}
-                selected={card.selected}
-                disabled={card.disabled}
-                onSelect={() => onChange(card.type)}
-              />
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
+          </>
+        ) : (
+          <span className="relative min-w-0 flex-1 truncate text-sm text-[var(--input-placeholder-color)]">
+            {placeholder}
+          </span>
+        )}
+        <BaseSelect.Icon className="relative inline-flex shrink-0 items-center justify-center self-center text-secondary transition-transform duration-150 group-[[data-popup-open]]/cardselect:rotate-180">
+          <ChevronDown className="size-4" />
+        </BaseSelect.Icon>
+      </BaseSelect.Trigger>
+      <BaseSelect.Portal>
+        <BaseSelect.Positioner className="z-50" sideOffset={4} alignItemWithTrigger={false}>
+          <BaseSelect.Popup className="max-h-[var(--available-height)] w-[max(var(--anchor-width),20rem)] space-y-2 overflow-y-auto rounded-xl border border-border-default bg-surface-raised p-1.5 shadow-lg outline-none">
+            {groups.flatMap((group) => [
+              group.key ? (
+                <div
+                  key={`heading-${group.key}`}
+                  className="px-2 pt-1 text-[11px] font-semibold uppercase tracking-wide text-tertiary"
+                >
+                  {group.key}
+                </div>
+              ) : null,
+              ...group.items.map((option) => {
+                const Icon = option.icon;
+                // Driven off the controlled value, not a data-attribute: the selected
+                // option gets the same accent treatment as the grid cards (primary border
+                // + filled check), so selection reads identically in both surfaces.
+                const isSelected = option.value === value;
+                return (
+                  <BaseSelect.Item
+                    key={option.value}
+                    value={option.value}
+                    disabled={option.disabled}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-3 rounded-lg border px-2.5 py-2 outline-none transition-colors",
+                      isSelected
+                        ? "border-primary bg-fill-subtle/50"
+                        : "border-transparent data-[highlighted]:border-border-default data-[highlighted]:bg-fill-subtle",
+                      "data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle",
+                        isSelected ? "text-primary" : "text-tertiary"
+                      )}
+                    >
+                      <Icon className="size-[18px]" />
+                    </span>
+                    <span className="min-w-0 flex-1 space-y-0.5">
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <BaseSelect.ItemText className="text-sm font-medium text-primary">
+                          {option.label}
+                        </BaseSelect.ItemText>
+                        {option.badge}
+                      </span>
+                      {option.description ? (
+                        <span className="block text-xs leading-4 text-tertiary">
+                          {option.description}
+                        </span>
+                      ) : null}
+                      {option.note ? (
+                        <span className="block text-xs text-secondary">{option.note}</span>
+                      ) : null}
+                    </span>
+                    <span
+                      className={cn(
+                        "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors",
+                        isSelected
+                          ? "border-primary bg-primary text-on-primary"
+                          : "border-border-default text-transparent"
+                      )}
+                      aria-hidden
+                    >
+                      <Check className="size-3" strokeWidth={3} />
+                    </span>
+                  </BaseSelect.Item>
+                );
+              }),
+            ])}
+          </BaseSelect.Popup>
+        </BaseSelect.Positioner>
+      </BaseSelect.Portal>
+    </BaseSelect.Root>
   );
 }
 
-// ── Flow connector (the "arrows" between stages) ─────────────────────────────────────
-
-export function FlowConnector({
-  orientation = "vertical",
-  label,
-}: {
-  orientation?: "vertical" | "horizontal";
-  // Optional inline caption (e.g. an "only if…" note riding the arrow).
-  label?: string;
-}) {
-  if (orientation === "horizontal") {
-    return (
-      <div className="flex shrink-0 items-center gap-2 self-center text-tertiary" aria-hidden>
-        <span className="h-px w-4 bg-border-default sm:w-6" />
-        <ArrowDown className="size-4 rotate-[-90deg]" />
-        {label ? <span className="text-xs text-secondary">{label}</span> : null}
-      </div>
-    );
-  }
+// Circular arrow badge — the connector between builder stages. Bordered + raised so it
+// stands out against the cards (flat: no shadow, colour reserved for status).
+export function ConnectorBadge({ icon: Icon }: { icon: LucideIcon }) {
   return (
-    <div className="flex items-center gap-2 py-1 pl-4 text-tertiary" aria-hidden>
-      <CornerDownRight className="size-4" />
-      {label ? (
-        <span className="text-xs text-secondary">{label}</span>
-      ) : (
-        <span className="h-px flex-1 bg-transparent" />
-      )}
-    </div>
+    <span className="flex size-7 items-center justify-center rounded-full border border-border-strong bg-surface-raised text-secondary">
+      <Icon className="size-4" />
+    </span>
   );
-}
-
-const GRID_COLS: Record<1 | 2 | 3, string> = {
-  1: "grid-cols-1",
-  2: "grid-cols-1 sm:grid-cols-2",
-  3: "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3",
-};
-
-// "  — unavailable" → "unavailable": the catalog suffix carries a separator for inline
-// use; on a card it stands alone.
-function stripSuffix(value: string): string {
-  return value.replace(/^[\s—·-]+/, "").trim();
 }

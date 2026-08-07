@@ -2,19 +2,31 @@
 
 import {
   ArrowRight,
+  BadgeCheck,
+  Check,
+  Circle,
+  CircleCheck,
+  CircleSlash,
+  Clock,
   Filter,
+  Inbox,
   Loader2,
   type LucideIcon,
   Pencil,
   Play,
+  Power,
+  PowerOff,
   RefreshCw,
   Trash2,
+  TriangleAlert,
+  Wallet,
+  X,
   Zap,
 } from "lucide-react";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { formatRelativeTime } from "@/app/dashboard/activity-format-utils";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -63,10 +75,10 @@ import {
 import { GuardEditor } from "./guard-editor";
 import {
   ACTION_ICONS,
-  ActionCardGrid,
-  FlowConnector,
+  CardSelect,
+  type CardSelectOption,
+  ConnectorBadge,
   TRIGGER_ICONS,
-  TriggerCardGrid,
 } from "./workflow-builder-cards";
 import { WorkflowFlowGraph } from "./workflow-flow-preview";
 
@@ -122,15 +134,35 @@ const ACTION_PARAM_FIELDS: Record<string, ParamField[]> = {
   allowlist_remove: [{ key: "wallet", labelKey: "paramWallet", helpKey: WALLET_HELP }],
 };
 
-// Status dots stay within the semantic four: green (done), red (failed), amber
-// (needs a human), gray (in flight / neutral).
-const STATUS_DOT: Record<ExecutionStatus, string> = {
-  succeeded: "bg-success",
-  failed: "bg-error",
-  awaiting_review: "bg-warning",
-  processing: "bg-fill-strong",
-  pending: "bg-fill-strong",
-  cancelled: "bg-fill-strong",
+// Execution status → glyph + tone. Colour stays within the semantic four: green (done),
+// red (failed), amber (needs a human), gray (in flight / neutral).
+const STATUS_GLYPH: Record<ExecutionStatus, LucideIcon> = {
+  succeeded: CircleCheck,
+  failed: TriangleAlert,
+  awaiting_review: Clock,
+  processing: Loader2,
+  pending: Circle,
+  cancelled: CircleSlash,
+};
+const STATUS_BADGE_VARIANT: Record<ExecutionStatus, BadgeVariant> = {
+  succeeded: "success",
+  failed: "danger",
+  awaiting_review: "warning",
+  processing: "info",
+  pending: "default",
+  cancelled: "default",
+};
+
+// Holder KYC status → pill variant + glyph.
+const KYC_STATUS_META: Record<string, { variant: BadgeVariant; icon: LucideIcon }> = {
+  verified: { variant: "success", icon: BadgeCheck },
+  pending: { variant: "warning", icon: Clock },
+  rejected: { variant: "danger", icon: X },
+  unverified: { variant: "default", icon: Circle },
+};
+const KYC_STATUS_FALLBACK: { variant: BadgeVariant; icon: LucideIcon } = {
+  variant: "default",
+  icon: Circle,
 };
 
 // Triggers whose payload identifies a subject wallet. Any other trigger driving a
@@ -496,9 +528,6 @@ export function WorkflowsTab({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [walletAddress, setWalletAddress] = useState("");
-  // TEMP: three builder layouts behind a switcher so we can pick one. Remove the
-  // switcher (and the two unused layouts) once a direction is chosen.
-  const [builderLayout, setBuilderLayout] = useState<BuilderLayout>("pipeline");
 
   const effectiveTrigger = editingRule?.trigger_type ?? triggerType ?? catalog?.triggers[0]?.type;
   const selectedTrigger = catalog?.triggers.find((tr) => tr.type === effectiveTrigger) ?? null;
@@ -806,13 +835,9 @@ export function WorkflowsTab({
                   })
                 : wf("builderDescription")}
             </CardDescription>
-            <CardAction>
-              <LayoutSwitcher value={builderLayout} onChange={setBuilderLayout} />
-            </CardAction>
           </CardHeader>
           <CardContent>
             <WorkflowBuilder
-              layout={builderLayout}
               t={t}
               wf={wf}
               label={label}
@@ -856,6 +881,7 @@ export function WorkflowsTab({
         locale={locale}
         canManage={canManage}
         canUseAction={canUseAction}
+        tierForAction={tierForAction}
         busyId={busyId}
         editingRuleId={editingRule?.id ?? null}
         onToggle={(rule) => void handleToggle(rule)}
@@ -909,79 +935,16 @@ export function WorkflowsTab({
   );
 }
 
-// ── Builder: layout switcher (TEMPORARY comparison control) ─────────────────────────
+// ── Builder: shared field blocks ────────────────────────────────────────────────────
 
-type BuilderLayout = "pipeline" | "split" | "track" | "wizard" | "stepper" | "canvas" | "panels";
-
-// Non-catalog label: this control is throwaway, so its copy is intentionally hard-coded
-// (kept out of the i18n audit by living on a non-user-facing `name` field / a const).
-// The `card` layouts use icon-card selectors; the `dropdown` ones mirror the sketches.
-const LAYOUT_GROUP_LABEL = "Builder layout (preview)";
-const BUILDER_LAYOUTS: Array<{ id: BuilderLayout; name: string }> = [
-  { id: "pipeline", name: "Pipeline (cards)" },
-  { id: "split", name: "Split (cards)" },
-  { id: "track", name: "Track (cards)" },
-  { id: "wizard", name: "Wizard row" },
-  { id: "stepper", name: "Stepper + diagram" },
-  { id: "canvas", name: "Canvas" },
-  { id: "panels", name: "Panels + summary" },
-];
-
-function LayoutSwitcher({
-  value,
-  onChange,
-}: {
-  value: BuilderLayout;
-  onChange: (value: BuilderLayout) => void;
-}) {
-  return (
-    <fieldset
-      aria-label={LAYOUT_GROUP_LABEL}
-      className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-border-subtle bg-fill-subtle/50 p-0.5"
-    >
-      {BUILDER_LAYOUTS.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          onClick={() => onChange(option.id)}
-          aria-pressed={value === option.id}
-          className={cn(
-            "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-            value === option.id
-              ? "bg-surface-raised text-primary"
-              : "text-secondary hover:text-primary"
-          )}
-        >
-          {option.name}
-        </button>
-      ))}
-    </fieldset>
-  );
-}
-
-// ── Builder: shared field blocks (arranged differently by each layout) ──────────────
-
-// Pre-rendered pieces + grid factories handed to whichever layout is active, so the
-// heavy wiring lives once and the layouts only decide arrangement.
+// Pre-rendered pieces handed to the layout, so the wiring lives in one place.
 interface LayoutArgs {
   wf: ReturnType<typeof makeWf>;
   triggerType: string | null;
-  // Icon-card selectors (the `*-cards` layouts).
-  triggerGrid: (columns: 1 | 2 | 3) => ReactNode;
-  actionGrid: (columns: 1 | 2 | 3) => ReactNode;
-  // Dropdown selectors + resolved display labels/icons (the sketch-style layouts).
   triggerSelect: ReactNode;
   actionSelect: ReactNode;
   triggerIcon: LucideIcon;
   actionIcon: LucideIcon;
-  triggerLabel: string;
-  actionLabel: string;
-  reviewLabel: string;
-  guardSummary: string;
-  // Pre-rendered so the orientation/chrome literals don't sit in a JSX child (the i18n
-  // audit would read them as copy). `flowInline` = horizontal, no chrome; `flowPanel` =
-  // vertical, titled card.
-  flowInline: ReactNode;
   flowPanel: ReactNode;
   guardEditor: ReactNode;
   tierNotice: ReactNode;
@@ -992,23 +955,14 @@ interface LayoutArgs {
   submitRow: ReactNode;
 }
 
-// `heading`, not `title`: see the SelectableCard note — a `title` prop would make the
-// i18n audit treat the i18n keys passed through it as hard-coded copy.
+// `heading`, not `title`: a `title` JSX prop is read as user-facing copy by the i18n
+// audit, which would then flag the i18n keys passed through it.
 function StageHeading({ heading, hint }: { heading: string; hint?: string }) {
   return (
     <div className="flex items-center gap-2">
       <span className="h-3.5 w-1 shrink-0 rounded-full bg-fill-strong" aria-hidden />
       <span className="text-sm font-semibold text-primary">{heading}</span>
       {hint ? <span className="text-xs text-tertiary">{hint}</span> : null}
-    </div>
-  );
-}
-
-function TrackPanel({ heading, children }: { heading: string; children: ReactNode }) {
-  return (
-    <div className="flex-1 space-y-2 rounded-xl border border-border-default bg-fill-subtle/20 p-3">
-      <StageHeading heading={heading} />
-      {children}
     </div>
   );
 }
@@ -1075,7 +1029,13 @@ function ParamsBlock({
     return null;
   }
   return (
-    <div className="grid gap-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3 sm:grid-cols-2">
+    <div
+      className={cn(
+        "grid gap-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3",
+        // A lone field (e.g. allowlist's wallet) takes the full row; pairs split.
+        paramFields.length > 1 && "sm:grid-cols-2"
+      )}
+    >
       {paramFields.map((field) => (
         <ParamFieldControl
           key={field.key}
@@ -1173,9 +1133,21 @@ function SubmitRow({
 
 // ── Builder: dropdown selectors (used by the sketch-style layouts) ──────────────────
 
-// The `<Select>`-based WHEN/THEN pickers. The card layouts use the icon grids instead;
-// these keep the sketch-faithful layouts on dropdowns per the design direction. Their
-// i18n keys match the ones already tracked in the copy baseline.
+const TIER_BADGE_VARIANT: Record<ExecutionTier, "success" | "warning" | "danger"> = {
+  automated: "success",
+  sensitive: "warning",
+  requires_approval: "danger",
+};
+
+// "  — unavailable" → "unavailable": the catalog suffix carries a separator for inline
+// use; as a card note it stands alone.
+function stripSuffix(value: string): string {
+  return value.replace(/^[\s—·-]+/, "").trim();
+}
+
+// The WHEN/THEN pickers. Compact select triggers whose options are the rich cards
+// (icon + description + tier badge) — the card grids' content, in a dropdown. i18n keys
+// match the ones already tracked in the copy baseline.
 function TriggerSelect({
   catalog,
   value,
@@ -1183,6 +1155,7 @@ function TriggerSelect({
   onChange,
   wf,
   label,
+  describe,
 }: {
   catalog: WorkflowCatalog | null;
   value: string | null;
@@ -1190,21 +1163,23 @@ function TriggerSelect({
   onChange: (value: string | null) => void;
   wf: ReturnType<typeof makeWf>;
   label: ReturnType<typeof makeLabel>;
+  describe: ReturnType<typeof makeDescription>;
 }) {
+  const options: CardSelectOption[] = (catalog?.triggers ?? []).map((trigger) => ({
+    value: trigger.type,
+    icon: TRIGGER_ICONS[trigger.type] ?? Zap,
+    label: label("trigger", trigger.type),
+    description: describe("trigger", trigger.type),
+  }));
   return (
-    <Select
+    <CardSelect
       ariaLabel={wf("when")}
       value={value}
       disabled={editing}
       onValueChange={onChange}
       placeholder={wf("triggerPlaceholder")}
-    >
-      {(catalog?.triggers ?? []).map((trigger) => (
-        <SelectItem key={trigger.type} value={trigger.type}>
-          {label("trigger", trigger.type)}
-        </SelectItem>
-      ))}
-    </Select>
+      options={options}
+    />
   );
 }
 
@@ -1216,6 +1191,7 @@ function ActionSelect({
   onChange,
   wf,
   label,
+  describe,
 }: {
   catalog: WorkflowCatalog | null;
   value: string | null;
@@ -1224,29 +1200,37 @@ function ActionSelect({
   onChange: (value: string | null) => void;
   wf: ReturnType<typeof makeWf>;
   label: ReturnType<typeof makeLabel>;
+  describe: ReturnType<typeof makeDescription>;
 }) {
+  const options: CardSelectOption[] = (catalog?.actions ?? []).map((a) => {
+    const permitted = canUseAction(a.type);
+    const unsupported = !a.support.ok;
+    const tier = a.action.execution;
+    const tierLabel = wf(`tierLabels.${tier}`);
+    return {
+      value: a.type,
+      icon: ACTION_ICONS[a.type] ?? Play,
+      label: label("action", a.type),
+      description: describe("action", a.type),
+      badge: <Badge variant={TIER_BADGE_VARIANT[tier]}>{tierLabel}</Badge>,
+      note: unsupported
+        ? stripSuffix(wf("unavailableSuffix"))
+        : permitted
+          ? undefined
+          : stripSuffix(wf("adminOnlySuffix")),
+      disabled: editing || unsupported || !permitted,
+      group: tierLabel,
+    };
+  });
   return (
-    <Select
+    <CardSelect
       ariaLabel={wf("then")}
       value={value}
       disabled={editing}
       onValueChange={onChange}
       placeholder={wf("actionPlaceholder")}
-    >
-      {(catalog?.actions ?? []).map((a) => {
-        const permitted = canUseAction(a.type);
-        const suffix = !a.support.ok
-          ? wf("unavailableSuffix")
-          : permitted
-            ? ""
-            : wf("adminOnlySuffix");
-        return (
-          <SelectItem key={a.type} value={a.type} disabled={!a.support.ok || !permitted}>
-            {`${label("action", a.type)}${suffix}`}
-          </SelectItem>
-        );
-      })}
-    </Select>
+      options={options}
+    />
   );
 }
 
@@ -1276,7 +1260,9 @@ function BuilderNode({
   return (
     <div
       className={cn(
-        "flex-1 space-y-3 rounded-xl border bg-fill-subtle/20 p-3",
+        // min-w-0 so the flex row splits into equal columns regardless of the selected
+        // option's length — the trigger truncates instead of widening its column.
+        "min-w-0 flex-1 space-y-3 rounded-xl border bg-surface-raised p-3 transition-colors",
         active ? "border-primary" : "border-border-default"
       )}
     >
@@ -1286,8 +1272,8 @@ function BuilderNode({
             {index}
           </span>
         ) : null}
-        <span className="flex size-7 items-center justify-center rounded-md bg-fill-subtle text-secondary">
-          <Icon className="size-4" aria-hidden />
+        <span className="flex size-9 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+          <Icon className="size-[18px]" aria-hidden />
         </span>
         <MetaText
           text={kicker}
@@ -1301,176 +1287,21 @@ function BuilderNode({
 
 // Labeled field wrapper (stepper layout). `term` (not `label`) is a resolved string —
 // a `label=` JSX attribute would be read as copy by the i18n audit.
-function FieldRow({ term, children }: { term: string; children: ReactNode }) {
-  return (
-    <div className="space-y-1.5 text-sm">
-      <span className="font-medium text-secondary">{term}</span>
-      {children}
-    </div>
-  );
-}
-
-// One key → value line in the summary read-back (both resolved strings).
-function SummaryRow({ term, value }: { term: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 text-sm">
-      <span className="text-secondary">{term}</span>
-      <span className="min-w-0 truncate text-right font-medium text-primary">{value}</span>
-    </div>
-  );
-}
-
-// Numbered 1-2-3-4 pill strip (stepper layout). Labels are resolved strings.
-function StepStrip({ steps }: { steps: string[] }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {steps.map((step, index) => (
-        <span
-          key={step}
-          className="inline-flex items-center gap-1.5 rounded-full border border-border-subtle bg-fill-subtle/40 px-2.5 py-1 text-xs"
-        >
-          <span className="flex size-4 items-center justify-center rounded-full bg-fill-strong text-[10px] font-semibold text-primary">
-            {index + 1}
-          </span>
-          <span className="text-secondary">{step}</span>
-        </span>
-      ))}
-    </div>
-  );
-}
-
 // Decorative left-to-right connector, hidden when the row wraps to a column.
 function RowArrow() {
   return (
-    <div className="hidden items-center self-center text-tertiary xl:flex" aria-hidden>
-      <ArrowRight className="size-4" />
+    <div className="hidden items-center self-center xl:flex" aria-hidden>
+      <ConnectorBadge icon={ArrowRight} />
     </div>
   );
 }
 
-// ── Builder: three arrangements of the same pieces ──────────────────────────────────
-
-// Vertical pipeline: the builder IS the diagram — card stages joined top-to-bottom by
-// arrows, ending in the live outcome strip.
-function PipelineLayout(args: LayoutArgs) {
-  return (
-    <div className="space-y-3">
-      <section className="space-y-2">
-        <StageHeading heading={args.wf("when")} />
-        {args.triggerGrid(3)}
-      </section>
-
-      {args.triggerType ? (
-        <>
-          <FlowConnector />
-          <section className="space-y-2">
-            <StageHeading heading={args.wf("guardTitle")} />
-            {args.guardEditor}
-          </section>
-        </>
-      ) : null}
-
-      <FlowConnector />
-      <section className="space-y-2">
-        <StageHeading heading={args.wf("then")} />
-        {args.actionGrid(3)}
-        {args.tierNotice}
-        {args.paramsBlock}
-        <div className="sm:max-w-xs">{args.reviewField}</div>
-      </section>
-
-      <FlowConnector />
-      <section className="space-y-2">
-        <StageHeading heading={args.wf("flowTitle")} hint={args.wf("flowIntro")} />
-        {args.flowInline}
-      </section>
-
-      {args.emailWarning}
-      {args.validationMessage}
-      {args.submitRow}
-    </div>
-  );
-}
-
-// Split: compact card builder on the left, the live node graph on the right.
-function SplitLayout(args: LayoutArgs) {
-  return (
-    <div className="grid gap-6 min-[1440px]:grid-cols-2">
-      <div className="space-y-4">
-        <section className="space-y-2">
-          <StageHeading heading={args.wf("when")} />
-          {args.triggerGrid(2)}
-        </section>
-        <section className="space-y-2">
-          <StageHeading heading={args.wf("then")} />
-          {args.actionGrid(2)}
-        </section>
-        {args.tierNotice}
-        {args.paramsBlock}
-        {args.triggerType ? (
-          <section className="space-y-2">
-            <StageHeading heading={args.wf("guardTitle")} />
-            {args.guardEditor}
-          </section>
-        ) : null}
-        {args.reviewField}
-        {args.emailWarning}
-        {args.validationMessage}
-        {args.submitRow}
-      </div>
-      <div className="min-[1440px]:sticky min-[1440px]:top-4 min-[1440px]:self-start">
-        {args.flowPanel}
-      </div>
-    </div>
-  );
-}
-
-// Track: WHEN → ONLY IF → THEN panels across the top, details and outcome below.
-function TrackLayout(args: LayoutArgs) {
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-2 xl:flex-row xl:items-stretch">
-        <TrackPanel heading={args.wf("when")}>{args.triggerGrid(1)}</TrackPanel>
-        <div className="hidden items-center xl:flex">
-          <FlowConnector orientation="horizontal" />
-        </div>
-        <TrackPanel heading={args.wf("guardTitle")}>
-          {args.triggerType ? (
-            args.guardEditor
-          ) : (
-            <p className="text-xs text-tertiary">{args.wf("triggerPlaceholder")}</p>
-          )}
-        </TrackPanel>
-        <div className="hidden items-center xl:flex">
-          <FlowConnector orientation="horizontal" />
-        </div>
-        <TrackPanel heading={args.wf("then")}>{args.actionGrid(1)}</TrackPanel>
-      </div>
-
-      {args.tierNotice}
-      {args.paramsBlock}
-      <div className="sm:max-w-xs">{args.reviewField}</div>
-
-      <section className="space-y-2">
-        <StageHeading heading={args.wf("flowTitle")} hint={args.wf("flowIntro")} />
-        {args.flowInline}
-      </section>
-
-      {args.emailWarning}
-      {args.validationMessage}
-      {args.submitRow}
-    </div>
-  );
-}
-
-// ── Builder: sketch-style layouts (dropdown selectors) ──────────────────────────────
+// ── Builder: layout ─────────────────────────────────────────────────────────────────
 //
-// These mirror the four design sketches. Corrections applied throughout: the GUARD slot
-// is the user's "only if…" filter (never "capability enabled" — capability is automatic
-// and appears only in the live preview), and no wizard/canvas chrome implies engine
-// features we don't have (multi-step, branching, undo/zoom). A rule is always exactly
-// one trigger → one action → optional filter. Structural labels here are untranslated
-// on purpose (throwaway comparison scaffolding).
+// WHEN → THEN → GUARD across the top, then rule settings + the live execution preview.
+// The GUARD slot is the user's "only if…" filter (never "capability enabled" — capability
+// is automatic and shows only in the preview). A rule is always exactly one trigger → one
+// action → optional filter. The WHEN/THEN/GUARD kicker labels are untranslated for now.
 
 function GuardSlot(args: LayoutArgs) {
   return (
@@ -1512,121 +1343,9 @@ function WizardRowLayout(args: LayoutArgs) {
   );
 }
 
-// TR — "Stepper + diagram": numbered 1-2-3-4 strip over stacked dropdown fields, with the
-// live node-graph preview pinned on the right.
-function StepperLayout(args: LayoutArgs) {
-  return (
-    <div className="grid gap-6 min-[1440px]:grid-cols-2">
-      <div className="space-y-4">
-        <StepStrip
-          steps={[args.wf("when"), args.wf("then"), args.wf("guardTitle"), args.wf("review")]}
-        />
-        <FieldRow term={args.wf("when")}>{args.triggerSelect}</FieldRow>
-        <FieldRow term={args.wf("then")}>{args.actionSelect}</FieldRow>
-        {args.paramsBlock}
-        <FieldRow term={args.wf("guardTitle")}>
-          <GuardSlot {...args} />
-        </FieldRow>
-        {args.reviewField}
-        {args.tierNotice}
-        {args.emailWarning}
-        {args.validationMessage}
-        {args.submitRow}
-      </div>
-      <div className="min-[1440px]:sticky min-[1440px]:top-4 min-[1440px]:self-start">
-        {args.flowPanel}
-      </div>
-    </div>
-  );
-}
-
-// BL — "Canvas": a stylized flow surface of fixed nodes. Deliberately NOT a free node
-// editor — no "add step", branching, undo/redo or zoom, since the engine runs exactly
-// one trigger → one action → optional filter.
-function CanvasLayout(args: LayoutArgs) {
-  return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-border-default bg-fill-subtle/10 p-4">
-        <MetaText text="Automation flow" className="text-xs font-medium text-tertiary" />
-        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start">
-          <BuilderNode icon={args.triggerIcon} kicker="WHEN">
-            {args.triggerSelect}
-          </BuilderNode>
-          <div className="hidden items-center self-center text-tertiary sm:flex" aria-hidden>
-            <ArrowRight className="size-4" />
-          </div>
-          <BuilderNode icon={args.actionIcon} kicker="THEN">
-            {args.actionSelect}
-          </BuilderNode>
-          <div className="hidden items-center self-center text-tertiary sm:flex" aria-hidden>
-            <ArrowRight className="size-4" />
-          </div>
-          <BuilderNode icon={Filter} kicker="GUARD">
-            <GuardSlot {...args} />
-          </BuilderNode>
-        </div>
-      </div>
-      {args.paramsBlock}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
-          <StageHeading heading="Rule settings" />
-          {args.reviewField}
-          {args.tierNotice}
-        </div>
-        <div>{args.flowPanel}</div>
-      </div>
-      {args.emailWarning}
-      {args.validationMessage}
-      {args.submitRow}
-    </div>
-  );
-}
-
-// BR — "Panels + summary": numbered WHEN/THEN/GUARD panels with an at-a-glance read-back.
-function PanelSummaryLayout(args: LayoutArgs) {
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-stretch">
-        <BuilderNode index={1} icon={args.triggerIcon} kicker="WHEN">
-          {args.triggerSelect}
-        </BuilderNode>
-        <RowArrow />
-        <BuilderNode index={2} icon={args.actionIcon} kicker="THEN">
-          {args.actionSelect}
-        </BuilderNode>
-        <RowArrow />
-        <BuilderNode index={3} icon={Filter} kicker="GUARD">
-          <GuardSlot {...args} />
-        </BuilderNode>
-      </div>
-      {args.paramsBlock}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
-          <StageHeading heading="Settings" />
-          {args.reviewField}
-          {args.tierNotice}
-        </div>
-        <div className="space-y-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
-          <StageHeading heading="Summary" />
-          <div className="space-y-1.5">
-            <SummaryRow term={args.wf("when")} value={args.triggerLabel} />
-            <SummaryRow term={args.wf("then")} value={args.actionLabel} />
-            <SummaryRow term={args.wf("guardTitle")} value={args.guardSummary} />
-            <SummaryRow term={args.wf("review")} value={args.reviewLabel} />
-          </div>
-        </div>
-      </div>
-      {args.emailWarning}
-      {args.validationMessage}
-      {args.submitRow}
-    </div>
-  );
-}
-
-// ── Builder (assembles the shared pieces, delegates arrangement to a layout) ─────────
+// ── Builder (assembles the shared pieces and renders the layout) ────────────────────
 
 function WorkflowBuilder(props: {
-  layout: BuilderLayout;
   t: TFunc;
   wf: ReturnType<typeof makeWf>;
   label: ReturnType<typeof makeLabel>;
@@ -1664,40 +1383,9 @@ function WorkflowBuilder(props: {
   // what's stored — so offering "auto apply" here would contradict the preview.
   const reviewLocked = props.selectedAction?.action.execution === "requires_approval";
 
-  // Resolved display strings/icons for the sketch-style layouts. Computed here (outside
-  // JSX) so the i18n keys aren't read as hard-coded copy by the audit.
+  // Icons for the WHEN/THEN nodes; fall back to a neutral glyph.
   const triggerIcon = (props.triggerType && TRIGGER_ICONS[props.triggerType]) || Zap;
   const actionIcon = (props.actionType && ACTION_ICONS[props.actionType]) || Play;
-  const triggerLabel = props.triggerType
-    ? label("trigger", props.triggerType)
-    : wf("triggerPlaceholder");
-  const actionLabel = props.actionType
-    ? label("action", props.actionType)
-    : wf("actionPlaceholder");
-  const reviewLabel =
-    reviewLocked || props.reviewMode === "manual" ? wf("manualReview") : wf("autoApply");
-  const guardOpKey: Record<GuardDraft["op"], string> = {
-    eq: "guardIs",
-    neq: "guardIsNot",
-    in: "guardIsOneOf",
-  };
-  const activeGuards = props.guards.filter((g) => g.field && g.value.trim().length > 0);
-  const guardSummary =
-    activeGuards.length === 0
-      ? wf("guardEmpty")
-      : activeGuards
-          .map((g) => {
-            const value =
-              g.op === "in"
-                ? g.value
-                    .split(",")
-                    .map((entry) => entry.trim())
-                    .filter(Boolean)
-                    .join(", ")
-                : g.value.trim();
-            return `${label("conditionField", g.field)} ${wf(guardOpKey[g.op]).toLocaleLowerCase()} ${value}`;
-          })
-          .join(" · ");
 
   const args: LayoutArgs = {
     wf,
@@ -1710,6 +1398,7 @@ function WorkflowBuilder(props: {
         onChange={props.onTriggerChange}
         wf={wf}
         label={label}
+        describe={props.describe}
       />
     ),
     actionSelect: (
@@ -1721,50 +1410,11 @@ function WorkflowBuilder(props: {
         onChange={props.onActionChange}
         wf={wf}
         label={label}
+        describe={props.describe}
       />
     ),
     triggerIcon,
     actionIcon,
-    triggerLabel,
-    actionLabel,
-    reviewLabel,
-    guardSummary,
-    triggerGrid: (columns) => (
-      <TriggerCardGrid
-        columns={columns}
-        triggers={props.catalog?.triggers ?? []}
-        value={props.triggerType}
-        locked={props.editing}
-        onChange={props.onTriggerChange}
-        label={props.label}
-        describe={props.describe}
-      />
-    ),
-    actionGrid: (columns) => (
-      <ActionCardGrid
-        columns={columns}
-        actions={props.catalog?.actions ?? []}
-        value={props.actionType}
-        locked={props.editing}
-        canUseAction={props.canUseAction}
-        onChange={props.onActionChange}
-        label={props.label}
-        describe={props.describe}
-        wf={wf}
-      />
-    ),
-    flowInline: (
-      <WorkflowFlowGraph
-        trigger={props.selectedTrigger}
-        action={props.selectedAction}
-        guards={props.guards}
-        reviewMode={props.reviewMode}
-        paramSummary={props.paramSummary}
-        walletGap={props.validation.walletGap}
-        orientation="horizontal"
-        showChrome={false}
-      />
-    ),
     flowPanel: (
       <WorkflowFlowGraph
         trigger={props.selectedTrigger}
@@ -1832,22 +1482,7 @@ function WorkflowBuilder(props: {
     ),
   };
 
-  switch (props.layout) {
-    case "split":
-      return <SplitLayout {...args} />;
-    case "track":
-      return <TrackLayout {...args} />;
-    case "wizard":
-      return <WizardRowLayout {...args} />;
-    case "stepper":
-      return <StepperLayout {...args} />;
-    case "canvas":
-      return <CanvasLayout {...args} />;
-    case "panels":
-      return <PanelSummaryLayout {...args} />;
-    default:
-      return <PipelineLayout {...args} />;
-  }
+  return <WizardRowLayout {...args} />;
 }
 
 function ParamFieldControl({
@@ -1891,6 +1526,9 @@ function ParamFieldControl({
         {field.required ? <span className="text-error"> *</span> : null}
       </Label>
       <Input
+        // The design-system TextInput is inline-flex (intrinsic width); stretch the root
+        // AND the inner field span so the control fills its grid cell.
+        className="w-full [&>span:first-child]:w-full"
         id={inputId}
         type={field.secret ? "password" : "text"}
         autoComplete={field.secret ? "off" : undefined}
@@ -1916,6 +1554,7 @@ function RulesCard({
   locale,
   canManage,
   canUseAction,
+  tierForAction,
   busyId,
   editingRuleId,
   onToggle,
@@ -1928,6 +1567,7 @@ function RulesCard({
   locale: string;
   canManage: boolean;
   canUseAction: (type: string) => boolean;
+  tierForAction: (type: string) => ExecutionTier;
   busyId: string | null;
   editingRuleId: string | null;
   onToggle: (rule: WorkflowRuleView) => void;
@@ -1942,7 +1582,12 @@ function RulesCard({
       </CardHeader>
       <CardContent>
         {rules.length === 0 ? (
-          <p className="text-sm text-secondary">{wf("rulesEmpty")}</p>
+          <div className="flex flex-col items-center gap-2 py-6 text-center">
+            <span className="flex size-10 items-center justify-center rounded-full bg-fill-subtle text-tertiary">
+              <Zap className="size-5" aria-hidden />
+            </span>
+            <p className="text-sm text-secondary">{wf("rulesEmpty")}</p>
+          </div>
         ) : (
           <ul className="divide-y divide-border-default">
             {rules.map((rule) => (
@@ -1957,6 +1602,7 @@ function RulesCard({
                 busy={busyId !== null}
                 rowBusy={busyId === rule.id}
                 editing={editingRuleId === rule.id}
+                tier={tierForAction(rule.action_type)}
                 onToggle={() => onToggle(rule)}
                 onEdit={() => onEdit(rule)}
                 onDelete={() => onDelete(rule)}
@@ -1997,26 +1643,27 @@ function HoldersCard({
         <CardDescription>{wf("holdersDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <div className="min-w-0 flex-1">
-            <Input
-              aria-label={wf("walletPlaceholder")}
-              value={walletAddress}
-              onChange={(e) => onWalletAddressChange(e.target.value)}
-              placeholder={wf("walletPlaceholder")}
-            />
+        <div className="space-y-2">
+          <Input
+            className="w-full [&>span:first-child]:w-full"
+            aria-label={wf("walletPlaceholder")}
+            value={walletAddress}
+            onChange={(e) => onWalletAddressChange(e.target.value)}
+            placeholder={wf("walletPlaceholder")}
+          />
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              onClick={onEnroll}
+              disabled={busyId !== null || !walletAddress.trim()}
+              iconLeft={
+                busyId === "enroll" ? <Loader2 className="size-3.5 animate-spin" /> : undefined
+              }
+            >
+              {wf("enrollWallet")}
+            </Button>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            onClick={onEnroll}
-            disabled={busyId !== null || !walletAddress.trim()}
-            iconLeft={
-              busyId === "enroll" ? <Loader2 className="size-3.5 animate-spin" /> : undefined
-            }
-          >
-            {wf("enrollWallet")}
-          </Button>
         </div>
         <HoldersList holders={holders} wf={wf} label={label} locale={locale} />
       </CardContent>
@@ -2080,7 +1727,12 @@ function ExecutionLogCard({
       </CardHeader>
       <CardContent>
         {executions.length === 0 ? (
-          <p className="text-sm text-secondary">{wf("logEmpty")}</p>
+          <div className="flex flex-col items-center gap-2 py-6 text-center">
+            <span className="flex size-10 items-center justify-center rounded-full bg-fill-subtle text-tertiary">
+              <Inbox className="size-5" aria-hidden />
+            </span>
+            <p className="text-sm text-secondary">{wf("logEmpty")}</p>
+          </div>
         ) : (
           <>
             <ul className="divide-y divide-border-default">
@@ -2134,6 +1786,7 @@ function RuleRow({
   busy,
   rowBusy,
   editing,
+  tier,
   onToggle,
   onEdit,
   onDelete,
@@ -2146,21 +1799,37 @@ function RuleRow({
   busy: boolean;
   rowBusy: boolean;
   editing: boolean;
+  tier: ExecutionTier;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const ActionIcon = ACTION_ICONS[rule.action_type] ?? Play;
+  const tierLabel = wf(`tierLabels.${tier}`);
   return (
-    <li className="flex items-center justify-between gap-4 py-3">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-primary">
-          {label("trigger", rule.trigger_type)} → {label("action", rule.action_type)}
-        </p>
-        <p className="text-xs text-secondary">
-          {rule.review_mode === "manual" ? wf("manualReview") : wf("autoApply")}
-          {" · "}
-          {formatRelativeTime(rule.created_at, locale)}
-        </p>
+    <li className="flex items-center justify-between gap-4 py-3.5">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+          <ActionIcon className="size-[18px]" />
+        </span>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-medium text-primary">
+            <span className="truncate">{label("trigger", rule.trigger_type)}</span>
+            <span
+              className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border-default text-tertiary"
+              aria-hidden
+            >
+              <ArrowRight className="size-3" />
+            </span>
+            <span className="truncate">{label("action", rule.action_type)}</span>
+            <Badge variant={TIER_BADGE_VARIANT[tier]}>{tierLabel}</Badge>
+          </div>
+          <p className="mt-0.5 text-xs text-secondary">
+            {rule.review_mode === "manual" ? wf("manualReview") : wf("autoApply")}
+            {" · "}
+            {formatRelativeTime(rule.created_at, locale)}
+          </p>
+        </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {rowBusy ? <Loader2 className="size-3.5 animate-spin text-secondary" /> : null}
@@ -2191,7 +1860,16 @@ function RuleRow({
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={onToggle} disabled={busy}>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={onToggle}
+              disabled={busy}
+              iconLeft={
+                rule.enabled ? <PowerOff className="size-3.5" /> : <Power className="size-3.5" />
+              }
+            >
               {rule.enabled ? wf("disable") : wf("enable")}
             </Button>
           </>
@@ -2215,23 +1893,42 @@ function HoldersList({
   locale: string;
 }) {
   if (holders.length === 0) {
-    return <p className="text-sm text-secondary">{wf("holdersEmpty")}</p>;
+    return (
+      <div className="flex flex-col items-center gap-2 py-6 text-center">
+        <span className="flex size-10 items-center justify-center rounded-full bg-fill-subtle text-tertiary">
+          <Wallet className="size-5" aria-hidden />
+        </span>
+        <p className="text-sm text-secondary">{wf("holdersEmpty")}</p>
+      </div>
+    );
   }
   return (
     <ul className="divide-y divide-border-default">
-      {holders.map((holder) => (
-        <li key={holder.id} className="flex items-center justify-between gap-4 py-2.5">
-          <div className="min-w-0">
-            <p className="truncate font-mono text-sm text-primary">{holder.wallet_address}</p>
-            <p className="text-xs text-secondary">
-              {formatRelativeTime(holder.created_at, locale)}
-            </p>
-          </div>
-          <Badge variant={holder.kyc_status === "verified" ? "success" : "default"}>
-            {label("status", holder.kyc_status)}
-          </Badge>
-        </li>
-      ))}
+      {holders.map((holder) => {
+        const status = KYC_STATUS_META[holder.kyc_status] ?? KYC_STATUS_FALLBACK;
+        const StatusIcon = status.icon;
+        return (
+          <li key={holder.id} className="flex items-center justify-between gap-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+                <Wallet className="size-[18px]" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate font-mono text-sm text-primary">{holder.wallet_address}</p>
+                <p className="text-xs text-secondary">
+                  {formatRelativeTime(holder.created_at, locale)}
+                </p>
+              </div>
+            </div>
+            <Badge variant={status.variant}>
+              <span className="inline-flex items-center gap-1 leading-none">
+                <StatusIcon className="size-3 shrink-0" aria-hidden />
+                {label("status", holder.kyc_status)}
+              </span>
+            </Badge>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -2281,28 +1978,43 @@ function ExecutionRow({
 }) {
   const destructive = tier === "requires_approval";
   const target = executionTarget(execution);
+  const ActionIcon = ACTION_ICONS[execution.action_type] ?? Play;
+  const StatusGlyph = STATUS_GLYPH[execution.status];
   return (
-    <li className="flex items-center justify-between gap-4 py-3">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[execution.status]}`}
-          aria-hidden
-        />
+    <li className="flex items-center justify-between gap-4 py-3.5">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+          <ActionIcon className="size-[18px]" aria-hidden />
+        </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-primary">
-            {label("action", execution.action_type)}{" "}
-            <span className="font-normal text-secondary">
-              · {label("status", execution.status)}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="text-sm font-medium text-primary">
+              {label("action", execution.action_type)}
             </span>
-          </p>
+            <Badge variant={STATUS_BADGE_VARIANT[execution.status]}>
+              <span className="inline-flex items-center gap-1 leading-none">
+                <StatusGlyph
+                  className={cn(
+                    "size-3 shrink-0",
+                    execution.status === "processing" && "animate-spin"
+                  )}
+                  aria-hidden
+                />
+                {label("status", execution.status)}
+              </span>
+            </Badge>
+          </div>
           {/* What this execution will actually do. Shown before the approve control so a
               held mint or seize is never authorized sight-unseen. */}
           {target ? (
-            <p className="truncate font-mono text-xs text-primary" title={target}>
+            <p className="mt-0.5 truncate font-mono text-xs text-primary" title={target}>
               {target}
             </p>
           ) : null}
-          <p className="truncate text-xs text-secondary" title={execution.error ?? undefined}>
+          <p
+            className="mt-0.5 truncate text-xs text-secondary"
+            title={execution.error ?? undefined}
+          >
             {label("trigger", execution.trigger_type)} ·{" "}
             {formatRelativeTime(execution.created_at, locale)} · {wf("attempt")}{" "}
             {execution.attempt_count}/{execution.max_attempts}
@@ -2322,11 +2034,25 @@ function ExecutionRow({
               onConfirm={onApprove}
             />
           ) : (
-            <Button type="button" size="sm" variant="secondary" onClick={onApprove} disabled={busy}>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={onApprove}
+              disabled={busy}
+              iconLeft={<Check className="size-3.5" />}
+            >
               {wf("approve")}
             </Button>
           )}
-          <Button type="button" size="sm" variant="ghost" onClick={onReject} disabled={busy}>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={onReject}
+            disabled={busy}
+            iconLeft={<X className="size-3.5" />}
+          >
             {wf("reject")}
           </Button>
         </div>
@@ -2340,7 +2066,14 @@ function ExecutionRow({
             onConfirm={onApprove}
           />
         ) : (
-          <Button type="button" size="sm" variant="secondary" onClick={onApprove} disabled={busy}>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={onApprove}
+            disabled={busy}
+            iconLeft={<RefreshCw className="size-3.5" />}
+          >
             {wf("retry")}
           </Button>
         )

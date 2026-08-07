@@ -252,7 +252,7 @@
       "logTitle": "Execution log",
       "logDescription": "Recent workflow runs and their outcomes.",
       "logEmpty": "No executions yet.",
-      "attempt": "attempt",
+      "attempt": "Attempt",
       "approve": "Approve",
       "holdApprove": "Hold to approve",
       "holdRetry": "Hold to retry",

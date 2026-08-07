@@ -3,6 +3,7 @@
 import {
   ArrowDown,
   ArrowRight,
+  Circle,
   CircleCheck,
   Clock,
   Filter,
@@ -24,7 +25,7 @@ import {
   type GuardDraft,
   humanizeType,
 } from "../workflows.data";
-import { ACTION_ICONS } from "./workflow-builder-cards";
+import { ACTION_ICONS, ConnectorBadge } from "./workflow-builder-cards";
 
 // Read-only "exactly what happens" panel for the rule currently being built. Computed
 // live from the same catalog the controls use — no backend call. It surfaces the
@@ -44,12 +45,19 @@ interface FlowStep {
   actionType?: string;
 }
 
-// Icon-chip tint stays inside the semantic four (status colour only).
-const TONE_CHIP: Record<StepTone, string> = {
-  ok: "bg-success-bg text-success",
-  warn: "bg-warning-bg text-warning",
-  blocked: "bg-error-bg text-error",
-  pending: "bg-fill-subtle text-secondary",
+// Status lives in a trailing glyph (green check / amber clock / red alert), so the left
+// icon tile stays neutral — status colour in exactly one place per node, per the sketches.
+const STATUS_ICON: Record<StepTone, LucideIcon> = {
+  ok: CircleCheck,
+  warn: Clock,
+  blocked: TriangleAlert,
+  pending: Circle,
+};
+const STATUS_TONE: Record<StepTone, string> = {
+  ok: "text-success",
+  warn: "text-warning",
+  blocked: "text-error",
+  pending: "text-tertiary",
 };
 
 const TIER_VARIANT: Record<ExecutionTier, "success" | "warning" | "danger"> = {
@@ -295,21 +303,19 @@ function FlowNode({
   badgeVariant?: "success" | "warning" | "danger";
   orientation: "vertical" | "horizontal";
 }) {
+  const StatusIcon = STATUS_ICON[tone];
   return (
     <div
       className={cn(
-        "flex items-start gap-3 rounded-lg border border-border-subtle bg-surface-raised px-3 py-2",
-        orientation === "horizontal" && "min-w-[10rem] flex-1 basis-[10rem] items-center"
+        "flex items-center gap-3 rounded-xl border border-border-subtle bg-surface-raised px-3 py-2.5",
+        orientation === "horizontal" && "min-w-[11rem] flex-1 basis-[11rem]"
       )}
     >
       <span
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-md",
-          TONE_CHIP[tone]
-        )}
+        className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary"
         aria-hidden
       >
-        <Icon className="size-4" />
+        <Icon className="size-[18px]" />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -322,6 +328,7 @@ function FlowNode({
         </div>
         {detail ? <p className="mt-0.5 truncate text-xs text-secondary">{detail}</p> : null}
       </div>
+      <StatusIcon className={cn("size-4 shrink-0 self-center", STATUS_TONE[tone])} aria-hidden />
     </div>
   );
 }
@@ -329,14 +336,15 @@ function FlowNode({
 function FlowArrow({ orientation }: { orientation: "vertical" | "horizontal" }) {
   if (orientation === "horizontal") {
     return (
-      <div className="flex items-center self-center text-tertiary" aria-hidden>
-        <ArrowRight className="size-4" />
+      <div className="flex items-center self-center" aria-hidden>
+        <ConnectorBadge icon={ArrowRight} />
       </div>
     );
   }
+  // Centred across the node width — the connectors form a spine down the middle.
   return (
-    <div className="flex items-center py-0.5 pl-[18px] text-tertiary" aria-hidden>
-      <ArrowDown className="size-4" />
+    <div className="flex justify-center py-1.5" aria-hidden>
+      <ConnectorBadge icon={ArrowDown} />
     </div>
   );
 }
