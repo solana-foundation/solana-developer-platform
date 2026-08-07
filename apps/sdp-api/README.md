@@ -184,7 +184,7 @@ In self-hosted mode every configured provider is automatically entitled
 regardless of organization tier. Per-org `providerOverrides` still apply as
 a disable-only mechanism.
 
-For the Clerk side of self-hosting (account creation, JWT template, webhook
+For the Clerk side of self-hosting (account creation, session token customization, webhook
 relay via an ngrok tunnel), follow [`docs/self-hosting/clerk-setup.md`](docs/self-hosting/clerk-setup.md).
 The webhook handler is the only path that creates `organizations` rows
 outside `pnpm db:seed:local`.

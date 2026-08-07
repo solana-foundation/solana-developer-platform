@@ -252,12 +252,26 @@ export const updateToken = async (c: AppContext) => {
     throw badRequest("maxSupply cannot be changed after the supply is locked on-chain");
   }
 
+  const auditService = new AuditService(getDb(c.env));
+  let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
+  let authoritativeEffectCompleted = false;
+
   try {
     const metadataPatch = getOnChainMetadataPatch(parsed.data);
     const shouldUpdateMetadataOnChain =
       Boolean(existing.mintAddress) &&
       existing.status !== "pending" &&
       Object.keys(metadataPatch).length > 0;
+
+    auditIntent = await auditService.beginCritical(c, {
+      action: "update",
+      resourceType: "token",
+      resourceId: tokenId,
+      metadata: {
+        ...parsed.data,
+        onChainMetadataUpdatePlanned: shouldUpdateMetadataOnChain,
+      },
+    });
 
     let metadataUpdateSignature: string | null = null;
     let metadataUpdateSlot: string | null = null;
@@ -288,6 +302,7 @@ export const updateToken = async (c: AppContext) => {
         updateAuthority: signer,
         feePayer: signer,
       });
+      authoritativeEffectCompleted = true;
 
       metadataUpdateSignature = result?.signature ?? null;
       metadataUpdateSlot = result ? result.slot.toString() : null;
@@ -297,15 +312,10 @@ export const updateToken = async (c: AppContext) => {
       status: existing.status,
       mintAddress: existing.mintAddress,
     });
+    authoritativeEffectCompleted = true;
 
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "update",
-      resourceType: "token",
-      resourceId: tokenId,
+    await auditService.completeCritical(c, auditIntent, {
       metadata: {
-        ...parsed.data,
         onChainMetadataUpdated: shouldUpdateMetadataOnChain,
         metadataUpdateSignature,
         metadataUpdateSlot,
@@ -315,6 +325,12 @@ export const updateToken = async (c: AppContext) => {
     const response: TokenResponse = { token };
     return success(c, response);
   } catch (error) {
+    if (auditIntent && !authoritativeEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+    }
     if (error instanceof Error && error.message === "TOKEN_NOT_FOUND") {
       throw notFound("Token");
     }

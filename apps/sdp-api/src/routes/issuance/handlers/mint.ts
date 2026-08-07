@@ -1,5 +1,6 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import type { TokenTransaction } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -7,7 +8,7 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
-import { AuditService } from "@/services/audit.service";
+import { type AuditIntent, AuditService } from "@/services/audit.service";
 import {
   approvedWalletOperationId,
   beginApprovedWalletOperationEffect,
@@ -30,8 +31,77 @@ import {
 } from "./access-control";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { enforceIssuanceWalletOperationPolicy } from "./policy";
+import {
+  persistSettledTransaction,
+  persistSettledTransactionThenOutcome,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+interface SettledMintEvidence {
+  signature: string;
+  slot: number;
+  tokenAccount: string;
+}
+
+function parseSettledMintEvidence(metadata: Record<string, unknown>): SettledMintEvidence | null {
+  const slot =
+    typeof metadata.slot === "string" && /^\d+$/.test(metadata.slot)
+      ? Number(metadata.slot)
+      : metadata.slot;
+  if (
+    typeof metadata.signature !== "string" ||
+    metadata.signature.length === 0 ||
+    !Number.isSafeInteger(slot) ||
+    Number(slot) < 0 ||
+    typeof metadata.tokenAccount !== "string" ||
+    metadata.tokenAccount.length === 0
+  ) {
+    return null;
+  }
+  return {
+    signature: metadata.signature,
+    slot: Number(slot),
+    tokenAccount: metadata.tokenAccount,
+  };
+}
+
+async function persistSettledMintTransaction(
+  tokenService: TokenService,
+  transaction: TokenTransaction,
+  evidence: SettledMintEvidence
+): Promise<TokenTransaction> {
+  return persistSettledTransaction(tokenService, transaction, evidence, {
+    tokenAccount: evidence.tokenAccount,
+  });
+}
+
+async function recoverSettledMintReplay(
+  auditService: AuditService,
+  tokenService: TokenService,
+  transaction: TokenTransaction
+): Promise<TokenTransaction> {
+  if (transaction.status !== "pending") return transaction;
+  const journaledEvidence = parseSettledMintEvidence({
+    ...transaction.params,
+    signature: transaction.signature,
+    slot: transaction.slot,
+  });
+  if (journaledEvidence) {
+    return persistSettledMintTransaction(tokenService, transaction, journaledEvidence);
+  }
+  const outcome = await auditService.findCriticalOutcome({
+    organizationId: transaction.organizationId,
+    action: "mint",
+    resourceType: "token_transaction",
+    resourceId: transaction.id,
+  });
+  if (outcome?.status !== "success") return transaction;
+  const evidence = parseSettledMintEvidence(outcome.metadata);
+  return evidence
+    ? persistSettledMintTransaction(tokenService, transaction, evidence)
+    : transaction;
+}
 
 type AllowlistInsertArgs = {
   tokenId: string;
@@ -352,6 +422,34 @@ export const prepareMint = async (c: AppContext) => {
   });
 };
 
+async function recordPreSubmissionMintFailure(options: {
+  c: AppContext;
+  auditService: AuditService;
+  auditIntent: AuditIntent;
+  tokenService: TokenService;
+  transactionId: string;
+  error: unknown;
+}): Promise<void> {
+  const errorMessage = options.error instanceof Error ? options.error.message : "Unknown error";
+  await options.auditService.completeCritical(options.c, options.auditIntent, {
+    status: "failure",
+    metadata: { error: errorMessage },
+  });
+
+  // A failed approved replay that never reserved supply did not cross the
+  // mint submission boundary. Release its durable idempotency key so a
+  // recovered execution can retry instead of replaying a stale failure.
+  const removedPreEffectReplay = approvedWalletOperationId(options.c)
+    ? await options.tokenService.deleteUnsubmittedTransaction(options.transactionId)
+    : false;
+  if (!removedPreEffectReplay) {
+    await options.tokenService.updateTransaction(options.transactionId, {
+      status: "failed",
+      error: errorMessage,
+    });
+  }
+}
+
 export const executeMint = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -466,14 +564,30 @@ export const executeMint = async (c: AppContext) => {
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
+    const replayedTransaction = await recoverSettledMintReplay(auditService, tokenService, tx);
     const txTokenAccount =
-      typeof tx.params.tokenAccount === "string" ? tx.params.tokenAccount : undefined;
+      typeof replayedTransaction.params.tokenAccount === "string"
+        ? replayedTransaction.params.tokenAccount
+        : undefined;
     return success(c, {
-      transaction: tx,
+      transaction: replayedTransaction,
       tokenAccount: txTokenAccount ?? parsed.data.mint.destination,
     });
   }
+
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "mint",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      destination: parsed.data.mint.destination,
+      amount: parsed.data.mint.amount,
+      mode: "execute",
+    },
+  });
 
   // Counted against the cap in the last moment before the transaction is submitted,
   // and only then. The check above ran against a cached total in this process, which
@@ -506,36 +620,44 @@ export const executeMint = async (c: AppContext) => {
       }
     );
 
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "mint",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
-      metadata: {
-        tokenId,
-        destination: parsed.data.mint.destination,
-        amount: parsed.data.mint.amount,
-        signature: result.signature,
-        slot: result.slot.toString(),
-        mode: "execute",
-        addedToAllowlist,
-      },
+    const settledTokenAccount = result.tokenAccount ?? parsed.data.mint.destination;
+    const settledEvidence: SettledMintEvidence = {
+      signature: result.signature,
+      slot: Number(result.slot),
+      tokenAccount: settledTokenAccount,
+    };
+    const settledTransaction = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: settledEvidence,
+      params: { tokenAccount: settledTokenAccount },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+            tokenAccount: settledTokenAccount,
+            addedToAllowlist,
+          },
+        }),
     });
 
     return success(c, {
-      transaction: await tokenService.updateTransaction(tx.id, {
-        status: "confirmed",
-        signature: result.signature,
-        slot: Number(result.slot),
-        params: {
-          ...tx.params,
-          tokenAccount: result.tokenAccount,
-        },
-      }),
-      tokenAccount: result.tokenAccount,
+      transaction: settledTransaction,
+      tokenAccount: settledTokenAccount,
     });
   } catch (error) {
+    if (reservedSupply === null) {
+      await recordPreSubmissionMintFailure({
+        c,
+        auditService,
+        auditIntent,
+        tokenService,
+        transactionId: tx.id,
+        error,
+      });
+    }
+
     // A reservation exists only if the gate ran, which means the transaction was
     // submitted — and then it stands. Reaching here does not mean nothing landed: a
     // timeout during confirmation leaves a transaction the cluster may still accept,
@@ -556,19 +678,6 @@ export const executeMint = async (c: AppContext) => {
         },
         "Mint failed after it was submitted and its supply reserved; the reservation is kept because the transaction may still land. Refresh the token's supply to reconcile."
       );
-    }
-    // A failed approved replay with no reservation never crossed this mint's
-    // submission boundary. Drop the pending record so a recovered attempt can
-    // reuse its durable idempotency key instead of replaying a stale failure.
-    const removedPreEffectReplay =
-      reservedSupply === null && approvedWalletOperationId(c)
-        ? await tokenService.deleteUnsubmittedTransaction(tx.id)
-        : false;
-    if (!removedPreEffectReplay) {
-      await tokenService.updateTransaction(tx.id, {
-        status: "failed",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
     }
     throw error;
   }

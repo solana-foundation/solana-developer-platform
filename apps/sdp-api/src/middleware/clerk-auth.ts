@@ -400,7 +400,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   if (!email) {
     throw new AppError(
       "UNAUTHORIZED",
-      "Clerk token has no usable email claim. Check the JWT template: an invalid shortcode is passed through unsubstituted rather than resolved."
+      "Clerk token has no usable email claim. Check the session token customization: an invalid shortcode is passed through unsubstituted rather than resolved."
     );
   }
 
