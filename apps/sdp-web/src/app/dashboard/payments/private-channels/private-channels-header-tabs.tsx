@@ -76,23 +76,21 @@ export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
   const activeId = visible.find((tab) => pathname.startsWith(tab.href))?.id ?? visible[0].id;
 
   return (
-    <div className="mb-6">
-      <Tabs
-        bordered
-        value={activeId}
-        onValueChange={(value) => {
-          const next = visible.find((tab) => tab.id === value);
-          if (next) router.push(next.href);
-        }}
-      >
-        <TabList>
-          {visible.map((tab) => (
-            <Tab key={tab.id} value={tab.id}>
-              {t(tab.labelKey)}
-            </Tab>
-          ))}
-        </TabList>
-      </Tabs>
-    </div>
+    <Tabs
+      bordered
+      value={activeId}
+      onValueChange={(value) => {
+        const next = visible.find((tab) => tab.id === value);
+        if (next) router.push(next.href);
+      }}
+    >
+      <TabList>
+        {visible.map((tab) => (
+          <Tab key={tab.id} value={tab.id}>
+            {t(tab.labelKey)}
+          </Tab>
+        ))}
+      </TabList>
+    </Tabs>
   );
 }

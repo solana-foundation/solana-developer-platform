@@ -11,6 +11,7 @@ import type {
 import {
   fetchCustodyWallets,
   fetchPrivateChannelBalance,
+  fetchPrivateChannelEventReferences,
   fetchPrivateChannelEvents,
   fetchPrivateChannelInstance,
   fetchPrivateChannelOverview,
@@ -103,6 +104,16 @@ export function loadEvents(
     hasMore: false,
     nextCursor: null,
   });
+}
+
+/**
+ * Flat id→name dictionary for event enrichment. Falls back to `{}` so a failed
+ * lookup degrades to shortened addresses rather than breaking the page.
+ */
+export function loadEventReferences(
+  client: SdpApiClient
+): Promise<PrivateChannelsResult<Record<string, string>>> {
+  return toResult(() => fetchPrivateChannelEventReferences(client), {});
 }
 
 /** Verified wallets joined with the custody wallets they can be verified from. */
