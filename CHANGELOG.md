@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.56.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.55.0...v0.56.0) (2026-08-07)
+
+### Features
+
+* **policy:** revision message placeholder, history revalidation, secondary wallet actions ([#1168](https://github.com/solana-foundation/solana-developer-platform/pull/1168)) ([b0d2fc3](https://github.com/solana-foundation/solana-developer-platform/commit/b0d2fc3b91f9c52b0febec9619fa8b6399e9eab5))
+* **policy:** store commit messages on wallet policy revisions ([#1156](https://github.com/solana-foundation/solana-developer-platform/pull/1156)) ([95982ba](https://github.com/solana-foundation/solana-developer-platform/commit/95982ba596f8281af8dd475dd029e56e0e276e91))
+* **api:** let the dashboard read its custody connections ([#1132](https://github.com/solana-foundation/solana-developer-platform/pull/1132)) ([69ea094](https://github.com/solana-foundation/solana-developer-platform/commit/69ea094dd35b525dcf2b4dda681a134cad385998))
+* **web:** give the dashboard an integrations catalog ([#1128](https://github.com/solana-foundation/solana-developer-platform/pull/1128)) ([29b5904](https://github.com/solana-foundation/solana-developer-platform/commit/29b5904620214ac57015e4ead6335c1ca5600865))
+* **private-channels:** enable wallet-to-wallet transfers ([#1081](https://github.com/solana-foundation/solana-developer-platform/pull/1081)) ([1dc4921](https://github.com/solana-foundation/solana-developer-platform/commit/1dc4921d254c265aea1a562e7d385af0e682c7ff))
+* **spc:** update openapi spec for api playground  prerequisites ([#1108](https://github.com/solana-foundation/solana-developer-platform/pull/1108)) ([04a1037](https://github.com/solana-foundation/solana-developer-platform/commit/04a1037b2eaf2294b01bb0e80440668174883204))
+* **private-channels:** redesign the Overview and reorganize navigation ([#1142](https://github.com/solana-foundation/solana-developer-platform/pull/1142)) ([a550bed](https://github.com/solana-foundation/solana-developer-platform/commit/a550bed27b462815688fea250268d63d1114a8e5))
+* **private-channels:** resolve event ids to display names ([#1140](https://github.com/solana-foundation/solana-developer-platform/pull/1140)) ([12a7a5a](https://github.com/solana-foundation/solana-developer-platform/commit/12a7a5a445643c46c2dbcf780ef7c69cbeed7cad))
+* **web:** give every token holding a page to open ([#1091](https://github.com/solana-foundation/solana-developer-platform/pull/1091)) ([e9bd859](https://github.com/solana-foundation/solana-developer-platform/commit/e9bd859f48e4fd2f411cd2da54f1195f667d77a3))
+* **web:** end onboarding by showing what setup created ([#1123](https://github.com/solana-foundation/solana-developer-platform/pull/1123)) ([d97b1c3](https://github.com/solana-foundation/solana-developer-platform/commit/d97b1c339768b9f77ddbaea648cb65a515b02cd0))
+
+### Bug Fixes
+
+* **web:** hold unrouted gated custody providers at not configured ([#1163](https://github.com/solana-foundation/solana-developer-platform/pull/1163)) ([dbd32c2](https://github.com/solana-foundation/solana-developer-platform/commit/dbd32c2625c0c14df0345d138dd497645774f668))
+* **web:** register integrations in the More sheet ([#1162](https://github.com/solana-foundation/solana-developer-platform/pull/1162)) ([6e12a29](https://github.com/solana-foundation/solana-developer-platform/commit/6e12a2980c210db2d75a168d52ded02444eedc49))
+* **api:** match token filters against every form the ledger stores ([#1113](https://github.com/solana-foundation/solana-developer-platform/pull/1113)) ([1732f0b](https://github.com/solana-foundation/solana-developer-platform/commit/1732f0b5f9646877f13fc62abcb9de89f9abfa5c))
+* **web:** stop a new organization landing on $0.00 ([#1089](https://github.com/solana-foundation/solana-developer-platform/pull/1089)) ([cbd92ed](https://github.com/solana-foundation/solana-developer-platform/commit/cbd92eda1fe5d064787fb6625464a8858a7c88f1))
+* **web:** say what onboarding can actually promise about providers ([#1093](https://github.com/solana-foundation/solana-developer-platform/pull/1093)) ([0ee73b4](https://github.com/solana-foundation/solana-developer-platform/commit/0ee73b421d6b2682def074d87c9f1b1c1a153707))
+* **web:** give members without setup access somewhere to go ([#1092](https://github.com/solana-foundation/solana-developer-platform/pull/1092)) ([eaf3ec4](https://github.com/solana-foundation/solana-developer-platform/commit/eaf3ec43753135c56209ea77faef617392e53b03))
+* **security:** make audit ledger tamper-evident ([#1090](https://github.com/solana-foundation/solana-developer-platform/pull/1090)) ([9dc59bd](https://github.com/solana-foundation/solana-developer-platform/commit/9dc59bdb6afbedcebb7e58cba6f71dad347bc705))
+* **web:** stop the filter count appearing twice on the transactions toolbar ([#1097](https://github.com/solana-foundation/solana-developer-platform/pull/1097)) ([397cae7](https://github.com/solana-foundation/solana-developer-platform/commit/397cae714b840c59423654625bafe534287f4459))
+* **policy:** execute approved wallet operations ([#1096](https://github.com/solana-foundation/solana-developer-platform/pull/1096)) ([781e229](https://github.com/solana-foundation/solana-developer-platform/commit/781e229df314e78ff9f4f11e629b7bca8fa174c7))
+* **web:** show token symbols in the transactions asset filter ([#1114](https://github.com/solana-foundation/solana-developer-platform/pull/1114)) ([5436c58](https://github.com/solana-foundation/solana-developer-platform/commit/5436c58e37ddc68bcf63b41974d80e6cf925f7fd))
+
+### Maintenance
+
+* **auth:** forward the Clerk session token instead of minting a JWT template token ([#1147](https://github.com/solana-foundation/solana-developer-platform/pull/1147)) ([32e9a97](https://github.com/solana-foundation/solana-developer-platform/commit/32e9a9754e03460d007b61fef2e6ff70485f9153))
+
 ## [0.55.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.54.0...v0.55.0) (2026-08-06)
 
 ### Features
