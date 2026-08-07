@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import type { EarnPortfolioWalletActivity, EarnPortfolioWalletStatus } from "@sdp/types";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnProgramState } from "./earn-program-data";
 import {
   EARN_PROGRAM_DEDUPING_MS,
   earnProgramRefreshInterval,
   useEarnWalletActivityToasts,
+  useEarnWithdrawalOutcomeToast,
 } from "./earn-program-data";
 
 /**
@@ -18,10 +19,13 @@ import {
 
 const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toasts }));
+// The withdrawal watcher reads through the shared dashboard fetcher; stubbing
+// that seam keeps these tests off the network while exercising the real hook.
+const fetchMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/dashboard-fetch", () => ({ dashboardFetch: fetchMock }));
 vi.mock("@/i18n/provider", () => ({ useTranslations: () => (key: string) => key }));
 
 const KEY = {
-  withdrawal: "DashboardEarn.overview.activityWithdrawalComplete",
   rebalance: "DashboardEarn.overview.activityRebalanceComplete",
   generic: "DashboardEarn.overview.activityComplete",
   failed: "DashboardEarn.overview.activityFailed",
@@ -71,9 +75,13 @@ describe("useEarnWalletActivityToasts", () => {
     toasts.error.mockClear();
   });
 
-  it("announces a withdrawal once the provider reports the wallet settled", () => {
+  it("says nothing about a withdrawal when the wallet merely goes idle", () => {
+    // The wallet only reports that the provider STOPPED — a failed, cancelled
+    // or partial payout leaves it exactly as idle as a settled one. Claiming
+    // settlement from this transition would be wrong when it matters most, so
+    // the outcome comes from the withdrawal itself.
     observe(programState("busy", "withdrawing"), programState("ready"));
-    expect(toasts.success).toHaveBeenCalledWith(KEY.withdrawal);
+    expect(toasts.success).not.toHaveBeenCalled();
     expect(toasts.error).not.toHaveBeenCalled();
   });
 
@@ -87,8 +95,8 @@ describe("useEarnWalletActivityToasts", () => {
     expect(toasts.success).toHaveBeenCalledWith(KEY.generic);
   });
 
-  it("reports a failure as a failure, not a completion", () => {
-    observe(programState("busy", "withdrawing"), programState("failed"));
+  it("reports a wallet failure as a failure, not a completion", () => {
+    observe(programState("busy", "rebalancing"), programState("failed"));
     expect(toasts.error).toHaveBeenCalledWith(KEY.failed);
     expect(toasts.success).not.toHaveBeenCalled();
   });
@@ -110,7 +118,7 @@ describe("useEarnWalletActivityToasts", () => {
 
   it("announces once per completion, not on every subsequent read", () => {
     observe(
-      programState("busy", "withdrawing"),
+      programState("busy", "rebalancing"),
       programState("ready"),
       programState("ready"),
       programState("ready")
@@ -122,6 +130,96 @@ describe("useEarnWalletActivityToasts", () => {
     observe(programState("busy", "withdrawing"), { kind: "none" } as EarnProgramState);
     expect(toasts.success).not.toHaveBeenCalled();
     expect(toasts.error).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * How a withdrawal ENDED, which the wallet transition above deliberately does
+ * not claim. Each case pins that the announcement matches the provider's own
+ * withdrawal status — the only thing that knows whether money arrived.
+ */
+describe("useEarnWithdrawalOutcomeToast", () => {
+  const OUTCOME = {
+    completed: "DashboardEarn.overview.withdrawalCompleted",
+    partial: "DashboardEarn.overview.withdrawalPartiallyCompleted",
+    failed: "DashboardEarn.overview.withdrawalFailed",
+    cancelled: "DashboardEarn.overview.withdrawalCancelled",
+  };
+
+  function withdrawalOf(ref: string, status: string) {
+    return {
+      ok: true as const,
+      data: { data: { withdrawal: { withdrawalRef: ref, status, destinationAddress: "addr" } } },
+    };
+  }
+
+  beforeEach(() => {
+    toasts.success.mockClear();
+    toasts.error.mockClear();
+    fetchMock.mockReset();
+  });
+
+  /**
+   * SWR caches globally by key, so each case watches its OWN ref — sharing one
+   * would replay the previous status and quietly assert nothing.
+   */
+  async function watch(status: string) {
+    const ref = `wd_${status}`;
+    fetchMock.mockResolvedValue(withdrawalOf(ref, status));
+    renderHook(() => useEarnWithdrawalOutcomeToast(ref));
+    // Let SWR resolve the first read and the effect run.
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  it("announces settlement only when the provider says completed", async () => {
+    await watch("completed");
+    expect(toasts.success).toHaveBeenCalledWith(OUTCOME.completed);
+    expect(toasts.error).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call a failed withdrawal complete", async () => {
+    // The wallet is idle either way; only this status distinguishes them.
+    await watch("failed");
+    expect(toasts.error).toHaveBeenCalledWith(OUTCOME.failed);
+    expect(toasts.success).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call a cancelled withdrawal complete", async () => {
+    await watch("cancelled");
+    expect(toasts.error).toHaveBeenCalledWith(OUTCOME.cancelled);
+    expect(toasts.success).not.toHaveBeenCalled();
+  });
+
+  it("treats a partial payout as a problem, never a success", async () => {
+    // Some of the money did not arrive; "complete" would be the exact lie
+    // this hook exists to prevent.
+    await watch("partially_completed");
+    expect(toasts.error).toHaveBeenCalledWith(OUTCOME.partial);
+    expect(toasts.success).not.toHaveBeenCalled();
+  });
+
+  it("stays silent while the withdrawal is still in flight", async () => {
+    await watch("processing");
+    expect(toasts.success).not.toHaveBeenCalled();
+    expect(toasts.error).not.toHaveBeenCalled();
+  });
+
+  it("keeps waiting on an approval rather than calling it an outcome", async () => {
+    // Parked on a signature — it still resolves later, so announcing now
+    // would close a story that has not ended.
+    await watch("pending_approval");
+    expect(toasts.success).not.toHaveBeenCalled();
+    expect(toasts.error).not.toHaveBeenCalled();
+  });
+
+  it("issues no request at all when nothing was submitted", async () => {
+    renderHook(() => useEarnWithdrawalOutcomeToast(undefined));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

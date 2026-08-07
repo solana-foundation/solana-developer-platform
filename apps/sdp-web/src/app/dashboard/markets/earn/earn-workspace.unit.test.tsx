@@ -41,6 +41,9 @@ vi.mock("./earn-program-data", () => ({
   // them against provider state transitions, so the workspace only has to
   // mount the hook.
   useEarnWalletActivityToasts: () => {},
+  // Withdrawal outcomes are announced from the withdrawal's own status;
+  // earn-wallet-activity covers that hook against each terminal status.
+  useEarnWithdrawalOutcomeToast: () => {},
   // The workspace also reads the provider pin, so the hero counts exactly what
   // the deposit flow will offer rather than every synced row.
   EARN_PORTFOLIO_PROVIDER: "ground",

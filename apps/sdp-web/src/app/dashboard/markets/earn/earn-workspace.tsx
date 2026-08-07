@@ -25,6 +25,7 @@ import {
   useEarnProgram,
   useEarnStrategies,
   useEarnWalletActivityToasts,
+  useEarnWithdrawalOutcomeToast,
 } from "./earn-program-data";
 import {
   settlementDays,
@@ -253,6 +254,11 @@ function ProgramSection() {
   useEarnWalletActivityToasts(state);
   const { strategies } = useEarnStrategies();
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  // Held past the modal's lifetime on purpose: the outcome lands well after
+  // the user dismisses it, and it is the withdrawal — not the wallet — that
+  // knows whether the money arrived.
+  const [watchedWithdrawalRef, setWatchedWithdrawalRef] = useState<string | undefined>(undefined);
+  useEarnWithdrawalOutcomeToast(watchedWithdrawalRef);
 
   const program = state?.kind === "active" ? state.program : undefined;
   const holdings = useMemo(
@@ -378,7 +384,10 @@ function ProgramSection() {
           balance={program.wallet.balance}
           positions={program.wallet.positions}
           onClose={() => setWithdrawOpen(false)}
-          onWithdrawalCreated={refresh}
+          onWithdrawalCreated={(withdrawalRef) => {
+            setWatchedWithdrawalRef(withdrawalRef);
+            refresh();
+          }}
         />
       ) : null}
     </section>

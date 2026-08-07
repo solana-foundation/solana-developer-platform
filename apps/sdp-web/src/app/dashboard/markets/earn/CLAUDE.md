@@ -35,9 +35,16 @@ reintroduce fixture modules. Data flows: BFF proxies
   announces a `busy → settled` transition ONCE, from observed provider state
   (never from what the user submitted), and only the workspace mounts it: the
   program read runs in several components and a toast per consumer would
-  announce one completion several times. SWR suspends polling for a hidden tab
-  and revalidates on focus — which is why the cadence is unit-tested rather
-  than checked in a browser;
+  announce one completion several times. **It never announces a withdrawal**:
+  the wallet only reports that the provider stopped, and a failed, cancelled or
+  partial payout leaves it exactly as idle as a settled one — so
+  `useEarnWithdrawalOutcomeToast(ref)` follows the WITHDRAWAL's own status
+  instead (terminal = completed / partially_completed / failed / cancelled;
+  `pending_approval` keeps waiting, since it still resolves). Only `completed`
+  is a success toast — partial is a problem, not a win. Sourcing a settlement
+  claim from a wallet transition is the bug to never reintroduce. SWR suspends
+  polling for a hidden tab and revalidates on focus — which is why the cadence
+  is unit-tested rather than checked in a browser;
   `useEarnStrategies()`, program upsert, deposits, withdrawal fetchers.
   `EARN_PORTFOLIO_PROVIDER` is the single deliberate Ground pin — widening to
   multi-provider selection happens HERE, not by scattering provider ids.

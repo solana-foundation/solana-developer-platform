@@ -198,8 +198,13 @@ provider actually offers it.
    for the environment (devnet rail in sandbox, mainnet in production) and
    pin withdrawal/preview destination chains the same way, even if the
    provider is multi-chain internally.
-4. **Idempotency.** Withdrawal `requestId` is caller-owned and passed
-   verbatim; create/update may generate a UUIDv4 when omitted. A provider
+4. **Idempotency.** A withdrawal requires EXACTLY one caller-supplied key —
+   `requestId` (UUIDv4) or the `Idempotency-Key` header — and 400s on both or
+   neither, because no precedence rule can tell which one a caller's retry
+   holds stable. The key is not forwarded as given: `deriveProviderRequestId`
+   hashes it against the program wallet, so two organizations sharing one
+   provider account cannot collide on the same pasted value. Create/update is
+   looser and may generate a UUIDv4 when omitted. A provider
    requestId-conflict error surfaces as `CONFLICT`.
 5. **Persistence.** One shared wallet per org+environment+provider:
    `earn_provider_wallets` (migration `0049_earn_provider_wallets.sql`), via
