@@ -47,6 +47,7 @@ function mapWalletControlProfileSummary(
     activeRevisionId: active.profile.active_revision_id,
     revisionId: active.revision?.id ?? null,
     revisionNumber: active.revision?.revision_number ?? null,
+    commitMessage: active.revision === null ? null : active.revision.commit_message,
     defaultAction: active.revision?.default_action ?? "allow",
     rules: (active.revision?.rules ?? []) as unknown as PolicyRule[],
     providerMappingStatus: "not_applicable",

@@ -113,11 +113,11 @@ describe("policy revision explorer", () => {
     expect(html).toContain("Draft");
   });
 
-  it("shows commit messages without rendering a placeholder for revisions without one", () => {
+  it("shows commit messages and an italic placeholder for revisions without one", () => {
     const html = renderExplorer();
 
     expect(html).toContain("Restrict assets and blocked destinations.");
-    expect(html).not.toContain("No revision message");
+    expect(html).toContain("No revision message");
   });
 
   it("links destinations to the active project cluster on Solana Explorer", () => {

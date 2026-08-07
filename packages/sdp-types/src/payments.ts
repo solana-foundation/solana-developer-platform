@@ -58,6 +58,7 @@ export interface PaymentWalletControlProfileSummary {
   activeRevisionId: string | null;
   revisionId: string | null;
   revisionNumber: number | null;
+  commitMessage: string | null;
   defaultAction: PolicyDefaultAction;
   rules: PolicyRule[];
   providerMappingStatus: PolicyProviderSyncStatus;
