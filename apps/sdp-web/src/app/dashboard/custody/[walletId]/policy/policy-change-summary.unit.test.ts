@@ -75,7 +75,7 @@ describe("summarizePolicyChanges", () => {
     expect(rows).toEqual([
       {
         direction: "removed",
-        group: "rule:allowed-assets",
+        group: "rule:asset:allowed-assets",
         label: "Allowed assets",
         value: "MintBb…bbbb",
       },
@@ -109,7 +109,7 @@ describe("summarizePolicyChanges", () => {
     expect(rows.map((row) => row.direction)).toEqual(["removed", "result"]);
     expect(rows[1]).toEqual({
       direction: "result",
-      group: "rule:allowed-assets",
+      group: "rule:asset:allowed-assets",
       label: "Allowed assets",
       value: "",
     });
@@ -127,13 +127,13 @@ describe("summarizePolicyChanges", () => {
     expect(rows).toEqual([
       {
         direction: "removed",
-        group: "rule:per-transaction-limit",
+        group: "rule:amount:per-transaction-limit",
         label: "Per transaction limit",
         value: "allow, max 100",
       },
       {
         direction: "result",
-        group: "rule:per-transaction-limit",
+        group: "rule:amount:per-transaction-limit",
         label: "Per transaction limit",
         value: "",
       },
@@ -151,13 +151,13 @@ describe("summarizePolicyChanges", () => {
     expect(rows).toEqual([
       {
         direction: "removed",
-        group: "rule:per-transaction-limit",
+        group: "rule:amount:per-transaction-limit",
         label: "per-transaction-limit",
         value: "allow, max 100",
       },
       {
         direction: "added",
-        group: "rule:per-transaction-limit",
+        group: "rule:amount:per-transaction-limit",
         label: "per-transaction-limit",
         value: "allow, max 50",
       },
@@ -308,7 +308,7 @@ describe("summarizePolicyChanges", () => {
       },
       {
         direction: "added",
-        group: "rule:allowed-assets",
+        group: "rule:asset:allowed-assets",
         label: "Allowed assets",
         value: "MintAa…aaaa, allow",
       },
@@ -335,11 +335,16 @@ describe("summarizePolicyChanges", () => {
       },
       {
         direction: "removed",
-        group: "rule:allowed-assets",
+        group: "rule:asset:allowed-assets",
         label: "Allowed assets",
         value: "MintAa…aaaa, allow",
       },
-      { direction: "result", group: "rule:allowed-assets", label: "Allowed assets", value: "" },
+      {
+        direction: "result",
+        group: "rule:asset:allowed-assets",
+        label: "Allowed assets",
+        value: "",
+      },
     ]);
   });
 
@@ -384,19 +389,19 @@ describe("summarizePolicyChanges", () => {
       },
       {
         direction: "removed",
-        group: "rule:allowlist-destinations",
+        group: "rule:destination:allowlist-destinations",
         label: "Allowed destinations",
         value: "Dq73PQ…2KCh, allow",
       },
       {
         direction: "result",
-        group: "rule:allowlist-destinations",
+        group: "rule:destination:allowlist-destinations",
         label: "Allowed destinations",
         value: "",
       },
       {
         direction: "added",
-        group: "rule:allowed-assets",
+        group: "rule:asset:allowed-assets",
         label: "Allowed assets",
         value: "MintAa…aaaa, allow",
       },
@@ -457,13 +462,13 @@ describe("summarizePolicyChanges field coverage", () => {
     expect(rows).toEqual([
       {
         direction: "removed",
-        group: "rule:per-transaction-limit",
+        group: "rule:amount:per-transaction-limit",
         label: "Per transaction limit",
         value: "allow, max 100",
       },
       {
         direction: "added",
-        group: "rule:per-transaction-limit",
+        group: "rule:amount:per-transaction-limit",
         label: "Per transaction limit",
         value: "allow, max 150",
       },
@@ -505,8 +510,18 @@ describe("summarizePolicyChanges field coverage", () => {
     });
     const rows = summarizePolicyChanges(before, after, LABELS);
     expect(rows).toEqual([
-      { direction: "removed", group: "rule:approval-rule", label: "Approvals", value: "grp_1" },
-      { direction: "added", group: "rule:approval-rule", label: "Approvals", value: "grp_2" },
+      {
+        direction: "removed",
+        group: "rule:approval:approval-rule",
+        label: "Approvals",
+        value: "grp_1",
+      },
+      {
+        direction: "added",
+        group: "rule:approval:approval-rule",
+        label: "Approvals",
+        value: "grp_2",
+      },
     ]);
   });
 
@@ -519,8 +534,36 @@ describe("summarizePolicyChanges field coverage", () => {
     });
     const rows = summarizePolicyChanges(before, after, LABELS);
     expect(rows).toEqual([
-      { direction: "removed", group: "rule:always-rule", label: "Always", value: "deny" },
-      { direction: "added", group: "rule:always-rule", label: "Always", value: "allow" },
+      { direction: "removed", group: "rule:always:always-rule", label: "Always", value: "deny" },
+      { direction: "added", group: "rule:always:always-rule", label: "Always", value: "allow" },
+    ]);
+  });
+
+  it("reports a rule kind change as a removal plus an addition, never an item diff", () => {
+    const before = payload({
+      rules: [
+        {
+          id: "sneaky",
+          kind: "asset",
+          assets: ["MintAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+          action: "allow",
+          name: "Allowed assets",
+        },
+      ],
+    });
+    const after = payload({
+      rules: [{ id: "sneaky", kind: "always", action: "allow", name: "Allowed assets" }],
+    });
+    const rows = summarizePolicyChanges(before, after, LABELS);
+    expect(rows).toEqual([
+      {
+        direction: "removed",
+        group: "rule:asset:sneaky",
+        label: "Allowed assets",
+        value: "MintAa…aaaa, allow",
+      },
+      { direction: "result", group: "rule:asset:sneaky", label: "Allowed assets", value: "" },
+      { direction: "added", group: "rule:always:sneaky", label: "Allowed assets", value: "allow" },
     ]);
   });
 
@@ -554,7 +597,7 @@ describe("summarizePolicyChanges field coverage", () => {
     expect(rows).toEqual([
       {
         direction: "removed",
-        group: "rule:allowlist-destinations",
+        group: "rule:destination:allowlist-destinations",
         label: "Allowed destinations",
         value: "Dq73PQ…2KCh",
       },
@@ -591,7 +634,7 @@ describe("groupPolicyChanges", () => {
     expect(groups.map((group) => group.label)).toEqual(["Allow list", "Allow list"]);
     expect(groups.map((group) => group.rows[0].group)).toEqual([
       "destinationAllowlist",
-      "rule:custom-rule",
+      "rule:always:custom-rule",
     ]);
   });
 });

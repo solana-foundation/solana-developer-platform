@@ -126,14 +126,16 @@ function ruleLabel(rule: PolicyRule): string {
 
 /**
  * Identity key for matching a rule across the before/after payloads: the
- * rule's id, or its full serialized shape for rules without one — an id-less
- * rule that changed shows as one removal plus one addition.
+ * rule's kind plus id, or its full serialized shape for rules without an id.
+ * Kind is part of the identity so a rule resubmitted under the same id with
+ * a different kind reads as one removal plus one addition, never as an item
+ * diff that hides the type change.
  *
  * @param rule - The rule to key.
  * @returns The matching key.
  */
 function ruleKey(rule: PolicyRule): string {
-  return rule.id === undefined ? JSON.stringify(rule) : rule.id;
+  return rule.id === undefined ? JSON.stringify(rule) : `${rule.kind}:${rule.id}`;
 }
 
 /**

@@ -6254,6 +6254,34 @@ describe("Payments routes", () => {
     expect(body.error.details?.errors?.rules).toContain("operationType must not be empty");
   });
 
+  it("rejects wallet policy payloads with duplicate rule ids", async () => {
+    const updateRes = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationAllowlist: [],
+          rules: [
+            { id: "duplicated", kind: "always", action: "deny" },
+            { id: "duplicated", kind: "operation_family", families: ["ramp"], action: "allow" },
+          ],
+        }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(400);
+    const body = (await updateRes.json()) as {
+      error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
+    };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.details?.errors?.rules).toContain("Duplicate rule id: duplicated");
+  });
+
   it("executes an approved transfer exactly once after leaving it pending", async () => {
     const sessionId = "ses_ungrouped_payment_approver";
     const approverUserId = "usr_ungrouped_payment_approver";

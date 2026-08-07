@@ -45,7 +45,7 @@ import {
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
   updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
   updateSubscriptionSchema as updateSubscriptionSchemaBase,
-  updateWalletPolicySchema as updateWalletPolicySchemaBase,
+  updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
 } from "../../routes/payments/schemas";
 import {
