@@ -29,7 +29,7 @@ The OpenAPI source in `apps/sdp-api/src/openapi` is the source of truth for the 
 | `apps/sdp-docs` | Public documentation site and generated API reference |
 | `packages/sdp-types` | Shared runtime types and product constants |
 | `packages/sdp-api-integration` | Maintainer-oriented integration tests |
-| `infra/postgres` | Local Postgres setup |
+| `infra/local` | Local Postgres, Redis, and Kora setup |
 | `docs/ops` | Operator and maintainer notes |
 
 ## Local Setup
@@ -52,10 +52,10 @@ For basic devnet development, set:
 SOLANA_RPC_URL=https://api.devnet.solana.com
 ```
 
-Start the local Postgres and Redis services, then the apps:
+Start the local Postgres, Redis, and Kora services, then the apps:
 
 ```bash
-pnpm db:postgres:up
+pnpm infra:up
 pnpm --filter @sdp/api db:postgres:bootstrap
 pnpm dev
 ```

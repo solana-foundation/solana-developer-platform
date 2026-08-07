@@ -176,7 +176,7 @@ export PRIVY_APP_SECRET=your_secret
 ### "Kora is not responding"
 ```bash
 # Ensure Kora is running
-pnpm kora:up
+pnpm infra:up
 
 # Check connectivity
 curl http://127.0.0.1:8080/health

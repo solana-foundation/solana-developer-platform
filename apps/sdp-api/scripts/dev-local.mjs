@@ -200,13 +200,13 @@ try {
       "Postgres",
       databaseUrl,
       5432,
-      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm db:postgres:up`"
+      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm infra:up`"
     ),
     waitForService(
       "Redis",
       redisUrl,
       6379,
-      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm db:redis:up`"
+      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm infra:up`"
     ),
   ]);
 

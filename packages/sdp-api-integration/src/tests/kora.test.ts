@@ -5,7 +5,7 @@
  * Requires Kora to be running locally (docker compose up) or CI environment.
  *
  * Run locally:
- *   pnpm kora:up && pnpm --filter @sdp/api-integration test
+ *   pnpm infra:up && pnpm --filter @sdp/api-integration test
  *
  * Override URL for CI:
  *   KORA_RPC_URL=http://kora:8080 pnpm --filter @sdp/api-integration test

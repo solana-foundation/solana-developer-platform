@@ -10,7 +10,7 @@ SURFPOOL_PID_FILE="${STATE_DIR}/surfpool.pid"
 SURFPOOL_INFO_FILE="${STATE_DIR}/surfpool.json"
 
 KORA_FEE_PAYER_LAMPORTS="${KORA_FEE_PAYER_LAMPORTS:-10000000000}"
-KORA_IMAGE="${KORA_IMAGE:-ghcr.io/solana-foundation/kora:61add05}"
+KORA_IMAGE="${KORA_IMAGE:-ghcr.io/solana-foundation/kora:8249b4a}"
 KORA_PLATFORM="${KORA_PLATFORM:-linux/amd64}"
 KORA_REDIS_PORT="${KORA_REDIS_PORT:-0}"
 if [ -n "${KORA_SURFPOOL_KORA_RPC_URL:-}" ]; then

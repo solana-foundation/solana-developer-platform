@@ -74,16 +74,13 @@ The API exposes these public REST endpoints (all require API key or session toke
    pnpm dev
    ```
 
-   That command starts local Postgres and Redis along with the development
+   That command starts local Postgres, Redis, and Kora along with the development
    processes. To run only the API, start its dependencies and process
    separately:
 
    ```bash
-   # Postgres and Redis (runs in the background)
-   pnpm db:postgres:up
-
-   # Optional: local Kora, only when FEE_PAYMENT_PROVIDER=kora
-   pnpm kora:up
+   # Postgres, Redis, and Kora (runs in the background)
+   pnpm infra:up
 
    # API with team/Doppler configuration (keep this process running)
    pnpm dev:api:local
@@ -224,7 +221,7 @@ pnpm --filter @sdp/api-integration test
 
 **Requires:**
 - Privy credentials (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`)
-- Running Kora instance (`pnpm kora:up`)
+- Running Kora instance (`pnpm infra:up`)
 - Funded Solana devnet account
 
 ## Database Migrations

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node scripts/dev-local.mjs",
     "dev:local": "node scripts/dev-local.mjs",
-    "dev:db": "pnpm -w db:postgres:up && pnpm -w db:postgres:logs",
+    "dev:kora": "pnpm -w infra:up && pnpm -w infra:logs -- kora",
     "dev:webhook": "bash scripts/dev-webhook.sh",
     "build": "node scripts/build-node.mjs",
     "db:migrate:local": "DATABASE_URL=${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} node scripts/migrate-postgres.mjs",

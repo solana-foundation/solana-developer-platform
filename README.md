@@ -32,7 +32,7 @@ Prerequisites:
 - Node.js 22+
 - pnpm 10.16+
 - Git
-- Docker or another Compose-compatible container runtime for local Postgres and Redis
+- Docker or another Compose-compatible container runtime for local Postgres, Redis, and Kora
 
 Install dependencies:
 
@@ -48,10 +48,10 @@ cp apps/sdp-api/.env.local.example apps/sdp-api/.env.local
 
 For local devnet work, set `SOLANA_RPC_URL=https://api.devnet.solana.com` in `apps/sdp-api/.env.local`.
 
-Start the local Postgres and Redis services, then the apps:
+Start the local Postgres, Redis, and Kora services, then the apps:
 
 ```bash
-pnpm db:postgres:up
+pnpm infra:up
 pnpm --filter @sdp/api db:postgres:bootstrap
 pnpm dev
 ```

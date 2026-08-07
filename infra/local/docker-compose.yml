@@ -1,0 +1,60 @@
+name: solana-developer-platform
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sdp
+      POSTGRES_USER: sdp
+      POSTGRES_PASSWORD: sdp
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sdp -d sdp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - sdp-postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Local Kora fee-payment RPC; config and image tag mirror sdp-infra.
+  kora:
+    image: ghcr.io/solana-foundation/kora:8249b4a
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./kora.toml:/app/kora.toml:ro
+      - ./signers.toml:/app/signers.toml:ro
+    environment:
+      RUST_LOG: info
+      SIGNER_PRIVATE_KEY: ${KORA_SIGNER_PRIVATE_KEY}
+    command:
+      - kora
+      - --config
+      - /app/kora.toml
+      - --rpc-url
+      - ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      - rpc
+      - start
+      - --signers-config
+      - /app/signers.toml
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  sdp-postgres-data:
