@@ -106,7 +106,11 @@ export function formatCustodyProviderName(provider: string): string {
 export function getCustodyProviderEntry(
   provider: KnownCustodyProvider
 ): CustodyProviderCatalogEntry {
-  return PROVIDER_CATALOG_BY_ID.get(provider)!;
+  const entry = PROVIDER_CATALOG_BY_ID.get(provider);
+  if (!entry) {
+    throw new Error(`Custody provider missing from the catalog: ${provider}`);
+  }
+  return entry;
 }
 
 export function getCustodyProviderCategory(provider: KnownCustodyProvider): WalletProviderCategory {
