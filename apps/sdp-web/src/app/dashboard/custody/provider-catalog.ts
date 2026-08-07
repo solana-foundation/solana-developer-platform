@@ -4,6 +4,7 @@ import {
   CUSTODY_PROVIDER_CATEGORY_DETAILS,
   CUSTODY_PROVIDER_USE_CASE_LABEL_KEYS,
   type CustodyProvider,
+  type CustodyProviderAvailabilityClass,
   type CustodyProviderCapabilities,
   type CustodyProviderCategory,
   type CustodyProviderSetupField,
@@ -43,13 +44,14 @@ type DashboardCustodyProviderSetupField = CustodyProviderSetupField & {
 type DashboardCustodyProviderStoredCredentialSetup =
   | { mode: "self_service"; fields: readonly DashboardCustodyProviderSetupField[] }
   | { mode: "request_access"; requestAccessUrl: string }
-  | { mode: "unavailable" };
+  | { mode: "none" };
 
 export interface CustodyProviderCatalogEntry {
   id: KnownCustodyProvider;
   label: string;
   descriptionKey: MessageKey;
   category: WalletProviderCategory;
+  availability: CustodyProviderAvailabilityClass;
   visible: boolean;
   technicalCapabilities: CustodyProviderCapabilities;
   useCases: readonly CustodyProviderUseCase[];
@@ -104,7 +106,11 @@ export function formatCustodyProviderName(provider: string): string {
 export function getCustodyProviderEntry(
   provider: KnownCustodyProvider
 ): CustodyProviderCatalogEntry {
-  return PROVIDER_CATALOG_BY_ID.get(provider)!;
+  const entry = PROVIDER_CATALOG_BY_ID.get(provider);
+  if (!entry) {
+    throw new Error(`Custody provider missing from the catalog: ${provider}`);
+  }
+  return entry;
 }
 
 export function getCustodyProviderCategory(provider: KnownCustodyProvider): WalletProviderCategory {
