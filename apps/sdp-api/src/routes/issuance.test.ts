@@ -3884,7 +3884,10 @@ describe("Issuance Routes", () => {
           // reconciles it once the transaction cannot land; handing the headroom back
           // here is what let two mints exceed the cap.
           expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("300000000000");
-          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("failed");
+          // Submission is ambiguous after the point-of-no-return hook. Keep the
+          // transaction pending and its durable audit intent unresolved until
+          // supply reconciliation proves whether the mint landed.
+          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("pending");
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
@@ -4012,6 +4015,126 @@ describe("Issuance Routes", () => {
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
+        }
+      });
+
+      it("repairs settled mint bookkeeping from durable audit evidence on replay", async () => {
+        await seedAblListAddress();
+
+        const idempotencyKey = `idem_${crypto.randomUUID()}`;
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValue(true);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementationOnce(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            return mockMintResult as never;
+          });
+        const updateTransactionSpy = vi
+          .spyOn(TokenService.prototype, "updateTransaction")
+          .mockRejectedValueOnce(new Error("transaction bookkeeping unavailable"));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                "Idempotency-Key": idempotencyKey,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+          const firstBody = (await res.json()) as {
+            data: { transaction: { status: string; signature: string | null } };
+          };
+          expect(firstBody.data.transaction).toMatchObject({
+            status: "confirmed",
+            signature: mockMintResult.signature,
+          });
+
+          const db = getDb(env);
+          const transaction = await db
+            .prepare(
+              "SELECT id, status FROM issuance_transactions WHERE idempotency_key = ? LIMIT 1"
+            )
+            .bind(idempotencyKey)
+            .first<{ id: string; status: string }>();
+          expect(transaction?.status).toBe("pending");
+
+          const intent = await db
+            .prepare(
+              `SELECT resource_id FROM audit_logs
+               WHERE action = 'maintenance' AND resource_type = 'audit_ledger'
+                 AND metadata::jsonb #>> '{target,resourceId}' = ?
+               ORDER BY ledger_sequence DESC LIMIT 1`
+            )
+            .bind(transaction?.id)
+            .first<{ resource_id: string }>();
+          expect(intent?.resource_id).toMatch(/^aint_/);
+
+          const outcome = await db
+            .prepare(
+              `SELECT id, status FROM audit_logs
+               WHERE metadata::jsonb ->> 'auditIntentId' = ?
+               LIMIT 1`
+            )
+            .bind(intent?.resource_id)
+            .first<{ id: string; status: string }>();
+          expect(outcome).toMatchObject({ status: "success" });
+
+          const replay = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                "Idempotency-Key": idempotencyKey,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+          expect(replay.status).toBe(200);
+          const replayBody = (await replay.json()) as {
+            data: { transaction: { status: string; signature: string | null } };
+          };
+          expect(replayBody.data.transaction).toMatchObject({
+            status: "confirmed",
+            signature: mockMintResult.signature,
+          });
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+
+          const repaired = await db
+            .prepare(
+              "SELECT status, signature FROM issuance_transactions WHERE idempotency_key = ? LIMIT 1"
+            )
+            .bind(idempotencyKey)
+            .first<{ status: string; signature: string | null }>();
+          expect(repaired).toMatchObject({
+            status: "confirmed",
+            signature: mockMintResult.signature,
+          });
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+          updateTransactionSpy.mockRestore();
         }
       });
 
