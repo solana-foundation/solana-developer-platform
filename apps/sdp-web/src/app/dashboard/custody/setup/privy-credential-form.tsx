@@ -99,6 +99,14 @@ export function PrivyCredentialForm({
       setCheck({ kind: "failed", message: result.message });
       return;
     }
+    if (result.status === "invalid") {
+      // Nothing left the client, so there is nothing to recover: back to the
+      // editable form with the message. The key is untouched — it was never
+      // spent — and the secret stays typed since no server saw it.
+      onRecoveryLockChange?.(false);
+      setCheck({ kind: "failed", message: result.message });
+      return;
+    }
     // Transport-level uncertainty: the submission may have committed, so the
     // key is kept and the payload is frozen for a verbatim replay.
     onRecoveryLockChange?.(true);

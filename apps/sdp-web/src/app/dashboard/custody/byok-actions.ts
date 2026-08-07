@@ -39,6 +39,10 @@ export type PrivyByokSubmitResult =
   // same credential is the only move that can still converge.
   | { status: "failed"; message: string; providerCredentialId?: string }
   | { status: "retry_unknown"; providerCredentialId: string }
+  // The action rejected the input before sending anything, so nothing can
+  // have committed and the frozen-replay recovery path must not engage —
+  // replaying an unsent payload can only fail the same way.
+  | { status: "invalid"; message: string }
   | { status: "error"; message: string };
 
 function extractApiMessage(error: unknown): { status: number | null; message: string } {
@@ -128,11 +132,13 @@ export async function submitPrivyCredentialAction(
   const appSecret = String(formData.get("appSecret") ?? "");
   const walletLabel = String(formData.get("walletLabel") ?? "").trim();
 
+  // Trimmed-empty fields pass the browser's `required` check but are known
+  // rejects before any request leaves — `invalid`, never the replay path.
   if (!idempotencyKey || !credentialLabel || !appId || !appSecret) {
-    return { status: "error", message: t("DashboardCustody.byokMissingFields") };
+    return { status: "invalid", message: t("DashboardCustody.byokMissingFields") };
   }
   if (scope !== "organization" && scope !== "project") {
-    return { status: "error", message: t("DashboardCustody.byokMissingFields") };
+    return { status: "invalid", message: t("DashboardCustody.byokMissingFields") };
   }
 
   const client = await createSdpApiClient();

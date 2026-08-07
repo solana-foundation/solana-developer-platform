@@ -166,4 +166,15 @@ describe("submitPrivyCredentialAction outcome classification", () => {
     const result = await submitPrivyCredentialAction(submitForm());
     expect(result.status).toBe("error");
   });
+
+  it("rejects whitespace-only fields as invalid without sending anything", async () => {
+    // Whitespace passes the browser's `required` check; the action trims it
+    // away and must not report the pre-request reject as a replayable outcome.
+    const form = submitForm();
+    form.set("credentialLabel", "   ");
+
+    const result = await submitPrivyCredentialAction(form);
+    expect(result.status).toBe("invalid");
+    expect(client.fetch).not.toHaveBeenCalled();
+  });
 });
