@@ -29,6 +29,11 @@ function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function requiresSessionCookie(security: unknown): boolean {
+  if (!Array.isArray(security)) return false;
+  return security.some((requirement) => isRecord(requirement) && "sessionCookie" in requirement);
+}
+
 function dereferenceSchema(schema: unknown, document: JsonRecord): JsonRecord {
   if (!isRecord(schema)) {
     return {};
@@ -249,6 +254,53 @@ function toEndpointId(operationId: string): string {
     .toLowerCase();
 }
 
+interface CatalogEntry {
+  module: PlaygroundModule;
+  op: JsonRecord;
+}
+
+function buildCatalogEntry(
+  pathname: string,
+  method: string,
+  operationInput: JsonRecord,
+  pathParameters: unknown[],
+  document: JsonRecord
+): CatalogEntry | null {
+  const tag = Array.isArray(operationInput.tags) ? operationInput.tags[0] : undefined;
+  const module = typeof tag === "string" ? TAG_TO_MODULE.get(tag) : undefined;
+  if (!module) return null;
+  // Session-cookie ops would 401 under API-key playground auth.
+  if (requiresSessionCookie(operationInput.security)) return null;
+
+  const operationId =
+    typeof operationInput.operationId === "string"
+      ? operationInput.operationId
+      : `${method}-${pathname}`;
+  const rawParameters = [
+    ...pathParameters,
+    ...(Array.isArray(operationInput.parameters) ? operationInput.parameters : []),
+  ];
+  const parameters = rawParameters
+    .map((parameter) => dereferenceSchema(parameter, document))
+    .filter((parameter) => parameter.in === "path" || parameter.in === "query");
+
+  return {
+    module,
+    op: {
+      id: toEndpointId(operationId),
+      operationId,
+      title: typeof operationInput.summary === "string" ? operationInput.summary : operationId,
+      method: method.toUpperCase() as PlaygroundMethod,
+      path: buildPathWithQuery(pathname, parameters),
+      pathFields: rawParameters
+        .map((parameter) => fieldFromParameter(parameter, document))
+        .filter((field): field is JsonRecord => field !== null),
+      bodyFields: buildBodyFields(operationInput, document),
+      expectedResponse: buildExpectedResponse(operationInput, document),
+    },
+  };
+}
+
 function generateCatalog(): string {
   const document = createPublicOpenApiDocument() as unknown as JsonRecord;
   const paths = isRecord(document.paths) ? document.paths : {};
@@ -260,47 +312,13 @@ function generateCatalog(): string {
   };
 
   for (const [pathname, pathItemInput] of Object.entries(paths)) {
-    if (!isRecord(pathItemInput)) {
-      continue;
-    }
-
+    if (!isRecord(pathItemInput)) continue;
     const pathParameters = Array.isArray(pathItemInput.parameters) ? pathItemInput.parameters : [];
 
     for (const [method, operationInput] of Object.entries(pathItemInput)) {
-      if (!HTTP_METHODS.has(method) || !isRecord(operationInput)) {
-        continue;
-      }
-
-      const tag = Array.isArray(operationInput.tags) ? operationInput.tags[0] : undefined;
-      const module = typeof tag === "string" ? TAG_TO_MODULE.get(tag) : undefined;
-      if (!module) {
-        continue;
-      }
-
-      const operationId =
-        typeof operationInput.operationId === "string"
-          ? operationInput.operationId
-          : `${method}-${pathname}`;
-      const rawParameters = [
-        ...pathParameters,
-        ...(Array.isArray(operationInput.parameters) ? operationInput.parameters : []),
-      ];
-      const parameters = rawParameters
-        .map((parameter) => dereferenceSchema(parameter, document))
-        .filter((parameter) => parameter.in === "path" || parameter.in === "query");
-
-      modules[module].push({
-        id: toEndpointId(operationId),
-        operationId,
-        title: typeof operationInput.summary === "string" ? operationInput.summary : operationId,
-        method: method.toUpperCase() as PlaygroundMethod,
-        path: buildPathWithQuery(pathname, parameters),
-        pathFields: rawParameters
-          .map((parameter) => fieldFromParameter(parameter, document))
-          .filter((field): field is JsonRecord => field !== null),
-        bodyFields: buildBodyFields(operationInput, document),
-        expectedResponse: buildExpectedResponse(operationInput, document),
-      });
+      if (!HTTP_METHODS.has(method) || !isRecord(operationInput)) continue;
+      const entry = buildCatalogEntry(pathname, method, operationInput, pathParameters, document);
+      if (entry) modules[entry.module].push(entry.op);
     }
   }
 

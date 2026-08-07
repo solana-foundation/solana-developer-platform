@@ -47,7 +47,7 @@ function getUnauthenticatedUrl(req: NextRequest): string {
  * reconcileProjectCookieAction already match on.
  */
 async function resolveDefaultProjectId(
-  getToken: (options?: { template?: string }) => Promise<string | null>
+  getToken: () => Promise<string | null>
 ): Promise<string | null> {
   const projects = await retryProjectBootstrap({
     load: async () => {

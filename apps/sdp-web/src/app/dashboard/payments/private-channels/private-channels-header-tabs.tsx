@@ -8,11 +8,11 @@ import { useTranslations } from "@/i18n/provider";
 //   1. Create app/dashboard/payments/private-channels/<slug>/page.tsx
 //   2. Append { id, labelKey, href, requiresActive: true } to the list.
 //
-// Overview is always visible (even when no instance is connected — it surfaces the
-// "Not connected" state and a connect link). There is no Instance or Channels tab:
-// the instance (connect/disconnect) and channels are reached from links in the
-// Overview's Connected-instance card. The Events feed has no tab either — it's
-// reached from the Overview's "All activity" link.
+// Overview and API Playground are always visible, including before an instance is
+// connected. There is no Instance or Channels tab: the instance
+// (connect/disconnect) and channels are reached from links in the Overview's
+// Connected-instance card. The Events feed has no tab either — it's reached from
+// the Overview's "All activity" link.
 const TABS = [
   {
     id: "overview",
@@ -44,6 +44,14 @@ const TABS = [
     href: "/dashboard/payments/private-channels/withdraw",
     requiresActive: true,
   },
+  {
+    id: "api-playground",
+    labelKey: "DashboardPrivateChannels.tabs.apiPlayground",
+    href: "/dashboard/payments/private-channels/api-playground",
+    // Always visible: the /instance endpoints are what the operator needs
+    // before an instance is connected.
+    requiresActive: false,
+  },
 ] as const;
 
 interface Props {
@@ -55,8 +63,7 @@ export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
   const pathname = usePathname();
   const t = useTranslations();
 
-  // When no instance is connected only Overview is visible; still render the strip so the
-  // sub-views (e.g. Instance) keep a consistent header and a way back to the Overview.
+  // Keep the always-visible destinations available before an instance is connected.
   const visible = TABS.filter((tab) => isConnected || !tab.requiresActive);
   if (visible.length === 0) return null;
 
