@@ -356,10 +356,12 @@ const WELL_KNOWN_TOKEN_BY_NAME: ReadonlyMap<string, WellKnownTokenSymbol> = new 
  * a single transfer type. An exact match on either form therefore silently drops
  * the rows written the other way, so a filter has to accept both.
  *
- * Symbols resolve case-insensitively, and both the catalogue key and the display
- * symbol are emitted. Matching the key exactly made this asymmetric for every
- * mixed-case asset: the mint expanded to `JitoSOL`, but `JitoSOL` did not expand
- * back to the mint, so filtering by the symbol still dropped the mint rows.
+ * Any form resolves to the catalogue entry, and every form is emitted: the
+ * upper-case catalogue key (what the request schema normalises symbols to), the
+ * display symbol, and each cluster's mint. Anything less is asymmetric for
+ * mixed-case assets — `JitoSOL` did not expand back to the mint, and a mint
+ * did not expand to the `JITOSOL` key — so one stored form always slipped
+ * through the filter.
  *
  * @param token - A mint address or a well-known symbol, in any casing.
  * @returns The distinct forms to match, always including the input itself.
@@ -372,12 +374,12 @@ export function tokenFilterAliases(token: string): string[] {
 
   const aliases = new Set<string>([trimmed]);
 
+  // Resolve to one catalogue entry whichever form arrived, then emit every
+  // form the ledger may hold for it: the key, the display symbol and each
+  // cluster's mint. Expanding only some of these from the mint branch left
+  // mint filters blind to rows stored under the schema-normalised key.
   const byMint = WELL_KNOWN_TOKEN_BY_MINT.get(trimmed);
-  if (byMint) {
-    aliases.add(byMint.symbol);
-  }
-
-  const key = WELL_KNOWN_TOKEN_BY_NAME.get(trimmed.toLowerCase());
+  const key = WELL_KNOWN_TOKEN_BY_NAME.get((byMint?.symbol ?? trimmed).toLowerCase());
   if (key) {
     const entry = WELL_KNOWN_TOKENS[key];
     aliases.add(key);

@@ -62,6 +62,21 @@ describe("tokenFilterAliases", () => {
     }
   });
 
+  it("matches the schema-normalised key rows when given a mint", () => {
+    // paymentTokenSchema upper-cases symbols before storage-bound paths, so the
+    // ledger can hold JITOSOL where the display form is JitoSOL. A mint filter
+    // has to reach those rows too.
+    const jitoMint = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
+    const aliases = tokenFilterAliases(jitoMint);
+    expect(aliases).toContain("JITOSOL");
+    expect(aliases).toContain("JitoSOL");
+  });
+
+  it("expands a mint and its symbol to the same alias set", () => {
+    const jitoMint = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
+    expect(new Set(tokenFilterAliases(jitoMint))).toEqual(new Set(tokenFilterAliases("JitoSOL")));
+  });
+
   it("resolves a symbol whatever casing it arrives in", () => {
     const jitoMint = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
     for (const spelling of ["JITOSOL", "jitosol", "JitoSOL", "jItOsOl"]) {
