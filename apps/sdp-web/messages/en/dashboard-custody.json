@@ -402,6 +402,13 @@
     "policyReviewDailyTotal": "Daily total {amount}",
     "policyReviewPreservedRules": "Includes {count} existing advanced rules.",
     "policyReviewNoRestrictions": "Nothing is restricted yet — activating would change nothing.",
+    "policyCommitDrawerTitle": "Review changes",
+    "policyCommitDailyLimit": "Daily limit",
+    "policyCommitEmpty": "Empty {label}",
+    "policyCommitNoChanges": "No changes to display — only ordering changed.",
+    "policyCommitMessage": "Commit message (optional)",
+    "policyCommitMessagePlaceholder": "Describe why you are making this change…",
+    "policyCommitMessageHelp": "This message will be saved with the policy revision and visible to your team.",
     "policySaveDraft": "Save draft",
     "policyActivateControls": "Activate controls",
     "policyControlsActive": "Controls active",
@@ -480,7 +487,7 @@
     "onboardingDescription": "Choose the infrastructure your organization will use.",
     "onboardingChooseRpc": "Choose your RPC provider",
     "onboardingChooseCustody": "Choose your custody provider",
-    "onboardingProvidersChangeLater": "You can change providers at any time in Settings.",
+    "onboardingProvidersChangeLater": "You can change your RPC provider later in Settings. Custody providers are connected from Wallets.",
     "onboardingNoRpcProviders": "No RPC providers are available for this organization in the current environment. Contact your SDP administrator before continuing.",
     "onboardingNoCustodyProviders": "No custody providers are available for this organization in the current environment. Contact your SDP administrator before continuing.",
     "onboardingFinish": "Finish setup",
@@ -628,7 +635,6 @@
     "policyRevisionsEmpty": "No policy revisions yet",
     "policyRevisionsEmptyDescription": "A revision will appear after wallet controls are saved.",
     "policyRevisionsChanges": "Changes",
-    "policyRevisionsNoMessage": "No revision message",
     "policyRevisionNumber": "Revision #{number}",
     "policyRevisionsSystem": "System",
     "policyRevisionsActive": "Active",
@@ -791,7 +797,6 @@
     "onboardingDoneWalletHeading": "Your first wallet",
     "onboardingDoneGoToDashboard": "Go to dashboard",
     "onboardingDoneViewWallets": "View wallets",
-    "providerStatusComingLater": "Coming later",
     "providerRequestAccess": "Request access"
   }
 }

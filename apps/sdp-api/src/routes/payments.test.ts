@@ -6117,6 +6117,7 @@ describe("Payments routes", () => {
           destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
           maxTransferAmount: "5",
           defaultAction: "allow",
+          commitMessage: "  Restrict raw signing and large transfers.  ",
           rules,
         }),
       },
@@ -6153,19 +6154,21 @@ describe("Payments routes", () => {
 
     const revisionRows = await getDb(env)
       .prepare(
-        `SELECT revision_number, default_action, rules
+        `SELECT revision_number, default_action, commit_message, rules
          FROM wallet_control_profile_revisions
          ORDER BY revision_number ASC`
       )
       .all<{
         revision_number: number;
         default_action: string;
+        commit_message: string | null;
         rules: unknown;
       }>();
     expect(revisionRows.results).toHaveLength(1);
     expect(revisionRows.results[0]).toMatchObject({
       revision_number: 1,
       default_action: "allow",
+      commit_message: "Restrict raw signing and large transfers.",
     });
 
     const secondRes = await app.request(
@@ -6249,6 +6252,34 @@ describe("Payments routes", () => {
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toContain("Invalid request body");
     expect(body.error.details?.errors?.rules).toContain("operationType must not be empty");
+  });
+
+  it("rejects wallet policy payloads with duplicate rule ids", async () => {
+    const updateRes = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationAllowlist: [],
+          rules: [
+            { id: "duplicated", kind: "always", action: "deny" },
+            { id: "duplicated", kind: "operation_family", families: ["ramp"], action: "allow" },
+          ],
+        }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(400);
+    const body = (await updateRes.json()) as {
+      error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
+    };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.details?.errors?.rules).toContain("Duplicate rule id: duplicated");
   });
 
   it("executes an approved transfer exactly once after leaving it pending", async () => {
@@ -8023,6 +8054,48 @@ describe("Payments routes", () => {
   describe("list transfers", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+    });
+
+    it("matches a token filter against every form the ledger stores it in", async () => {
+      // pt.token is written inconsistently: the same asset is a mint on some rows
+      // and a bare symbol on others. An exact match returned 2 for the symbol and
+      // 1 for the mint when the right answer was 3, so either spelling has to
+      // answer with all of them. This is the HTTP hop over the repository fix.
+      const solMint = "So11111111111111111111111111111111111111112";
+      await seedTransfer({ id: "xfr_tok_sym_1", status: "confirmed", token: "SOL" });
+      await seedTransfer({ id: "xfr_tok_sym_2", status: "confirmed", token: "SOL" });
+      await seedTransfer({ id: "xfr_tok_mint_1", status: "confirmed", token: solMint });
+
+      for (const spelling of ["SOL", solMint]) {
+        const res = await app.request(
+          `/v1/payments/transfers?token=${encodeURIComponent(spelling)}`,
+          { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: Array<{ id: string }> };
+        expect(body.data.map((row) => row.id).sort()).toEqual([
+          "xfr_tok_mint_1",
+          "xfr_tok_sym_1",
+          "xfr_tok_sym_2",
+        ]);
+      }
+    });
+
+    it("does not widen a token filter to an unrelated asset", async () => {
+      await seedTransfer({ id: "xfr_tok_sol", status: "confirmed", token: "SOL" });
+      await seedTransfer({ id: "xfr_tok_usdc", status: "confirmed", token: "USDC" });
+
+      const res = await app.request(
+        "/v1/payments/transfers?token=SOL",
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string }> };
+      expect(body.data.map((row) => row.id)).toEqual(["xfr_tok_sol"]);
     });
 
     it("returns confirmed + pending transfers when wallet filter is provided", async () => {

@@ -249,6 +249,7 @@ async function seedPoliciesAndEvaluations() {
     profileId,
     rules: [{ id: "review-ramps", kind: "operation_family", family: "ramp" }],
     defaultAction: "review",
+    commitMessage: "Review ramp operations.",
     createdBy: TEST_USER_ID,
   });
   activeRevisionId = activeRevision?.id ?? "";
@@ -474,13 +475,28 @@ describe("Wallet policy audit detail routes", () => {
     const body = (await response.json()) as {
       data: {
         profile: { id: string; activeRevisionId: string };
-        revisions: Array<{ id: string; revisionNumber: number; isActive: boolean }>;
+        revisions: Array<{
+          id: string;
+          revisionNumber: number;
+          commitMessage: string | null;
+          isActive: boolean;
+        }>;
       };
     };
     expect(body.data.profile).toMatchObject({ id: profileId, activeRevisionId });
     expect(body.data.revisions).toEqual([
-      expect.objectContaining({ id: activeRevisionId, revisionNumber: 2, isActive: true }),
-      expect.objectContaining({ id: firstRevisionId, revisionNumber: 1, isActive: false }),
+      expect.objectContaining({
+        id: activeRevisionId,
+        revisionNumber: 2,
+        commitMessage: "Review ramp operations.",
+        isActive: true,
+      }),
+      expect.objectContaining({
+        id: firstRevisionId,
+        revisionNumber: 1,
+        commitMessage: null,
+        isActive: false,
+      }),
     ]);
   });
 
