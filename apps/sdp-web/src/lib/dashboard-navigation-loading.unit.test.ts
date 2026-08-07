@@ -45,6 +45,8 @@ describe("dashboard loading route", () => {
     ["/dashboard/approvals", "approvals-list"],
     ["/dashboard/approvals/request-1", "approval-detail"],
     ["/dashboard/settings", "settings"],
+    ["/dashboard/integrations", "integrations"],
+    ["/dashboard/integrations/privy", "integration-detail"],
     ["/dashboard/allowlist", "allowlist"],
   ])("maps %s to its exact route skeleton", (pathname, route) => {
     expect(resolveDashboardLoadingRoute(pathname)).toBe(route);
@@ -104,6 +106,18 @@ describe("dashboard navigation intent", () => {
         ...input,
       })
     ).toBeNull();
+  });
+});
+
+describe("integrations route", () => {
+  it("keeps the Integrations nav item lit across its subtree", () => {
+    expect(isDashboardNavItemActive("/dashboard/integrations", "/dashboard/integrations")).toBe(
+      true
+    );
+    expect(
+      isDashboardNavItemActive("/dashboard/integrations/privy", "/dashboard/integrations")
+    ).toBe(true);
+    expect(isDashboardNavItemActive("/dashboard/wallets", "/dashboard/integrations")).toBe(false);
   });
 });
 

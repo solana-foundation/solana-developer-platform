@@ -8,6 +8,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   policies: "/dashboard/policies",
   approvals: "/dashboard/approvals",
   settings: "/dashboard/settings",
+  integrations: "/dashboard/integrations",
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
@@ -53,6 +54,8 @@ export type DashboardLoadingRoute =
   | "approvals-list"
   | "approval-detail"
   | "settings"
+  | "integrations"
+  | "integration-detail"
   | "allowlist";
 
 function normalizePathname(pathname: string): string {
@@ -122,6 +125,8 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/approvals") return "approvals-list";
   if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
   if (pathname === "/dashboard/settings") return "settings";
+  if (pathname === "/dashboard/integrations") return "integrations";
+  if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) return "integration-detail";
   if (pathname === "/dashboard/allowlist") return "allowlist";
 
   return null;
@@ -240,6 +245,11 @@ export function isDashboardNavItemActive(pathname: string, href: string): boolea
     // allocation card, so Home keeps the highlight rather than the sidebar going
     // blank while you are on it.
     return pathname === "/dashboard" || pathname === "/dashboard/tokens";
+  }
+  if (href === "/dashboard/integrations") {
+    return (
+      pathname === "/dashboard/integrations" || pathname.startsWith("/dashboard/integrations/")
+    );
   }
   if (href === "/dashboard/wallets") {
     return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
