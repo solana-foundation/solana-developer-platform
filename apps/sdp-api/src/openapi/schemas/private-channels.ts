@@ -528,6 +528,25 @@ export const privateChannelEventListSchema = z.object({
     .openapi({ description: "Opaque cursor for the next page; null when there are no more." }),
 });
 
+export const privateChannelEventReferencesSchema = z
+  .object({
+    references: z.record(z.string(), z.string()).openapi({
+      description:
+        "Flat id→name dictionary for event enrichment. Keys are channel ids, wallet pubkeys/ids, private-channel-user ids, SDP user ids, instance ids, and issued-token mint addresses.",
+      example: {
+        pch_treasury: "Treasury",
+        TreasuryPubkey1111111111111111111111111: "Treasury Wallet",
+        usr_ada: "Ada Lovelace",
+        pci_production: "https://gateway.example",
+        EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: "USDC",
+      },
+    }),
+  })
+  .openapi({
+    description:
+      "Display-name references for Private Channels events (channels, wallets, members, instances, tokens).",
+  });
+
 export const privateChannelEventsQuerySchema = z.object({
   family: privateChannelEventFamilySchema.optional().openapi({
     param: { name: "family", in: "query" },
