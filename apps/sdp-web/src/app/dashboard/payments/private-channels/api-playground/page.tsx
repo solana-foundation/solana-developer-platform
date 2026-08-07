@@ -14,11 +14,9 @@ export default async function PrivateChannelsApiPlaygroundPage() {
   const client = await createSdpApiClient();
   const apiKeysResult = await fetchActiveApiKeys(client.request);
 
-  // The Private Channels layout renders `<> tabs + {children} </>` inside the
-  // dashboard shell's `flex flex-col min-h-0 flex-1` region. To fill the
-  // remaining vertical space (below the tab bar), this page must be a flex
-  // child that takes flex-1 — h-full would collapse to 0 here because the
-  // parent has no fixed height.
+  // The Private Channels layout gives direct children a definite flex height below
+  // the tab strip. Take that remaining space so the playground can own its internal
+  // request/response scrolling instead of growing beyond the viewport.
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col">
       <PrivateChannelsPlayground

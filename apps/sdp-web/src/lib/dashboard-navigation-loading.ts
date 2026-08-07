@@ -22,6 +22,7 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
 
 export type DashboardLoadingRoute =
   | "home"
+  | "token-holdings"
   | "wallets-overview"
   | "wallet-setup"
   | "wallet-detail"
@@ -83,6 +84,7 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
 export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoadingRoute | null {
   const pathname = normalizePathname(rawPathname);
   if (pathname === "/dashboard") return "home";
+  if (pathname === "/dashboard/tokens") return "token-holdings";
 
   const walletRoute = resolveWalletLoadingRoute(pathname);
   if (walletRoute) return walletRoute;
@@ -234,7 +236,10 @@ export function announceDashboardNavigation(targetHref: string): void {
  */
 export function isDashboardNavItemActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") {
-    return pathname === "/dashboard";
+    // Holdings has no nav entry of its own and is only reached from the home
+    // allocation card, so Home keeps the highlight rather than the sidebar going
+    // blank while you are on it.
+    return pathname === "/dashboard" || pathname === "/dashboard/tokens";
   }
   if (href === "/dashboard/wallets") {
     return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");

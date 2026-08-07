@@ -242,7 +242,16 @@ function useTransactionDetail(selected: PaymentTransferSummary | null) {
   return { detail, error, loading };
 }
 
-function EmptyState({ filtered, onClear }: { filtered: boolean; onClear: () => void }) {
+function EmptyState({
+  filtered,
+  assetFiltered,
+  onClear,
+}: {
+  filtered: boolean;
+  /** An asset filter is active — usually arrived at from a holding on the home card. */
+  assetFiltered: boolean;
+  onClear: () => void;
+}) {
   const t = useTranslations();
   return (
     <ListEmptyState
@@ -252,6 +261,12 @@ function EmptyState({ filtered, onClear }: { filtered: boolean; onClear: () => v
           ? "DashboardPayments.transactions.noMatches"
           : "DashboardPayments.transactions.emptyProject"
       )}
+      // Balances come from the chain and this table comes from SDP's ledger, so a
+      // token can legitimately hold value here and have nothing to list. Opening
+      // this view from a holding makes that gap look like a bug unless it is said.
+      description={
+        assetFiltered ? t("DashboardPayments.transactions.noAssetMatchesDescription") : undefined
+      }
       action={
         filtered ? (
           <Button type="button" variant="secondary" onClick={onClear}>
@@ -489,7 +504,11 @@ export function TransactionsResults({
       aria-busy={isPending}
     >
       {result.transfers.length === 0 ? (
-        <EmptyState filtered={filtered} onClear={clearFilters} />
+        <EmptyState
+          filtered={filtered}
+          assetFiltered={Boolean(filters.asset)}
+          onClear={clearFilters}
+        />
       ) : (
         <>
           <DesktopTable

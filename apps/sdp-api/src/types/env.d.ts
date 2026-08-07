@@ -299,6 +299,8 @@ declare module "hono" {
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;
+    approvedWalletOperationId?: string;
+    approvedWalletOperationAttemptId?: string;
     apiKey?: {
       id: string;
       organizationId: string;

@@ -615,6 +615,9 @@
                   "amount": "example",
                   "destination": "example",
                   "status": "pending_approval",
+                  "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                  "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                  "executionError": "example",
                   "createdAt": "2025-01-01T00:00:00.000Z",
                   "updatedAt": "2025-01-01T00:00:00.000Z"
                 },
@@ -687,6 +690,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -758,6 +764,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -829,6 +838,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -900,6 +912,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },

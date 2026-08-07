@@ -5,9 +5,10 @@
  * Supports DB-backed default resolution with project → organization fallback.
  */
 
-import { SigningError, type SignStatus } from "@sdp/custody/signing";
+import type { SignStatus } from "@sdp/custody/signing";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
+import { selectCustodyConfigTarget } from "@/services/domain/signing/custody-runtime-target";
 import type {
   CreateSigningRequestParams,
   SigningConfigStore,
@@ -103,7 +104,8 @@ interface CustodyScopeDefaultRow {
   id: string;
   organization_id: string;
   project_id: string | null;
-  default_custody_config_id: string;
+  default_custody_config_id: string | null;
+  default_custody_connection_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -219,7 +221,7 @@ export class CustodyConfigStore implements SigningConfigStore {
    */
   async getDefaultConfig(orgId: string, projectId?: string): Promise<SigningConfigRecord | null> {
     const scopeDefault = await this.getScopeDefaultRow(orgId, projectId ?? null);
-    if (!scopeDefault) {
+    if (!scopeDefault?.default_custody_config_id) {
       return null;
     }
 
@@ -244,48 +246,11 @@ export class CustodyConfigStore implements SigningConfigStore {
     projectId: string | undefined,
     configId: string
   ): Promise<void> {
-    const normalizedProjectId = projectId ?? null;
-
-    const matchingConfig = await this.db
-      .prepare(
-        normalizedProjectId
-          ? `SELECT id FROM custody_configs
-             WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
-             LIMIT 1`
-          : `SELECT id FROM custody_configs
-             WHERE id = ? AND organization_id = ? AND project_id IS NULL AND status = 'active'
-             LIMIT 1`
-      )
-      .bind(...(normalizedProjectId ? [configId, orgId, normalizedProjectId] : [configId, orgId]))
-      .first<{ id: string }>();
-
-    if (!matchingConfig) {
-      throw new SigningError(
-        "Default config must be active and match the requested scope",
-        "NOT_FOUND"
-      );
-    }
-
-    const scopeDefault = await this.getScopeDefaultRow(orgId, normalizedProjectId);
-    if (scopeDefault) {
-      await this.db
-        .prepare(
-          `UPDATE custody_scope_defaults
-           SET default_custody_config_id = ?, updated_at = datetime('now')
-           WHERE id = ?`
-        )
-        .bind(configId, scopeDefault.id)
-        .run();
-      return;
-    }
-
-    await this.db
-      .prepare(
-        `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind(`csd_${crypto.randomUUID()}`, orgId, normalizedProjectId, configId)
-      .run();
+    await selectCustodyConfigTarget(this.db, {
+      organizationId: orgId,
+      projectId,
+      configId,
+    });
   }
 
   /**

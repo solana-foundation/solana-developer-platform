@@ -39,6 +39,31 @@ return {1, current, previous}
 
 const ADMIT_SLIDING_WINDOW_SHA = createHash("sha1").update(ADMIT_SLIDING_WINDOW_LUA).digest("hex");
 
+const COMPARE_AND_SET_LUA = `
+local current = redis.call('GET', KEYS[1])
+if ARGV[1] == 'missing' then
+  if current ~= false then
+    return 0
+  end
+elseif current ~= ARGV[2] then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[3])
+return 1
+`;
+
+const COMPARE_AND_SET_SHA = createHash("sha1").update(COMPARE_AND_SET_LUA).digest("hex");
+
+const COMPARE_AND_DELETE_LUA = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return 0
+end
+redis.call('DEL', KEYS[1])
+return 1
+`;
+
+const COMPARE_AND_DELETE_SHA = createHash("sha1").update(COMPARE_AND_DELETE_LUA).digest("hex");
+
 // One Promise<Redis> per URL, shared by every RedisKVStore at that backend.
 // Storing the Promise (not the resolved client) means concurrent first-
 // callers share one in-flight import + `new Redis(...)` instead of opening
@@ -116,6 +141,37 @@ export class RedisKVStore implements KVStore {
   async delete(key: string): Promise<void> {
     const client = await this.clientPromise;
     await client.del(this.namespaced(key));
+  }
+
+  async compareAndSet(key: string, expected: string | null, value: string): Promise<boolean> {
+    const client = await this.clientPromise;
+    const args = expected === null ? ["missing", "", value] : ["present", expected, value];
+    let result: unknown;
+    try {
+      result = await client.evalsha(COMPARE_AND_SET_SHA, 1, this.namespaced(key), ...args);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("NOSCRIPT")) {
+        result = await client.eval(COMPARE_AND_SET_LUA, 1, this.namespaced(key), ...args);
+      } else {
+        throw err;
+      }
+    }
+    return result === 1;
+  }
+
+  async compareAndDelete(key: string, expected: string): Promise<boolean> {
+    const client = await this.clientPromise;
+    let result: unknown;
+    try {
+      result = await client.evalsha(COMPARE_AND_DELETE_SHA, 1, this.namespaced(key), expected);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("NOSCRIPT")) {
+        result = await client.eval(COMPARE_AND_DELETE_LUA, 1, this.namespaced(key), expected);
+      } else {
+        throw err;
+      }
+    }
+    return result === 1;
   }
 
   async admitSlidingWindow(

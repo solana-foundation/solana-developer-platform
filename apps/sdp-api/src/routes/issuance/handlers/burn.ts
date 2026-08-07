@@ -22,6 +22,10 @@ import {
 } from "../helpers";
 import { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
@@ -204,6 +208,7 @@ export const prepareBurn = async (c: AppContext) => {
       source: parsed.data.burn.source,
       amount: parsed.data.burn.amount,
       memo: parsed.data.burn.memo,
+      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     serializedTx: prepared.serializedTx,
     initiatedByKeyId: auth.id,
@@ -289,15 +294,38 @@ export const executeBurn = async (c: AppContext) => {
       source: parsed.data.burn.source,
       amount: parsed.data.burn.amount,
       memo: parsed.data.burn.memo,
+      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     initiatedByKeyId: auth.id,
     idempotencyKey: idempotencyMetadata.idempotencyKey,
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    return success(c, { transaction: tx });
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "burn",
+    });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.burn.amount);
+    }
+    return success(c, { transaction });
   }
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "burn",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      source: parsed.data.burn.source,
+      amount: parsed.data.burn.amount,
+      mode: "execute",
+    },
+  });
+  let onChainEffectCompleted = false;
   try {
     // Get custody signer (via 3-tier resolution)
     const signer = await createOrgSigner(
@@ -324,42 +352,47 @@ export const executeBurn = async (c: AppContext) => {
       amount: mosaicAmount,
       authority: signer,
     });
+    onChainEffectCompleted = true;
 
-    // Update transaction with confirmation
-    const updatedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
+    const evidence = { signature: result.signature, slot: Number(result.slot) };
+
+    // Persist the settlement first so an audit-outcome outage cannot leave a
+    // completed operation looking pending. If this write is unavailable, the
+    // independent audit outcome below remains the replay-recovery fallback.
+    const updatedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence,
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
 
     // Update token supply
-    await tokenService.updateSupply(tokenId, parsed.data.burn.amount, "burn");
-
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "burn",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
-      metadata: {
-        tokenId,
-        source: parsed.data.burn.source,
-        amount: parsed.data.burn.amount,
-        signature: result.signature,
-        slot: result.slot.toString(),
-        mode: "execute",
-      },
-    });
+    await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.burn.amount);
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
-    // Update transaction as failed
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error:
-        toBurnOperationAppError(error)?.message ??
-        (error instanceof Error ? error.message : "Unknown error"),
-    });
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: {
+          error:
+            toBurnOperationAppError(error)?.message ??
+            (error instanceof Error ? error.message : "Unknown error"),
+        },
+      });
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error:
+          toBurnOperationAppError(error)?.message ??
+          (error instanceof Error ? error.message : "Unknown error"),
+      });
+    }
 
     const appError = toBurnOperationAppError(error);
     if (appError) {
