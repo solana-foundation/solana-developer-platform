@@ -10,30 +10,33 @@ describe("custody provider catalog", () => {
     expect(CUSTODY_PROVIDER_DISPLAY_STATUSES).toEqual([
       "available",
       "active",
-      "pending",
       "request_access",
-      "unavailable",
+      "not_configured",
     ]);
   });
 
-  it("publishes every existing provider with its stored-credential setup mode", () => {
+  it("publishes every provider with its launch classification and setup mode", () => {
     expect(
       CUSTODY_PROVIDER_CATALOG.map((provider) => ({
         id: provider.id,
         visible: provider.visible,
+        availability: provider.availability,
         mode: provider.storedCredentialSetup.mode,
       }))
     ).toEqual([
-      { id: "local", visible: true, mode: "unavailable" },
-      { id: "privy", visible: true, mode: "self_service" },
-      { id: "fireblocks", visible: true, mode: "request_access" },
-      { id: "coinbase_cdp", visible: true, mode: "unavailable" },
-      { id: "para", visible: true, mode: "unavailable" },
-      { id: "turnkey", visible: true, mode: "unavailable" },
-      { id: "dfns", visible: true, mode: "unavailable" },
-      { id: "ibm_haven", visible: true, mode: "unavailable" },
-      { id: "anchorage", visible: true, mode: "unavailable" },
-      { id: "utila", visible: true, mode: "unavailable" },
+      // The launch classification from the remove-signup-waitlist decision map.
+      // Fireblocks is the only provider with an established request route;
+      // routes for the other manual providers are HOO-775.
+      { id: "local", visible: true, availability: "general", mode: "none" },
+      { id: "privy", visible: true, availability: "general", mode: "self_service" },
+      { id: "fireblocks", visible: true, availability: "manual", mode: "request_access" },
+      { id: "coinbase_cdp", visible: true, availability: "general", mode: "none" },
+      { id: "para", visible: true, availability: "general", mode: "none" },
+      { id: "turnkey", visible: true, availability: "general", mode: "none" },
+      { id: "dfns", visible: true, availability: "manual", mode: "none" },
+      { id: "ibm_haven", visible: true, availability: "manual", mode: "none" },
+      { id: "anchorage", visible: true, availability: "manual", mode: "none" },
+      { id: "utila", visible: true, availability: "manual", mode: "none" },
     ]);
   });
 
