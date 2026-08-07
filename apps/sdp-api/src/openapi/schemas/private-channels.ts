@@ -422,18 +422,24 @@ export const privateChannelTransferListSchema = z.object({
   transfers: z.array(privateChannelTransferSchema),
 });
 
-const privateChannelTransferRecipientWalletSchema = z.object({
-  id: z.string().openapi({ description: "Opaque verified-wallet id." }),
-  pubkey: solanaAddressSchema,
-});
-
-const privateChannelTransferRecipientSchema = z.object({
-  privateChannelUserId: z.string(),
-  userId: z.string(),
-  email: z.string(),
-  name: z.string().nullable(),
-  wallets: z.array(privateChannelTransferRecipientWalletSchema),
-});
+const privateChannelTransferRecipientSchema = z
+  .object({
+    id: z.string().openapi({ description: "Opaque verified-wallet id." }),
+    pubkey: solanaAddressSchema,
+    walletName: z.string().nullable().openapi({
+      description: "User-assigned custody wallet name, when available.",
+    }),
+    privateChannelUserId: z.string().openapi({
+      description: "Opaque private-channel member id that owns this verified wallet.",
+    }),
+    isSelf: z.boolean().openapi({
+      description: "True when the wallet belongs to the requesting member.",
+    }),
+  })
+  .openapi({
+    description:
+      "One verified wallet that may receive a transfer. A member holding several verified wallets appears once per wallet. Owner identity (email, SDP user id, display name) is not included.",
+  });
 
 export const privateChannelTransferRecipientListSchema = z.object({
   recipients: z.array(privateChannelTransferRecipientSchema),
@@ -527,6 +533,25 @@ export const privateChannelEventListSchema = z.object({
     .nullable()
     .openapi({ description: "Opaque cursor for the next page; null when there are no more." }),
 });
+
+export const privateChannelEventReferencesSchema = z
+  .object({
+    references: z.record(z.string(), z.string()).openapi({
+      description:
+        "Flat id→name dictionary for event enrichment. Keys are channel ids, wallet pubkeys/ids, private-channel-user ids, SDP user ids, instance ids, and issued-token mint addresses.",
+      example: {
+        pch_treasury: "Treasury",
+        TreasuryPubkey1111111111111111111111111: "Treasury Wallet",
+        usr_ada: "Ada Lovelace",
+        pci_production: "https://gateway.example",
+        EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: "USDC",
+      },
+    }),
+  })
+  .openapi({
+    description:
+      "Display-name references for Private Channels events (channels, wallets, members, instances, tokens).",
+  });
 
 export const privateChannelEventsQuerySchema = z.object({
   family: privateChannelEventFamilySchema.optional().openapi({

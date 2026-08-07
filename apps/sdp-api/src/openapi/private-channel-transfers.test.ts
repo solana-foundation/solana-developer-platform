@@ -109,7 +109,7 @@ describe("Private Channel transfer OpenAPI", () => {
     });
     for (const field of [
       "privateChannelUserId",
-      "wallets",
+      "isSelf",
       "pubkey",
       "pending",
       "submitted",

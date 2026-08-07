@@ -14,6 +14,7 @@
     "db:migrate:dev": "node scripts/migrate-postgres.mjs",
     "db:migrate:production": "node scripts/migrate-postgres.mjs",
     "db:verify": "node scripts/verify-postgres.mjs",
+    "audit:ledger": "node scripts/audit-ledger.mjs",
     "db:seed:local": "psql \"${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}\" -f src/db/seeds/local.sql",
     "db:spc:reset:local": "DATABASE_URL=${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} node scripts/spc-reset-postgres.mjs",
     "db:seed:issuance": "tsx scripts/seed-issuance-demo.ts",
