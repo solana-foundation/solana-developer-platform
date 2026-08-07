@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useSWRConfig } from "swr";
 import { updateWalletPolicy } from "@/app/dashboard/payments/payments-workspace.data";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,7 +27,7 @@ import type { IssuedPolicyToken } from "./policy-assets.data";
 import { PolicyCommitDrawer } from "./policy-commit-drawer";
 import { PolicySummaryRail } from "./policy-summary-rail";
 import { ReviewStep } from "./review-step";
-import { RevisionHistoryDrawer } from "./revision-history-drawer";
+import { RevisionHistoryDrawer, walletPolicyRevisionsKey } from "./revision-history-drawer";
 import {
   buildDisabledPolicyPayload,
   buildPolicyAssetOptions,
@@ -74,6 +75,7 @@ export function WalletPolicyStartingProfileFlow({
   initialRevisionId,
 }: WalletPolicyStartingProfileFlowProps) {
   const t = useTranslations();
+  const { mutate } = useSWRConfig();
   const router = useDashboardRouter();
   const pathname = usePathname();
   const { sdpEnvironment } = useDashboardWorkspace();
@@ -235,6 +237,7 @@ export function WalletPolicyStartingProfileFlow({
       setState(returnedState);
       setCommitMessage("");
       setReviewDrawerOpen(false);
+      void mutate(walletPolicyRevisionsKey(wallet.walletId), undefined, { revalidate: false });
       setActiveFingerprint(policyStateFingerprint(wallet.walletId, returnedState));
       clearPolicyDraft(window.localStorage, projectId, wallet.walletId);
       toast.success(t("DashboardCustody.policyActive"), {
@@ -361,7 +364,7 @@ export function WalletPolicyStartingProfileFlow({
                     type="button"
                     variant="secondary"
                     onClick={() => persistDraft(true)}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || !isDirty}
                   >
                     {t("DashboardCustody.policySaveDraft")}
                   </Button>
