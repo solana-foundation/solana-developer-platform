@@ -1,4 +1,8 @@
-export { createTransactionalEmailService, TransactionalEmailService } from "./service";
+export {
+  createTransactionalEmailService,
+  isEmailConfigured,
+  TransactionalEmailService,
+} from "./service";
 export type {
   TransactionalEmailDeliveryResult,
   TransactionalEmailErrorCode,

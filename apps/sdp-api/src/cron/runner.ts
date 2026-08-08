@@ -11,6 +11,7 @@
 
 import { type ScheduledTask, schedule } from "node-cron";
 import {
+  isAssetProfilesEnabled,
   isEarnEnabled,
   isPrivateChannelsEnabled,
   isRecurringPaymentCollectionEnabled,
@@ -33,6 +34,7 @@ import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import { runWorkflowExecutions, WORKFLOW_EXECUTIONS_CRON } from "./workflow-executions";
 
 export interface CronDeps {
   env: Env;
@@ -112,6 +114,21 @@ export function startCron(deps: CronDeps): CronHandle | null {
           return;
         }
         runRecurringPaymentsCollection({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        });
+      })
+    );
+  }
+
+  if (isAssetProfilesEnabled(deps.env)) {
+    tasks.push(
+      schedule(WORKFLOW_EXECUTIONS_CRON, () => {
+        if (stopping) {
+          return;
+        }
+        runWorkflowExecutions({
           env: deps.env,
           bg: deps.bg,
           observability: deps.observability,

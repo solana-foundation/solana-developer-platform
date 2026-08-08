@@ -14,6 +14,7 @@ import {
   runApprovedWalletOperationEffectTransaction,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
+import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -323,6 +324,15 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
 
     await tokenService.applySettledTokenAuthority(tx.id, tokenId, role, newAuthority);
+
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "update_authority",
+      signature: result.signature,
+      slot: result.slot.toString(),
+    });
 
     return success(c, { transaction: updatedTx });
   } catch (error) {

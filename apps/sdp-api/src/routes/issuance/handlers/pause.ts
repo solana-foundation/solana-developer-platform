@@ -9,6 +9,7 @@ import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
+import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -157,6 +158,15 @@ export const pauseToken = async (c: AppContext) => {
     });
     await tokenService.applySettledTokenStatus(tx.id, tokenId, "paused");
 
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "pause",
+      signature: result.signature,
+      slot: result.slot.toString(),
+    });
+
     return success(c, { transaction: confirmedTx });
   } catch (error) {
     if (!onChainEffectCompleted) {
@@ -304,6 +314,15 @@ export const unpauseToken = async (c: AppContext) => {
         }),
     });
     await tokenService.applySettledTokenStatus(tx.id, tokenId, "active");
+
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "unpause",
+      signature: result.signature,
+      slot: result.slot.toString(),
+    });
 
     return success(c, { transaction: confirmedTx });
   } catch (error) {

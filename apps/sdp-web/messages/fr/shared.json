@@ -258,5 +258,28 @@
     "issuanceActivityUnavailable": "L’activité d’émission est indisponible pour le moment.",
     "failedToLoadActivity": "Échec du chargement de l’activité du dashboard",
     "balanceDataUnavailable": "Les données de solde sont indisponibles pour le moment."
+  },
+  "notifications": {
+    "ariaLabel": "Notifications",
+    "ariaLabelUnread": "Notifications, {count} non lues",
+    "title": "Notifications",
+    "markAllRead": "Tout marquer comme lu",
+    "loading": "Chargement…",
+    "empty": "Vous êtes à jour.",
+    "error": "Impossible de charger les notifications.",
+    "retry": "Réessayer",
+    "showMore": "Afficher plus",
+    "emailUnavailable": "L’envoi d’e-mails est indisponible pour le moment.",
+    "types": {
+      "workflow_execution": "Automatisation exécutée : {trigger}"
+    },
+    "triggerLabels": {
+      "kyc_approved": "KYC approuvé",
+      "kyc_rejected": "KYC rejeté",
+      "onramp_settled": "On-ramp réglé",
+      "offramp_settled": "Off-ramp réglé",
+      "recurring_payment_failed": "Paiement récurrent échoué",
+      "token_operation_completed": "Opération sur le token terminée"
+    }
   }
 }

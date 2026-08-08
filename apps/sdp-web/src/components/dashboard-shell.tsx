@@ -870,6 +870,7 @@ export function DashboardShell({
                   centeredTitle={centeredTitle}
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
+                  showNotifications={assetProfilesEnabled}
                 />
               </div>
 
