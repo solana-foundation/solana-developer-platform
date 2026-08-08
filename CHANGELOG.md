@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.57.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.56.0...v0.57.0) (2026-08-08)
+
+### Features
+
+* **earn:** inventory Ground catalogue coverage vs the V1 RWA promise ([#1137](https://github.com/solana-foundation/solana-developer-platform/pull/1137)) ([5d55290](https://github.com/solana-foundation/solana-developer-platform/commit/5d55290a89832c1dc1a58d4fb01c71d12b79b5f2))
+
 ## [0.56.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.55.0...v0.56.0) (2026-08-07)
 
 ### Features
