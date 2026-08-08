@@ -178,8 +178,9 @@ export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnio
   }),
 ]);
 
-export const updateWalletPolicySchema = z.object({
+export const updateWalletPolicyBaseSchema = z.object({
   destinationAllowlist: z.array(solanaAddressSchema("destinationAllowlist entry")).max(500),
+  commitMessage: z.string().trim().min(1).max(500).optional(),
   maxTransferAmount: z
     .string()
     .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
@@ -190,6 +191,26 @@ export const updateWalletPolicySchema = z.object({
     .optional(),
   defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional(),
   rules: z.array(walletPolicyRuleSchema).max(100).optional(),
+});
+
+export const updateWalletPolicySchema = updateWalletPolicyBaseSchema.superRefine((policy, ctx) => {
+  if (policy.rules === undefined) {
+    return;
+  }
+  const seen = new Set<string>();
+  for (const rule of policy.rules) {
+    if (rule.id === undefined) {
+      continue;
+    }
+    if (seen.has(rule.id)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["rules"],
+        message: `Duplicate rule id: ${rule.id}`,
+      });
+    }
+    seen.add(rule.id);
+  }
 });
 
 export const paymentAmountSchema = z

@@ -1,4 +1,45 @@
+import { createHash } from "node:crypto";
 import { conflict } from "@/lib/errors";
+
+/**
+ * Turn a caller's `Idempotency-Key` into the stable request id a provider
+ * dedupes on.
+ *
+ * For a keyed insert SDP owns (payments transfers), replay is resolved against
+ * our own row and its fingerprint. A provider-executed money movement that SDP
+ * stores no row for has no such anchor — the PROVIDER is the only party that
+ * can collapse a duplicate, and it does so on the request id it was sent. So
+ * the caller's key has to survive into that id unchanged across retries, which
+ * `crypto.randomUUID()` by definition cannot: a fresh id per attempt is a fresh
+ * money movement.
+ *
+ * Derivation is a SHA-256 over the scope plus the key. Scope parts keep the
+ * same key in two different places from colliding into one provider request;
+ * they are length-prefixed so no combination of parts can be rearranged into
+ * another.
+ *
+ * The result is stamped as version FOUR even though it is derived rather than
+ * random, because providers validate the shape: Ground answers a version-5
+ * UUID with `400 requestId must be a valid UUID v4` (verified against their
+ * sandbox, 2026-08-05), which would turn every header-keyed withdrawal into a
+ * rejected request. Version 5 is the semantically correct label for a
+ * name-derived value, so this is a deliberate concession to the wire format,
+ * not a claim of randomness. Collision resistance comes from SHA-256, not from
+ * the version nibble.
+ */
+export function deriveProviderRequestId(scope: readonly string[], key: string): string {
+  const material = [...scope, key].map((part) => `${part.length}:${part}`).join("|");
+  const hash = createHash("sha256").update(material).digest("hex");
+  // RFC 4122 variant: high bits 10xx, i.e. one of 8/9/a/b.
+  const variant = ((Number.parseInt(hash[16], 16) & 0x3) | 0x8).toString(16);
+  return [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    `4${hash.slice(13, 16)}`,
+    `${variant}${hash.slice(17, 20)}`,
+    hash.slice(20, 32),
+  ].join("-");
+}
 
 /**
  * Resolves an idempotent replay for a keyed insert: returns the existing row

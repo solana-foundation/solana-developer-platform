@@ -11,6 +11,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../onboarding-status";
+import { OnboardingBlockedActions } from "./onboarding-blocked-actions";
 import { OrganizationOnboardingFlow } from "./organization-onboarding-flow";
 import { OrganizationPreparingLoader } from "./organization-preparing-loader";
 
@@ -41,6 +42,10 @@ export default async function OrganizationOnboardingPage() {
   if (status.setup.status === "complete") redirect("/dashboard");
 
   if (!status.setup.canManage) {
+    // Explaining why someone cannot continue and then stopping leaves them on a
+    // route they were sent to with nowhere to go. It cannot be an in-app link:
+    // while setup is incomplete the shell redirects every dashboard path back
+    // here, so the only action that moves them is changing organization.
     return (
       <div className="flex h-full items-center justify-center p-6">
         <div className="max-w-lg rounded-2xl border border-border-default bg-surface-raised p-6 text-center">
@@ -50,6 +55,7 @@ export default async function OrganizationOnboardingPage() {
           <p className="mt-2 text-sm leading-6 text-tertiary">
             {t("DashboardCustody.onboardingAdminDescription")}
           </p>
+          <OnboardingBlockedActions />
         </div>
       </div>
     );

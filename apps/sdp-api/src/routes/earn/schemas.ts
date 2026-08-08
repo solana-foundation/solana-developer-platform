@@ -174,7 +174,16 @@ export const earnProgramWithdrawalPreviewSchema = z.object({
 });
 
 export const earnProgramWithdrawalCreateSchema = earnProgramWithdrawalPreviewSchema.extend({
-  /** Caller-owned idempotency key (UUIDv4); the server mints one when absent. */
+  /**
+   * Caller-owned idempotency key (UUIDv4). Optional HERE only because the
+   * `Idempotency-Key` header is the other accepted source — the handler
+   * requires EXACTLY one and refuses both neither and both, since the provider
+   * dedupes a withdrawal on this key alone and no precedence rule can tell
+   * which of two sources a caller's retry keeps stable. Either way the value
+   * is derived against the program wallet before it reaches the provider, so
+   * one organization's key can never collide with another's on the shared
+   * account.
+   */
   requestId: z.uuidv4().optional(),
   destinationAddress: solanaDestinationSchema,
 });

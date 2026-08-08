@@ -28,6 +28,8 @@
     "openapi:generate": "tsx scripts/generate-openapi.ts",
     "playground:generate": "tsx scripts/generate-playground-catalog.ts",
     "playground:check": "tsx scripts/generate-playground-catalog.ts --check",
+    "earn:inventory": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/inventory-ground-catalogue.ts fetch",
+    "earn:inventory:render": "tsx scripts/inventory-ground-catalogue.ts render",
     "rails:discover": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/discover-ramp-rails.ts discover",
     "rails:generate": "tsx scripts/discover-ramp-rails.ts generate",
     "rails:drift": "tsx scripts/discover-ramp-rails.ts drift",

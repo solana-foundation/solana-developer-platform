@@ -70,6 +70,7 @@ export interface WalletControlProfileRevisionRow {
   revision_number: number;
   rules: Record<string, unknown>[];
   default_action: PolicyDefaultAction;
+  commit_message: string | null;
   created_by: string | null;
   created_at: string;
   activated_at: string | null;
@@ -338,6 +339,7 @@ export interface CreateWalletControlProfileRevisionInput {
   profileId: string;
   rules?: PolicyRule[];
   defaultAction?: PolicyDefaultAction;
+  commitMessage?: string | null;
   createdBy?: string | null;
 }
 
