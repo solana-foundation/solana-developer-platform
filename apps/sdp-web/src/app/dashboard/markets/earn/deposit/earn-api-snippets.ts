@@ -117,6 +117,11 @@ export function earnApiSnippets({
         // number, and not the base-unit integers the per-strategy quotes take.
         body: {
           provider,
+          // Required on this route, and the only thing that makes a retry
+          // safe: the same value replays the original withdrawal instead of
+          // paying out twice. Send the Idempotency-Key header instead if you
+          // prefer — exactly one of the two, never both and never neither.
+          requestId: "<uuid_v4>",
           amountUsd: "1000.00",
           token: withdrawalToken,
           destinationAddress: "<your_solana_address>",

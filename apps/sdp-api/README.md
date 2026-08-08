@@ -6,11 +6,11 @@ The core Solana Developer Platform API, built as a Node.js service with Postgres
 
 The SDP API provides a unified interface for blockchain operations on Solana, including:
 
-- **Wallets & Custody** — create and manage wallets with custodial integrations (Privy, Coinbase CDP, Turnkey, Fireblocks, Para)
+- **Wallets & Custody** — create and manage wallets with the built-in local signer or a custodial integration (Privy, Coinbase CDP, Turnkey, Fireblocks, Para, DFNS, IBM Digital Asset Haven, Utila). Anchorage is provisioning-only: it has no keychain signing adapter, so it can create and delete wallets but never signs.
 - **Token Issuance** — mint, freeze, and manage SPL tokens
 - **Payments** — send SOL and SPL token transfers with compliance screening
 - **Compliance** — AML/KYC screening via TRM, Chainalysis, Elliptic, or Range
-- **On/Off Ramps** — integrate fiat on/off-ramps via MoonPay, Lightspark, or BVNK
+- **On/Off Ramps** — integrate fiat on/off-ramps via MoonPay, Lightspark, BVNK, MoneyGram, Coinbase, Mural, or Stripe
 - **Organizations & Projects** — multi-tenant project management with API key authentication
 
 ## Public API Routes
@@ -29,13 +29,13 @@ The API exposes these public REST endpoints (all require API key or session toke
 
 ## Internal Routes (Maintainers Only)
 
-- `/allowlist/*` — Admin allowlist management
+- `/admin/allowlist/*` — Admin allowlist management
 - `/webhooks/clerk/link-orgs` — Clerk org sync webhook
-- `/auth/*` — Session/token auth flows
+- `/v1/auth/*` — Session/token auth flows
 - `/v1/rpc/*` — Solana RPC proxy (internal)
 - `/v1/organizations/*` — Multi-tenant org management (internal)
 - `/v1/members/*` — Team member management (internal)
-- `/onboarding/*` — Internal onboarding status
+- `/v1/onboarding/*` — Internal onboarding status
 
 ## Local Development
 
@@ -309,9 +309,9 @@ See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for
 
 ### Reconciliation cron
 
-- **Transfer reconciliation** can run via the dedicated Cloud Run Job (`src/job.ts`). Web service replicas skip in-process cron by default when `K_SERVICE` is set (`DISABLE_CRON=false` opts a service back in).
-- **Recurring payment collection** and **Private Channels deposit/withdrawal reconcilers** register only on in-process `startCron` (`src/cron/runner.ts`) when their respective env gates are enabled (`PAYMENTS_RECURRING_COLLECTION_ENABLED`, `PRIVATE_CHANNELS_ENABLED`). That path covers self-hosted and explicitly opted-in services.
-- **TODO:** the Cloud Run Job is transfers-only, so on managed deployments the Private Channels reconcilers run only on a service replica that opts back in with `DISABLE_CRON=false`. Decide whether that job (or a second one) should run them instead, so production does not depend on an opted-in replica.
+- **Transfer reconciliation** and **approved wallet-operation recovery** are the two ungated jobs: they register on every in-process `startCron` and both also run in the dedicated Cloud Run Job (`src/job.ts`). Web service replicas skip in-process cron by default when `K_SERVICE` is set (`DISABLE_CRON=false` opts a service back in).
+- **Recurring payment collection**, **Private Channels deposit/withdrawal reconcilers**, and the **Earn strategy-catalogue sync** register only on in-process `startCron` (`src/cron/runner.ts`) when their respective env gates are enabled (`PAYMENTS_RECURRING_COLLECTION_ENABLED`, `PRIVATE_CHANNELS_ENABLED`, and `MARKETS_ENABLED` plus `EARN_ENABLED`). That path covers self-hosted and explicitly opted-in services.
+- **TODO:** the Cloud Run Job runs only the two ungated jobs above, so on managed deployments the recurring-payment collection, the Private Channels reconcilers, and the Earn catalogue sync run only on a service replica that opts back in with `DISABLE_CRON=false`. Decide whether that job (or a second one) should run them instead, so production does not depend on an opted-in replica.
 
 ## Contributing
 

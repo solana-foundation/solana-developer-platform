@@ -3,6 +3,7 @@
 import type {
   EarnPortfolioPosition,
   EarnPortfolioTargetAllocations,
+  EarnPortfolioWalletActivity,
   EarnPortfolioWalletStatus,
   EarnStrategy,
 } from "@sdp/types";
@@ -23,6 +24,8 @@ import {
   type EarnProgram,
   useEarnProgram,
   useEarnStrategies,
+  useEarnWalletActivityToasts,
+  useEarnWithdrawalOutcomeToast,
 } from "./earn-program-data";
 import {
   settlementDays,
@@ -35,11 +38,34 @@ import { EarnWithdrawModal } from "./earn-withdraw-modal";
 const DEPOSIT_PATH = "/dashboard/markets/earn/deposit";
 
 const WALLET_STATUS_BADGES: Partial<
-  Record<EarnPortfolioWalletStatus, { variant: "warning" | "danger"; key: MessageKey }>
+  Record<EarnPortfolioWalletStatus, { variant: "default" | "warning" | "danger"; key: MessageKey }>
 > = {
   creating: { variant: "warning", key: "DashboardEarn.overview.walletStatusCreating" },
-  busy: { variant: "warning", key: "DashboardEarn.overview.walletStatusBusy" },
+  // Neutral, not amber: money moving exactly as asked — or the provider
+  // rebalancing on its own schedule — is a fact, not a caution. That leaves
+  // amber for `creating` (no deposit address exists yet, so the reader is
+  // genuinely gated) and red for `failed`.
+  busy: { variant: "default", key: "DashboardEarn.overview.walletStatusBusy" },
   failed: { variant: "danger", key: "DashboardEarn.overview.walletStatusFailed" },
+};
+
+/**
+ * Copy for the named operation behind `busy`.
+ *
+ * The provider is the source of truth for what is happening to the money; this
+ * only translates the provider-neutral activity the client already derived
+ * (`EarnPortfolioWalletActivity`) into words. No provider status string appears
+ * on this surface — that vocabulary lives in exactly one place, the provider
+ * client's own status table. Nothing here infers state from what the user just
+ * did either, so a rebalance the provider started by itself reads as
+ * truthfully as a withdrawal the user submitted.
+ *
+ * An absent activity (wallet not busy, or a provider state this build does not
+ * recognize) falls through to the generic label rather than guessing.
+ */
+const WALLET_ACTIVITY_KEYS: Record<EarnPortfolioWalletActivity, MessageKey> = {
+  withdrawing: "DashboardEarn.overview.walletStatusWithdrawing",
+  rebalancing: "DashboardEarn.overview.walletStatusRebalancing",
 };
 
 const SKELETON_ITEM_IDS = ["one", "two", "three"];
@@ -94,9 +120,11 @@ function buildHoldings(
 
 function WalletStatusBadge({ program }: { program: EarnProgram | undefined }) {
   const t = useTranslations();
-  const badge = program ? WALLET_STATUS_BADGES[program.wallet.status] : undefined;
-  if (!badge) return null;
-  return <Badge variant={badge.variant}>{t(badge.key)}</Badge>;
+  const wallet = program?.wallet;
+  const badge = wallet ? WALLET_STATUS_BADGES[wallet.status] : undefined;
+  if (!wallet || !badge) return null;
+  const key = wallet.activity ? WALLET_ACTIVITY_KEYS[wallet.activity] : badge.key;
+  return <Badge variant={badge.variant}>{t(key)}</Badge>;
 }
 
 function ProgramSkeleton() {
@@ -221,8 +249,16 @@ function DepositAddressRow({ address }: { address: string | undefined }) {
 function ProgramSection() {
   const t = useTranslations();
   const { state, error, isLoading, refresh } = useEarnProgram();
+  // Owned here, not in the hook: the program read runs in several components,
+  // and a toast per consumer would announce one completion several times.
+  useEarnWalletActivityToasts(state);
   const { strategies } = useEarnStrategies();
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  // Held past the modal's lifetime on purpose: the outcome lands well after
+  // the user dismisses it, and it is the withdrawal — not the wallet — that
+  // knows whether the money arrived.
+  const [watchedWithdrawalRef, setWatchedWithdrawalRef] = useState<string | undefined>(undefined);
+  useEarnWithdrawalOutcomeToast(watchedWithdrawalRef);
 
   const program = state?.kind === "active" ? state.program : undefined;
   const holdings = useMemo(
@@ -237,7 +273,11 @@ function ProgramSection() {
     <section className="rounded-xl border border-border-default bg-surface-raised p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          {/* Polite live region: the badge now appears and clears on its own
+              as the provider's status changes, so a screen-reader user would
+              otherwise never learn a withdrawal started or settled. Not atomic
+              — only the badge is announced, never the re-read heading. */}
+          <div aria-live="polite" className="flex items-center gap-2">
             <h2 className="text-base font-medium tracking-tight text-primary">
               {t("DashboardEarn.overview.programTitle")}
             </h2>
@@ -344,7 +384,10 @@ function ProgramSection() {
           balance={program.wallet.balance}
           positions={program.wallet.positions}
           onClose={() => setWithdrawOpen(false)}
-          onWithdrawalCreated={refresh}
+          onWithdrawalCreated={(withdrawalRef) => {
+            setWatchedWithdrawalRef(withdrawalRef);
+            refresh();
+          }}
         />
       ) : null}
     </section>
