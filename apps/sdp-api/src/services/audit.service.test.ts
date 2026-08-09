@@ -266,8 +266,26 @@ describe("AuditService", () => {
     );
   });
 
-  it("fails closed instead of repairing a checkpoint more than one row behind", async () => {
+  it("bootstraps the checkpoint from a verified head when the external key is absent", async () => {
     const { db, queryOne, checkpoint } = createAuditWriter({ initialCommittedSequence: 2 });
+    const audit = new AuditService(db as never, checkpoint);
+
+    await expect(
+      audit.logSystem({ action: "maintenance", resourceType: "audit_ledger" })
+    ).resolves.toBeUndefined();
+
+    expect(insertedCalls(queryOne)).toHaveLength(1);
+    await expect(checkpoint.get(AUDIT_LEDGER_CHECKPOINT_KEY)).resolves.toBe(
+      JSON.stringify({ sequence: 3, headHash: hashForSequence(3) })
+    );
+  });
+
+  it("fails closed instead of repairing a checkpoint present but more than one row behind", async () => {
+    const { db, queryOne, checkpoint } = createAuditWriter({ initialCommittedSequence: 2 });
+    await checkpoint.put(
+      AUDIT_LEDGER_CHECKPOINT_KEY,
+      JSON.stringify({ sequence: 1, headHash: hashForSequence(1) })
+    );
 
     await expect(
       new AuditService(db as never, checkpoint).logSystem({
@@ -277,7 +295,6 @@ describe("AuditService", () => {
     ).rejects.toBeInstanceOf(AuditPersistenceError);
 
     expect(insertedCalls(queryOne)).toHaveLength(0);
-    expect(checkpoint.compareAndSet).not.toHaveBeenCalled();
   });
 
   it("fails closed when the recoverable head does not match its seal and anchor", async () => {
