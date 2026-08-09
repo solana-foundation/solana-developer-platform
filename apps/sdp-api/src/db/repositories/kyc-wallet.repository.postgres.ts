@@ -97,37 +97,10 @@ export function createPostgresKycWalletsRepository(db: AppDb): KycWalletsReposit
     },
 
     async setKycStatus(input: SetKycStatusInput) {
-      const rowsAffected = await db
-        .prepare(
-          `UPDATE kyc_wallets
-             SET kyc_status = ?,
-                 kyc_provider = COALESCE(?, kyc_provider),
-                 provider_ref = COALESCE(?, provider_ref),
-                 verified_at = ${VERIFIED_AT_EXPR},
-                 updated_at = sdp_iso_now()
-           WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(
-          input.status,
-          input.provider ?? null,
-          input.providerRef ?? null,
-          input.status,
-          input.kycWalletId,
-          input.organizationId,
-          input.projectId
-        )
-        .run();
-      if (rowsAffected === 0) {
-        return null;
-      }
-      return this.getKycWalletById({
-        kycWalletId: input.kycWalletId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
-    },
-
-    async setKycStatusByCounterparty(input: SetKycStatusByCounterpartyInput) {
+      // `AND kyc_status IS DISTINCT FROM ?` makes a same-status write a no-op instead of
+      // re-stamping the row. Workflow idempotency keys are derived from verified_at /
+      // updated_at, so an unconditional write let a redelivered provider webhook mint a
+      // fresh key and enqueue the same rule twice (see clearance.ts `transition`).
       await db
         .prepare(
           `UPDATE kyc_wallets
@@ -136,7 +109,42 @@ export function createPostgresKycWalletsRepository(db: AppDb): KycWalletsReposit
                  provider_ref = COALESCE(?, provider_ref),
                  verified_at = ${VERIFIED_AT_EXPR},
                  updated_at = sdp_iso_now()
-           WHERE counterparty_id = ? AND organization_id = ? AND project_id = ?`
+           WHERE id = ? AND organization_id = ? AND project_id = ?
+             AND kyc_status IS DISTINCT FROM ?`
+        )
+        .bind(
+          input.status,
+          input.provider ?? null,
+          input.providerRef ?? null,
+          input.status,
+          input.kycWalletId,
+          input.organizationId,
+          input.projectId,
+          input.status
+        )
+        .run();
+      // Re-read rather than treating "no rows updated" as missing: an unchanged status is
+      // a successful no-op, and the read still yields null when the wallet truly is gone.
+      return this.getKycWalletById({
+        kycWalletId: input.kycWalletId,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
+    },
+
+    async setKycStatusByCounterparty(input: SetKycStatusByCounterpartyInput) {
+      // Same idempotency guard as setKycStatus: this is the path a redelivered Mural
+      // webhook takes, so a same-status write must leave the row's timestamps alone.
+      await db
+        .prepare(
+          `UPDATE kyc_wallets
+             SET kyc_status = ?,
+                 kyc_provider = COALESCE(?, kyc_provider),
+                 provider_ref = COALESCE(?, provider_ref),
+                 verified_at = ${VERIFIED_AT_EXPR},
+                 updated_at = sdp_iso_now()
+           WHERE counterparty_id = ? AND organization_id = ? AND project_id = ?
+             AND kyc_status IS DISTINCT FROM ?`
         )
         .bind(
           input.status,
@@ -145,7 +153,8 @@ export function createPostgresKycWalletsRepository(db: AppDb): KycWalletsReposit
           input.status,
           input.counterpartyId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.status
         )
         .run();
       return this.listKycWalletsByCounterparty({
