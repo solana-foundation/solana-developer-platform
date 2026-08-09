@@ -3,7 +3,7 @@ import { afterEach, describe, it, mock } from "node:test";
 import { wellKnownMint } from "@sdp/types";
 import { SdpEarnError, type SdpEarnErrorCode } from "../../errors";
 import type { EarnRuntimeContext } from "../../types";
-import { GroundEarnClient } from "./client";
+import { distillGroundYieldSource, GroundEarnClient, type GroundYieldSource } from "./client";
 
 /**
  * Canonical no-network harness (see src/fetch.test.ts): `globalThis.fetch` is
@@ -388,6 +388,169 @@ describe("GroundEarnClient.listStrategies", () => {
   });
 });
 
+describe("distillGroundYieldSource", () => {
+  const distill = (
+    overrides: Record<string, unknown>,
+    cluster: "devnet" | "mainnet-beta" = "devnet"
+  ) => distillGroundYieldSource(yieldSource(overrides) as GroundYieldSource, cluster);
+
+  it("names the gate that keeps each source out of the catalogue", () => {
+    assert.deepEqual(distill({ mode: "buy_only" }), {
+      outcome: "dropped",
+      reason: "inactive_mode",
+    });
+    assert.deepEqual(distill({ mode: "emergency_freeze" }), {
+      outcome: "dropped",
+      reason: "inactive_mode",
+    });
+    // Rail-gated, not mint-gated: USDT drops even on mainnet-beta, where a
+    // well-known mint exists — Ground's Solana rails carry USDC only.
+    assert.deepEqual(distill({ depositToken: "usdt" }, "mainnet-beta"), {
+      outcome: "dropped",
+      reason: "not_solana_routable",
+    });
+  });
+
+  it("catalogues an active USDC source with the snapshot listStrategies publishes", () => {
+    const distilled = distill({});
+    if (distilled.outcome !== "catalogued") {
+      assert.fail(`expected catalogued, got dropped: ${distilled.reason}`);
+    }
+    assert.equal(distilled.snapshot.providerReference, "morpho-gauntlet-usdc");
+    assert.equal(distilled.snapshot.sourceKind, "defi");
+    assert.equal(distilled.snapshot.riskMetadata?.curator, "gauntlet");
+    assert.deepEqual(distilled.snapshot.depositMints, [wellKnownMint("USDC", "devnet")]);
+  });
+});
+
+/**
+ * THE Solana-only boundary test. Every wallet flow must send the environment's
+ * Solana chain from GROUND_SOLANA_CHAINS — never a caller value — so this
+ * drives every body-sending client method in BOTH environments and walks every
+ * request body: any chain-keyed field must equal the pinned chain, and no
+ * non-Solana chain name may appear anywhere in any payload. A new method that
+ * hardcodes or accepts a chain fails here without anyone remembering to review
+ * for it.
+ */
+describe("Solana-only boundary — every request pins the environment's chain", () => {
+  const FOREIGN_CHAIN = /ethereum|sepolia|base|arbitrum|polygon|optimism|avalanche/i;
+
+  /** Every chain-keyed entry in a JSON body, with its path for the failure message. */
+  function chainFields(value: unknown, path = "$"): Array<{ path: string; value: unknown }> {
+    if (Array.isArray(value)) {
+      return value.flatMap((item, index) => chainFields(item, `${path}[${index}]`));
+    }
+    if (value !== null && typeof value === "object") {
+      return Object.entries(value).flatMap(([key, nested]) => {
+        const nestedPath = `${path}.${key}`;
+        const own = /chain/i.test(key) ? [{ path: nestedPath, value: nested }] : [];
+        return [...own, ...chainFields(nested, nestedPath)];
+      });
+    }
+    return [];
+  }
+
+  const CASES: Array<{
+    label: string;
+    reply: unknown;
+    call: (ctx: EarnRuntimeContext) => Promise<unknown>;
+    carriesChain: boolean;
+  }> = [
+    {
+      label: "createPortfolioWallet",
+      reply: groundWallet({ status: "creating" }),
+      call: (ctx) =>
+        client.createPortfolioWallet(ctx, {
+          label: "boundary",
+          allocations: { usdc: [{ yieldSourceId: "morpho-gauntlet-usdc", pct: 100 }] },
+        }),
+      carriesChain: false,
+    },
+    {
+      label: "updatePortfolioStrategy",
+      reply: { strategyAllocations: {} },
+      call: (ctx) =>
+        client.updatePortfolioStrategy(ctx, {
+          providerWalletRef: "wal_1",
+          allocations: { usdc: [{ yieldSourceId: "morpho-gauntlet-usdc", pct: 100 }] },
+        }),
+      carriesChain: false,
+    },
+    {
+      label: "previewPortfolioWithdrawal",
+      reply: { feeUsd: "0", withdrawableUsd: "10", totalUsdAfterWithdrawal: "9" },
+      call: (ctx) =>
+        client.previewPortfolioWithdrawal(ctx, {
+          providerWalletRef: "wal_1",
+          amountUsd: "1.00",
+          token: "usdc",
+        }),
+      carriesChain: true,
+    },
+    {
+      label: "createPortfolioWithdrawal",
+      reply: groundWithdrawal(),
+      call: (ctx) =>
+        client.createPortfolioWithdrawal(ctx, {
+          providerWalletRef: "wal_1",
+          requestId: "3f1f2b6e-7a51-4b8e-9a4e-6f2d1c0b9a87",
+          amountUsd: "1.00",
+          token: "usdc",
+          destinationAddress: "DestAddr1111111111111111111111111111111111",
+        }),
+      carriesChain: true,
+    },
+    {
+      label: "createPortfolioAddressBookEntry",
+      reply: { entry: "abe_1" },
+      call: (ctx) =>
+        client.createPortfolioAddressBookEntry(ctx, {
+          address: "DestAddr1111111111111111111111111111111111",
+          label: "boundary",
+        }),
+      carriesChain: true,
+    },
+  ];
+
+  const EXPECTED_CHAIN = { sandbox: "solana_devnet", production: "solana" } as const;
+
+  for (const [environment, ctx] of [
+    ["sandbox", sandboxCtx],
+    ["production", productionCtx],
+  ] as const) {
+    it(`${environment}: every body-sending method pins ${EXPECTED_CHAIN[environment]}`, async () => {
+      let chainCarryingBodies = 0;
+      for (const testCase of CASES) {
+        mock.restoreAll();
+        const fetchMock = stubGroundFetch({ body: testCase.reply });
+        await testCase.call(ctx);
+
+        const body = requestBody(fetchMock);
+        const fields = chainFields(body);
+        if (testCase.carriesChain) {
+          chainCarryingBodies += 1;
+          assert.ok(fields.length > 0, `${testCase.label}: expected a chain field in the body`);
+        }
+        for (const field of fields) {
+          assert.equal(
+            field.value,
+            EXPECTED_CHAIN[environment],
+            `${testCase.label}: ${field.path} must be ${EXPECTED_CHAIN[environment]}, got ${String(field.value)}`
+          );
+        }
+        assert.doesNotMatch(
+          JSON.stringify(body),
+          FOREIGN_CHAIN,
+          `${testCase.label}: request body must never name a non-Solana chain`
+        );
+      }
+      // Guard the walker itself: if a rename blinds /chain/i, this fails loud
+      // instead of the assertions above silently passing on zero matches.
+      assert.equal(chainCarryingBodies, 3);
+    });
+  }
+});
+
 describe("GroundEarnClient.createPortfolioWallet", () => {
   it("posts the labelled strategy and passes the caller's requestId through verbatim", async () => {
     const fetchMock = stubGroundFetch({ body: groundWallet({ status: "creating" }) });
@@ -468,6 +631,44 @@ describe("GroundEarnClient.getPortfolioWallet", () => {
     const snapshot = await client.getPortfolioWallet(productionCtx, { providerWalletRef: "wal_1" });
 
     assert.equal(snapshot.solanaDepositAddress, "So1anaMainnetDepositAddr");
+  });
+
+  // The provider is the source of truth for what is happening to the money.
+  // Consumers read the neutral `activity`, so this table is the ONE place
+  // Ground's vocabulary is interpreted — a UI must never re-derive it.
+  it("names the operation behind every busy status, and never guesses on an unknown one", async () => {
+    const observed: Array<{ status: string; activity: string | undefined }> = [];
+    for (const providerStatus of [
+      "idle",
+      "creating",
+      "withdrawal_active",
+      "rebalance_active",
+      "withdrawal_and_rebalance_active",
+      "failed",
+      // Ground adds a status this build has never seen.
+      "some_future_state",
+    ]) {
+      mock.restoreAll();
+      stubGroundFetch({ body: groundWallet({ status: providerStatus }) });
+      const snapshot = await client.getPortfolioWallet(sandboxCtx, {
+        providerWalletRef: "wal_1",
+      });
+      assert.equal(snapshot.providerStatus, providerStatus, "raw status is always relayed");
+      observed.push({ status: snapshot.status, activity: snapshot.activity });
+    }
+
+    assert.deepEqual(observed, [
+      { status: "ready", activity: undefined },
+      { status: "creating", activity: undefined },
+      { status: "busy", activity: "withdrawing" },
+      { status: "busy", activity: "rebalancing" },
+      // A concurrent rebalance never masks the withdrawal the reader waits on.
+      { status: "busy", activity: "withdrawing" },
+      { status: "failed", activity: undefined },
+      // Unknown ⇒ busy so funds stay visible and mutations wait, but NO
+      // activity: nothing may claim to know what an unseen status means.
+      { status: "busy", activity: undefined },
+    ]);
   });
 
   // ADR 0002 invariant 5: no other chain's rails may reach a wire type or the
@@ -707,6 +908,55 @@ describe("GroundEarnClient.updatePortfolioStrategy", () => {
 });
 
 describe("GroundEarnClient.listPortfolioDeposits", () => {
+  // A shared Ground wallet is fundable on non-Solana rails (the sandbox USDT
+  // faucet is Sepolia-only), so the deposits page can carry rows whose
+  // provenance belongs to another chain. ADR 0002 invariant 5: the VALUE
+  // renders, the foreign rail's identifiers never do — otherwise an Ethereum
+  // 0x address reaches the dashboard and an Ethereum tx hash ships in a field
+  // named transactionSignature.
+  it("withholds another rail's from-address and tx hash, keeping the value visible", async () => {
+    stubGroundFetch({
+      body: page([
+        {
+          id: "dep_sepolia",
+          amount: "50.000000",
+          token: "usdt",
+          chain: "ethereum_sepolia",
+          fromAddress: "0x52908400098527886E0F7030069857D2E4169EE7",
+          txHash: "0x88df016429689c079f3b2f6ad39fa052532c56795b733da78a91ebe6a713944b",
+          status: "completed",
+          createdAt: "2026-08-04T10:00:00Z",
+          completedAt: "2026-08-04T10:03:00Z",
+        },
+        {
+          // No chain reported: never guess — withhold identifiers, keep value.
+          id: "dep_unreported",
+          amount: "10.000000",
+          token: "usdc",
+          fromAddress: "SomeAddr11111111111111111111111111111111111",
+          txHash: "5igSig999",
+          status: "completed",
+          createdAt: "2026-08-04T11:00:00Z",
+          completedAt: null,
+        },
+      ]),
+    });
+
+    const result = await client.listPortfolioDeposits(sandboxCtx, {
+      providerWalletRef: "wal_1",
+    });
+
+    const [sepolia, unreported] = result.deposits;
+    assert.equal(sepolia.id, "dep_sepolia");
+    assert.equal(sepolia.amountUsd, "50.000000");
+    assert.equal(sepolia.status, "completed");
+    assert.equal(sepolia.fromAddress, undefined);
+    assert.equal(sepolia.transactionSignature, undefined);
+    assert.equal(unreported.fromAddress, undefined);
+    assert.equal(unreported.transactionSignature, undefined);
+    assert.doesNotMatch(JSON.stringify(result), /0x[0-9a-fA-F]/);
+  });
+
   it("maps the deposit page and passes the cursor through", async () => {
     const fetchMock = stubGroundFetch({
       body: page(

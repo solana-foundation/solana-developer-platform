@@ -15,7 +15,8 @@ import type {
 } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
-import { AppError, badRequest } from "@/lib/errors";
+import type { ApiKeyWalletPolicyBindingRow } from "@/db/repositories";
+import { AppError, badRequest, internalError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
 import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
@@ -673,12 +674,17 @@ export class ApiKeyService {
          ORDER BY created_at ASC`
       )
       .bind(sourceApiKeyId)
-      .all<Record<string, unknown>>();
+      .all<ApiKeyWalletPolicyBindingRow>();
 
     for (const binding of bindingRows.results) {
-      const apiKeyControlProfileId = binding.api_key_control_profile_id
-        ? (profileIdMap.get(binding.api_key_control_profile_id as string) ?? null)
-        : null;
+      let apiKeyControlProfileId: string | null = null;
+      if (binding.api_key_control_profile_id !== null) {
+        const mappedProfileId = profileIdMap.get(binding.api_key_control_profile_id);
+        if (mappedProfileId === undefined) {
+          throw internalError("Failed to clone API key policy binding profile");
+        }
+        apiKeyControlProfileId = mappedProfileId;
+      }
 
       await db
         .prepare(
@@ -696,9 +702,9 @@ export class ApiKeyService {
           `akwpol_${crypto.randomUUID()}`,
           targetApiKeyId,
           binding.binding_scope,
-          binding.wallet_id ?? null,
-          binding.custody_wallet_id ?? null,
-          binding.wallet_control_profile_id ?? null,
+          binding.wallet_id,
+          binding.custody_wallet_id,
+          binding.wallet_control_profile_id,
           apiKeyControlProfileId
         )
         .run();

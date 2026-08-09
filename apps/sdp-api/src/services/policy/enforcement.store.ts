@@ -7,6 +7,7 @@ import type {
 } from "@sdp/policy";
 import { IMPLICIT_DEFAULT_ALLOW_POLICY } from "@sdp/policy";
 import type {
+  EffectiveApiKeyPolicy,
   PolicyEvaluation,
   WalletOperationActor,
   WalletOperationContext,
@@ -51,16 +52,24 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
     operation: WalletOperationEnvelope
   ): Promise<EffectiveOperationPolicies> {
     const apiKeyScope =
-      operation.apiKeyId !== null
+      operation.apiKeyId !== null && operation.custodyWalletId !== null
         ? await this.apiKeyPolicies.resolveOperationScope({
             apiKeyId: operation.apiKeyId,
-            walletId: operation.walletId,
             custodyWalletId: operation.custodyWalletId,
           })
         : null;
 
+    let apiKeyPolicy: EffectiveApiKeyPolicy | null = null;
+    if (apiKeyScope !== null) {
+      apiKeyPolicy = apiKeyScope.apiKeyPolicy;
+    } else if (operation.apiKeyId !== null) {
+      apiKeyPolicy = await this.apiKeyPolicies.resolveOperationPolicyWithoutCustodyWallet(
+        operation.apiKeyId
+      );
+    }
+
     if (apiKeyScope !== null && apiKeyScope.walletPolicy !== null) {
-      return { walletPolicy: apiKeyScope.walletPolicy, apiKeyPolicy: apiKeyScope.apiKeyPolicy };
+      return { walletPolicy: apiKeyScope.walletPolicy, apiKeyPolicy };
     }
 
     const custodyWalletId =
@@ -74,7 +83,7 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
 
     return {
       walletPolicy,
-      apiKeyPolicy: apiKeyScope === null ? null : apiKeyScope.apiKeyPolicy,
+      apiKeyPolicy,
     };
   }
 

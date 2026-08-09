@@ -12,6 +12,7 @@ import {
   type EarnPortfolioProcessingEstimate,
   type EarnPortfolioTargetAllocations,
   type EarnPortfolioToken,
+  type EarnPortfolioWalletActivity,
   type EarnPortfolioWalletSnapshot,
   type EarnPortfolioWalletStatus,
   type EarnPortfolioWithdrawal,
@@ -19,6 +20,7 @@ import {
   type EarnPortfolioYield,
   type EarnStrategySourceKind,
   isWellKnownTokenSymbol,
+  type SolanaCluster,
   wellKnownMint,
 } from "@sdp/types";
 import { badRequest, providerNotConfigured } from "../../errors";
@@ -151,18 +153,29 @@ interface GroundProcessingPolicy {
   typicalMaxUnits: number;
 }
 
-interface GroundYieldSourceAllocation {
+export interface GroundYieldSourceAllocation {
   label: string;
   type?: string | null;
   valueUsd?: number | null;
   pct?: number | null;
 }
 
-interface GroundYieldSource {
+export interface GroundYieldSource {
   id: string;
   name: string;
   /** Documented: active | buy_only | sell_only | emergency_freeze — kept open. */
   mode: string;
+  /**
+   * Where the yield source ITSELF sits — provider plumbing, deliberately NOT a
+   * catalogue gate. SDP's Solana-only mandate is about the rails the customer
+   * touches (deposit address, payout address, `depositToken`), not about where
+   * Ground routes the capital afterwards: it bridges internally, which is what
+   * the `bridge` position kind represents. So an Ethereum-hosted source funded
+   * by USDC on Solana is catalogued on purpose. Surfaced for the inventory
+   * script, which reports it because "how much of this shelf actually lives on
+   * Solana" is a product question the gates alone do not answer.
+   */
+  chain?: string | null;
   apyBps?: number | null;
   tvlUsd?: number | null;
   utilizationPct?: number | null;
@@ -226,6 +239,8 @@ interface GroundDeposit {
   id: string;
   amount: string;
   token: string;
+  /** Rail the deposit arrived on — gates whether its identifiers surface. */
+  chain?: string | null;
   fromAddress?: string | null;
   txHash?: string | null;
   status?: string | null;
@@ -390,15 +405,19 @@ function redeemLiquidity(
  * vaults report `treasury`. Everything else is genuinely DeFi. The extra
  * alternatives below are kept for values Ground documents but has not emitted
  * here; do not add more on speculation — check what the API returns first.
+ * Exported for the catalogue-inventory script's allocation-type census, which
+ * is how "check what the API returns" happens against each environment.
  */
-const RWA_ALLOCATION_TYPE = /treasur|t.?bill|clo|rwa|bond|credit|note/i;
+export const RWA_ALLOCATION_TYPE = /treasur|t.?bill|clo|rwa|bond|credit|note/i;
 
 /**
  * A Ground source is a basket of allocations; classify by the dominant side
  * (weighted by pct when reported, else counted) so a mostly-treasury source
  * reads as RWA even with a small DeFi reserve sleeve. Empty → defi.
+ * Exported for the catalogue-inventory script, which classifies sources
+ * distillation drops.
  */
-function classifySourceKind(
+export function classifySourceKind(
   allocations: readonly GroundYieldSourceAllocation[] | null | undefined
 ): EarnStrategySourceKind {
   let rwa = 0;
@@ -437,8 +456,10 @@ const GROUND_CURATOR_HOUSES = [
  * Curator is data, not code (ADR 0002): match a curator house named in the
  * source id/name, then the `<protocol>-<curator>-<token>` convention (open
  * string — an unlisted curator still resolves), then the hosting protocol.
+ * Exported for the catalogue-inventory script, which attributes sources
+ * distillation drops.
  */
-function deriveCurator(source: GroundYieldSource): string | undefined {
+export function deriveCurator(source: GroundYieldSource): string | undefined {
   const id = source.id.toLowerCase();
   const idTokens = id.split(/[^a-z0-9]+/);
   const name = source.name.toLowerCase();
@@ -454,18 +475,108 @@ function deriveCurator(source: GroundYieldSource): string | undefined {
   return source.protocol?.trim().toLowerCase() || undefined;
 }
 
-const WALLET_STATUS_BY_GROUND_STATUS: Record<string, EarnPortfolioWalletStatus> = {
-  creating: "creating",
-  idle: "ready",
-  withdrawal_active: "busy",
-  rebalance_active: "busy",
-  withdrawal_and_rebalance_active: "busy",
-  failed: "failed",
+/** Why distillation kept a raw yield source out of the strategy catalogue. */
+export type GroundCatalogueDropReason =
+  | "inactive_mode"
+  | "not_solana_routable"
+  | "unknown_token_symbol"
+  | "no_cluster_mint";
+
+export type GroundYieldSourceDistillation =
+  | { outcome: "catalogued"; snapshot: ProviderStrategySnapshot }
+  | { outcome: "dropped"; reason: GroundCatalogueDropReason };
+
+/**
+ * Distill one raw Ground yield source into a catalogue snapshot, or say
+ * exactly why it stays out. The single decision point for what enters the
+ * catalogue: `listStrategies` collects the catalogued outcomes, and the
+ * inventory script (apps/sdp-api/scripts/inventory-ground-catalogue.ts)
+ * reports the dropped ones — these gates silently shrink the catalogue, so
+ * coverage questions (PRO-1638) need the drops enumerated, not skipped.
+ */
+export function distillGroundYieldSource(
+  source: GroundYieldSource,
+  cluster: SolanaCluster
+): GroundYieldSourceDistillation {
+  // Only fully tradable sources enter the catalogue. buy_only would let
+  // deposits into an exit-frozen source — trapped funds, which the Earn
+  // pluggability constraint forbids; sell_only/emergency_freeze cannot
+  // take deposits at all. Delisting is also how a paused source drains
+  // from the depositable set (catalogue-sync re-asserts `active`).
+  if (source.mode !== "active") {
+    return { outcome: "dropped", reason: "inactive_mode" };
+  }
+  // A token Ground cannot route on Solana is un-fundable and un-exitable
+  // through SDP's Solana-only surface on ANY cluster — never catalogue it
+  // (GROUND_SOLANA_ROUTED_TOKENS; this is Ground's rail support, not a
+  // cluster/mint question like the check below).
+  if (!GROUND_SOLANA_ROUTED_TOKENS.has(source.depositToken.toLowerCase())) {
+    return { outcome: "dropped", reason: "not_solana_routable" };
+  }
+  const symbol = source.depositToken.toUpperCase();
+  if (!isWellKnownTokenSymbol(symbol)) {
+    return { outcome: "dropped", reason: "unknown_token_symbol" };
+  }
+  // No mint on this environment's cluster (USDT has no devnet mint) —
+  // the strategy cannot be funded here, so keep it out of the catalogue.
+  const mint = wellKnownMint(symbol, cluster);
+  if (!mint) {
+    return { outcome: "dropped", reason: "no_cluster_mint" };
+  }
+
+  const curator = deriveCurator(source);
+  return {
+    outcome: "catalogued",
+    snapshot: {
+      providerReference: source.id,
+      name: source.name,
+      sourceKind: classifySourceKind(source.allocations),
+      underlyingSource: source.protocol?.trim().toLowerCase() || undefined,
+      depositMints: [mint],
+      apyType: "variable",
+      currentApy: source.apyBps == null ? undefined : bpsToDecimalString(source.apyBps),
+      ...redeemLiquidity(source.processingPolicies?.redeem),
+      riskMetadata: {
+        ...(curator === undefined ? {} : { curator }),
+        ...(source.tvlUsd == null ? {} : { tvlUsd: source.tvlUsd }),
+        ...(source.utilizationPct == null ? {} : { utilizationPct: source.utilizationPct }),
+      },
+    },
+  };
+}
+
+/**
+ * THE mapping from Ground's wallet vocabulary to SDP's — the only place in the
+ * platform that knows these strings. Each entry carries both facts a consumer
+ * needs: whether the wallet can take a mutation (`status`) and, when it is
+ * busy, what it is doing (`activity`). Keeping them in one table is what stops
+ * a second copy of Ground's vocabulary appearing in a UI that wants to name the
+ * operation.
+ */
+const WALLET_STATE_BY_GROUND_STATUS: Record<
+  string,
+  { status: EarnPortfolioWalletStatus; activity?: EarnPortfolioWalletActivity }
+> = {
+  creating: { status: "creating" },
+  idle: { status: "ready" },
+  withdrawal_active: { status: "busy", activity: "withdrawing" },
+  rebalance_active: { status: "busy", activity: "rebalancing" },
+  // The withdrawal is the fact a reader is waiting on; a concurrent rebalance
+  // is provider housekeeping that implies nothing for them to do.
+  withdrawal_and_rebalance_active: { status: "busy", activity: "withdrawing" },
+  failed: { status: "failed" },
 };
 
-/** Unknown statuses read as `busy`: funds stay visible, mutations wait. */
-function normalizeWalletStatus(status: string): EarnPortfolioWalletStatus {
-  return WALLET_STATUS_BY_GROUND_STATUS[status] ?? "busy";
+/**
+ * Unknown statuses read as `busy` with NO activity: funds stay visible,
+ * mutations wait, and nothing claims to know what a status this build has
+ * never seen actually means.
+ */
+function normalizeWalletState(status: string): {
+  status: EarnPortfolioWalletStatus;
+  activity?: EarnPortfolioWalletActivity;
+} {
+  return WALLET_STATE_BY_GROUND_STATUS[status] ?? { status: "busy" };
 }
 
 /**
@@ -536,7 +647,16 @@ function mapTargetAllocations(
   return mapped;
 }
 
-function mapDeposit(deposit: GroundDeposit): EarnPortfolioDeposit {
+function mapDeposit(deposit: GroundDeposit, solanaChain: string): EarnPortfolioDeposit {
+  // Same rule as position labels and the deposit-address selection, applied to
+  // deposit provenance: the VALUE always surfaces, another rail's identifiers
+  // never do (ADR 0002 invariant 5). A shared Ground wallet is fundable on
+  // non-Solana rails (the sandbox USDT faucet is Sepolia-only), and passing
+  // those rows' fields through verbatim put an Ethereum 0x address in the
+  // dashboard and an Ethereum tx hash in a field named transactionSignature.
+  // Gate on the deposit's own rail; an absent chain withholds the identifiers
+  // rather than guessing — the row, amount, token, and status still render.
+  const onSolanaRail = deposit.chain === solanaChain;
   return {
     id: deposit.id,
     amountUsd: deposit.amount,
@@ -544,8 +664,8 @@ function mapDeposit(deposit: GroundDeposit): EarnPortfolioDeposit {
     // is drift; surface it as usdc rather than dropping the funds from view.
     token: narrow(EARN_PORTFOLIO_TOKENS, deposit.token) ?? "usdc",
     status: narrow(EARN_PORTFOLIO_DEPOSIT_STATUSES, deposit.status) ?? "processing",
-    fromAddress: deposit.fromAddress ?? undefined,
-    transactionSignature: deposit.txHash ?? undefined,
+    fromAddress: onSolanaRail ? (deposit.fromAddress ?? undefined) : undefined,
+    transactionSignature: onSolanaRail ? (deposit.txHash ?? undefined) : undefined,
     createdAt: deposit.createdAt,
     completedAt: deposit.completedAt ?? undefined,
   };
@@ -635,11 +755,15 @@ export class GroundEarnClient
     depositTokens: ["USDC"],
   };
 
-  override async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
+  /**
+   * Page through the raw yield-source catalogue, unfiltered. Data source for
+   * `listStrategies`, and the tooling surface the catalogue-inventory script
+   * reads so it can report what distillation drops (underscore-prefixed like
+   * RampClient._discoverProviderRails: a real consumer exists, but this is
+   * not part of the provider contract).
+   */
+  async *_iterateYieldSources(ctx: EarnRuntimeContext): AsyncGenerator<GroundYieldSource, void> {
     const config = readGroundConfig(ctx);
-    const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
-    const snapshots: ProviderStrategySnapshot[] = [];
-
     let cursor: string | null = null;
     do {
       const url = new URL("/v2/wallets/yield-sources", config.baseUrl);
@@ -651,54 +775,20 @@ export class GroundEarnClient
         url.toString(),
         { method: "GET", headers: config.headers }
       );
-
-      for (const source of page.data) {
-        // Only fully tradable sources enter the catalogue. buy_only would let
-        // deposits into an exit-frozen source — trapped funds, which the Earn
-        // pluggability constraint forbids; sell_only/emergency_freeze cannot
-        // take deposits at all. Delisting is also how a paused source drains
-        // from the depositable set (catalogue-sync re-asserts `active`).
-        if (source.mode !== "active") {
-          continue;
-        }
-        // A token Ground cannot route on Solana is un-fundable and un-exitable
-        // through SDP's Solana-only surface on ANY cluster — never catalogue it
-        // (GROUND_SOLANA_ROUTED_TOKENS; this is Ground's rail support, not a
-        // cluster/mint question like the check below).
-        if (!GROUND_SOLANA_ROUTED_TOKENS.has(source.depositToken.toLowerCase())) {
-          continue;
-        }
-        const symbol = source.depositToken.toUpperCase();
-        if (!isWellKnownTokenSymbol(symbol)) {
-          continue;
-        }
-        // No mint on this environment's cluster (USDT has no devnet mint) —
-        // the strategy cannot be funded here, so keep it out of the catalogue.
-        const mint = wellKnownMint(symbol, cluster);
-        if (!mint) {
-          continue;
-        }
-
-        const curator = deriveCurator(source);
-        snapshots.push({
-          providerReference: source.id,
-          name: source.name,
-          sourceKind: classifySourceKind(source.allocations),
-          underlyingSource: source.protocol?.trim().toLowerCase() || undefined,
-          depositMints: [mint],
-          apyType: "variable",
-          currentApy: source.apyBps == null ? undefined : bpsToDecimalString(source.apyBps),
-          ...redeemLiquidity(source.processingPolicies?.redeem),
-          riskMetadata: {
-            ...(curator === undefined ? {} : { curator }),
-            ...(source.tvlUsd == null ? {} : { tvlUsd: source.tvlUsd }),
-            ...(source.utilizationPct == null ? {} : { utilizationPct: source.utilizationPct }),
-          },
-        });
-      }
+      yield* page.data;
       cursor = page.nextCursor;
     } while (cursor);
+  }
 
+  override async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
+    const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
+    const snapshots: ProviderStrategySnapshot[] = [];
+    for await (const source of this._iterateYieldSources(ctx)) {
+      const distilled = distillGroundYieldSource(source, cluster);
+      if (distilled.outcome === "catalogued") {
+        snapshots.push(distilled.snapshot);
+      }
+    }
     return snapshots;
   }
 
@@ -719,7 +809,7 @@ export class GroundEarnClient
         strategy: { allocations: input.allocations },
       },
     });
-    return { providerWalletRef: wallet.id, status: normalizeWalletStatus(wallet.status) };
+    return { providerWalletRef: wallet.id, status: normalizeWalletState(wallet.status).status };
   }
 
   async getPortfolioYield(
@@ -759,7 +849,7 @@ export class GroundEarnClient
     );
     return {
       providerWalletRef: wallet.id,
-      status: normalizeWalletStatus(wallet.status),
+      ...normalizeWalletState(wallet.status),
       providerStatus: wallet.status,
       // Solana-only mandate: of Ground's multi-chain funding addresses, SDP
       // surfaces exactly the one on this environment's Solana rail.
@@ -812,7 +902,10 @@ export class GroundEarnClient
       url.toString(),
       { method: "GET", headers: config.headers }
     );
-    return { deposits: page.data.map(mapDeposit), nextCursor: page.nextCursor };
+    return {
+      deposits: page.data.map((deposit) => mapDeposit(deposit, config.chain)),
+      nextCursor: page.nextCursor,
+    };
   }
 
   async previewPortfolioWithdrawal(

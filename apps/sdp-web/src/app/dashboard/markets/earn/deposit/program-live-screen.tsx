@@ -159,7 +159,7 @@ export function ProgramLiveScreen({
 }) {
   const t = useTranslations();
   const liquidityLabel = useLiquidityLabel();
-  const { state } = useEarnProgram({ refreshWhileCreating: true });
+  const { state } = useEarnProgram();
   const program = state?.kind === "active" ? state.program : undefined;
   const wallet = program?.wallet;
   const address = wallet?.solanaDepositAddress;
