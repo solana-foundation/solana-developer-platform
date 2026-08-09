@@ -23,8 +23,7 @@ import { WalletPolicyStore } from "./wallet-policy.store";
 
 export interface ResolveApiKeyWalletPolicyScopeInput {
   apiKeyId: string;
-  walletId: string;
-  custodyWalletId?: string | null;
+  custodyWalletId: string;
 }
 
 export interface ResolvedApiKeyWalletPolicyScope {
@@ -181,6 +180,22 @@ export class ApiKeyPolicyStore {
     };
   }
 
+  /**
+   * Resolve an API-key policy when an operation has no custody-wallet identity.
+   *
+   * @param apiKeyId - The API key initiating the operation.
+   * @returns The effective API-key policy when no wallet bindings require a custody target.
+   */
+  async resolveOperationPolicyWithoutCustodyWallet(
+    apiKeyId: string
+  ): Promise<EffectiveApiKeyPolicy> {
+    const bindings = await this.repository.listApiKeyWalletPolicyBindings(apiKeyId);
+    if (bindings.length > 0) {
+      throw forbidden("API key policy binding is not configured for the requested wallet");
+    }
+    return this.resolveEffectiveApiKeyPolicy(apiKeyId);
+  }
+
   async upsertApiKeyWalletPolicyBinding(
     input: UpsertApiKeyWalletPolicyBindingInput
   ): Promise<ApiKeyWalletPolicyBinding> {
@@ -197,7 +212,7 @@ export class ApiKeyPolicyStore {
   ): Promise<ResolvedApiKeyWalletPolicyScope> {
     const resolution = await this.repository.getApiKeyWalletPolicyBindingResolution(
       input.apiKeyId,
-      input.walletId
+      input.custodyWalletId
     );
 
     this.assertApplicablePolicyBindingExists(resolution);
@@ -212,7 +227,7 @@ export class ApiKeyPolicyStore {
    * closed instead of falling back to the plain per-key profile lookup; a
    * binding may also supply the wallet policy and custody wallet.
    *
-   * @param input - The API key, requested wallet, and custody-wallet claim.
+   * @param input - The API key and requested custody wallet.
    * @returns The effective API-key policy plus any binding-supplied wallet scope.
    */
   async resolveOperationScope(
@@ -220,7 +235,7 @@ export class ApiKeyPolicyStore {
   ): Promise<ApiKeyOperationScope> {
     const resolution = await this.repository.getApiKeyWalletPolicyBindingResolution(
       input.apiKeyId,
-      input.walletId
+      input.custodyWalletId
     );
 
     if (resolution.total_binding_count === 0) {
@@ -299,15 +314,11 @@ export class ApiKeyPolicyStore {
   ): Promise<ApiKeyWalletPolicyTargetRow> {
     const target = await this.repository.getApiKeyWalletPolicyTarget(
       input.apiKeyId,
-      input.walletId
+      input.custodyWalletId
     );
 
     if (!target) {
       throw forbidden("API key is not authorized for the requested wallet");
-    }
-
-    if (input.custodyWalletId && input.custodyWalletId !== target.custody_wallet_id) {
-      throw forbidden("API key wallet policy target does not match the requested custody wallet");
     }
 
     if (
@@ -335,7 +346,6 @@ export class ApiKeyPolicyStore {
     if (input.bindingScope === "selected") {
       const target = await this.assertApiKeyWalletPolicyTarget({
         apiKeyId: input.apiKeyId,
-        walletId: input.walletId,
         custodyWalletId: input.custodyWalletId,
       });
 
@@ -419,7 +429,7 @@ export class ApiKeyPolicyStore {
   private assertUniquePolicyBindingTargets(bindings: UpsertApiKeyWalletPolicyBindingInput[]): void {
     const targets = new Set<string>();
     for (const binding of bindings) {
-      const target = binding.bindingScope === "all" ? "all" : `selected:${binding.walletId}`;
+      const target = binding.bindingScope === "all" ? "all" : `selected:${binding.custodyWalletId}`;
       if (targets.has(target)) {
         throw badRequest("Policy binding targets must be unique");
       }
@@ -431,11 +441,10 @@ export class ApiKeyPolicyStore {
     binding: ApiKeyWalletPolicyBindingRow,
     target: ApiKeyWalletPolicyTargetRow
   ): void {
-    if (binding.binding_scope === "selected" && binding.wallet_id !== target.wallet_id) {
-      throw forbidden("API key policy binding does not match the requested wallet");
-    }
-
-    if (binding.custody_wallet_id && binding.custody_wallet_id !== target.custody_wallet_id) {
+    if (
+      binding.binding_scope === "selected" &&
+      binding.custody_wallet_id !== target.custody_wallet_id
+    ) {
       throw forbidden("API key policy binding does not match the requested custody wallet");
     }
   }

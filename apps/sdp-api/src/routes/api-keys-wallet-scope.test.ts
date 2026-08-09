@@ -821,6 +821,11 @@ describe("API key wallet scope routes", () => {
       env
     );
     expect(firstReplace.status).toBe(200);
+    await expect(firstReplace.json()).resolves.toMatchObject({
+      data: {
+        policyBindings: [{ custodyWalletId: "cwlt_scope_a" }],
+      },
+    });
 
     const outOfScopeReplace = await app.request(
       `/v1/api-keys/${apiKeyId}/policy-bindings`,
@@ -890,5 +895,67 @@ describe("API key wallet scope routes", () => {
     expect(secondBody.data.policyBindings.map((binding) => binding.walletId)).toEqual([
       "wal_scope_b",
     ]);
+  });
+
+  it("rejects an ambiguous provider wallet ID when authoring a selected policy binding", async () => {
+    const apiKeyId = await createManagedApiKey({
+      name: "Ambiguous selected-wallet policy key",
+      walletScope: "selected",
+      walletIds: ["wal_scope_a"],
+    });
+    const { profileId } = await createAndActivateApiKeyPolicy(apiKeyId);
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted, status)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "cust_cfg_api_key_wallet_scope_duplicate",
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          "privy",
+          "test-config",
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "cwlt_scope_a_duplicate",
+          "cust_cfg_api_key_wallet_scope_duplicate",
+          "wal_scope_a",
+          "pub_scope_a_duplicate",
+          "Duplicate Wallet Scope A",
+          "transfer",
+          "active"
+        ),
+    ]);
+
+    const response = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-bindings`,
+      {
+        method: "PUT",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          mode: "replace",
+          bindings: [
+            {
+              bindingScope: "selected",
+              walletId: "wal_scope_a",
+              apiKeyControlProfileId: profileId,
+            },
+          ],
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
   });
 });
