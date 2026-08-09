@@ -3,9 +3,10 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type DatabaseClient, getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
-import { AppError } from "@/lib/errors";
+import { AppError, internalError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { rootLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
 import {
   type CredentialSecretStore,
@@ -380,6 +381,45 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       .prepare("SELECT COUNT(*) AS count FROM custody_scope_defaults")
       .first<{ count: number }>();
     expect(defaults?.count).toBe(0);
+  });
+
+  it("keeps a committed submission replayable when its audit outcome cannot be persisted", async () => {
+    const completeCritical = vi
+      .spyOn(AuditService.prototype, "completeCritical")
+      .mockResolvedValue(false);
+    const { app, token } = buildApp();
+
+    const first = await submit(app, token, { key: "submission-audit-outcome-failure" });
+    const replay = await submit(app, token, { key: "submission-audit-outcome-failure" });
+
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(201);
+    const firstBody = (await first.json()) as { data: unknown };
+    const replayBody = (await replay.json()) as { data: unknown };
+    expect(replayBody.data).toEqual(firstBody.data);
+    expect(completeCritical).toHaveBeenCalledOnce();
+    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
+
+    const audits = await getDb(env)
+      .prepare(
+        `SELECT action, resource_type
+         FROM audit_logs
+         ORDER BY ledger_sequence`
+      )
+      .all<{ action: string; resource_type: string }>();
+    expect(audits.results).toEqual([{ action: "maintenance", resource_type: "audit_ledger" }]);
+  });
+
+  it("does not write a secret when the submission audit intent cannot be persisted", async () => {
+    vi.spyOn(AuditService.prototype, "beginCritical").mockRejectedValue(internalError());
+    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+    const { app, token } = buildApp();
+
+    const response = await submit(app, token, { key: "submission-audit-intent-failure" });
+
+    expect(response.status).toBe(500);
+    expect(factory).not.toHaveBeenCalled();
+    expect(await getDomainCounts()).toEqual({ credentials: 0, connections: 0, wallets: 0 });
   });
 
   it("requires an idempotency key after auth, project, and body validation", async () => {
@@ -1417,6 +1457,14 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     );
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("raw upstream detail");
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("exact secret");
+    const criticalOutcomes = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM audit_logs
+         WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'`
+      )
+      .first<{ count: number }>();
+    expect(criticalOutcomes?.count).toBe(0);
   });
 
   it("destroys only the exact GCP version after a database rollback", async () => {

@@ -15,7 +15,7 @@ import {
 } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
-import { AuditService } from "@/services/audit.service";
+import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
   type CredentialSecretPayload,
@@ -134,52 +134,98 @@ export async function completeProviderCredentialInstallation(
 
   const secretStore = createPersistedSecretStore(c.env, loaded.target.credential_storage_backend);
   const credential = await readPrivyCredential(secretStore, context.organizationId, loaded.target);
-  const leaseToken = await context.store.acquireInstallationLease({
-    connectionId,
-    providerCredentialId: loaded.target.provider_credential_id,
-    expectedStatus: loaded.target.status as "pending" | "checking",
-    expectedLastCheckStatus: loaded.target.last_check_status,
-    expectedLastCheckAt: loaded.target.last_check_at,
+  const auditIntent = await context.audit.beginCritical(c, {
+    organizationId: context.organizationId,
+    userId: context.userId,
+    action: "check",
+    resourceType: "custody_connection",
+    resourceId: connectionId,
+    metadata: {
+      event: "provider_credential_installation_completion_started",
+      provider: "privy",
+      providerCredentialId: loaded.target.provider_credential_id,
+    },
   });
-  if (!leaseToken) {
-    return resolveCompletionRace(context, connectionId);
-  }
+  let canRecordFailureOutcome = true;
 
-  const outcome = await executeCompletionMode(
-    context,
-    loaded.target,
-    credential,
-    leaseToken,
-    loaded.decisions.complete.mode
-  );
-  if (outcome.kind === "replay") {
-    return completionResult(outcome.installation);
-  }
-  const replay =
-    outcome.kind === "success"
-      ? await persistSuccess(context, loaded.target, leaseToken, outcome.wallet)
-      : outcome.kind === "retry_unknown"
-        ? await persistRetryUnknown(context, loaded.target, leaseToken)
-        : await persistFailure(context, loaded.target, leaseToken, outcome.code, secretStore);
-  if (replay) {
-    return completionResult(replay);
-  }
+  try {
+    const leaseToken = await context.store.acquireInstallationLease({
+      connectionId,
+      providerCredentialId: loaded.target.provider_credential_id,
+      expectedStatus: loaded.target.status as "pending" | "checking",
+      expectedLastCheckStatus: loaded.target.last_check_status,
+      expectedLastCheckAt: loaded.target.last_check_at,
+    });
+    if (!leaseToken) {
+      canRecordFailureOutcome = false;
+      await completeInstallationCriticalNoop(
+        context,
+        auditIntent,
+        "provider_credential_installation_completion_not_admitted"
+      );
+      return resolveCompletionRace(context, connectionId);
+    }
+    const outcome = await executeCompletionMode(
+      context,
+      loaded.target,
+      credential,
+      leaseToken,
+      loaded.decisions.complete.mode
+    );
+    if (outcome.kind === "replay") {
+      canRecordFailureOutcome = false;
+      await completeInstallationCriticalNoop(
+        context,
+        auditIntent,
+        "provider_credential_installation_completion_replayed"
+      );
+      return completionResult(outcome.installation);
+    }
+    if (outcome.kind === "success" || outcome.kind === "retry_unknown") {
+      canRecordFailureOutcome = false;
+    }
+    const replay =
+      outcome.kind === "success"
+        ? await persistSuccess(context, loaded.target, leaseToken, outcome.wallet)
+        : outcome.kind === "retry_unknown"
+          ? await persistRetryUnknown(context, loaded.target, leaseToken)
+          : await persistFailure(context, loaded.target, leaseToken, outcome.code, secretStore);
+    if (replay) {
+      canRecordFailureOutcome = false;
+      if (replay.target.last_check_at === leaseToken) {
+        await completeInstallationAudit(context, auditIntent, replay);
+      } else {
+        await completeInstallationCriticalNoop(
+          context,
+          auditIntent,
+          "provider_credential_installation_completion_replayed"
+        );
+      }
+      return completionResult(replay);
+    }
 
-  if (outcome.kind === "failed") {
-    if (outcome.code !== "invalid_credentials") {
-      await auditCompletion(context, await loadInstallation(context, connectionId));
-    }
-    if (outcome.code === "provider_account_already_connected") {
-      throw installationConflict("provider_account_already_connected");
-    }
-    if (outcome.code === "wallet_conflict") {
-      throw conflict("Privy wallet cannot be reconciled");
-    }
-  }
+    const completed = await loadInstallation(context, connectionId);
+    canRecordFailureOutcome = false;
+    await completeInstallationAudit(context, auditIntent, completed);
 
-  const completed = await loadInstallation(context, connectionId);
-  await auditCompletion(context, completed);
-  return completionResult(completed);
+    if (outcome.kind === "failed") {
+      if (outcome.code === "provider_account_already_connected") {
+        throw installationConflict("provider_account_already_connected");
+      }
+      if (outcome.code === "wallet_conflict") {
+        throw conflict("Privy wallet cannot be reconciled");
+      }
+    }
+    return completionResult(completed);
+  } catch (error) {
+    if (canRecordFailureOutcome) {
+      await context.audit.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { event: "provider_credential_installation_completion_failed" },
+      });
+    }
+    throw error;
+  }
 }
 
 export async function cancelProviderCredentialInstallation(
@@ -197,47 +243,92 @@ export async function cancelProviderCredentialInstallation(
       loaded.decisions.cancel.kind === "conflict" ? loaded.decisions.cancel.reason : undefined
     );
   }
-
-  const canceled = await context.db.transaction(async (tx) => {
-    return new ProviderCredentialStore(tx).cancelInstallation({
-      connectionId,
-      providerCredentialId: loaded.target.provider_credential_id,
-      expectedStatus: loaded.target.status as "pending" | "checking",
-      expectedLastCheckStatus: loaded.target.last_check_status,
-      expectedLastCheckAt: loaded.target.last_check_at,
-    });
-  });
-  if (!canceled) {
-    const current = await loadInstallation(context, connectionId);
-    if (current.decisions.cancel.kind === "replay") {
-      await destroyGcpVersionBestEffort(c, current.target);
-      return { connection: projectConnection(c.env, current) };
-    }
-    if (current.target.provider_account_fingerprint) {
-      throw installationConflict("installation_completion_required");
-    }
-    if (
-      current.target.status === "checking" &&
-      current.decisions.cancel.kind === "conflict" &&
-      current.decisions.cancel.reason === "completion_in_progress"
-    ) {
-      throw installationConflict("completion_in_progress");
-    }
-    throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
-  }
-
-  await destroyGcpVersionBestEffort(c, loaded.target);
-  const result = await loadInstallation(context, connectionId);
-  await context.audit.log(c, {
+  const auditIntent = await context.audit.beginCritical(c, {
     organizationId: context.organizationId,
     userId: context.userId,
     action: "deactivate",
     resourceType: "custody_connection",
     resourceId: connectionId,
-    status: "success",
-    metadata: { provider: "privy", event: "provider_credential_installation_canceled" },
+    metadata: {
+      provider: "privy",
+      event: "provider_credential_installation_cancellation_started",
+      providerCredentialId: loaded.target.provider_credential_id,
+    },
   });
-  return { connection: projectConnection(c.env, result) };
+  let canRecordFailureOutcome = true;
+
+  try {
+    let canceled: boolean;
+    try {
+      canRecordFailureOutcome = false;
+      canceled = await context.db.transaction(async (tx) => {
+        return new ProviderCredentialStore(tx).cancelInstallation({
+          connectionId,
+          providerCredentialId: loaded.target.provider_credential_id,
+          expectedStatus: loaded.target.status as "pending" | "checking",
+          expectedLastCheckStatus: loaded.target.last_check_status,
+          expectedLastCheckAt: loaded.target.last_check_at,
+        });
+      });
+      canRecordFailureOutcome = !canceled;
+    } catch (transactionError) {
+      let current: LoadedInstallation;
+      try {
+        current = await loadInstallation(context, connectionId);
+      } catch {
+        throw transactionError;
+      }
+      if (current.decisions.cancel.kind !== "replay") {
+        canRecordFailureOutcome = true;
+        throw transactionError;
+      }
+
+      await destroyGcpVersionBestEffort(c, current.target);
+      // The row proves cancellation, but not which concurrent request committed it.
+      // Keep this intent unresolved instead of emitting a duplicate domain outcome.
+      return { connection: projectConnection(c.env, current) };
+    }
+    if (!canceled) {
+      const current = await loadInstallation(context, connectionId);
+      if (current.decisions.cancel.kind === "replay") {
+        canRecordFailureOutcome = false;
+        await completeInstallationCriticalNoop(
+          context,
+          auditIntent,
+          "provider_credential_installation_cancellation_replayed"
+        );
+        await destroyGcpVersionBestEffort(c, current.target);
+        return { connection: projectConnection(c.env, current) };
+      }
+      if (current.target.provider_account_fingerprint) {
+        throw installationConflict("installation_completion_required");
+      }
+      if (
+        current.target.status === "checking" &&
+        current.decisions.cancel.kind === "conflict" &&
+        current.decisions.cancel.reason === "completion_in_progress"
+      ) {
+        throw installationConflict("completion_in_progress");
+      }
+      throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+    }
+
+    await destroyGcpVersionBestEffort(c, loaded.target);
+    const result = await loadInstallation(context, connectionId);
+    canRecordFailureOutcome = false;
+    await context.audit.completeCritical(c, auditIntent, {
+      metadata: { event: "provider_credential_installation_canceled" },
+    });
+    return { connection: projectConnection(c.env, result) };
+  } catch (error) {
+    if (canRecordFailureOutcome) {
+      await context.audit.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { event: "provider_credential_installation_cancellation_failed" },
+      });
+    }
+    throw error;
+  }
 }
 
 function createInstallationContext(c: Context<{ Bindings: Env }>): InstallationContext {
@@ -614,23 +705,32 @@ async function resolveCompletionRace(
   throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
 }
 
-async function auditCompletion(
+async function completeInstallationAudit(
   context: InstallationContext,
+  intent: AuditIntent,
   loaded: LoadedInstallation
 ): Promise<void> {
   const completion = projectCompletion(loaded);
-  await context.audit.log(context.c, {
-    organizationId: context.organizationId,
-    userId: context.userId,
-    action: "check",
-    resourceType: "custody_connection",
-    resourceId: loaded.target.id,
+  await context.audit.completeCritical(context.c, intent, {
     status: completion?.status === "success" ? "success" : "failure",
     metadata: {
-      provider: "privy",
+      event: "provider_credential_installation_completed",
       completionStatus: completion?.status,
       ...(completion?.code ? { failureCode: completion.code } : {}),
     },
+  });
+}
+
+async function completeInstallationCriticalNoop(
+  context: InstallationContext,
+  intent: AuditIntent,
+  event: string
+): Promise<void> {
+  await context.audit.completeCritical(context.c, intent, {
+    action: "maintenance",
+    resourceType: "audit_ledger",
+    resourceId: intent.id,
+    metadata: { event },
   });
 }
 

@@ -14,7 +14,7 @@ import {
 } from "@/lib/errors";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
-import { AuditService } from "@/services/audit.service";
+import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
   type CredentialSecretStore,
@@ -124,6 +124,12 @@ class SetupConflict extends Error {
         ? UNFINISHED_INSTALLATION_MESSAGE
         : REPLACEMENT_CONFLICT_MESSAGE
     );
+  }
+}
+
+class SubmissionOutcomeUnknown extends Error {
+  constructor(readonly responseError: unknown) {
+    super("Provider credential submission outcome is unknown");
   }
 }
 
@@ -319,25 +325,82 @@ async function persistPreparedSubmission(
     prepared.preflightPlan.kind === "replacement"
       ? prepared.preflightPlan.connection.id
       : `cconn_${crypto.randomUUID()}`;
+  const auditIntent = await prepared.audit.beginCritical(prepared.c, {
+    organizationId: prepared.organizationId,
+    userId: prepared.userId,
+    action: "submit",
+    resourceType: "provider_credential",
+    resourceId: providerCredentialId,
+    metadata: {
+      event: "provider_credential_submission_started",
+      provider: prepared.input.provider,
+      scope: prepared.input.fields.scope,
+      connectionId,
+    },
+  });
 
-  const secretStore = await createSubmissionSecretStore(
-    prepared,
-    providerCredentialId,
-    connectionId
-  );
-  const stored = await writeSubmissionSecret(
-    prepared,
-    providerCredentialId,
-    connectionId,
-    secretStore
-  );
+  try {
+    const secretStore = await createSubmissionSecretStore(
+      prepared,
+      providerCredentialId,
+      connectionId
+    );
+    const stored = await writeSubmissionSecret(
+      prepared,
+      providerCredentialId,
+      connectionId,
+      secretStore
+    );
+    const transaction = await commitStoredSubmission({
+      ...prepared,
+      providerCredentialId,
+      connectionId,
+      secretStore,
+      stored,
+    });
 
-  return commitStoredSubmission({
-    ...prepared,
-    providerCredentialId,
-    connectionId,
-    secretStore,
-    stored,
+    if (transaction.kind === "committed") {
+      await prepared.audit.completeCritical(prepared.c, auditIntent, {
+        metadata: {
+          event: "provider_credential_submitted",
+          storageBackend: stored.storageBackend,
+          credentialStatus: transaction.result.providerCredential.status,
+        },
+      });
+    } else {
+      await closeSubmissionAuditIntent(
+        prepared,
+        auditIntent,
+        "provider_credential_submission_replayed"
+      );
+    }
+    return transaction.result;
+  } catch (error) {
+    if (error instanceof SubmissionOutcomeUnknown) {
+      throw error.responseError;
+    }
+    await closeSubmissionAuditIntent(
+      prepared,
+      auditIntent,
+      "provider_credential_submission_failed",
+      "failure"
+    );
+    throw error;
+  }
+}
+
+async function closeSubmissionAuditIntent(
+  context: Pick<SubmissionContext, "c" | "audit">,
+  intent: AuditIntent,
+  event: string,
+  status: "success" | "failure" = "success"
+): Promise<void> {
+  await context.audit.completeCritical(context.c, intent, {
+    action: "maintenance",
+    resourceType: "audit_ledger",
+    resourceId: intent.id,
+    status,
+    metadata: { event },
   });
 }
 
@@ -396,22 +459,22 @@ async function writeSubmissionSecret(
         reason: "secret_write_outcome_unknown",
       });
     }
+    if (upstream) {
+      throw new SubmissionOutcomeUnknown(
+        providerUnavailable("Credential storage is temporarily unavailable")
+      );
+    }
     await auditFailure(context.c, context.audit, context.auditBase, {
-      reason: upstream ? "secret_store_unavailable" : "secret_store_failure",
+      reason: "secret_store_failure",
       resourceId: providerCredentialId,
       connectionId,
       storageBackend: secretStore.storageBackend,
     });
-    if (upstream) {
-      throw providerUnavailable("Credential storage is temporarily unavailable");
-    }
     throw internalError();
   }
 }
 
-async function commitStoredSubmission(
-  submission: StoredSubmission
-): Promise<ProviderCredentialSubmissionResult> {
+async function commitStoredSubmission(submission: StoredSubmission): Promise<TransactionResult> {
   let transactionResult: TransactionResult;
   try {
     transactionResult = await runSubmissionTransaction(submission);
@@ -426,33 +489,9 @@ async function commitStoredSubmission(
       submission.stored,
       submission.providerCredentialId
     );
-    return transactionResult.result;
   }
 
-  await auditSubmissionSuccess(submission, transactionResult.result);
-  return transactionResult.result;
-}
-
-async function auditSubmissionSuccess(
-  submission: StoredSubmission,
-  result: ProviderCredentialSubmissionResult
-): Promise<void> {
-  await submission.audit.log(submission.c, {
-    organizationId: submission.organizationId,
-    userId: submission.userId,
-    action: "submit",
-    resourceType: "provider_credential",
-    resourceId: submission.providerCredentialId,
-    status: "success",
-    metadata: {
-      event: "provider_credential_submitted",
-      provider: submission.input.provider,
-      scope: submission.input.fields.scope,
-      storageBackend: submission.stored.storageBackend,
-      credentialStatus: result.providerCredential.status,
-      connectionId: submission.connectionId,
-    },
-  });
+  return transactionResult;
 }
 
 async function runSubmissionTransaction(submission: StoredSubmission): Promise<TransactionResult> {
@@ -548,17 +587,20 @@ async function persistConnection(
 async function recoverTransactionFailure(
   submission: StoredSubmission,
   error: unknown
-): Promise<ProviderCredentialSubmissionResult> {
+): Promise<TransactionResult> {
   const reconciliation = await reconcileTransactionOutcome(submission);
   if (reconciliation.kind === "found") {
     if (reconciliation.replay.id === submission.providerCredentialId) {
-      const committed = await resolveReplay(
-        submission,
-        reconciliation.replay,
-        submission.fingerprint
-      );
-      await auditSubmissionSuccess(submission, committed);
-      return committed;
+      try {
+        const committed = await resolveReplay(
+          submission,
+          reconciliation.replay,
+          submission.fingerprint
+        );
+        return { kind: "committed", result: committed };
+      } catch (replayError) {
+        throw new SubmissionOutcomeUnknown(replayError);
+      }
     }
 
     const compensationOutcome = await compensateSecretWrite(
@@ -567,23 +609,23 @@ async function recoverTransactionFailure(
       submission.stored,
       submission.providerCredentialId
     );
-    return resolveReplayWithAudit(submission, reconciliation.replay, submission.fingerprint, {
-      failureResourceId: submission.providerCredentialId,
-      compensationOutcome,
-    });
+    return {
+      kind: "replay",
+      result: await resolveReplayWithAudit(
+        submission,
+        reconciliation.replay,
+        submission.fingerprint,
+        {
+          failureResourceId: submission.providerCredentialId,
+          compensationOutcome,
+        }
+      ),
+    };
   }
 
   if (reconciliation.kind === "unknown") {
     reportManualSecretCleanupRequired(submission);
-    await auditFailure(submission.c, submission.audit, submission.auditBase, {
-      reason: "database_failure",
-      resourceId: submission.providerCredentialId,
-      connectionId: submission.connectionId,
-      storageBackend: submission.stored.storageBackend,
-      compensationOutcome:
-        submission.stored.storageBackend === "gcp_secret_manager" ? "deferred" : "not_required",
-    });
-    throw internalError();
+    throw new SubmissionOutcomeUnknown(internalError());
   }
 
   const compensationOutcome = await compensateSecretWrite(

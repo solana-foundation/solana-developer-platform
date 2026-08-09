@@ -2,8 +2,9 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
-import { AppError } from "@/lib/errors";
+import { AppError, internalError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
@@ -562,6 +563,77 @@ describe("exact Custody Connection installation routes", () => {
     });
     expect(providerFetch).not.toHaveBeenCalled();
     expect(secretFactory).not.toHaveBeenCalled();
+  });
+
+  it("keeps completion successful and replayable when its audit outcome cannot be persisted", async () => {
+    const completeCritical = vi
+      .spyOn(AuditService.prototype, "completeCritical")
+      .mockResolvedValue(false);
+    const providerFetch = successfulPrivyFetch();
+    const { app, token } = buildApp();
+
+    const completed = await installationRequest(app, token, "complete");
+    const replay = await installationRequest(app, token, "complete");
+
+    expect(completed.status).toBe(200);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      data: { connectionId: CONNECTION_ID, completion: { status: "success" } },
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(3);
+    expect(completeCritical).toHaveBeenCalledOnce();
+    expect(await getState()).toMatchObject({
+      credential_status: "active",
+      connection_status: "active",
+      last_check_status: "success",
+    });
+  });
+
+  it("records a recovered completion after a lost COMMIT response", async () => {
+    successfulPrivyFetch();
+    const db = getDb(env);
+    const runTransaction = db.transaction.bind(db);
+    vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+      await runTransaction(callback);
+      throw new Error("simulated lost COMMIT response");
+    });
+    const { app, token } = buildApp();
+
+    const response = await installationRequest(app, token, "complete");
+
+    expect(response.status).toBe(200);
+    expect(await getState()).toMatchObject({
+      credential_status: "active",
+      connection_status: "active",
+      last_check_status: "success",
+    });
+    const audit = await db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM audit_logs
+         WHERE action = 'check' AND resource_id = ?`
+      )
+      .bind(CONNECTION_ID)
+      .first<{ count: number }>();
+    expect(audit?.count).toBe(1);
+  });
+
+  it("performs no Provider I/O when the completion audit intent cannot be persisted", async () => {
+    vi.spyOn(AuditService.prototype, "beginCritical").mockRejectedValue(internalError());
+    const providerFetch = successfulPrivyFetch();
+    const { app, token } = buildApp();
+
+    const response = await installationRequest(app, token, "complete");
+
+    expect(response.status).toBe(500);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(await getState()).toMatchObject({
+      credential_status: "pending",
+      connection_status: "pending",
+      last_check_status: null,
+      provider_account_fingerprint: null,
+      default_custody_wallet_id: null,
+    });
   });
 
   it("accepts an organization admin dashboard session", async () => {
@@ -1123,6 +1195,54 @@ describe("exact Custody Connection installation routes", () => {
       default_custody_wallet_id: null,
       deactivated_at: expect.any(String),
     });
+  });
+
+  it("keeps cancellation successful and replayable when its audit outcome cannot be persisted", async () => {
+    env.PRIVY_BYOK_ENABLED = "false";
+    const completeCritical = vi
+      .spyOn(AuditService.prototype, "completeCritical")
+      .mockResolvedValue(false);
+    const { app, token } = buildApp();
+
+    const canceled = await installationRequest(app, token, "cancel");
+    const replay = await installationRequest(app, token, "cancel");
+
+    expect(canceled.status).toBe(200);
+    expect(replay.status).toBe(200);
+    expect(completeCritical).toHaveBeenCalledOnce();
+    expect(await getState()).toMatchObject({
+      credential_status: "deactivated",
+      connection_status: "deactivated",
+      default_custody_wallet_id: null,
+    });
+  });
+
+  it("keeps cancellation replayable after a lost COMMIT response", async () => {
+    env.PRIVY_BYOK_ENABLED = "false";
+    const db = getDb(env);
+    const runTransaction = db.transaction.bind(db);
+    vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+      await runTransaction(callback);
+      throw new Error("simulated lost COMMIT response");
+    });
+    const { app, token } = buildApp();
+
+    const response = await installationRequest(app, token, "cancel");
+
+    expect(response.status).toBe(200);
+    expect(await getState()).toMatchObject({
+      credential_status: "deactivated",
+      connection_status: "deactivated",
+    });
+    const audit = await db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM audit_logs
+         WHERE action = 'deactivate' AND resource_id = ?`
+      )
+      .bind(CONNECTION_ID)
+      .first<{ count: number }>();
+    expect(audit?.count).toBe(0);
   });
 
   it("blocks cancel during a current lease or after fingerprint reservation", async () => {
