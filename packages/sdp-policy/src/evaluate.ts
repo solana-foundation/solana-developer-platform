@@ -5,6 +5,7 @@ import type {
   EffectiveWalletPolicy,
   MatchedPolicyRule,
   PolicyCandidate,
+  PolicyDryRunCriterion,
   PolicyEvaluationContext,
   PolicyEvaluationReasonCode,
   PolicyRuleScope,
@@ -72,6 +73,39 @@ export function evaluateCandidatePolicies(
     walletPolicyRevisionId: wallet.revisionId,
     apiKeyPolicyRevisionId: apiKey === null ? null : apiKey.revisionId,
   };
+}
+
+/**
+ * Describe every rule in one scope's active revision against a candidate,
+ * matched or not, with the action a match would contribute. Backs dry-run
+ * criteria; an inactive scope (no revision) has no rules to describe.
+ *
+ * @param scope - The policy scope the rules belong to.
+ * @param policy - The scope's effective policy.
+ * @param candidate - The candidate under evaluation.
+ * @returns One criterion per rule; empty when the scope has no active revision.
+ */
+export function describeCandidateRuleCriteria(
+  scope: PolicyRuleScope,
+  policy: EffectiveWalletPolicy | EffectiveApiKeyPolicy,
+  candidate: PolicyCandidate
+): PolicyDryRunCriterion[] {
+  if (policy.revision === null) {
+    return [];
+  }
+
+  return policy.revision.rules.map((rule) => {
+    const evaluation = evaluatePolicyRule(rule, candidate);
+    return {
+      scope,
+      ruleId: rule.id === undefined ? null : rule.id,
+      kind: rule.kind,
+      name: rule.name === undefined ? null : rule.name,
+      matched: evaluation !== null,
+      action: evaluation === null ? null : evaluation.decision,
+      reason: evaluation === null ? null : evaluation.reason,
+    };
+  });
 }
 
 /**

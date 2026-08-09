@@ -6283,6 +6283,120 @@ describe("Payments routes", () => {
     expect(body.error.details?.errors?.rules).toContain("Duplicate rule id: duplicated");
   });
 
+  it("dry-runs a gated transfer with zero writes and full rule criteria", async () => {
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-execution",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+        {
+          id: "block-ramp",
+          kind: "operation_family",
+          families: ["ramp"],
+          action: "deny",
+        },
+      ],
+    });
+
+    const response = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        decision: string;
+        criteria: Array<{ ruleId: string | null; matched: boolean; action: string | null }>;
+        walletPolicyRevisionId: string | null;
+      };
+    };
+    expect(body.data.decision).toBe("approval_required");
+    expect(body.data.walletPolicyRevisionId).toMatch(/^wcpr_/);
+    expect(body.data.criteria).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ruleId: "approve-payment-execution",
+          matched: true,
+          action: "approval_required",
+        }),
+        expect.objectContaining({ ruleId: "block-ramp", matched: false, action: null }),
+      ])
+    );
+
+    for (const table of ["wallet_operations", "approval_requests", "payment_transfers"]) {
+      const row = await getDb(env)
+        .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
+        .first<{ count: number | string }>();
+      expect(Number(row?.count ?? 0)).toBe(0);
+    }
+  });
+
+  it("answers a dry-run with the verdict even when an Idempotency-Key matches a recorded transfer", async () => {
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Idempotency-Key": "idem-dry-run-replay",
+    };
+    const transferBody = JSON.stringify({
+      source: TEST_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "0.1",
+    });
+
+    const first = await app.request(
+      "/v1/payments/transfers",
+      { method: "POST", headers, body: transferBody },
+      env
+    );
+    expect(first.status).toBe(200);
+
+    const dryRun = await app.request(
+      "/v1/payments/transfers",
+      { method: "POST", headers: { ...headers, "Dry-Run": "true" }, body: transferBody },
+      env
+    );
+    expect(dryRun.status).toBe(200);
+    const dryRunBody = (await dryRun.json()) as { data: { decision: string; criteria: unknown } };
+    expect(dryRunBody.data.decision).toBe("allow");
+    expect(dryRunBody.data).toHaveProperty("criteria");
+  });
+
+  it("rejects an invalid body before evaluating a dry-run", async () => {
+    const response = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({ source: TEST_WALLET_ID }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+  });
+
   it("executes an approved transfer exactly once after leaving it pending", async () => {
     const sessionId = "ses_ungrouped_payment_approver";
     const approverUserId = "usr_ungrouped_payment_approver";

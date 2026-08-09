@@ -49,4 +49,10 @@ export {
   getTransferBatch,
   listTransferBatches,
 } from "./handlers/transfer-batches";
-export { createTransfer, getTransfer, listTransfers } from "./handlers/transfers";
+export {
+  createTransfer,
+  extractTransferPolicyCandidate,
+  findTransferIdempotentKeyReplay,
+  getTransfer,
+  listTransfers,
+} from "./handlers/transfers";

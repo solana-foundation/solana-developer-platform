@@ -13,6 +13,7 @@ import { dryRunPolicyCandidate } from "@/services/policy/candidate-evaluation.se
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
 import { isDryRunRequest } from "./dry-run";
+import { IDEMPOTENCY_KEY_HEADER } from "./idempotency-key";
 
 type GateContext = Context<{ Bindings: Env }>;
 
@@ -27,7 +28,8 @@ export interface PolicyGateConfig {
   extract: (c: GateContext) => Promise<PolicyGateExtraction>;
   findIdempotentKeyReplay?: (
     c: GateContext,
-    extraction: PolicyGateExtraction
+    extraction: PolicyGateExtraction,
+    idempotencyKey: string
   ) => Promise<Response | null>;
 }
 
@@ -80,11 +82,9 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
       return success(c, await dryRunPolicyCandidate(c.env, scope, candidate));
     }
 
-    if (
-      config.findIdempotentKeyReplay !== undefined &&
-      c.req.header("Idempotency-Key") !== undefined
-    ) {
-      const replayed = await config.findIdempotentKeyReplay(c, extraction);
+    const idempotencyKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
+    if (config.findIdempotentKeyReplay !== undefined && idempotencyKey !== undefined) {
+      const replayed = await config.findIdempotentKeyReplay(c, extraction, idempotencyKey);
       if (replayed !== null) {
         return replayed;
       }

@@ -76,7 +76,10 @@ export interface RecordPolicyEvaluationInput {
 export interface PolicyEnforcementStore {
   createWalletOperation(input: CreateWalletOperationInput): Promise<WalletOperationEnvelope>;
   loadEffectivePolicies(
-    candidate: Pick<PolicyCandidate, "apiKeyId" | "custodyWalletId">
+    candidate: Pick<
+      PolicyCandidate,
+      "organizationId" | "projectId" | "apiKeyId" | "custodyWalletId"
+    >
   ): Promise<EffectiveOperationPolicies>;
   createApprovalRequest(
     input: CreateApprovalRequestInput

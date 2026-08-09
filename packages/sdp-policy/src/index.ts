@@ -3,6 +3,7 @@ export {
   type WalletOperationPolicyEnforcement,
 } from "./enforce";
 export {
+  describeCandidateRuleCriteria,
   type EvaluateCandidatePoliciesInput,
   type EvaluateWalletOperationPoliciesInput,
   evaluateCandidatePolicies,

@@ -144,7 +144,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/payments/handlers/transfers.ts",
       section: "export async function createTransfer",
-      before: "await enforcePaymentTransferOperationPolicy(c, scope, operation",
+      before: "getPolicyGateContext<CreateTransferBody, TransferPolicyResolved>(c)",
       after: "await executeSolTransfer(",
     },
     replay: [
