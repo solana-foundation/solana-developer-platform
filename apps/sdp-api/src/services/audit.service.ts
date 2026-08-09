@@ -274,6 +274,25 @@ async function reconcileExternalCheckpoint(
       return expectedCheckpoint;
     }
   }
+
+  if (externalCheckpoint === null && expectedCheckpoint !== null) {
+    const seeded = await checkpointStore.compareAndSet(
+      AUDIT_LEDGER_CHECKPOINT_KEY,
+      null,
+      expectedCheckpoint
+    );
+    if (seeded) {
+      getLogger().warn(
+        { event: "audit_checkpoint_bootstrapped", sequence: head?.ledger_sequence },
+        "External audit-ledger checkpoint was absent; bootstrapped from the verified database head"
+      );
+      return expectedCheckpoint;
+    }
+    if ((await checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY)) === expectedCheckpoint) {
+      return expectedCheckpoint;
+    }
+  }
+
   throw new Error("External audit-ledger checkpoint diverged; writes are locked");
 }
 
