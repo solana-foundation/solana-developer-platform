@@ -191,7 +191,34 @@ export function createPostgresPrivateChannelTransferRepository(
         )
         .all<EligibleRecipientRow>();
 
-      return result.results.map(
+      // A transfer credits a pubkey, and SPC balances are per (wallet, mint) — shared
+      // across the members who verified that wallet. The join above yields one row per
+      // (member, verification), so a wallet verified by several members would appear
+      // multiple times, and the retained row's metadata (label + the member/verification
+      // IDs persisted on the transfer) would otherwise be an arbitrary side effect of the
+      // pcu.id sort. Collapse to one entry per pubkey with an EXPLICIT preference:
+      //   1. the initiator's own verification (keeps the caller's wallet self-attributed);
+      //   2. otherwise a verification whose custody wallet has a name (a known/labelled
+      //      record beats a bare address in the picker and in history);
+      //   3. otherwise the first by the query's stable order.
+      // The Map preserves first-occurrence order, so the overall initiator-first ordering
+      // from the ORDER BY is retained.
+      const hasName = (row: EligibleRecipientRow) => (row.wallet_name?.trim().length ?? 0) > 0;
+      const bestByPubkey = new Map<string, EligibleRecipientRow>();
+      for (const row of result.results) {
+        const current = bestByPubkey.get(row.pubkey);
+        if (current === undefined) {
+          bestByPubkey.set(row.pubkey, row);
+          continue;
+        }
+        if (current.is_self) {
+          continue; // (1) self already wins; never replace it.
+        }
+        if (row.is_self || (!hasName(current) && hasName(row))) {
+          bestByPubkey.set(row.pubkey, row); // (1) self, else (2) upgrade to a named record.
+        }
+      }
+      return [...bestByPubkey.values()].map(
         (row): PrivateChannelTransferRecipientDto => ({
           id: row.verified_wallet_id,
           pubkey: row.pubkey,

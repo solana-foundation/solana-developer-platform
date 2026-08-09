@@ -464,6 +464,51 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
     ]);
   });
 
+  it("keeps the named verification when several channel members verified the same pubkey", async () => {
+    const db = getDb(env);
+    // NON_MEMBER joins the channel and verifies the SAME pubkey as RECIPIENT_WALLET_A,
+    // but via a custody wallet with no active label (walletName resolves to null). Its
+    // pcu.id ("…non_member") sorts BEFORE the recipient's ("…recipient"), so a naive
+    // "keep first" would retain this nameless duplicate and mis-attribute the recipient.
+    await db
+      .prepare(
+        `INSERT INTO private_channel_memberships (id, channel_id, private_channel_user_id)
+         VALUES ('pcm_pct_dup', ?, ?)`
+      )
+      .bind(CHANNEL_A_ID, NON_MEMBER_PC_USER_ID)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO private_channel_verified_wallets (
+           id, organization_id, project_id, user_id, instance_id, wallet_id, pubkey
+         ) VALUES ('pcvw_pct_dup', ?, ?, ?, ?, 'wal_pct_dup', ?)`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID, NON_MEMBER_PC_USER_ID, TEST_INSTANCE_ID, RECIPIENT)
+      .run();
+
+    const recipients = await repo.listEligibleRecipients({
+      ...SCOPE,
+      instanceId: TEST_INSTANCE_ID,
+      channelId: CHANNEL_A_ID,
+      initiatingPrivateChannelUserId: SENDER_PC_USER_ID,
+    });
+
+    // Exactly one entry for the shared pubkey, and it must be the NAMED "Operations"
+    // verification — id, member, and label all attributed to the labelled record.
+    const forPubkey = recipients.filter((recipient) => recipient.pubkey === RECIPIENT);
+    expect(forPubkey).toEqual([
+      {
+        id: RECIPIENT_WALLET_A_ID,
+        pubkey: RECIPIENT,
+        walletName: "Operations",
+        privateChannelUserId: RECIPIENT_PC_USER_ID,
+        isSelf: false,
+      },
+    ]);
+    const pubkeys = recipients.map((recipient) => recipient.pubkey);
+    expect(new Set(pubkeys).size).toBe(pubkeys.length);
+  });
+
   it("excludes verified wallets of members who are not in the channel", async () => {
     const recipients = await repo.listEligibleRecipients({
       ...SCOPE,
