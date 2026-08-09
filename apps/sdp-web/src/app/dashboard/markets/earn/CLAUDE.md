@@ -26,6 +26,25 @@ reintroduce fixture modules. Data flows: BFF proxies
   below.
 - `earn-program-data.ts` — THE data seam. `useEarnProgram()` discriminates
   `404 → none`, `503 → unconfigured` (no provider key), `200 → active`;
+  **polls while the provider is mid-operation** — cadence is a property of the
+  WALLET (`earnProgramRefreshInterval`: `creating` 4s, `busy` 10s, everything
+  else 0), never a caller flag, so a status can never sit frozen while money
+  moves. It sets `EARN_PROGRAM_DEDUPING_MS` (2s) because the dashboard-wide
+  `dedupingInterval` is 10s — equal to the busy cadence — and a poll landing
+  inside its own dedupe window is dropped. `useEarnWalletActivityToasts()`
+  announces a `busy → settled` transition ONCE, from observed provider state
+  (never from what the user submitted), and only the workspace mounts it: the
+  program read runs in several components and a toast per consumer would
+  announce one completion several times. **It never announces a withdrawal**:
+  the wallet only reports that the provider stopped, and a failed, cancelled or
+  partial payout leaves it exactly as idle as a settled one — so
+  `useEarnWithdrawalOutcomeToast(ref)` follows the WITHDRAWAL's own status
+  instead (terminal = completed / partially_completed / failed / cancelled;
+  `pending_approval` keeps waiting, since it still resolves). Only `completed`
+  is a success toast — partial is a problem, not a win. Sourcing a settlement
+  claim from a wallet transition is the bug to never reintroduce. SWR suspends
+  polling for a hidden tab and revalidates on focus — which is why the cadence
+  is unit-tested rather than checked in a browser;
   `useEarnStrategies()`, program upsert, deposits, withdrawal fetchers.
   `EARN_PORTFOLIO_PROVIDER` is the single deliberate Ground pin — widening to
   multi-provider selection happens HERE, not by scattering provider ids.
@@ -165,7 +184,9 @@ funding instructions and nothing else — never imply a transfer happens.
   helper, a `process.env` read, or a `NEXT_PUBLIC_*` twin is wrong (the deleted
   `lib/earn-feature.ts` was all three).
 - **i18n: English only.** Edit `messages/en/dashboard-earn.json`; NEVER touch
-  `messages/fr/*` (CI Translation Catalog Policy fails the branch).
+  `messages/{es,fr,pt}` — or any future non-`en` locale — in the same PR. CI's
+  Translation Catalog Policy fails a branch that edits English and localized
+  catalogs together, because translations land on the automated release PR.
 - **Solana-only surface**: only Solana deposit addresses/destinations render.
   Position **labels arrive display-ready** — the provider client synthesizes them
   from kind + token precisely because a provider names a position after the chain
@@ -189,6 +210,19 @@ funding instructions and nothing else — never imply a transfer happens.
   Note the asymmetry: `PUT /program` answers 403 even for *missing credentials*,
   so read `error.code`, not just the status, before labelling a failure.
 - Missing numbers render "—", never `0` and never a fabricated rate.
+- **The provider is the source of truth for what is happening to the money.**
+  The status chip names the operation from `wallet.activity` — the
+  provider-neutral field the provider client derives in ONE place (Ground:
+  `WALLET_STATE_BY_GROUND_STATUS`) — never from a raw provider status string,
+  and never inferred from what the user just submitted. A busy state the client
+  does not recognize arrives with no activity and falls back to the generic
+  label rather than being guessed at. Adding a second copy of a provider's
+  vocabulary to this module is the mistake to avoid.
+- **Never disable a money verb on status.** Withdraw gates on
+  `withdrawableUsd` alone (ADR 0002, money out beats money off): the provider
+  already reserves an in-flight amount out of that figure, so the balance
+  expresses the constraint without a status lock that could trap an exit —
+  including when an unrecognized status normalizes to `busy` indefinitely.
 - Tests: vitest, `environment: "node"` by default — a test that touches
   `document` needs a `// @vitest-environment jsdom` docblock. Mock the data-hook
   seam (`./earn-program-data`), not fetch. Run:

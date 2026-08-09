@@ -37,6 +37,13 @@ const data = vi.hoisted(() => ({
 vi.mock("./earn-program-data", () => ({
   useEarnProgram: () => data.program,
   useEarnStrategies: () => data.strategies,
+  // Completion toasts are behaviour of their own; earn-wallet-activity covers
+  // them against provider state transitions, so the workspace only has to
+  // mount the hook.
+  useEarnWalletActivityToasts: () => {},
+  // Withdrawal outcomes are announced from the withdrawal's own status;
+  // earn-wallet-activity covers that hook against each terminal status.
+  useEarnWithdrawalOutcomeToast: () => {},
   // The workspace also reads the provider pin, so the hero counts exactly what
   // the deposit flow will offer rather than every synced row.
   EARN_PORTFOLIO_PROVIDER: "ground",
@@ -226,6 +233,68 @@ describe("EarnWorkspace with an active program", () => {
   it("renders the provider's position label verbatim so no chain name is rebuilt", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("Cash (USDC)");
+  });
+
+  // The status chip relays what the PROVIDER says is happening. It reads the
+  // neutral `activity` the provider client derived — never a raw provider
+  // status string, which would put a second copy of that vocabulary here.
+  describe("wallet status chip", () => {
+    const withWallet = (patch: Record<string, unknown>) => {
+      const state = data.program.state;
+      if (state?.kind !== "active") throw new Error("expected an active program");
+      Object.assign(state.program.wallet, patch);
+      return renderToStaticMarkup(<EarnWorkspace />);
+    };
+
+    it("shows no chip while the wallet is ready", () => {
+      const html = withWallet({ status: "ready", activity: undefined });
+      expect(html).not.toContain("DashboardEarn.overview.walletStatus");
+    });
+
+    it("names the operation when the provider reports one", () => {
+      expect(withWallet({ status: "busy", activity: "withdrawing" })).toContain(
+        "DashboardEarn.overview.walletStatusWithdrawing"
+      );
+      expect(withWallet({ status: "busy", activity: "rebalancing" })).toContain(
+        "DashboardEarn.overview.walletStatusRebalancing"
+      );
+    });
+
+    it("falls back to the generic label when busy carries no named activity", () => {
+      // The provider client reports an unrecognized provider state as busy with
+      // no activity; the chip must not invent one.
+      const html = withWallet({ status: "busy", activity: undefined });
+      expect(html).toContain("DashboardEarn.overview.walletStatusBusy");
+      expect(html).not.toContain("DashboardEarn.overview.walletStatusWithdrawing");
+    });
+
+    it("keeps both money verbs reachable while the provider is busy", () => {
+      // ADR 0002, money out beats money off: a withdrawal in flight must never
+      // lock the exit. Ground already moves reserved funds out of
+      // withdrawableUsd, so that figure — not a status — is the only gate.
+      // Matches the rendered attribute, NOT Tailwind's `disabled:` utilities.
+      const html = withWallet({ status: "busy", activity: "withdrawing" });
+      expect(html).toContain("DashboardEarn.overview.withdraw");
+      expect(html).toContain("DashboardEarn.overview.changeStrategy");
+      expect(html).not.toContain('disabled=""');
+    });
+
+    it("gates withdraw on the balance alone, so the assertion above has teeth", () => {
+      // Ground reserves the amount the instant it accepts a withdrawal, so a
+      // program with nothing left to withdraw disables the button — proving
+      // the previous test observes a real absence, not a broken matcher.
+      const html = withWallet({
+        status: "busy",
+        activity: "withdrawing",
+        balance: {
+          totalUsd: "125000.50",
+          withdrawableUsd: "0.00",
+          reservedUsd: "125000.50",
+          earnedUsd: "1250.75",
+        },
+      });
+      expect(html).toContain('disabled=""');
+    });
   });
 
   it("explains what each cash slice is waiting for, from the target allocations", () => {

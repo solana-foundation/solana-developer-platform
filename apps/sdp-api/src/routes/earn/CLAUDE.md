@@ -8,6 +8,20 @@ invariants.
 ## Route map
 
 - `GET /strategies[/:id[/nav]]` — synced catalogue (DB), env-scoped.
+- **`POST /program/withdrawals` needs a retry-stable idempotency key** and
+  refuses a request carrying none. The provider dedupes a withdrawal on the
+  request id alone and SDP persists no row for one, so that id is the entire
+  defence against a retried request paying out twice — a server-minted random
+  id is fresh per attempt and would *cause* the double-send. Accepts EXACTLY
+  one of `requestId` (UUIDv4) or the `Idempotency-Key` header — both and
+  neither are 400s, because no precedence rule can tell which of two sources a
+  caller's retry keeps stable, and following the wrong one pays out twice.
+  Whichever arrives, `deriveProviderRequestId` hashes it into a stable id
+  scoped by the program wallet, so two tenants sharing the provider account
+  cannot collide on the same pasted key.
+  Ground validates the shape strictly (`400 requestId must be a valid UUID v4`
+  on anything else, verified 2026-08-05), which is why that derivation stamps
+  version 4 despite being derived rather than random.
 - `POST /deposits/quote`, `POST /withdrawals/quote` — per-strategy quoting
   (capability of providers that support it).
 - `PUT /program` / `GET /program` — the **shared portfolio wallet**, ONE per
@@ -32,8 +46,13 @@ invariants.
 - `GET /program/deposits`, `POST /program/withdrawal-preview`,
   `POST /program/withdrawals`, `GET /program/withdrawals/:ref` — funding
   tracking + portfolio-level withdrawals (Solana destinations only).
-- `GET /positions|/movements` — per-strategy families (currently unused by the
-  portfolio flow; kept for per-strategy providers).
+- `GET /positions|/movements` — read `earn_positions`/`earn_movements`, tables
+  **nothing writes in V1**: their writer was the execution path, which the
+  portfolio-wallet model shipped without, so these serve permanently empty
+  ledgers. Live truth is the program surface (provider snapshot per request).
+  Do not wire writers here, and do not remove the routes, without PRO-1628 —
+  that decision (ledger vs live-only) lands as an ADR 0002 addendum; see the
+  "Ledger vs live" callout in docs/architecture/earn-v1-data-flow.md.
 
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
