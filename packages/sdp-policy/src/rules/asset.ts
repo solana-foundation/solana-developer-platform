@@ -1,4 +1,4 @@
-import type { AssetPolicyRule, WalletOperationEnvelope } from "@sdp/types";
+import type { AssetPolicyRule, PolicyCandidate } from "@sdp/types";
 import { type RuleEvaluation, ruleValues } from "./helpers";
 
 /**
@@ -10,7 +10,7 @@ import { type RuleEvaluation, ruleValues } from "./helpers";
  */
 export function evaluateAssetRule(
   rule: AssetPolicyRule,
-  operation: WalletOperationEnvelope
+  operation: PolicyCandidate
 ): RuleEvaluation | null {
   const assets = ruleValues(rule.asset, rule.assets);
 

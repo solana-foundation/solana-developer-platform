@@ -1,8 +1,10 @@
 import type {
+  CandidatePolicyEvaluation,
   EffectiveApiKeyPolicy,
   EffectivePolicy,
   EffectiveWalletPolicy,
   MatchedPolicyRule,
+  PolicyCandidate,
   PolicyEvaluationContext,
   PolicyEvaluationReasonCode,
   PolicyRuleScope,
@@ -21,6 +23,12 @@ export const IMPLICIT_DEFAULT_ALLOW_POLICY: EffectivePolicy<never, never> = {
   defaultAction: "allow",
 };
 
+export interface EvaluateCandidatePoliciesInput {
+  candidate: PolicyCandidate;
+  walletPolicy: EffectiveWalletPolicy;
+  apiKeyPolicy: EffectiveApiKeyPolicy | null;
+}
+
 export interface EvaluateWalletOperationPoliciesInput {
   operation: WalletOperationEnvelope;
   walletPolicy: EffectiveWalletPolicy;
@@ -28,19 +36,21 @@ export interface EvaluateWalletOperationPoliciesInput {
 }
 
 /**
- * Evaluate an operation against its effective wallet and API-key policies and
- * combine the scope decisions, strictest wins.
+ * Evaluate a candidate operation against its effective wallet and API-key
+ * policies and combine the scope decisions, strictest wins. Pure and
+ * persistence-free: the candidate needs no wallet-operation row, so dry-run
+ * evaluation and real enforcement share this exact decision path.
  *
- * @param input - The operation plus the effective policy for each scope.
+ * @param input - The candidate plus the effective policy for each scope.
  * @returns The combined evaluation with per-scope detail and matched rules.
  */
-export function evaluateWalletOperationPolicies(
-  input: EvaluateWalletOperationPoliciesInput
-): WalletOperationPolicyEvaluation {
+export function evaluateCandidatePolicies(
+  input: EvaluateCandidatePoliciesInput
+): CandidatePolicyEvaluation {
   const wallet = evaluatePolicyScope({
     scope: "wallet",
     policy: input.walletPolicy,
-    operation: input.operation,
+    operation: input.candidate,
   });
   const apiKey = resolveApiKeyScopeEvaluation(input);
   const scopes = apiKey === null ? [wallet] : [wallet, apiKey];
@@ -52,14 +62,12 @@ export function evaluateWalletOperationPolicies(
   );
 
   return {
-    operation: input.operation,
     wallet,
     apiKey,
     decision: selected.decision,
     reasonCode: allScopesUseImplicitAllow ? "implicit_default_allow" : selected.reasonCode,
     reason: summarizeScopeDecisions(scopes, selected),
     matchedRules: scopes.flatMap((scope) => scope.matchedRules),
-    evaluationContext: createPolicyEvaluationContext(input.operation, wallet, apiKey),
     requiresApproval: isApprovalDecision(selected.decision),
     walletPolicyRevisionId: wallet.revisionId,
     apiKeyPolicyRevisionId: apiKey === null ? null : apiKey.revisionId,
@@ -67,27 +75,55 @@ export function evaluateWalletOperationPolicies(
 }
 
 /**
+ * Evaluate a persisted operation against its effective policies: the
+ * candidate evaluation plus the audit context recorded alongside the
+ * operation row.
+ *
+ * @param input - The operation plus the effective policy for each scope.
+ * @returns The combined evaluation with per-scope detail and audit context.
+ */
+export function evaluateWalletOperationPolicies(
+  input: EvaluateWalletOperationPoliciesInput
+): WalletOperationPolicyEvaluation {
+  const evaluation = evaluateCandidatePolicies({
+    candidate: input.operation,
+    walletPolicy: input.walletPolicy,
+    apiKeyPolicy: input.apiKeyPolicy,
+  });
+
+  return {
+    ...evaluation,
+    operation: input.operation,
+    evaluationContext: createPolicyEvaluationContext(
+      input.operation,
+      evaluation.wallet,
+      evaluation.apiKey
+    ),
+  };
+}
+
+/**
  * Evaluate the API-key scope when the caller supplies an effective API-key
- * policy, or when the operation was made with an API key (implicit allow).
+ * policy, or when the candidate was made with an API key (implicit allow).
  *
  * @param input - The evaluation input.
  * @returns The API-key scope evaluation, or null when no API key is involved.
  */
 function resolveApiKeyScopeEvaluation(
-  input: EvaluateWalletOperationPoliciesInput
+  input: EvaluateCandidatePoliciesInput
 ): PolicyScopeEvaluation | null {
   if (input.apiKeyPolicy !== null) {
     return evaluatePolicyScope({
       scope: "api_key",
       policy: input.apiKeyPolicy,
-      operation: input.operation,
+      operation: input.candidate,
     });
   }
-  if (input.operation.apiKeyId !== null) {
+  if (input.candidate.apiKeyId !== null) {
     return evaluatePolicyScope({
       scope: "api_key",
       policy: IMPLICIT_DEFAULT_ALLOW_POLICY,
-      operation: input.operation,
+      operation: input.candidate,
     });
   }
   return null;
@@ -103,7 +139,7 @@ function resolveApiKeyScopeEvaluation(
 function evaluatePolicyScope(input: {
   scope: PolicyRuleScope;
   policy: EffectiveWalletPolicy | EffectiveApiKeyPolicy;
-  operation: WalletOperationEnvelope;
+  operation: PolicyCandidate;
 }): PolicyScopeEvaluation {
   const revision = input.policy.revision;
 
