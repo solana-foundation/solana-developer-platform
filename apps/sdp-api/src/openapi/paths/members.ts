@@ -113,7 +113,8 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     tags: ["Members"],
     summary: "Remove member",
     operationId: "removeMember",
-    description: "Removes a member from the organization.",
+    description:
+      "Removes a member from the organization and revokes their pending invitations, so an unspent invitation token cannot reinstate them. Re-inviting the removed member issues a fresh invitation that works normally.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

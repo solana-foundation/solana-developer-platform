@@ -14,7 +14,7 @@ import app from "@/index";
 import { SessionService } from "@/services/session.service";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 /** The organization the caller is signed in to. */
@@ -158,7 +158,6 @@ describe("POST /v1/members/accept", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
@@ -293,7 +292,10 @@ describe("POST /v1/members/accept", () => {
     expect(await invitationStatus()).toBe("pending");
   });
 
-  it("reinstates a removed membership rather than adding a second row", async () => {
+  it("reinstates a removed membership from an invitation issued after the removal", async () => {
+    // The legitimate path back in: an admin re-invites a previously removed
+    // member, which creates a fresh invitation. Reinstatement happens on the
+    // existing row rather than by inserting a second one.
     const sessionId = await seedCaller();
     await getDb(env)
       .prepare(
@@ -311,6 +313,49 @@ describe("POST /v1/members/accept", () => {
     expect(memberships[0]?.id).toBe("mem_acceptance_removed");
     expect(memberships[0]?.status).toBe("active");
     expect(memberships[0]?.role).toBe("admin");
+  });
+
+  it("does not let a removed member self-reinstate with an invitation that predates the removal", async () => {
+    // A pending invitation that survives the member's removal is a
+    // self-reinstatement token: acceptance would flip the removed row back to
+    // active at the invited role, undoing the admin's decision. Removal must
+    // take the member's outstanding invitations down with it.
+    const sessionId = await seedCaller();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('mem_acceptance_stale', ?, ?, 'member', 'active')`
+      )
+      .bind(INVITING_ORG_ID, CALLER_USER_ID)
+      .run();
+    // Unspent invitation from before (or during) their membership — at a
+    // higher role than they held, which is the escalation the attack buys.
+    await seedInvitation({ role: "admin" });
+
+    // An admin of the inviting organization removes them.
+    await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_CACHED_API_KEY,
+      organizationId: INVITING_ORG_ID,
+      permissions: ["*"],
+    });
+    const removal = await app.request(
+      "/v1/members/mem_acceptance_stale",
+      { method: "DELETE", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(removal.status).toBe(204);
+
+    // The removal revoked the outstanding invitation…
+    expect(await invitationStatus()).toBe("revoked");
+
+    // …so the old token cannot resurrect the membership.
+    const res = await accept(sessionId);
+    expect(res.status).toBe(400);
+
+    const memberships = await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID);
+    expect(memberships).toHaveLength(1);
+    expect(memberships[0]?.status).toBe("removed");
+    expect(memberships[0]?.role).toBe("member");
   });
 
   it("spends the invitation without duplicating an existing membership", async () => {
