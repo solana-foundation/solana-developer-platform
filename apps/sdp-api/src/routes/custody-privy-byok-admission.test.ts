@@ -156,24 +156,24 @@ describe("legacy Privy setup admission", () => {
     await clearKVStores(env);
   });
 
-  it.each([
-    "initialize",
-    "switch",
-  ] as const)("routes fresh /%s setup to stored credentials before env availability", async (path) => {
-    const response = await request(path);
+  it.each(["initialize", "switch"] as const)(
+    "routes fresh /%s setup to stored credentials before env availability",
+    async (path) => {
+      const response = await request(path);
 
-    expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({
-      error: {
-        code: "FORBIDDEN",
-        message: "New Privy setup must use stored credentials",
-      },
-    });
-    const configs = await getDb(env)
-      .prepare("SELECT COUNT(*) AS count FROM custody_configs")
-      .first<{ count: number }>();
-    expect(configs?.count).toBe(0);
-  });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "FORBIDDEN",
+          message: "New Privy setup must use stored credentials",
+        },
+      });
+      const configs = await getDb(env)
+        .prepare("SELECT COUNT(*) AS count FROM custody_configs")
+        .first<{ count: number }>();
+      expect(configs?.count).toBe(0);
+    }
+  );
 
   it("treats inactive Config reactivation as fresh setup", async () => {
     await seedLegacyConfig("inactive");
@@ -191,36 +191,36 @@ describe("legacy Privy setup admission", () => {
     expect(config?.status).toBe("inactive");
   });
 
-  it.each([
-    "initialize",
-    "switch",
-  ] as const)("ignores stored Connection state on /%s after flag rollback", async (path) => {
-    env.PRIVY_BYOK_ENABLED = "false";
-    env.PRIVY_APP_ID = "legacy-app-id";
-    env.PRIVY_APP_SECRET = "legacy-app-secret";
-    env.CUSTODY_ENCRYPTION_KEY = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
-    provisionPrivyWalletMock.mockResolvedValueOnce({
-      walletId: "wallet_rollback",
-      address: "LegacyRollbackPublicKey",
-    });
-    await seedBlockingConnection();
+  it.each(["initialize", "switch"] as const)(
+    "ignores stored Connection state on /%s after flag rollback",
+    async (path) => {
+      env.PRIVY_BYOK_ENABLED = "false";
+      env.PRIVY_APP_ID = "legacy-app-id";
+      env.PRIVY_APP_SECRET = "legacy-app-secret";
+      env.CUSTODY_ENCRYPTION_KEY = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
+      provisionPrivyWalletMock.mockResolvedValueOnce({
+        walletId: "wallet_rollback",
+        address: "LegacyRollbackPublicKey",
+      });
+      await seedBlockingConnection();
 
-    const response = await request(path);
+      const response = await request(path);
 
-    expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({
-      data: {
-        walletId: "privy_wallet_rollback",
-        publicKey: "LegacyRollbackPublicKey",
-      },
-    });
-    expect(
-      await getDb(env)
-        .prepare("SELECT status FROM custody_connections WHERE id = ?")
-        .bind("cconn_privy_byok_admission")
-        .first()
-    ).toEqual({ status: "pending" });
-  });
+      expect(response.status).toBe(201);
+      expect(await response.json()).toMatchObject({
+        data: {
+          walletId: "privy_wallet_rollback",
+          publicKey: "LegacyRollbackPublicKey",
+        },
+      });
+      expect(
+        await getDb(env)
+          .prepare("SELECT status FROM custody_connections WHERE id = ?")
+          .bind("cconn_privy_byok_admission")
+          .first()
+      ).toEqual({ status: "pending" });
+    }
+  );
 
   it("preserves the initialize conflict for an active exact-project Config", async () => {
     env.PRIVY_APP_ID = "legacy-app-id";

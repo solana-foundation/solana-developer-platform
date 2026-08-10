@@ -496,19 +496,19 @@ describe("Private Channels — transfer access and routes", () => {
     expect(createChannelTransferMock).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "1.2.3",
-    "0.0000001",
-  ])("rejects malformed or over-precise amount %s at the route boundary", async (amount) => {
-    const response = await postTransfer({
-      walletId: ACTOR_WALLET_ID,
-      recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
-      amount,
-    });
+  it.each(["1.2.3", "0.0000001"])(
+    "rejects malformed or over-precise amount %s at the route boundary",
+    async (amount) => {
+      const response = await postTransfer({
+        walletId: ACTOR_WALLET_ID,
+        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+        amount,
+      });
 
-    expect(response.status).toBe(400);
-    expect(createChannelTransferMock).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(400);
+      expect(createChannelTransferMock).not.toHaveBeenCalled();
+    }
+  );
 
   it("requires the source custody wallet to be verified by the acting member", async () => {
     const response = await postTransfer({

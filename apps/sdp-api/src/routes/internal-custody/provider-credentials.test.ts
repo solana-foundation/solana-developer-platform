@@ -953,84 +953,84 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         ]);
       },
     },
-  ] satisfies RejectedReplacementCase[])("rejects a new credential when the project already has $label", async ({
-    key,
-    arrange,
-  }) => {
-    const { app, token } = buildApp();
-    const initial = await submit(app, token, {
-      key: `blocked-${key}-initial`,
-    });
-    expect(initial.status).toBe(201);
-    const initialBody = (await initial.json()) as {
-      data: {
-        providerCredential: { id: string };
+  ] satisfies RejectedReplacementCase[])(
+    "rejects a new credential when the project already has $label",
+    async ({ key, arrange }) => {
+      const { app, token } = buildApp();
+      const initial = await submit(app, token, {
+        key: `blocked-${key}-initial`,
+      });
+      expect(initial.status).toBe(201);
+      const initialBody = (await initial.json()) as {
+        data: {
+          providerCredential: { id: string };
+        };
       };
-    };
-    const db = getDb(env);
-    const initialConnection = await getConnectionForCredential(
-      initialBody.data.providerCredential.id
-    );
-    await arrange(db, {
-      credentialId: initialBody.data.providerCredential.id,
-      connectionId: initialConnection.id,
-    });
+      const db = getDb(env);
+      const initialConnection = await getConnectionForCredential(
+        initialBody.data.providerCredential.id
+      );
+      await arrange(db, {
+        credentialId: initialBody.data.providerCredential.id,
+        connectionId: initialConnection.id,
+      });
 
-    const readSafeSetupState = async () => {
-      const [credentials, connections] = await Promise.all([
-        db
-          .prepare(
-            `SELECT id, project_id, status, credential_version,
+      const readSafeSetupState = async () => {
+        const [credentials, connections] = await Promise.all([
+          db
+            .prepare(
+              `SELECT id, project_id, status, credential_version,
                       rotated_from_provider_credential_id, idempotency_key
                FROM provider_credentials
                ORDER BY id`
-          )
-          .all<Record<string, unknown>>(),
-        db
-          .prepare(
-            `SELECT id, project_id, status, provider_credential_id,
+            )
+            .all<Record<string, unknown>>(),
+          db
+            .prepare(
+              `SELECT id, project_id, status, provider_credential_id,
                       default_custody_wallet_id, setup_metadata,
                       last_check_status, last_check_at, last_check_failure_code,
                       activated_at
                FROM custody_connections
                ORDER BY id`
-          )
-          .all<Record<string, unknown>>(),
-      ]);
-      return {
-        credentials: credentials.results,
-        connections: connections.results,
+            )
+            .all<Record<string, unknown>>(),
+        ]);
+        return {
+          credentials: credentials.results,
+          connections: connections.results,
+        };
       };
-    };
 
-    const stateBefore = await readSafeSetupState();
-    const countsBefore = await getDomainCounts();
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-    const newKey = `blocked-${key}-new`;
+      const stateBefore = await readSafeSetupState();
+      const countsBefore = await getDomainCounts();
+      const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+      const newKey = `blocked-${key}-new`;
 
-    const response = await submit(app, token, { key: newKey });
+      const response = await submit(app, token, { key: newKey });
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "CONFLICT",
-        message: "Privy custody setup already exists for this project",
-      },
-      meta: { requestId: "req_provider_credential_submit" },
-    });
-    expect(factory).not.toHaveBeenCalled();
-    expect(await readSafeSetupState()).toEqual(stateBefore);
-    expect(await getDomainCounts()).toEqual(countsBefore);
-    const newIntentCount = await db
-      .prepare(
-        `SELECT COUNT(*) AS count
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "CONFLICT",
+          message: "Privy custody setup already exists for this project",
+        },
+        meta: { requestId: "req_provider_credential_submit" },
+      });
+      expect(factory).not.toHaveBeenCalled();
+      expect(await readSafeSetupState()).toEqual(stateBefore);
+      expect(await getDomainCounts()).toEqual(countsBefore);
+      const newIntentCount = await db
+        .prepare(
+          `SELECT COUNT(*) AS count
            FROM provider_credentials
            WHERE idempotency_key = ?`
-      )
-      .bind(newKey)
-      .first<{ count: number }>();
-    expect(newIntentCount?.count).toBe(0);
-  });
+        )
+        .bind(newKey)
+        .first<{ count: number }>();
+      expect(newIntentCount?.count).toBe(0);
+    }
+  );
 
   it("reinstalls as a new root and preserves deactivated lineage replay", async () => {
     const { app, token } = buildApp();
@@ -1235,25 +1235,28 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it.each([
     ["missing", undefined],
     ["blank", "   "],
-  ] as const)("fails closed before secret storage when CREDENTIAL_FINGERPRINT_PEPPER is %s", async (_case, value) => {
-    env.CREDENTIAL_FINGERPRINT_PEPPER = value;
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-    const { app, token } = buildApp();
+  ] as const)(
+    "fails closed before secret storage when CREDENTIAL_FINGERPRINT_PEPPER is %s",
+    async (_case, value) => {
+      env.CREDENTIAL_FINGERPRINT_PEPPER = value;
+      const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+      const { app, token } = buildApp();
 
-    const response = await submit(app, token, {
-      key: "missing-pepper",
-    });
-    expect(response.status).toBe(500);
-    expect(await response.json()).toMatchObject({
-      error: { code: "INTERNAL_ERROR" },
-    });
-    expect(factory).not.toHaveBeenCalled();
-    expect(await getDomainCounts()).toEqual({
-      credentials: 0,
-      connections: 0,
-      wallets: 0,
-    });
-  });
+      const response = await submit(app, token, {
+        key: "missing-pepper",
+      });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({
+        error: { code: "INTERNAL_ERROR" },
+      });
+      expect(factory).not.toHaveBeenCalled();
+      expect(await getDomainCounts()).toEqual({
+        credentials: 0,
+        connections: 0,
+        wallets: 0,
+      });
+    }
+  );
 
   it("maps an upstream secret-store failure to a safe 503 and orphan alert", async () => {
     const store: CredentialSecretStore = {
