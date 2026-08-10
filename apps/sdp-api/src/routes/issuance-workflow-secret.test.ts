@@ -19,7 +19,10 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import type { AssetWorkflowDefinition } from "@/db/repositories";
+import {
+  type AssetWorkflowDefinition,
+  createWorkflowExecutionsRepository,
+} from "@/db/repositories";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { CredentialSecretStoreError } from "@/services/credential-secret-store";
@@ -440,8 +443,8 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       expect(secretStore.destroyVersion).toHaveBeenCalledWith({ secretVersionRef: versionRef(1) });
     });
 
-    // The one handler where a missed cleanup is unrecoverable: a retry 404s, because
-    // getWorkflowById excludes the row the first call soft-deleted.
+    // Retired before the next failure point on purpose: a retry can now finish a failed
+    // delete's cleanup, but the secret's retirement should not have to depend on one.
     it("retires the secret even when execution cancellation fails", async () => {
       const workflowId = await createRuleWithSecret();
       repoRejects.cancelOpenExecutionsForWorkflow = new Error("deadlock detected");
@@ -461,6 +464,50 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       const res = await request("DELETE", `${base}/${workflowId}`);
 
       expect(res.status).toBe(200);
+    });
+
+    // Execution withdrawal runs last, so its failure leaves the rule soft-deleted with
+    // its executions still open. The retry used to 404 — the live read excluded the row
+    // the first call soft-deleted — making the withdrawal permanently unreachable and
+    // leaving a held execution in the approval queue of a rule that no longer exists.
+    // Delete must be idempotent over its own partial failure: the retry finishes the job.
+    it("lets a retry withdraw the executions a failed delete left open", async () => {
+      const workflowId = await createRuleWithSecret();
+      await createWorkflowExecutionsRepository(env as never).createExecution({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        workflowId,
+        tokenId: TOKEN_ID,
+        triggerType: "kyc_approved",
+        actionType: "send_webhook",
+        status: "awaiting_review",
+        idempotencyKey: "kyc_approved:delete-retry",
+        triggerPayload: { wallet: "holder" },
+        maxAttempts: 5,
+      });
+      repoRejects.cancelOpenExecutionsForWorkflow = new Error("deadlock detected");
+      expect((await request("DELETE", `${base}/${workflowId}`)).status).toBe(500);
+
+      repoRejects.cancelOpenExecutionsForWorkflow = null;
+      const retry = await request("DELETE", `${base}/${workflowId}`);
+
+      expect(retry.status).toBe(200);
+      const { data } = (await retry.json()) as { data: { cancelledExecutions: number } };
+      expect(data.cancelledExecutions).toBe(1);
+      const row = await getDb(env)
+        .prepare("SELECT status, error FROM workflow_executions WHERE workflow_id = ?")
+        .bind(workflowId)
+        .first<{ status: string; error: string | null }>();
+      expect(row?.status).toBe("cancelled");
+      expect(row?.error).toBe("RULE_WITHDRAWN");
+    });
+
+    // Idempotence must not widen visibility: a rule some other tenant soft-deleted is
+    // still a 404 here, and a workflow id that never existed stays one too.
+    it("still 404s a delete of a workflow that never existed", async () => {
+      const res = await request("DELETE", `${base}/wf_never_existed`);
+
+      expect(res.status).toBe(404);
     });
   });
 });

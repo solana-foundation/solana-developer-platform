@@ -24,6 +24,7 @@ function mapWorkflowRow(row: Record<string, unknown>): AssetWorkflowRow {
     created_by: (row.created_by as string | null) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
+    deleted_at: (row.deleted_at as string | null) ?? null,
   };
 }
 
@@ -102,7 +103,8 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
       const row = await db
         .prepare(
           `SELECT * FROM asset_workflows
-             WHERE id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL`
+             WHERE id = ? AND organization_id = ? AND project_id = ?
+             ${params.includeDeleted ? "" : "AND deleted_at IS NULL"}`
         )
         .bind(params.workflowId, params.organizationId, params.projectId)
         .first<Record<string, unknown>>();

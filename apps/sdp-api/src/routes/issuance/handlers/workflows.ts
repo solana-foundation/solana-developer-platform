@@ -403,7 +403,19 @@ export const deleteWorkflow = async (c: AppContext) => {
   const { projectId, orgId } = requireProjectScope(c);
 
   const repo = createAssetWorkflowsRepository(c.env);
-  const existing = await repo.getWorkflowById({ workflowId, organizationId: orgId, projectId });
+  // Read INCLUDING soft-deleted rows. The cleanup after the soft delete (secret
+  // retirement, withdrawal of queued/held executions) can fail with the delete already
+  // committed — and a retry that 404s on the now-invisible row makes that cleanup
+  // permanently unreachable: the secret stays recoverable and a held execution from
+  // the dead rule sits in the approval queue inviting a decision (the engine would
+  // refuse it with RULE_NOT_FOUND, but nothing should ask). So delete is idempotent
+  // over its own partial failure: a repeat request finishes the job.
+  const existing = await repo.getWorkflowById({
+    workflowId,
+    organizationId: orgId,
+    projectId,
+    includeDeleted: true,
+  });
   if (!existing || existing.token_id !== tokenId) {
     throw notFound("Workflow");
   }
@@ -412,13 +424,12 @@ export const deleteWorkflow = async (c: AppContext) => {
   const removed = await repo.deleteWorkflow({ workflowId, organizationId: orgId, projectId });
   // The rule is gone from every read path, so its signing key has no reader left. The
   // soft delete keeps the reference on the row for history; the value itself is retired
-  // rather than left recoverable from the secret backend.
-  //
-  // Retired immediately after the delete commits, before anything else that can throw.
-  // This is the one handler where a missed cleanup cannot be repaired by retrying: the
-  // caller's retry gets a 404, because getWorkflowById excludes the row it just
-  // soft-deleted, so the secret would stay recoverable with nothing left to reach it.
-  if (removed) {
+  // rather than left recoverable from the secret backend. Retired immediately after the
+  // delete commits, before anything else that can throw; replayed when this request is
+  // the retry of a delete that died before reaching it (destroying an already-destroyed
+  // version is a logged no-op). Skipped only when a concurrent delete owns the row —
+  // it reached the soft delete first, so this cleanup is its to run.
+  if (removed || existing.deleted_at !== null) {
     await destroyActionSecret(c.env, existing.definition.actionSecret);
   }
   // Anything this rule had queued or held is withdrawn with it — otherwise a held mint
