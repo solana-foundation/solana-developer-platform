@@ -7,6 +7,7 @@ import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { TokenMark } from "@/components/token-mark";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -35,8 +36,10 @@ import { fetchHomeActivity } from "./home-workspace.data";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
+  resolveTokenByMint,
   resolveTransferTokenLabel,
 } from "./payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
 import { tokenActivityHref } from "./tokens/holdings-links";
 
 interface HomeWorkspaceProps {
@@ -45,6 +48,7 @@ interface HomeWorkspaceProps {
   wallets: PaymentsDashboardWallet[];
   balances: CustodyWalletTokenBalance[];
   walletCount: number;
+  issuedTokens: PaymentsIssuedTokenSymbol[];
 }
 
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
@@ -113,9 +117,11 @@ const OTHER_SEGMENT_COLOR = "bg-fill-strong";
  */
 function BalanceAllocation({
   balances,
+  issuedTokensByMint,
   locale,
 }: {
   balances: CustodyWalletTokenBalance[];
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   locale: string;
 }) {
   const t = useTranslations();
@@ -132,6 +138,8 @@ function BalanceAllocation({
   );
   const symbolFor = (slice: { mint: string; token: string }) =>
     resolveTransferTokenLabel(slice.mint, symbolsByMint) ?? slice.token;
+  const resolvedFor = (mint: string, symbol: string) =>
+    resolveTokenByMint(mint, issuedTokensByMint, symbol);
 
   const segments = [
     ...breakdown.priced.map((slice) => ({
@@ -200,40 +208,54 @@ function BalanceAllocation({
           </div>
 
           <ul className="space-y-1">
-            {segments.map((segment) => (
-              <li key={segment.key}>
-                {/* Row highlight is pure CSS. Driving it from mouse handlers on a
+            {segments.map((segment) => {
+              const resolved = segment.mint ? resolvedFor(segment.mint, segment.label) : null;
+              return (
+                <li key={segment.key}>
+                  {/* Row highlight is pure CSS. Driving it from mouse handlers on a
                     plain element is a keyboard trap — the segment button above owns
                     the interaction, and this only mirrors it. */}
-                <Link
-                  href={segment.href}
-                  onMouseEnter={() => setHovered(segment.key)}
-                  onMouseLeave={() => setHovered(null)}
-                  className={cn(
-                    "flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none",
-                    hovered === segment.key ? "bg-fill-subtle" : "bg-transparent"
-                  )}
-                >
-                  {segment.mint ? (
-                    <TokenMark mint={segment.mint} symbol={segment.label} size="sm" />
-                  ) : (
-                    <span
-                      aria-hidden="true"
-                      className={cn("size-6 shrink-0 rounded-full", segment.fill)}
-                    />
-                  )}
-                  <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-primary">
-                    {segment.label}
-                  </span>
-                  <span className="shrink-0 text-[15px] text-tertiary tabular-nums">
-                    {Math.round(segment.percent)}%
-                  </span>
-                  <span className="w-28 shrink-0 text-right text-[15px] font-medium text-primary tabular-nums">
-                    {formatCurrencyAmount(segment.value, locale)}
-                  </span>
-                </Link>
-              </li>
-            ))}
+                  <Link
+                    href={segment.href}
+                    onMouseEnter={() => setHovered(segment.key)}
+                    onMouseLeave={() => setHovered(null)}
+                    className={cn(
+                      "flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none",
+                      hovered === segment.key ? "bg-fill-subtle" : "bg-transparent"
+                    )}
+                  >
+                    {segment.mint ? (
+                      <TokenMark
+                        mint={segment.mint}
+                        symbol={segment.label}
+                        logoUrl={resolved?.metadataImageUrl}
+                        size="sm"
+                      />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className={cn("size-6 shrink-0 rounded-full", segment.fill)}
+                      />
+                    )}
+                    <span className="min-w-0 truncate text-[15px] font-medium text-primary">
+                      {segment.label}
+                    </span>
+                    {resolved?.tokenId ? (
+                      <Badge variant="outline" className="shrink-0">
+                        {t("Shared.SharedComponents.sdpMintedToken")}
+                      </Badge>
+                    ) : null}
+                    <span className="min-w-0 flex-1" />
+                    <span className="shrink-0 text-[15px] text-tertiary tabular-nums">
+                      {Math.round(segment.percent)}%
+                    </span>
+                    <span className="w-28 shrink-0 text-right text-[15px] font-medium text-primary tabular-nums">
+                      {formatCurrencyAmount(segment.value, locale)}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </>
       ) : null}
@@ -243,16 +265,28 @@ function BalanceAllocation({
           <p className="px-2 pb-1 text-xs text-tertiary">{t("Shared.homeWorkspace.notPriced")}</p>
           {breakdown.unpriced.map((slice) => {
             const symbol = symbolFor(slice);
+            const resolved = resolvedFor(slice.mint, symbol);
             return (
               <Link
                 key={slice.mint}
                 href={tokenActivityHref(slice.mint)}
                 className="flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none"
               >
-                <TokenMark mint={slice.mint} symbol={symbol} size="sm" />
-                <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-primary">
+                <TokenMark
+                  mint={slice.mint}
+                  symbol={symbol}
+                  logoUrl={resolved.metadataImageUrl}
+                  size="sm"
+                />
+                <span className="min-w-0 truncate text-[15px] font-medium text-primary">
                   {symbol}
                 </span>
+                {resolved.tokenId ? (
+                  <Badge variant="outline" className="shrink-0">
+                    {t("Shared.SharedComponents.sdpMintedToken")}
+                  </Badge>
+                ) : null}
+                <span className="min-w-0 flex-1" />
                 <span className="shrink-0 text-[15px] text-secondary tabular-nums">
                   {formatDisplayAmount(slice.uiAmount, symbol)}
                 </span>
@@ -321,6 +355,7 @@ function BalanceHero({
   walletCount,
   heldTokenCount,
   balances,
+  issuedTokensByMint,
   locale,
   canManageApiKeys,
   canManageCustody,
@@ -334,6 +369,7 @@ function BalanceHero({
   walletCount: number;
   heldTokenCount: number;
   balances: CustodyWalletTokenBalance[];
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   locale: string;
   canManageApiKeys: boolean;
   canManageCustody: boolean;
@@ -414,7 +450,11 @@ function BalanceHero({
 
         {balances.length > 0 ? (
           <div className="border-t border-border-default pt-5">
-            <BalanceAllocation balances={balances} locale={locale} />
+            <BalanceAllocation
+              balances={balances}
+              issuedTokensByMint={issuedTokensByMint}
+              locale={locale}
+            />
           </div>
         ) : null}
       </CardContent>
@@ -459,6 +499,7 @@ export function HomeWorkspace({
   wallets,
   balances,
   walletCount,
+  issuedTokens,
 }: HomeWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -506,6 +547,9 @@ export function HomeWorkspace({
     : (activitySnapshot?.activityError ?? null);
   const activityRows = activitySnapshot?.activityRows ?? [];
   const symbolsByMint = buildTokenSymbolsByMint(activityRows, balances);
+  const issuedTokensByMint = Object.fromEntries(
+    issuedTokens.map((token) => [token.mintAddress, token])
+  );
   const activityError = activityRequestError
     ? activityRequestError instanceof Error
       ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
@@ -536,6 +580,7 @@ export function HomeWorkspace({
             walletCount={walletCount}
             heldTokenCount={heldTokenCount}
             balances={balances}
+            issuedTokensByMint={issuedTokensByMint}
             locale={locale}
             canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
             canManageCustody={dashboardAccess.capabilities.canManageCustody}
@@ -575,10 +620,10 @@ export function HomeWorkspace({
                         <TableHead className="w-[calc(100%-7rem)] md:hidden">
                           {t("Shared.homeWorkspace.activity")}
                         </TableHead>
-                        <TableHead className="hidden w-[6.5rem] md:table-cell">
+                        <TableHead className="hidden w-[9.5rem] md:table-cell">
                           {t("Shared.homeWorkspace.type")}
                         </TableHead>
-                        <TableHead className="hidden w-[8rem] md:table-cell">
+                        <TableHead className="hidden w-[12rem] md:table-cell">
                           {t("Shared.homeWorkspace.token")}
                         </TableHead>
                         <TableHead className="hidden w-[9rem] text-right md:table-cell">
@@ -597,6 +642,9 @@ export function HomeWorkspace({
                         // from the mint using the balance symbols before falling back.
                         const tokenSymbol =
                           resolveTransferTokenLabel(row.tokenMint, symbolsByMint) ?? row.token;
+                        const resolvedToken = row.tokenMint
+                          ? resolveTokenByMint(row.tokenMint, issuedTokensByMint, tokenSymbol)
+                          : null;
                         const amountLabel =
                           row.amount === "—"
                             ? "—"
@@ -627,8 +675,18 @@ export function HomeWorkspace({
                             </TableCell>
                             <TableCell className="hidden text-secondary md:table-cell">
                               <span className="flex min-w-0 items-center gap-2">
-                                <TokenMark mint={row.tokenMint} symbol={tokenSymbol} size="xs" />
+                                <TokenMark
+                                  mint={resolvedToken ? resolvedToken.mint : null}
+                                  symbol={tokenSymbol}
+                                  logoUrl={resolvedToken?.metadataImageUrl}
+                                  size="xs"
+                                />
                                 <TruncatedTableText value={tokenSymbol} className="truncate" />
+                                {resolvedToken?.tokenId ? (
+                                  <Badge variant="outline" className="shrink-0">
+                                    {t("Shared.SharedComponents.sdpMintedToken")}
+                                  </Badge>
+                                ) : null}
                               </span>
                             </TableCell>
                             <TableCell className="hidden text-right text-secondary tabular-nums md:table-cell">

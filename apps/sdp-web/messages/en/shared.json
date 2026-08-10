@@ -140,7 +140,8 @@
     "invalidApiKeyFormat": "Invalid API key format. Use a raw key value like sk_test_... or sk_live_... with a valid suffix.",
     "playgroundExecutionFailed": "Playground execution failed.",
     "requestExecutionFailed": "Request execution failed.",
-    "customToken": "Custom"
+    "unknownToken": "Unknown",
+    "sdpMintedToken": "SDP-Minted"
   },
   "dashboardShell": {
     "workspace": "Workspace",
