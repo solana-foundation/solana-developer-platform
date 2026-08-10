@@ -42,6 +42,7 @@ const PROVISIONING_DISABLED_MESSAGE =
 
 interface SubmitPrivyCredentialInput {
   provider: "privy";
+  requestDelayMs?: number;
   walletLabel?: string;
   fields: {
     credentialLabel: string;
@@ -567,6 +568,7 @@ async function persistConnection(
       projectId: submission.projectId,
       providerCredentialId: submission.providerCredentialId,
       providerCredentialScopeKey: providerCredential.scope_key,
+      requestDelayMs: submission.input.requestDelayMs,
       pendingWalletLabel: submission.input.walletLabel,
       createdBy: submission.userId,
     });
@@ -578,6 +580,7 @@ async function persistConnection(
     expectedProviderCredentialId: lockedPlan.currentCredential.id,
     providerCredentialId: submission.providerCredentialId,
     providerCredentialScopeKey: providerCredential.scope_key,
+    requestDelayMs: submission.input.requestDelayMs,
     pendingWalletLabel: submission.input.walletLabel,
   });
   if (!updated) {
@@ -741,6 +744,7 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
         }),
       },
       provider: params.input.provider,
+      requestDelayMs: params.input.requestDelayMs,
       walletLabel: params.input.walletLabel,
       fields: params.input.fields,
     })

@@ -38,6 +38,7 @@ export interface CustodyConnectionRow {
   provider_credential_scope_key: string;
   default_custody_wallet_id: string | null;
   provider_account_fingerprint: string | null;
+  request_delay_ms: number | null;
   status: CustodyConnectionStatus;
   setup_metadata: unknown;
   last_check_status: string | null;
@@ -136,6 +137,7 @@ export class ProviderCredentialStore {
       `SELECT c.id, c.organization_id, c.project_id, c.provider, c.scope,
               c.provider_credential_id, c.provider_credential_scope_key,
               c.default_custody_wallet_id, c.provider_account_fingerprint,
+              c.request_delay_ms,
               c.status, c.setup_metadata,
               c.last_check_status, c.last_check_at, c.last_check_failure_code,
               c.activated_at, c.deactivated_at, c.created_at,
@@ -264,6 +266,7 @@ export class ProviderCredentialStore {
       `SELECT c.id, c.organization_id, c.project_id, c.provider, c.scope,
               c.provider_credential_id, c.provider_credential_scope_key,
               c.default_custody_wallet_id, c.provider_account_fingerprint,
+              c.request_delay_ms,
               c.status, c.setup_metadata, c.last_check_status, c.last_check_at,
               c.last_check_failure_code, c.activated_at, c.deactivated_at, c.created_at,
               pc.label AS credential_label,
@@ -695,6 +698,7 @@ export class ProviderCredentialStore {
     projectId: string;
     providerCredentialId: string;
     providerCredentialScopeKey: string;
+    requestDelayMs?: number;
     pendingWalletLabel?: string;
     createdBy: string | null;
   }): Promise<CustodyConnectionRow> {
@@ -702,11 +706,12 @@ export class ProviderCredentialStore {
       `INSERT INTO custody_connections (
        id, organization_id, project_id, provider, scope,
          provider_credential_id, provider_credential_scope_key,
-         setup_metadata, status, created_by
-       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, 'pending', ?)
+         request_delay_ms, setup_metadata, status, created_by
+       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, ?, 'pending', ?)
        RETURNING id, organization_id, project_id, provider, scope,
                  provider_credential_id, provider_credential_scope_key,
                  default_custody_wallet_id, provider_account_fingerprint,
+                 request_delay_ms,
                  status, setup_metadata,
                  last_check_status, last_check_at, last_check_failure_code,
                  activated_at, deactivated_at, created_at`,
@@ -716,6 +721,7 @@ export class ProviderCredentialStore {
         params.projectId,
         params.providerCredentialId,
         params.providerCredentialScopeKey,
+        params.requestDelayMs ?? null,
         JSON.stringify(
           params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}
         ),
@@ -733,12 +739,14 @@ export class ProviderCredentialStore {
     expectedProviderCredentialId: string;
     providerCredentialId: string;
     providerCredentialScopeKey: string;
+    requestDelayMs?: number;
     pendingWalletLabel?: string;
   }): Promise<CustodyConnectionRow | null> {
     return this.db.queryOne<CustodyConnectionRow>(
       `UPDATE custody_connections
        SET provider_credential_id = ?,
            provider_credential_scope_key = ?,
+           request_delay_ms = ?,
            status = 'pending',
            setup_metadata = CAST(? AS jsonb),
            last_check_status = NULL,
@@ -771,12 +779,14 @@ export class ProviderCredentialStore {
        RETURNING id, organization_id, project_id, provider, scope,
                  provider_credential_id, provider_credential_scope_key,
                  default_custody_wallet_id, provider_account_fingerprint,
+                 request_delay_ms,
                  status, setup_metadata,
                  last_check_status, last_check_at, last_check_failure_code,
                  activated_at, deactivated_at, created_at`,
       [
         params.providerCredentialId,
         params.providerCredentialScopeKey,
+        params.requestDelayMs ?? null,
         JSON.stringify(
           params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}
         ),

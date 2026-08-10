@@ -75,6 +75,7 @@ export async function tryInitializePrivyFromDeploymentCredentials(
     createdBy: auth.userId,
     idempotencyKey,
     fingerprint,
+    requestDelayMs: request.requestDelayMs,
     walletLabel: request.walletLabel,
   });
   if (!connectionId) {
@@ -107,6 +108,7 @@ async function createRuntimeAttempt(params: {
   createdBy: string | null;
   idempotencyKey: string;
   fingerprint: string;
+  requestDelayMs?: number;
   walletLabel?: string;
 }): Promise<string | null> {
   const providerCredentialId = `pcred_${crypto.randomUUID()}`;
@@ -162,6 +164,7 @@ async function createRuntimeAttempt(params: {
         projectId: params.projectId,
         providerCredentialId: credential.id,
         providerCredentialScopeKey: credential.scope_key,
+        requestDelayMs: params.requestDelayMs,
         pendingWalletLabel: params.walletLabel,
         createdBy: params.createdBy,
       });

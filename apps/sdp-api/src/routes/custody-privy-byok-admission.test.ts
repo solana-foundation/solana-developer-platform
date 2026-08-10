@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -72,7 +73,7 @@ async function seedActor(): Promise<void> {
 
 async function request(
   path: "initialize" | "switch",
-  options: { idempotencyKey?: string; walletLabel?: string } = {}
+  options: { idempotencyKey?: string; requestDelayMs?: number; walletLabel?: string } = {}
 ): Promise<Response> {
   return app.request(
     `/v1/wallets/${path}`,
@@ -83,7 +84,11 @@ async function request(
         "Content-Type": "application/json",
         ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
       },
-      body: JSON.stringify({ provider: "privy", walletLabel: options.walletLabel }),
+      body: JSON.stringify({
+        provider: "privy",
+        requestDelayMs: options.requestDelayMs,
+        walletLabel: options.walletLabel,
+      }),
     },
     env
   );
@@ -369,6 +374,7 @@ describe("legacy Privy setup admission", () => {
 
     const response = await request("initialize", {
       idempotencyKey: "runtime-initialize-1",
+      requestDelayMs: 125,
       walletLabel: "Runtime treasury",
     });
 
@@ -404,7 +410,7 @@ describe("legacy Privy setup admission", () => {
     expect(
       await getDb(env)
         .prepare(
-          `SELECT c.status, c.default_custody_wallet_id, w.label,
+          `SELECT c.status, c.default_custody_wallet_id, c.request_delay_ms, w.label,
                   w.custody_config_id, w.custody_connection_id
            FROM custody_connections c
            JOIN custody_wallets w ON w.id = c.default_custody_wallet_id`
@@ -412,6 +418,7 @@ describe("legacy Privy setup admission", () => {
         .first()
     ).toMatchObject({
       status: "active",
+      request_delay_ms: 125,
       label: "Runtime treasury",
       custody_config_id: null,
       custody_connection_id: body.data.connectionId,
@@ -543,6 +550,67 @@ describe("legacy Privy setup admission", () => {
     });
   });
 
+  it("waits for concurrent Project target selection before activating", async () => {
+    enableRuntimeSetup();
+    let signalProviderStarted!: () => void;
+    const providerStarted = new Promise<void>((resolve) => {
+      signalProviderStarted = resolve;
+    });
+    let releaseProvider!: () => void;
+    const providerRelease = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    provisionPrivyWalletMock.mockImplementationOnce(async () => {
+      signalProviderStarted();
+      await providerRelease;
+      return {
+        walletId: "wallet_runtime_serialized",
+        address: "RuntimeSerializedPublicKey",
+      };
+    });
+
+    const initialize = request("initialize", { idempotencyKey: "runtime-serialized" });
+    await providerStarted;
+
+    let signalProjectLocked!: () => void;
+    const projectLocked = new Promise<void>((resolve) => {
+      signalProjectLocked = resolve;
+    });
+    let releaseProject!: () => void;
+    const projectRelease = new Promise<void>((resolve) => {
+      releaseProject = resolve;
+    });
+    const lockTransaction = getDb(env).transaction(async (tx) => {
+      expect(await new ProviderCredentialStore(tx).lockProject(ORGANIZATION_ID, PROJECT_ID)).toBe(
+        true
+      );
+      signalProjectLocked();
+      await projectRelease;
+    });
+    await projectLocked;
+
+    const lockProject = vi.spyOn(ProviderCredentialStore.prototype, "lockProject");
+    const recordInstallationSuccess = vi.spyOn(
+      ProviderCredentialStore.prototype,
+      "recordInstallationSuccess"
+    );
+    let initializeSettled = false;
+    void initialize.finally(() => {
+      initializeSettled = true;
+    });
+    try {
+      releaseProvider();
+      await vi.waitFor(() => expect(lockProject).toHaveBeenCalledOnce());
+      expect(recordInstallationSuccess).not.toHaveBeenCalled();
+      expect(initializeSettled).toBe(false);
+    } finally {
+      releaseProject();
+      await lockTransaction;
+    }
+    expect((await initialize).status).toBe(201);
+    expect(recordInstallationSuccess).toHaveBeenCalledOnce();
+  });
+
   it("requires Idempotency-Key only before fresh runtime creation", async () => {
     enableRuntimeSetup();
 
@@ -578,7 +646,10 @@ describe("legacy Privy setup admission", () => {
     expect(await getRuntimeRowCounts()).toEqual({ credentials: 1, connections: 1, wallets: 1 });
   });
 
-  it("rejects an idempotency key reused with another wallet label", async () => {
+  it.each([
+    ["wallet label", { walletLabel: "First label" }, { walletLabel: "Different label" }],
+    ["request delay", { requestDelayMs: 100 }, { requestDelayMs: 200 }],
+  ])("rejects an idempotency key reused with another %s", async (_field, first, changed) => {
     enableRuntimeSetup();
     provisionPrivyWalletMock.mockResolvedValue({
       walletId: "wallet_runtime_conflict",
@@ -586,12 +657,12 @@ describe("legacy Privy setup admission", () => {
     });
     await request("initialize", {
       idempotencyKey: "runtime-conflict",
-      walletLabel: "First label",
+      ...first,
     });
 
     const response = await request("initialize", {
       idempotencyKey: "runtime-conflict",
-      walletLabel: "Different label",
+      ...changed,
     });
 
     expect(response.status).toBe(409);

@@ -233,6 +233,7 @@ type StoredConnection = {
   project_id: string;
   provider: string;
   provider_credential_id: string;
+  request_delay_ms: number | null;
   status: string;
   setup_metadata: Record<string, unknown>;
   last_check_status: string | null;
@@ -243,7 +244,7 @@ type StoredConnection = {
 async function getConnectionForCredential(credentialId: string): Promise<StoredConnection> {
   const connection = await getDb(env)
     .prepare(
-      `SELECT id, project_id, provider, provider_credential_id, status,
+      `SELECT id, project_id, provider, provider_credential_id, request_delay_ms, status,
               setup_metadata, last_check_status, last_check_at, last_check_failure_code
        FROM custody_connections
        WHERE provider_credential_id = ?`
@@ -328,7 +329,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
     const response = await submit(app, token, {
       key: "submit-privy-credentials-1",
-      body: { ...VALID_BODY, walletLabel: "  Treasury Wallet  " },
+      body: { ...VALID_BODY, requestDelayMs: 175, walletLabel: "  Treasury Wallet  " },
     });
 
     expect(response.status).toBe(201);
@@ -373,6 +374,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       project_id: PROJECT_ID,
       provider: "privy",
       provider_credential_id: body.data.providerCredential.id,
+      request_delay_ms: 175,
       status: "pending",
       setup_metadata: { pendingWalletLabel: "Treasury Wallet" },
     });
@@ -566,6 +568,9 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     ],
     ["blank wallet label", { ...VALID_BODY, walletLabel: "   " }],
     ["long wallet label", { ...VALID_BODY, walletLabel: "x".repeat(101) }],
+    ["negative request delay", { ...VALID_BODY, requestDelayMs: -1 }],
+    ["fractional request delay", { ...VALID_BODY, requestDelayMs: 1.5 }],
+    ["excessive request delay", { ...VALID_BODY, requestDelayMs: 3001 }],
     ["blank normalized app ID", { ...VALID_BODY, fields: { ...VALID_BODY.fields, appId: "   " } }],
     [
       "blank normalized label",
@@ -709,6 +714,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       },
     ],
     ["wallet label", { ...VALID_BODY, walletLabel: "Different wallet" }],
+    ["request delay", { ...VALID_BODY, requestDelayMs: 250 }],
   ])("rejects same-key %s reuse before another secret write", async (_field, changedBody) => {
     const { app, token } = buildApp();
     expect(
@@ -897,11 +903,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it("clears the pending wallet label when replacement omits walletLabel", async () => {
+  it("clears optional Connection settings when replacement omits them", async () => {
     const { app, token } = buildApp();
     const first = await submit(app, token, {
       key: "replacement-clear-label-v1",
-      body: { ...VALID_BODY, walletLabel: "First wallet" },
+      body: { ...VALID_BODY, requestDelayMs: 225, walletLabel: "First wallet" },
     });
     const firstBody = (await first.json()) as {
       data: { providerCredential: { id: string } };
@@ -931,6 +937,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     const connection = await getConnectionForCredential(replacementBody.data.providerCredential.id);
     expect(connection.id).toBe(connectionId);
+    expect(connection.request_delay_ms).toBeNull();
     expect(connection.setup_metadata).toEqual({});
   });
 
@@ -1051,143 +1058,143 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
           .run();
       },
     },
-  ] satisfies RejectedReplacementCase[])(
-    "rejects a new credential when the project already has $label",
-    async ({ key, arrange }) => {
-      const { app, token } = buildApp();
-      const initial = await submit(app, token, {
-        key: `blocked-${key}-initial`,
-      });
-      expect(initial.status).toBe(201);
-      const initialBody = (await initial.json()) as {
-        data: {
-          providerCredential: { id: string };
-        };
+  ] satisfies RejectedReplacementCase[])("rejects a new credential when the project already has $label", async ({
+    key,
+    arrange,
+  }) => {
+    const { app, token } = buildApp();
+    const initial = await submit(app, token, {
+      key: `blocked-${key}-initial`,
+    });
+    expect(initial.status).toBe(201);
+    const initialBody = (await initial.json()) as {
+      data: {
+        providerCredential: { id: string };
       };
-      const db = getDb(env);
-      const initialConnection = await getConnectionForCredential(
-        initialBody.data.providerCredential.id
-      );
-      await arrange(db, {
-        credentialId: initialBody.data.providerCredential.id,
-        connectionId: initialConnection.id,
-      });
+    };
+    const db = getDb(env);
+    const initialConnection = await getConnectionForCredential(
+      initialBody.data.providerCredential.id
+    );
+    await arrange(db, {
+      credentialId: initialBody.data.providerCredential.id,
+      connectionId: initialConnection.id,
+    });
 
-      const readSafeSetupState = async () => {
-        const [credentials, connections] = await Promise.all([
-          db
-            .prepare(
-              `SELECT id, project_id, status, credential_version,
+    const readSafeSetupState = async () => {
+      const [credentials, connections] = await Promise.all([
+        db
+          .prepare(
+            `SELECT id, project_id, status, credential_version,
                       rotated_from_provider_credential_id, idempotency_key
                FROM provider_credentials
                ORDER BY id`
-            )
-            .all<Record<string, unknown>>(),
-          db
-            .prepare(
-              `SELECT id, project_id, status, provider_credential_id,
+          )
+          .all<Record<string, unknown>>(),
+        db
+          .prepare(
+            `SELECT id, project_id, status, provider_credential_id,
                       default_custody_wallet_id, setup_metadata,
                       last_check_status, last_check_at, last_check_failure_code,
                       activated_at
                FROM custody_connections
                ORDER BY id`
-            )
-            .all<Record<string, unknown>>(),
-        ]);
-        return {
-          credentials: credentials.results,
-          connections: connections.results,
-        };
+          )
+          .all<Record<string, unknown>>(),
+      ]);
+      return {
+        credentials: credentials.results,
+        connections: connections.results,
       };
+    };
 
-      const stateBefore = await readSafeSetupState();
-      const countsBefore = await getDomainCounts();
-      const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-      const newKey = `blocked-${key}-new`;
+    const stateBefore = await readSafeSetupState();
+    const countsBefore = await getDomainCounts();
+    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+    const newKey = `blocked-${key}-new`;
 
-      const response = await submit(app, token, { key: newKey });
+    const response = await submit(app, token, { key: newKey });
 
-      expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({
-        error: {
-          code: "CONFLICT",
-          message: "A Privy custody installation is already in progress for this project",
-          details: { reason: "unfinished_installation_exists" },
-        },
-        meta: { requestId: "req_provider_credential_submit" },
-      });
-      expect(factory).not.toHaveBeenCalled();
-      expect(await readSafeSetupState()).toEqual(stateBefore);
-      expect(await getDomainCounts()).toEqual(countsBefore);
-      const newIntentCount = await db
-        .prepare(
-          `SELECT COUNT(*) AS count
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "CONFLICT",
+        message: "A Privy custody installation is already in progress for this project",
+        details: { reason: "unfinished_installation_exists" },
+      },
+      meta: { requestId: "req_provider_credential_submit" },
+    });
+    expect(factory).not.toHaveBeenCalled();
+    expect(await readSafeSetupState()).toEqual(stateBefore);
+    expect(await getDomainCounts()).toEqual(countsBefore);
+    const newIntentCount = await db
+      .prepare(
+        `SELECT COUNT(*) AS count
            FROM provider_credentials
            WHERE idempotency_key = ?`
-        )
-        .bind(newKey)
-        .first<{ count: number }>();
-      expect(newIntentCount?.count).toBe(0);
-    }
-  );
+      )
+      .bind(newKey)
+      .first<{ count: number }>();
+    expect(newIntentCount?.count).toBe(0);
+  });
 
-  it.each(["active", "failed"] as const)(
-    "creates a fresh Connection beside %s history instead of implicitly replacing it",
-    async (historyStatus) => {
-      const { app, token } = buildApp();
-      const initial = await submit(app, token, { key: `history-${historyStatus}-initial` });
-      const initialBody = (await initial.json()) as {
-        data: { providerCredential: { id: string }; connectionId: string };
-      };
-      const ids = {
-        credentialId: initialBody.data.providerCredential.id,
-        connectionId: initialBody.data.connectionId,
-      };
-      if (historyStatus === "failed") {
-        await markInitialValidationFailed(getDb(env), ids);
-      } else {
-        const historyWalletId = "cwlt_active_history";
-        await getDb(env).batch([
-          getDb(env)
-            .prepare(
-              `INSERT INTO custody_wallets (
+  it.each([
+    "active",
+    "failed",
+  ] as const)("creates a fresh Connection beside %s history instead of implicitly replacing it", async (historyStatus) => {
+    const { app, token } = buildApp();
+    const initial = await submit(app, token, { key: `history-${historyStatus}-initial` });
+    const initialBody = (await initial.json()) as {
+      data: { providerCredential: { id: string }; connectionId: string };
+    };
+    const ids = {
+      credentialId: initialBody.data.providerCredential.id,
+      connectionId: initialBody.data.connectionId,
+    };
+    if (historyStatus === "failed") {
+      await markInitialValidationFailed(getDb(env), ids);
+    } else {
+      const historyWalletId = "cwlt_active_history";
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets (
                id, custody_connection_id, wallet_id, public_key, status
              ) VALUES (?, ?, 'privy_active_history', 'active_history_public_key', 'active')`
-            )
-            .bind(historyWalletId, ids.connectionId),
-          getDb(env)
-            .prepare(
-              `UPDATE provider_credentials
+          )
+          .bind(historyWalletId, ids.connectionId),
+        getDb(env)
+          .prepare(
+            `UPDATE provider_credentials
                SET status = 'active', last_validated_at = sdp_iso_now()
                WHERE id = ?`
-            )
-            .bind(ids.credentialId),
-          getDb(env)
-            .prepare(
-              `UPDATE custody_connections
+          )
+          .bind(ids.credentialId),
+        getDb(env)
+          .prepare(
+            `UPDATE custody_connections
                SET status = 'active', last_check_status = 'success',
                    last_check_at = sdp_iso_now(), activated_at = sdp_iso_now(),
                    default_custody_wallet_id = ?,
                    provider_account_fingerprint = 'sha256:active-history'
                WHERE id = ?`
-            )
-            .bind(historyWalletId, ids.connectionId),
-        ]);
-      }
-
-      const fresh = await submit(app, token, { key: `history-${historyStatus}-fresh` });
-      expect(fresh.status).toBe(201);
-      const freshBody = (await fresh.json()) as {
-        data: { providerCredential: { id: string }; connectionId: string };
-      };
-      expect(freshBody.data.connectionId).not.toBe(ids.connectionId);
-      expect(await getDomainCounts()).toEqual({
-        credentials: 2,
-        connections: 2,
-        wallets: historyStatus === "active" ? 1 : 0,
-      });
+          )
+          .bind(historyWalletId, ids.connectionId),
+      ]);
     }
-  );
+
+    const fresh = await submit(app, token, { key: `history-${historyStatus}-fresh` });
+    expect(fresh.status).toBe(201);
+    const freshBody = (await fresh.json()) as {
+      data: { providerCredential: { id: string }; connectionId: string };
+    };
+    expect(freshBody.data.connectionId).not.toBe(ids.connectionId);
+    expect(await getDomainCounts()).toEqual({
+      credentials: 2,
+      connections: 2,
+      wallets: historyStatus === "active" ? 1 : 0,
+    });
+  });
 
   it("reinstalls as a new root and preserves deactivated lineage replay", async () => {
     const { app, token } = buildApp();
@@ -1393,28 +1400,25 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it.each([
     ["missing", undefined],
     ["blank", "   "],
-  ] as const)(
-    "fails closed before secret storage when CREDENTIAL_FINGERPRINT_PEPPER is %s",
-    async (_case, value) => {
-      env.CREDENTIAL_FINGERPRINT_PEPPER = value;
-      const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-      const { app, token } = buildApp();
+  ] as const)("fails closed before secret storage when CREDENTIAL_FINGERPRINT_PEPPER is %s", async (_case, value) => {
+    env.CREDENTIAL_FINGERPRINT_PEPPER = value;
+    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+    const { app, token } = buildApp();
 
-      const response = await submit(app, token, {
-        key: "missing-pepper",
-      });
-      expect(response.status).toBe(500);
-      expect(await response.json()).toMatchObject({
-        error: { code: "INTERNAL_ERROR" },
-      });
-      expect(factory).not.toHaveBeenCalled();
-      expect(await getDomainCounts()).toEqual({
-        credentials: 0,
-        connections: 0,
-        wallets: 0,
-      });
-    }
-  );
+    const response = await submit(app, token, {
+      key: "missing-pepper",
+    });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      error: { code: "INTERNAL_ERROR" },
+    });
+    expect(factory).not.toHaveBeenCalled();
+    expect(await getDomainCounts()).toEqual({
+      credentials: 0,
+      connections: 0,
+      wallets: 0,
+    });
+  });
 
   it("maps an upstream secret-store failure to a safe 503 and orphan alert", async () => {
     const store: CredentialSecretStore = {

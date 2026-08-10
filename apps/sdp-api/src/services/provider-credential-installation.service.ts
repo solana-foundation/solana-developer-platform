@@ -681,7 +681,11 @@ async function persistSuccess(
 ): Promise<LoadedInstallation | null> {
   try {
     await context.db.transaction(async (tx) => {
-      const updated = await new ProviderCredentialStore(tx).recordInstallationSuccess({
+      const store = new ProviderCredentialStore(tx);
+      if (!(await store.lockProject(context.organizationId, context.projectId))) {
+        throw new Error("Project disappeared during installation success persistence");
+      }
+      const updated = await store.recordInstallationSuccess({
         providerCredentialId: target.provider_credential_id,
         connectionId: target.id,
         leaseToken,
