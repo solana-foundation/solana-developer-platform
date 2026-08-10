@@ -5,7 +5,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
-type BadgeVariant = "default" | "primary" | "success" | "warning" | "danger" | "info";
+type BadgeVariant = "default" | "primary" | "success" | "warning" | "danger" | "info" | "outline";
 
 type BadgeProps = Omit<SolanaBadgeProps, "variant"> & {
   variant?: BadgeVariant;
@@ -18,6 +18,7 @@ const variantClassNames: Record<BadgeVariant, string> = {
   warning: "bg-warning-bg text-warning",
   danger: "bg-error-bg text-error",
   info: "bg-info-bg text-info",
+  outline: "border border-border-default bg-transparent font-medium text-secondary",
 };
 
 function Badge({ className, variant = "default", ...props }: BadgeProps) {

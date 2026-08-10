@@ -107,7 +107,7 @@ export function PolicySummaryRail({
                 {option?.token ?? t("DashboardCustody.policyCustomMint")}
               </span>
               {WELL_KNOWN_TOKEN_BY_MINT.has(mint) ? null : option?.sdpIssued ? (
-                <Badge variant="primary" className="shrink-0">
+                <Badge variant="outline" className="shrink-0">
                   {t("Shared.SharedComponents.sdpMintedToken")}
                 </Badge>
               ) : (

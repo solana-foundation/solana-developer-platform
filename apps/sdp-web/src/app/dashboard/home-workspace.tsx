@@ -241,7 +241,7 @@ function BalanceAllocation({
                       {segment.label}
                     </span>
                     {resolved?.tokenId ? (
-                      <Badge variant="primary" className="shrink-0">
+                      <Badge variant="outline" className="shrink-0">
                         {t("Shared.SharedComponents.sdpMintedToken")}
                       </Badge>
                     ) : null}
@@ -282,7 +282,7 @@ function BalanceAllocation({
                   {symbol}
                 </span>
                 {resolved.tokenId ? (
-                  <Badge variant="primary" className="shrink-0">
+                  <Badge variant="outline" className="shrink-0">
                     {t("Shared.SharedComponents.sdpMintedToken")}
                   </Badge>
                 ) : null}
@@ -683,7 +683,7 @@ export function HomeWorkspace({
                                 />
                                 <TruncatedTableText value={tokenSymbol} className="truncate" />
                                 {resolvedToken?.tokenId ? (
-                                  <Badge variant="primary" className="shrink-0">
+                                  <Badge variant="outline" className="shrink-0">
                                     {t("Shared.SharedComponents.sdpMintedToken")}
                                   </Badge>
                                 ) : null}

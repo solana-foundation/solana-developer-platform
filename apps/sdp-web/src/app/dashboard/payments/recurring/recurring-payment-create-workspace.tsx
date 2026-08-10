@@ -359,7 +359,7 @@ export function RecurringPaymentCreateWorkspace({
             />
           ),
           badge: sdpMinted ? t("Shared.SharedComponents.sdpMintedToken") : undefined,
-          badgeVariant: sdpMinted ? ("primary" as const) : undefined,
+          badgeVariant: sdpMinted ? ("outline" as const) : undefined,
         };
       }),
     [assetOptions, issuedTokensByMint, t]
