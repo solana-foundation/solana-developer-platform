@@ -184,8 +184,19 @@ export async function fillApiKeyCache(
     expected = currentRaw;
   }
 
-  // Extreme contention; use this fill's own DB read. Revocation paths write
-  // unconditionally, so authoritative state still lands regardless.
+  // Lost every attempt without ever observing an authoritative entry. The
+  // final CAS failure proves a competing write landed after this fill's DB
+  // read — re-read and adopt it rather than authenticate the stale snapshot.
+  const finalRaw = await kv.get(cacheKey);
+  if (finalRaw !== null) {
+    const current = tryParseAuthoritativeEntry(finalRaw);
+    if (current) {
+      return current;
+    }
+  }
+
+  // Slot empty or legacy even now; use this fill's own DB read. Revocation
+  // paths write unconditionally, so authoritative state still lands.
   return entry;
 }
 

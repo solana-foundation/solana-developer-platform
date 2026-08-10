@@ -26,6 +26,16 @@ import type { Env } from "@/types/env";
 
 const LOOKBACK_MS = 2 * 60 * 60 * 1000;
 
+/**
+ * Hard cap on rows per tick, newest revocations first. Anything beyond it is
+ * picked up by later ticks (repaired entries turn terminal and become cheap
+ * skips) and bounded regardless by the one-hour cache TTL.
+ */
+const DEFAULT_SCAN_LIMIT = 10_000;
+
+/** Cache reads/repairs in flight at once — bounds Redis and pool pressure. */
+const SWEEP_CONCURRENCY = 25;
+
 const TERMINAL_STATUSES: ReadonlySet<ApiKeyStatus> = new Set(["revoked", "deactivated", "expired"]);
 
 export interface RevokedApiKeyCacheReconciliation {
@@ -47,46 +57,76 @@ function tryParseCachedEntry(raw: string): CachedApiKey | null {
   }
 }
 
+export interface ReconcileRevokedApiKeyCacheOptions {
+  /** Maximum rows examined per tick. Defaults to DEFAULT_SCAN_LIMIT. */
+  scanLimit?: number;
+}
+
 export async function reconcileRevokedApiKeyCache(
-  env: Env
+  env: Env,
+  options: ReconcileRevokedApiKeyCacheOptions = {}
 ): Promise<RevokedApiKeyCacheReconciliation> {
   const db = getDb(env);
   const kv = createKVStoreSet(env).apiKeys;
   const cutoff = new Date(Date.now() - LOOKBACK_MS).toISOString();
+  const scanLimit = options.scanLimit ?? DEFAULT_SCAN_LIMIT;
 
   // revoked_at is TEXT with two writer formats (sdp_datetime_now() and
   // toISOString()); the timestamptz casts make the comparison format-proof.
+  // Newest first under a hard LIMIT so a bulk revocation cannot hand this
+  // tick an unbounded row set: the freshest divergences — the ones with the
+  // most cache TTL left to exploit — are always repaired first, and the
+  // remainder rolls into later ticks.
   const rows = await db
     .prepare(
       `SELECT key_hash FROM api_keys
        WHERE status != 'active'
          AND revoked_at IS NOT NULL
-         AND revoked_at::timestamptz > ?::timestamptz`
+         AND revoked_at::timestamptz > ?::timestamptz
+       ORDER BY revoked_at::timestamptz DESC
+       LIMIT ?`
     )
-    .bind(cutoff)
+    .bind(cutoff, scanLimit)
     .all<{ key_hash: string }>();
 
   const recentlyRevoked = rows.results ?? [];
   let repaired = 0;
 
-  for (const row of recentlyRevoked) {
-    const raw = await kv.get(apiKeyCacheKey(row.key_hash));
-    if (raw === null) {
-      continue;
-    }
-    const cached = tryParseCachedEntry(raw);
-    if (cached && TERMINAL_STATUSES.has(cached.status)) {
-      continue;
-    }
-    // Stale-active or unparseable: overwrite with the authoritative state.
-    await refreshApiKeyCache(db, kv, row.key_hash);
-    repaired += 1;
+  // Fixed-width chunks: bounded overlap keeps a large backlog from becoming
+  // thousands of sequential round-trips, without unbounded fan-out starving
+  // the connection pool that the payment/custody jobs share.
+  for (let offset = 0; offset < recentlyRevoked.length; offset += SWEEP_CONCURRENCY) {
+    const chunk = recentlyRevoked.slice(offset, offset + SWEEP_CONCURRENCY);
+    const outcomes = await Promise.all(
+      chunk.map(async (row) => {
+        const raw = await kv.get(apiKeyCacheKey(row.key_hash));
+        if (raw === null) {
+          return false;
+        }
+        const cached = tryParseCachedEntry(raw);
+        if (cached && TERMINAL_STATUSES.has(cached.status)) {
+          return false;
+        }
+        // Stale-active or unparseable: overwrite with authoritative state.
+        await refreshApiKeyCache(db, kv, row.key_hash);
+        return true;
+      })
+    );
+    repaired += outcomes.filter(Boolean).length;
   }
 
   if (repaired > 0) {
     getLogger().warn(
       { repaired, scanned: recentlyRevoked.length },
       "Repaired stale active cache entries for revoked API keys"
+    );
+  }
+
+  if (recentlyRevoked.length === scanLimit) {
+    // Never let a truncated sweep read as full coverage.
+    getLogger().warn(
+      { scanLimit },
+      "Revoked API key cache sweep hit its scan limit; remaining keys roll into the next tick"
     );
   }
 

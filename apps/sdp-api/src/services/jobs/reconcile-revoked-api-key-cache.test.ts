@@ -12,7 +12,48 @@
 
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Gauge for the sweep's Redis fan-out: tracks how many kv.get calls are in
+// flight at once so the tests can prove the loop is not one-row-at-a-time.
+const kvGauge = vi.hoisted(() => ({ inflightGets: 0, maxInflightGets: 0 }));
+
+vi.mock("@/runtime/kv-redis", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/runtime/kv-redis")>();
+
+  type KVStore = ReturnType<typeof original.createKVStoreSet>["apiKeys"];
+
+  const wrapStore = (store: KVStore): KVStore =>
+    new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "get") {
+          return async (...args: unknown[]) => {
+            kvGauge.inflightGets += 1;
+            kvGauge.maxInflightGets = Math.max(kvGauge.maxInflightGets, kvGauge.inflightGets);
+            try {
+              return await (target.get as (...inner: unknown[]) => Promise<unknown>).apply(
+                target,
+                args
+              );
+            } finally {
+              kvGauge.inflightGets -= 1;
+            }
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+  return {
+    ...original,
+    createKVStoreSet: (env: Parameters<typeof original.createKVStoreSet>[0]) => {
+      const set = original.createKVStoreSet(env);
+      return { ...set, apiKeys: wrapStore(set.apiKeys) };
+    },
+  };
+});
+
 import { getDb } from "@/db";
 import { apiKeyCacheKey } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
@@ -116,5 +157,31 @@ describe("reconcileRevokedApiKeyCache", () => {
 
     // And a second sweep has nothing left to do.
     expect((await reconcileRevokedApiKeyCache(env)).repaired).toBe(0);
+  });
+
+  it("bounds the scan and fans out cache reads instead of one row at a time", async () => {
+    // A bulk revocation: 40 keys, every one with a stale active cache entry.
+    const hashes: string[] = [];
+    for (let index = 0; index < 40; index++) {
+      const keyId = `key_reconcile_bulk_${index}`;
+      const hash = await hashString(`sk_test_reconcile_bulk_${index}`, env.API_KEY_PEPPER);
+      hashes.push(hash);
+      await seedRevokedKeyRow(keyId, hash);
+      await seedCachedApiKey(env, hash, activeEntry(keyId));
+    }
+
+    kvGauge.inflightGets = 0;
+    kvGauge.maxInflightGets = 0;
+
+    const outcome = await reconcileRevokedApiKeyCache(env);
+    expect(outcome.repaired).toBe(40);
+    // Sequential per-row awaits would never have more than one read in
+    // flight; the chunked sweep must overlap them.
+    expect(kvGauge.maxInflightGets).toBeGreaterThan(1);
+
+    // The scan itself is bounded: with a limit below the backlog, one tick
+    // processes exactly the limit and leaves the rest for the next tick.
+    const limited = await reconcileRevokedApiKeyCache(env, { scanLimit: 10 });
+    expect(limited.scanned).toBe(10);
   });
 });
