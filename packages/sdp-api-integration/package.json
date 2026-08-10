@@ -25,7 +25,7 @@
   "devDependencies": {
     "@sdp/api": "workspace:*",
     "@solana/surfpool": "^1.4.0",
-    "@types/node": "^25.9.2",
+    "@types/node": "^26.1.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }

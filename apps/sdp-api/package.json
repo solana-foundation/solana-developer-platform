@@ -93,7 +93,7 @@
     "@asteasolutions/zod-to-openapi": "8.5.0",
     "@testcontainers/postgresql": "12.0.4",
     "@testcontainers/redis": "12.0.4",
-    "@types/node": "^25.9.2",
+    "@types/node": "^26.1.2",
     "@types/pg": "^8.20.3",
     "@types/react": "^19.2.18",
     "@vitest/coverage-istanbul": "4.1.10",
