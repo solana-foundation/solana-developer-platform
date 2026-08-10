@@ -1,7 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { type ContextVariableMap, Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/errors";
+import { policyGate } from "@/middleware/policy-gate";
+import type { Env } from "@/types/env";
 
 const boundaryMocks = vi.hoisted(() => ({
   createOrgSigner: vi.fn(),
@@ -26,7 +29,7 @@ vi.mock("@/services/policy/enforcement.service", async (importOriginal) => ({
   resolvePolicyCustodyWallet: boundaryMocks.resolvePolicyWallet,
 }));
 
-import { signerCheck } from "@/routes/custody/handlers/signer-check";
+import { extractSignerCheckPolicyCandidate } from "@/routes/custody/handlers/signer-check";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../../..");
 
@@ -71,10 +74,10 @@ const contracts: ValueMovingContract[] = [
       evidence: "resolved.scope.auth.organizationId",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/payments/handlers/transfer-batches/create.ts",
-      section: "export async function createTransferBatch",
-      before: "await enforceBatchPolicies(c, resolved, parsed.data)",
-      after: "solanaServices.createOrgSigner(",
+      file: "apps/sdp-api/src/routes/payments/index.ts",
+      section: '"/transfer-batches",',
+      before: "extract: extractTransferBatchPolicyCandidate",
+      after: "createTransferBatch",
     },
     replay: [
       {
@@ -118,14 +121,14 @@ const contracts: ValueMovingContract[] = [
   {
     family: "issuance",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/issuance/handlers/policy.ts",
-      evidence: "getRequestTenantScope(c)",
+      file: "apps/sdp-api/src/routes/issuance/handlers/authority.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/issuance/handlers/authority.ts",
-      section: "export const executeUpdateAuthority",
-      before: "await enforceIssuanceWalletOperationPolicy(c",
-      after: "createResolvedAuthoritySigner({",
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/authority",',
+      before: "policyGate({ extract: extractUpdateAuthorityPolicyCandidate })",
+      after: "executeUpdateAuthority",
     },
     replay: [
       {
@@ -142,10 +145,10 @@ const contracts: ValueMovingContract[] = [
       evidence: "createRequestSponsorshipFeePayment(c)",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/payments/handlers/transfers.ts",
-      section: "export async function createTransfer",
-      before: "getPolicyGateContext<CreateTransferBody, TransferPolicyResolved>(c)",
-      after: "await executeSolTransfer(",
+      file: "apps/sdp-api/src/routes/payments/index.ts",
+      section: '"/transfers",',
+      before: "extract: extractTransferPolicyCandidate",
+      after: "createTransfer",
     },
     replay: [
       {
@@ -164,13 +167,13 @@ const contracts: ValueMovingContract[] = [
     family: "ramps",
     trustedContext: {
       file: "apps/sdp-api/src/routes/payments/handlers/ramps.ts",
-      evidence: "getRequestTenantScope(c)",
+      evidence: "scope.auth.organizationId",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/payments/handlers/ramps.ts",
-      section: "export async function createOnrampQuote",
-      before: "await enforceRampWalletOperationPolicy(c",
-      after: "RAMP_PROVIDER_CLIENTS.moonpay.createOnrampQuote",
+      file: "apps/sdp-api/src/routes/payments/index.ts",
+      section: '"/ramps/onramp/quote",',
+      before: "policyGate({ extract: extractOnrampQuotePolicyCandidate })",
+      after: "createOnrampQuote",
     },
     replay: [
       {
@@ -214,13 +217,13 @@ const contracts: ValueMovingContract[] = [
     family: "raw_signing",
     trustedContext: {
       file: "apps/sdp-api/src/routes/custody/handlers/signer-check.ts",
-      evidence: "getRequestTenantScope(c)",
+      evidence: "const auth = getAuth(c)",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/custody/handlers/signer-check.ts",
-      section: "export const signerCheck",
-      before: "await enforceWalletOperationPolicy(",
-      after: "const signer = await createOrgSigner(",
+      file: "apps/sdp-api/src/routes/custody/index.ts",
+      section: '"/signer-check",',
+      before: "policyGate({ extract: extractSignerCheckPolicyCandidate })",
+      after: "signerCheck",
     },
     replay: [
       {
@@ -347,6 +350,26 @@ describe("value-moving authorization and replay conformance", () => {
     }
   });
 
+  it("enforces policy inside the gate before the handler runs", () => {
+    const gateSource = readSource("apps/sdp-api/src/middleware/policy-gate.ts");
+    const start = gateSource.indexOf("export function policyGate");
+    expect(start, "policy gate middleware must exist").toBeGreaterThanOrEqual(0);
+    const source = gateSource.slice(start);
+    const orderedMarkers = [
+      "isDryRunRequest(c)",
+      "findIdempotentKeyReplay",
+      "candidate === null",
+      "await enforceWalletOperationPolicy(",
+      "return next()",
+    ];
+    let cursor = 0;
+    for (const marker of orderedMarkers) {
+      const index = source.indexOf(marker, cursor);
+      expect(index, `policy gate must retain ${marker} in order`).toBeGreaterThanOrEqual(cursor);
+      cursor = index + marker.length;
+    }
+  });
+
   it("catalogs every production signing sink", () => {
     expect(discoverSigningSinks()).toEqual(signingSinkInventory);
   });
@@ -361,7 +384,7 @@ describe("value-moving authorization and replay conformance", () => {
     );
   });
 
-  it("stops a raw-sign policy denial before signer, KMS, or Kora access", async () => {
+  it("stops a raw-sign policy denial in the gate before handler, KMS, or Kora access", async () => {
     boundaryMocks.enforcePolicy.mockRejectedValueOnce(
       new AppError("FORBIDDEN", "Denied by wallet policy")
     );
@@ -375,21 +398,32 @@ describe("value-moving authorization and replay conformance", () => {
       signingWalletId: "wal_conformance",
       signingWalletIds: ["wal_conformance"],
       walletBindings: [{ walletId: "wal_conformance", permissions: ["wallets:write"] }],
-    };
-    const context = {
-      env: {},
-      req: {
-        json: vi.fn().mockResolvedValue({ walletId: "wal_conformance", memo: "conformance" }),
-      },
-      get: vi.fn((key: string) => {
-        if (key === "apiKey") return apiKey;
-        if (key === "projectId") return "prj_conformance";
-        if (key === "projectEnvironment") return "sandbox";
-        return undefined;
-      }),
-    } as never;
+    } satisfies NonNullable<ContextVariableMap["apiKey"]>;
+    const handler = vi.fn(() => new Response(null, { status: 204 }));
+    const testApp = new Hono<{ Bindings: Env }>();
+    testApp.use("*", async (c, next) => {
+      c.set("apiKey", apiKey);
+      c.set("projectId", "prj_conformance");
+      c.set("projectEnvironment", "sandbox");
+      await next();
+    });
+    testApp.post(
+      "/signer-check",
+      policyGate({ extract: extractSignerCheckPolicyCandidate }),
+      handler
+    );
+    testApp.onError((error) => {
+      throw error;
+    });
 
-    await expect(signerCheck(context)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      testApp.request("/signer-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletId: "wal_conformance", memo: "conformance" }),
+      })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(handler).not.toHaveBeenCalled();
     expect(boundaryMocks.createOrgSigner).not.toHaveBeenCalled();
     expect(boundaryMocks.createSponsorship).not.toHaveBeenCalled();
   });

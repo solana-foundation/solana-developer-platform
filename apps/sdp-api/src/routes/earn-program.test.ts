@@ -50,8 +50,15 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
+const TEST_PRODUCTION_PROJECT = {
+  id: "prj_test_earn_program_prod",
+  slug: "test-earn-program-project-prod",
+};
+const TEST_SESSION_ID = "ses_earn_program";
+
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const GROUND_SANDBOX_KEY = "ground-sandbox-test-api-key";
+const GROUND_PRODUCTION_KEY = "ground-production-test-api-key";
 const GROUND_SOURCE = "morpho-gauntlet-usdc";
 const WALLET_REF = "8f14e45f-ceea-467f-9b6b-3c1a5c7f9d21";
 const SOLANA_DESTINATION = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
@@ -95,6 +102,7 @@ const WITHDRAWAL: EarnPortfolioWithdrawal = {
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
 let originalGroundSandboxApiKey: string | undefined;
+let originalGroundApiKey: string | undefined;
 
 /**
  * Earn provider entitlement defaults to OFF for every organization, so the
@@ -151,6 +159,51 @@ async function seedAuth({ entitleGround = true }: { entitleGround?: boolean } = 
         JSON.stringify(["*"]),
         "active"
       ),
+  ]);
+}
+
+/**
+ * Dashboard (session) callers resolve their environment from the membership-
+ * verified x-project-id project, so the session fixture carries both the
+ * sandbox project seedAuth created and a production sibling. Call after
+ * seedAuth().
+ */
+async function seedSessionAuth(): Promise<void> {
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES (?, ?, ?, 'member', 'active')`
+      )
+      .bind("om_earn_program_session", TEST_ORG.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, 'production', 'active', ?)`
+      )
+      .bind(
+        TEST_PRODUCTION_PROJECT.id,
+        TEST_ORG.id,
+        "Production Project",
+        TEST_PRODUCTION_PROJECT.slug,
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
+      )
+      .bind("pm_earn_program_sandbox", TEST_PROJECT.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
+      )
+      .bind("pm_earn_program_production", TEST_PRODUCTION_PROJECT.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+         VALUES (?, ?, ?, 'session', ?)`
+      )
+      .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
   ]);
 }
 
@@ -214,16 +267,40 @@ function requestEarn(
   );
 }
 
+function requestEarnAsSession(
+  method: string,
+  path: string,
+  projectId: string,
+  body?: Record<string, unknown>
+) {
+  return app.request(
+    path,
+    {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `sdp_session=${TEST_SESSION_ID}`,
+        "x-project-id": projectId,
+      },
+      ...(body !== undefined && { body: JSON.stringify(body) }),
+    },
+    env
+  );
+}
+
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
   originalGroundSandboxApiKey = env.GROUND_SANDBOX_API_KEY;
+  originalGroundApiKey = env.GROUND_API_KEY;
   // Earn is a Markets sub-module, so both gates have to be on to reach a route.
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   // Sandbox credentials so the provider-configured gates pass; provider HTTP
-  // itself is stubbed per-test via EARN_PROVIDER_CLIENTS spies.
+  // itself is stubbed per-test via EARN_PROVIDER_CLIENTS spies. The production
+  // credential stays absent unless a test opts in.
   env.GROUND_SANDBOX_API_KEY = GROUND_SANDBOX_KEY;
+  env.GROUND_API_KEY = undefined;
   await seedTestDatabase(env);
 });
 
@@ -232,6 +309,7 @@ afterEach(async () => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
   env.GROUND_SANDBOX_API_KEY = originalGroundSandboxApiKey;
+  env.GROUND_API_KEY = originalGroundApiKey;
   await clearKVStores(env);
 });
 
@@ -428,6 +506,80 @@ describe("Earn program — PUT create-or-update", () => {
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+});
+
+describe("Earn program — session callers and environment isolation", () => {
+  it("creates a production program from a production-project dashboard session", async () => {
+    await seedAuth();
+    await seedSessionAuth();
+    env.GROUND_API_KEY = GROUND_PRODUCTION_KEY;
+    await seedGroundStrategy({ environment: "production" });
+    const createWallet = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWallet").mockResolvedValue(WALLET_SNAPSHOT);
+
+    const res = await requestEarnAsSession("PUT", "/v1/earn/program", TEST_PRODUCTION_PROJECT.id, {
+      provider: "ground",
+      allocations: VALID_ALLOCATIONS,
+    });
+
+    expect(res.status).toBe(201);
+    expect(createWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "production" }),
+      expect.objectContaining({ allocations: VALID_ALLOCATIONS })
+    );
+
+    // The ONE-wallet row lands under production with no sandbox sibling…
+    const repo = createPostgresEarnRepository(getDb(env));
+    const productionRow = await repo.getProviderWallet({
+      organizationId: TEST_ORG.id,
+      environment: "production",
+      provider: "ground",
+    });
+    expect(productionRow?.provider_wallet_ref).toBe(WALLET_REF);
+    expect(productionRow?.environment).toBe("production");
+    expect(
+      await repo.getProviderWallet({
+        organizationId: TEST_ORG.id,
+        environment: "sandbox",
+        provider: "ground",
+      })
+    ).toBeNull();
+
+    // …so the org's sandbox API key cannot see the production program.
+    const sandboxView = await requestEarn("GET", "/v1/earn/program?provider=ground");
+    expect(sandboxView.status).toBe(404);
+  });
+
+  it("never serves the sandbox program to a production-project session", async () => {
+    await seedAuth();
+    await seedSessionAuth();
+    await seedProgramWallet();
+    const getWallet = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWallet")
+      .mockResolvedValue(WALLET_SNAPSHOT);
+
+    // requireProgramWallet keys on (org, environment, provider), so the
+    // production-project session finds nothing — 404, no cross-read.
+    const production = await requestEarnAsSession(
+      "GET",
+      "/v1/earn/program?provider=ground",
+      TEST_PRODUCTION_PROJECT.id
+    );
+    expect(production.status).toBe(404);
+
+    // The sandbox-project session still reads the org's program, unchanged.
+    const sandbox = await requestEarnAsSession(
+      "GET",
+      "/v1/earn/program?provider=ground",
+      TEST_PROJECT.id
+    );
+    expect(sandbox.status).toBe(200);
+    expect(getWallet).toHaveBeenCalledWith(expect.objectContaining({ environment: "sandbox" }), {
+      providerWalletRef: WALLET_REF,
+    });
   });
 });
 
