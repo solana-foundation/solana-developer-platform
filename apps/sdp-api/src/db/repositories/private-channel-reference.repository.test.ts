@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { PrivateChannelReferenceRepository } from "./private-channel-reference.repository";
 import { createPostgresPrivateChannelReferenceRepository } from "./private-channel-reference.repository.postgres";
 
@@ -28,15 +29,8 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
   let repo: PrivateChannelReferenceRepository;
 
   beforeEach(async () => {
+    await seedTestDatabase(env);
     const db = getDb(env);
-    await db.prepare("DELETE FROM private_channel_memberships").run();
-    await db.prepare("DELETE FROM private_channel_users").run();
-    await db.prepare("DELETE FROM private_channels").run();
-    await db.prepare("DELETE FROM private_channel_instances").run();
-    await db.prepare("DELETE FROM custody_wallets").run();
-    await db.prepare("DELETE FROM custody_configs").run();
-    await db.prepare("DELETE FROM issued_tokens").run();
-    await db.prepare("DELETE FROM projects").run();
 
     await db
       .prepare(
