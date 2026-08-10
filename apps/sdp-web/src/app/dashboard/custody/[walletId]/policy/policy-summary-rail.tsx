@@ -102,16 +102,16 @@ export function PolicySummaryRail({
           const option = assetByMint.get(mint);
           return (
             <span key={mint} className="flex items-center gap-2" title={mint}>
-              <TokenMark mint={mint} symbol={option?.token} size="sm" />
+              <TokenMark mint={mint} symbol={option?.token} logoUrl={option?.imageUrl} size="sm" />
               <span className="min-w-0 truncate text-sm font-medium text-primary">
                 {option?.token ?? t("DashboardCustody.policyCustomMint")}
               </span>
-              {WELL_KNOWN_TOKEN_BY_MINT.has(mint) ? null : (
-                <Badge className="shrink-0">
-                  {option?.source === "issued"
-                    ? t("DashboardCustody.policyAssetBadgeIssued")
-                    : t("DashboardCustody.policyAssetBadgeCustom")}
+              {WELL_KNOWN_TOKEN_BY_MINT.has(mint) ? null : option?.sdpIssued ? (
+                <Badge variant="outline" className="shrink-0">
+                  {t("Shared.SharedComponents.sdpMintedToken")}
                 </Badge>
+              ) : (
+                <Badge className="shrink-0">{t("DashboardCustody.policyAssetBadgeCustom")}</Badge>
               )}
               <span className="ml-auto shrink-0 text-xs text-muted">{shortenAddress(mint)}</span>
             </span>

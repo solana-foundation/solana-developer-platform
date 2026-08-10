@@ -8,7 +8,7 @@ import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
@@ -326,7 +326,6 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.PRIVY_API_BASE_URL = original.apiBaseUrl;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
@@ -840,70 +839,70 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "wallet lookup",
-    "wallet create",
-  ] as const)("records a late Privy 401 during %s as a failed check", async (failureStage) => {
-    const providerFetch = vi.fn(
-      async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-        const url = String(input);
-        if (url.endsWith("/wallets?limit=1&chain_type=solana")) {
-          return privyJson({ data: [] });
+  it.each(["wallet lookup", "wallet create"] as const)(
+    "records a late Privy 401 during %s as a failed check",
+    async (failureStage) => {
+      const providerFetch = vi.fn(
+        async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+          const url = String(input);
+          if (url.endsWith("/wallets?limit=1&chain_type=solana")) {
+            return privyJson({ data: [] });
+          }
+          if (failureStage === "wallet lookup") {
+            return privyJson({ error: "raw provider detail" }, 401);
+          }
+          if (init?.method === "POST") {
+            return privyJson({ error: "raw provider detail" }, 401);
+          }
+          return url === PRIVY_EXTERNAL_WALLET_URL
+            ? privyWalletNotFoundResponse()
+            : privyJson({ data: [] });
         }
-        if (failureStage === "wallet lookup") {
-          return privyJson({ error: "raw provider detail" }, 401);
-        }
-        if (init?.method === "POST") {
-          return privyJson({ error: "raw provider detail" }, 401);
-        }
-        return url === PRIVY_EXTERNAL_WALLET_URL
-          ? privyWalletNotFoundResponse()
-          : privyJson({ data: [] });
-      }
-    );
-    vi.stubGlobal("fetch", providerFetch);
-    const { app, token } = buildApp();
+      );
+      vi.stubGlobal("fetch", providerFetch);
+      const { app, token } = buildApp();
 
-    const response = await check(app, token);
+      const response = await check(app, token);
 
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body).toMatchObject({
-      data: {
-        providerCredential: {
-          id: CREDENTIAL_ID,
-          status: "failed_validation",
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body).toMatchObject({
+        data: {
+          providerCredential: {
+            id: CREDENTIAL_ID,
+            status: "failed_validation",
+          },
+          check: {
+            status: "failed",
+            checkedAt: expect.any(String),
+          },
         },
-        check: {
-          status: "failed",
-          checkedAt: expect.any(String),
-        },
-      },
-    });
-    expect(JSON.stringify(body)).not.toContain("raw provider detail");
-    expect(await getCheckState()).toMatchObject({
-      credential_status: "failed_validation",
-      encrypted_secret_payload: null,
-      connection_status: "failed",
-      setup_metadata: { pendingWalletLabel: WALLET_LABEL },
-      last_check_status: "failed",
-      last_check_at: expect.any(String),
-      last_check_failure_code: "invalid_credentials",
-    });
-    expect(
-      providerFetch.mock.calls.some(([url]) => String(url) === PRIVY_EXTERNAL_WALLET_URL)
-    ).toBe(true);
-    expect(providerFetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(
-      failureStage === "wallet create" ? 1 : 0
-    );
-    const audit = await getLatestCheckAudit();
-    expect(audit?.metadata).toEqual({
-      provider: "privy",
-      checkStatus: "failed",
-      failureStage: "wallet_provisioning",
-      failureCode: "invalid_credentials",
-    });
-  });
+      });
+      expect(JSON.stringify(body)).not.toContain("raw provider detail");
+      expect(await getCheckState()).toMatchObject({
+        credential_status: "failed_validation",
+        encrypted_secret_payload: null,
+        connection_status: "failed",
+        setup_metadata: { pendingWalletLabel: WALLET_LABEL },
+        last_check_status: "failed",
+        last_check_at: expect.any(String),
+        last_check_failure_code: "invalid_credentials",
+      });
+      expect(
+        providerFetch.mock.calls.some(([url]) => String(url) === PRIVY_EXTERNAL_WALLET_URL)
+      ).toBe(true);
+      expect(providerFetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(
+        failureStage === "wallet create" ? 1 : 0
+      );
+      const audit = await getLatestCheckAudit();
+      expect(audit?.metadata).toEqual({
+        provider: "privy",
+        checkStatus: "failed",
+        failureStage: "wallet_provisioning",
+        failureCode: "invalid_credentials",
+      });
+    }
+  );
 
   it.each([
     ["Privy 403", () => Promise.resolve(new Response(null, { status: 403 }))],

@@ -387,7 +387,7 @@ export type UpsertApiKeyWalletPolicyBindingInput = UpsertApiKeyWalletPolicyBindi
     | {
         bindingScope: "selected";
         walletId: string;
-        custodyWalletId?: string | null;
+        custodyWalletId: string;
       }
   );
 
@@ -573,11 +573,11 @@ export interface PolicyRepository {
   ): Promise<ActivePolicyProfileRevisionRefRow[]>;
   getApiKeyWalletPolicyBindingResolution(
     apiKeyId: string,
-    walletId: string
+    custodyWalletId: string
   ): Promise<ApiKeyWalletPolicyBindingResolutionRow>;
   getApiKeyWalletPolicyTarget(
     apiKeyId: string,
-    walletId: string
+    custodyWalletId: string
   ): Promise<ApiKeyWalletPolicyTargetRow | null>;
 
   createWalletOperation(input: CreateWalletOperationInput): Promise<WalletOperationRow | null>;

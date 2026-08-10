@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_custody_connection_constraints";
 const PROJECT_ID = "prj_custody_connection_constraints";
@@ -85,10 +85,6 @@ describe("custody Connection ownership constraints", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await seedScope();
-  });
-
-  afterEach(async () => {
-    await clearTestDatabase(env);
   });
 
   it("requires every wallet to have exactly one Config or Connection owner", async () => {

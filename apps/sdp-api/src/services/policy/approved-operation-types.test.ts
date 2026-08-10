@@ -1,6 +1,7 @@
 import type { CreateWalletOperationInput } from "@sdp/policy";
 import { describe, expect, it } from "vitest";
 import type { PolicyRepository, WalletOperationRow } from "@/db/repositories";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { WalletPolicyEnforcementService } from "./enforcement.service";
 
 const CASES = [
@@ -84,7 +85,10 @@ describe("approved wallet-operation type resumption", () => {
       ],
     } as unknown as PolicyRepository;
 
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
     const result = await service.resumeApprovedOperation(operation.id, "attempt_1", input);
 
     expect(result.operation).toMatchObject({

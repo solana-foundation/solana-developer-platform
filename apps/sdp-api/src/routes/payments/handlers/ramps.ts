@@ -57,6 +57,7 @@ import {
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
+import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import {
   approvedWalletOperationAttemptId,
   approvedWalletOperationId,
@@ -308,7 +309,7 @@ async function persistRampQuoteTransfer(
     counterpartyId: input.counterparty.id,
     sourceAddress: isOnramp ? null : input.walletAddress,
     destinationAddress: isOnramp ? input.walletAddress : null,
-    token: input.cryptoToken,
+    token: rampTransferTokenMint(input.cryptoToken, c.env),
     amount: input.cryptoAmount,
     memo: null,
     type: input.direction,

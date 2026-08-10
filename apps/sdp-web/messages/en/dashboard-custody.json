@@ -324,7 +324,6 @@
     "policyOperationControls": "Operation controls",
     "policyOperationControlsDescription": "Choose a decision for wallet operation families and exact operation types.",
     "policyPerTransaction": "Per transaction",
-    "policyAssetBadgeIssued": "Issued",
     "policyAssetBadgeCustom": "Custom",
     "policySummarySelectedCount": "{count} selected",
     "policyDailyTotal": "Daily total",

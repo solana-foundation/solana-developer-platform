@@ -313,8 +313,7 @@ export interface WalletOperationActor {
 export type WalletOperationContext = Record<string, unknown>;
 export type WalletOperationProviderExtensions = Record<string, unknown>;
 
-export interface WalletOperationEnvelope {
-  id: string;
+export interface PolicyCandidate {
   organizationId: string;
   projectId: string | null;
   custodyWalletId: string | null;
@@ -329,6 +328,10 @@ export interface WalletOperationEnvelope {
   destination: string | null;
   context: WalletOperationContext;
   providerExtensions: WalletOperationProviderExtensions;
+}
+
+export interface WalletOperationEnvelope extends PolicyCandidate {
+  id: string;
   rawPayload: Record<string, unknown>;
   idempotencyKey: string | null;
   status: WalletOperationStatus;
@@ -358,6 +361,24 @@ export interface MatchedPolicyRule {
   decision: PolicyDecision;
   reason: string;
   rule: PolicyRule;
+}
+
+export interface PolicyDryRunCriterion {
+  scope: PolicyRuleScope;
+  ruleId: string | null;
+  kind: PolicyRule["kind"];
+  name: string | null;
+  matched: boolean;
+  action: PolicyDecision | null;
+  reason: string | null;
+}
+
+export interface PolicyDryRunResult {
+  decision: PolicyDecision;
+  reason: string;
+  criteria: PolicyDryRunCriterion[];
+  walletPolicyRevisionId: string | null;
+  apiKeyPolicyRevisionId: string | null;
 }
 
 export interface PolicyScopeEvaluation {
@@ -425,18 +446,21 @@ export interface PolicyEvaluationPolicyContext {
   requiresApproval: boolean;
 }
 
-export interface WalletOperationPolicyEvaluation {
-  operation: WalletOperationEnvelope;
+export interface CandidatePolicyEvaluation {
   wallet: PolicyScopeEvaluation;
   apiKey: PolicyScopeEvaluation | null;
   decision: PolicyDecision;
   reasonCode: PolicyEvaluationReasonCode | string;
   reason: string;
   matchedRules: MatchedPolicyRule[];
-  evaluationContext: PolicyEvaluationContext;
   requiresApproval: boolean;
   walletPolicyRevisionId: string | null;
   apiKeyPolicyRevisionId: string | null;
+}
+
+export interface WalletOperationPolicyEvaluation extends CandidatePolicyEvaluation {
+  operation: WalletOperationEnvelope;
+  evaluationContext: PolicyEvaluationContext;
 }
 
 export interface EffectivePolicy<TProfile, TRevision> {

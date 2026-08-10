@@ -28,7 +28,6 @@ export {
 } from "./handlers/recurring-payments";
 export {
   createSubscription,
-  createSubscriptionCollectionAttempt,
   createSubscriptionPlan,
   getSubscription,
   getSubscriptionPlan,
@@ -40,7 +39,6 @@ export {
   prepareResumeSubscription,
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
-  updateSubscription,
   updateSubscriptionPlan,
 } from "./handlers/subscriptions";
 export {
@@ -49,4 +47,10 @@ export {
   getTransferBatch,
   listTransferBatches,
 } from "./handlers/transfer-batches";
-export { createTransfer, getTransfer, listTransfers } from "./handlers/transfers";
+export {
+  createTransfer,
+  extractTransferPolicyCandidate,
+  findTransferIdempotentKeyReplay,
+  getTransfer,
+  listTransfers,
+} from "./handlers/transfers";

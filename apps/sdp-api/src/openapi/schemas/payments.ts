@@ -9,7 +9,6 @@ import {
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
-  createSubscriptionCollectionAttemptSchema as createSubscriptionCollectionAttemptSchemaBase,
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   createSubscriptionSchema as createSubscriptionSchemaBase,
   createTransferBatchSchema as createTransferBatchSchemaBase,
@@ -44,7 +43,6 @@ import {
   transferStatusSchema as transferStatusSchemaBase,
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
   updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
-  updateSubscriptionSchema as updateSubscriptionSchemaBase,
   updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
 } from "../../routes/payments/schemas";
@@ -1447,34 +1445,11 @@ export const createSubscriptionRequestSchema = createSubscriptionSchemaBase
       description: "Customer wallet address that authorizes the subscription.",
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
-    subscriberTokenAccount: withOpenApi(createSubscriptionSchemaBase.shape.subscriberTokenAccount, {
-      description: "Optional subscriber token account address.",
-    }),
-    subscriptionPda: withOpenApi(createSubscriptionSchemaBase.shape.subscriptionPda, {
-      description: "On-chain subscription PDA once created.",
-    }),
-    subscriptionAuthorityAddress: withOpenApi(
-      createSubscriptionSchemaBase.shape.subscriptionAuthorityAddress,
-      {
-        description: "Subscription authority PDA/address once initialized.",
-      }
-    ),
-    authorizationSignature: withOpenApi(createSubscriptionSchemaBase.shape.authorizationSignature, {
-      description: "Signature for the customer authorization transaction.",
-      example: "sig_example",
-    }),
-    status: paymentSubscriptionStatusSchema.optional(),
   })
   .openapi({
     description:
-      "Creates an SDP subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization flow.",
+      "Creates a pending SDP subscription record tied to a counterparty. Lifecycle, schedule, on-chain addresses, and authorization proof are server-owned and populated only by verified flows.",
   });
-
-export const updateSubscriptionRequestSchema = updateSubscriptionSchemaBase
-  .safeExtend({
-    status: paymentSubscriptionStatusSchema.optional(),
-  })
-  .openapi({ description: "Updates mutable subscription state and on-chain identifiers." });
 
 export const paymentListSubscriptionsQuerySchema = listSubscriptionsQuerySchemaBase
   .extend({
@@ -1589,16 +1564,6 @@ export const paymentSubscriptionListResponseSchema = z
   })
   .openapi({ description: "Subscription list response payload." });
 
-export const createSubscriptionCollectionAttemptRequestSchema =
-  createSubscriptionCollectionAttemptSchemaBase
-    .extend({
-      status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),
-    })
-    .openapi({
-      description:
-        "Creates a collection-attempt record for a due subscription. This endpoint records backend state; the collection worker/Solana transaction submitter owns actual settlement.",
-    });
-
 export const paymentListSubscriptionCollectionAttemptsQuerySchema =
   listSubscriptionCollectionAttemptsQuerySchemaBase
     .extend({
@@ -1638,11 +1603,6 @@ export const paymentSubscriptionCollectionAttemptResponseSchema = z
 
 export const prepareSubscriptionCollectionRequestSchema = prepareSubscriptionCollectionSchemaBase
   .extend({
-    amount: withOpenApi(prepareSubscriptionCollectionSchemaBase.shape.amount, {
-      description:
-        "Optional override amount in UI units. Defaults to the subscription plan amount.",
-      example: "25.00",
-    }),
     receiverTokenAccount: withOpenApi(
       prepareSubscriptionCollectionSchemaBase.shape.receiverTokenAccount,
       {
@@ -1654,7 +1614,7 @@ export const prepareSubscriptionCollectionRequestSchema = prepareSubscriptionCol
   })
   .openapi({
     description:
-      "Inputs for preparing the collector-signed Solana subscriptions transfer transaction.",
+      "Inputs for preparing the collector-signed Solana subscriptions transfer transaction. The amount is always derived from the stored plan.",
   });
 
 export const preparePaymentSubscriptionCollectionResponseSchema = z

@@ -162,7 +162,12 @@ export function AssetEditor({
                           className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-sunken"
                           onClick={() => toggleWalletAsset(asset.mint)}
                         >
-                          <TokenMark mint={asset.mint} symbol={asset.token} size="md" />
+                          <TokenMark
+                            mint={asset.mint}
+                            symbol={asset.token}
+                            logoUrl={asset.imageUrl}
+                            size="md"
+                          />
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-primary text-base font-medium">
                               {asset.token}
@@ -240,7 +245,12 @@ export function AssetEditor({
               const secondary = walletAsset?.name ?? shortenAddress(mint);
               return (
                 <div key={mint} className="flex min-h-14 items-center gap-3 py-2.5 last:pb-0">
-                  <TokenMark mint={mint} symbol={walletAsset?.token} size="md" />
+                  <TokenMark
+                    mint={mint}
+                    symbol={walletAsset?.token}
+                    logoUrl={walletAsset?.imageUrl}
+                    size="md"
+                  />
                   <span className="min-w-0 flex-1">
                     <span className="block text-base font-medium text-primary">{label}</span>
                     <span className="block truncate text-sm text-muted" title={mint}>

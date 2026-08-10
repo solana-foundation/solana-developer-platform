@@ -409,36 +409,13 @@ export const listSubscriptionPlansQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export const createSubscriptionSchema = z.object({
-  planId: z.string().min(1),
-  counterpartyId: z.string().min(1),
-  subscriberAddress: solanaAddressSchema("subscriberAddress"),
-  subscriberTokenAccount: solanaAddressSchema("subscriberTokenAccount").optional(),
-  subscriptionPda: solanaAddressSchema("subscriptionPda").optional(),
-  subscriptionAuthorityAddress: solanaAddressSchema("subscriptionAuthorityAddress").optional(),
-  authorizationSignature: z.string().min(1).max(128).optional(),
-  status: paymentSubscriptionStatusSchema.default("pending_authorization"),
-  currentPeriodStartAt: recurringTimestampSchema.optional(),
-  nextCollectionDueAt: recurringTimestampSchema.optional(),
-});
-
-export const updateSubscriptionSchema = z
+export const createSubscriptionSchema = z
   .object({
-    subscriberTokenAccount: solanaAddressSchema("subscriberTokenAccount").nullable().optional(),
-    subscriptionPda: solanaAddressSchema("subscriptionPda").nullable().optional(),
-    subscriptionAuthorityAddress: solanaAddressSchema("subscriptionAuthorityAddress")
-      .nullable()
-      .optional(),
-    authorizationSignature: z.string().min(1).max(128).nullable().optional(),
-    status: paymentSubscriptionStatusSchema.optional(),
-    currentPeriodStartAt: recurringTimestampSchema.nullable().optional(),
-    nextCollectionDueAt: recurringTimestampSchema.nullable().optional(),
-    cancelAt: recurringTimestampSchema.nullable().optional(),
-    canceledAt: recurringTimestampSchema.nullable().optional(),
+    planId: z.string().min(1),
+    counterpartyId: z.string().min(1),
+    subscriberAddress: solanaAddressSchema("subscriberAddress"),
   })
-  .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field must be provided",
-  });
+  .strict();
 
 export const prepareSubscriptionAuthorizationSchema = z.object({
   subscriberTokenAccount: solanaAddressSchema("subscriberTokenAccount"),
@@ -457,22 +434,11 @@ export const listSubscriptionsQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export const createSubscriptionCollectionAttemptSchema = z.object({
-  amount: paymentAmountSchema.optional(),
-  token: paymentTokenSchema.optional(),
-  dueAt: recurringTimestampSchema.optional(),
-  attemptedAt: recurringTimestampSchema.optional(),
-  status: paymentSubscriptionCollectionAttemptStatusSchema.default("pending"),
-  transferId: z.string().min(1).optional(),
-  signature: z.string().min(1).max(128).optional(),
-  error: z.string().min(1).max(2048).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-
-export const prepareSubscriptionCollectionSchema = z.object({
-  amount: paymentAmountSchema.optional(),
-  receiverTokenAccount: solanaAddressSchema("receiverTokenAccount"),
-});
+export const prepareSubscriptionCollectionSchema = z
+  .object({
+    receiverTokenAccount: solanaAddressSchema("receiverTokenAccount"),
+  })
+  .strict();
 
 export const listSubscriptionCollectionAttemptsQuerySchema = z.object({
   status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),

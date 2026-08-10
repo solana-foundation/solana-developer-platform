@@ -1,4 +1,4 @@
-import type { PolicyRule, WalletOperationEnvelope } from "@sdp/types";
+import type { PolicyCandidate, PolicyRule } from "@sdp/types";
 import { evaluateAlwaysRule } from "./always";
 import { evaluateAmountRule } from "./amount";
 import { evaluateApprovalRule } from "./approval";
@@ -19,7 +19,7 @@ export type { RuleEvaluation } from "./helpers";
  */
 export function evaluatePolicyRule(
   rule: PolicyRule,
-  operation: WalletOperationEnvelope
+  operation: PolicyCandidate
 ): RuleEvaluation | null {
   switch (rule.kind) {
     case "always":

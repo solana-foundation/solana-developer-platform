@@ -11,7 +11,7 @@ import {
 } from "@/db/repositories";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
@@ -207,7 +207,6 @@ afterEach(async () => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
   env.VEDA_SANDBOX_API_KEY = originalVedaSandboxApiKey;
-  await clearTestDatabase(env);
   await clearKVStores(env);
 });
 

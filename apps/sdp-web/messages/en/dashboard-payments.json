@@ -356,7 +356,7 @@
       "recipientsTitle": "Pay multiple recipients",
       "reviewStep": "Review",
       "reviewTitle": "Review batch",
-      "customToken": "Custom token",
+      "unknownToken": "Unknown token",
       "tokenUnavailableOnNetwork": "{currency} is not available on this network.",
       "importExceedsMaximumRecipients": "A batch can have at most {max} recipients. This import would bring the total to {total}.",
       "submitting": "Submitting batch.",
