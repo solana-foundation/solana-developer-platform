@@ -13,6 +13,7 @@ import {
   setDefaultWalletResponseSchema,
   signerCheckRequestSchema,
   switchSigningRequestSchema,
+  switchSigningResponseSchema,
   updateCustodyWalletRequestSchema,
   walletIdParamSchema,
 } from "../schemas";
@@ -63,7 +64,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Switch wallet signing provider",
     operationId: "switchWalletSigningProvider",
     description:
-      "Ensures the target provider is active and sets it as the default signing provider for the requested scope. Existing on-chain authorities are not rotated.",
+      "Selects an active provider config or exact Custody Connection as the default signing target for the requested scope. Existing on-chain authorities are not rotated.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -74,9 +75,9 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     responses: {
       201: {
         description: "Wallet signing provider switched",
-        content: jsonContent(initializeSigningResponseSchema),
+        content: jsonContent(switchSigningResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

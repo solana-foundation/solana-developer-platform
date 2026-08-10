@@ -1,6 +1,7 @@
 import {
   COMPLIANCE_PROVIDERS,
   type ComplianceProviderId,
+  CUSTODY_PROVIDER_CATALOG_BY_ID,
   CUSTODY_PROVIDERS,
   type CustodyProvider,
   EARN_PROVIDERS,
@@ -20,6 +21,7 @@ import {
 } from "@sdp/types";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 
@@ -517,6 +519,25 @@ export async function getProviderAvailability(
       earn: buildAvailabilityEntries(entitled.earn, configured.earn),
     },
   };
+}
+
+export async function isStoredCustodySetupEnabled(
+  env: Env,
+  db: DatabaseClient,
+  organizationId: string,
+  provider: CustodyProvider
+): Promise<boolean> {
+  // Stored credential setup remains managed-only. Further task adds explicit self-hosted opt-in.
+  if (
+    isSelfHostedDeployment(env) ||
+    !isCustodyConnectionRuntimeEnabled(env, provider) ||
+    CUSTODY_PROVIDER_CATALOG_BY_ID[provider].storedCredentialSetup.mode !== "self_service"
+  ) {
+    return false;
+  }
+
+  const availability = await getProviderAvailability(env, db, organizationId);
+  return availability.providers.custody[provider]?.entitled === true;
 }
 
 function getAvailabilityMessage(

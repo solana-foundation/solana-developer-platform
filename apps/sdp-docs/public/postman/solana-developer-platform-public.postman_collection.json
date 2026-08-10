@@ -289,10 +289,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets/switch",
-            "description": "Ensures the target provider is active and sets it as the default signing provider for the requested scope. Existing on-chain authorities are not rotated.",
+            "description": "Selects an active provider config or exact Custody Connection as the default signing target for the requested scope. Existing on-chain authorities are not rotated.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"local\",\n  \"walletLabel\": \"\"\n}",
+              "raw": "{\n  \"provider\": \"privy\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

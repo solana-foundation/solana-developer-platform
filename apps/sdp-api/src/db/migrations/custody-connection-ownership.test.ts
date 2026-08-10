@@ -5,8 +5,10 @@ import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_custody_connection_constraints";
 const PROJECT_ID = "prj_custody_connection_constraints";
+const OTHER_PROJECT_ID = "prj_custody_connection_constraints_other";
 const USER_ID = "usr_custody_connection_constraints";
 const CONFIG_ID = "cust_custody_connection_constraints";
+const CHECKED_AT = "2026-08-06T12:00:00.000Z";
 
 async function seedScope(): Promise<void> {
   const db = getDb(env);
@@ -44,29 +46,71 @@ async function seedScope(): Promise<void> {
 async function insertCredential(
   id: string,
   status = "pending",
-  ciphertext: string | null = "secret"
+  ciphertext: string | null = "secret",
+  projectId = PROJECT_ID
 ): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO provider_credentials (
          id, organization_id, project_id, provider, label, scope, source,
-         storage_backend, encrypted_secret_payload, status, created_by
+         storage_backend, encrypted_secret_payload, status, deactivated_at, created_by
        ) VALUES (?, ?, ?, 'privy', 'Privy', 'project', 'stored',
-                 'encrypted_db', ?, ?, ?)`
+                 'encrypted_db', ?, ?, ?, ?)`
     )
-    .bind(id, ORGANIZATION_ID, PROJECT_ID, ciphertext, status, USER_ID)
+    .bind(
+      id,
+      ORGANIZATION_ID,
+      projectId,
+      ciphertext,
+      status,
+      status === "deactivated" ? CHECKED_AT : null,
+      USER_ID
+    )
     .run();
 }
 
-async function insertConnection(id: string, credentialId: string): Promise<void> {
+async function insertConnection(
+  id: string,
+  credentialId: string,
+  options: {
+    projectId?: string;
+    status?: "pending" | "checking" | "active" | "failed" | "deactivated";
+    providerAccountFingerprint?: string;
+  } = {}
+): Promise<void> {
+  const projectId = options.projectId ?? PROJECT_ID;
+  const status = options.status ?? "pending";
+  const lastCheckStatus =
+    status === "checking"
+      ? "running"
+      : status === "active"
+        ? "success"
+        : status === "failed"
+          ? "failed"
+          : null;
   await getDb(env)
     .prepare(
       `INSERT INTO custody_connections (
          id, organization_id, project_id, provider, scope,
-         provider_credential_id, provider_credential_scope_key, status, created_by
-       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+         provider_credential_id, provider_credential_scope_key,
+         provider_account_fingerprint, status, last_check_status, last_check_at,
+         activated_at, deactivated_at, created_by
+       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(id, ORGANIZATION_ID, PROJECT_ID, credentialId, PROJECT_ID, USER_ID)
+    .bind(
+      id,
+      ORGANIZATION_ID,
+      projectId,
+      credentialId,
+      projectId,
+      options.providerAccountFingerprint ?? null,
+      status,
+      lastCheckStatus,
+      lastCheckStatus ? CHECKED_AT : null,
+      status === "active" ? CHECKED_AT : null,
+      status === "deactivated" ? CHECKED_AT : null,
+      USER_ID
+    )
     .run();
 }
 
@@ -81,7 +125,23 @@ async function insertConnectionWallet(id: string, connectionId: string): Promise
     .run();
 }
 
-describe("custody Connection ownership constraints", () => {
+async function activateConnection(id: string, walletId: string): Promise<void> {
+  await insertConnectionWallet(walletId, id);
+  await getDb(env)
+    .prepare(
+      `UPDATE custody_connections
+       SET status = 'active',
+           last_check_status = 'success',
+           last_check_at = ?,
+           default_custody_wallet_id = ?,
+           activated_at = ?
+       WHERE id = ?`
+    )
+    .bind(CHECKED_AT, walletId, CHECKED_AT, id)
+    .run();
+}
+
+describe("custody Connection constraints", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await seedScope();
@@ -124,20 +184,12 @@ describe("custody Connection ownership constraints", () => {
   });
 
   it("allows a Connection to default only to one of its own wallets", async () => {
-    await insertCredential("pcred_default_one");
-    await insertCredential("pcred_default_two");
-    await insertConnection("cconn_default_one", "pcred_default_one");
-    await insertConnection("cconn_default_two", "pcred_default_two");
-    await insertConnectionWallet("cwlt_default_one", "cconn_default_one");
-    await insertConnectionWallet("cwlt_default_two", "cconn_default_two");
-
-    await getDb(env)
-      .prepare(
-        `UPDATE custody_connections
-         SET default_custody_wallet_id = 'cwlt_default_one'
-         WHERE id = 'cconn_default_one'`
-      )
-      .run();
+    await insertCredential("pcred_default_one", "active");
+    await insertCredential("pcred_default_two", "active");
+    await insertConnection("cconn_default_one", "pcred_default_one", { status: "failed" });
+    await activateConnection("cconn_default_one", "cwlt_default_one");
+    await insertConnection("cconn_default_two", "pcred_default_two", { status: "failed" });
+    await activateConnection("cconn_default_two", "cwlt_default_two");
 
     await expect(
       getDb(env)
@@ -159,12 +211,156 @@ describe("custody Connection ownership constraints", () => {
     ).not.toBeNull();
   });
 
-  it("allows failed encrypted credentials to retain metadata without ciphertext", async () => {
+  it("allows failed and deactivated encrypted credentials without ciphertext", async () => {
     await insertCredential("pcred_failed_without_secret", "failed_validation", null);
+    await insertCredential("pcred_deactivated_without_secret", "deactivated", null);
 
     await expect(insertCredential("pcred_pending_without_secret", "pending", null)).rejects.toThrow(
       /provider_credentials_secret_location_check/
     );
+    await expect(insertCredential("pcred_active_without_secret", "active", null)).rejects.toThrow(
+      /provider_credentials_secret_location_check/
+    );
+  });
+
+  it("allows only one unfinished Privy installation per Project", async () => {
+    await insertCredential("pcred_unfinished_one");
+    await insertCredential("pcred_unfinished_two");
+    await insertCredential("pcred_active_sibling", "active");
+    await insertConnection("cconn_unfinished_one", "pcred_unfinished_one");
+
+    await expect(
+      insertConnection("cconn_unfinished_two", "pcred_unfinished_two", { status: "checking" })
+    ).rejects.toThrow(/idx_custody_connections_privy_unfinished/);
+
+    await getDb(env)
+      .prepare(
+        `UPDATE custody_connections
+         SET status = 'failed',
+             last_check_status = 'failed',
+             last_check_at = ?
+         WHERE id = 'cconn_unfinished_one'`
+      )
+      .bind(CHECKED_AT)
+      .run();
+
+    await insertConnection("cconn_unfinished_two", "pcred_unfinished_two", {
+      status: "checking",
+    });
+    await insertConnection("cconn_active_sibling", "pcred_active_sibling", { status: "failed" });
+    await activateConnection("cconn_active_sibling", "cwlt_active_sibling");
+  });
+
+  it("enforces local installation lifecycle combinations", async () => {
+    await insertCredential("pcred_lifecycle", "active");
+    await insertConnection("cconn_lifecycle", "pcred_lifecycle");
+
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE custody_connections
+           SET status = 'checking', last_check_status = NULL, last_check_at = ?
+           WHERE id = 'cconn_lifecycle'`
+        )
+        .bind(CHECKED_AT)
+        .run()
+    ).rejects.toThrow(/custody_connections_checking_lifecycle_check/);
+
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE custody_connections
+           SET status = 'failed', last_check_status = NULL, last_check_at = ?
+           WHERE id = 'cconn_lifecycle'`
+        )
+        .bind(CHECKED_AT)
+        .run()
+    ).rejects.toThrow(/custody_connections_failed_lifecycle_check/);
+
+    await getDb(env)
+      .prepare(
+        `UPDATE custody_connections
+         SET status = 'failed', last_check_status = 'failed', last_check_at = ?
+         WHERE id = 'cconn_lifecycle'`
+      )
+      .bind(CHECKED_AT)
+      .run();
+
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE custody_connections
+           SET status = 'active', last_check_status = 'success', activated_at = ?
+           WHERE id = 'cconn_lifecycle'`
+        )
+        .bind(CHECKED_AT)
+        .run()
+    ).rejects.toThrow(/custody_connections_active_lifecycle_check/);
+
+    await insertConnectionWallet("cwlt_lifecycle", "cconn_lifecycle");
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE custody_connections
+           SET status = 'active', last_check_status = NULL, last_check_at = ?,
+               default_custody_wallet_id = 'cwlt_lifecycle', activated_at = ?
+           WHERE id = 'cconn_lifecycle'`
+        )
+        .bind(CHECKED_AT, CHECKED_AT)
+        .run()
+    ).rejects.toThrow(/custody_connections_active_lifecycle_check/);
+
+    await getDb(env)
+      .prepare(
+        `UPDATE custody_connections
+         SET status = 'active', last_check_status = 'success', last_check_at = ?,
+             default_custody_wallet_id = 'cwlt_lifecycle', activated_at = ?
+         WHERE id = 'cconn_lifecycle'`
+      )
+      .bind(CHECKED_AT, CHECKED_AT)
+      .run();
+  });
+
+  it("keeps live Provider Account claims unique within a Project", async () => {
+    const fingerprint = "sha256:provider-account";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects
+           (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Other custody project', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(OTHER_PROJECT_ID, ORGANIZATION_ID, "custody-connection-constraints-other", USER_ID)
+      .run();
+    await insertCredential("pcred_fingerprint_live", "active");
+    await insertCredential("pcred_fingerprint_terminal", "failed_validation");
+    await insertCredential("pcred_fingerprint_other_project", "active", "secret", OTHER_PROJECT_ID);
+    await insertConnection("cconn_fingerprint_live", "pcred_fingerprint_live", {
+      status: "failed",
+      providerAccountFingerprint: fingerprint,
+    });
+    await activateConnection("cconn_fingerprint_live", "cwlt_fingerprint_live");
+    await insertConnection("cconn_fingerprint_terminal", "pcred_fingerprint_terminal", {
+      status: "failed",
+      providerAccountFingerprint: fingerprint,
+    });
+    await insertConnection("cconn_fingerprint_other_project", "pcred_fingerprint_other_project", {
+      projectId: OTHER_PROJECT_ID,
+      status: "failed",
+      providerAccountFingerprint: fingerprint,
+    });
+    await activateConnection("cconn_fingerprint_other_project", "cwlt_fingerprint_other_project");
+
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE custody_connections
+           SET status = 'pending',
+               last_check_status = NULL,
+               last_check_at = NULL
+           WHERE id = 'cconn_fingerprint_terminal'`
+        )
+        .run()
+    ).rejects.toThrow(/idx_custody_connections_live_provider_account/);
   });
 
   it("supports Config-only, dual, and Connection-only scope defaults", async () => {
