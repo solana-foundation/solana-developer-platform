@@ -1,5 +1,6 @@
 import path from "node:path";
 import { defineConfig } from "vitest/config";
+import { TEST_WORKER_COUNT } from "./src/test/worker-count";
 
 export default defineConfig({
   resolve: {
@@ -18,8 +19,7 @@ export default defineConfig({
     globals: true,
     globalSetup: ["src/test/node-global-setup.ts"],
     setupFiles: ["src/test/setup.ts"],
-    fileParallelism: false,
-    maxWorkers: 1,
+    maxWorkers: TEST_WORKER_COUNT,
     server: {
       deps: {
         inline: [
