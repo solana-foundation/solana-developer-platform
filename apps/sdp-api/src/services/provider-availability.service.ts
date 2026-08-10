@@ -21,7 +21,7 @@ import {
 } from "@sdp/types";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
-import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
+import { resolveNewCustodySetupMethod } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 
@@ -527,10 +527,8 @@ export async function isStoredCustodySetupEnabled(
   organizationId: string,
   provider: CustodyProvider
 ): Promise<boolean> {
-  // Stored credential setup remains managed-only. Further task adds explicit self-hosted opt-in.
   if (
-    isSelfHostedDeployment(env) ||
-    !isCustodyConnectionRuntimeEnabled(env, provider) ||
+    resolveNewCustodySetupMethod(env, provider) !== "stored_credentials" ||
     CUSTODY_PROVIDER_CATALOG_BY_ID[provider].storedCredentialSetup.mode !== "self_service"
   ) {
     return false;
@@ -538,6 +536,19 @@ export async function isStoredCustodySetupEnabled(
 
   const availability = await getProviderAvailability(env, db, organizationId);
   return availability.providers.custody[provider]?.entitled === true;
+}
+
+export async function isDeploymentCredentialCustodySetupEnabled(
+  env: Env,
+  db: DatabaseClient,
+  organizationId: string,
+  provider: CustodyProvider
+): Promise<boolean> {
+  if (resolveNewCustodySetupMethod(env, provider) !== "deployment_credentials") {
+    return false;
+  }
+  const availability = await getProviderAvailability(env, db, organizationId);
+  return availability.providers.custody[provider]?.enabled === true;
 }
 
 function getAvailabilityMessage(

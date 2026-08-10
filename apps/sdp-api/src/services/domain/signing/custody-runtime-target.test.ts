@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import type { SigningConfigRecord } from "@/services/adapters";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { RuntimeEnvCredentialSecretStore } from "@/services/credential-secret-store";
+import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -460,6 +461,24 @@ describe("CustodyRuntimeTargets", () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
+  it("fails closed when runtime env credentials point to another Privy account", async () => {
+    env.PRIVY_APP_ID = "runtime-app-id";
+    env.PRIVY_APP_SECRET = "runtime-app-secret";
+    const connection = await seedConnection({ backend: "runtime_env" });
+    await setProjectDefault(null, connection.id);
+    env.PRIVY_APP_ID = "different-runtime-app-id";
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.getTransactionSigner(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        connection.walletId,
+        createConfigAdapterFactory()
+      )
+    ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
+  });
+
   it("is used by the production SigningService transaction-signer path", async () => {
     const connection = await seedConnection();
     await setProjectDefault(null, connection.id);
@@ -562,6 +581,10 @@ async function seedConnection(
   const encryptedPayload = backend === "encrypted_db" ? "ciphertext" : null;
   const lastCheckStatus = params.lastCheckStatus ?? "success";
   const connectionStatus = lastCheckStatus === "success" ? "active" : "pending";
+  const providerAccountFingerprint =
+    backend === "runtime_env"
+      ? await getPrivyProviderAccountFingerprint(env.PRIVY_APP_ID ?? "")
+      : `sha256:${credentialId}`;
 
   await getDb(env).batch([
     getDb(env)
@@ -600,7 +623,7 @@ async function seedConnection(
         `cwlt_${id}`,
         connectionStatus,
         lastCheckStatus,
-        `sha256:${credentialId}`,
+        providerAccountFingerprint,
         connectionStatus,
         id
       ),

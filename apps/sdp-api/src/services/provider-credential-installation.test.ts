@@ -7,7 +7,7 @@ function facts(overrides: Partial<InstallationFacts> = {}): InstallationFacts {
   return {
     connectionStatus: "pending",
     credentialStatus: "pending",
-    isStoredProjectCredential: true,
+    isExpectedProjectCredential: true,
     hasDefaultWallet: false,
     hasOwnedWallet: false,
     providerAccountFingerprint: null,
@@ -94,7 +94,9 @@ describe("provider credential installation decisions", () => {
     expect(decision.cancel).toEqual({ kind: "conflict" });
     expect(decision.replace).toEqual({ kind: "conflict" });
 
-    expect(decideInstallation(facts({ isStoredProjectCredential: false })).consistent).toBe(false);
+    expect(decideInstallation(facts({ isExpectedProjectCredential: false })).consistent).toBe(
+      false
+    );
     expect(
       decideInstallation(
         facts({

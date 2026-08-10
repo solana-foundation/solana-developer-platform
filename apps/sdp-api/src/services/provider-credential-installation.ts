@@ -25,7 +25,7 @@ export type InstallationDecision<Mode extends string = never> =
 export interface InstallationFacts {
   connectionStatus: CustodyConnectionStatus;
   credentialStatus: ProviderCredentialStatus;
-  isStoredProjectCredential: boolean;
+  isExpectedProjectCredential: boolean;
   hasDefaultWallet: boolean;
   hasOwnedWallet: boolean;
   providerAccountFingerprint: string | null;
@@ -48,13 +48,14 @@ export interface InstallationDecisions {
 export function installationFactsFromConnection(
   connection: InstallationConnectionState,
   nowMs: number,
-  fullCompletionEnabled: boolean
+  fullCompletionEnabled: boolean,
+  expectedCredentialSource: "stored" | "runtime" = "stored"
 ): InstallationFacts {
   return {
     connectionStatus: connection.status,
     credentialStatus: connection.credential_status,
-    isStoredProjectCredential:
-      connection.credential_source === "stored" &&
+    isExpectedProjectCredential:
+      connection.credential_source === expectedCredentialSource &&
       connection.credential_scope === "project" &&
       connection.credential_project_id === connection.project_id &&
       connection.provider_credential_scope_key === connection.project_id,
@@ -166,7 +167,7 @@ function isCompletionLeaseCurrent(facts: InstallationFacts): boolean {
 }
 
 function hasConsistentLifecycle(facts: InstallationFacts): boolean {
-  if (!facts.isStoredProjectCredential) {
+  if (!facts.isExpectedProjectCredential) {
     return false;
   }
 

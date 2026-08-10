@@ -536,6 +536,7 @@ async function runSubmissionTransaction(submission: StoredSubmission): Promise<T
       projectId: credentialProjectId,
       label: submission.input.fields.credentialLabel,
       scope: submission.input.fields.scope,
+      source: "stored",
       stored: submission.stored,
       displayMetadata,
       version,

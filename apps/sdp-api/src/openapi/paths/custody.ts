@@ -17,7 +17,12 @@ import {
   updateCustodyWalletRequestSchema,
   walletIdParamSchema,
 } from "../schemas";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import {
+  errorResponses,
+  jsonContent,
+  projectScopeHeaders,
+  projectScopeWithIdempotencyHeaders,
+} from "./helpers";
 import {
   custodyConfigResponse,
   custodyConfigsResponse,
@@ -40,9 +45,10 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Initialize wallet signing",
     operationId: "initializeWalletSigning",
     description:
-      "Initializes wallet signing for the organization or project by creating an active signing configuration.",
+      "Initializes wallet signing for the resolved project by creating or reusing a Config, or an eligible self-hosted runtime-env Custody Connection. Idempotency-Key is required only before creating a fresh runtime-env Connection; the legacy Config path remains available without it.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(initializeSigningRequestSchema),
@@ -53,7 +59,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet signing initialized",
         content: jsonContent(initializeSigningResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500, 503]),
     },
   });
 

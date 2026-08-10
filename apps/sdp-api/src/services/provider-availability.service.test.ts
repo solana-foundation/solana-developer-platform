@@ -5,6 +5,8 @@ import {
   assertEarnProviderConfigured,
   assertProviderAvailable,
   getProviderAvailability,
+  isDeploymentCredentialCustodySetupEnabled,
+  isStoredCustodySetupEnabled,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { env } from "@/test/helpers/env";
@@ -112,10 +114,14 @@ async function setOrganizationTier(tier: "individual" | "enterprise"): Promise<v
 describe("provider-availability.service", () => {
   let originalProviderEnv: ProviderEnvSnapshot;
   let originalDeploymentMode: "managed" | "self_hosted" | undefined;
+  let originalPrivyByokEnabled: string | undefined;
+  let originalSelfHostedStoredSetupEnabled: string | undefined;
 
   beforeEach(async () => {
     originalProviderEnv = readProviderEnv();
     originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
+    originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
+    originalSelfHostedStoredSetupEnabled = env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED;
 
     writeProviderEnv({});
     setBaseProviderEnv();
@@ -138,6 +144,8 @@ describe("provider-availability.service", () => {
   afterEach(async () => {
     writeProviderEnv(originalProviderEnv);
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
+    env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = originalSelfHostedStoredSetupEnabled;
   });
 
   it("resolves general defaults independently of the legacy tier value", () => {
@@ -252,31 +260,31 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it.each(["individual", "enterprise"] as const)(
-    "treats configured Nodit as general for the legacy %s tier and honors an explicit disable",
-    async (tier) => {
-      await setOrganizationTier(tier);
+  it.each([
+    "individual",
+    "enterprise",
+  ] as const)("treats configured Nodit as general for the legacy %s tier and honors an explicit disable", async (tier) => {
+    await setOrganizationTier(tier);
 
-      const enabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-      expect(enabled.providers.rpc.nodit).toEqual({
-        entitled: true,
-        configured: true,
-        enabled: true,
-      });
+    const enabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(enabled.providers.rpc.nodit).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
 
-      await getDb(env)
-        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-        .bind(JSON.stringify({ providerOverrides: { rpc: { nodit: false } } }), TEST_ORG_ID)
-        .run();
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { rpc: { nodit: false } } }), TEST_ORG_ID)
+      .run();
 
-      const disabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-      expect(disabled.providers.rpc.nodit).toEqual({
-        entitled: false,
-        configured: true,
-        enabled: false,
-      });
-    }
-  );
+    const disabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(disabled.providers.rpc.nodit).toEqual({
+      entitled: false,
+      configured: true,
+      enabled: false,
+    });
+  });
 
   it("treats Nodit as configured when its URL is present like other RPC providers", async () => {
     env.SOLANA_RPC_NODIT_URL = "https://rpc.proxy.test/nodit";
@@ -394,6 +402,28 @@ describe("provider-availability.service", () => {
     expect(availability.providers.compliance.range.entitled).toBe(true);
     expect(availability.providers.ramps.lightspark.entitled).toBe(true);
     expect(availability.providers.ramps.bvnk.entitled).toBe(true);
+  });
+
+  it("selects exactly one self-hosted Privy Connection setup source", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "true";
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "false";
+
+    await expect(
+      isDeploymentCredentialCustodySetupEnabled(env, getDb(env), TEST_ORG_ID, "privy")
+    ).resolves.toBe(true);
+    await expect(isStoredCustodySetupEnabled(env, getDb(env), TEST_ORG_ID, "privy")).resolves.toBe(
+      false
+    );
+
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "true";
+
+    await expect(
+      isDeploymentCredentialCustodySetupEnabled(env, getDb(env), TEST_ORG_ID, "privy")
+    ).resolves.toBe(false);
+    await expect(isStoredCustodySetupEnabled(env, getDb(env), TEST_ORG_ID, "privy")).resolves.toBe(
+      true
+    );
   });
 
   it("respects providerOverrides[id] === false in self-hosted mode", async () => {

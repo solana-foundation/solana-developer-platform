@@ -265,7 +265,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets/initialize",
-            "description": "Initializes wallet signing for the organization or project by creating an active signing configuration.",
+            "description": "Initializes wallet signing for the resolved project by creating or reusing a Config, or an eligible self-hosted runtime-env Custody Connection. Idempotency-Key is required only before creating a fresh runtime-env Connection; the legacy Config path remains available without it.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"local\",\n  \"walletLabel\": \"\"\n}",

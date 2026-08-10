@@ -116,6 +116,34 @@ test("valid utila signing config has no Utila field errors", () => {
   }
 });
 
+test("Privy runtime BYOK setup does not require an existing wallet", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    SIGNING_PROVIDERS: "privy",
+    SIGNING_PROVIDER: "privy",
+    PRIVY_BYOK_ENABLED: "true",
+    PRIVY_APP_ID: "app-id",
+    PRIVY_APP_SECRET: "app-secret",
+    PRIVY_WALLET_ID: "",
+  });
+
+  assert.equal(errors.PRIVY_WALLET_ID, undefined);
+});
+
+test("legacy Privy setup still requires an existing wallet", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    SIGNING_PROVIDERS: "privy",
+    SIGNING_PROVIDER: "privy",
+    PRIVY_BYOK_ENABLED: "false",
+    PRIVY_APP_ID: "app-id",
+    PRIVY_APP_SECRET: "app-secret",
+    PRIVY_WALLET_ID: "",
+  });
+
+  assert.ok(errors.PRIVY_WALLET_ID);
+});
+
 test("an unknown provider in SIGNING_PROVIDERS reports an error", () => {
   const errors = validateValues({ ...defaultValues(), SIGNING_PROVIDERS: "local,bogus" });
   assert.match(errors.SIGNING_PROVIDERS ?? "", /must be one of/);

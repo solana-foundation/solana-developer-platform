@@ -18,13 +18,12 @@ import {
   createCredentialSecretStore,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
+import {
+  getPrivyProviderAccountFingerprint,
+  PRIVY_RUNTIME_ENV_FIELDS,
+} from "@/services/custody/privy-credential";
 import { createPrivyAdapterFromCredential } from "@/services/domain/signing/provider-adapter-factory";
 import type { Env } from "@/types/env";
-
-const PRIVY_RUNTIME_ENV_FIELDS = {
-  appId: "PRIVY_APP_ID",
-  appSecret: "PRIVY_APP_SECRET",
-} as const satisfies Record<string, keyof Env & string>;
 
 type ConfigAdapterResolver = (
   organizationId: string,
@@ -444,6 +443,7 @@ export class CustodyRuntimeTargets {
         : {}),
     };
 
+    let credential: { appId: string; appSecret: string };
     try {
       const payload = await createCredentialSecretStore(this.env, row.storage_backend).read({
         orgId: target.organizationId,
@@ -454,11 +454,21 @@ export class CustodyRuntimeTargets {
       if (!appId || !appSecret) {
         throw new Error("incomplete credential payload");
       }
-      return { appId, appSecret };
+      credential = { appId, appSecret };
     } catch {
       this.logUnavailable(target, "credential_secret_unavailable");
       throw providerUnavailable("Custody credential is temporarily unavailable");
     }
+
+    if (
+      row.source === "runtime" &&
+      (await getPrivyProviderAccountFingerprint(credential.appId)) !==
+        row.provider_account_fingerprint
+    ) {
+      this.logUnavailable(target, "provider_account_mismatch");
+      throw conflict("Custody runtime credential does not match the connected Provider account");
+    }
+    return credential;
   }
 
   private mapConfigTarget(row: ConfigRow): ConfigRuntimeTarget {
@@ -531,6 +541,7 @@ export class CustodyRuntimeTargets {
       | "connection_unusable"
       | "connection_changed"
       | "credential_secret_unavailable"
+      | "provider_account_mismatch"
   ): void {
     getLogger().warn(
       {

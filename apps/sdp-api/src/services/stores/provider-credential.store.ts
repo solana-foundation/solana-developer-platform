@@ -310,6 +310,7 @@ export class ProviderCredentialStore {
   async acquireInstallationLease(params: {
     connectionId: string;
     providerCredentialId: string;
+    credentialSource: "stored" | "runtime";
     expectedStatus: "pending" | "checking";
     expectedLastCheckStatus: string | null;
     expectedLastCheckAt: string | null;
@@ -345,7 +346,7 @@ export class ProviderCredentialStore {
            SELECT 1 FROM provider_credentials pc
            WHERE pc.id = c.provider_credential_id
              AND pc.status = 'pending'
-             AND pc.source = 'stored'
+             AND pc.source = ?
              AND pc.scope = 'project'
              AND pc.project_id = c.project_id
          )
@@ -356,6 +357,7 @@ export class ProviderCredentialStore {
         params.expectedStatus,
         params.expectedLastCheckStatus,
         params.expectedLastCheckAt,
+        params.credentialSource,
       ]
     );
     return row?.last_check_at ?? null;
@@ -393,6 +395,7 @@ export class ProviderCredentialStore {
     providerWalletId: string;
     publicKey: string;
     label?: string;
+    selectIfUnassigned?: boolean;
   }): Promise<ProviderCredentialRow | null> {
     const custodyWalletId = `cwlt_${crypto.randomUUID()}`;
     await this.db.execute(
@@ -430,7 +433,7 @@ export class ProviderCredentialStore {
       throw new Error("Installation changed during success persistence");
     }
 
-    return this.db.queryOne<ProviderCredentialRow>(
+    const credential = await this.db.queryOne<ProviderCredentialRow>(
       `UPDATE provider_credentials
        SET status = 'active',
            last_validated_at = sdp_iso_now(),
@@ -443,6 +446,46 @@ export class ProviderCredentialStore {
                  idempotency_fingerprint, created_at`,
       [params.providerCredentialId]
     );
+    if (credential && params.selectIfUnassigned) {
+      await this.db.execute(
+        `UPDATE custody_scope_defaults
+         SET default_custody_connection_id = ?, updated_at = sdp_iso_now()
+         WHERE default_custody_connection_id IS NULL
+           AND organization_id = ?
+           AND project_id = ?
+           AND EXISTS (
+             SELECT 1
+             FROM custody_configs config
+             WHERE config.id = custody_scope_defaults.default_custody_config_id
+               AND config.organization_id = ?
+               AND config.provider = ?
+               AND config.status = 'inactive'
+           )`,
+        [
+          params.connectionId,
+          credential.organization_id,
+          credential.project_id,
+          credential.organization_id,
+          credential.provider,
+        ]
+      );
+      await this.db.execute(
+        `INSERT INTO custody_scope_defaults (
+           id, organization_id, project_id, default_custody_connection_id
+         )
+         SELECT ?, organization_id, project_id, id
+         FROM custody_connections connection
+         WHERE connection.id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM custody_scope_defaults existing
+             WHERE existing.organization_id = connection.organization_id
+               AND existing.project_id = connection.project_id
+           )
+         ON CONFLICT DO NOTHING`,
+        [`csd_${crypto.randomUUID()}`, params.connectionId]
+      );
+    }
+    return credential;
   }
 
   async recordInstallationFailure(params: {
@@ -595,13 +638,14 @@ export class ProviderCredentialStore {
     projectId: string | null;
     label: string;
     scope: "organization" | "project";
+    source: "stored" | "runtime";
     stored: StoredCredentialSecret;
     displayMetadata: Record<string, string>;
     version: number;
     rotatedFromId: string | null;
     idempotencyKey: string;
     idempotencyFingerprint: string;
-    createdBy: string;
+    createdBy: string | null;
   }): Promise<ProviderCredentialRow> {
     const scopeKey = params.scope === "organization" ? "__organization__" : params.projectId;
     const row = await this.db.queryOne<ProviderCredentialRow>(
@@ -612,7 +656,7 @@ export class ProviderCredentialStore {
          rotated_from_provider_credential_id, idempotency_key,
          idempotency_fingerprint, created_by
        ) VALUES (
-         ?, ?, ?, 'privy', ?, ?, 'stored',
+         ?, ?, ?, 'privy', ?, ?, ?,
          ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?
        )
        RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
@@ -625,6 +669,7 @@ export class ProviderCredentialStore {
         params.projectId,
         params.label,
         params.scope,
+        params.source,
         params.stored.storageBackend,
         params.stored.secretRef ?? null,
         params.stored.secretVersionRef ?? null,
@@ -651,7 +696,7 @@ export class ProviderCredentialStore {
     providerCredentialId: string;
     providerCredentialScopeKey: string;
     pendingWalletLabel?: string;
-    createdBy: string;
+    createdBy: string | null;
   }): Promise<CustodyConnectionRow> {
     const row = await this.db.queryOne<CustodyConnectionRow>(
       `INSERT INTO custody_connections (

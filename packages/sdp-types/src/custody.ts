@@ -652,19 +652,34 @@ export interface DeleteWalletResponse {
   deleted: true;
 }
 
-export interface InitializeSigningResponse {
-  configId: string;
+interface SigningInitializationWallet {
   publicKey: string;
   walletId: string;
 }
 
+type ConfigSigningInitialization = SigningInitializationWallet & {
+  configId: string;
+  connectionId?: never;
+};
+
+type ConnectionSigningInitialization = SigningInitializationWallet & {
+  connectionId: string;
+  configId?: never;
+};
+
+export type InitializeSigningResponse =
+  | ConfigSigningInitialization
+  | ConnectionSigningInitialization;
+
 export type SwitchSigningResponse =
-  | InitializeSigningResponse
-  | {
+  | (SigningInitializationWallet & {
+      configId: string;
+      connectionId?: never;
+    })
+  | (SigningInitializationWallet & {
       connectionId: string;
-      publicKey: string;
-      walletId: string;
-    };
+      configId?: never;
+    });
 
 export interface SignerCheckResponse {
   walletId: string;

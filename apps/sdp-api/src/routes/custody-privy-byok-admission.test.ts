@@ -9,6 +9,10 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
+const findPrivyWalletByExternalIdMock = vi.spyOn(
+  custodyProvisioning,
+  "findPrivyWalletByExternalId"
+);
 
 const ORGANIZATION_ID = "org_privy_byok_admission";
 const PROJECT_ID = "prj_privy_byok_admission";
@@ -66,7 +70,10 @@ async function seedActor(): Promise<void> {
   ]);
 }
 
-async function request(path: "initialize" | "switch"): Promise<Response> {
+async function request(
+  path: "initialize" | "switch",
+  options: { idempotencyKey?: string; walletLabel?: string } = {}
+): Promise<Response> {
   return app.request(
     `/v1/wallets/${path}`,
     {
@@ -74,8 +81,9 @@ async function request(path: "initialize" | "switch"): Promise<Response> {
       headers: {
         Authorization: `Bearer ${API_KEY.raw}`,
         "Content-Type": "application/json",
+        ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
       },
-      body: JSON.stringify({ provider: "privy" }),
+      body: JSON.stringify({ provider: "privy", walletLabel: options.walletLabel }),
     },
     env
   );
@@ -129,12 +137,39 @@ async function seedBlockingConnection(): Promise<void> {
   ]);
 }
 
+function enableRuntimeSetup(): void {
+  env.SDP_DEPLOYMENT_MODE = "self_hosted";
+  env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "false";
+  env.PRIVY_APP_ID = "runtime-app-id";
+  env.PRIVY_APP_SECRET = "runtime-app-secret";
+  env.CUSTODY_ENCRYPTION_KEY = undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ data: [] }))
+  );
+}
+
+async function getRuntimeRowCounts() {
+  const counts = await getDb(env)
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM provider_credentials) AS credentials,
+         (SELECT COUNT(*) FROM custody_connections) AS connections,
+         (SELECT COUNT(*) FROM custody_wallets) AS wallets`
+    )
+    .first<{ credentials: number; connections: number; wallets: number }>();
+  if (!counts) throw new Error("Runtime row count query returned no row");
+  return counts;
+}
+
 describe("legacy Privy setup admission", () => {
   const original = {
     flag: env.PRIVY_BYOK_ENABLED,
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
+    deploymentMode: env.SDP_DEPLOYMENT_MODE,
+    selfHostedStoredSetup: env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED,
   };
 
   beforeEach(async () => {
@@ -152,27 +187,30 @@ describe("legacy Privy setup admission", () => {
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
+    env.SDP_DEPLOYMENT_MODE = original.deploymentMode;
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = original.selfHostedStoredSetup;
+    vi.unstubAllGlobals();
     await clearKVStores(env);
   });
 
-  it.each(["initialize", "switch"] as const)(
-    "routes fresh /%s setup to stored credentials before env availability",
-    async (path) => {
-      const response = await request(path);
+  it.each([
+    "initialize",
+    "switch",
+  ] as const)("routes fresh /%s setup to stored credentials before env availability", async (path) => {
+    const response = await request(path);
 
-      expect(response.status).toBe(403);
-      expect(await response.json()).toMatchObject({
-        error: {
-          code: "FORBIDDEN",
-          message: "New Privy setup must use stored credentials",
-        },
-      });
-      const configs = await getDb(env)
-        .prepare("SELECT COUNT(*) AS count FROM custody_configs")
-        .first<{ count: number }>();
-      expect(configs?.count).toBe(0);
-    }
-  );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "FORBIDDEN",
+        message: "New Privy setup must use stored credentials",
+      },
+    });
+    const configs = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM custody_configs")
+      .first<{ count: number }>();
+    expect(configs?.count).toBe(0);
+  });
 
   it("treats inactive Config reactivation as fresh setup", async () => {
     await seedLegacyConfig("inactive");
@@ -190,43 +228,42 @@ describe("legacy Privy setup admission", () => {
     expect(config?.status).toBe("inactive");
   });
 
-  it.each(["initialize", "switch"] as const)(
-    "ignores stored Connection state on /%s after flag rollback",
-    async (path) => {
-      env.PRIVY_BYOK_ENABLED = "false";
-      env.PRIVY_APP_ID = "legacy-app-id";
-      env.PRIVY_APP_SECRET = "legacy-app-secret";
-      env.CUSTODY_ENCRYPTION_KEY = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
-      provisionPrivyWalletMock.mockResolvedValueOnce({
-        walletId: "wallet_rollback",
-        address: "LegacyRollbackPublicKey",
-      });
-      await seedBlockingConnection();
-
-      const response = await request(path);
-
-      expect(response.status).toBe(201);
-      expect(await response.json()).toMatchObject({
-        data: {
-          walletId: "privy_wallet_rollback",
-          publicKey: "LegacyRollbackPublicKey",
-        },
-      });
-      expect(
-        await getDb(env)
-          .prepare("SELECT status FROM custody_connections WHERE id = ?")
-          .bind("cconn_privy_byok_admission")
-          .first()
-      ).toEqual({ status: "pending" });
-    }
-  );
-
-  it("preserves the initialize conflict for an active exact-project Config", async () => {
+  it.each([
+    "initialize",
+    "switch",
+  ] as const)("ignores stored Connection state on /%s after flag rollback", async (path) => {
+    env.PRIVY_BYOK_ENABLED = "false";
     env.PRIVY_APP_ID = "legacy-app-id";
     env.PRIVY_APP_SECRET = "legacy-app-secret";
+    env.CUSTODY_ENCRYPTION_KEY = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "wallet_rollback",
+      address: "LegacyRollbackPublicKey",
+    });
+    await seedBlockingConnection();
+
+    const response = await request(path);
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      data: {
+        walletId: "privy_wallet_rollback",
+        publicKey: "LegacyRollbackPublicKey",
+      },
+    });
+    expect(
+      await getDb(env)
+        .prepare("SELECT status FROM custody_connections WHERE id = ?")
+        .bind("cconn_privy_byok_admission")
+        .first()
+    ).toEqual({ status: "pending" });
+  });
+
+  it("preserves the initialize conflict for an active exact-project Config", async () => {
+    enableRuntimeSetup();
     await seedLegacyConfig("active");
 
-    const response = await request("initialize");
+    const response = await request("initialize", { idempotencyKey: "active-config" });
 
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({
@@ -243,6 +280,22 @@ describe("legacy Privy setup admission", () => {
       )
       .first<{ count: number }>();
     expect(createAudits?.count).toBe(0);
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(await getRuntimeRowCounts()).toEqual({ credentials: 0, connections: 0, wallets: 0 });
+  });
+
+  it("does not use runtime setup when self-hosted stored setup is enabled", async () => {
+    enableRuntimeSetup();
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "true";
+
+    const response = await request("initialize", { idempotencyKey: "stored-policy" });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: "FORBIDDEN", message: "New Privy setup must use stored credentials" },
+    });
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(await getRuntimeRowCounts()).toEqual({ credentials: 0, connections: 0, wallets: 0 });
   });
 
   it("keeps active Config selection through switch when stored setup is enabled", async () => {
@@ -305,5 +358,397 @@ describe("legacy Privy setup admission", () => {
       },
     });
     expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+  });
+
+  it("initializes a self-hosted runtime Credential, Connection, and first wallet", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "wallet_runtime_initialize",
+      address: "RuntimeInitializePublicKey",
+    });
+
+    const response = await request("initialize", {
+      idempotencyKey: "runtime-initialize-1",
+      walletLabel: "Runtime treasury",
+    });
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      data: Record<string, string>;
+    };
+    expect(body.data).toMatchObject({
+      walletId: "privy_wallet_runtime_initialize",
+      publicKey: "RuntimeInitializePublicKey",
+    });
+    expect(body.data.connectionId).toMatch(/^cconn_/);
+    expect(body.data).not.toHaveProperty("configId");
+    expect(body.data).not.toHaveProperty("targetType");
+
+    const credential = await getDb(env)
+      .prepare(
+        `SELECT source, storage_backend, secret_ref, secret_version_ref,
+                encrypted_secret_payload, display_metadata, status
+         FROM provider_credentials`
+      )
+      .first<Record<string, unknown>>();
+    expect(credential).toMatchObject({
+      source: "runtime",
+      storage_backend: "runtime_env",
+      secret_ref: null,
+      secret_version_ref: null,
+      encrypted_secret_payload: null,
+      status: "active",
+    });
+    expect(credential?.display_metadata).toEqual({});
+
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT c.status, c.default_custody_wallet_id, w.label,
+                  w.custody_config_id, w.custody_connection_id
+           FROM custody_connections c
+           JOIN custody_wallets w ON w.id = c.default_custody_wallet_id`
+        )
+        .first()
+    ).toMatchObject({
+      status: "active",
+      label: "Runtime treasury",
+      custody_config_id: null,
+      custody_connection_id: body.data.connectionId,
+    });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT default_custody_config_id, default_custody_connection_id
+           FROM custody_scope_defaults
+           WHERE organization_id = ? AND project_id = ?`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID)
+        .first()
+    ).toEqual({
+      default_custody_config_id: null,
+      default_custody_connection_id: body.data.connectionId,
+    });
+  });
+
+  it("does not replace an explicit different-provider Project target", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "wallet_runtime_unselected",
+      address: "RuntimeUnselectedPublicKey",
+    });
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs (
+             id, organization_id, project_id, provider, config_encrypted, status
+           ) VALUES ('cust_local_target', ?, ?, 'local', 'legacy', 'active')`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_scope_defaults (
+             id, organization_id, project_id, default_custody_config_id
+           ) VALUES ('csd_local_target', ?, ?, 'cust_local_target')`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID),
+    ]);
+
+    const response = await request("initialize", { idempotencyKey: "runtime-unselected" });
+
+    expect(response.status).toBe(201);
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT default_custody_config_id, default_custody_connection_id
+           FROM custody_scope_defaults
+           WHERE organization_id = ? AND project_id = ?`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID)
+        .first()
+    ).toEqual({
+      default_custody_config_id: "cust_local_target",
+      default_custody_connection_id: null,
+    });
+  });
+
+  it("selects the Connection beside an inactive same-provider Config target", async () => {
+    enableRuntimeSetup();
+    await seedLegacyConfig("inactive");
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults (
+           id, organization_id, project_id, default_custody_config_id
+         ) VALUES ('csd_inactive_privy_target', ?, ?, 'cust_privy_byok_admission')`
+      )
+      .bind(ORGANIZATION_ID, PROJECT_ID)
+      .run();
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "wallet_runtime_selected",
+      address: "RuntimeSelectedPublicKey",
+    });
+
+    const response = await request("initialize", { idempotencyKey: "runtime-selected" });
+    const body = (await response.json()) as { data: { connectionId: string } };
+
+    expect(response.status).toBe(201);
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT default_custody_config_id, default_custody_connection_id
+           FROM custody_scope_defaults
+           WHERE organization_id = ? AND project_id = ?`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID)
+        .first()
+    ).toEqual({
+      default_custody_config_id: "cust_privy_byok_admission",
+      default_custody_connection_id: body.data.connectionId,
+    });
+  });
+
+  it("does not replace a same-provider Config activated during Provider work", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockImplementationOnce(async () => {
+      await seedLegacyConfig("active");
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_scope_defaults (
+             id, organization_id, project_id, default_custody_config_id
+           ) VALUES ('csd_active_privy_target', ?, ?, 'cust_privy_byok_admission')`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID)
+        .run();
+      return {
+        walletId: "wallet_runtime_not_selected",
+        address: "RuntimeNotSelectedPublicKey",
+      };
+    });
+
+    const response = await request("initialize", { idempotencyKey: "runtime-not-selected" });
+
+    expect(response.status).toBe(201);
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT default_custody_config_id, default_custody_connection_id
+           FROM custody_scope_defaults
+           WHERE organization_id = ? AND project_id = ?`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID)
+        .first()
+    ).toEqual({
+      default_custody_config_id: "cust_privy_byok_admission",
+      default_custody_connection_id: null,
+    });
+  });
+
+  it("requires Idempotency-Key only before fresh runtime creation", async () => {
+    enableRuntimeSetup();
+
+    const response = await request("initialize");
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Idempotency-Key is required" },
+    });
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(
+      await getDb(env).prepare("SELECT COUNT(*) AS count FROM provider_credentials").first()
+    ).toEqual({ count: 0 });
+  });
+
+  it("replays the same runtime initialization without repeating Provider work", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockResolvedValue({
+      walletId: "wallet_runtime_replay",
+      address: "RuntimeReplayPublicKey",
+    });
+    const options = { idempotencyKey: "runtime-replay", walletLabel: "Replay wallet" };
+
+    const first = await request("initialize", options);
+    const second = await request("initialize", options);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    const firstBody = (await first.json()) as { data: unknown };
+    const secondBody = (await second.json()) as { data: unknown };
+    expect(secondBody.data).toEqual(firstBody.data);
+    expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+    expect(await getRuntimeRowCounts()).toEqual({ credentials: 1, connections: 1, wallets: 1 });
+  });
+
+  it("rejects an idempotency key reused with another wallet label", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockResolvedValue({
+      walletId: "wallet_runtime_conflict",
+      address: "RuntimeConflictPublicKey",
+    });
+    await request("initialize", {
+      idempotencyKey: "runtime-conflict",
+      walletLabel: "First label",
+    });
+
+    const response = await request("initialize", {
+      idempotencyKey: "runtime-conflict",
+      walletLabel: "Different label",
+    });
+
+    expect(response.status).toBe(409);
+    expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+  });
+
+  it("converges concurrent same-key requests on one runtime installation", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockResolvedValue({
+      walletId: "wallet_runtime_concurrent",
+      address: "RuntimeConcurrentPublicKey",
+    });
+    const options = { idempotencyKey: "runtime-concurrent", walletLabel: "Concurrent wallet" };
+
+    const responses = await Promise.all([
+      request("initialize", options),
+      request("initialize", options),
+    ]);
+
+    const statuses = responses.map((response) => response.status);
+    expect(statuses).toContain(201);
+    expect(statuses.every((status) => status === 201 || status === 409)).toBe(true);
+    expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+  });
+
+  it("reconciles a retry-unknown runtime installation with the same key", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockRejectedValueOnce(new Error("Provider response was lost"));
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "wallet_runtime_reconciled",
+      address: "RuntimeReconciledPublicKey",
+    });
+    const options = { idempotencyKey: "runtime-reconcile", walletLabel: "Recovered wallet" };
+
+    const first = await request("initialize", options);
+    expect(first.status).toBe(503);
+    expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+    const second = await request("initialize", options);
+
+    expect(provisionPrivyWalletMock).toHaveBeenCalledTimes(2);
+    expect(second.status).toBe(201);
+    expect(await second.json()).toMatchObject({
+      data: {
+        walletId: "privy_wallet_runtime_reconciled",
+        publicKey: "RuntimeReconciledPublicKey",
+      },
+    });
+    expect(provisionPrivyWalletMock.mock.calls[1]?.[1]).toEqual(
+      provisionPrivyWalletMock.mock.calls[0]?.[1]
+    );
+    expect(await getRuntimeRowCounts()).toEqual({ credentials: 1, connections: 1, wallets: 1 });
+  });
+
+  it("fails a retry closed when the runtime Provider account changes", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockRejectedValueOnce(new Error("Provider response was lost"));
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "wallet_runtime_account_restored",
+      address: "RuntimeAccountRestoredPublicKey",
+    });
+    const options = { idempotencyKey: "runtime-account-changed" };
+
+    expect((await request("initialize", options)).status).toBe(503);
+    env.PRIVY_APP_ID = "another-runtime-app-id";
+    expect((await request("initialize", options)).status).toBe(409);
+    env.PRIVY_APP_ID = "runtime-app-id";
+    const recovered = await request("initialize", options);
+
+    expect(recovered.status).toBe(201);
+    expect(provisionPrivyWalletMock).toHaveBeenCalledTimes(2);
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT c.status AS connection_status, pc.status AS credential_status
+           FROM custody_connections c
+           JOIN provider_credentials pc ON pc.id = c.provider_credential_id`
+        )
+        .first()
+    ).toEqual({ connection_status: "active", credential_status: "active" });
+  });
+
+  it("reconciles a pinned same-key attempt after the runtime flag is disabled", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockRejectedValueOnce(new Error("Provider response was lost"));
+    findPrivyWalletByExternalIdMock.mockResolvedValueOnce({
+      walletId: "wallet_runtime_flag_off_reconciled",
+      address: "RuntimeFlagOffReconciledPublicKey",
+    });
+    const options = { idempotencyKey: "runtime-flag-off-reconcile" };
+
+    expect((await request("initialize", options)).status).toBe(503);
+    env.PRIVY_BYOK_ENABLED = "false";
+    const recovered = await request("initialize", options);
+
+    expect(recovered.status).toBe(201);
+    expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+    expect(findPrivyWalletByExternalIdMock).toHaveBeenCalledOnce();
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM custody_configs) AS configs,
+             (SELECT COUNT(*) FROM custody_scope_defaults) AS project_targets`
+        )
+        .first()
+    ).toEqual({ configs: 0, project_targets: 0 });
+  });
+
+  it("allows only one concurrent runtime installation across different keys", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockResolvedValue({
+      walletId: "wallet_runtime_single_winner",
+      address: "RuntimeSingleWinnerPublicKey",
+    });
+
+    const responses = await Promise.all([
+      request("initialize", { idempotencyKey: "runtime-winner-left" }),
+      request("initialize", { idempotencyKey: "runtime-winner-right" }),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+    expect(await getRuntimeRowCounts()).toEqual({ credentials: 1, connections: 1, wallets: 1 });
+  });
+
+  it("rejects a new key after runtime setup is active", async () => {
+    enableRuntimeSetup();
+    provisionPrivyWalletMock.mockResolvedValue({
+      walletId: "wallet_runtime_active",
+      address: "RuntimeActivePublicKey",
+    });
+
+    expect((await request("initialize", { idempotencyKey: "runtime-active-first" })).status).toBe(
+      201
+    );
+    const response = await request("initialize", { idempotencyKey: "runtime-active-second" });
+
+    expect(response.status).toBe(409);
+    expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+    expect(await getRuntimeRowCounts()).toEqual({ credentials: 1, connections: 1, wallets: 1 });
+  });
+
+  it("allows a fresh key after a conclusive failed attempt", async () => {
+    enableRuntimeSetup();
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      Response.json({ error: "invalid credentials" }, { status: 401 })
+    );
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "wallet_runtime_after_failure",
+      address: "RuntimeAfterFailurePublicKey",
+    });
+
+    const failed = await request("initialize", { idempotencyKey: "runtime-failed" });
+    const retried = await request("initialize", { idempotencyKey: "runtime-after-failure" });
+
+    expect(failed.status).toBe(400);
+    expect(retried.status).toBe(201);
+    expect(await getRuntimeRowCounts()).toEqual({ credentials: 2, connections: 2, wallets: 1 });
   });
 });
