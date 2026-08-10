@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.58.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.57.0...v0.58.0) (2026-08-10)
+
+### Features
+
+* **sdp-api:** resolve session environment from the selected project (PRO-1641) ([#1204](https://github.com/solana-foundation/solana-developer-platform/pull/1204)) ([83001e8](https://github.com/solana-foundation/solana-developer-platform/commit/83001e88dc8548aec8f1aa6c4dc705ff9447bb40))
+* support multiple Privy connections ([#1148](https://github.com/solana-foundation/solana-developer-platform/pull/1148)) ([debe33a](https://github.com/solana-foundation/solana-developer-platform/commit/debe33af2d5eb912689d2c9606af000d1593ee8e))
+
 ## [0.57.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.56.0...v0.57.0) (2026-08-10)
 
 ### Features
