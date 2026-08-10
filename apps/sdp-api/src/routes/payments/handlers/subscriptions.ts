@@ -7,7 +7,6 @@ import type {
   ListPaymentSubscriptionsResponse,
   PaymentSubscription,
   PaymentSubscriptionCollectionAttempt,
-  PaymentSubscriptionCollectionAttemptResponse,
   PaymentSubscriptionPlan,
   PaymentSubscriptionPlanResponse,
   PaymentSubscriptionResponse,
@@ -63,7 +62,6 @@ import {
   getSponsoredFeePayer,
 } from "../context";
 import {
-  createSubscriptionCollectionAttemptSchema,
   createSubscriptionPlanSchema,
   createSubscriptionSchema,
   listSubscriptionCollectionAttemptsQuerySchema,
@@ -76,7 +74,6 @@ import {
   subscriptionIdParamsSchema,
   subscriptionPlanIdParamsSchema,
   updateSubscriptionPlanSchema,
-  updateSubscriptionSchema,
 } from "../schemas";
 import { resolveMintDecimals, resolveMintTokenProgram, SOL_MINT } from "../token-accounts";
 import { resolveScope, resolveWallet } from "../wallets";
@@ -147,10 +144,6 @@ function mapCollectionAttempt(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-function defaultNextCollectionDueAt(periodHours: number): string {
-  return new Date(Date.now() + periodHours * 60 * 60 * 1000).toISOString();
 }
 
 async function readOptionalJsonBody(c: AppContext): Promise<unknown> {
@@ -290,10 +283,18 @@ async function persistSubscriptionAuthorizationAddresses(
     subscriberTokenAccount: input.subscriberTokenAccount,
     subscriptionPda: input.subscriptionPda,
     subscriptionAuthorityAddress: input.subscriptionAuthorityAddress,
+    expectedStatus: "pending_authorization",
     updatedAt: new Date().toISOString(),
   });
 
-  return updated ?? subscription;
+  if (!updated) {
+    throw new AppError(
+      "CONFLICT",
+      "Subscription authorization state changed while preparing authorization"
+    );
+  }
+
+  return updated;
 }
 
 async function getSubscriptionWithPlan(
@@ -649,12 +650,6 @@ export const createSubscription = async (c: AppContext) => {
 
   const now = new Date().toISOString();
   const createdBy = await resolveCreatorUserId(c);
-  const status = parsed.data.status;
-  const currentPeriodStartAt =
-    parsed.data.currentPeriodStartAt ?? (status === "active" ? now : null);
-  const nextCollectionDueAt =
-    parsed.data.nextCollectionDueAt ??
-    (status === "active" ? defaultNextCollectionDueAt(plan.period_hours) : null);
 
   const subscription = await repo.createSubscription({
     id: `psub_${crypto.randomUUID()}`,
@@ -663,13 +658,13 @@ export const createSubscription = async (c: AppContext) => {
     planId: parsed.data.planId,
     counterpartyId: parsed.data.counterpartyId,
     subscriberAddress: parsed.data.subscriberAddress,
-    subscriberTokenAccount: parsed.data.subscriberTokenAccount ?? null,
-    subscriptionPda: parsed.data.subscriptionPda ?? null,
-    subscriptionAuthorityAddress: parsed.data.subscriptionAuthorityAddress ?? null,
-    authorizationSignature: parsed.data.authorizationSignature ?? null,
-    status,
-    currentPeriodStartAt,
-    nextCollectionDueAt,
+    subscriberTokenAccount: null,
+    subscriptionPda: null,
+    subscriptionAuthorityAddress: null,
+    authorizationSignature: null,
+    status: "pending_authorization",
+    currentPeriodStartAt: null,
+    nextCollectionDueAt: null,
     createdBy,
     createdAt: now,
     updatedAt: now,
@@ -827,48 +822,6 @@ export const getSubscription = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const updateSubscription = async (c: AppContext) => {
-  const params = subscriptionIdParamsSchema.safeParse(c.req.param());
-
-  if (!params.success) {
-    throw badRequestParams();
-  }
-
-  const body = await c.req.json();
-  const parsed = updateSubscriptionSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
-
-  const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
-  await resolvePlanWriteWallet(c, plan);
-
-  const repo = getPaymentSubscriptionsRepository(c);
-  const updated = await repo.updateSubscription({
-    subscriptionId: subscription.id,
-    organizationId: subscription.organization_id,
-    projectId: subscription.project_id,
-    subscriberTokenAccount: parsed.data.subscriberTokenAccount,
-    subscriptionPda: parsed.data.subscriptionPda,
-    subscriptionAuthorityAddress: parsed.data.subscriptionAuthorityAddress,
-    authorizationSignature: parsed.data.authorizationSignature,
-    status: parsed.data.status,
-    currentPeriodStartAt: parsed.data.currentPeriodStartAt,
-    nextCollectionDueAt: parsed.data.nextCollectionDueAt,
-    cancelAt: parsed.data.cancelAt,
-    canceledAt: parsed.data.canceledAt,
-    updatedAt: new Date().toISOString(),
-  });
-
-  if (!updated) {
-    throw new AppError("NOT_FOUND", "Subscription not found");
-  }
-
-  const response: PaymentSubscriptionResponse = { subscription: mapSubscription(updated) };
-  return success(c, response);
-};
-
 async function prepareSubscriptionLifecycle(
   c: AppContext,
   operation: "cancel" | "resume"
@@ -953,11 +906,7 @@ export const prepareSubscriptionCollection = async (c: AppContext) => {
     plan.puller_wallet_id ?? plan.owner_wallet_id
   );
 
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(
-    c,
-    plan,
-    parsed.data.amount ?? plan.amount
-  );
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c, plan, plan.amount);
   const { planPda } = await derivePlanAddresses(plan);
   const subscriber = assertValidAddress(subscription.subscriber_address, "subscriberAddress");
   const [derivedSubscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
@@ -987,79 +936,6 @@ export const prepareSubscriptionCollection = async (c: AppContext) => {
   };
 
   return success(c, response);
-};
-
-export const createSubscriptionCollectionAttempt = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const params = subscriptionIdParamsSchema.safeParse(c.req.param());
-
-  if (!params.success) {
-    throw badRequestParams();
-  }
-
-  const body = await c.req.json();
-  const parsed = createSubscriptionCollectionAttemptSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
-
-  const repo = getPaymentSubscriptionsRepository(c);
-  const subscription = await repo.getSubscriptionById({
-    subscriptionId: params.data.subscriptionId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!subscription) {
-    throw new AppError("NOT_FOUND", "Subscription not found");
-  }
-  if (subscription.status !== "active") {
-    throw badRequest("Subscription must be active before collection");
-  }
-
-  const plan = await repo.getPlanById({
-    planId: subscription.plan_id,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-  if (!plan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
-  if (plan.status !== "active") {
-    throw badRequest("Subscription plan must be active before collection");
-  }
-
-  await resolvePlanWriteWallet(c, plan, plan.puller_wallet_id ?? plan.owner_wallet_id);
-
-  const now = new Date().toISOString();
-  const attempt = await repo.createCollectionAttempt({
-    id: `psca_${crypto.randomUUID()}`,
-    organizationId: auth.organizationId,
-    projectId,
-    subscriptionId: subscription.id,
-    transferId: parsed.data.transferId ?? null,
-    token: parsed.data.token ? normalizePaymentToken(parsed.data.token, c.env) : plan.token,
-    amount: parsed.data.amount ?? plan.amount,
-    dueAt: parsed.data.dueAt ?? subscription.next_collection_due_at ?? now,
-    attemptedAt: parsed.data.attemptedAt ?? null,
-    status: parsed.data.status,
-    signature: parsed.data.signature ?? null,
-    error: parsed.data.error ?? null,
-    metadata: parsed.data.metadata ?? {},
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  if (!attempt) {
-    throw new AppError("CONFLICT", "Collection attempt already exists");
-  }
-
-  const response: PaymentSubscriptionCollectionAttemptResponse = {
-    collectionAttempt: mapCollectionAttempt(attempt),
-  };
-  return created(c, response);
 };
 
 export const listSubscriptionCollectionAttempts = async (c: AppContext) => {

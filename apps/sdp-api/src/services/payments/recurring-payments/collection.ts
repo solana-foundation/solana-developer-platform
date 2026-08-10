@@ -7,6 +7,7 @@ import {
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import { getBase58Codec } from "@solana/codecs";
 import { type Address, createNoopSigner, type Signature } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import {
@@ -31,6 +32,7 @@ import {
 import { AppError, badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
+  resolveMintDecimals,
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
@@ -51,6 +53,15 @@ import {
 } from "./shared";
 
 const COLLECTION_STALE_AFTER_MS = RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS;
+const base58 = getBase58Codec();
+
+interface VerifiedRecurringPaymentCollection {
+  attemptId: string;
+  dueAt: string;
+  destinationTokenAccount: Address;
+  signature: Signature;
+  transferId: string;
+}
 
 function tenantScope(input: { organizationId: string; projectId: string }) {
   return createTenantScope({
@@ -117,6 +128,165 @@ async function resolveDestinationTokenAccount(input: {
     mint,
   });
   return receiverAta;
+}
+
+function matchesRecurringTransferInstruction(input: {
+  instruction: solanaRpc.ParsedInstruction;
+  amountBaseUnits: bigint;
+  sourceAddress: string;
+  subscriberTokenAccount: string;
+  subscriptionAuthorityAddress: string;
+  subscriptionPda: string;
+  planPda: string;
+  destinationTokenAccount: string;
+  token: string;
+  tokenProgram: string;
+  eventAuthority: string;
+}): boolean {
+  const { instruction } = input;
+  if (
+    instruction.programId !== subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS ||
+    !instruction.accounts ||
+    instruction.accounts.length !== 10 ||
+    !instruction.data
+  ) {
+    return false;
+  }
+
+  let decoded: subscriptionsProgram.TransferSubscriptionInstructionData;
+  try {
+    decoded = subscriptionsProgram
+      .getTransferSubscriptionInstructionDataDecoder()
+      .decode(base58.encode(instruction.data));
+  } catch {
+    return false;
+  }
+
+  return (
+    decoded.discriminator === subscriptionsProgram.TRANSFER_SUBSCRIPTION_DISCRIMINATOR &&
+    decoded.transferData.amount === input.amountBaseUnits &&
+    decoded.transferData.delegator === input.sourceAddress &&
+    decoded.transferData.mint === input.token &&
+    instruction.accounts[0] === input.subscriptionPda &&
+    instruction.accounts[1] === input.planPda &&
+    instruction.accounts[2] === input.subscriptionAuthorityAddress &&
+    instruction.accounts[3] === input.subscriberTokenAccount &&
+    instruction.accounts[4] === input.destinationTokenAccount &&
+    instruction.accounts[5] === input.sourceAddress &&
+    instruction.accounts[6] === input.token &&
+    instruction.accounts[7] === input.tokenProgram &&
+    instruction.accounts[8] === input.eventAuthority &&
+    instruction.accounts[9] === subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS
+  );
+}
+
+async function verifyRecurringPaymentCollection(input: {
+  env: Env;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+  signature: Signature;
+  dueAt: string;
+  destinationTokenAccount: Address;
+}): Promise<VerifiedRecurringPaymentCollection> {
+  const providerData = input.transfer.provider_data;
+  const attemptMetadata = input.attempt.metadata;
+  const providerEvidenceMatches =
+    providerData.recurringPaymentId === input.recurringPayment.id &&
+    ((providerData.subscriptionId === input.subscription.id &&
+      providerData.collectionDueAt === input.dueAt) ||
+      // Transfers created before settlement verification shipped only persisted the recurring ID.
+      // Their exact attempt/transfer bindings and on-chain instruction are still verified below.
+      (!Object.hasOwn(providerData, "subscriptionId") &&
+        !Object.hasOwn(providerData, "collectionDueAt")));
+  const persistedEvidenceMatches =
+    input.attempt.subscription_id === input.subscription.id &&
+    input.attempt.transfer_id === input.transfer.id &&
+    input.attempt.due_at === input.dueAt &&
+    input.attempt.token === input.recurringPayment.token &&
+    input.attempt.amount === input.recurringPayment.amount &&
+    attemptMetadata.recurringPaymentId === input.recurringPayment.id &&
+    input.transfer.wallet_id === input.recurringPayment.source_wallet_id &&
+    input.transfer.counterparty_id === input.recurringPayment.counterparty_id &&
+    input.transfer.source_address === input.recurringPayment.source_address &&
+    input.transfer.destination_address === input.recurringPayment.destination_address &&
+    input.transfer.token === input.recurringPayment.token &&
+    input.transfer.amount === input.recurringPayment.amount &&
+    input.transfer.type === "transfer" &&
+    input.transfer.direction === "outbound" &&
+    providerEvidenceMatches &&
+    (input.attempt.signature === null || input.attempt.signature === input.signature) &&
+    input.transfer.signature === input.signature;
+
+  if (!persistedEvidenceMatches) {
+    throw new AppError(
+      "CONFLICT",
+      "Recurring payment collection evidence does not match the due payment"
+    );
+  }
+  if (
+    !input.recurringPayment.plan_pda ||
+    !input.recurringPayment.subscription_pda ||
+    !input.subscription.subscription_authority_address ||
+    !input.subscription.subscriber_token_account
+  ) {
+    throw new AppError("CONFLICT", "Recurring payment collection is missing verified addresses");
+  }
+
+  const planPda = input.recurringPayment.plan_pda;
+  const subscriptionPda = input.recurringPayment.subscription_pda;
+  const subscriptionAuthorityAddress = input.subscription.subscription_authority_address;
+  const subscriberTokenAccount = input.subscription.subscriber_token_account;
+
+  const rpc = solanaRpc.createRpc(input.env);
+  const mint = assertValidAddress(input.recurringPayment.token, "token") as Address;
+  const tokenProgram = await resolveMintTokenProgram(rpc, mint);
+  const amountBaseUnits = parseDecimalAmount(
+    input.recurringPayment.amount,
+    await resolveMintDecimals(rpc, mint)
+  );
+  const confirmedTransaction = await solanaRpc.getTransaction(rpc, input.signature);
+  if (!confirmedTransaction) {
+    throw new AppError(
+      "SOLANA_RPC_ERROR",
+      "Recurring payment collection is confirmed but not yet indexed; retry shortly"
+    );
+  }
+  if (confirmedTransaction.err) {
+    throw new AppError("TRANSACTION_FAILED", "Recurring payment collection failed on-chain");
+  }
+  const [eventAuthority] = await subscriptionsProgram.findEventAuthorityPda();
+
+  const hasExpectedInstruction = confirmedTransaction.instructions.some((instruction) =>
+    matchesRecurringTransferInstruction({
+      instruction,
+      amountBaseUnits,
+      sourceAddress: input.recurringPayment.source_address,
+      subscriberTokenAccount,
+      subscriptionAuthorityAddress,
+      subscriptionPda,
+      planPda,
+      destinationTokenAccount: input.destinationTokenAccount,
+      token: input.recurringPayment.token,
+      tokenProgram,
+      eventAuthority,
+    })
+  );
+  if (!hasExpectedInstruction) {
+    throw new AppError(
+      "CONFLICT",
+      "Confirmed transaction does not prove the expected recurring payment collection"
+    );
+  }
+
+  return {
+    attemptId: input.attempt.id,
+    dueAt: input.dueAt,
+    destinationTokenAccount: input.destinationTokenAccount,
+    signature: input.signature,
+    transferId: input.transfer.id,
+  };
 }
 
 function collectionRetryMetadata(env: Env, error: unknown): Record<string, unknown> {
@@ -267,8 +437,7 @@ async function finalizeRecurringPaymentCollection(input: {
   subscription: PaymentSubscriptionRow;
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow;
-  signature: Signature;
-  destinationTokenAccount?: string | null;
+  proof: VerifiedRecurringPaymentCollection;
 }): Promise<{
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
@@ -276,7 +445,7 @@ async function finalizeRecurringPaymentCollection(input: {
   transfer: PaymentTransferRow;
 }> {
   const finalizedAt = new Date().toISOString();
-  const dueAt = input.attempt.due_at;
+  const dueAt = input.proof.dueAt;
   const nextDueAt = nextRecurringPaymentCollectionDueAt(dueAt, input.recurringPayment.period_hours);
 
   return getDb(input.env).transaction(async (tx) => {
@@ -297,7 +466,7 @@ async function finalizeRecurringPaymentCollection(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       status: "confirmed",
-      signature: input.signature,
+      signature: input.proof.signature,
       error: null,
       updatedAt: finalizedAt,
     });
@@ -314,7 +483,7 @@ async function finalizeRecurringPaymentCollection(input: {
       projectId: input.projectId,
       transferId: input.transfer.id,
       status: "confirmed",
-      signature: input.signature,
+      signature: input.proof.signature,
       error: null,
       metadata: recurringCollectionMetadata({
         metadata: input.attempt.metadata,
@@ -353,7 +522,7 @@ async function finalizeRecurringPaymentCollection(input: {
       projectId: input.projectId,
       currentCollectionDueAt: dueAt,
       nextCollectionDueAt: nextDueAt,
-      destinationTokenAccount: input.destinationTokenAccount,
+      destinationTokenAccount: input.proof.destinationTokenAccount,
       updatedAt: finalizedAt,
     });
     const finalizedRecurringPayment =
@@ -381,11 +550,13 @@ async function finalizeRecurringPaymentCollection(input: {
         )) ||
       !finalizedAttempt ||
       finalizedAttempt.status !== "confirmed" ||
-      finalizedAttempt.signature !== input.signature ||
-      finalizedAttempt.transfer_id !== input.transfer.id ||
+      finalizedAttempt.signature !== input.proof.signature ||
+      finalizedAttempt.id !== input.proof.attemptId ||
+      finalizedAttempt.transfer_id !== input.proof.transferId ||
       !finalizedTransfer ||
       finalizedTransfer.status !== "confirmed" ||
-      finalizedTransfer.signature !== input.signature
+      finalizedTransfer.signature !== input.proof.signature ||
+      finalizedTransfer.id !== input.proof.transferId
     ) {
       throw new AppError("INTERNAL_ERROR", "Failed to finalize recurring payment collection");
     }
@@ -554,6 +725,9 @@ async function recoverRecurringPaymentCollection(input: {
   if (!transfer) {
     throw new AppError("INTERNAL_ERROR", "Recurring payment collection transfer not found");
   }
+  if (existing.signature && transfer.signature && existing.signature !== transfer.signature) {
+    throw new AppError("CONFLICT", "Recurring payment collection signatures do not match");
+  }
   const recoveredSignature = existing.signature ?? transfer.signature;
   if (!recoveredSignature) {
     // A fresh unsigned attempt means another request is between local persistence and Kora
@@ -577,15 +751,19 @@ async function recoverRecurringPaymentCollection(input: {
     existing.signature === recoveredSignature
       ? existing
       : { ...existing, signature: recoveredSignature };
+  const recoveredTransfer =
+    transfer.signature === recoveredSignature
+      ? transfer
+      : { ...transfer, signature: recoveredSignature };
 
-  if (existing.status === "processing" && transfer.status !== "confirmed") {
-    try {
-      await confirmSubscriptionSignature(
-        input.env,
-        recoveredSignature as Signature,
-        "Recurring payment collection failed on-chain"
-      );
-    } catch (error) {
+  try {
+    await confirmSubscriptionSignature(
+      input.env,
+      recoveredSignature as Signature,
+      "Recurring payment collection failed on-chain"
+    );
+  } catch (error) {
+    if (error instanceof AppError && error.code === "TRANSACTION_FAILED") {
       await markRecurringPaymentCollectionFailedAtomically({
         env: input.env,
         organizationId: input.organizationId,
@@ -596,11 +774,11 @@ async function recoverRecurringPaymentCollection(input: {
         submittedSignature: recoveredSignature as Signature,
         error,
       });
-      if (error instanceof AppError && error.code === "TRANSACTION_FAILED") {
-        return null;
-      }
-      throw error;
+      return null;
     }
+    // A recovered signature can age out of getSignatureStatuses' recent cache.
+    // Continue to the exact transaction-evidence check below: an archival RPC can
+    // still prove the completed collection without treating RPC uncertainty as failure.
   }
 
   const currentRecurringPayment =
@@ -615,13 +793,26 @@ async function recoverRecurringPaymentCollection(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
     })) ?? input.subscription;
-  const destinationTokenAccount =
-    currentRecurringPayment.destination_token_account ??
-    (await resolveDestinationTokenAccount({
-      env: input.env,
-      destinationAddress: currentRecurringPayment.destination_address,
-      token: currentRecurringPayment.token,
-    }));
+  const destinationTokenAccount = currentRecurringPayment.destination_token_account
+    ? assertValidAddress(
+        currentRecurringPayment.destination_token_account,
+        "destinationTokenAccount"
+      )
+    : await resolveDestinationTokenAccount({
+        env: input.env,
+        destinationAddress: currentRecurringPayment.destination_address,
+        token: currentRecurringPayment.token,
+      });
+  const proof = await verifyRecurringPaymentCollection({
+    env: input.env,
+    recurringPayment: currentRecurringPayment,
+    subscription: currentSubscription,
+    attempt: recoveredAttempt,
+    transfer: recoveredTransfer,
+    signature: recoveredSignature as Signature,
+    dueAt: input.dueAt,
+    destinationTokenAccount,
+  });
 
   return finalizeRecurringPaymentCollection({
     env: input.env,
@@ -630,9 +821,8 @@ async function recoverRecurringPaymentCollection(input: {
     recurringPayment: currentRecurringPayment,
     subscription: currentSubscription,
     attempt: recoveredAttempt,
-    transfer,
-    signature: recoveredSignature as Signature,
-    destinationTokenAccount,
+    transfer: recoveredTransfer,
+    proof,
   });
 }
 
@@ -977,6 +1167,16 @@ export async function collectRecurringPayment(input: {
       signature,
       "Recurring payment collection failed on-chain"
     );
+    const proof = await verifyRecurringPaymentCollection({
+      env: input.env,
+      recurringPayment: recurringPaymentWithDestination,
+      subscription,
+      attempt,
+      transfer,
+      signature,
+      dueAt,
+      destinationTokenAccount: receiverAta,
+    });
 
     return finalizeRecurringPaymentCollection({
       env: input.env,
@@ -986,8 +1186,7 @@ export async function collectRecurringPayment(input: {
       subscription,
       attempt,
       transfer,
-      signature,
-      destinationTokenAccount: receiverAta,
+      proof,
     });
   } catch (error) {
     if (attempt) {
