@@ -90,7 +90,7 @@
     "@coinbase/cdp-sdk": "1.54.0"
   },
   "devDependencies": {
-    "@asteasolutions/zod-to-openapi": "8.5.0",
+    "@asteasolutions/zod-to-openapi": "9.1.0",
     "@testcontainers/postgresql": "12.0.4",
     "@testcontainers/redis": "12.0.4",
     "@types/node": "^25.9.2",
