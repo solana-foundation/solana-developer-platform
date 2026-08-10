@@ -1,5 +1,8 @@
+import { createRpcForSdk } from "@sdp/rpc/solana";
+import type { Address } from "@sdp/solana/address";
 import type { TokenTransactionType } from "@sdp/types";
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
+import { AccountState, fetchToken } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
@@ -105,9 +108,24 @@ export async function runUnpause(
   }
 }
 
-// The DB frozen-account mirror is best-effort AFTER the on-chain truth: a mirror write
-// failure must not fail an action whose chain effect already landed (a retry would hit
-// ACCOUNT_ALREADY_FROZEN and converge anyway).
+// Whether the token account is frozen ON CHAIN.
+//
+// The frozen_accounts table cannot answer this. It records what the platform froze, and
+// it is written best-effort AFTER the chain op — so "no row" means "we have no record",
+// never "the account is thawed". Gating on it turned a single failed mirror write into a
+// permanent silent no-op: the account stayed frozen on chain while the rule reported
+// alreadyThawed and the engine marked the execution succeeded. The converse stranded a
+// freeze the same way. Callers run this inside their try, so an RPC error becomes a retry
+// rather than a wrong answer.
+async function isFrozenOnChain(env: Env, tokenAccount: Address): Promise<boolean> {
+  const rpc = createRpcForSdk<Parameters<typeof fetchToken>[0]>(env);
+  const account = await fetchToken(rpc, tokenAccount);
+  return account.data.state === AccountState.Frozen;
+}
+
+// The DB frozen-account mirror is bookkeeping written AFTER the on-chain truth: a mirror
+// write failure must not fail an action whose chain effect already landed. It is reported
+// via `mirrorFailed` and never used to decide whether the chain op is needed.
 async function mirrorFreeze(
   env: Env,
   execution: WorkflowExecutionRow,
@@ -169,10 +187,9 @@ export async function runFreeze(
 
   try {
     const tokenAccount = await resolveWalletTokenAccount(env, wallet, mintAddress);
-    // Idempotent converge: the platform's frozen-accounts mirror is the authority on
-    // what it froze — a retry after a partial success (chain landed, tick died) must
-    // not re-submit and fail on the raw chain error.
-    if (await new TokenService(getDb(env)).isAccountFrozen(execution.token_id, tokenAccount)) {
+    // Idempotent converge against chain state, so a retry after a partial success (chain
+    // landed, tick died) does not re-submit and fail on the raw chain error.
+    if (await isFrozenOnChain(env, tokenAccount)) {
       return succeeded({ alreadyFrozen: true, tokenAccount });
     }
     const result = await mosaic.freezeAccount({ tokenAccount, feePayer: signer.address });
@@ -207,8 +224,8 @@ export async function runUnfreeze(
 
   try {
     const tokenAccount = await resolveWalletTokenAccount(env, wallet, mintAddress);
-    // Idempotent converge (see runFreeze): not frozen in the mirror → nothing to thaw.
-    if (!(await new TokenService(getDb(env)).isAccountFrozen(execution.token_id, tokenAccount))) {
+    // Idempotent converge (see runFreeze): not frozen on chain → nothing to thaw.
+    if (!(await isFrozenOnChain(env, tokenAccount))) {
       return succeeded({ alreadyThawed: true, tokenAccount });
     }
     const result = await mosaic.thawAccount({ tokenAccount, feePayer: signer.address });
