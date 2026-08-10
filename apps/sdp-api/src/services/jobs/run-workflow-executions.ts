@@ -53,12 +53,24 @@ interface TickCaches {
   gates: Map<string, AssetGateContext | null>;
 }
 
+// A batch spans every tenant, and both cached lookups are tenant-scoped — so the key has
+// to carry the tenant as well as the id. Keyed on the id alone, an execution whose
+// organization/project disagree with the owner of its workflow_id (or token_id) takes a
+// cache hit and never runs the predicate the loader applies, reading another tenant's
+// rule or gate. Nothing upstream makes that key collision impossible: the table's
+// organization_id and workflow_id foreign keys are independent, so no constraint ties an
+// execution to the owner of the rule it names.
+function tenantCacheKey(execution: WorkflowExecutionRow, id: string): string {
+  return `${execution.organization_id}:${execution.project_id}:${id}`;
+}
+
 async function loadRule(
   workflowsRepo: AssetWorkflowsRepository,
   caches: TickCaches,
   execution: WorkflowExecutionRow
 ): Promise<AssetWorkflowRow | null> {
-  const cached = caches.rules.get(execution.workflow_id);
+  const key = tenantCacheKey(execution, execution.workflow_id);
+  const cached = caches.rules.get(key);
   if (cached !== undefined) {
     return cached;
   }
@@ -67,7 +79,7 @@ async function loadRule(
     organizationId: execution.organization_id,
     projectId: execution.project_id,
   });
-  caches.rules.set(execution.workflow_id, rule);
+  caches.rules.set(key, rule);
   return rule;
 }
 
@@ -76,7 +88,8 @@ async function loadGate(
   caches: TickCaches,
   execution: WorkflowExecutionRow
 ): Promise<AssetGateContext | null> {
-  const cached = caches.gates.get(execution.token_id);
+  const key = tenantCacheKey(execution, execution.token_id);
+  const cached = caches.gates.get(key);
   if (cached !== undefined) {
     return cached;
   }
@@ -85,7 +98,7 @@ async function loadGate(
     organizationId: execution.organization_id,
     projectId: execution.project_id,
   });
-  caches.gates.set(execution.token_id, gate);
+  caches.gates.set(key, gate);
   return gate;
 }
 
