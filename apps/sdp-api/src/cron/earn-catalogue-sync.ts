@@ -1,17 +1,25 @@
 /**
  * Earn strategy-catalogue sync entrypoint.
  *
- * Mirrors `pending-transfers`: wraps the sync with a Sentry cron monitor when
- * observability is supplied, and hands the resulting promise to the
- * BackgroundRunner so it survives past the initiating tick and drains during
- * graceful shutdown. Gated on the Earn feature flag.
+ * Two execution paths, both gated on the Earn feature flags by their callers:
+ *
+ * - **In-process cron** (`runEarnCatalogueSync`, self-hosted runtimes and
+ *   explicitly opted-in services): mirrors `pending-transfers` — wraps the
+ *   sync with a Sentry cron monitor when observability is supplied, and hands
+ *   the resulting promise to the BackgroundRunner so it survives past the
+ *   initiating tick and drains during graceful shutdown.
+ * - **Managed Cloud Run Job** (`runEarnCatalogueSyncIfDue`, `src/job.ts`):
+ *   the job is scheduled every five minutes, so each tick claims an hourly
+ *   Redis slot first and skips quietly when the slot is held — the catalogue
+ *   cadence stays `EARN_CATALOGUE_SYNC_CRON` no matter how often the job runs.
  *
  * The sync iterates every registered vault-infra provider per environment,
  * pulls the live strategy catalogue, and upserts it into `earn_strategies`
  * keyed on (provider, provider_reference, environment) — the only writer of
  * that table besides the dev seed. It degrades provider-by-provider: one
  * provider failing (or still being a NOT_IMPLEMENTED stub) must never sink
- * the others' pass.
+ * the others' pass. Adding a provider is a registry change only
+ * (`EARN_PROVIDER_CLIENTS`) — neither execution path names providers.
  */
 
 import { EARN_PROVIDER_CLIENTS, isStrategyWithinDeclaredSupport, SdpEarnError } from "@sdp/earn";
@@ -23,6 +31,7 @@ import type {
 import type { SdpEnvironment } from "@sdp/types";
 import { createEarnRepository, type EarnRepository } from "@/db/repositories";
 import type { BackgroundRunner } from "@/runtime/background";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
@@ -31,6 +40,20 @@ export const EARN_CATALOGUE_SYNC_MONITOR = "sdp-api-sync-earn-catalogue";
 // Catalogue drift is slow (a provider onboarding or delisting a vault), so
 // hourly keeps rows fresh without hammering provider APIs.
 export const EARN_CATALOGUE_SYNC_CRON = "0 * * * *";
+
+// The managed Cloud Run Job ticks every five minutes (Cloud Scheduler in
+// sdp-infra), far more often than the hourly cadence above. Each tick claims
+// this Redis slot — an atomic INCR + TTL via admitSlidingWindow with
+// maxRequests 1 — so exactly one tick per window syncs and overlapping
+// executions lose cleanly. The TTL sits just under the hour so the next
+// on-the-hour tick of the five-minute grid claims a fresh slot; a job that
+// dies mid-sync self-heals when the slot expires (worst case: one skipped
+// window).
+export const EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS = 3540;
+const EARN_CATALOGUE_SYNC_SLOT_KEY = "cron:earn-catalogue-sync:slot";
+// admitSlidingWindow needs a previous-window key; nothing ever increments this
+// one, which collapses the sliding window into a fixed once-per-TTL claim.
+const EARN_CATALOGUE_SYNC_SLOT_PREVIOUS_KEY = "cron:earn-catalogue-sync:slot-previous";
 
 // The catalogue is platform-global but environment-scoped (sandbox rows carry
 // devnet mints, production rows mainnet mints), so each provider syncs once
@@ -153,4 +176,62 @@ export function runEarnCatalogueSync(deps: EarnCatalogueSyncDeps): void {
     : Promise.resolve().then(work);
 
   deps.bg.run(promise);
+}
+
+export type EarnCatalogueSyncTickOutcome = "synced" | "skipped";
+
+/**
+ * One tick of the managed Cloud Run Job (`src/job.ts`): claim the hourly slot,
+ * then sync under this task's own Sentry monitor. Ticks that lose the claim
+ * skip without a monitor check-in, so Sentry sees check-ins matching
+ * EARN_CATALOGUE_SYNC_CRON rather than the job's five-minute schedule.
+ *
+ * A failed sync releases the slot — the next five-minute tick retries instead
+ * of waiting out the hour — and rethrows: syncEarnCatalogue already degrades
+ * per provider and per row, so anything escaping it is infrastructure-level
+ * and must fail the job loudly.
+ *
+ * Callers gate on isEarnEnabled first, mirroring the in-process registration
+ * in cron/runner.ts.
+ */
+export async function runEarnCatalogueSyncIfDue(
+  env: Env,
+  observability?: Observability
+): Promise<EarnCatalogueSyncTickOutcome> {
+  const cache = createKVStoreSet(env).cache;
+  const admission = await cache.admitSlidingWindow(
+    EARN_CATALOGUE_SYNC_SLOT_KEY,
+    EARN_CATALOGUE_SYNC_SLOT_PREVIOUS_KEY,
+    {
+      maxRequests: 1,
+      previousWeight: 0,
+      expirationTtl: EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS,
+    }
+  );
+  if (!admission.admitted) {
+    getLogger().info("syncEarnCatalogue: hourly slot already claimed, skipping this tick");
+    return "skipped";
+  }
+
+  const work = () => syncEarnCatalogue(env);
+  try {
+    await (observability
+      ? observability.withMonitor(EARN_CATALOGUE_SYNC_MONITOR, work, {
+          schedule: { type: "crontab", value: EARN_CATALOGUE_SYNC_CRON },
+        })
+      : work());
+  } catch (err) {
+    try {
+      await cache.delete(EARN_CATALOGUE_SYNC_SLOT_KEY);
+    } catch (releaseErr) {
+      // Log-and-continue: a release failure must never mask the sync error,
+      // and the slot's TTL bounds the damage to one skipped window.
+      getLogger().error(
+        { error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr) },
+        "syncEarnCatalogue: failed to release hourly slot after sync failure"
+      );
+    }
+    throw err;
+  }
+  return "synced";
 }
