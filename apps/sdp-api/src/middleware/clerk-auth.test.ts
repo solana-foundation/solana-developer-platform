@@ -5,10 +5,10 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { skipRateLimitPaths } from "@/middleware/rate-limit";
+import { DASHBOARD_ACTOR_MAX_REQUESTS, skipRateLimitPaths } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores } from "@/test/mocks/kv";
+import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 const TEST_ORG = {
@@ -158,6 +158,55 @@ describe("Clerk auth request cache", () => {
       "default-production",
       "default-sandbox",
     ]);
+  });
+
+  it("counts Clerk dashboard requests against a per-user per-org limit", async () => {
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_cached",
+      org_role: "org:admin",
+      org_slug: TEST_ORG.slug,
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+    env.CLERK_ISSUER = payload.iss;
+    const { app, token } = createProtectedApp(payload);
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(await readRateLimitCount(env, `user:usr_clerk_cached:org:${TEST_ORG.id}`)).toBe(1);
+  });
+
+  it("429s Clerk dashboard traffic once the per-user limit is exhausted", async () => {
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_cached",
+      org_role: "org:admin",
+      org_slug: TEST_ORG.slug,
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+    env.CLERK_ISSUER = payload.iss;
+    const { app, token } = createProtectedApp(payload);
+    await seedRateLimit(
+      env,
+      `user:usr_clerk_cached:org:${TEST_ORG.id}`,
+      DASHBOARD_ACTOR_MAX_REQUESTS
+    );
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).not.toBeNull();
   });
 
   it("rejects a stale Clerk JWT after the local organization membership is removed", async () => {

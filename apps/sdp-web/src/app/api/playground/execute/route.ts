@@ -13,6 +13,13 @@ interface PlaygroundExecuteRequestBody {
 
 const ALLOWED_METHODS = new Set<PlaygroundMethod>(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * Ceiling on the playground request envelope. Playground bodies are
+ * hand-authored JSON; anything near this size is abuse of the proxy, not a
+ * documented API call.
+ */
+const MAX_REQUEST_BYTES = 256 * 1024;
+
 function failureResponse(
   trace: ReturnType<typeof createTimedTrace>,
   status: number,
@@ -43,7 +50,18 @@ export async function POST(request: Request) {
       return failureResponse(trace, 403, "Active organization required");
     }
 
-    const payload = (await request.json()) as PlaygroundExecuteRequestBody;
+    const rawBody = await request.text();
+    if (rawBody.length > MAX_REQUEST_BYTES) {
+      return failureResponse(trace, 413, "Request body too large");
+    }
+
+    let payload: PlaygroundExecuteRequestBody;
+    try {
+      payload = JSON.parse(rawBody) as PlaygroundExecuteRequestBody;
+    } catch {
+      return failureResponse(trace, 400, "Invalid JSON body");
+    }
+
     const method = payload.method;
     const path = payload.path;
 
@@ -76,9 +94,12 @@ export async function POST(request: Request) {
       logRouteResult(trace, 400, { error: "Invalid path" });
       return response;
     }
-    if (!path.startsWith("/")) {
+    // The playground documents only public /v1 endpoints; refusing everything
+    // else keeps the proxy from replaying dashboard credentials' keys against
+    // internal or admin mounts.
+    if (!path.startsWith("/v1/")) {
       const response = NextResponse.json(
-        { error: "Path must start with '/'" },
+        { error: "Path must start with '/v1/'" },
         {
           status: 400,
           headers: {
@@ -87,7 +108,7 @@ export async function POST(request: Request) {
           },
         }
       );
-      logRouteResult(trace, 400, { error: "Path must start with '/'" });
+      logRouteResult(trace, 400, { error: "Path must start with '/v1/'" });
       return response;
     }
 
