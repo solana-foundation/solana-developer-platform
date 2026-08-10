@@ -25,6 +25,7 @@ import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
+import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
 import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
 import { tryApprovedOperationReplayAuth } from "@/services/policy/approved-operation-replay";
@@ -383,6 +384,11 @@ export function authMiddleware() {
     if (!isClientIpAllowed(getClientIp(c), cachedKey.allowedIps)) {
       throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");
     }
+
+    // The organization-wide restriction applies on top of the key's own, and is
+    // read from Postgres rather than the cached key so that turning it on takes
+    // effect without waiting for every cached key to expire.
+    await enforceOrganizationIpAllowlist(c, cachedKey.organizationId);
 
     await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);
 

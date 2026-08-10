@@ -41,6 +41,13 @@ export interface OrganizationSettings {
   defaultEnvironment?: "sandbox" | "production";
   webhookSecret?: string;
   allowedIpAddresses?: string[];
+  /**
+   * An allowlist written before the setting was enforced, kept for reference and
+   * never applied. Typed as `unknown` because these values predate validation
+   * and can be any shape. Migration 0055 moves them here; re-applying one means
+   * sending it back as `allowedIpAddresses`, which validates it.
+   */
+  legacyAllowedIpAddresses?: unknown;
   providerOverrides?: OrganizationProviderOverrides;
   customRateLimits?: {
     requestsPerMinute?: number;

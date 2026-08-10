@@ -11,7 +11,9 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
+import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, notFound } from "@/lib/errors";
+import { canonicalizeIpAllowlist, isClientIpAllowed } from "@/lib/ip-allowlist";
 import { noContent, success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -107,6 +109,66 @@ export const getOrganization = async (c: AppContext) => {
   return success(c, response);
 };
 
+type OrganizationSettingsPatch = NonNullable<z.infer<typeof updateOrgSchema>["settings"]>;
+
+/**
+ * The settings to merge, with the allowlist rewritten to canonical form.
+ *
+ * Storing what was typed rather than what it means is how an allowlist ends up
+ * broader than the operator who wrote it believes: `203.0.113.5/24` is displayed
+ * back as a single host and authorizes 256 of them.
+ */
+function resolveSettingsPatch(
+  patch: OrganizationSettingsPatch | undefined
+): OrganizationSettingsPatch | undefined {
+  if (patch?.allowedIpAddresses === undefined) {
+    return patch;
+  }
+
+  const allowedIpAddresses = canonicalizeIpAllowlist(patch.allowedIpAddresses);
+
+  if (!allowedIpAddresses) {
+    // Unreachable: the schema rejects an invalid entry before this runs. Kept so
+    // that a future caller of this helper cannot skip the validation silently.
+    throw badRequest("Invalid request body", {
+      errors: {
+        settings: ["allowedIpAddresses must contain only valid IP addresses or CIDR ranges"],
+      },
+    });
+  }
+
+  return { ...patch, allowedIpAddresses };
+}
+
+/**
+ * Refuse an allowlist that would shut out the request installing it.
+ *
+ * The restriction applies to every authenticated path, including this endpoint
+ * and the dashboard, so an allowlist that excludes the caller's own origin is
+ * not recoverable through the API at all — it takes database access to undo.
+ * Refusing it here costs an operator one corrected request; allowing it costs
+ * them the organization.
+ *
+ * A missing client IP is refused for the same reason: the enforcement fails
+ * closed without one, so a deployment that cannot observe the origin cannot
+ * satisfy any non-empty allowlist either.
+ */
+function assertAllowlistAdmitsCaller(c: AppContext, allowedIps: string[] | undefined): void {
+  if (allowedIps === undefined || allowedIps.length === 0) {
+    return;
+  }
+
+  const clientIp = getClientIp(c);
+
+  if (!isClientIpAllowed(clientIp, allowedIps)) {
+    throw badRequest(
+      clientIp
+        ? `The allowed IP list must include the address this request came from (${clientIp}), or it would lock the organization out.`
+        : "No client IP could be determined for this request, so an allowed IP list cannot be verified. It would lock the organization out."
+    );
+  }
+}
+
 export const updateOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
   const auth = getAuth(c);
@@ -124,65 +186,79 @@ export const updateOrganization = async (c: AppContext) => {
     });
   }
 
-  const updates: string[] = [];
-  const params: (string | null)[] = [];
+  const settingsPatch = resolveSettingsPatch(parsed.data.settings);
 
-  const existing = await getDb(c.env)
-    .prepare(
-      `SELECT id, name, slug, tier, status, settings, created_at, updated_at
-     FROM organizations WHERE id = ?`
-    )
-    .bind(orgId)
-    .first<OrganizationRow>();
-
-  if (!existing) {
-    throw notFound("Organization");
-  }
-
-  if (parsed.data.name) {
-    updates.push("name = ?");
-    params.push(parsed.data.name);
-  }
-
-  if (parsed.data.settings !== undefined) {
-    if (parsed.data.settings.rpcProvider) {
-      await assertProviderAvailable(
-        c.env,
-        getDb(c.env),
-        orgId,
-        "rpc",
-        parsed.data.settings.rpcProvider
-      );
-    }
-
-    const mergedSettings: OrganizationSettings = {
-      ...(parseOrganizationSettings(existing.settings) ?? {}),
-      ...parsed.data.settings,
-    };
-    updates.push("settings = ?");
-    params.push(JSON.stringify(mergedSettings));
-  }
-
-  if (updates.length === 0) {
+  if (parsed.data.name === undefined && settingsPatch === undefined) {
     throw badRequest("No valid updates provided");
   }
 
-  updates.push("updated_at = datetime('now')");
-  params.push(orgId);
+  assertAllowlistAdmitsCaller(c, settingsPatch?.allowedIpAddresses);
 
-  await getDb(c.env)
-    .prepare(`UPDATE organizations SET ${updates.join(", ")} WHERE id = ?`)
-    .bind(...params)
-    .run();
+  // Availability depends on organization state this request does not write, so
+  // it is checked outside the transaction below rather than holding the row
+  // while it runs.
+  if (settingsPatch?.rpcProvider) {
+    await assertProviderAvailable(c.env, getDb(c.env), orgId, "rpc", settingsPatch.rpcProvider);
+  }
 
-  // Fetch updated org
-  const org = await getDb(c.env)
-    .prepare(
-      `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+  // Settings are one JSON column, so a patch is a read, a merge and a write. Run
+  // unsynchronized, two concurrent patches both merge onto the state they read
+  // and the one that commits second silently drops the other's change — which,
+  // for a column holding the IP allowlist, means a security setting can be
+  // reverted by an unrelated edit landing at the same moment. Locking the row
+  // for the whole read-merge-write makes the merges compose instead.
+  const org = await getDb(c.env).transaction(async (tx) => {
+    const existing = await tx
+      .prepare(
+        `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+     FROM organizations WHERE id = ? FOR UPDATE`
+      )
+      .bind(orgId)
+      .first<OrganizationRow>();
+
+    if (!existing) {
+      throw notFound("Organization");
+    }
+
+    const updates: string[] = [];
+    const params: (string | null)[] = [];
+
+    if (parsed.data.name !== undefined) {
+      updates.push("name = ?");
+      params.push(parsed.data.name);
+    }
+
+    if (settingsPatch !== undefined) {
+      const mergedSettings: OrganizationSettings = {
+        ...(parseOrganizationSettings(existing.settings) ?? {}),
+        ...settingsPatch,
+      };
+      updates.push("settings = ?");
+      params.push(JSON.stringify(mergedSettings));
+    }
+
+    updates.push("updated_at = datetime('now')");
+    params.push(orgId);
+
+    await tx
+      .prepare(`UPDATE organizations SET ${updates.join(", ")} WHERE id = ?`)
+      .bind(...params)
+      .run();
+
+    const updated = await tx
+      .prepare(
+        `SELECT id, name, slug, tier, status, settings, created_at, updated_at
      FROM organizations WHERE id = ?`
-    )
-    .bind(orgId)
-    .first<OrganizationRow>();
+      )
+      .bind(orgId)
+      .first<OrganizationRow>();
+
+    if (!updated) {
+      throw notFound("Organization");
+    }
+
+    return updated;
+  });
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -190,12 +266,10 @@ export const updateOrganization = async (c: AppContext) => {
     action: "update",
     resourceType: "organization",
     resourceId: orgId,
-    metadata: parsed.data,
+    // The canonicalized allowlist, not the submitted spelling, so the trail
+    // records the access that was actually granted.
+    metadata: { ...parsed.data, ...(settingsPatch ? { settings: settingsPatch } : {}) },
   });
-
-  if (!org) {
-    throw notFound("Organization");
-  }
 
   return success(c, toOrganizationResponse(org));
 };

@@ -22,6 +22,7 @@ import {
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
+import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
 import { ensureClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import {
@@ -536,6 +537,7 @@ export function clerkAuthMiddleware() {
     }
 
     const clerkContext = await buildClerkContext(c, payload);
+    await enforceOrganizationIpAllowlist(c, clerkContext.organizationId);
     c.set("clerk", clerkContext);
 
     await next();
@@ -557,6 +559,9 @@ export function optionalClerkAuth() {
       if (payload.sub && payload.org_id) {
         const clerkContext = await buildClerkContext(c, payload);
         if (clerkContext) {
+          // Checked before the context is set, so a request from a disallowed
+          // origin continues as anonymous rather than as an organization member.
+          await enforceOrganizationIpAllowlist(c, clerkContext.organizationId);
           c.set("clerk", clerkContext);
         }
       }

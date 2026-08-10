@@ -8,6 +8,7 @@ import type { Context, Next } from "hono";
 import { getCookie } from "hono/cookie";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
+import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
 import { getLogger } from "@/runtime/logger";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
@@ -33,6 +34,8 @@ export function sessionAuthMiddleware() {
       throw new AppError("UNAUTHORIZED", "Invalid or expired session");
     }
 
+    await enforceOrganizationIpAllowlist(c, cachedSession.organizationId);
+
     // Set session context
     c.set("session", cachedSession);
 
@@ -56,6 +59,9 @@ export function optionalSessionAuth() {
         const cachedSession = await sessionService.getSession(sessionId);
 
         if (cachedSession) {
+          // Checked before the context is set, so a request from a disallowed
+          // origin continues as anonymous rather than as an organization member.
+          await enforceOrganizationIpAllowlist(c, cachedSession.organizationId);
           c.set("session", cachedSession);
           updateLastActivity(getDb(c.env), sessionId);
         }
