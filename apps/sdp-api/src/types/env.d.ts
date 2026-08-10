@@ -1,6 +1,7 @@
 /** Environment variables consumed by the Node API runtime. */
 
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { ApiKeyEnvironment, CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
@@ -300,6 +301,8 @@ declare module "hono" {
     projectEnvironment?: ApiKeyEnvironment;
     approvedWalletOperationId?: string;
     approvedWalletOperationAttemptId?: string;
+    // Set by policyGate middleware for gated routes
+    policyGate?: PolicyGateContext;
     apiKey?: {
       id: string;
       organizationId: string;

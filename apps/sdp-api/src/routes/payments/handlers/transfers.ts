@@ -4,6 +4,7 @@ import { assertValidAddress } from "@sdp/solana/address";
 import { MAX_SAFE_BASE_UNITS, parseDecimalAmount } from "@sdp/solana/amount";
 import {
   type Permission,
+  type PolicyCandidate,
   type PrivateTransferRequest,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
 } from "@sdp/types";
@@ -43,6 +44,7 @@ import { AppError, accountFrozen, badRequest, badRequestQuery, solanaRpcError } 
 import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -59,7 +61,6 @@ import {
   approvedWalletOperationId,
   beginApprovedWalletOperationEffect,
   runApprovedWalletOperationEffectTransaction,
-  walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
 import {
   enforceWalletOperationPolicy,
@@ -260,6 +261,43 @@ async function assertApprovedTransferReplayCompleted(c: AppContext, transfer: Tr
   );
 }
 
+/**
+ * Build the policy candidate for a transfer operation from its resolved scope
+ * and outbound operation — the single source for both the gated primary leg
+ * and the in-flow signer legs.
+ *
+ * @param scope - The resolved request scope.
+ * @param operation - The resolved outbound payment operation.
+ * @param input - The transfer memo and private-transfer flag.
+ * @returns The policy candidate for the operation.
+ */
+function buildTransferPolicyCandidate(
+  scope: ResolvedScope,
+  operation: OutboundPaymentOperation,
+  input: { memo: string | null; privateTransfer: boolean }
+): PolicyCandidate {
+  return {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    custodyWalletId: operation.sourceWallet.id,
+    walletId: operation.sourceWallet.walletId,
+    apiKeyId: scope.auth.apiKeyId === undefined ? null : scope.auth.apiKeyId,
+    actor: walletOperationActorFromAuth(scope.auth),
+    source: "api",
+    operationFamily: "payment",
+    operationType: "payment_transfer_execute",
+    asset: operation.token,
+    amount: operation.amount,
+    destination: operation.destinationAddress,
+    context: {
+      sourceAddress: operation.sourceAddress,
+      memo: input.memo,
+      privateTransfer: input.privateTransfer,
+    },
+    providerExtensions: {},
+  };
+}
+
 async function enforcePaymentTransferOperationPolicy(
   c: AppContext,
   scope: ResolvedScope,
@@ -275,27 +313,110 @@ async function enforcePaymentTransferOperationPolicy(
     c.env,
     getRequestTenantScope(c),
     {
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-      custodyWalletId: operation.sourceWallet.id,
-      walletId: operation.sourceWallet.walletId,
-      apiKeyId: scope.auth.apiKeyId,
-      actor: walletOperationActorFromAuth(scope.auth),
-      operationFamily: "payment",
-      operationType: input.operationType,
-      asset: operation.token,
-      amount: operation.amount,
-      destination: operation.destinationAddress,
-      context: {
-        sourceAddress: operation.sourceAddress,
-        memo: input.memo ?? null,
-        privateTransfer: input.privateTransfer ?? false,
-      },
+      ...buildTransferPolicyCandidate(scope, operation, {
+        memo: input.memo === undefined ? null : input.memo,
+        privateTransfer: input.privateTransfer === true,
+      }),
       rawPayload: input.rawPayload,
     },
     approvedWalletOperationId(c),
     approvedWalletOperationAttemptId(c)
   );
+}
+
+type CreateTransferBody = z.output<typeof createTransferSchema>;
+
+interface TransferPolicyResolved {
+  scope: ResolvedScope;
+  operation: OutboundPaymentOperation;
+  privateTransfer: PrivateTransferRequest | undefined;
+}
+
+/**
+ * Parse and resolve a create-transfer request into its policy candidate for
+ * the policy gate: validated body, resolved scope and outbound operation, and
+ * the enforcement raw payload.
+ *
+ * @param c - Request context.
+ * @returns The candidate, validated body, resolved resources, and raw payload.
+ */
+export async function extractTransferPolicyCandidate(c: AppContext): Promise<PolicyGateExtraction> {
+  const parsed = createTransferSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const scope = await resolveScope(c);
+  assertPaymentProjectScope(parsed.data.projectId, scope.auth.projectId);
+  const operation = resolveOutboundPaymentOperation({
+    auth: scope.auth,
+    wallets: scope.wallets,
+    source: parsed.data.source,
+    destination: parsed.data.destination,
+    token: parsed.data.token,
+    amount: parsed.data.amount,
+    env: c.env,
+    requiredWalletPermissions: ["payments:write"],
+  });
+  const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
+
+  return {
+    candidate: buildTransferPolicyCandidate(scope, operation, {
+      memo: parsed.data.memo === undefined ? null : parsed.data.memo,
+      privateTransfer: Boolean(privateTransfer),
+    }),
+    body: parsed.data,
+    resolved: { scope, operation, privateTransfer },
+    rawPayload: {
+      source: parsed.data.source,
+      destination: parsed.data.destination,
+      token: parsed.data.token,
+      amount: parsed.data.amount,
+    },
+  };
+}
+
+/**
+ * Resolve an Idempotency-Key replay for a create-transfer request: a key that
+ * matches a recorded transfer with the same fingerprint returns the recorded
+ * outcome, so the gate never re-enforces a replayed intent.
+ *
+ * @param c - Request context.
+ * @param extraction - The extraction produced by extractTransferPolicyCandidate.
+ * @param idempotencyKey - The Idempotency-Key header value the gate read.
+ * @returns The recorded response, or null when the request is a new intent.
+ */
+export async function findTransferIdempotentKeyReplay(
+  c: AppContext,
+  extraction: PolicyGateExtraction,
+  idempotencyKey: string
+): Promise<Response | null> {
+  const body = extraction.body as CreateTransferBody;
+  const { operation, privateTransfer } = extraction.resolved as TransferPolicyResolved;
+
+  const replay = await resolveTransferIdempotencyReplay(
+    getPaymentsRepository(c),
+    extraction.candidate.organizationId,
+    extraction.candidate.projectId,
+    idempotencyKey,
+    buildPaymentTransferFingerprint({
+      sourceAddress: operation.sourceWallet.publicKey,
+      destinationAddress: body.destination,
+      token: operation.token,
+      amount: operation.amount,
+      memo: body.memo,
+      type: privateTransfer ? "transfer_confidential" : "transfer",
+      privateTransfer,
+    })
+  );
+  if (!replay) {
+    return null;
+  }
+
+  await assertApprovedTransferReplayCompleted(c, replay);
+  return success(c, buildTransferReplayPayload(replay));
 }
 
 async function updateTransferRecord(
@@ -924,65 +1045,13 @@ function compareTransferRows(
 }
 
 export async function createTransfer(c: AppContext) {
-  const body = await c.req.json();
-  const parsed = createTransferSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const scope = await resolveScope(c);
-  assertPaymentProjectScope(parsed.data.projectId, scope.auth.projectId);
-  const operation = resolveOutboundPaymentOperation({
-    auth: scope.auth,
-    wallets: scope.wallets,
-    source: parsed.data.source,
-    destination: parsed.data.destination,
-    token: parsed.data.token,
-    amount: parsed.data.amount,
-    env: c.env,
-    requiredWalletPermissions: ["payments:write"],
-  });
-
-  const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
-
+  const {
+    body,
+    resolved: { scope, operation, privateTransfer },
+    enforcement,
+  } = getPolicyGateContext<CreateTransferBody, TransferPolicyResolved>(c);
   const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
-  if (idempotencyKey) {
-    const replay = await resolveTransferIdempotencyReplay(
-      getPaymentsRepository(c),
-      scope.auth.organizationId,
-      scope.auth.projectId,
-      idempotencyKey,
-      buildPaymentTransferFingerprint({
-        sourceAddress: operation.sourceWallet.publicKey,
-        destinationAddress: parsed.data.destination,
-        token: operation.token,
-        amount: operation.amount,
-        memo: parsed.data.memo,
-        type: privateTransfer ? "transfer_confidential" : "transfer",
-        privateTransfer,
-      })
-    );
-    if (replay) {
-      await assertApprovedTransferReplayCompleted(c, replay);
-      return success(c, buildTransferReplayPayload(replay));
-    }
-  }
 
-  const enforcement = await enforcePaymentTransferOperationPolicy(c, scope, operation, {
-    operationType: "payment_transfer_execute",
-    memo: parsed.data.memo,
-    privateTransfer: Boolean(privateTransfer),
-    rawPayload: {
-      source: parsed.data.source,
-      destination: parsed.data.destination,
-      token: parsed.data.token,
-      amount: parsed.data.amount,
-      executionRequest: walletOperationExecutionRequest(c, parsed.data),
-    },
-  });
   try {
     await assertWalletPolicyAllowsTransfer(c, {
       organizationId: scope.auth.organizationId,
@@ -1003,7 +1072,7 @@ export async function createTransfer(c: AppContext) {
       c,
       operation,
       privateTransfer,
-      memo: parsed.data.memo,
+      memo: body.memo,
       // MagicBlock's gasless response separates the source signer from the provider sponsor.
       // SDP swaps that sponsor slot for Kora before signing and submission.
       koraSponsoredExecution: true,
@@ -1014,10 +1083,10 @@ export async function createTransfer(c: AppContext) {
       projectId: scope.auth.projectId,
       walletId: operation.sourceWallet.walletId,
       sourceAddress: operation.sourceWallet.publicKey,
-      destinationAddress: parsed.data.destination,
+      destinationAddress: body.destination,
       token: operation.token,
       amount: operation.amount,
-      memo: parsed.data.memo,
+      memo: body.memo,
       type: transferType,
       status: "processing",
       serializedTx: mapped.prepared.serializedTx,
@@ -1069,10 +1138,10 @@ export async function createTransfer(c: AppContext) {
     projectId: scope.auth.projectId,
     walletId: operation.sourceWallet.walletId,
     sourceAddress: operation.sourceWallet.publicKey,
-    destinationAddress: parsed.data.destination,
+    destinationAddress: body.destination,
     token: operation.token,
     amount: operation.amount,
-    memo: parsed.data.memo,
+    memo: body.memo,
     status: "processing",
     initiatedByKeyId: scope.auth.id,
     idempotencyKey,

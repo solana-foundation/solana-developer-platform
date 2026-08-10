@@ -8,7 +8,7 @@ import {
 import type { PiiCipher } from "@/services/pii-cipher/pii-cipher";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import {
   backfillAccounts,
   backfillCounterparties,
@@ -28,7 +28,7 @@ describe("counterparty PII migration lifecycle", () => {
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {

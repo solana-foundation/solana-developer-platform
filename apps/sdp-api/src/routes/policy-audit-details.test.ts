@@ -6,7 +6,7 @@ import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG_ID = "org_policy_audit_routes";
@@ -460,7 +460,6 @@ describe("Wallet policy audit detail routes", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

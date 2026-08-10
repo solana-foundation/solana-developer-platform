@@ -1,5 +1,5 @@
 import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
-import type { AmountPolicyRule, WalletOperationEnvelope } from "@sdp/types";
+import type { AmountPolicyRule, PolicyCandidate } from "@sdp/types";
 import { type RuleEvaluation, ruleValues } from "./helpers";
 
 /**
@@ -12,7 +12,7 @@ import { type RuleEvaluation, ruleValues } from "./helpers";
  */
 export function evaluateAmountRule(
   rule: AmountPolicyRule,
-  operation: WalletOperationEnvelope
+  operation: PolicyCandidate
 ): RuleEvaluation | null {
   const assets = ruleValues(rule.asset, rule.assets);
 

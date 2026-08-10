@@ -1,4 +1,4 @@
-import type { OperationFamilyPolicyRule, WalletOperationEnvelope } from "@sdp/types";
+import type { OperationFamilyPolicyRule, PolicyCandidate } from "@sdp/types";
 import { type RuleEvaluation, ruleValues } from "./helpers";
 
 /**
@@ -10,7 +10,7 @@ import { type RuleEvaluation, ruleValues } from "./helpers";
  */
 export function evaluateOperationFamilyRule(
   rule: OperationFamilyPolicyRule,
-  operation: WalletOperationEnvelope
+  operation: PolicyCandidate
 ): RuleEvaluation | null {
   const families = ruleValues(rule.family, rule.families);
 

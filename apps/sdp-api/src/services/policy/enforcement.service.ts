@@ -45,7 +45,7 @@ export async function enforceWalletOperationPolicy(
   approvedOperationAttemptId?: string
 ): Promise<WalletOperationPolicyEnforcement> {
   assertTenantClaim(scope, input, "enforceWalletOperationPolicy");
-  const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope));
+  const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope), scope);
   if (approvedOperationId) {
     if (!approvedOperationAttemptId) {
       throw new AppError("FORBIDDEN", "Approved wallet operation attempt is unavailable");
@@ -57,7 +57,10 @@ export async function enforceWalletOperationPolicy(
 
 /** Policy enforcement plus approval-request lifecycle transitions for wallet operations. */
 export class WalletPolicyEnforcementService {
-  constructor(private readonly repository: PolicyRepository) {}
+  constructor(
+    private readonly repository: PolicyRepository,
+    private readonly scope: TenantScope
+  ) {}
 
   /**
    * Enforce policy on a wallet operation, throwing the route-contract error
@@ -67,7 +70,7 @@ export class WalletPolicyEnforcementService {
    * @returns The recorded operation and its evaluation when allowed.
    */
   async enforce(input: CreateWalletOperationInput): Promise<WalletOperationPolicyEnforcement> {
-    const store = new PostgresPolicyEnforcementStore(this.repository);
+    const store = new PostgresPolicyEnforcementStore(this.repository, this.scope);
     const enforcement = await runPolicyEnforcement(store, input);
 
     if (enforcement.evaluation.decision === "allow") {

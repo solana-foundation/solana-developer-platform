@@ -7,19 +7,17 @@ const validCreateRequest = {
 };
 
 describe("API key IP allowlist schemas", () => {
-  it.each([
-    "203.0.113.42",
-    "203.0.113.0/24",
-    "2001:db8::42",
-    "2001:db8::/48",
-  ])("accepts a valid IP address or CIDR range: %s", (allowedIp) => {
-    expect(
-      apiKeyCreateSchema.safeParse({
-        ...validCreateRequest,
-        allowedIps: [allowedIp],
-      }).success
-    ).toBe(true);
-  });
+  it.each(["203.0.113.42", "203.0.113.0/24", "2001:db8::42", "2001:db8::/48"])(
+    "accepts a valid IP address or CIDR range: %s",
+    (allowedIp) => {
+      expect(
+        apiKeyCreateSchema.safeParse({
+          ...validCreateRequest,
+          allowedIps: [allowedIp],
+        }).success
+      ).toBe(true);
+    }
+  );
 
   it.each([
     "",

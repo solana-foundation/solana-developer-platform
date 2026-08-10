@@ -1,10 +1,10 @@
 import { createSign, generateKeyPairSync } from "node:crypto";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { MuralWebhookProcessor } from "./mural";
 import type { AppContext } from "./processor";
 
@@ -190,10 +190,6 @@ describe("MuralWebhookProcessor.process", () => {
           {}
         ),
     ]);
-  });
-
-  afterEach(async () => {
-    await clearTestDatabase(env);
   });
 
   it("consumes a signed account-credit delivery once", async () => {

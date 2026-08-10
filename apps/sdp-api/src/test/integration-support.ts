@@ -19,7 +19,7 @@ import {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
 export type ApiTestEnv = Env;
@@ -27,7 +27,6 @@ export type ApiTestCustodyWallet = CustodyWallet;
 
 export const apiTestSupport = {
   app,
-  clearTestDatabase,
   closeAllRedisClients,
   closeDatabasePools,
   createFeePaymentAdapter,

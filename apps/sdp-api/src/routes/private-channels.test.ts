@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
@@ -129,7 +129,6 @@ describe("Private Channels routes", () => {
 
   afterEach(async () => {
     env.PRIVATE_CHANNELS_ENABLED = originalPrivateChannelsEnabled;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

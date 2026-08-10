@@ -10,7 +10,7 @@ import { KEYED_IP_BACKSTOP_MAX_REQUESTS } from "@/middleware/rate-limit";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import {
   clearKVStores,
   readRateLimitCount,
@@ -57,7 +57,6 @@ describe("Rate limiting", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

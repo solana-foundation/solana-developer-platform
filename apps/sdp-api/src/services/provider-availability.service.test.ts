@@ -8,7 +8,7 @@ import {
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_ORG_ID = "org_provider_availability_test";
 
@@ -138,8 +138,6 @@ describe("provider-availability.service", () => {
   afterEach(async () => {
     writeProviderEnv(originalProviderEnv);
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
-
-    await clearTestDatabase(env);
   });
 
   it("resolves general defaults independently of the legacy tier value", () => {
@@ -254,31 +252,31 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it.each([
-    "individual",
-    "enterprise",
-  ] as const)("treats configured Nodit as general for the legacy %s tier and honors an explicit disable", async (tier) => {
-    await setOrganizationTier(tier);
+  it.each(["individual", "enterprise"] as const)(
+    "treats configured Nodit as general for the legacy %s tier and honors an explicit disable",
+    async (tier) => {
+      await setOrganizationTier(tier);
 
-    const enabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-    expect(enabled.providers.rpc.nodit).toEqual({
-      entitled: true,
-      configured: true,
-      enabled: true,
-    });
+      const enabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+      expect(enabled.providers.rpc.nodit).toEqual({
+        entitled: true,
+        configured: true,
+        enabled: true,
+      });
 
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ providerOverrides: { rpc: { nodit: false } } }), TEST_ORG_ID)
-      .run();
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ providerOverrides: { rpc: { nodit: false } } }), TEST_ORG_ID)
+        .run();
 
-    const disabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-    expect(disabled.providers.rpc.nodit).toEqual({
-      entitled: false,
-      configured: true,
-      enabled: false,
-    });
-  });
+      const disabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+      expect(disabled.providers.rpc.nodit).toEqual({
+        entitled: false,
+        configured: true,
+        enabled: false,
+      });
+    }
+  );
 
   it("treats Nodit as configured when its URL is present like other RPC providers", async () => {
     env.SOLANA_RPC_NODIT_URL = "https://rpc.proxy.test/nodit";
