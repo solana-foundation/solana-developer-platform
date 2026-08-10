@@ -106,10 +106,6 @@ async function getWalletPolicyAudit(
   };
 }
 
-/**
- * The wallet's active control profile with its active revision content, read
- * with a row lock so the caller's merge base cannot change before it commits.
- */
 interface LockedActiveWalletControlProfile {
   profile_id: string;
   revision_id: string | null;
@@ -118,9 +114,8 @@ interface LockedActiveWalletControlProfile {
 }
 
 /**
- * Reads the active control-profile summary on the update transaction's own
- * connection, so the response reflects exactly the state this request
- * committed — a post-commit read could mix in a concurrent update's profile.
+ * Must run on the update transaction's connection: a post-commit read could
+ * mix a concurrent update's profile into this request's response.
  */
 async function readWalletControlProfileSummaryInTransaction(
   db: DatabaseExecutor,
@@ -422,8 +417,7 @@ export async function updateWalletPolicy(c: AppContext) {
   const now = new Date().toISOString();
 
   const { rows, controlProfile } = await getDb(c.env).transaction(async (tx) => {
-    // Serialize concurrent policy updates for this wallet so read-merge-write
-    // cannot interleave and silently drop another request's controls.
+    // Serializes per-wallet read-merge-write; interleaving would drop controls.
     const lockedWallet = await tx
       .prepare(`SELECT id FROM custody_wallets WHERE id = ? FOR UPDATE`)
       .bind(wallet.id)
@@ -438,10 +432,8 @@ export async function updateWalletPolicy(c: AppContext) {
     const current = buildWalletPolicyPayload(wallet.walletId, currentRows, wallet.createdAt);
     const activeProfile = await lockActiveWalletControlProfile(tx, wallet.id);
 
-    // The whole-policy version advances on every update — including limit and
-    // allowlist changes that leave the control-profile revision untouched —
-    // so a stale full-policy save cannot slip past the guard by matching an
-    // unchanged revision.
+    // Guards on the whole-policy version, not the revision id: limits-only
+    // updates advance no revision, so a stale save could match one.
     if (
       patch.expectedPolicyVersionId !== undefined &&
       patch.expectedPolicyVersionId !== (current.policyVersionId ?? null)

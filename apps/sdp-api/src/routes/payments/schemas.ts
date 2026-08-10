@@ -178,8 +178,7 @@ export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnio
   }),
 ]);
 
-// Patch semantics shared with mergeWalletPolicyPatch: omitted fields keep the
-// wallet's current value; explicit null clears a clearable limit.
+// Patch semantics (see mergeWalletPolicyPatch): omitted = keep current, null = clear.
 export const updateWalletPolicyBaseSchema = z.object({
   destinationAllowlist: z
     .array(solanaAddressSchema("destinationAllowlist entry"))
@@ -198,8 +197,7 @@ export const updateWalletPolicyBaseSchema = z.object({
     .optional(),
   defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional(),
   rules: z.array(walletPolicyRuleSchema).max(100).optional(),
-  // Whole-policy stale-write guard: unlike a control-profile revision id,
-  // this token also advances on limit/allowlist-only updates.
+  // Unlike a revision id, this token also advances on limit/allowlist-only updates.
   expectedPolicyVersionId: z.string().min(1).max(120).nullable().optional(),
 });
 

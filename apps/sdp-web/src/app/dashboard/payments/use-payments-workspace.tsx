@@ -305,8 +305,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
         },
         t,
         undefined,
-        // addPolicy is server-read state, so any concurrent policy update —
-        // including one that only touched limits — surfaces as a 409.
+        // addPolicy is server-read, so null correctly means "no stored version".
         { expectedPolicyVersionId: addPolicy.policyVersionId ?? null }
       );
       setAddPolicy(updated);

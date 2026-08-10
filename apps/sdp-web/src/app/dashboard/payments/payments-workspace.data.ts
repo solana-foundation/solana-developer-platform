@@ -512,12 +512,9 @@ export async function updateWalletPolicy(
   commitMessage?: string,
   options?: {
     /**
-     * The policyVersionId of the server-read policy this edit was based on,
-     * or null when that policy carried no version (never written, or written
-     * before version stamping). The token changes on every policy update —
-     * including limit/allowlist changes — so any concurrent save fails with
-     * 409. Omit only when the caller has no server-read base; the API then
-     * skips the stale-write check.
+     * policyVersionId of the server-read base policy (null when it carried
+     * none). Omit only without a server-read base — the API then skips the
+     * stale-write check.
      */
     expectedPolicyVersionId?: string | null;
   }
@@ -531,10 +528,8 @@ export async function updateWalletPolicy(
       headers: {
         "Content-Type": "application/json",
       },
-      // The API applies patch semantics (omitted fields keep their current
-      // values), while this editor replaces the whole policy — so cleared
-      // limits are sent as explicit nulls, and the base revision id rejects
-      // saves built on a policy another session has since changed.
+      // The API patches (omitted = keep current) while this editor replaces,
+      // so cleared limits must be explicit nulls.
       body: JSON.stringify({
         destinationAllowlist: policy.destinationAllowlist,
         ...(trimmedCommitMessage ? { commitMessage: trimmedCommitMessage } : {}),

@@ -64,10 +64,7 @@ async function getPolicy(): Promise<WalletPolicyBody["data"]["policy"]> {
   return ((await res.json()) as WalletPolicyBody).data.policy;
 }
 
-/**
- * Seeds a restrictive full policy through the endpoint itself: allowlist,
- * both limits, and an active control profile with a deny default action.
- */
+/** Allowlist, both limits, and an active deny-default profile — via the endpoint itself. */
 async function seedRestrictivePolicy(): Promise<WalletPolicyBody["data"]["policy"]> {
   const res = await putPolicy({
     destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
@@ -95,8 +92,7 @@ describe("Payments routes — wallet policy partial updates", () => {
   installPaymentsRouteTestHooks();
 
   beforeEach(async () => {
-    // The write-scope tenant check requires the custody config to belong to
-    // the API key's project; the shared seed leaves it unscoped.
+    // The write-scope tenant check needs the config scoped to the key's project.
     await getDb(env)
       .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
       .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
@@ -251,8 +247,7 @@ describe("Payments routes — wallet policy partial updates", () => {
   });
 
   it("rejects a stale full-policy save after a limits-only update", async () => {
-    // The exact bypass scenario: a limits-only change does not advance the
-    // control-profile revision, but it must still invalidate stale saves.
+    // Limits-only updates advance no revision but must still invalidate stale saves.
     const seeded = await seedRestrictivePolicy();
 
     const tighten = await putPolicy({ maxTransferAmount: "2" });
@@ -339,8 +334,7 @@ describe("Payments routes — wallet policy partial updates", () => {
     expect(firstRes.status).toBe(200);
     expect(secondRes.status).toBe(200);
 
-    // Each response reports the revision its own transaction activated — a
-    // post-commit read would let both echo the final revision.
+    // A post-commit summary read would let both responses echo the final revision.
     const firstPolicy = ((await firstRes.json()) as WalletPolicyBody).data.policy;
     const secondPolicy = ((await secondRes.json()) as WalletPolicyBody).data.policy;
     expect(
@@ -351,8 +345,7 @@ describe("Payments routes — wallet policy partial updates", () => {
     ).toEqual(new Set([2, 3]));
 
     const policy = await getPolicy();
-    // Whichever update ran second merged on top of the first: the wallet must
-    // end with the seeded controls only explicitly replaced, never reset.
+    // Either order converges: seeded controls only explicitly replaced, never reset.
     expect(policy.controlProfile?.revisionNumber).toBe(3);
     expect(await countProfileRevisions()).toBe(3);
     expect(policy.maxTransferAmount).toBe("5");

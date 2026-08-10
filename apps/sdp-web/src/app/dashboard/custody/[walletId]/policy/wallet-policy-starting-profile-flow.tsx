@@ -231,9 +231,7 @@ export function WalletPolicyStartingProfileFlow({
         buildPolicyPayload(wallet.walletId, state),
         t,
         commitMessage,
-        // currentPolicy is server-read state; a save built on a stale policy
-        // — even one where only limits changed since — fails with 409 instead
-        // of replacing another session's controls.
+        // Stale base 409s instead of replacing another session's controls.
         { expectedPolicyVersionId: currentPolicy.policyVersionId ?? null }
       );
       const returnedState = createPolicyAuthoringState(updated);

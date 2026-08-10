@@ -51,10 +51,8 @@ export interface PaymentWalletPolicy {
   controlProfile?: PaymentWalletControlProfileSummary;
   audit?: PaymentWalletPolicyAudit;
   /**
-   * Opaque token that changes on every committed policy update, including
-   * limit and allowlist changes that do not advance the control-profile
-   * revision. Absent until the policy is first written by a version-aware
-   * update. Pass back as expectedPolicyVersionId for stale-write detection.
+   * Changes on every policy update, including limit/allowlist-only ones.
+   * Pass back as expectedPolicyVersionId to detect stale writes.
    */
   policyVersionId?: string;
 }

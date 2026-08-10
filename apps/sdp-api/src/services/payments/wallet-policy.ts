@@ -41,10 +41,7 @@ function parseDestinationAllowlistPolicy(raw: string): string[] {
   return value.filter((entry): entry is string => typeof entry === "string");
 }
 
-/**
- * Extracts the whole-policy version token stamped into every policy document
- * on write. Documents persisted before version stamping have none.
- */
+/** Documents persisted before version stamping have no token. */
 function parsePolicyVersionId(raw: string): string | undefined {
   const document = parsePolicyDocument(raw);
   if (!document || document.version !== PAYMENT_POLICY_VERSION) {
@@ -94,17 +91,9 @@ export interface WalletPolicyControlsPatch {
 }
 
 /**
- * The single patch semantic for wallet-policy updates, shared by the request
- * schema, the update handler, and persistence: an omitted field keeps the
- * wallet's current value, an explicit value replaces it, and an explicit null
- * clears a clearable limit. The control profile only changes when the patch
- * names `rules` or `defaultAction`; the omitted one is carried over from the
- * active revision, or from the implicit default-allow policy when none is
- * active.
- *
- * @param current - The wallet's current controls, read in the same transaction that persists the result.
- * @param patch - The parsed request body.
- * @returns The full controls state to persist.
+ * The one patch semantic shared by schema, handler, and persistence:
+ * omitted = keep current, explicit null = clear a limit. An omitted profile
+ * field merges from the active revision, or implicit default-allow when none.
  */
 export function mergeWalletPolicyPatch(
   current: WalletPolicyControlsState,
