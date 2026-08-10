@@ -9,6 +9,7 @@ import {
   type ProvisionTurnkeyOptions as CustodyProvisionTurnkeyOptions,
   type ProvisionUtilaOptions as CustodyProvisionUtilaOptions,
   deleteAnchorageWallet as deleteAnchorageWalletInCustody,
+  findPrivyWalletByExternalId as findPrivyWalletByExternalIdInCustody,
   type ProvisionAnchorageResult,
   type ProvisionCoinbaseCdpResult,
   type ProvisionFireblocksResult,
@@ -96,6 +97,22 @@ export async function provisionPrivyWallet(
       apiBaseUrl: env.PRIVY_API_BASE_URL,
     },
     options
+  );
+}
+
+export async function findPrivyWalletByExternalId(
+  env: Env,
+  externalId: string,
+  authentication?: PrivyCredentialAuthentication
+): Promise<ProvisionPrivyResult | undefined> {
+  return findPrivyWalletByExternalIdInCustody(
+    createRuntime(),
+    {
+      appId: authentication?.appId ?? env.PRIVY_APP_ID,
+      appSecret: authentication?.appSecret ?? env.PRIVY_APP_SECRET,
+      apiBaseUrl: env.PRIVY_API_BASE_URL,
+    },
+    externalId
   );
 }
 
