@@ -7,6 +7,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
 import { TokenMark } from "@/components/token-mark";
+import type { BadgeVariant } from "@/components/ui/badge";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { DateTimePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
@@ -347,6 +348,14 @@ export function RecurringPaymentCreateWorkspace({
       assetOptions.map((asset) => {
         const token = resolveTokenByMint(asset.value, issuedTokensByMint, asset.label);
         const sdpMinted = token.tokenId !== null;
+        let badge: string | undefined;
+        let badgeVariant: BadgeVariant | undefined;
+        if (sdpMinted) {
+          badge = t("Shared.SharedComponents.sdpMintedToken");
+          badgeVariant = "outline";
+        } else if (!token.isWellKnown) {
+          badge = t("Shared.SharedComponents.customToken");
+        }
         return {
           value: asset.value,
           label: token.tokenName,
@@ -358,8 +367,8 @@ export function RecurringPaymentCreateWorkspace({
               size="xs"
             />
           ),
-          badge: sdpMinted ? t("Shared.SharedComponents.sdpMintedToken") : undefined,
-          badgeVariant: sdpMinted ? ("outline" as const) : undefined,
+          badge,
+          badgeVariant,
         };
       }),
     [assetOptions, issuedTokensByMint, t]
