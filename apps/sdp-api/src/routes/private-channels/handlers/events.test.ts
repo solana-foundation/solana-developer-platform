@@ -6,11 +6,11 @@ import {
   type PrivateChannelEventListEnvelope,
 } from "@sdp/types";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPrivateChannelEventRepository } from "@/db/repositories/private-channel-event.repository.postgres";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { listChannelEvents, listProjectEvents } from "./events";
 
@@ -202,10 +202,6 @@ describe("Private Channels event handlers", () => {
       occurredAt: NOW,
       createdAt: NOW,
     });
-  });
-
-  afterEach(async () => {
-    await clearTestDatabase(env);
   });
 
   it("shows channel memberships plus authored transfers in the project feed", async () => {

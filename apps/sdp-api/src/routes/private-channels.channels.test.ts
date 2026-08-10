@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = { id: "org_pc_test", name: "Private Channels Test Org", slug: "pc-test-org" };
@@ -105,7 +105,6 @@ describe("Private Channels — channel routes", () => {
 
   afterEach(async () => {
     env.PRIVATE_CHANNELS_ENABLED = originalEnabled;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

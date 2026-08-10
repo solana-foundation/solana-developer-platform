@@ -1,6 +1,7 @@
 import { provisionUtilaWallet as provisionUtilaWalletInCustody } from "@sdp/custody/provisioning";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  findPrivyWalletByExternalId,
   provisionCoinbaseCdpAccount,
   provisionParaWallet,
   provisionPrivyWallet,
@@ -176,6 +177,32 @@ describe("coinbase account provisioning", () => {
 describe("privy wallet provisioning", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("looks up an existing wallet by external ID without creating one", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(privyWalletResponse());
+
+    await expect(findTestPrivyWallet()).resolves.toEqual({
+      walletId: "wallet-existing",
+      address: EXISTING_ADDRESS,
+    });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET"]);
+  });
+
+  it("returns absent from external-ID lookup without creating a wallet", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(privyWalletNotFound());
+
+    await expect(findTestPrivyWallet()).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET"]);
+  });
+
+  it("rejects an invalid external-ID wallet without creating one", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(privyWalletResponse({ external_id: "sdp_connection_other" }));
+
+    await expect(findTestPrivyWallet()).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET"]);
   });
 
   it("reuses a wallet found by external ID before creating one", async () => {
@@ -664,6 +691,14 @@ function createPrivyEnv(overrides: Partial<Env> = {}): Env {
 
 function provisionTestPrivyWallet(options: Parameters<typeof provisionPrivyWallet>[1]) {
   return provisionPrivyWallet(createPrivyEnv(), options, PRIVY_AUTHENTICATION);
+}
+
+function findTestPrivyWallet() {
+  return findPrivyWalletByExternalId(
+    createPrivyEnv(),
+    PRIVY_CREATE_OPTIONS.externalId,
+    PRIVY_AUTHENTICATION
+  );
 }
 
 function privyWalletResponse(overrides: Record<string, unknown> = {}): Response {

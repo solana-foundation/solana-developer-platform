@@ -8,7 +8,7 @@ import {
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_ORG_ID = "org_provider_availability_test";
 
@@ -138,8 +138,6 @@ describe("provider-availability.service", () => {
   afterEach(async () => {
     writeProviderEnv(originalProviderEnv);
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
-
-    await clearTestDatabase(env);
   });
 
   it("resolves general defaults independently of the legacy tier value", () => {
