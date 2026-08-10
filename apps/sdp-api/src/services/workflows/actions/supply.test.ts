@@ -17,6 +17,7 @@ import type { Env } from "@/types/env";
 
 const MINT = "So11111111111111111111111111111111111111112";
 const DEST = "AENLi9e2xTiK7YHThmEQhBrCaDTjTRV4hsDXdwbPcBbK";
+const TREASURY = "11111111111111111111111111111111";
 
 // Relative order of the reservation and the submission — the fix's core claim is
 // "reserve" strictly before "submit", and never "submit" without a granted "reserve".
@@ -24,9 +25,12 @@ const events = vi.hoisted(() => [] as string[]);
 
 const mintTo = vi.hoisted(() => vi.fn());
 const burn = vi.hoisted(() => vi.fn());
+const forceBurn = vi.hoisted(() => vi.fn());
+const forceTransfer = vi.hoisted(() => vi.fn());
 const reserveMintSupply = vi.hoisted(() => vi.fn());
 const updateSupply = vi.hoisted(() => vi.fn());
 const logWarn = vi.hoisted(() => vi.fn());
+const preflightWalletPolicy = vi.hoisted(() => vi.fn());
 
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/runtime/logger", () => ({
@@ -43,12 +47,13 @@ vi.mock("@/services/solana", () => ({
 }));
 vi.mock("./record-transaction", () => ({ recordWorkflowTransaction: async () => true }));
 
-// The three advisory preflights all pass. For the supply check that is the point: it is
+// The advisory preflights pass by default. For the supply check that is the point: it is
 // the stale in-process snapshot both racers read, and it must not be what admits a mint.
+// The wallet policy is a controllable mock so tests can deny it per custody action.
 vi.mock("./preflight", () => ({
   preflightMintAmount: () => ({ ok: true, mosaicAmount: 10 }),
   preflightDestinationAllowed: async () => ({ ok: true }),
-  preflightWalletPolicy: async () => ({ ok: true }),
+  preflightWalletPolicy,
 }));
 
 vi.mock("./onchain", async (importOriginal) => {
@@ -63,14 +68,14 @@ vi.mock("./onchain", async (importOriginal) => {
         mintAddress: MINT,
         signer: { address: DEST },
         signerWalletId: null,
-        mosaic: { mintTo },
+        mosaic: { mintTo, forceBurn, forceTransfer },
       },
     }),
     resolveWalletTokenAccount: async () => MINT,
   };
 });
 
-import { runBurn, runMint } from "./supply";
+import { runBurn, runForceBurn, runMint, runSeize } from "./supply";
 
 const env = {} as Env;
 
@@ -102,27 +107,30 @@ function executionFixture(): WorkflowExecutionRow {
 // amount "10" at 2 decimals → 1000 base units: the reservation must be in base units.
 const action = { type: "mint", params: { amount: "10" } } as never;
 
-describe("workflow mint counts against the cap atomically at the effect boundary", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    events.length = 0;
-    // Mirrors the real mintTo contract: the hook runs once the transaction is built and
-    // signed, immediately before submission; a throw from it aborts the submission.
-    mintTo.mockImplementation(async (_opts: unknown, onBeforeSubmit?: () => Promise<void>) => {
-      if (onBeforeSubmit) {
-        await onBeforeSubmit();
-      }
-      events.push("submit");
-      return { signature: "sig_mint", slot: 42n, tokenAccount: MINT };
-    });
-    burn.mockResolvedValue({ signature: "sig_burn", slot: 43n });
-    reserveMintSupply.mockImplementation(async () => {
-      events.push("reserve");
-      return "1000";
-    });
-    updateSupply.mockResolvedValue(undefined);
+beforeEach(() => {
+  vi.clearAllMocks();
+  events.length = 0;
+  // Mirrors the real mintTo contract: the hook runs once the transaction is built and
+  // signed, immediately before submission; a throw from it aborts the submission.
+  mintTo.mockImplementation(async (_opts: unknown, onBeforeSubmit?: () => Promise<void>) => {
+    if (onBeforeSubmit) {
+      await onBeforeSubmit();
+    }
+    events.push("submit");
+    return { signature: "sig_mint", slot: 42n, tokenAccount: MINT };
   });
+  burn.mockResolvedValue({ signature: "sig_burn", slot: 43n });
+  forceBurn.mockResolvedValue({ signature: "sig_force_burn", slot: 44n });
+  forceTransfer.mockResolvedValue({ signature: "sig_seize", slot: 45n });
+  reserveMintSupply.mockImplementation(async () => {
+    events.push("reserve");
+    return "1000";
+  });
+  updateSupply.mockResolvedValue(undefined);
+  preflightWalletPolicy.mockResolvedValue({ ok: true });
+});
 
+describe("workflow mint counts against the cap atomically at the effect boundary", () => {
   // The reported bug. A concurrent mint consumed the headroom after this execution read
   // its snapshot: the snapshot check passed, the DB reservation refuses. Unpatched code
   // never asked the DB and submitted anyway — supply ends above maxSupply on chain.
@@ -188,5 +196,81 @@ describe("workflow mint counts against the cap atomically at the effect boundary
     expect(result.status).toBe("succeeded");
     expect(updateSupply).toHaveBeenCalledWith("tok_1", "10", "burn");
     expect(reserveMintSupply).not.toHaveBeenCalled();
+  });
+});
+
+// Wallet-baseline policies (amount/velocity limits, custody approval bound to the
+// signing key) match every enforced operation when they name no operationTypes — so a
+// custody action that never submits its operation for enforcement silently escapes
+// them. Each destructive action must ask the policy BEFORE its chain call and treat a
+// denial as a permanent, un-retried failure.
+describe("custody actions enforce the signing wallet's operation policy", () => {
+  const denied = {
+    ok: false,
+    result: { status: "failed", retryable: false, result: {}, error: "POLICY_DENIED" },
+  };
+
+  it("burn asks the policy and is refused before the chain call on denial", async () => {
+    preflightWalletPolicy.mockResolvedValue(denied);
+
+    const result = await runBurn(env, executionFixture(), action);
+
+    expect(burn).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    expect(result.retryable).toBe(false);
+    expect(result.error).toBe("POLICY_DENIED");
+    expect(preflightWalletPolicy).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      expect.objectContaining({ operationType: "issuance_burn_execute", amount: "10" })
+    );
+  });
+
+  it("force_burn asks the policy and is refused before the chain call on denial", async () => {
+    preflightWalletPolicy.mockResolvedValue(denied);
+
+    const result = await runForceBurn(env, executionFixture(), action);
+
+    expect(forceBurn).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    expect(result.retryable).toBe(false);
+    expect(preflightWalletPolicy).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      expect.objectContaining({ operationType: "issuance_force_burn_execute", amount: "10" })
+    );
+  });
+
+  it("seize asks the policy — destination included — and is refused on denial", async () => {
+    preflightWalletPolicy.mockResolvedValue(denied);
+
+    const result = await runSeize(env, executionFixture(), {
+      type: "seize",
+      params: { amount: "10", destination: TREASURY },
+    } as never);
+
+    expect(forceTransfer).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    expect(result.retryable).toBe(false);
+    expect(preflightWalletPolicy).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      expect.objectContaining({
+        operationType: "issuance_seize_execute",
+        amount: "10",
+        destination: TREASURY,
+      })
+    );
+  });
+
+  it("seize proceeds when the policy allows", async () => {
+    const result = await runSeize(env, executionFixture(), {
+      type: "seize",
+      params: { amount: "10", destination: TREASURY },
+    } as never);
+
+    expect(forceTransfer).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("succeeded");
+    expect(result.result).toMatchObject({ signature: "sig_seize" });
   });
 });

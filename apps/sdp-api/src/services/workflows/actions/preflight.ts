@@ -84,7 +84,16 @@ export async function preflightWalletPolicy(
   env: Env,
   ctx: OnchainContext,
   input: {
-    operationType: "issuance_mint_execute" | "issuance_update_authority_execute";
+    // burn/force_burn/seize have no HTTP policy gate to mirror (only mint and
+    // update-authority do); their types exist so that wallet-baseline rules — which
+    // match every operation when they name no operationTypes — bind the custody key
+    // here too, and so orgs can write type-specific rules for them.
+    operationType:
+      | "issuance_mint_execute"
+      | "issuance_update_authority_execute"
+      | "issuance_burn_execute"
+      | "issuance_force_burn_execute"
+      | "issuance_seize_execute";
     amount?: string | null;
     destination?: string | null;
   }

@@ -224,6 +224,17 @@ export async function runBurn(
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
   }
 
+  // The signing wallet's operation policy (amount/velocity limits, custody approval)
+  // binds every custody-signed op, checked BEFORE the chain call — a rule must not be
+  // a way to destroy supply past limits the org configured for the key.
+  const policy = await preflightWalletPolicy(env, prep.ctx, {
+    operationType: "issuance_burn_execute",
+    amount: amount.amountStr,
+  });
+  if (!policy.ok) {
+    return policy.result;
+  }
+
   // Destructive + not idempotent: any chain error is permanent (see runMint).
   let result: Awaited<ReturnType<ReturnType<typeof createToken2022Service>["burn"]>>;
   try {
@@ -269,6 +280,15 @@ export async function runForceBurn(
   const amount = parseAmount(action, decimals);
   if (!amount) {
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
+  }
+
+  // Wallet policy for the permanent-delegate key, BEFORE the chain call (see runBurn).
+  const policy = await preflightWalletPolicy(env, prep.ctx, {
+    operationType: "issuance_force_burn_execute",
+    amount: amount.amountStr,
+  });
+  if (!policy.ok) {
+    return policy.result;
   }
 
   // Destructive + not idempotent: any chain error is permanent (see runMint).
@@ -328,6 +348,17 @@ export async function runSeize(
   const allowed = await preflightDestinationAllowed(env, prep.ctx, destination);
   if (!allowed.ok) {
     return allowed.result;
+  }
+
+  // Wallet policy for the permanent-delegate key, BEFORE the chain call (see runBurn).
+  // Seize moves value, so its destination is subject to the policy's destination rules.
+  const policy = await preflightWalletPolicy(env, prep.ctx, {
+    operationType: "issuance_seize_execute",
+    amount: amount.amountStr,
+    destination,
+  });
+  if (!policy.ok) {
+    return policy.result;
   }
 
   // Destructive + not idempotent: any chain error is permanent (see runMint).
