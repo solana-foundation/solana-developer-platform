@@ -19,6 +19,7 @@ import {
   TEST_MOONPAY_SECRET_KEY,
   TEST_ORG,
   TEST_PROJECT,
+  TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 
@@ -842,5 +843,95 @@ describe("Payments routes — ramps", () => {
       .bind("xfr_moneygram_amount_guard")
       .first<{ status: string }>();
     expect(transfer?.status).toBe("pending");
+  });
+
+  describe("session-caller environment resolution", () => {
+    const SESSION_ID = "ses_ramps_environment";
+    const PRODUCTION_PROJECT_ID = "prj_payments_test_prod";
+
+    /**
+     * Dashboard (session) callers resolve their environment from the
+     * membership-verified x-project-id project; this seeds the org member, a
+     * production sibling of the hooks' sandbox project, and a session.
+     */
+    async function seedSessionAuth(): Promise<void> {
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+             VALUES (?, ?, ?, 'member', 'active')`
+          )
+          .bind("om_ramps_environment", TEST_ORG.id, TEST_USER.id),
+        getDb(env)
+          .prepare(
+            `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+             VALUES (?, ?, ?, ?, 'production', 'active', ?)`
+          )
+          .bind(
+            PRODUCTION_PROJECT_ID,
+            TEST_ORG.id,
+            "Production Project",
+            "payments-test-project-prod",
+            TEST_USER.id
+          ),
+        getDb(env)
+          .prepare(
+            `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
+          )
+          .bind("pm_ramps_environment_sandbox", TEST_PROJECT.id, TEST_USER.id),
+        getDb(env)
+          .prepare(
+            `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
+          )
+          .bind("pm_ramps_environment_production", PRODUCTION_PROJECT_ID, TEST_USER.id),
+        getDb(env)
+          .prepare(
+            `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+             VALUES (?, ?, ?, 'session', ?)`
+          )
+          .bind(SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      ]);
+    }
+
+    function simulateAsSession(projectId: string, body: Record<string, unknown>) {
+      return app.request(
+        "/v1/payments/ramps/sandbox/simulate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: `sdp_session=${SESSION_ID}`,
+            "x-project-id": projectId,
+          },
+          body: JSON.stringify(body),
+        },
+        env
+      );
+    }
+
+    it("refuses the sandbox simulator from a production-project session", async () => {
+      await seedSessionAuth();
+
+      // Session callers used to hardcode to sandbox, so a production-project
+      // session could run sandbox simulations inside production tenant scope.
+      // The guard now sees the real project environment.
+      const res = await simulateAsSession(PRODUCTION_PROJECT_ID, {});
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("only available in sandbox mode");
+    });
+
+    it("still lets sandbox-project sessions past the environment guard", async () => {
+      await seedSessionAuth();
+
+      // An empty body is invalid, so a 400 proves the request got PAST the
+      // environment guard — sandbox sessions are unchanged.
+      const res = await simulateAsSession(TEST_PROJECT.id, {});
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("BAD_REQUEST");
+    });
   });
 });

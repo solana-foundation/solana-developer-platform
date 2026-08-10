@@ -65,6 +65,11 @@ invariants.
 
 ## Conventions
 
+- Environment resolution is the shared `@/lib/sdp-environment` helper: API-key
+  callers use the key's (project-derived) environment; dashboard/session
+  callers use the membership-verified `x-project-id` project's environment; a
+  request with neither fails closed (500), never defaults to sandbox. A
+  production-project dashboard session therefore drives provider production.
 - `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
   Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so
   clearing that one flag darkens every Markets API surface. Both default off.
