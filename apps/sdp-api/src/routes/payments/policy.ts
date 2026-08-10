@@ -2,6 +2,7 @@ import {
   assertWalletPolicyAllowsTransferWithRepository,
   buildWalletPolicyPayload,
   DESTINATION_ALLOWLIST_POLICY_TYPE,
+  mergeWalletPolicyPatch,
   PAYMENT_POLICY_VERSION,
   TRANSFER_LIMITS_POLICY_TYPE,
 } from "@/services/payments/wallet-policy";
@@ -12,6 +13,7 @@ export {
   assertWalletPolicyAllowsTransferWithRepository,
   buildWalletPolicyPayload,
   DESTINATION_ALLOWLIST_POLICY_TYPE,
+  mergeWalletPolicyPatch,
   PAYMENT_POLICY_VERSION,
   TRANSFER_LIMITS_POLICY_TYPE,
 };

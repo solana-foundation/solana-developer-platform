@@ -9,6 +9,7 @@ import type {
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db";
+import { asPostgresJsonArray } from "@/db/postgres-utils";
 import {
   type ActiveWalletControlProfileResult,
   createPostgresPaymentsRepository,
@@ -18,7 +19,7 @@ import {
   generateWalletControlProfileId,
   generateWalletControlProfileRevisionId,
 } from "@/db/repositories/policy.repository";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
@@ -30,6 +31,7 @@ import { type AppContext, getPaymentsRepository, getPolicyRepository } from "../
 import {
   buildWalletPolicyPayload,
   DESTINATION_ALLOWLIST_POLICY_TYPE,
+  mergeWalletPolicyPatch,
   PAYMENT_POLICY_VERSION,
   TRANSFER_LIMITS_POLICY_TYPE,
 } from "../policy";
@@ -104,8 +106,42 @@ async function getWalletPolicyAudit(
   };
 }
 
+/**
+ * The wallet's active control profile with its active revision content, read
+ * with a row lock so the caller's merge base cannot change before it commits.
+ */
+interface LockedActiveWalletControlProfile {
+  profile_id: string;
+  revision_id: string | null;
+  rules: unknown;
+  default_action: PolicyDefaultAction | null;
+}
+
+async function lockActiveWalletControlProfile(
+  db: DatabaseExecutor,
+  custodyWalletId: string
+): Promise<LockedActiveWalletControlProfile | null> {
+  return await db
+    .prepare(
+      `SELECT p.id AS profile_id,
+              r.id AS revision_id,
+              r.rules AS rules,
+              r.default_action AS default_action
+       FROM wallet_control_profiles p
+       LEFT JOIN wallet_control_profile_revisions r ON r.id = p.active_revision_id
+       WHERE p.custody_wallet_id = ?
+         AND p.status = 'active'
+       ORDER BY p.activated_at DESC NULLS LAST, p.created_at DESC
+       LIMIT 1
+       FOR UPDATE OF p`
+    )
+    .bind(custodyWalletId)
+    .first<LockedActiveWalletControlProfile>();
+}
+
 async function activateWalletControlProfileRevisionInTransaction({
   db,
+  existingProfileId,
   organizationId,
   projectId,
   custodyWalletId,
@@ -117,6 +153,7 @@ async function activateWalletControlProfileRevisionInTransaction({
   activatedAt,
 }: {
   db: DatabaseExecutor;
+  existingProfileId: string | null;
   organizationId: string;
   projectId: string | null;
   custodyWalletId: string;
@@ -127,22 +164,9 @@ async function activateWalletControlProfileRevisionInTransaction({
   createdBy: string | null;
   activatedAt: string;
 }): Promise<void> {
-  const existingProfile = await db
-    .prepare(
-      `SELECT id
-       FROM wallet_control_profiles
-       WHERE custody_wallet_id = ?
-         AND status = 'active'
-       ORDER BY activated_at DESC NULLS LAST, created_at DESC
-       LIMIT 1
-       FOR UPDATE`
-    )
-    .bind(custodyWalletId)
-    .first<{ id: string }>();
+  const profileId = existingProfileId ?? generateWalletControlProfileId();
 
-  const profileId = existingProfile?.id ?? generateWalletControlProfileId();
-
-  if (!existingProfile) {
+  if (!existingProfileId) {
     await db
       .prepare(
         `INSERT INTO wallet_control_profiles (
@@ -320,7 +344,6 @@ export async function getWalletPolicy(c: AppContext) {
 
 export async function updateWalletPolicy(c: AppContext) {
   const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:write"]);
-  const repository = getPaymentsRepository(c);
 
   const body = await c.req.json();
   const parsed = updateWalletPolicySchema.safeParse(body);
@@ -331,71 +354,98 @@ export async function updateWalletPolicy(c: AppContext) {
     });
   }
 
+  const patch = parsed.data;
   const now = new Date().toISOString();
-  const walletPolicyInputs = [
-    {
-      id: `pwp_${crypto.randomUUID()}`,
-      custodyWalletId: wallet.id,
-      policyType: DESTINATION_ALLOWLIST_POLICY_TYPE,
-      policy: JSON.stringify({
-        version: PAYMENT_POLICY_VERSION,
-        destinationAllowlist: parsed.data.destinationAllowlist,
-      }),
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: `pwp_${crypto.randomUUID()}`,
-      custodyWalletId: wallet.id,
-      policyType: TRANSFER_LIMITS_POLICY_TYPE,
-      policy: JSON.stringify({
-        version: PAYMENT_POLICY_VERSION,
-        maxTransferAmount: parsed.data.maxTransferAmount ?? null,
-        maxDailyAmount: parsed.data.maxDailyAmount ?? null,
-      }),
-      createdAt: now,
-      updatedAt: now,
-    },
-  ];
 
-  let controlProfile: PaymentWalletControlProfileSummary | null = null;
-  let rows: Awaited<ReturnType<typeof repository.upsertWalletPolicies>>;
-  if (parsed.data.rules || parsed.data.defaultAction) {
-    rows = await getDb(c.env).transaction(async (tx) => {
-      const txRepository = createPostgresPaymentsRepository(tx, getRequestTenantScope(c));
-      const savedRows = await txRepository.upsertWalletPolicies(walletPolicyInputs);
+  const rows = await getDb(c.env).transaction(async (tx) => {
+    // Serialize concurrent policy updates for this wallet so read-merge-write
+    // cannot interleave and silently drop another request's controls.
+    const lockedWallet = await tx
+      .prepare(`SELECT id FROM custody_wallets WHERE id = ? FOR UPDATE`)
+      .bind(wallet.id)
+      .first<{ id: string }>();
 
-      if (savedRows.length === 0) {
-        throw new AppError("INTERNAL_ERROR", "Failed to persist wallet policy");
-      }
+    if (!lockedWallet) {
+      throw new AppError("NOT_FOUND", "Wallet not found");
+    }
 
+    const txRepository = createPostgresPaymentsRepository(tx, getRequestTenantScope(c));
+    const currentRows = await txRepository.getWalletPoliciesByCustodyWalletId(wallet.id);
+    const current = buildWalletPolicyPayload(wallet.walletId, currentRows, wallet.createdAt);
+    const activeProfile = await lockActiveWalletControlProfile(tx, wallet.id);
+    const activeRevisionId = activeProfile?.revision_id ?? null;
+
+    if (patch.expectedRevisionId !== undefined && patch.expectedRevisionId !== activeRevisionId) {
+      throw conflict(
+        "Wallet policy was changed by another update; refresh and retry with the current revision"
+      );
+    }
+
+    const merged = mergeWalletPolicyPatch(
+      {
+        destinationAllowlist: current.destinationAllowlist,
+        maxTransferAmount: current.maxTransferAmount,
+        maxDailyAmount: current.maxDailyAmount,
+        controlProfile: activeProfile?.revision_id
+          ? {
+              rules: asPostgresJsonArray(activeProfile.rules) as unknown as PolicyRule[],
+              defaultAction: activeProfile.default_action ?? "allow",
+            }
+          : null,
+      },
+      patch
+    );
+
+    const savedRows = await txRepository.upsertWalletPolicies([
+      {
+        id: `pwp_${crypto.randomUUID()}`,
+        custodyWalletId: wallet.id,
+        policyType: DESTINATION_ALLOWLIST_POLICY_TYPE,
+        policy: JSON.stringify({
+          version: PAYMENT_POLICY_VERSION,
+          destinationAllowlist: merged.destinationAllowlist,
+        }),
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: `pwp_${crypto.randomUUID()}`,
+        custodyWalletId: wallet.id,
+        policyType: TRANSFER_LIMITS_POLICY_TYPE,
+        policy: JSON.stringify({
+          version: PAYMENT_POLICY_VERSION,
+          maxTransferAmount: merged.maxTransferAmount ?? null,
+          maxDailyAmount: merged.maxDailyAmount ?? null,
+        }),
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+
+    if (savedRows.length === 0) {
+      throw new AppError("INTERNAL_ERROR", "Failed to persist wallet policy");
+    }
+
+    if (patch.rules !== undefined || patch.defaultAction !== undefined) {
       await activateWalletControlProfileRevisionInTransaction({
         db: tx,
+        existingProfileId: activeProfile?.profile_id ?? null,
         organizationId: auth.organizationId,
         projectId: auth.projectId ?? null,
         custodyWalletId: wallet.id,
         profileName: `${wallet.label ?? wallet.walletId} controls`,
-        rules: parsed.data.rules ?? [],
-        defaultAction: parsed.data.defaultAction ?? "allow",
-        commitMessage: parsed.data.commitMessage,
+        rules: merged.controlProfile?.rules ?? [],
+        defaultAction: merged.controlProfile?.defaultAction ?? "allow",
+        commitMessage: patch.commitMessage,
         createdBy: auth.userId ?? auth.apiKeyId ?? null,
         activatedAt: now,
       });
-
-      return savedRows;
-    });
-
-    controlProfile = await getWalletControlProfileSummary(c, wallet.id);
-  } else {
-    rows = await repository.upsertWalletPolicies(walletPolicyInputs);
-
-    if (rows.length === 0) {
-      throw new AppError("INTERNAL_ERROR", "Failed to persist wallet policy");
     }
 
-    controlProfile = await getWalletControlProfileSummary(c, wallet.id);
-  }
+    return savedRows;
+  });
 
+  const controlProfile = await getWalletControlProfileSummary(c, wallet.id);
   const payload = buildWalletPolicyPayload(wallet.walletId, rows, now);
   const audit = await getWalletPolicyAudit(c, {
     organizationId: auth.organizationId,

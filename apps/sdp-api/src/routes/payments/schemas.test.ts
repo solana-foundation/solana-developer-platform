@@ -24,7 +24,10 @@ describe("payments schema inferred types", () => {
     type UpdateWalletPolicy = z.infer<typeof updateWalletPolicySchema>;
 
     expectTypeOf<CreateTransfer["destination"]>().toEqualTypeOf<string>();
-    expectTypeOf<UpdateWalletPolicy["destinationAllowlist"]>().toEqualTypeOf<string[]>();
+    // Patch semantics: an omitted allowlist keeps the wallet's current value.
+    expectTypeOf<UpdateWalletPolicy["destinationAllowlist"]>().toEqualTypeOf<
+      string[] | undefined
+    >();
   });
 });
 

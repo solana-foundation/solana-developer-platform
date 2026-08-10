@@ -430,7 +430,7 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
   .extend({
     destinationAllowlist: withOpenApi(updateWalletPolicySchemaBase.shape.destinationAllowlist, {
       description:
-        "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
+        "Allowed destination addresses. Omit to keep the wallet's current allowlist; an empty array removes all destination restrictions. Maximum 500 entries per wallet.",
       example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
     }),
     commitMessage: withOpenApi(updateWalletPolicySchemaBase.shape.commitMessage, {
@@ -438,20 +438,23 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
       example: "Require approval for transfers above 10,000 USDC.",
     }),
     maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
-      description: "Maximum amount allowed per transfer.",
+      description:
+        "Maximum amount allowed per transfer. Omit to keep the current limit; set null to remove it.",
       example: "100.00",
     }),
     maxDailyAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxDailyAmount, {
-      description: "Maximum total amount allowed per day.",
+      description:
+        "Maximum total amount allowed per day. Omit to keep the current limit; set null to remove it.",
       example: "1000.00",
     }),
     defaultAction: withOpenApi(updateWalletPolicySchemaBase.shape.defaultAction, {
-      description: "Default action for the activated wallet control profile revision.",
+      description:
+        "Default action for the activated wallet control profile revision. Omit to keep the active revision's default action.",
       example: "allow",
     }),
     rules: withOpenApi(updateWalletPolicySchemaBase.shape.rules, {
       description:
-        "Rules for a new immutable wallet control profile revision. When provided, the revision is activated after validation.",
+        "Rules for a new immutable wallet control profile revision. When provided, the revision is activated after validation. Omit to keep the active revision's rules.",
       example: [
         {
           id: "deny-raw-signing",
@@ -461,10 +464,15 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
         },
       ],
     }),
+    expectedRevisionId: withOpenApi(updateWalletPolicySchemaBase.shape.expectedRevisionId, {
+      description:
+        "Optimistic-concurrency precondition. When set, the update only applies if this matches the wallet's active control-profile revision id (use null to require that no profile is active); otherwise the request fails with 409. Omit to skip the check.",
+      example: "wcpr_example",
+    }),
   })
   .openapi({
     description:
-      "Update wallet policy request payload. Controls map to typed internal policy records for provider-specific extensibility.",
+      "Update wallet policy request payload with patch semantics: omitted fields keep the wallet's current values, and null clears a clearable limit. Controls map to typed internal policy records for provider-specific extensibility.",
   });
 
 export const tokenBalanceSchema = z

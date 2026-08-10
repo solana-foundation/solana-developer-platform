@@ -178,19 +178,27 @@ export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnio
   }),
 ]);
 
+// Patch semantics shared with mergeWalletPolicyPatch: omitted fields keep the
+// wallet's current value; explicit null clears a clearable limit.
 export const updateWalletPolicyBaseSchema = z.object({
-  destinationAllowlist: z.array(solanaAddressSchema("destinationAllowlist entry")).max(500),
+  destinationAllowlist: z
+    .array(solanaAddressSchema("destinationAllowlist entry"))
+    .max(500)
+    .optional(),
   commitMessage: z.string().trim().min(1).max(500).optional(),
   maxTransferAmount: z
     .string()
     .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+    .nullable()
     .optional(),
   maxDailyAmount: z
     .string()
     .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+    .nullable()
     .optional(),
   defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional(),
   rules: z.array(walletPolicyRuleSchema).max(100).optional(),
+  expectedRevisionId: z.string().min(1).max(120).nullable().optional(),
 });
 
 export const updateWalletPolicySchema = updateWalletPolicyBaseSchema.superRefine((policy, ctx) => {

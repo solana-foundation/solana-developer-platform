@@ -520,13 +520,20 @@ export async function updateWalletPolicy(
       headers: {
         "Content-Type": "application/json",
       },
+      // The API applies patch semantics (omitted fields keep their current
+      // values), while this editor replaces the whole policy — so cleared
+      // limits are sent as explicit nulls, and the base revision id rejects
+      // saves built on a policy another session has since changed.
       body: JSON.stringify({
         destinationAllowlist: policy.destinationAllowlist,
         ...(trimmedCommitMessage ? { commitMessage: trimmedCommitMessage } : {}),
-        ...(policy.maxTransferAmount ? { maxTransferAmount: policy.maxTransferAmount } : {}),
-        ...(policy.maxDailyAmount ? { maxDailyAmount: policy.maxDailyAmount } : {}),
+        maxTransferAmount: policy.maxTransferAmount ?? null,
+        maxDailyAmount: policy.maxDailyAmount ?? null,
         ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
         ...(policy.rules ? { rules: policy.rules } : {}),
+        ...(policy.controlProfile?.revisionId
+          ? { expectedRevisionId: policy.controlProfile.revisionId }
+          : {}),
       }),
     }
   );

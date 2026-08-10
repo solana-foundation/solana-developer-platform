@@ -180,7 +180,6 @@ export function buildPaymentsPlaygroundEndpointConfigs(
           placeholder: t("DashboardPayments.playground.destinationAllowlistPlaceholder"),
           defaultValue: exampleWalletAddress,
           valueType: "string_array",
-          required: true,
         },
         {
           key: maxTransferAmountFieldKey,

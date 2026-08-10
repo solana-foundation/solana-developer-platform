@@ -5,6 +5,7 @@ import {
   sumDecimalAmounts,
 } from "@sdp/payments/decimal";
 import { isDecimalString } from "@sdp/solana/amount";
+import type { PolicyDefaultAction, PolicyRule } from "@sdp/types";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type {
   PaymentsRepository,
@@ -58,6 +59,67 @@ function parseTransferLimitsPolicy(raw: string): {
   }
 
   return payload;
+}
+
+export interface WalletPolicyControlsState {
+  destinationAllowlist: string[];
+  maxTransferAmount?: string;
+  maxDailyAmount?: string;
+  /** Active control-profile revision content, or null when none is active. */
+  controlProfile: {
+    rules: PolicyRule[];
+    defaultAction: PolicyDefaultAction;
+  } | null;
+}
+
+export interface WalletPolicyControlsPatch {
+  destinationAllowlist?: string[];
+  maxTransferAmount?: string | null;
+  maxDailyAmount?: string | null;
+  rules?: PolicyRule[];
+  defaultAction?: PolicyDefaultAction;
+}
+
+/**
+ * The single patch semantic for wallet-policy updates, shared by the request
+ * schema, the update handler, and persistence: an omitted field keeps the
+ * wallet's current value, an explicit value replaces it, and an explicit null
+ * clears a clearable limit. The control profile only changes when the patch
+ * names `rules` or `defaultAction`; the omitted one is carried over from the
+ * active revision, or from the implicit default-allow policy when none is
+ * active.
+ *
+ * @param current - The wallet's current controls, read in the same transaction that persists the result.
+ * @param patch - The parsed request body.
+ * @returns The full controls state to persist.
+ */
+export function mergeWalletPolicyPatch(
+  current: WalletPolicyControlsState,
+  patch: WalletPolicyControlsPatch
+): WalletPolicyControlsState {
+  const touchesProfile = patch.rules !== undefined || patch.defaultAction !== undefined;
+  const baseProfile = current.controlProfile ?? {
+    rules: [] as PolicyRule[],
+    defaultAction: "allow" as PolicyDefaultAction,
+  };
+
+  return {
+    destinationAllowlist: patch.destinationAllowlist ?? current.destinationAllowlist,
+    maxTransferAmount:
+      patch.maxTransferAmount === undefined
+        ? current.maxTransferAmount
+        : (patch.maxTransferAmount ?? undefined),
+    maxDailyAmount:
+      patch.maxDailyAmount === undefined
+        ? current.maxDailyAmount
+        : (patch.maxDailyAmount ?? undefined),
+    controlProfile: touchesProfile
+      ? {
+          rules: patch.rules ?? baseProfile.rules,
+          defaultAction: patch.defaultAction ?? baseProfile.defaultAction,
+        }
+      : current.controlProfile,
+  };
 }
 
 export function buildWalletPolicyPayload(
