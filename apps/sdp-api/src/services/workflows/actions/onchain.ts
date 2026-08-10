@@ -109,6 +109,28 @@ export async function prepareOnchain(
   };
 }
 
+// The active custody wallet holding a public key, or null when none does (a key custody
+// does not manage, e.g. a local dev signer). Never throws: a lookup failure must not turn
+// into a retried action.
+function lookupCustodyWallet(env: Env, execution: WorkflowExecutionRow, publicKey: string) {
+  return new CustodyConfigStore(getDb(env), env)
+    .findActiveWalletByPublicKey(
+      execution.organization_id,
+      execution.project_id ?? undefined,
+      publicKey
+    )
+    .catch(() => null);
+}
+
+async function findCustodyWalletId(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  publicKey: string
+): Promise<string | null> {
+  const wallet = await lookupCustodyWallet(env, execution, publicKey);
+  return wallet?.walletId ?? null;
+}
+
 // Build the signer that actually controls the authority this action needs.
 //
 // The token's `signingWalletId` is the right key only while a token uses one wallet for
@@ -146,16 +168,20 @@ async function resolveSignerForAuthority(
   const required = requires === "mint" ? token.mintAuthority : token.freezeAuthority;
   // No declared authority to match (or none demanded): the token's wallet is all we know.
   if (!requires || !required || preferred.address === (required as string)) {
-    return { ok: true, signer: preferred, walletId: token.signingWalletId ?? null };
+    return {
+      ok: true,
+      signer: preferred,
+      // A token that names no wallet still signs with one: `getTransactionSigner` with no
+      // wallet id resolves the org's effective custody config and signs with that config's
+      // wallet — a real custody row that can carry an operation policy. Reporting null
+      // here let that wallet mint unbounded, so the id is recovered from the key that will
+      // actually sign. Null now means only what it says: no custody wallet holds this key.
+      walletId:
+        token.signingWalletId ?? (await findCustodyWalletId(env, execution, preferred.address)),
+    };
   }
 
-  const authorityWallet = await new CustodyConfigStore(getDb(env), env)
-    .findActiveWalletByPublicKey(
-      execution.organization_id,
-      execution.project_id ?? undefined,
-      required
-    )
-    .catch(() => null);
+  const authorityWallet = await lookupCustodyWallet(env, execution, required);
   if (!authorityWallet) {
     return {
       ok: false,

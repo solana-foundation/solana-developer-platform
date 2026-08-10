@@ -19,14 +19,32 @@ import type { Env } from "@/types/env";
 
 const TOKEN_WALLET_ID = "wal_token_nominal";
 const AUTHORITY_WALLET_ID = "wal_actual_mint_authority";
+// The wallet the org's effective custody config signs with when a token names none.
+const DEFAULT_WALLET_ID = "wal_org_default";
 const TOKEN_WALLET_PUBKEY = "So11111111111111111111111111111111111111112";
 const MINT_AUTHORITY_PUBKEY = "AENLi9e2xTiK7YHThmEQhBrCaDTjTRV4hsDXdwbPcBbK";
 
 // Signer address is keyed off the wallet id, so a wallet that is not the mint authority
-// produces an address that does not match and drives the fallback.
+// produces an address that does not match and drives the fallback. No wallet id means the
+// org default signer, which here holds TOKEN_WALLET_PUBKEY.
 const signerAddressByWallet: Record<string, string> = {
   [TOKEN_WALLET_ID]: TOKEN_WALLET_PUBKEY,
   [AUTHORITY_WALLET_ID]: MINT_AUTHORITY_PUBKEY,
+  [DEFAULT_WALLET_ID]: TOKEN_WALLET_PUBKEY,
+};
+
+// Custody's view: both keys belong to active custody wallets that can carry a policy.
+const custodyWalletByPubkey: Record<string, { walletId: string; publicKey: string; id: string }> = {
+  [MINT_AUTHORITY_PUBKEY]: {
+    walletId: AUTHORITY_WALLET_ID,
+    publicKey: MINT_AUTHORITY_PUBKEY,
+    id: "custody_row_authority",
+  },
+  [TOKEN_WALLET_PUBKEY]: {
+    walletId: DEFAULT_WALLET_ID,
+    publicKey: TOKEN_WALLET_PUBKEY,
+    id: "custody_row_default",
+  },
 };
 
 const createOrgSigner = vi.hoisted(() => vi.fn());
@@ -122,11 +140,10 @@ describe("workflow wallet policy binds to the signing wallet", () => {
         address: walletId ? signerAddressByWallet[walletId] : TOKEN_WALLET_PUBKEY,
       })
     );
-    findActiveWalletByPublicKey.mockResolvedValue({
-      walletId: AUTHORITY_WALLET_ID,
-      publicKey: MINT_AUTHORITY_PUBKEY,
-      id: "custody_row_authority",
-    });
+    findActiveWalletByPublicKey.mockImplementation(
+      async (_org: string, _project: string | undefined, publicKey: string) =>
+        custodyWalletByPubkey[publicKey] ?? null
+    );
     resolvePolicyCustodyWallet.mockResolvedValue({ id: "custody_row_authority" });
     enforceWalletOperationPolicy.mockResolvedValue(undefined);
   });
@@ -184,10 +201,52 @@ describe("workflow wallet policy binds to the signing wallet", () => {
     }
   });
 
-  // Unchanged behaviour, kept explicit: with no fallback and no nominal wallet there is no
-  // custody wallet to bind to, and the HTTP route skips in exactly the same situation.
-  it("skips when no custody wallet is identified at all", async () => {
+  // No fallback runs here: the token names no wallet AND the org default signer already
+  // holds the mint authority, so the early return decides the wallet id. That default
+  // signer is still a custody wallet — getTransactionSigner with no wallet id resolves the
+  // effective custody config and signs with its wallet — so its limits have to apply.
+  it("enforces the org default signer's policy when the token names no wallet", async () => {
     getToken.mockResolvedValue({ ...tokenFixture(null), mintAuthority: TOKEN_WALLET_PUBKEY });
+    const prep = await prepareOnchain(env, executionFixture(), "mint");
+    if (!prep.ok) {
+      throw new Error("prepareOnchain failed");
+    }
+
+    // The signer is the default one, matched to its custody row by public key.
+    expect(prep.ctx.signer.address).toBe(TOKEN_WALLET_PUBKEY);
+    expect(prep.ctx.signerWalletId).toBe(DEFAULT_WALLET_ID);
+
+    const outcome = await preflightWalletPolicy(env, prep.ctx, {
+      operationType: "issuance_mint_execute",
+      amount: "1000",
+      destination: TOKEN_WALLET_PUBKEY,
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(enforceWalletOperationPolicy).toHaveBeenCalledTimes(1);
+    expect(enforceWalletOperationPolicy.mock.calls[0][2]).toMatchObject({
+      walletId: DEFAULT_WALLET_ID,
+    });
+  });
+
+  // Same shape for an action that demands no particular authority — the early return is
+  // taken via `!requires`, and the signing wallet still has to be bound.
+  it("enforces the default signer's policy for an action with no required authority", async () => {
+    getToken.mockResolvedValue(tokenFixture(null));
+    const prep = await prepareOnchain(env, executionFixture());
+    if (!prep.ok) {
+      throw new Error("prepareOnchain failed");
+    }
+
+    expect(prep.ctx.signerWalletId).toBe(DEFAULT_WALLET_ID);
+  });
+
+  // Null is now reserved for what it actually says: no custody wallet holds this key, so
+  // there is no policy to bind. A local dev signer is the real-world case.
+  it("skips only when custody manages no wallet for the signing key", async () => {
+    getToken.mockResolvedValue({ ...tokenFixture(null), mintAuthority: TOKEN_WALLET_PUBKEY });
+    findActiveWalletByPublicKey.mockResolvedValue(null);
+
     const prep = await prepareOnchain(env, executionFixture(), "mint");
     if (!prep.ok) {
       throw new Error("prepareOnchain failed");
