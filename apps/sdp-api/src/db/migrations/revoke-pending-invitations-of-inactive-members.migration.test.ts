@@ -6,10 +6,8 @@ import { expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
 
 /**
- * A pending invitation held by a member who was removed before removal started
- * revoking invitations is a self-reinstatement token. The migration revokes
- * exactly those, and nothing else — an invitation for an active member, for a
- * non-member, or in another organization is somebody's live workflow.
+ * Revokes exactly the self-reinstatement tokens (pending invitations of
+ * inactive members) — everything else is somebody's live workflow.
  */
 it("revokes pending invitations only where the invited member is inactive", async () => {
   const migrationPath = path.join(
@@ -48,8 +46,7 @@ it("revokes pending invitations only where the invited member is inactive", asyn
       ('usr_removed', 'Removed@Example.com'),
       ('usr_active', 'active@example.com'),
       ('usr_identity', 'placeholder-{{user.email}}')`);
-    // The users row holds a corrupted placeholder; the real address only
-    // exists on the auth identity, which is also what acceptance would match.
+    // Real address only on the auth identity — which acceptance would match too.
     await client.query(`INSERT INTO auth_user_identities (id, user_id, email) VALUES
       ('aui_identity', 'usr_identity', 'identity@example.com')`);
     await client.query(`INSERT INTO organization_members (id, organization_id, user_id, status) VALUES
@@ -73,8 +70,8 @@ it("revokes pending invitations only where the invited member is inactive", asyn
     );
     const statusById = new Map(rows.map((row) => [row.id, row.status]));
 
-    // Inactive member in the invitation's organization → revoked, matched
-    // case-insensitively and through the auth identity as well as users.email.
+    // Inactive member in the invitation's org → revoked (case-insensitive,
+    // users.email or auth identity).
     expect(statusById.get("inv_stale")).toBe("revoked");
     expect(statusById.get("inv_identity_match")).toBe("revoked");
     expect(statusById.get("inv_other_org_removed")).toBe("revoked");

@@ -59,8 +59,7 @@ export function optionalSessionAuth() {
         const cachedSession = await sessionService.getSession(sessionId);
 
         if (cachedSession) {
-          // Checked before the context is set, so a request from a disallowed
-          // origin continues as anonymous rather than as an organization member.
+          // Before the context is set: a disallowed origin continues as anonymous.
           await enforceOrganizationIpAllowlist(c, cachedSession.organizationId);
           c.set("session", cachedSession);
           updateLastActivity(getDb(c.env), sessionId);

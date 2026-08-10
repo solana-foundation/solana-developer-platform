@@ -42,10 +42,8 @@ export interface OrganizationSettings {
   webhookSecret?: string;
   allowedIpAddresses?: string[];
   /**
-   * An allowlist written before the setting was enforced, kept for reference and
-   * never applied. Typed as `unknown` because these values predate validation
-   * and can be any shape. Migration 0055 moves them here; re-applying one means
-   * sending it back as `allowedIpAddresses`, which validates it.
+   * Pre-enforcement allowlist parked by migration 0055 — never applied, any
+   * shape (predates validation). Re-apply by sending it as `allowedIpAddresses`.
    */
   legacyAllowedIpAddresses?: unknown;
   providerOverrides?: OrganizationProviderOverrides;

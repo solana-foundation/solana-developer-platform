@@ -575,13 +575,9 @@ export const inviteMember = async (c: AppContext) => {
 };
 
 /**
- * The verified email address of the caller redeeming an invitation.
- *
- * Read from the caller's own identity rather than from the invitation, because
- * it is the value the invitation is checked against. The two stored copies are
- * both consulted for the reason described in `clerk-auth.ts`: either can hold an
- * unsubstituted JWT-template placeholder, which is not an address and must never
- * be matched against `invitations.email`.
+ * The caller's verified email, to match against `invitations.email`. Both
+ * stored copies are consulted because either can hold an unsubstituted
+ * JWT-template placeholder (see clerk-auth.ts).
  */
 async function resolveActorEmail(c: AppContext, userId: string): Promise<string | null> {
   const clerkEmail = c.get("clerk")?.email;
@@ -621,10 +617,8 @@ export const acceptInvitation = async (c: AppContext) => {
 
   const { token, name } = parsed.data;
 
-  // An invitation names a person, and accepting it is that person joining. An
-  // API key is the organization acting on its own behalf, so it has no identity
-  // to be the invitee — and letting it redeem a token would mean any key holder
-  // could enrol somebody else, or burn an invitation that is not theirs.
+  // An API key has no identity to be the invitee — letting it redeem a token
+  // would let any key holder enrol somebody else or burn their invitation.
   if (!actorUserId) {
     throw new AppError(
       "FORBIDDEN",
@@ -671,30 +665,18 @@ export const acceptInvitation = async (c: AppContext) => {
     throw new AppError("EXPIRED_INVITATION", "Invitation has expired");
   }
 
-  // The token proves an invitation was issued; it does not prove who is holding
-  // it. Invitations travel by email and the acceptance link is forwardable, so
-  // without this check anyone who came across a token could spend it: the
-  // membership was created for whichever address the invitation named, which
-  // enrols that person into an organization they never joined and leaves them
-  // holding a token that now reads as already accepted.
+  // The token proves an invitation was issued, not who is holding it — it
+  // travels by email and the link is forwardable. Anyone else spending it
+  // would enrol the invitee into an organization they never joined.
   if (invitation.email.trim().toLowerCase() !== actorEmail) {
     throw new AppError("FORBIDDEN", "This invitation was issued to a different email address");
   }
 
-  // Claim the invitation and create the membership in one transaction.
-  //
-  // The status check above is only a read, so on its own it leaves a window in
-  // which a concurrent revocation — or a second acceptance — can act on a row
-  // this request still believes is pending. The conditional write below closes
-  // that: exactly one caller flips pending to accepted.
-  //
-  // It has to commit together with the membership insert, though. Claiming first
-  // and failing afterwards would consume the invitation without producing a
-  // membership, and the retry would be rejected as no longer valid — stranding
-  // an invitee holding a token that is still rightfully theirs.
-  //
-  // Expiry is re-tested in the claim rather than trusted from the read above, so
-  // the deadline is enforced by the same statement that consumes the row.
+  // The conditional claim makes acceptance single-use under concurrency
+  // (exactly one caller flips pending → accepted) and re-tests expiry in the
+  // statement that consumes the row. It must commit together with the
+  // membership write: claiming alone and failing after would burn the token
+  // without granting anything.
   const claimInvitationAndGrantMembership = () =>
     getDb(c.env).transaction(async (tx) => {
       const claimed = await tx
@@ -710,8 +692,7 @@ export const acceptInvitation = async (c: AppContext) => {
         throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
       }
 
-      // Only fills a gap, never overwrites: the name belongs to the account, and
-      // an invitation acceptance is not the place to rename an existing one.
+      // Fills a gap only — acceptance is not the place to rename an account.
       if (name) {
         await tx
           .prepare("UPDATE users SET name = ? WHERE id = ? AND name IS NULL")
@@ -719,15 +700,9 @@ export const acceptInvitation = async (c: AppContext) => {
           .run();
       }
 
-      // The membership goes to the caller, in the organization the invitation
-      // names. Taking the organization from the invitation rather than from the
-      // caller's current context is what keeps a token from being redeemed into
-      // some other organization the caller happens to be signed in to.
-      //
-      // Locked because the row is read and then conditionally written. Against the
-      // other path that provisions a membership from this invitation — a Clerk
-      // sign-in through `ensureMembership` — the claim above is what serializes
-      // us: both consume the same invitation row, and only one can.
+      // Scoped to the invitation's organization, not the caller's current one,
+      // so a token cannot be redeemed into whatever org the caller is signed
+      // in to. Locked because the row is read and then conditionally written.
       const existingMembership = await tx
         .prepare(
           `SELECT id, status
@@ -739,19 +714,15 @@ export const acceptInvitation = async (c: AppContext) => {
         .first<{ id: string; status: string }>();
 
       if (existingMembership?.status === "active") {
-        // Already a member — the invitation is spent above and there is nothing
-        // left to grant. Inserting again would leave two rows for one membership.
+        // Invitation already spent above; nothing left to grant.
         return;
       }
 
       if (existingMembership) {
-        // An inactive row is reinstated rather than duplicated, at the role the
-        // invitation grants. This is safe only because a still-pending invitation
-        // is proof the removal came first: removing a member revokes their
-        // outstanding invitations in the same transaction (see removeMember, and
-        // migration 0056 for rows from before that rule), so the only invitation
-        // that can reach this branch is one an admin issued after the removal —
-        // a deliberate re-invite, not a leftover the removed member can replay.
+        // Reinstating an inactive row is safe only because removal revokes the
+        // member's pending invitations in the same transaction (removeMember;
+        // migration 0056 for older rows) — so a still-pending invitation must
+        // postdate the removal: a deliberate re-invite, not a replayable leftover.
         await tx
           .prepare(
             `UPDATE organization_members
@@ -780,14 +751,11 @@ export const acceptInvitation = async (c: AppContext) => {
   try {
     await claimInvitationAndGrantMembership();
   } catch (error) {
-    // FOR UPDATE cannot lock a row that does not exist yet, so a concurrent
-    // Clerk sign-in can insert this membership between the read above and the
-    // INSERT — the unique constraint on (organization_id, user_id) then rejects
-    // the duplicate and rolls the whole acceptance back, claim included. That
-    // rollback is what makes a single retry sound: the invitation is pending
-    // again, and the re-run sees the row that won and takes the update or
-    // early-return branch instead of inserting. Retried only when such a row
-    // actually exists, so every other failure propagates untouched.
+    // FOR UPDATE cannot lock a row that does not exist yet: a concurrent Clerk
+    // sign-in can insert this membership mid-transaction and the unique
+    // constraint rolls the acceptance back, claim included. That rollback makes
+    // one retry sound — the re-run claims again and sees the row that won.
+    // Retried only when such a row exists; every other failure propagates.
     const concurrentMembership = await getDb(c.env)
       .prepare("SELECT id FROM organization_members WHERE organization_id = ? AND user_id = ?")
       .bind(invitation.organization_id, actorUserId)
@@ -807,8 +775,7 @@ export const acceptInvitation = async (c: AppContext) => {
     resourceType: "invitation",
     resourceId: invitation.id,
     metadata: { email: invitation.email, userId: actorUserId },
-    // The organization the membership was granted in, which is the invitation's
-    // and not necessarily the one the caller was signed in to.
+    // The org the membership landed in, not the one the caller was signed in to.
     organizationId: invitation.organization_id,
     userId: actorUserId,
   });
@@ -846,9 +813,8 @@ export const removeMember = async (c: AppContext) => {
 
   const removesAnAdmin = normalizeOrganizationRole(member.role) === "admin";
 
-  // Every address the member could later redeem an invitation under.
-  // Acceptance matches the caller's email against `users` or any of their
-  // auth identities, so revocation below has to cover the same set.
+  // Acceptance matches the caller's email against `users` or any auth
+  // identity, so revocation must cover the same set.
   const inviteeEmailRows = await getDb(c.env)
     .prepare(
       `SELECT email FROM users WHERE id = ?
@@ -866,20 +832,12 @@ export const removeMember = async (c: AppContext) => {
   ];
 
   await getDb(c.env).transaction(async (tx) => {
-    // A pending invitation that survives the removal is a self-reinstatement
-    // token: acceptance reinstates an inactive membership at the invited role,
-    // so an invitation issued before the removal would let the removed member
-    // walk straight back in — possibly as admin. Revoking here, in the same
-    // transaction as the status flip, leaves acceptance able to honor only
-    // invitations an admin issued *after* the removal.
-    //
-    // Clerk's own acceptance link needs no matching revocation: a removed
-    // member signing in through it is refused on the inactive membership row
-    // before any invitation is consulted (see ensureMembership in clerk-auth).
-    //
-    // First statement on purpose: acceptance locks the invitation row before
-    // the membership row, and taking them in the same order here avoids a
-    // deadlock between a removal and a concurrent acceptance.
+    // A pending invitation surviving the removal is a self-reinstatement token
+    // (acceptance reinstates inactive rows at the invited role), so it dies in
+    // the same transaction as the status flip. Clerk's link needs no matching
+    // revocation — sign-in refuses the inactive row first. First statement so
+    // locks are taken in acceptance's order (invitation, then member): no
+    // deadlock against a concurrent acceptance.
     if (inviteeEmails.length > 0) {
       await tx
         .prepare(

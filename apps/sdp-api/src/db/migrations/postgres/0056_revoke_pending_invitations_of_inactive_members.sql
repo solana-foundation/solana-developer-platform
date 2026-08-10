@@ -1,16 +1,9 @@
--- Removing a member now revokes their outstanding pending invitations in the
--- same transaction (routes/members/handlers.ts), because a pending invitation
--- that survives the removal is a self-reinstatement token: acceptance
--- reinstates an inactive membership at the invited role, so a leftover
--- invitation would let a removed member walk straight back in — possibly at a
--- higher role than they ever held.
---
--- Members removed before that rule shipped may still have such invitations
--- pending; this revokes them. Matched on every address acceptance would accept
--- from the member — the users row and any auth identity — mirroring how the
--- caller's email is resolved at acceptance time. A legitimate re-invite issued
--- after this runs creates a new pending row and is unaffected, exactly as it
--- would be for a removal happening today.
+-- A pending invitation that survives a member's removal is a self-reinstatement
+-- token: acceptance reinstates inactive rows at the invited role. Removal now
+-- revokes them in the same transaction (routes/members/handlers.ts); this does
+-- the same for members removed before that rule shipped. Matched on every
+-- address acceptance honors (users row + auth identities). A re-invite issued
+-- after this runs creates a new pending row and is unaffected.
 UPDATE invitations AS i
    SET status = 'revoked'
  WHERE i.status = 'pending'

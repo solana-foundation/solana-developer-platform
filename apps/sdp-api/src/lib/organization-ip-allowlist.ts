@@ -8,13 +8,9 @@ import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 /**
- * The organization-wide allowed-IP restriction, or null when there is none.
- *
- * Returned as `unknown` on purpose: a value that was persisted before this
- * setting was validated can be any shape at all, and {@link isClientIpAllowed}
- * already fails closed on everything it does not recognize. Narrowing it here
- * would mean deciding what a malformed restriction means, which is exactly the
- * decision that belongs in one place.
+ * Returned as `unknown` on purpose: pre-validation values can be any shape,
+ * and {@link isClientIpAllowed} already fails closed on anything unrecognized —
+ * that decision belongs in one place.
  */
 function readAllowedIpAddresses(settings: string | null): unknown {
   if (!settings) {
@@ -26,27 +22,18 @@ function readAllowedIpAddresses(settings: string | null): unknown {
 }
 
 /**
- * Apply an organization's `settings.allowedIpAddresses` to the current request.
+ * Apply `settings.allowedIpAddresses` to the current request. Runs on every
+ * authenticated path — a restriction only one of three doors honors is not a
+ * restriction; an API key's own `allowedIps` intersects on top.
  *
- * This runs on every authenticated path — API key, Clerk and session — because
- * the setting restricts the organization rather than a single credential, and a
- * restriction that only one of three doors honors is not a restriction. An API
- * key's own `allowedIps` still applies on top; the two intersect.
+ * Deliberately uncached (one primary-key read per request): a cache would keep
+ * the previous origin authorized for its TTL after an operator turns this on.
  *
- * Costs one primary-key read per authenticated request. It is deliberately not
- * cached: the whole point of the setting is to take effect when an operator
- * turns it on, and a cache would keep the previous origin authorized for as
- * long as its TTL.
- *
- * A malformed restriction fails closed — see {@link readAllowedIpAddresses} —
- * but a settings blob that will not parse at all does not. That asymmetry is
- * deliberate. A blob holding no readable JSON expresses no configuration, and
- * every other reader of this column already treats it as carrying none; turning
- * it into a denial here would lock an organization out of its API and its
- * dashboard at once, with no route left to undo it, over a row nobody can even
- * read. Inducing that state needs write access to the database, and anyone
- * holding that could clear the allowlist outright — so failing closed would buy
- * no protection and risk an outage that takes database access to repair.
+ * A malformed restriction fails closed, but an unparseable settings blob reads
+ * as no restriction: it expresses no configuration, every other reader treats
+ * it that way, and denying would lock the organization out of the API and
+ * dashboard over a row nobody can repair through the API. Inducing that state
+ * needs DB write access — which could clear the allowlist outright anyway.
  */
 export async function enforceOrganizationIpAllowlist(
   c: Context<{ Bindings: Env }>,
@@ -58,9 +45,7 @@ export async function enforceOrganizationIpAllowlist(
     .first<{ settings: string | null }>();
 
   if (!row) {
-    // The credential resolved against an organization that no longer exists.
-    // There is no restriction to read, and the paths that own that failure
-    // report it far better than an origin error would.
+    // Organization gone: no restriction to read; the owning paths report that.
     return;
   }
 
@@ -68,8 +53,7 @@ export async function enforceOrganizationIpAllowlist(
   try {
     allowedIpAddresses = readAllowedIpAddresses(row.settings);
   } catch (error) {
-    // Logged at error level because it is a corruption we want to hear about,
-    // and treated as no restriction for the reason given above.
+    // Corruption we want to hear about; no restriction, per the doc above.
     getLogger().error(
       { error, organizationId },
       "Organization settings could not be parsed; no IP allowlist could be read"

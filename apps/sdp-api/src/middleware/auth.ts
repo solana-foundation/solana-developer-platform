@@ -387,15 +387,10 @@ export function authMiddleware() {
 
     await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);
 
-    // The organization-wide restriction applies on top of the key's own, and is
-    // read from Postgres rather than the cached key so that turning it on takes
-    // effect without waiting for every cached key to expire. That uncached read
-    // is exactly why it must run behind the KV-backed rate limiter: ahead of
-    // it, a key flooding past its tier would still cost one database query per
-    // rejected request, so the limiter would bound the handlers but never the
-    // database. Behind it, the reads a key can force are capped at its tier.
-    // The disallowed-origin requests this lets count against the quota are
-    // spent by whoever holds the key — nothing an outsider can burn.
+    // Uncached Postgres read (so enabling it takes effect immediately) — which
+    // is why it must sit behind the KV-backed limiter: ahead of it, a flooding
+    // key costs one DB read per rejected request. Behind it, reads are capped
+    // at the tier; the quota this spends belongs to whoever holds the key.
     await enforceOrganizationIpAllowlist(c, cachedKey.organizationId);
 
     // Set auth context

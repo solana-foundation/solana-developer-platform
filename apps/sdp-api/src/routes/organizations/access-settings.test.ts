@@ -82,11 +82,7 @@ function get(headers: Record<string, string>) {
   return app.request(`/v1/organizations/${ORGANIZATION_ID}`, { headers }, env);
 }
 
-/**
- * A settings patch. `from` is the origin the request appears to come from,
- * which matters whenever the patch installs an allowlist: the endpoint refuses
- * one that would exclude its own caller.
- */
+/** `from` matters when installing an allowlist: one excluding the caller is refused. */
 function patch(body: unknown, from = "203.0.113.42") {
   return app.request(
     `/v1/organizations/${ORGANIZATION_ID}`,
@@ -136,8 +132,8 @@ describe("Organization access settings", () => {
     });
 
     it("stores the range each entry actually selects", async () => {
-      // What is stored is what an operator is shown when they come back to
-      // review the restriction, so it has to say 256 hosts when it grants 256.
+      // The stored form is what a later review shows: it must say 256 hosts
+      // when it grants 256.
       const res = await patch({
         settings: {
           allowedIpAddresses: ["203.0.113.5/24", "2001:0DB8::0042", "::ffff:198.51.100.7"],
@@ -172,8 +168,7 @@ describe("Organization access settings", () => {
     });
 
     it("refuses an allowlist that excludes the caller's own origin", async () => {
-      // Nothing else could undo it: the restriction applies to this endpoint and
-      // to the dashboard, so accepting it would take database access to reverse.
+      // Accepting it would take database access to reverse.
       const res = await patch(
         { settings: { allowedIpAddresses: ["203.0.113.0/24"] } },
         "198.51.100.42"
@@ -221,10 +216,8 @@ describe("Organization access settings", () => {
     });
 
     it("keeps a security change that lands alongside an unrelated one", async () => {
-      // Both patches read the same settings, merge onto it and write the whole
-      // column back. Unsynchronized, whichever commits second overwrites the
-      // other — and an unrelated edit silently reverting the IP allowlist is
-      // exactly the failure that must not be possible.
+      // Unsynchronized read-merge-write would let the second commit silently
+      // revert the allowlist the first just installed.
       const [restriction, unrelated] = await Promise.all([
         patch({ settings: { allowedIpAddresses: ["203.0.113.0/24"] } }),
         patch({ settings: { defaultEnvironment: "production" } }),
@@ -369,10 +362,8 @@ describe("Organization access settings", () => {
     });
 
     it("reads no restriction from settings that will not parse", async () => {
-      // Denying here would lock the organization out of both the API and the
-      // dashboard over a row nobody can read, with no route left to repair it.
-      // Every other reader of this column already treats such a blob as holding
-      // no configuration.
+      // Denying over an unreadable row would be an unrecoverable lockout;
+      // every other reader treats such a blob as holding no configuration.
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
       await writeRawSettings("{not json");
 
@@ -385,8 +376,7 @@ describe("Organization access settings", () => {
     });
 
     it("ignores an allowlist that was recorded before the setting was enforced", async () => {
-      // Migration 0055 moves pre-enforcement values here. They were never
-      // validated and never decided an access outcome, so they must not start.
+      // Migration 0055 parks never-validated values here; they must not start deciding access.
       await seedOrganization(null);
       await writeRawSettings(
         JSON.stringify({ legacyAllowedIpAddresses: ["203.0.113.0/24", "office wifi"] })
@@ -451,19 +441,16 @@ describe("Organization access settings", () => {
     });
 
     it("dies at the rate limiter before the organization row is read", async () => {
-      // The allowlist check is an uncached Postgres read per request — the
-      // price of immediate enforcement. The rate limiter is KV-backed. If the
-      // read ran first, a key flooding past its tier would still cost one
-      // database query per rejected request, so the limiter would bound the
-      // handlers but never the database. Once the tier is exhausted the
-      // request must die with the limiter's 429, not the allowlist's 403 —
-      // which is only possible if the database read sits behind the limiter.
+      // The check is an uncached Postgres read; ahead of the KV-backed limiter
+      // it would cost one query per rejected request of a flooding key. Past
+      // the tier the request must get the limiter's 429, not the allowlist's
+      // 403 — only possible with the read behind the limiter.
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
 
       const headers = {
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        // Outside the allowlist, so on the wrong ordering every one of these
-        // returns the allowlist's 403 without ever counting toward the tier.
+        // Outside the allowlist: on the wrong ordering every request 403s
+        // without ever counting toward the tier.
         "x-forwarded-for": "198.51.100.42",
       };
 

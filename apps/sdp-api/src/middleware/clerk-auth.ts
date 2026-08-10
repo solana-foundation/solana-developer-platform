@@ -559,8 +559,7 @@ export function optionalClerkAuth() {
       if (payload.sub && payload.org_id) {
         const clerkContext = await buildClerkContext(c, payload);
         if (clerkContext) {
-          // Checked before the context is set, so a request from a disallowed
-          // origin continues as anonymous rather than as an organization member.
+          // Before the context is set: a disallowed origin continues as anonymous.
           await enforceOrganizationIpAllowlist(c, clerkContext.organizationId);
           c.set("clerk", clerkContext);
         }

@@ -1,10 +1,6 @@
 /**
- * Who an invitation can be redeemed by.
- *
- * A token proves an invitation was issued; it does not prove who is holding it.
- * Invitations travel by email and their links are forwardable, so these cover
- * the caller the acceptance is bound to, the organization the membership lands
- * in, and the single-use and expiry properties of the token itself.
+ * Who an invitation can be redeemed by: the token travels by email and is
+ * forwardable, so acceptance must be bound to the invited identity.
  */
 
 import { hashString } from "@sdp/payments/hash";
@@ -46,10 +42,7 @@ async function seedOrganization(id: string, slug: string): Promise<void> {
     .run();
 }
 
-/**
- * The caller: a user with an active membership and project in their home
- * organization, so a session authenticates and can be scoped to a project.
- */
+/** A user whose session authenticates and scopes to a home-org project. */
 async function seedCaller(email = CALLER_EMAIL): Promise<string> {
   await getDb(env)
     .prepare("INSERT INTO users (id, email, status) VALUES (?, ?, 'active'), (?, ?, 'active')")
@@ -220,8 +213,7 @@ describe("POST /v1/members/accept", () => {
     expect(granted[0]?.role).toBe("admin");
     expect(granted[0]?.status).toBe("active");
 
-    // The organization the caller was signed in to is untouched: it keeps the one
-    // membership it started with, at its original role.
+    // The caller's signed-in org is untouched.
     const home = await membershipsIn(HOME_ORG_ID, CALLER_USER_ID);
     expect(home).toHaveLength(1);
     expect(home[0]?.role).toBe("admin");
@@ -293,9 +285,7 @@ describe("POST /v1/members/accept", () => {
   });
 
   it("reinstates a removed membership from an invitation issued after the removal", async () => {
-    // The legitimate path back in: an admin re-invites a previously removed
-    // member, which creates a fresh invitation. Reinstatement happens on the
-    // existing row rather than by inserting a second one.
+    // The legitimate path back in: a fresh re-invite reuses the existing row.
     const sessionId = await seedCaller();
     await getDb(env)
       .prepare(
@@ -316,10 +306,8 @@ describe("POST /v1/members/accept", () => {
   });
 
   it("does not let a removed member self-reinstate with an invitation that predates the removal", async () => {
-    // A pending invitation that survives the member's removal is a
-    // self-reinstatement token: acceptance would flip the removed row back to
-    // active at the invited role, undoing the admin's decision. Removal must
-    // take the member's outstanding invitations down with it.
+    // Removal must take outstanding invitations down with it, or an unspent
+    // token flips the removed row back to active — at the invited role.
     const sessionId = await seedCaller();
     await getDb(env)
       .prepare(
@@ -328,8 +316,7 @@ describe("POST /v1/members/accept", () => {
       )
       .bind(INVITING_ORG_ID, CALLER_USER_ID)
       .run();
-    // Unspent invitation from before (or during) their membership — at a
-    // higher role than they held, which is the escalation the attack buys.
+    // Unspent, at a higher role than they held — the escalation the attack buys.
     await seedInvitation({ role: "admin" });
 
     // An admin of the inviting organization removes them.

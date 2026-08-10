@@ -69,9 +69,7 @@ function parseIpv4Octets(address: string): number[] | null {
 
   const octets: number[] = [];
   for (const part of parts) {
-    // Leading zeros are rejected rather than normalized: `010.0.0.1` reads as
-    // octal to some resolvers and as decimal to others, so there is no single
-    // canonical form to pick.
+    // `010.0.0.1` is octal to some resolvers, decimal to others — reject, don't guess.
     if (!/^(0|[1-9]\d{0,2})$/.test(part)) {
       return null;
     }
@@ -91,8 +89,7 @@ function toHextets(parts: readonly string[]): number[] | null {
 
   for (const [index, part] of parts.entries()) {
     if (part.includes(".")) {
-      // An embedded IPv4 address occupies the low 32 bits, so it is only valid
-      // as the final group.
+      // An embedded IPv4 quad is only valid as the final group.
       if (index !== parts.length - 1) {
         return null;
       }
@@ -200,16 +197,10 @@ function formatRange(address: string, prefix: number, maximumPrefix: number): st
 }
 
 /**
- * Rewrite a valid entry into the single form that means what it enforces.
- *
- * Matching already tolerates the variants — `node:net`'s BlockList ignores host
- * bits, folds case, and treats an IPv4-mapped range as its IPv4 equivalent — so
- * this is about what an operator is shown afterwards. `203.0.113.5/24` reads as
- * one host and authorizes 256; `::ffff:203.0.113.0/120` reads as an IPv6 rule
- * and authorizes IPv4 clients. Storing the canonical form is what makes a
- * review of the allowlist agree with the access it grants.
- *
- * Returns null for anything {@link isValidIpAllowlistEntry} would reject.
+ * Rewrite a valid entry into the form that means what it enforces. BlockList
+ * already tolerates the variants at match time; this is for the operator
+ * reviewing the stored list — `203.0.113.5/24` reads as one host but
+ * authorizes 256. Null for anything {@link isValidIpAllowlistEntry} rejects.
  */
 export function canonicalizeIpAllowlistEntry(value: string): string | null {
   const parsed = parseIpRange(value);
@@ -232,8 +223,7 @@ export function canonicalizeIpAllowlistEntry(value: string): string | null {
 
   const masked = maskGroups(hextets, 16, parsed.prefix);
 
-  // Below /96 the prefix covers part of the mapping prefix itself, so the range
-  // is no longer confined to the IPv4 space and has to stay in IPv6 form.
+  // Below /96 the range escapes the IPv4-mapped space and must stay IPv6.
   if (parsed.prefix >= 96 && isIpv4Mapped(masked)) {
     const octets = [masked[6] >> 8, masked[6] & 0xff, masked[7] >> 8, masked[7] & 0xff];
     return formatRange(octets.join("."), parsed.prefix - 96, 32);
@@ -243,9 +233,8 @@ export function canonicalizeIpAllowlistEntry(value: string): string | null {
 }
 
 /**
- * Canonicalize a whole allowlist, dropping duplicates that differed only in
- * spelling. Returns null when any entry is invalid, so a caller cannot persist
- * a partially understood list.
+ * Canonicalize a whole allowlist, deduped. Null when any entry is invalid —
+ * a partially understood list must never be persisted.
  */
 export function canonicalizeIpAllowlist(values: readonly string[]): string[] | null {
   const canonical = new Set<string>();

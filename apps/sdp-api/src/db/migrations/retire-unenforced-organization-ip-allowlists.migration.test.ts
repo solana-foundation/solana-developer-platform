@@ -6,10 +6,8 @@ import { expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
 
 /**
- * Rows written before `settings.allowedIpAddresses` was enforced must not start
- * deciding access on deploy: they were never validated, and a bad one denies
- * every authenticated request for that organization with no route left to undo
- * it. The migration moves them aside without losing them.
+ * Never-validated pre-enforcement allowlists must not start deciding access on
+ * deploy — a bad one denies the whole organization. Moved aside, not deleted.
  */
 it("retires pre-enforcement allowlists without losing them", async () => {
   const migrationPath = path.join(
@@ -58,8 +56,7 @@ it("retires pre-enforcement allowlists without losing them", async () => {
       defaultEnvironment: "sandbox",
     });
 
-    // Whatever shape it was in, it moves — an entry that cannot be parsed at
-    // request time is exactly the value that would deny everything.
+    // Whatever the shape, it moves — the unparseable entry is the one that would deny everything.
     expect(parse("org_invalid_entry")).toEqual({ legacyAllowedIpAddresses: ["office wifi"] });
     expect(parse("org_not_an_array")).toEqual({ legacyAllowedIpAddresses: "203.0.113.0/24" });
 
@@ -67,8 +64,7 @@ it("retires pre-enforcement allowlists without losing them", async () => {
     expect(parse("org_other_settings")).toEqual({ defaultEnvironment: "production" });
     expect(settingsById.get("org_no_settings")).toBeNull();
 
-    // Left exactly as found. There is nothing readable to move, and the
-    // enforcement reads an unparseable blob as carrying no restriction.
+    // Nothing readable to move; enforcement reads such a blob as unrestricted.
     expect(settingsById.get("org_unparseable")).toBe("{not json");
   } finally {
     await client.query("ROLLBACK");

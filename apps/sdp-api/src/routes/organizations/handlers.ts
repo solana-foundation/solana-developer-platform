@@ -112,11 +112,8 @@ export const getOrganization = async (c: AppContext) => {
 type OrganizationSettingsPatch = NonNullable<z.infer<typeof updateOrgSchema>["settings"]>;
 
 /**
- * The settings to merge, with the allowlist rewritten to canonical form.
- *
- * Storing what was typed rather than what it means is how an allowlist ends up
- * broader than the operator who wrote it believes: `203.0.113.5/24` is displayed
- * back as a single host and authorizes 256 of them.
+ * Canonicalizes the allowlist before storage: `203.0.113.5/24` displays as one
+ * host but authorizes 256, so the stored form must be the range it selects.
  */
 function resolveSettingsPatch(
   patch: OrganizationSettingsPatch | undefined
@@ -128,8 +125,7 @@ function resolveSettingsPatch(
   const allowedIpAddresses = canonicalizeIpAllowlist(patch.allowedIpAddresses);
 
   if (!allowedIpAddresses) {
-    // Unreachable: the schema rejects an invalid entry before this runs. Kept so
-    // that a future caller of this helper cannot skip the validation silently.
+    // Unreachable behind the schema; kept so a future caller cannot skip it.
     throw badRequest("Invalid request body", {
       errors: {
         settings: ["allowedIpAddresses must contain only valid IP addresses or CIDR ranges"],
@@ -141,17 +137,10 @@ function resolveSettingsPatch(
 }
 
 /**
- * Refuse an allowlist that would shut out the request installing it.
- *
- * The restriction applies to every authenticated path, including this endpoint
- * and the dashboard, so an allowlist that excludes the caller's own origin is
- * not recoverable through the API at all — it takes database access to undo.
- * Refusing it here costs an operator one corrected request; allowing it costs
- * them the organization.
- *
- * A missing client IP is refused for the same reason: the enforcement fails
- * closed without one, so a deployment that cannot observe the origin cannot
- * satisfy any non-empty allowlist either.
+ * Refuses an allowlist that would shut out the request installing it. The
+ * restriction covers this endpoint and the dashboard, so such a list is
+ * unrecoverable through the API — only database access could undo it. A
+ * missing client IP is refused too: enforcement fails closed without one.
  */
 function assertAllowlistAdmitsCaller(c: AppContext, allowedIps: string[] | undefined): void {
   if (allowedIps === undefined || allowedIps.length === 0) {
@@ -194,19 +183,14 @@ export const updateOrganization = async (c: AppContext) => {
 
   assertAllowlistAdmitsCaller(c, settingsPatch?.allowedIpAddresses);
 
-  // Availability depends on organization state this request does not write, so
-  // it is checked outside the transaction below rather than holding the row
-  // while it runs.
+  // Checked outside the transaction so the row is not held while it runs.
   if (settingsPatch?.rpcProvider) {
     await assertProviderAvailable(c.env, getDb(c.env), orgId, "rpc", settingsPatch.rpcProvider);
   }
 
-  // Settings are one JSON column, so a patch is a read, a merge and a write. Run
-  // unsynchronized, two concurrent patches both merge onto the state they read
-  // and the one that commits second silently drops the other's change — which,
-  // for a column holding the IP allowlist, means a security setting can be
-  // reverted by an unrelated edit landing at the same moment. Locking the row
-  // for the whole read-merge-write makes the merges compose instead.
+  // Settings are one JSON column patched by read-merge-write. Unsynchronized,
+  // the second commit silently drops the first — an unrelated edit could revert
+  // a just-installed allowlist. The row lock makes concurrent merges compose.
   const org = await getDb(c.env).transaction(async (tx) => {
     const existing = await tx
       .prepare(
@@ -266,8 +250,7 @@ export const updateOrganization = async (c: AppContext) => {
     action: "update",
     resourceType: "organization",
     resourceId: orgId,
-    // The canonicalized allowlist, not the submitted spelling, so the trail
-    // records the access that was actually granted.
+    // Canonical form, not the submitted spelling: the trail records what was granted.
     metadata: { ...parsed.data, ...(settingsPatch ? { settings: settingsPatch } : {}) },
   });
 
