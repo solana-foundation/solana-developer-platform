@@ -3,6 +3,7 @@ import { normalizeOrganizationRole, type OrganizationRole, type Permission } fro
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { isPlausibleEmail } from "@/lib/clerk-token";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
@@ -573,7 +574,42 @@ export const inviteMember = async (c: AppContext) => {
   return created(c, response);
 };
 
+/**
+ * The verified email address of the caller redeeming an invitation.
+ *
+ * Read from the caller's own identity rather than from the invitation, because
+ * it is the value the invitation is checked against. The two stored copies are
+ * both consulted for the reason described in `clerk-auth.ts`: either can hold an
+ * unsubstituted JWT-template placeholder, which is not an address and must never
+ * be matched against `invitations.email`.
+ */
+async function resolveActorEmail(c: AppContext, userId: string): Promise<string | null> {
+  const clerkEmail = c.get("clerk")?.email;
+  if (isPlausibleEmail(clerkEmail)) {
+    return clerkEmail.trim().toLowerCase();
+  }
+
+  const row = await getDb(c.env)
+    .prepare(
+      `SELECT u.email AS user_email,
+              (SELECT aui.email
+                 FROM auth_user_identities aui
+                WHERE aui.user_id = u.id AND aui.email IS NOT NULL
+                ORDER BY aui.updated_at DESC NULLS LAST
+                LIMIT 1) AS identity_email
+         FROM users u
+        WHERE u.id = ?`
+    )
+    .bind(userId)
+    .first<{ user_email: string | null; identity_email: string | null }>();
+
+  const email = [row?.user_email, row?.identity_email].find(isPlausibleEmail);
+  return email ? email.trim().toLowerCase() : null;
+}
+
 export const acceptInvitation = async (c: AppContext) => {
+  const { userId: actorUserId } = resolveActor(c);
+
   const body = await c.req.json();
   const parsed = acceptSchema.safeParse(body);
 
@@ -584,6 +620,26 @@ export const acceptInvitation = async (c: AppContext) => {
   }
 
   const { token, name } = parsed.data;
+
+  // An invitation names a person, and accepting it is that person joining. An
+  // API key is the organization acting on its own behalf, so it has no identity
+  // to be the invitee — and letting it redeem a token would mean any key holder
+  // could enrol somebody else, or burn an invitation that is not theirs.
+  if (!actorUserId) {
+    throw new AppError(
+      "FORBIDDEN",
+      "An invitation can only be accepted by the invited user, not by an API key"
+    );
+  }
+
+  const actorEmail = await resolveActorEmail(c, actorUserId);
+  if (!actorEmail) {
+    throw new AppError(
+      "FORBIDDEN",
+      "Your account has no verified email address, so no invitation can be matched to it"
+    );
+  }
+
   const tokenHash = await hashString(token);
 
   // Get invitation
@@ -615,6 +671,16 @@ export const acceptInvitation = async (c: AppContext) => {
     throw new AppError("EXPIRED_INVITATION", "Invitation has expired");
   }
 
+  // The token proves an invitation was issued; it does not prove who is holding
+  // it. Invitations travel by email and the acceptance link is forwardable, so
+  // without this check anyone who came across a token could spend it: the
+  // membership was created for whichever address the invitation named, which
+  // enrols that person into an organization they never joined and leaves them
+  // holding a token that now reads as already accepted.
+  if (invitation.email.trim().toLowerCase() !== actorEmail) {
+    throw new AppError("FORBIDDEN", "This invitation was issued to a different email address");
+  }
+
   // Claim the invitation and create the membership in one transaction.
   //
   // The status check above is only a read, so on its own it leaves a window in
@@ -622,40 +688,73 @@ export const acceptInvitation = async (c: AppContext) => {
   // this request still believes is pending. The conditional write below closes
   // that: exactly one caller flips pending to accepted.
   //
-  // It has to commit together with the user and membership inserts, though.
-  // Claiming first and failing afterwards would consume the invitation without
-  // producing a membership, and the retry would be rejected as no longer valid
-  // — stranding an invitee holding a token that is still rightfully theirs.
+  // It has to commit together with the membership insert, though. Claiming first
+  // and failing afterwards would consume the invitation without producing a
+  // membership, and the retry would be rejected as no longer valid — stranding
+  // an invitee holding a token that is still rightfully theirs.
+  //
+  // Expiry is re-tested in the claim rather than trusted from the read above, so
+  // the deadline is enforced by the same statement that consumes the row.
   await getDb(c.env).transaction(async (tx) => {
     const claimed = await tx
       .prepare(
         `UPDATE invitations
             SET status = 'accepted', accepted_at = datetime('now')
-          WHERE id = ? AND status = 'pending'`
+          WHERE id = ? AND status = 'pending' AND expires_at > ?`
       )
-      .bind(invitation.id)
+      .bind(invitation.id, new Date().toISOString())
       .run();
 
     if (claimed === 0) {
       throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
     }
 
-    let user = await tx
-      .prepare("SELECT id, email FROM users WHERE email = ?")
-      .bind(invitation.email)
-      .first<{ id: string; email: string }>();
+    // Only fills a gap, never overwrites: the name belongs to the account, and
+    // an invitation acceptance is not the place to rename an existing one.
+    if (name) {
+      await tx
+        .prepare("UPDATE users SET name = ? WHERE id = ? AND name IS NULL")
+        .bind(name, actorUserId)
+        .run();
+    }
 
-    if (!user) {
-      const userId = `usr_${crypto.randomUUID()}`;
+    // The membership goes to the caller, in the organization the invitation
+    // names. Taking the organization from the invitation rather than from the
+    // caller's current context is what keeps a token from being redeemed into
+    // some other organization the caller happens to be signed in to.
+    //
+    // Locked because the row is read and then conditionally written. Against the
+    // other path that provisions a membership from this invitation — a Clerk
+    // sign-in through `ensureMembership` — the claim above is what serializes
+    // us: both consume the same invitation row, and only one can.
+    const existingMembership = await tx
+      .prepare(
+        `SELECT id, status
+           FROM organization_members
+          WHERE organization_id = ? AND user_id = ?
+            FOR UPDATE`
+      )
+      .bind(invitation.organization_id, actorUserId)
+      .first<{ id: string; status: string }>();
+
+    if (existingMembership?.status === "active") {
+      // Already a member — the invitation is spent above and there is nothing
+      // left to grant. Inserting again would leave two rows for one membership.
+      return;
+    }
+
+    if (existingMembership) {
+      // A removed or suspended row is reinstated rather than duplicated, at the
+      // role the invitation grants.
       await tx
         .prepare(
-          `INSERT INTO users (id, email, name, email_verified, status)
-             VALUES (?, ?, ?, 1, 'active')`
+          `UPDATE organization_members
+              SET role = ?, status = 'active'
+            WHERE id = ?`
         )
-        .bind(userId, invitation.email, name ?? null)
+        .bind(normalizeOrganizationRole(invitation.role), existingMembership.id)
         .run();
-
-      user = { id: userId, email: invitation.email };
+      return;
     }
 
     await tx
@@ -666,7 +765,7 @@ export const acceptInvitation = async (c: AppContext) => {
       .bind(
         `mem_${crypto.randomUUID()}`,
         invitation.organization_id,
-        user.id,
+        actorUserId,
         normalizeOrganizationRole(invitation.role)
       )
       .run();
@@ -678,7 +777,11 @@ export const acceptInvitation = async (c: AppContext) => {
     action: "accept_invite",
     resourceType: "invitation",
     resourceId: invitation.id,
-    metadata: { email: invitation.email },
+    metadata: { email: invitation.email, userId: actorUserId },
+    // The organization the membership was granted in, which is the invitation's
+    // and not necessarily the one the caller was signed in to.
+    organizationId: invitation.organization_id,
+    userId: actorUserId,
   });
 
   return success(c, { success: true });
