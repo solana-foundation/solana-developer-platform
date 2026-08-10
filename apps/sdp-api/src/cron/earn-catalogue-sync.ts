@@ -61,6 +61,18 @@ export const EARN_CATALOGUE_SYNC_CRON = "0 * * * *";
 export const EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS = 3540;
 const EARN_CATALOGUE_SYNC_SLOT_KEY = "cron:earn-catalogue-sync:slot";
 
+// Lease validity: a claim only guarantees mutual exclusion while the holder's
+// work is bounded well below the claim's expiry, so the sync itself carries a
+// deadline. A pass is a handful of catalogue GETs (seconds today), so ten
+// minutes is generous headroom while staying far under the slot TTL — an
+// execution can therefore never still be syncing when its token expires and a
+// newer tick takes over. On the deadline the tick fails loudly and releases
+// its (provably still owned) claim; the job process exits, reaping any hung
+// I/O. Managed Cloud Run additionally caps the whole execution at the job
+// timeout (120s in sdp-infra), far under this — the deadline exists so the
+// invariant holds on every runtime, not just managed.
+export const EARN_CATALOGUE_SYNC_DEADLINE_SECONDS = 600;
+
 // The catalogue is platform-global but environment-scoped (sandbox rows carry
 // devnet mints, production rows mainnet mints), so each provider syncs once
 // per environment.
@@ -194,12 +206,14 @@ export type EarnCatalogueSyncTickOutcome = "synced" | "skipped";
  * skip without a monitor check-in, so Sentry sees check-ins matching
  * EARN_CATALOGUE_SYNC_CRON rather than the job's five-minute schedule.
  *
- * A failed sync releases the slot — the next five-minute tick retries instead
- * of waiting out the hour — and rethrows: syncEarnCatalogue already degrades
- * per provider and per row, so anything escaping it is infrastructure-level
- * and must fail the job loudly. The release is compareAndDelete on this
- * execution's claim token, so it atomically no-ops if a newer tick has taken
- * the slot over in the meantime.
+ * A failed or deadline-exceeded sync releases the slot — the next five-minute
+ * tick retries instead of waiting out the hour — and rethrows:
+ * syncEarnCatalogue already degrades per provider and per row, so anything
+ * escaping it is infrastructure-level and must fail the job loudly. The
+ * release is compareAndDelete on this execution's claim token, so it
+ * atomically no-ops if a newer tick has taken the slot over in the meantime;
+ * the sync deadline (far under the claim expiry) guarantees that never
+ * happens while a sync is still running.
  *
  * Callers gate on isEarnEnabled first, mirroring the in-process registration
  * in cron/runner.ts.
@@ -215,7 +229,9 @@ export async function runEarnCatalogueSyncIfDue(
     return "skipped";
   }
 
-  const work = () => syncEarnCatalogue(env);
+  // The deadline sits inside the monitor wrapper so Sentry records an
+  // exceeded run as a failed check-in rather than a forever-pending one.
+  const work = () => withSyncDeadline(syncEarnCatalogue(env));
   try {
     await (observability
       ? observability.withMonitor(EARN_CATALOGUE_SYNC_MONITOR, work, {
@@ -240,6 +256,29 @@ export async function runEarnCatalogueSyncIfDue(
     throw err;
   }
   return "synced";
+}
+
+// Rejects when the sync outlives its deadline, enforcing the lease-validity
+// invariant above. The losing promise is not cancelled — the tick's failure
+// exits the one-shot job process, which reaps any hung I/O — and the timer is
+// unref'd/cleared so a fast pass neither leaks it nor holds the process open.
+async function withSyncDeadline<T>(sync: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new Error(
+          `earn catalogue sync exceeded its ${EARN_CATALOGUE_SYNC_DEADLINE_SECONDS}s deadline`
+        )
+      );
+    }, EARN_CATALOGUE_SYNC_DEADLINE_SECONDS * 1000);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([sync, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Claim token wire format: `<expiresAtEpochMs>:<uuid>`. Wall-clock epoch is

@@ -9,6 +9,7 @@ import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
   EARN_CATALOGUE_SYNC_CRON,
+  EARN_CATALOGUE_SYNC_DEADLINE_SECONDS,
   EARN_CATALOGUE_SYNC_MONITOR,
   EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS,
   runEarnCatalogueSyncIfDue,
@@ -240,6 +241,36 @@ describe("runEarnCatalogueSyncIfDue", () => {
     // five-minute tick to retry.
     const token = mocks.compareAndSet.mock.calls[0][2] as string;
     expect(mocks.compareAndDelete).toHaveBeenCalledExactlyOnceWith(SLOT_KEY, token);
+  });
+
+  it("fails a sync that exceeds its deadline and releases the still-owned claim", async () => {
+    vi.useFakeTimers();
+    try {
+      // A provider call that never settles — the deadline, not the provider,
+      // must end the tick, keeping every execution bounded far below the
+      // claim expiry (the lease-validity invariant).
+      const never = new Promise<ProviderStrategySnapshot[]>(() => {});
+      installProviders({
+        ground: makeProvider(
+          "ground",
+          vi.fn(() => never)
+        ),
+      });
+
+      const tick = runEarnCatalogueSyncIfDue(env);
+      const assertion = expect(tick).rejects.toThrow(
+        `exceeded its ${EARN_CATALOGUE_SYNC_DEADLINE_SECONDS}s deadline`
+      );
+      await vi.advanceTimersByTimeAsync(EARN_CATALOGUE_SYNC_DEADLINE_SECONDS * 1000);
+      await assertion;
+
+      // Deadline ≪ claim expiry, so the claim is provably still this
+      // execution's and the release frees the next tick to retry.
+      const token = mocks.compareAndSet.mock.calls[0][2] as string;
+      expect(mocks.compareAndDelete).toHaveBeenCalledExactlyOnceWith(SLOT_KEY, token);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("never lets a slot-release failure mask the sync error", async () => {
