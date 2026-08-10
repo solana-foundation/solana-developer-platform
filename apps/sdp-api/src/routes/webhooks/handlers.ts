@@ -94,10 +94,6 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
   }
 
   const db = getDb(c.env);
-  const orgKeyHashes = await db
-    .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
-    .bind(mapping.organization_id)
-    .all<{ key_hash: string }>();
 
   await db.batch([
     db
@@ -118,6 +114,15 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       )
       .bind(mapping.organization_id),
   ]);
+
+  // Query the hashes AFTER the revocation batch commits: a key created
+  // concurrently with this webhook still gets revoked by the batch, and a
+  // pre-batch snapshot would miss it — leaving its cached credentials
+  // active for the full TTL.
+  const orgKeyHashes = await db
+    .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
+    .bind(mapping.organization_id)
+    .all<{ key_hash: string }>();
 
   // Webhooks are a KV-free path (no c.var.kv), so build the store set
   // directly — it shares the process-wide Redis client. Same invariant as

@@ -222,11 +222,6 @@ export const deleteOrganization = async (c: AppContext) => {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
-  const orgKeyHashes = await db
-    .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
-    .bind(orgId)
-    .all<{ key_hash: string }>();
-
   await db.batch([
     db
       .prepare(
@@ -242,6 +237,15 @@ export const deleteOrganization = async (c: AppContext) => {
       )
       .bind(orgId),
   ]);
+
+  // Query the hashes AFTER the revocation batch commits: a key created
+  // concurrently with this request still gets revoked by the batch, and a
+  // pre-batch snapshot would miss it — leaving its cached credentials
+  // active for the full TTL.
+  const orgKeyHashes = await db
+    .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
+    .bind(orgId)
+    .all<{ key_hash: string }>();
 
   // Push the revoked state into the auth cache for every one of the org's
   // keys before reporting success — otherwise cached entries keep
