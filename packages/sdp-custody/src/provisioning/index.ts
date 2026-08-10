@@ -310,7 +310,11 @@ export async function provisionPrivyWallet(
     ? { apiBaseUrl, authHeader, appId, externalId: options.externalId }
     : undefined;
   if (externalWalletLookup) {
-    const existing = await findPrivyWalletByExternalId(runtime, externalWalletLookup);
+    const existing = await findPrivyWalletByExternalId(
+      runtime,
+      config,
+      externalWalletLookup.externalId
+    );
     if (existing) return existing;
   }
 
@@ -343,7 +347,11 @@ export async function provisionPrivyWallet(
     }
     if (externalWalletLookup) {
       try {
-        const reconciled = await findPrivyWalletByExternalId(runtime, externalWalletLookup);
+        const reconciled = await findPrivyWalletByExternalId(
+          runtime,
+          config,
+          externalWalletLookup.externalId
+        );
         if (reconciled) return reconciled;
       } catch (reconciliationError) {
         if (isPrivyProvisioningConflict(reconciliationError)) {
@@ -867,21 +875,32 @@ async function privyRequest<T>(
   }
 }
 
-async function findPrivyWalletByExternalId(
+export async function findPrivyWalletByExternalId(
   runtime: CustodyProvisioningRuntime,
-  params: Pick<PrivyRequestParams, "apiBaseUrl" | "authHeader" | "appId"> & {
-    externalId: string;
-  }
+  config: PrivyProvisioningConfig,
+  externalId: string
 ): Promise<ProvisionPrivyResult | undefined> {
+  const appId = config.appId;
+  const appSecret = config.appSecret;
+  if (!appId || !appSecret) {
+    throw new SigningError(
+      "Privy environment variables not configured: PRIVY_APP_ID, PRIVY_APP_SECRET",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(externalId)) {
+    throw new SigningError("Privy external wallet ID is invalid", "INVALID_REQUEST");
+  }
+
   let wallet: PrivyWalletResponse;
   try {
     wallet = await privyRequest<PrivyWalletResponse>(runtime, {
-      apiBaseUrl: params.apiBaseUrl,
+      apiBaseUrl: config.apiBaseUrl ?? DEFAULT_PRIVY_API_BASE_URL,
       allowNotFound: true,
-      authHeader: params.authHeader,
-      appId: params.appId,
+      authHeader: `Basic ${encodeBasicAuth(`${appId}:${appSecret}`)}`,
+      appId,
       method: "GET",
-      path: `/wallets/ext_wal_${encodeURIComponent(params.externalId)}`,
+      path: `/wallets/ext_wal_${encodeURIComponent(externalId)}`,
       storedCredentialRequest: true,
     });
   } catch (error) {
@@ -891,7 +910,7 @@ async function findPrivyWalletByExternalId(
     throw error;
   }
 
-  return validatePrivyExternalWallet(wallet, params.externalId);
+  return validatePrivyExternalWallet(wallet, externalId);
 }
 
 function validatePrivyWalletPayload(wallet: PrivyWalletResponse): ProvisionPrivyResult {
