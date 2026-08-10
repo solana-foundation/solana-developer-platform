@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import * as solanaServices from "@/services/solana";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const { createChannelTransferMock, resolveGatewayAuthMock } = vi.hoisted(() => ({
@@ -408,7 +408,6 @@ describe("Private Channels — transfer access and routes", () => {
 
   afterEach(async () => {
     env.PRIVATE_CHANNELS_ENABLED = originalPrivateChannelsEnabled;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

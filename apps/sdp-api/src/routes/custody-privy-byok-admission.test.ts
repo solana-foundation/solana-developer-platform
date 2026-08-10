@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
@@ -152,7 +152,6 @@ describe("legacy Privy setup admission", () => {
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

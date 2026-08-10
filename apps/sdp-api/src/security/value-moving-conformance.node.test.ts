@@ -104,13 +104,13 @@ const contracts: ValueMovingContract[] = [
     replay: [
       {
         mode: "claimed_state_machine",
-        file: "apps/sdp-api/src/routes/payments.test.ts",
+        file: "apps/sdp-api/src/routes/payments.recurring.test.ts",
         evidence:
           "recovers stale authorized recurring payments without re-confirming old signatures",
       },
       {
         mode: "fresh_blockhash_per_attempt",
-        file: "apps/sdp-api/src/routes/payments.test.ts",
+        file: "apps/sdp-api/src/routes/payments.recurring.test.ts",
         evidence: "journals failed on-chain activation attempts and retries with a fresh signature",
       },
     ],
@@ -150,12 +150,12 @@ const contracts: ValueMovingContract[] = [
     replay: [
       {
         mode: "idempotency_fingerprint",
-        file: "apps/sdp-api/src/routes/payments.test.ts",
+        file: "apps/sdp-api/src/routes/payments.transfers.test.ts",
         evidence: "replays a transfer when the same Idempotency-Key + body is retried",
       },
       {
         mode: "idempotency_fingerprint",
-        file: "apps/sdp-api/src/routes/payments.test.ts",
+        file: "apps/sdp-api/src/routes/payments.transfers.test.ts",
         evidence: "rejects the same Idempotency-Key with a different body",
       },
     ],

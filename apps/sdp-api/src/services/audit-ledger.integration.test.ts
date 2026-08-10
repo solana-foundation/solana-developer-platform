@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import type { KVStore, SlidingWindowAdmission, SlidingWindowOptions } from "@/runtime/kv";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditService } from "./audit.service";
 
 class MemoryCheckpointStore implements KVStore {
@@ -82,7 +82,6 @@ describe("tamper-evident audit ledger", () => {
 
   afterEach(async () => {
     // Test databases have the migration's explicit TRUNCATE-only exemption.
-    await clearTestDatabase(env);
   });
 
   it("serializes request-independent worker writes into a valid chain", async () => {

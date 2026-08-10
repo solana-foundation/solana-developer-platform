@@ -8,7 +8,7 @@ import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { credentialAdminAuthMiddleware } from "./credential-admin-auth";
@@ -103,7 +103,6 @@ describe("credentialAdminAuthMiddleware", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

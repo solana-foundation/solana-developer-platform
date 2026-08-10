@@ -5,7 +5,7 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
@@ -168,7 +168,6 @@ describe("internal custody connections", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

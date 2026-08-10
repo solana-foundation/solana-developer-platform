@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
@@ -261,7 +261,6 @@ describe("Custody multi-provider routes", () => {
     env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
     env.PRIVY_APP_ID = originalPrivyAppId;
     env.PRIVY_APP_SECRET = originalPrivyAppSecret;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

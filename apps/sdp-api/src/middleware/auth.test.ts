@@ -17,7 +17,7 @@ import {
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 describe("Auth Middleware", () => {
@@ -40,7 +40,6 @@ describe("Auth Middleware", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

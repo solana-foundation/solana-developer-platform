@@ -7,7 +7,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { SessionService } from "@/services/session.service";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
 describe("Auth Routes", () => {
@@ -16,7 +16,7 @@ describe("Auth Routes", () => {
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {

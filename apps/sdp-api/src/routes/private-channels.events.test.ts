@@ -14,7 +14,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import * as pcServices from "@/services/private-channels";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
@@ -159,7 +159,6 @@ describe("Private Channels — event routes", () => {
 
   afterEach(async () => {
     env.PRIVATE_CHANNELS_ENABLED = originalEnabled;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

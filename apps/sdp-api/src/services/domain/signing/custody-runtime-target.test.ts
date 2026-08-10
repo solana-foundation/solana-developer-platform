@@ -9,7 +9,7 @@ import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime
 import { createSigningService } from "@/services/domain/signing.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_runtime_targets";
 const PROJECT_ID = "prj_runtime_targets";
@@ -51,7 +51,6 @@ describe("CustodyRuntimeTargets", () => {
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.PRIVY_API_BASE_URL = original.apiBaseUrl;
-    await clearTestDatabase(env);
   });
 
   it("switches effective signing ON -> OFF -> ON without changing retained targets", async () => {

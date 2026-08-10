@@ -15,7 +15,7 @@ import {
 import app from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
@@ -232,7 +232,6 @@ afterEach(async () => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
   env.GROUND_SANDBOX_API_KEY = originalGroundSandboxApiKey;
-  await clearTestDatabase(env);
   await clearKVStores(env);
 });
 
@@ -405,7 +404,7 @@ describe("Earn program — PUT create-or-update", () => {
 
     // Entitlement present but the sandbox credential missing also fails closed.
     await clearKVStores(env);
-    await clearTestDatabase(env);
+    await seedTestDatabase(env);
     await seedAuth();
     await seedGroundStrategy();
     env.GROUND_SANDBOX_API_KEY = undefined;
