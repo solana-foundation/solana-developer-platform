@@ -48,6 +48,12 @@ export interface OnchainContext {
   decimals: number;
   mintAddress: Address;
   signer: OrgSigner;
+  // The custody wallet `signer` was built from — which is NOT always the token's
+  // `signingWalletId`, since an authority fallback can settle on a different wallet.
+  // Wallet operation policy has to be evaluated against this one: the whole point of the
+  // policy is to bound what the signing key is allowed to do. Null only when the token
+  // named no wallet and no fallback ran, i.e. the org default signer.
+  signerWalletId: string | null;
   mosaic: ReturnType<typeof createMosaicService>;
 }
 
@@ -97,6 +103,7 @@ export async function prepareOnchain(
       decimals: token.decimals,
       mintAddress: assertValidAddress(token.mintAddress, "mintAddress"),
       signer,
+      signerWalletId: resolved.walletId,
       mosaic,
     },
   };
@@ -116,7 +123,10 @@ async function resolveSignerForAuthority(
   execution: WorkflowExecutionRow,
   token: LoadedToken,
   requires?: RequiredAuthority
-): Promise<{ ok: true; signer: OrgSigner } | { ok: false; result: ActionExecutionResult }> {
+): Promise<
+  | { ok: true; signer: OrgSigner; walletId: string | null }
+  | { ok: false; result: ActionExecutionResult }
+> {
   // Signer construction reaches custody and can fail for reasons no retry fixes (the
   // wallet was removed, the key is unavailable). Left to throw it would escape into the
   // engine's generic catch and be rescheduled up to `max_attempts`.
@@ -136,7 +146,7 @@ async function resolveSignerForAuthority(
   const required = requires === "mint" ? token.mintAuthority : token.freezeAuthority;
   // No declared authority to match (or none demanded): the token's wallet is all we know.
   if (!requires || !required || preferred.address === (required as string)) {
-    return { ok: true, signer: preferred };
+    return { ok: true, signer: preferred, walletId: token.signingWalletId ?? null };
   }
 
   const authorityWallet = await new CustodyConfigStore(getDb(env), env)
@@ -160,7 +170,8 @@ async function resolveSignerForAuthority(
   if (authoritySigner.address !== (required as string)) {
     return { ok: false, result: permanentFail(`AUTHORITY_MISMATCH:${requires}`) };
   }
-  return { ok: true, signer: authoritySigner };
+  // The fallback wallet is the one that signs, so it is the one the policy must bind.
+  return { ok: true, signer: authoritySigner, walletId: authorityWallet.walletId };
 }
 
 // The wallet an action targets: an explicit `params.wallet` wins, otherwise the

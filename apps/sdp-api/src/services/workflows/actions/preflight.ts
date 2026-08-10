@@ -89,8 +89,16 @@ export async function preflightWalletPolicy(
     destination?: string | null;
   }
 ): Promise<PreflightOutcome> {
-  const walletId = ctx.token.signingWalletId ?? null;
+  // The wallet that will actually sign, not the token's nominal `signingWalletId`. An
+  // authority fallback can settle on a different custody wallet (rotated authority, or a
+  // token that names no wallet at all), and binding the policy to the nominal one meant
+  // the engine signed with wallet B while enforcing wallet A's limits — or enforcing
+  // nothing, because the nominal id was null while the fallback had positively identified
+  // a custody wallet to sign with.
+  const walletId = ctx.signerWalletId;
   if (!walletId) {
+    // No identified custody wallet — the org default signer. Same as the HTTP route,
+    // which also skips the policy when it has no wallet id to bind it to.
     return { ok: true };
   }
   const auth = {
