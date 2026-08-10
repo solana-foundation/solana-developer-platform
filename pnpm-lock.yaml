@@ -8108,6 +8108,9 @@ packages:
   undici-types@7.29.0:
     resolution: {integrity: sha512-vamA8dGlzMwhpyYpQp9d8vka3o4D/yn5I7ez7Or+msDA4bZ8Uh+Zy91WvWf3I73gDAkFha9JcYRqm2li0Npfgg==}
 
+  undici-types@8.3.0:
+    resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
+
   undici-types@8.4.1:
     resolution: {integrity: sha512-iIXDNrTeaM0lDZvNUY1Urfs9dVgOWdQCkv6VMiePh644EKce0qoz6FNxxg7/DS4CxbFI36Atlz0VgHKS2qL1Dw==}
 
@@ -16577,6 +16580,8 @@ snapshots:
   undici-types@7.24.6: {}
 
   undici-types@7.29.0: {}
+
+  undici-types@8.3.0: {}
 
   undici-types@8.4.1: {}
 
