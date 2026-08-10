@@ -22,6 +22,7 @@
  * (`EARN_PROVIDER_CLIENTS`) — neither execution path names providers.
  */
 
+import { randomUUID } from "node:crypto";
 import { EARN_PROVIDER_CLIENTS, isStrategyWithinDeclaredSupport, SdpEarnError } from "@sdp/earn";
 import type {
   EarnRuntimeContext,
@@ -31,6 +32,7 @@ import type {
 import type { SdpEnvironment } from "@sdp/types";
 import { createEarnRepository, type EarnRepository } from "@/db/repositories";
 import type { BackgroundRunner } from "@/runtime/background";
+import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";
@@ -43,22 +45,21 @@ export const EARN_CATALOGUE_SYNC_CRON = "0 * * * *";
 
 // The managed Cloud Run Job ticks every five minutes (Cloud Scheduler in
 // sdp-infra), far more often than the hourly cadence above. Each tick claims
-// this Redis slot — an atomic INCR + TTL via admitSlidingWindow with
-// maxRequests 1 — so exactly one tick per window syncs and overlapping
-// executions lose cleanly. The TTL sits just under the hour so the next
-// on-the-hour tick of the five-minute grid claims a fresh slot; a job that
-// dies mid-sync self-heals when the slot expires (worst case: one skipped
-// window).
+// this Redis slot first, so exactly one tick per window syncs and overlapping
+// executions lose cleanly.
+//
+// The slot value is a unique claim token that embeds its own expiry
+// (`<expiresAtEpochMs>:<uuid>`), and every transition is atomic on the exact
+// prior value: an empty slot is claimed with compareAndSet(null → token), an
+// expired one is taken over with compareAndSet(staleValue → token), and a
+// failed sync releases with compareAndDelete(token) — which is a server-side
+// no-op unless the claim still belongs to this execution, so a sync that
+// outlives its slot can never delete a newer tick's claim. The expiry sits
+// just under the hour so the next on-the-hour tick of the five-minute grid
+// claims a fresh slot; a job that dies mid-sync self-heals once the token
+// expires (worst case: one skipped window).
 export const EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS = 3540;
 const EARN_CATALOGUE_SYNC_SLOT_KEY = "cron:earn-catalogue-sync:slot";
-// admitSlidingWindow needs a previous-window key; nothing ever increments this
-// one, which collapses the sliding window into a fixed once-per-TTL claim.
-const EARN_CATALOGUE_SYNC_SLOT_PREVIOUS_KEY = "cron:earn-catalogue-sync:slot-previous";
-// A failed sync releases its claim only while it provably still owns it: for
-// the TTL minus this margin, the key cannot have expired, so a delete can only
-// land on our own claim. Past that, a newer tick may have re-claimed the
-// expired key and deleting would cancel *that* claim (see the release site).
-const EARN_CATALOGUE_SYNC_SLOT_RELEASE_MARGIN_SECONDS = 60;
 
 // The catalogue is platform-global but environment-scoped (sandbox rows carry
 // devnet mints, production rows mainnet mints), so each provider syncs once
@@ -196,9 +197,9 @@ export type EarnCatalogueSyncTickOutcome = "synced" | "skipped";
  * A failed sync releases the slot — the next five-minute tick retries instead
  * of waiting out the hour — and rethrows: syncEarnCatalogue already degrades
  * per provider and per row, so anything escaping it is infrastructure-level
- * and must fail the job loudly. The release is ownership-guarded: a sync that
- * outlived the slot TTL leaves the key alone, because a newer tick may have
- * re-claimed it and deleting would cancel that claim.
+ * and must fail the job loudly. The release is compareAndDelete on this
+ * execution's claim token, so it atomically no-ops if a newer tick has taken
+ * the slot over in the meantime.
  *
  * Callers gate on isEarnEnabled first, mirroring the in-process registration
  * in cron/runner.ts.
@@ -208,21 +209,11 @@ export async function runEarnCatalogueSyncIfDue(
   observability?: Observability
 ): Promise<EarnCatalogueSyncTickOutcome> {
   const cache = createKVStoreSet(env).cache;
-  const admission = await cache.admitSlidingWindow(
-    EARN_CATALOGUE_SYNC_SLOT_KEY,
-    EARN_CATALOGUE_SYNC_SLOT_PREVIOUS_KEY,
-    {
-      maxRequests: 1,
-      previousWeight: 0,
-      expirationTtl: EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS,
-    }
-  );
-  if (!admission.admitted) {
+  const claimToken = await claimEarnCatalogueSyncSlot(cache);
+  if (claimToken === null) {
     getLogger().info("syncEarnCatalogue: hourly slot already claimed, skipping this tick");
     return "skipped";
   }
-  // Monotonic, so a wall-clock step (NTP) cannot fake an outlived claim.
-  const claimedAtMs = performance.now();
 
   const work = () => syncEarnCatalogue(env);
   try {
@@ -232,35 +223,62 @@ export async function runEarnCatalogueSyncIfDue(
         })
       : work());
   } catch (err) {
-    // Release only while the claim is provably still ours. Inside
-    // TTL - margin the key cannot have expired, and nothing else deletes it,
-    // so the delete lands on our own claim. A sync that outlived that window
-    // may be racing a newer tick that re-claimed the expired key —
-    // unconditionally deleting would cancel that claim and invite overlapping
-    // syncs — so the outlived claim is left to its current owner instead
-    // (worst case: the failure waits out the hourly window to retry).
-    const heldSeconds = (performance.now() - claimedAtMs) / 1000;
-    if (
-      heldSeconds <
-      EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS - EARN_CATALOGUE_SYNC_SLOT_RELEASE_MARGIN_SECONDS
-    ) {
-      try {
-        await cache.delete(EARN_CATALOGUE_SYNC_SLOT_KEY);
-      } catch (releaseErr) {
-        // Log-and-continue: a release failure must never mask the sync error,
-        // and the slot's TTL bounds the damage to one skipped window.
-        getLogger().error(
-          { error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr) },
-          "syncEarnCatalogue: failed to release hourly slot after sync failure"
-        );
-      }
-    } else {
-      getLogger().warn(
-        { held_seconds: Math.round(heldSeconds) },
-        "syncEarnCatalogue: failed sync outlived its slot TTL, leaving the slot to its current owner"
+    try {
+      // Atomic owner check and delete in one step: no-ops unless the slot
+      // still holds this execution's token, so a newer tick's takeover can
+      // never be cancelled from here.
+      await cache.compareAndDelete(EARN_CATALOGUE_SYNC_SLOT_KEY, claimToken);
+    } catch (releaseErr) {
+      // Log-and-continue: a release failure must never mask the sync error,
+      // and the token's embedded expiry bounds the damage to one skipped
+      // window.
+      getLogger().error(
+        { error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr) },
+        "syncEarnCatalogue: failed to release hourly slot after sync failure"
       );
     }
     throw err;
   }
   return "synced";
+}
+
+// Claim token wire format: `<expiresAtEpochMs>:<uuid>`. Wall-clock epoch is
+// deliberate — expiry must be comparable across job executions (a monotonic
+// reading is process-local); NTP keeps cross-instance skew far below the
+// minute granularity that matters here.
+function makeSlotToken(): string {
+  return `${Date.now() + EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS * 1000}:${randomUUID()}`;
+}
+
+// A value that doesn't parse (including the pre-token "1" a older build's
+// INCR-based claim may have left behind) reads as expired, so it is taken
+// over rather than wedging the slot.
+function slotExpiresAtMs(value: string): number {
+  const separator = value.indexOf(":");
+  if (separator === -1) {
+    return 0;
+  }
+  const expiresAt = Number(value.slice(0, separator));
+  return Number.isFinite(expiresAt) ? expiresAt : 0;
+}
+
+/**
+ * Claim the hourly slot, returning this execution's token, or null when the
+ * slot is held by a live claim (or a racer wins the same transition). Both
+ * claim shapes are single compareAndSet transitions on the exact observed
+ * value, so two ticks can never both win: null → token for an empty slot,
+ * staleValue → token for an expired one.
+ */
+async function claimEarnCatalogueSyncSlot(cache: KVStore): Promise<string | null> {
+  const token = makeSlotToken();
+  const existing = await cache.get(EARN_CATALOGUE_SYNC_SLOT_KEY);
+  if (existing === null) {
+    const won = await cache.compareAndSet(EARN_CATALOGUE_SYNC_SLOT_KEY, null, token);
+    return won ? token : null;
+  }
+  if (slotExpiresAtMs(existing) > Date.now()) {
+    return null;
+  }
+  const won = await cache.compareAndSet(EARN_CATALOGUE_SYNC_SLOT_KEY, existing, token);
+  return won ? token : null;
 }
