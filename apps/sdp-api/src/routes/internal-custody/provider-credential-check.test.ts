@@ -8,7 +8,7 @@ import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
@@ -326,7 +326,6 @@ describe("POST /internal/dashboard/custody/provider-credentials/:id/check", () =
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.PRIVY_API_BASE_URL = original.apiBaseUrl;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

@@ -12,7 +12,7 @@ import {
   CredentialSecretStoreError,
 } from "@/services/credential-secret-store";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
@@ -290,7 +290,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     env.PRIVY_BYOK_ENABLED = original.provisioningFlag;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
