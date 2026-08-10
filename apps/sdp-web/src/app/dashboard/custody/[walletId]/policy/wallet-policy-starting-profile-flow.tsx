@@ -231,10 +231,10 @@ export function WalletPolicyStartingProfileFlow({
         buildPolicyPayload(wallet.walletId, state),
         t,
         commitMessage,
-        // currentPolicy is server-read state, so null asserts "no active
-        // profile"; a save built on a stale revision fails with 409 instead
+        // currentPolicy is server-read state; a save built on a stale policy
+        // — even one where only limits changed since — fails with 409 instead
         // of replacing another session's controls.
-        { expectedRevisionId: currentPolicy.controlProfile?.revisionId ?? null }
+        { expectedPolicyVersionId: currentPolicy.policyVersionId ?? null }
       );
       const returnedState = createPolicyAuthoringState(updated);
       setCurrentPolicy(updated);
@@ -272,7 +272,7 @@ export function WalletPolicyStartingProfileFlow({
         buildDisabledPolicyPayload(wallet.walletId),
         t,
         undefined,
-        { expectedRevisionId: currentPolicy.controlProfile?.revisionId ?? null }
+        { expectedPolicyVersionId: currentPolicy.policyVersionId ?? null }
       );
       const returnedState = createPolicyAuthoringState(updated);
       setCurrentPolicy(updated);

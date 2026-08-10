@@ -41,6 +41,19 @@ function parseDestinationAllowlistPolicy(raw: string): string[] {
   return value.filter((entry): entry is string => typeof entry === "string");
 }
 
+/**
+ * Extracts the whole-policy version token stamped into every policy document
+ * on write. Documents persisted before version stamping have none.
+ */
+function parsePolicyVersionId(raw: string): string | undefined {
+  const document = parsePolicyDocument(raw);
+  if (!document || document.version !== PAYMENT_POLICY_VERSION) {
+    return undefined;
+  }
+
+  return typeof document.policyVersionId === "string" ? document.policyVersionId : undefined;
+}
+
 function parseTransferLimitsPolicy(raw: string): {
   maxTransferAmount?: string;
   maxDailyAmount?: string;
@@ -131,6 +144,7 @@ export function buildWalletPolicyPayload(
   destinationAllowlist: string[];
   maxTransferAmount?: string;
   maxDailyAmount?: string;
+  policyVersionId?: string;
   createdAt: string;
   updatedAt: string;
 } {
@@ -146,8 +160,11 @@ export function buildWalletPolicyPayload(
   let destinationAllowlist: string[] = [];
   let maxTransferAmount: string | undefined;
   let maxDailyAmount: string | undefined;
+  let policyVersionId: string | undefined;
 
   for (const row of rows) {
+    policyVersionId ??= parsePolicyVersionId(row.policy);
+
     if (row.policy_type === DESTINATION_ALLOWLIST_POLICY_TYPE) {
       destinationAllowlist = parseDestinationAllowlistPolicy(row.policy);
       continue;
@@ -174,6 +191,7 @@ export function buildWalletPolicyPayload(
     destinationAllowlist,
     ...(maxTransferAmount ? { maxTransferAmount } : {}),
     ...(maxDailyAmount ? { maxDailyAmount } : {}),
+    ...(policyVersionId ? { policyVersionId } : {}),
     createdAt,
     updatedAt,
   };

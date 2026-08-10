@@ -305,9 +305,9 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
         },
         t,
         undefined,
-        // addPolicy is server-read state, so null asserts "no active profile"
-        // and a concurrently created profile surfaces as a 409.
-        { expectedRevisionId: addPolicy.controlProfile?.revisionId ?? null }
+        // addPolicy is server-read state, so any concurrent policy update —
+        // including one that only touched limits — surfaces as a 409.
+        { expectedPolicyVersionId: addPolicy.policyVersionId ?? null }
       );
       setAddPolicy(updated);
       void mutateWallets();

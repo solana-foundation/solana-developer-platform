@@ -437,11 +437,17 @@ export async function updateWalletPolicy(c: AppContext) {
     const currentRows = await txRepository.getWalletPoliciesByCustodyWalletId(wallet.id);
     const current = buildWalletPolicyPayload(wallet.walletId, currentRows, wallet.createdAt);
     const activeProfile = await lockActiveWalletControlProfile(tx, wallet.id);
-    const activeRevisionId = activeProfile?.revision_id ?? null;
 
-    if (patch.expectedRevisionId !== undefined && patch.expectedRevisionId !== activeRevisionId) {
+    // The whole-policy version advances on every update — including limit and
+    // allowlist changes that leave the control-profile revision untouched —
+    // so a stale full-policy save cannot slip past the guard by matching an
+    // unchanged revision.
+    if (
+      patch.expectedPolicyVersionId !== undefined &&
+      patch.expectedPolicyVersionId !== (current.policyVersionId ?? null)
+    ) {
       throw conflict(
-        "Wallet policy was changed by another update; refresh and retry with the current revision"
+        "Wallet policy was changed by another update; refresh and retry with the current policy version"
       );
     }
 
@@ -460,6 +466,7 @@ export async function updateWalletPolicy(c: AppContext) {
       patch
     );
 
+    const nextPolicyVersionId = `pwv_${crypto.randomUUID()}`;
     const savedRows = await txRepository.upsertWalletPolicies([
       {
         id: `pwp_${crypto.randomUUID()}`,
@@ -468,6 +475,7 @@ export async function updateWalletPolicy(c: AppContext) {
         policy: JSON.stringify({
           version: PAYMENT_POLICY_VERSION,
           destinationAllowlist: merged.destinationAllowlist,
+          policyVersionId: nextPolicyVersionId,
         }),
         createdAt: now,
         updatedAt: now,
@@ -480,6 +488,7 @@ export async function updateWalletPolicy(c: AppContext) {
           version: PAYMENT_POLICY_VERSION,
           maxTransferAmount: merged.maxTransferAmount ?? null,
           maxDailyAmount: merged.maxDailyAmount ?? null,
+          policyVersionId: nextPolicyVersionId,
         }),
         createdAt: now,
         updatedAt: now,

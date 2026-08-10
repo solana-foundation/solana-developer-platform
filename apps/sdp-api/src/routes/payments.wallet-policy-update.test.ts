@@ -20,6 +20,7 @@ interface WalletPolicyBody {
       maxDailyAmount?: string;
       defaultAction?: string;
       rules?: PolicyRule[];
+      policyVersionId?: string;
       controlProfile?: {
         id: string;
         revisionId: string | null;
@@ -79,6 +80,7 @@ async function seedRestrictivePolicy(): Promise<WalletPolicyBody["data"]["policy
   const policy = ((await res.json()) as WalletPolicyBody).data.policy;
   expect(policy.defaultAction).toBe("deny");
   expect(policy.controlProfile?.revisionNumber).toBe(1);
+  expect(policy.policyVersionId).toMatch(/^pwv_/);
   return policy;
 }
 
@@ -209,23 +211,24 @@ describe("Payments routes — wallet policy partial updates", () => {
     }
   });
 
-  it("applies the update when expectedRevisionId matches the active revision", async () => {
+  it("applies the update when expectedPolicyVersionId matches the current version", async () => {
     const seeded = await seedRestrictivePolicy();
 
     const res = await putPolicy({
       maxTransferAmount: "9",
-      expectedRevisionId: seeded.controlProfile?.revisionId,
+      expectedPolicyVersionId: seeded.policyVersionId,
     });
 
     expect(res.status).toBe(200);
     const policy = ((await res.json()) as WalletPolicyBody).data.policy;
     expect(policy.maxTransferAmount).toBe("9");
     expect(policy.controlProfile?.revisionNumber).toBe(1);
+    expect(policy.policyVersionId).not.toBe(seeded.policyVersionId);
   });
 
-  it("rejects a stale expectedRevisionId with 409 and changes nothing", async () => {
+  it("rejects a stale expectedPolicyVersionId with 409 and changes nothing", async () => {
     const seeded = await seedRestrictivePolicy();
-    const staleRevisionId = seeded.controlProfile?.revisionId;
+    const staleVersionId = seeded.policyVersionId;
 
     const advance = await putPolicy({ rules: PATCHED_RULES });
     expect(advance.status).toBe(200);
@@ -233,7 +236,7 @@ describe("Payments routes — wallet policy partial updates", () => {
     const res = await putPolicy({
       defaultAction: "allow",
       maxTransferAmount: null,
-      expectedRevisionId: staleRevisionId,
+      expectedPolicyVersionId: staleVersionId,
     });
 
     expect(res.status).toBe(409);
@@ -247,32 +250,58 @@ describe("Payments routes — wallet policy partial updates", () => {
     expect(policy.controlProfile?.revisionNumber).toBe(2);
   });
 
-  it("rejects expectedRevisionId null when a profile is already active", async () => {
+  it("rejects a stale full-policy save after a limits-only update", async () => {
+    // The exact bypass scenario: a limits-only change does not advance the
+    // control-profile revision, but it must still invalidate stale saves.
+    const seeded = await seedRestrictivePolicy();
+
+    const tighten = await putPolicy({ maxTransferAmount: "2" });
+    expect(tighten.status).toBe(200);
+    const tightened = ((await tighten.json()) as WalletPolicyBody).data.policy;
+    expect(tightened.controlProfile?.revisionNumber).toBe(1);
+    expect(tightened.policyVersionId).not.toBe(seeded.policyVersionId);
+
+    const staleFullSave = await putPolicy({
+      destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
+      maxTransferAmount: "5",
+      maxDailyAmount: "50",
+      defaultAction: "deny",
+      rules: SEED_RULES,
+      expectedPolicyVersionId: seeded.policyVersionId,
+    });
+
+    expect(staleFullSave.status).toBe(409);
+    const policy = await getPolicy();
+    expect(policy.maxTransferAmount).toBe("2");
+  });
+
+  it("rejects expectedPolicyVersionId null when the policy has a version", async () => {
     await seedRestrictivePolicy();
 
-    const res = await putPolicy({ maxTransferAmount: "9", expectedRevisionId: null });
+    const res = await putPolicy({ maxTransferAmount: "9", expectedPolicyVersionId: null });
 
     expect(res.status).toBe(409);
     const policy = await getPolicy();
     expect(policy.maxTransferAmount).toBe("5");
   });
 
-  it("accepts expectedRevisionId null when no profile is active", async () => {
+  it("accepts expectedPolicyVersionId null when the policy has never been written", async () => {
     const res = await putPolicy({
       defaultAction: "deny",
-      expectedRevisionId: null,
+      expectedPolicyVersionId: null,
     });
 
     expect(res.status).toBe(200);
     const policy = ((await res.json()) as WalletPolicyBody).data.policy;
     expect(policy.defaultAction).toBe("deny");
     expect(policy.controlProfile?.revisionNumber).toBe(1);
+    expect(policy.policyVersionId).toMatch(/^pwv_/);
   });
 
-  it("rejects expectedRevisionId with 409 when no profile is active", async () => {
+  it("rejects expectedPolicyVersionId with 409 when the policy has never been written", async () => {
     const res = await putPolicy({
       maxTransferAmount: "9",
-      expectedRevisionId: "wcpr_never_existed",
+      expectedPolicyVersionId: "pwv_never_existed",
     });
 
     expect(res.status).toBe(409);

@@ -512,12 +512,14 @@ export async function updateWalletPolicy(
   commitMessage?: string,
   options?: {
     /**
-     * The control-profile revision this edit was based on: the active
-     * revision id, or null when the wallet was loaded with no active
-     * profile. Omit only when the caller has no server-read base — the API
-     * then skips the stale-revision check.
+     * The policyVersionId of the server-read policy this edit was based on,
+     * or null when that policy carried no version (never written, or written
+     * before version stamping). The token changes on every policy update —
+     * including limit/allowlist changes — so any concurrent save fails with
+     * 409. Omit only when the caller has no server-read base; the API then
+     * skips the stale-write check.
      */
-    expectedRevisionId?: string | null;
+    expectedPolicyVersionId?: string | null;
   }
 ): Promise<WalletPolicy> {
   const trimmedCommitMessage = commitMessage?.trim();
@@ -540,8 +542,8 @@ export async function updateWalletPolicy(
         maxDailyAmount: policy.maxDailyAmount ?? null,
         ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
         ...(policy.rules ? { rules: policy.rules } : {}),
-        ...(options?.expectedRevisionId !== undefined
-          ? { expectedRevisionId: options.expectedRevisionId }
+        ...(options?.expectedPolicyVersionId !== undefined
+          ? { expectedPolicyVersionId: options.expectedPolicyVersionId }
           : {}),
       }),
     }

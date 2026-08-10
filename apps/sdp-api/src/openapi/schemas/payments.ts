@@ -365,6 +365,11 @@ export const walletPolicySchema = z
     audit: walletPolicyAuditSchema.optional().openapi({
       description: "Recent wallet operation policy decisions for customer/support audit review.",
     }),
+    policyVersionId: z.string().optional().openapi({
+      description:
+        "Opaque token that changes on every policy update, including limit and allowlist changes. Pass back as expectedPolicyVersionId to detect stale writes. Absent until the policy is first written by a version-aware update.",
+      example: "pwv_example",
+    }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Timestamp when the policy was created.",
       example: "2025-01-01T00:00:00.000Z",
@@ -464,11 +469,14 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
         },
       ],
     }),
-    expectedRevisionId: withOpenApi(updateWalletPolicySchemaBase.shape.expectedRevisionId, {
-      description:
-        "Optimistic-concurrency precondition. When set, the update only applies if this matches the wallet's active control-profile revision id (use null to require that no profile is active); otherwise the request fails with 409. Omit to skip the check.",
-      example: "wcpr_example",
-    }),
+    expectedPolicyVersionId: withOpenApi(
+      updateWalletPolicySchemaBase.shape.expectedPolicyVersionId,
+      {
+        description:
+          "Optimistic-concurrency precondition. When set, the update only applies if this matches the wallet policy's current policyVersionId — a token that changes on every policy update, including limit and allowlist changes (use null to require that the policy has never been written with a version); otherwise the request fails with 409. Omit to skip the check.",
+        example: "pwv_example",
+      }
+    ),
   })
   .openapi({
     description:

@@ -192,7 +192,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Update wallet policy",
     operationId: "updatePaymentWalletPolicy",
     description:
-      "Updates payment policy rules for a custody wallet with patch semantics: omitted fields keep their current values, and null clears a clearable limit. Supply expectedRevisionId to reject the update with 409 when the active control-profile revision has changed since it was read. Wallet provisioning and default selection remain in /v1/wallets.",
+      "Updates payment policy rules for a custody wallet with patch semantics: omitted fields keep their current values, and null clears a clearable limit. Supply expectedPolicyVersionId to reject the update with 409 when the policy has changed since it was read — the token advances on every update, including limit and allowlist changes. Wallet provisioning and default selection remain in /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
