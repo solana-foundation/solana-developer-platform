@@ -29,29 +29,42 @@ export function emitTokenOperationCompleted(
     // which would permanently swallow every later op of the same type on the token.
     const fallback = input.transactionId ?? `${input.tokenId}:${input.operation}:${Date.now()}`;
     const eventKey = `token_operation_completed:${input.signature ?? fallback}`;
-    c.executionCtx.waitUntil(
-      dispatchWorkflowEvent(c.env, {
-        type: "token_operation_completed",
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        eventKey,
-        tokenId: input.tokenId,
-        payload: {
+    // Start the dispatch BEFORE touching `c.executionCtx`. That getter throws on runtimes
+    // without an ExecutionContext (@hono/node-server, i.e. the Cloud Run deployment), and
+    // JS evaluates the callee `c.executionCtx.waitUntil` ahead of its arguments — so
+    // wrapping the dispatch in the call meant the throw landed before the dispatch ever
+    // ran. The catch below then logged it as "emit failed" and the event was gone, which
+    // silently disabled every token_operation_completed rule in production.
+    const dispatched = dispatchWorkflowEvent(c.env, {
+      type: "token_operation_completed",
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      eventKey,
+      tokenId: input.tokenId,
+      payload: {
+        operation: input.operation,
+        signature: input.signature ?? null,
+        slot: input.slot != null ? String(input.slot) : null,
+      },
+    }).catch((error) => {
+      getLogger().error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          tokenId: input.tokenId,
           operation: input.operation,
-          signature: input.signature ?? null,
-          slot: input.slot != null ? String(input.slot) : null,
         },
-      }).catch((error) => {
-        getLogger().error(
-          {
-            error: error instanceof Error ? error.message : String(error),
-            tokenId: input.tokenId,
-            operation: input.operation,
-          },
-          "emitTokenOperationCompleted: dispatch failed"
-        );
-      })
-    );
+        "emitTokenOperationCompleted: dispatch failed"
+      );
+    });
+
+    try {
+      // Workers tear the isolate down at response time, so the promise needs waitUntil to
+      // survive. Node has no ExecutionContext and needs nothing: the process outlives the
+      // response and finishes the already-running dispatch on the event loop.
+      c.executionCtx.waitUntil(dispatched);
+    } catch {
+      // No ExecutionContext — the dispatch above is already in flight. Nothing to do.
+    }
   } catch (error) {
     getLogger().error(
       {
