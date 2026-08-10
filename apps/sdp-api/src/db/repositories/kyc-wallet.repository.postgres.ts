@@ -21,6 +21,7 @@ function mapKycWalletRow(row: Record<string, unknown>): KycWalletRow {
     kyc_provider: (row.kyc_provider as KycProvider | null) ?? null,
     provider_ref: (row.provider_ref as string | null) ?? null,
     verified_at: (row.verified_at as string | null) ?? null,
+    status_changed_at: row.status_changed_at as string,
     created_by: (row.created_by as string | null) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -108,6 +109,7 @@ export function createPostgresKycWalletsRepository(db: AppDb): KycWalletsReposit
                  kyc_provider = COALESCE(?, kyc_provider),
                  provider_ref = COALESCE(?, provider_ref),
                  verified_at = ${VERIFIED_AT_EXPR},
+                 status_changed_at = sdp_iso_now(),
                  updated_at = sdp_iso_now()
            WHERE id = ? AND organization_id = ? AND project_id = ?
              AND kyc_status IS DISTINCT FROM ?`
@@ -142,6 +144,7 @@ export function createPostgresKycWalletsRepository(db: AppDb): KycWalletsReposit
                  kyc_provider = COALESCE(?, kyc_provider),
                  provider_ref = COALESCE(?, provider_ref),
                  verified_at = ${VERIFIED_AT_EXPR},
+                 status_changed_at = sdp_iso_now(),
                  updated_at = sdp_iso_now()
            WHERE counterparty_id = ? AND organization_id = ? AND project_id = ?
              AND kyc_status IS DISTINCT FROM ?`

@@ -142,6 +142,35 @@ describe("KYC clearance idempotency across redelivered webhooks (postgres)", () 
     expect(await executionCount()).toBe(1);
   });
 
+  // A rejection's key falls back to updated_at, so any write that touches the row between
+  // the first delivery and a retry re-dates the same rejection into a fresh key. Enrolling
+  // the holder for a second asset does exactly that: the status write is already guarded,
+  // but the enrollment upsert re-stamped updated_at on its own.
+  it("enqueues one execution when an unrelated write lands between redeliveries", async () => {
+    await seedRule("kyc_rejected");
+    const wallet = await seedEnrolledWallet();
+
+    const first = await applyStatus(wallet.id, "rejected");
+    await emitKycRejectedForEnrollments(env, { kycWallet: first, provider: "mural" });
+
+    await nextMillisecond();
+
+    // The holder is enrolled for another asset — same wallet row, re-upserted.
+    await createKycWalletsRepository(env).upsertKycWallet({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      walletAddress: WALLET_ADDRESS,
+      createdBy: TEST_USER.id,
+    });
+
+    await nextMillisecond();
+
+    const redelivered = await applyStatus(wallet.id, "rejected");
+    await emitKycRejectedForEnrollments(env, { kycWallet: redelivered, provider: "mural" });
+
+    expect(await executionCount()).toBe(1);
+  });
+
   // Same root cause on the approved path: verified_at is re-stamped by every write with
   // status='verified', so the flagship kyc_approved → allowlist_add rule double-fired too.
   it("enqueues one execution when a kyc_approved webhook is redelivered", async () => {
