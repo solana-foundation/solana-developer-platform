@@ -11,7 +11,12 @@ ADR 0002 (`docs/decisions/`) for the invariants.
 
 **Absolute rule: local resources only.** Never point any of this at a shared or
 production database, and never exercise a provider's production API from a
-laptop — sandbox base URL + `*_SANDBOX_API_KEY` only.
+laptop — sandbox base URL + `*_SANDBOX_API_KEY` only. Note that dashboard
+sessions resolve their environment from the `x-project-id` project
+(`@/lib/sdp-environment`), so selecting an org's **production** project —
+possible via curl even while the dashboard's switcher stays locked — drives the
+provider's production API. Locally, only ever use sandbox projects and never
+set a production `*_API_KEY`.
 
 ### 1. Infrastructure
 
