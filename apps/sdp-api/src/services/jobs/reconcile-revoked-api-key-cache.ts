@@ -33,6 +33,20 @@ export interface RevokedApiKeyCacheReconciliation {
   repaired: number;
 }
 
+/**
+ * Guarded parse: a malformed or legacy non-JSON value must read as "needs
+ * repair", never crash the sweep — this cron tick also runs the payment and
+ * custody reconciliation jobs.
+ */
+function tryParseCachedEntry(raw: string): CachedApiKey | null {
+  try {
+    const parsed = JSON.parse(raw) as CachedApiKey | null;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function reconcileRevokedApiKeyCache(
   env: Env
 ): Promise<RevokedApiKeyCacheReconciliation> {
@@ -56,10 +70,15 @@ export async function reconcileRevokedApiKeyCache(
   let repaired = 0;
 
   for (const row of recentlyRevoked) {
-    const cached = await kv.get<CachedApiKey>(apiKeyCacheKey(row.key_hash), "json");
-    if (!cached || TERMINAL_STATUSES.has(cached.status)) {
+    const raw = await kv.get(apiKeyCacheKey(row.key_hash));
+    if (raw === null) {
       continue;
     }
+    const cached = tryParseCachedEntry(raw);
+    if (cached && TERMINAL_STATUSES.has(cached.status)) {
+      continue;
+    }
+    // Stale-active or unparseable: overwrite with the authoritative state.
     await refreshApiKeyCache(db, kv, row.key_hash);
     repaired += 1;
   }
