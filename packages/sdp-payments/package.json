@@ -151,7 +151,7 @@
     "lint": "biome check src/"
   },
   "dependencies": {
-    "@coinbase/cdp-sdk": "1.49.2",
+    "@coinbase/cdp-sdk": "1.54.0",
     "@sdp/rpc": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
@@ -164,7 +164,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
-    "tsx": "4.22.4",
+    "tsx": "4.23.5",
     "typescript": "^6.0.3"
   }
 }

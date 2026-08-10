@@ -6,7 +6,6 @@ import {
   type Permission,
   type PrivateTransferRequest,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
-  tokenFilterAliases,
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import {
@@ -50,6 +49,8 @@ import {
 } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
+  isNativePaymentToken,
+  normalizePaymentToken,
   type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
@@ -89,7 +90,6 @@ import {
   createSignatureHistoryRpc,
   dedupeSignatureHistory,
   mapSettledWithConcurrency,
-  resolveObservedTokenSymbols,
   resolveWalletTokenAccountAddresses,
   SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
 } from "./observed-transfers";
@@ -481,7 +481,7 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
 }) {
   const { c, operation, privateTransfer, memo } = params;
 
-  if (operation.token === "SOL") {
+  if (isNativePaymentToken(operation.token)) {
     throw new AppError(
       "BAD_REQUEST",
       "MagicBlock private transfers support SPL tokens only. Provide a token mint address."
@@ -1084,7 +1084,7 @@ export async function createTransfer(c: AppContext) {
   }
 
   try {
-    if (operation.token === "SOL") {
+    if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(
         c,
         operation.sourceWallet,
@@ -1175,6 +1175,9 @@ export async function listTransfers(c: AppContext) {
     throw new AppError("BAD_REQUEST", "type must match the requested transfer category");
   }
   const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
+  // Rows store mints, so a symbol or native-SOL filter must be normalized to
+  // the same canonical mint before either the in-memory or SQL comparison.
+  const tokenFilter = token ? normalizePaymentToken(token, c.env) : undefined;
   const hasProvider = provider !== undefined;
   const hasProviderReference = providerReference !== undefined;
   const hasExactProviderReference = hasProvider && hasProviderReference;
@@ -1330,7 +1333,7 @@ export async function listTransfers(c: AppContext) {
         statuses: nonChainStatuses,
         types: transferTypes,
         provider,
-        token,
+        token: tokenFilter,
         direction,
         createdAtFrom: from,
         createdAtTo: to,
@@ -1350,14 +1353,12 @@ export async function listTransfers(c: AppContext) {
     const missingObservedSignatures = onChainSigs.filter(
       (signatureInfo) => !confirmedSignatures.has(String(signatureInfo.signature))
     );
-    const tokenSymbolsByMint = await resolveObservedTokenSymbols(c.env);
     const observedRows = await buildObservedTransfersForSignatures(
       c.env,
       missingObservedSignatures,
       {
         organizationId: auth.organizationId,
         projectId: auth.projectId,
-        tokenSymbolsByMint,
         walletIdsByAddress,
       }
     );
@@ -1371,21 +1372,13 @@ export async function listTransfers(c: AppContext) {
     });
 
     // 5. Apply remaining filters and sort
-    //
-    // The token test mirrors the repository's, which expands a filter to every
-    // form the ledger stores it in. Comparing against the raw parameter here
-    // would undo that on this path: rows the query correctly returned under the
-    // mint would be dropped again for not equalling the symbol that was asked
-    // for. A blank filter is likewise no filter, not a value to match.
-    const tokenMatches = tokenFilterAliases(token ?? "");
-    const tokenAliases = tokenMatches.length > 0 ? new Set(tokenMatches) : null;
     const filtered = merged
       .filter((row) => {
         if (search && !transferMatchesSearch(row, search)) return false;
         if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
         if (provider && row.provider !== provider) return false;
         if (statuses && !statuses.includes(row.status)) return false;
-        if (tokenAliases && !tokenAliases.has(row.token)) return false;
+        if (tokenFilter && row.token !== tokenFilter) return false;
         if (direction && row.direction !== direction) return false;
         if (transferTypeSet && !transferTypeSet.has(row.type)) return false;
         if (from && row.created_at < from) return false;
@@ -1435,7 +1428,7 @@ export async function listTransfers(c: AppContext) {
       walletAddress: walletId ? walletAddress : unresolvedDatabaseWalletAddress,
       counterpartyId,
       search,
-      token,
+      token: tokenFilter,
       direction,
       statuses,
       types: transferTypes,

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   ActiveApiKeyControlProfileResult,
   ActiveWalletControlProfileResult,
+  ApiKeyWalletPolicyBindingRow,
   ApprovalRequestRow,
   CreatePolicyEvaluationInput,
   CreateWalletOperationInput,
@@ -99,6 +100,7 @@ function apiKeyProfile(
 function createRepository(options: {
   walletPolicy?: ActiveWalletControlProfileResult | null;
   apiKeyPolicy?: ActiveApiKeyControlProfileResult | null;
+  hasApiKeyWalletPolicyBindings?: boolean;
   evaluationError?: Error;
   policyEvaluationError?: Error;
   approvalStatusUpdateError?: Error;
@@ -262,6 +264,24 @@ function createRepository(options: {
     listPolicyEvaluationsForOperation: vi.fn(async () => []),
     getActiveWalletControlProfileByCustodyWalletId: vi.fn(async () => options.walletPolicy ?? null),
     getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => options.apiKeyPolicy ?? null),
+    listApiKeyWalletPolicyBindings: vi.fn(async (): Promise<ApiKeyWalletPolicyBindingRow[]> => {
+      if (!options.hasApiKeyWalletPolicyBindings) {
+        return [];
+      }
+      return [
+        {
+          id: "akwpol_1",
+          api_key_id: "key_1",
+          binding_scope: "selected",
+          wallet_id: "wal_bound",
+          custody_wallet_id: "cw_bound",
+          wallet_control_profile_id: null,
+          api_key_control_profile_id: "akcp_1",
+          created_at: "2026-06-18T00:00:00.000Z",
+          updated_at: "2026-06-18T00:00:00.000Z",
+        },
+      ];
+    }),
     getApiKeyWalletPolicyBindingResolution: vi.fn(async () => {
       if (options.evaluationError) {
         throw options.evaluationError;
@@ -645,6 +665,45 @@ describe("WalletPolicyEnforcementService", () => {
       },
     });
     expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");
+  });
+
+  it("applies the API key policy without wallet binding resolution when custody identity is absent", async () => {
+    const repository = createRepository({
+      apiKeyPolicy: apiKeyProfile([
+        { id: "api-key-destination", kind: "destination", blocklist: ["recipient_1"] },
+      ]),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(
+      service.enforce({
+        ...baseOperation,
+        custodyWalletId: null,
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      details: {
+        decision: "deny",
+        reasonCode: "api_key_policy_match",
+      },
+    });
+    expect(repository.getApiKeyWalletPolicyBindingResolution).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when wallet bindings exist without a custody identity to match", async () => {
+    const repository = createRepository({ hasApiKeyWalletPolicyBindings: true });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(
+      service.enforce({
+        ...baseOperation,
+        custodyWalletId: null,
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "API key policy binding is not configured for the requested wallet",
+    });
+    expect(repository.getApiKeyWalletPolicyBindingResolution).not.toHaveBeenCalled();
   });
 
   it("marks the operation failed when policy evaluation throws", async () => {

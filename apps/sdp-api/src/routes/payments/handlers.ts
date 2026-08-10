@@ -28,7 +28,6 @@ export {
 } from "./handlers/recurring-payments";
 export {
   createSubscription,
-  createSubscriptionCollectionAttempt,
   createSubscriptionPlan,
   getSubscription,
   getSubscriptionPlan,
@@ -40,7 +39,6 @@ export {
   prepareResumeSubscription,
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
-  updateSubscription,
   updateSubscriptionPlan,
 } from "./handlers/subscriptions";
 export {

@@ -15,7 +15,7 @@ import {
   type UpsertApiKeyWalletPolicyBindingInput,
 } from "@/db/repositories";
 import { requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { ApiKeyService } from "@/services/api-key.service";
@@ -28,7 +28,7 @@ import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service"
 import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import { ApiKeyPolicyStore } from "@/services/policy/api-key-policy.store";
-import type { WalletPurpose } from "@/services/stores/custody-config.store";
+import { CustodyConfigStore, type WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { buildApiKeyAccessSummaries } from "./access-response";
 import {
@@ -519,13 +519,32 @@ export const writeApiKeyPolicyBindings = async (c: AppContext) => {
     });
   }
 
+  const custodyStore = new CustodyConfigStore(getDb(c.env), c.env);
   const bindings: UpsertApiKeyWalletPolicyBindingInput[] =
-    parsed.data.mode === "clear"
-      ? []
-      : parsed.data.bindings.map((binding) => ({
-          apiKeyId: keyId,
-          ...binding,
-        }));
+    parsed.data.mode === "replace"
+      ? await Promise.all(
+          parsed.data.bindings.map(async (binding) => {
+            if (binding.bindingScope === "all") {
+              return { apiKeyId: keyId, ...binding };
+            }
+
+            const wallet = await custodyStore.findUniqueActiveWalletByIdentifier(
+              actor.organizationId,
+              projectId,
+              binding.walletId
+            );
+            if (!wallet) {
+              throw forbidden("API key is not authorized for the requested wallet");
+            }
+            return {
+              apiKeyId: keyId,
+              ...binding,
+              walletId: wallet.walletId,
+              custodyWalletId: wallet.id,
+            };
+          })
+        )
+      : [];
 
   await new ApiKeyPolicyStore(
     createPolicyRepository(c.env, getRequestTenantScope(c))

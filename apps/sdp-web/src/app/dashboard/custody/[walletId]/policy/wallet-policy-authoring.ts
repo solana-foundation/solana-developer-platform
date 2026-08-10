@@ -37,6 +37,10 @@ export interface PolicyAssetOption {
   category?: WellKnownTokenCategory;
   /** Only wallet holdings carry a balance; well-known mints are offered even when the wallet holds none. */
   uiAmount?: string;
+  /** Issuer-supplied metadata image, carried by tokens issued on SDP. */
+  imageUrl?: string;
+  /** Whether the org issued this mint on SDP; `source` stays "wallet" for held issued mints. */
+  sdpIssued: boolean;
   source: "wallet" | "well-known" | "issued";
 }
 
@@ -53,13 +57,22 @@ export interface PolicyAssetOption {
 export function buildPolicyAssetOptions(
   walletAssets: readonly { token: string; mint: string; uiAmount: string }[],
   environment: SdpEnvironment,
-  issuedTokens: readonly { token: string; mint: string; name?: string }[] = []
+  issuedTokens: readonly {
+    token: string;
+    mint: string;
+    name?: string;
+    imageUrl?: string | null;
+  }[] = []
 ): PolicyAssetOption[] {
   const options = new Map<string, PolicyAssetOption>();
+  const issuedByMint = new Map(issuedTokens.map((issued) => [issued.mint, issued]));
 
   for (const asset of walletAssets) {
     if (options.has(asset.mint)) continue;
     const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(asset.mint);
+    // A held mint the org issued keeps its holdings row but borrows the issued
+    // token's name and metadata image, which the balances API does not carry.
+    const issued = issuedByMint.get(asset.mint);
     options.set(
       asset.mint,
       wellKnown
@@ -69,9 +82,16 @@ export function buildPolicyAssetOptions(
             category: wellKnown.category,
             mint: asset.mint,
             uiAmount: asset.uiAmount,
+            sdpIssued: false,
             source: "wallet",
           }
-        : { ...asset, source: "wallet" }
+        : {
+            ...asset,
+            ...(issued?.name ? { name: issued.name } : {}),
+            ...(issued?.imageUrl ? { imageUrl: issued.imageUrl } : {}),
+            sdpIssued: issued !== undefined,
+            source: "wallet",
+          }
     );
   }
 
@@ -88,7 +108,9 @@ export function buildPolicyAssetOptions(
     options.set(issued.mint, {
       token: issued.token,
       ...(issued.name ? { name: issued.name } : {}),
+      ...(issued.imageUrl ? { imageUrl: issued.imageUrl } : {}),
       mint: issued.mint,
+      sdpIssued: true,
       source: "issued",
     });
   }
@@ -104,6 +126,7 @@ export function buildPolicyAssetOptions(
       name: token.name,
       category: token.category,
       mint,
+      sdpIssued: false,
       source: "well-known",
     });
   }
