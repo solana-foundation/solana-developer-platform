@@ -1,14 +1,16 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { dispatchWorkflowEvent } from "./event-bus";
 
 type AppContext = Context<{ Bindings: Env }>;
 
 function logDispatchError(label: string, error: unknown): void {
-  console.error(`${label}: dispatch failed`, {
-    error: error instanceof Error ? error.message : String(error),
-  });
+  getLogger().error(
+    { error: error instanceof Error ? error.message : String(error) },
+    `${label}: dispatch failed`
+  );
 }
 
 // onramp_settled / offramp_settled — NOT token-scoped (fiat↔crypto has no asset), so

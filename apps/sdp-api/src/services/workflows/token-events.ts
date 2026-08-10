@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { dispatchWorkflowEvent } from "./event-bus";
 
@@ -41,18 +42,24 @@ export function emitTokenOperationCompleted(
           slot: input.slot != null ? String(input.slot) : null,
         },
       }).catch((error) => {
-        console.error("emitTokenOperationCompleted: dispatch failed", {
-          error: error instanceof Error ? error.message : String(error),
-          tokenId: input.tokenId,
-          operation: input.operation,
-        });
+        getLogger().error(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            tokenId: input.tokenId,
+            operation: input.operation,
+          },
+          "emitTokenOperationCompleted: dispatch failed"
+        );
       })
     );
   } catch (error) {
-    console.error("emitTokenOperationCompleted: emit failed", {
-      error: error instanceof Error ? error.message : String(error),
-      tokenId: input.tokenId,
-      operation: input.operation,
-    });
+    getLogger().error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        tokenId: input.tokenId,
+        operation: input.operation,
+      },
+      "emitTokenOperationCompleted: emit failed"
+    );
   }
 }

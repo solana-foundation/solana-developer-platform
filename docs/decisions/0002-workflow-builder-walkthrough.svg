@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1424" viewBox="0 0 1200 1424" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <title>Workflow builder walkthrough: the issuer configures a rule once, then each matching event flows through emission, guard evaluation, approval and execution on its own.</title>
   <rect x="0" y="0" width="1200" height="1424" fill="#ffffff"/>
 
   <!-- Title + plain intro -->

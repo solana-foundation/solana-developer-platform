@@ -1,5 +1,6 @@
 import { getDb } from "@/db";
 import { createNotificationsRepository, type WorkflowExecutionRow } from "@/db/repositories";
+import { getLogger } from "@/runtime/logger";
 import { createTransactionalEmailService, isEmailConfigured } from "@/services/email";
 import type { Env } from "@/types/env";
 import { humanizeWorkflowKey } from "../labels";
@@ -173,9 +174,10 @@ export async function runNotify(
     emailed = sends.filter((s) => s.status === "fulfilled").length;
     for (const send of sends) {
       if (send.status === "rejected") {
-        console.error("workflow notify: email send failed", {
-          error: errorMessage(send.reason),
-        });
+        getLogger().error(
+          { error: errorMessage(send.reason) },
+          "workflow notify: email send failed"
+        );
       }
     }
   }

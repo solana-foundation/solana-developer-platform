@@ -2,6 +2,7 @@ import type { TokenTransactionType } from "@sdp/types";
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
 import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
+import { getLogger } from "@/runtime/logger";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { humanizeWorkflowKey } from "../labels";
@@ -121,7 +122,7 @@ async function mirrorFreeze(
     });
     return true;
   } catch (error) {
-    console.error("workflow freeze: DB mirror failed", { error: errorMessage(error) });
+    getLogger().error({ error: errorMessage(error) }, "workflow freeze: DB mirror failed");
     return false;
   }
 }
@@ -139,7 +140,7 @@ async function mirrorUnfreeze(
     );
     return true;
   } catch (error) {
-    console.error("workflow unfreeze: DB mirror failed", { error: errorMessage(error) });
+    getLogger().error({ error: errorMessage(error) }, "workflow unfreeze: DB mirror failed");
     return false;
   }
 }

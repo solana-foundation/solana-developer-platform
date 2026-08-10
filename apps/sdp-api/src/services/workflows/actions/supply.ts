@@ -1,6 +1,7 @@
 import type { TokenTransactionType } from "@sdp/types";
 import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
+import { getLogger } from "@/runtime/logger";
 import { createToken2022Service } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { parsePositiveTokenAmount } from "@/services/token-operation.service";
@@ -36,11 +37,10 @@ async function mirrorSupply(
     await new TokenService(getDb(env)).updateSupply(tokenId, amountStr, op);
     return true;
   } catch (error) {
-    console.error("workflow supply: DB mirror failed", {
-      tokenId,
-      op,
-      error: errorMessage(error),
-    });
+    getLogger().error(
+      { tokenId, op, error: errorMessage(error) },
+      "workflow supply: DB mirror failed"
+    );
     return false;
   }
 }
