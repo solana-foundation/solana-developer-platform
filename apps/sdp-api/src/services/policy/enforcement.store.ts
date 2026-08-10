@@ -8,6 +8,7 @@ import type {
 import { IMPLICIT_DEFAULT_ALLOW_POLICY } from "@sdp/policy";
 import type {
   EffectiveApiKeyPolicy,
+  PolicyCandidate,
   PolicyEvaluation,
   WalletOperationActor,
   WalletOperationContext,
@@ -16,6 +17,7 @@ import type {
 } from "@sdp/types";
 import type { PolicyEvaluationRow, PolicyRepository, WalletOperationRow } from "@/db/repositories";
 import { internalError } from "@/lib/errors";
+import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import { ApiKeyPolicyStore } from "./api-key-policy.store";
 import { WalletPolicyStore } from "./wallet-policy.store";
 
@@ -28,7 +30,10 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
   private readonly walletPolicies: WalletPolicyStore;
   private readonly apiKeyPolicies: ApiKeyPolicyStore;
 
-  constructor(private readonly repository: PolicyRepository) {
+  constructor(
+    private readonly repository: PolicyRepository,
+    private readonly scope: TenantScope
+  ) {
     this.walletPolicies = new WalletPolicyStore(repository);
     this.apiKeyPolicies = new ApiKeyPolicyStore(repository);
   }
@@ -42,29 +47,35 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
   }
 
   /**
-   * Resolve both policy scopes for an operation, letting a binding-supplied
+   * Resolve both policy scopes for a candidate, letting a binding-supplied
    * wallet policy or custody wallet from the API-key scope take precedence.
+   * The candidate's claimed tenant must match the store's bound scope, so a
+   * mismatched candidate fails before any lookup runs.
    *
-   * @param operation - The operation being enforced.
+   * @param candidate - The candidate whose scopes resolve the policies.
    * @returns The effective wallet and API-key policies.
    */
   async loadEffectivePolicies(
-    operation: WalletOperationEnvelope
+    candidate: Pick<
+      PolicyCandidate,
+      "organizationId" | "projectId" | "apiKeyId" | "custodyWalletId"
+    >
   ): Promise<EffectiveOperationPolicies> {
+    assertTenantClaim(this.scope, candidate, "PolicyEnforcementStore.loadEffectivePolicies");
     const apiKeyScope =
-      operation.apiKeyId !== null && operation.custodyWalletId !== null
+      candidate.apiKeyId !== null && candidate.custodyWalletId !== null
         ? await this.apiKeyPolicies.resolveOperationScope({
-            apiKeyId: operation.apiKeyId,
-            custodyWalletId: operation.custodyWalletId,
+            apiKeyId: candidate.apiKeyId,
+            custodyWalletId: candidate.custodyWalletId,
           })
         : null;
 
     let apiKeyPolicy: EffectiveApiKeyPolicy | null = null;
     if (apiKeyScope !== null) {
       apiKeyPolicy = apiKeyScope.apiKeyPolicy;
-    } else if (operation.apiKeyId !== null) {
+    } else if (candidate.apiKeyId !== null) {
       apiKeyPolicy = await this.apiKeyPolicies.resolveOperationPolicyWithoutCustodyWallet(
-        operation.apiKeyId
+        candidate.apiKeyId
       );
     }
 
@@ -75,7 +86,7 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
     const custodyWalletId =
       apiKeyScope !== null && apiKeyScope.custodyWalletId !== null
         ? apiKeyScope.custodyWalletId
-        : operation.custodyWalletId;
+        : candidate.custodyWalletId;
     const walletPolicy =
       custodyWalletId !== null
         ? await this.walletPolicies.resolveEffectiveWalletPolicy(custodyWalletId)

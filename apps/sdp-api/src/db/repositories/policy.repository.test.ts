@@ -35,7 +35,10 @@ import { createPostgresPolicyRepository } from "./policy.repository.postgres";
 function policyStores(repo: PolicyRepository) {
   const wallet = new WalletPolicyStore(repo);
   const apiKey = new ApiKeyPolicyStore(repo);
-  const enforcement = new PostgresPolicyEnforcementStore(repo);
+  const enforcement = new PostgresPolicyEnforcementStore(
+    repo,
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: null })
+  );
   return {
     resolveEffectiveWalletPolicy: wallet.resolveEffectiveWalletPolicy.bind(wallet),
     resolveEffectiveApiKeyPolicy: apiKey.resolveEffectiveApiKeyPolicy.bind(apiKey),

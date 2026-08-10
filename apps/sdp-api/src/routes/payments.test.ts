@@ -2944,60 +2944,59 @@ describe("Payments routes", () => {
   it.each([
     { journaledRecord: "transfer", attemptHasSignature: false, transferHasSignature: true },
     { journaledRecord: "attempt", attemptHasSignature: true, transferHasSignature: false },
-  ])("recovers submitted recurring payment collection attempts from the $journaledRecord journal", async ({
-    attemptHasSignature,
-    transferHasSignature,
-  }) => {
-    const sourceSigner = await generateKeyPairSigner();
-    await updateSeededWalletPublicKey(sourceSigner.address);
-    createOrgSignerMock.mockResolvedValue(sourceSigner);
-    mockRecurringActivationRpc();
-    const submittedSignature =
-      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
-    const signAndSendMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
-      )
-      .mockResolvedValueOnce(
-        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
-      );
-    createFeePaymentAdapterMock.mockReturnValue({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
-      signAsFeePayer: vi.fn(),
-      signAndSend: signAndSendMock,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
-    const headers = {
-      Authorization: `Bearer ${TEST_API_KEY.raw}`,
-      "Content-Type": "application/json",
-    };
-    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+  ])(
+    "recovers submitted recurring payment collection attempts from the $journaledRecord journal",
+    async ({ attemptHasSignature, transferHasSignature }) => {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerMock.mockResolvedValue(sourceSigner);
+      mockRecurringActivationRpc();
+      const submittedSignature =
+        "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
+      const signAndSendMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+        )
+        .mockResolvedValueOnce(
+          "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+        );
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+      const headers = {
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "Content-Type": "application/json",
+      };
+      const recurringPaymentId = await createRecurringPaymentForActivation(headers);
 
-    const activateRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
-      env
-    );
-    expect(activateRes.status).toBe(200);
-    const activateBody = (await activateRes.json()) as {
-      data: { recurringPayment: { subscriptionId: string } };
-    };
-    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
-    const now = new Date().toISOString();
-    const transferId = `xfr_${crypto.randomUUID()}`;
-    const attemptId = `psca_${crypto.randomUUID()}`;
-    await getDb(env)
-      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
-      .bind(dueAt, recurringPaymentId)
-      .run();
-    await getDb(env)
-      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
-      .bind(dueAt, activateBody.data.recurringPayment.subscriptionId)
-      .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO payment_transfers (
+      const activateRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+        { method: "POST", headers },
+        env
+      );
+      expect(activateRes.status).toBe(200);
+      const activateBody = (await activateRes.json()) as {
+        data: { recurringPayment: { subscriptionId: string } };
+      };
+      const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+      const now = new Date().toISOString();
+      const transferId = `xfr_${crypto.randomUUID()}`;
+      const attemptId = `psca_${crypto.randomUUID()}`;
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, recurringPaymentId)
+        .run();
+      await getDb(env)
+        .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, activateBody.data.recurringPayment.subscriptionId)
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
            id,
            organization_id,
            project_id,
@@ -3016,29 +3015,29 @@ describe("Payments routes", () => {
            created_at,
            updated_at
          ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
-      )
-      .bind(
-        transferId,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        TEST_WALLET_ID,
-        recurringPaymentId,
-        sourceSigner.address,
-        TEST_SOLANA_ADDRESSES.wallet2,
-        DEVNET_USDC_MINT,
-        "25.00",
-        "transfer",
-        "outbound",
-        "processing",
-        JSON.stringify({ recurringPaymentId }),
-        transferHasSignature ? submittedSignature : null,
-        now,
-        now
-      )
-      .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO payment_subscription_collection_attempts (
+        )
+        .bind(
+          transferId,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_WALLET_ID,
+          recurringPaymentId,
+          sourceSigner.address,
+          TEST_SOLANA_ADDRESSES.wallet2,
+          DEVNET_USDC_MINT,
+          "25.00",
+          "transfer",
+          "outbound",
+          "processing",
+          JSON.stringify({ recurringPaymentId }),
+          transferHasSignature ? submittedSignature : null,
+          now,
+          now
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_subscription_collection_attempts (
            id,
            organization_id,
            project_id,
@@ -3054,65 +3053,68 @@ describe("Payments routes", () => {
            created_at,
            updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
-      )
-      .bind(
-        attemptId,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        activateBody.data.recurringPayment.subscriptionId,
-        transferId,
-        DEVNET_USDC_MINT,
-        "25.00",
-        dueAt,
-        now,
-        "processing",
-        attemptHasSignature ? submittedSignature : null,
-        JSON.stringify({ recurringPaymentId }),
-        now,
-        now
-      )
-      .run();
-    const [expectedDestinationAta] = await findAssociatedTokenPda({
-      owner: address(TEST_SOLANA_ADDRESSES.wallet2),
-      tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-      mint: address(DEVNET_USDC_MINT),
-    });
+        )
+        .bind(
+          attemptId,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          activateBody.data.recurringPayment.subscriptionId,
+          transferId,
+          DEVNET_USDC_MINT,
+          "25.00",
+          dueAt,
+          now,
+          "processing",
+          attemptHasSignature ? submittedSignature : null,
+          JSON.stringify({ recurringPaymentId }),
+          now,
+          now
+        )
+        .run();
+      const [expectedDestinationAta] = await findAssociatedTokenPda({
+        owner: address(TEST_SOLANA_ADDRESSES.wallet2),
+        tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        mint: address(DEVNET_USDC_MINT),
+      });
 
-    const collectRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
-      env
-    );
+      const collectRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+        { method: "POST", headers },
+        env
+      );
 
-    expect(collectRes.status).toBe(200);
-    const collectBody = (await collectRes.json()) as {
-      data: {
-        recurringPayment: { destinationTokenAccount: string; nextCollectionDueAt: string };
-        collectionAttempt: { id: string; status: string; signature: string };
-        transfer: { id: string; status: string; signature: string };
+      expect(collectRes.status).toBe(200);
+      const collectBody = (await collectRes.json()) as {
+        data: {
+          recurringPayment: { destinationTokenAccount: string; nextCollectionDueAt: string };
+          collectionAttempt: { id: string; status: string; signature: string };
+          transfer: { id: string; status: string; signature: string };
+        };
       };
-    };
-    expect(collectBody.data.recurringPayment.destinationTokenAccount).toBe(expectedDestinationAta);
-    expect(collectBody.data.collectionAttempt).toMatchObject({
-      id: attemptId,
-      status: "confirmed",
-      signature: submittedSignature,
-    });
-    expect(collectBody.data.transfer).toMatchObject({
-      id: transferId,
-      status: "confirmed",
-      signature: submittedSignature,
-    });
-    expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt).getTime()).toBe(
-      new Date(dueAt).getTime() + 24 * 60 * 60 * 1000
-    );
-    expect(signAndSendMock).toHaveBeenCalledTimes(2);
-    expect(confirmTransactionMock).toHaveBeenCalledWith(
-      expect.anything(),
-      submittedSignature,
-      expect.objectContaining({ commitment: "confirmed" })
-    );
-  });
+      expect(collectBody.data.recurringPayment.destinationTokenAccount).toBe(
+        expectedDestinationAta
+      );
+      expect(collectBody.data.collectionAttempt).toMatchObject({
+        id: attemptId,
+        status: "confirmed",
+        signature: submittedSignature,
+      });
+      expect(collectBody.data.transfer).toMatchObject({
+        id: transferId,
+        status: "confirmed",
+        signature: submittedSignature,
+      });
+      expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt).getTime()).toBe(
+        new Date(dueAt).getTime() + 24 * 60 * 60 * 1000
+      );
+      expect(signAndSendMock).toHaveBeenCalledTimes(2);
+      expect(confirmTransactionMock).toHaveBeenCalledWith(
+        expect.anything(),
+        submittedSignature,
+        expect.objectContaining({ commitment: "confirmed" })
+      );
+    }
+  );
 
   it("does not let a delayed authorization preparation overwrite an active subscription", async () => {
     const counterpartyId = await seedCounterparty({
@@ -6614,6 +6616,120 @@ describe("Payments routes", () => {
     };
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.details?.errors?.rules).toContain("Duplicate rule id: duplicated");
+  });
+
+  it("dry-runs a gated transfer with zero writes and full rule criteria", async () => {
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-execution",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+        {
+          id: "block-ramp",
+          kind: "operation_family",
+          families: ["ramp"],
+          action: "deny",
+        },
+      ],
+    });
+
+    const response = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        decision: string;
+        criteria: Array<{ ruleId: string | null; matched: boolean; action: string | null }>;
+        walletPolicyRevisionId: string | null;
+      };
+    };
+    expect(body.data.decision).toBe("approval_required");
+    expect(body.data.walletPolicyRevisionId).toMatch(/^wcpr_/);
+    expect(body.data.criteria).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ruleId: "approve-payment-execution",
+          matched: true,
+          action: "approval_required",
+        }),
+        expect.objectContaining({ ruleId: "block-ramp", matched: false, action: null }),
+      ])
+    );
+
+    for (const table of ["wallet_operations", "approval_requests", "payment_transfers"]) {
+      const row = await getDb(env)
+        .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
+        .first<{ count: number | string }>();
+      expect(Number(row?.count ?? 0)).toBe(0);
+    }
+  });
+
+  it("answers a dry-run with the verdict even when an Idempotency-Key matches a recorded transfer", async () => {
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Idempotency-Key": "idem-dry-run-replay",
+    };
+    const transferBody = JSON.stringify({
+      source: TEST_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "0.1",
+    });
+
+    const first = await app.request(
+      "/v1/payments/transfers",
+      { method: "POST", headers, body: transferBody },
+      env
+    );
+    expect(first.status).toBe(200);
+
+    const dryRun = await app.request(
+      "/v1/payments/transfers",
+      { method: "POST", headers: { ...headers, "Dry-Run": "true" }, body: transferBody },
+      env
+    );
+    expect(dryRun.status).toBe(200);
+    const dryRunBody = (await dryRun.json()) as { data: { decision: string; criteria: unknown } };
+    expect(dryRunBody.data.decision).toBe("allow");
+    expect(dryRunBody.data).toHaveProperty("criteria");
+  });
+
+  it("rejects an invalid body before evaluating a dry-run", async () => {
+    const response = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({ source: TEST_WALLET_ID }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
   });
 
   it("executes an approved transfer exactly once after leaving it pending", async () => {

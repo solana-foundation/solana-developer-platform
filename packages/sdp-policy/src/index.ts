@@ -3,7 +3,10 @@ export {
   type WalletOperationPolicyEnforcement,
 } from "./enforce";
 export {
+  describeCandidateRuleCriteria,
+  type EvaluateCandidatePoliciesInput,
   type EvaluateWalletOperationPoliciesInput,
+  evaluateCandidatePolicies,
   evaluateWalletOperationPolicies,
   IMPLICIT_DEFAULT_ALLOW_POLICY,
 } from "./evaluate";
