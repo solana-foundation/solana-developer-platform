@@ -128,18 +128,65 @@ export async function loadCachedApiKeyFromDb(
 }
 
 /**
- * Cache an entry produced by a miss-path DB read. Write-if-absent: loses on
- * purpose against any state a concurrent mutation wrote after this fill's DB
- * read.
+ * Payloads written before rotation-deadline enforcement (or corrupted ones)
+ * are treated as cache misses by every reader; they must never be adopted as
+ * authoritative state.
+ */
+function tryParseAuthoritativeEntry(raw: string): CachedApiKey | null {
+  try {
+    const parsed = JSON.parse(raw) as CachedApiKey;
+    return Object.hasOwn(parsed, "rotationDeadline") ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cache an entry produced by a miss-path DB read and return the entry the
+ * caller must authenticate against. Write-if-absent: losing the write means
+ * something newer than this fill's DB read landed in the slot (e.g. a
+ * revocation), so the current request adopts that newer state instead of
+ * proceeding on its stale snapshot. Legacy pre-rotation-deadline payloads are
+ * the exception — readers treat them as misses, so they are upgraded to the
+ * fresh DB state rather than adopted.
  */
 export async function fillApiKeyCache(
   kv: KVStore,
   keyHash: string,
   entry: CachedApiKey
-): Promise<void> {
-  await kv.compareAndSet(apiKeyCacheKey(keyHash), null, JSON.stringify(entry), {
-    expirationTtl: API_KEY_CACHE_TTL_SECONDS,
-  });
+): Promise<CachedApiKey> {
+  const cacheKey = apiKeyCacheKey(keyHash);
+  const value = JSON.stringify(entry);
+  let expected: string | null = null;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (
+      await kv.compareAndSet(cacheKey, expected, value, {
+        expirationTtl: API_KEY_CACHE_TTL_SECONDS,
+      })
+    ) {
+      return entry;
+    }
+
+    const currentRaw = await kv.get(cacheKey);
+    if (currentRaw === null) {
+      // Slot emptied between attempts (TTL expiry or delete); try to claim it.
+      expected = null;
+      continue;
+    }
+
+    const current = tryParseAuthoritativeEntry(currentRaw);
+    if (current) {
+      return current;
+    }
+
+    // Legacy or unparseable payload: replace it with the fresh DB state.
+    expected = currentRaw;
+  }
+
+  // Extreme contention; use this fill's own DB read. Revocation paths write
+  // unconditionally, so authoritative state still lands regardless.
+  return entry;
 }
 
 function tryParseStatus(raw: string): ApiKeyStatus | null {

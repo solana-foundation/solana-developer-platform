@@ -113,10 +113,10 @@ async function getFromDatabaseAndCache(
   }
 
   // Write-if-absent: a fill must never overwrite authoritative state a
-  // concurrent revocation wrote after this function's DB read.
-  await fillApiKeyCache(kv, keyHash, cached);
-
-  return cached;
+  // concurrent revocation wrote after this function's DB read — and if that
+  // happened, this request must authenticate against the newer state, not
+  // the snapshot it read.
+  return await fillApiKeyCache(kv, keyHash, cached);
 }
 
 function writeLastUsed(db: DatabaseClient, keyId: string): Promise<void> {

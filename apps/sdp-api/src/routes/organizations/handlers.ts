@@ -245,8 +245,11 @@ export const deleteOrganization = async (c: AppContext) => {
 
   // Push the revoked state into the auth cache for every one of the org's
   // keys before reporting success — otherwise cached entries keep
-  // authenticating for the remainder of the cache TTL.
-  await Promise.all(
+  // authenticating for the remainder of the cache TTL. allSettled so a
+  // failed refresh cannot skip session revocation or the audit write below;
+  // any failure still becomes a 500 at the end (the deletion is idempotent,
+  // so the client retries).
+  const cacheRefreshes = await Promise.allSettled(
     (orgKeyHashes.results ?? []).map((row) =>
       refreshApiKeyCache(db, c.var.kv.apiKeys, row.key_hash)
     )
@@ -266,6 +269,20 @@ export const deleteOrganization = async (c: AppContext) => {
     resourceType: "organization",
     resourceId: orgId,
   });
+
+  const failedRefreshes = cacheRefreshes.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  );
+  if (failedRefreshes.length > 0) {
+    getLogger().error(
+      { errors: failedRefreshes.map((result) => result.reason) },
+      "Failed to invalidate cached API keys after organization deletion"
+    );
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Organization was deleted but cached API keys could not be invalidated; retry the deletion"
+    );
+  }
 
   return noContent(c);
 };

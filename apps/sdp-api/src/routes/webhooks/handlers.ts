@@ -10,10 +10,12 @@ import type { SdpEnvironment } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
 import { success } from "@/lib/response";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import {
   ensureClerkOrganizationMapping,
@@ -91,18 +93,24 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
     return;
   }
 
-  await getDb(c.env).batch([
-    getDb(c.env)
+  const db = getDb(c.env);
+  const orgKeyHashes = await db
+    .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
+    .bind(mapping.organization_id)
+    .all<{ key_hash: string }>();
+
+  await db.batch([
+    db
       .prepare(
         `UPDATE organizations
          SET status = 'deleted', updated_at = datetime('now')
          WHERE id = ?`
       )
       .bind(mapping.organization_id),
-    getDb(c.env)
+    db
       .prepare("UPDATE organization_members SET status = 'removed' WHERE organization_id = ?")
       .bind(mapping.organization_id),
-    getDb(c.env)
+    db
       .prepare(
         `UPDATE api_keys
          SET status = 'revoked', revoked_at = datetime('now')
@@ -111,12 +119,37 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       .bind(mapping.organization_id),
   ]);
 
-  const sessionService = new SessionService(getDb(c.env));
+  // Webhooks are a KV-free path (no c.var.kv), so build the store set
+  // directly — it shares the process-wide Redis client. Same invariant as
+  // the REST deletion: revoked keys must not keep authenticating from cache
+  // for the remainder of the TTL. allSettled so one failed refresh cannot
+  // skip session revocation; any failure is rethrown afterwards so the
+  // webhook 500s and Clerk redelivers (the whole handler is idempotent).
+  const apiKeysKV = createKVStoreSet(c.env).apiKeys;
+  const cacheRefreshes = await Promise.allSettled(
+    (orgKeyHashes.results ?? []).map((row) => refreshApiKeyCache(db, apiKeysKV, row.key_hash))
+  );
+
+  const sessionService = new SessionService(db);
   await sessionService
     .revokeOrganizationSessions(mapping.organization_id)
     .catch((error) =>
       getLogger().error({ error }, "Failed to revoke sessions after organization deletion")
     );
+
+  const failedRefreshes = cacheRefreshes.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  );
+  if (failedRefreshes.length > 0) {
+    getLogger().error(
+      { errors: failedRefreshes.map((result) => result.reason) },
+      "Failed to invalidate cached API keys after webhook organization deletion"
+    );
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Organization was deleted but cached API keys could not be invalidated"
+    );
+  }
 }
 
 async function resolveVerifiedUserEmail(env: Env, userId: string): Promise<string | null> {
