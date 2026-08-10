@@ -12,7 +12,6 @@ import {
   createPaymentRequest,
   createRecurringPayment,
   createSubscription,
-  createSubscriptionCollectionAttempt,
   createSubscriptionPlan,
   createTransfer,
   createTransferBatch,
@@ -47,7 +46,6 @@ import {
   resumeRecurringPayment,
   simulateSandboxTransfer,
   updateRecurringPayment,
-  updateSubscription,
   updateSubscriptionPlan,
   updateWalletPolicy,
 } from "./handlers";
@@ -170,16 +168,6 @@ payments.get(
   "/subscriptions/:subscriptionId",
   requirePermissions("payments:read"),
   getSubscription
-);
-payments.patch(
-  "/subscriptions/:subscriptionId",
-  requirePermissions("payments:write"),
-  updateSubscription
-);
-payments.post(
-  "/subscriptions/:subscriptionId/collection-attempts",
-  requirePermissions("payments:write"),
-  createSubscriptionCollectionAttempt
 );
 payments.get(
   "/subscriptions/:subscriptionId/collection-attempts",

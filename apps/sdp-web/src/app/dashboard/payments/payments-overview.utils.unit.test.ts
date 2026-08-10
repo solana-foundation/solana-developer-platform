@@ -1,6 +1,11 @@
-import { WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import { formatTokenAmount, isHttpUrl, resolveTransferTokenLabel } from "./payments-overview.utils";
+import {
+  formatTokenAmount,
+  isHttpUrl,
+  resolveTokenByMint,
+  resolveTransferTokenLabel,
+} from "./payments-overview.utils";
 
 const UNCATALOGUED_MINT = "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh";
 
@@ -47,6 +52,34 @@ describe("resolveTransferTokenLabel", () => {
 
   it("leaves a short non-mint ticker alone", () => {
     expect(resolveTransferTokenLabel("SOL")).toBe("SOL");
+  });
+});
+
+describe("resolveTokenByMint", () => {
+  it("maps the native SOL alias to the SOL mint", () => {
+    // Rows written by the native send path record the literal "SOL".
+    expect(resolveTokenByMint("SOL", {})).toMatchObject({
+      mint: SOL_MINT,
+      tokenName: "SOL",
+      isWellKnown: true,
+      tokenId: null,
+    });
+  });
+
+  it("resolves an issued mint to its id, symbol, and metadata image", () => {
+    const issued = {
+      id: "tok_1",
+      mintAddress: UNCATALOGUED_MINT,
+      symbol: "bSGD",
+      imageUrl: "https://cdn.example/bsgd.png",
+    };
+
+    expect(resolveTokenByMint(UNCATALOGUED_MINT, { [UNCATALOGUED_MINT]: issued })).toMatchObject({
+      tokenId: "tok_1",
+      tokenName: "bSGD",
+      metadataImageUrl: "https://cdn.example/bsgd.png",
+      isWellKnown: false,
+    });
   });
 });
 

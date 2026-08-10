@@ -1672,7 +1672,7 @@
             "description": "Creates a recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"sig_example\",\n  \"status\": \"active\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\"\n}",
+              "raw": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1768,7 +1768,7 @@
             "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"amount\": \"25.00\",\n  \"receiverTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
+              "raw": "{\n  \"receiverTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1787,60 +1787,12 @@
           }
         },
         {
-          "name": "Update subscription",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}",
-            "description": "Updates mutable subscription status and on-chain identifiers.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"\",\n  \"status\": \"active\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\",\n  \"cancelAt\": \"2026-01-01T00:00:00.000Z\",\n  \"canceledAt\": \"2026-01-01T00:00:00.000Z\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
           "name": "List subscription collection attempts",
           "request": {
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/collection-attempts",
             "description": "Lists collection attempts for a recurring-payment subscription."
-          }
-        },
-        {
-          "name": "Create subscription collection attempt",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/collection-attempts",
-            "description": "Creates a collection-attempt record for a due recurring-payment subscription. Actual Solana settlement is owned by the collection worker/transaction submitter.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"amount\": \"\",\n  \"token\": \"\",\n  \"dueAt\": \"2026-01-01T00:00:00.000Z\",\n  \"attemptedAt\": \"2026-01-01T00:00:00.000Z\",\n  \"status\": \"pending\",\n  \"transferId\": \"\",\n  \"signature\": \"\",\n  \"error\": \"\",\n  \"metadata\": {}\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
           }
         },
         {
