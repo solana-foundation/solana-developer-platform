@@ -16,6 +16,7 @@ export type {
   CreateAssetWorkflowInput,
   UpdateAssetWorkflowInput,
 } from "./asset-workflow.repository";
+export { generateAssetWorkflowId } from "./asset-workflow.repository";
 export { createPostgresAssetWorkflowsRepository } from "./asset-workflow.repository.postgres";
 export type { RepositoryDbClient } from "./base";
 export type {

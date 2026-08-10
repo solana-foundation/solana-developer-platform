@@ -41,6 +41,10 @@ export interface AssetWorkflowRow {
 }
 
 export interface CreateAssetWorkflowInput {
+  // Callers that must reference the rule before it exists supply their own id — the
+  // webhook signing secret is keyed by rule id and is written first, so that a store
+  // failure leaves no row behind. Everyone else lets the repository mint one.
+  id?: string;
   organizationId: string;
   projectId: string;
   tokenId: string;

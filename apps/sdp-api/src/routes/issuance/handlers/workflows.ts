@@ -19,10 +19,12 @@ import type { AssetWorkflowDefinition, AssetWorkflowRow } from "@/db/repositorie
 import {
   createAssetWorkflowsRepository,
   createWorkflowExecutionsRepository,
+  generateAssetWorkflowId,
 } from "@/db/repositories";
 import { badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
-import { storeActionSecret } from "@/services/workflows/action-secret";
+import type { StoredCredentialSecret } from "@/services/credential-secret-store";
+import { destroyActionSecret, storeActionSecret } from "@/services/workflows/action-secret";
 import { resolveAssetGateContext } from "@/services/workflows/asset-gate";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
@@ -187,14 +189,25 @@ export const createWorkflow = async (c: AppContext) => {
   // definition keeps only a reference.
   const { params: storableParams, secret } = splitOutSecret(actionParams);
 
+  // Mint the id here so the credential can be written before the insert. Attaching it
+  // afterwards meant a store failure answered 400 with an enabled rule already committed
+  // and its plaintext secret already stripped — the caller saw a failure while a live rule
+  // sent unsigned webhooks, and each retry left another row behind.
+  const workflowId = generateAssetWorkflowId();
+  const actionSecret = secret
+    ? await storeActionSecretOrRefuse(c.env, { orgId, workflowId, secret })
+    : null;
+
   const repo = createAssetWorkflowsRepository(c.env);
   const definition: AssetWorkflowDefinition = {
     condition: (parsed.data.condition ?? null) as WorkflowCondition | null,
     action: { type: parsed.data.actionType, params: storableParams },
     retryPolicy: parsed.data.retryPolicy ?? { maxAttempts: 5, retryAfterMinutes: 5 },
+    actionSecret,
   };
 
   const workflow = await repo.createWorkflow({
+    id: workflowId,
     organizationId: orgId,
     projectId,
     tokenId,
@@ -211,14 +224,13 @@ export const createWorkflow = async (c: AppContext) => {
   });
 
   if (!workflow) {
+    // Nothing references the credential now, so retire it rather than leaving a version
+    // no rule can ever reach.
+    await destroyActionSecret(c.env, actionSecret);
     throw badRequest("Failed to create workflow");
   }
-  // Stored after the insert because the secret is keyed by the rule's own id.
-  const stored = secret
-    ? await persistActionSecret(c.env, { orgId, projectId, workflow, definition, secret })
-    : workflow;
 
-  return created(c, { workflow: toWorkflowResponse(stored) });
+  return created(c, { workflow: toWorkflowResponse(workflow) });
 };
 
 // Pull a credential param out of the storable set. Returns the params to persist and the
@@ -239,37 +251,21 @@ function splitOutSecret(params: Record<string, string | number>): {
   return { params: rest, secret };
 }
 
-// Writes the secret to the credential store and records the reference on the rule. A
-// deployment with no store configured is refused outright rather than quietly persisting
-// the key in plaintext — the rest of the rule is already saved, so the operator can
-// re-save without the secret or configure the store.
-async function persistActionSecret(
+// Writes the secret to the credential store and hands back the reference for the caller to
+// fold into the definition it is about to persist. A deployment with no store configured
+// is refused outright rather than quietly persisting the key in plaintext; because this
+// runs before the row is written, that refusal changes nothing.
+async function storeActionSecretOrRefuse(
   env: Env,
-  input: {
-    orgId: string;
-    projectId: string;
-    workflow: AssetWorkflowRow;
-    definition: AssetWorkflowDefinition;
-    secret: string;
-  }
-): Promise<AssetWorkflowRow> {
-  const result = await storeActionSecret(env, {
-    orgId: input.orgId,
-    workflowId: input.workflow.id,
-    secret: input.secret,
-  });
+  input: { orgId: string; workflowId: string; secret: string }
+): Promise<StoredCredentialSecret> {
+  const result = await storeActionSecret(env, input);
   if (!result.ok) {
     throw badRequest(
       "Signing secrets require a configured credential secret store on this deployment"
     );
   }
-  const updated = await createAssetWorkflowsRepository(env).updateWorkflow({
-    workflowId: input.workflow.id,
-    organizationId: input.orgId,
-    projectId: input.projectId,
-    definition: { ...input.definition, actionSecret: result.stored },
-  });
-  return updated ?? input.workflow;
+  return result.stored;
 }
 
 export const listWorkflows = async (c: AppContext) => {
@@ -321,6 +317,15 @@ export const updateWorkflow = async (c: AppContext) => {
     );
   }
 
+  // Rotation writes the new version before the row is touched, for the same reason create
+  // does: attaching it afterwards meant a store failure answered 400 with the new webhook
+  // URL already saved and the rule signing with the superseded key — or with nothing, when
+  // the rule had no secret before this edit.
+  const previousSecret = existing.definition.actionSecret ?? null;
+  const actionSecret = secret
+    ? await storeActionSecretOrRefuse(c.env, { orgId, workflowId, secret })
+    : previousSecret;
+
   // An edit that doesn't re-send the secret keeps the stored reference — reads redact
   // it, so requiring it on every save would silently erase it.
   const definition: AssetWorkflowDefinition | undefined = definitionSupplied
@@ -331,7 +336,7 @@ export const updateWorkflow = async (c: AppContext) => {
             : existing.definition.condition,
         action: { type: existing.action_type, params },
         retryPolicy: parsed.data.retryPolicy ?? existing.definition.retryPolicy,
-        actionSecret: existing.definition.actionSecret ?? null,
+        actionSecret,
       }
     : undefined;
 
@@ -344,6 +349,9 @@ export const updateWorkflow = async (c: AppContext) => {
     enabled: parsed.data.enabled,
   });
   if (!workflow) {
+    // The rule went away between the read and the write, so no row points at the version
+    // we just wrote.
+    await destroyActionSecret(c.env, secret ? actionSecret : null);
     throw notFound("Workflow");
   }
 
@@ -357,12 +365,18 @@ export const updateWorkflow = async (c: AppContext) => {
     });
   }
 
-  const stored =
-    secret && definition
-      ? await persistActionSecret(c.env, { orgId, projectId, workflow, definition, secret })
-      : workflow;
+  // The row now points at the new version, so the one it replaced has no reader left.
+  // Guarded on the refs actually differing: destroying the version the rule still points
+  // at would break every subsequent delivery.
+  if (
+    secret &&
+    previousSecret?.secretVersionRef &&
+    previousSecret.secretVersionRef !== actionSecret?.secretVersionRef
+  ) {
+    await destroyActionSecret(c.env, previousSecret);
+  }
 
-  return success(c, { workflow: toWorkflowResponse(stored) });
+  return success(c, { workflow: toWorkflowResponse(workflow) });
 };
 
 // Soft delete: the rule disappears from every read path (list, dispatch, engine
@@ -378,12 +392,18 @@ export const deleteWorkflow = async (c: AppContext) => {
   }
   assertWorkflowActionPermitted(c, existing.action_type);
 
-  await repo.deleteWorkflow({ workflowId, organizationId: orgId, projectId });
+  const removed = await repo.deleteWorkflow({ workflowId, organizationId: orgId, projectId });
   // Anything this rule had queued or held is withdrawn with it — otherwise a held mint
   // from a deleted rule stays in the approval queue, approvable.
   const cancelled = await createWorkflowExecutionsRepository(c.env).cancelOpenExecutionsForWorkflow(
     { workflowId, organizationId: orgId, projectId }
   );
+  // The rule is gone from every read path, so its signing key has no reader left. The
+  // soft delete keeps the reference on the row for history; the value itself is retired
+  // rather than left recoverable from the secret backend.
+  if (removed) {
+    await destroyActionSecret(c.env, existing.definition.actionSecret);
+  }
   return success(c, { deleted: true, cancelledExecutions: cancelled });
 };
 

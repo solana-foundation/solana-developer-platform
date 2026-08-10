@@ -30,7 +30,7 @@ function mapWorkflowRow(row: Record<string, unknown>): AssetWorkflowRow {
 export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflowsRepository {
   return {
     async createWorkflow(input: CreateAssetWorkflowInput) {
-      const id = generateAssetWorkflowId();
+      const id = input.id ?? generateAssetWorkflowId();
       const row = await db
         .prepare(
           `INSERT INTO asset_workflows (
