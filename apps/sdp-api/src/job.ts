@@ -8,6 +8,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
+import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 
@@ -23,6 +24,9 @@ export async function runCronJob(): Promise<void> {
   initNodeSentry(getSentryOptions(env));
 
   const work = async () => {
+    // Security sweep first so payment reconciliation failures cannot starve
+    // it: repairs revoked API keys whose cache write failed post-commit.
+    await reconcileRevokedApiKeyCache(env);
     await trackPendingTransfers(env);
     await recoverApprovedWalletOperations(env);
   };

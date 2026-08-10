@@ -152,7 +152,7 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
     );
     throw new AppError(
       "INTERNAL_ERROR",
-      "Organization was deleted but cached API keys could not be invalidated"
+      "Organization was deleted but some cached API keys could not be invalidated yet; Clerk redelivery and the reconciliation job repair them"
     );
   }
 }

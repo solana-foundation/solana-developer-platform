@@ -284,7 +284,7 @@ export const deleteOrganization = async (c: AppContext) => {
     );
     throw new AppError(
       "INTERNAL_ERROR",
-      "Organization was deleted but cached API keys could not be invalidated; retry the deletion"
+      "Organization was deleted but some cached API keys could not be invalidated yet; the reconciliation job repairs them automatically"
     );
   }
 
