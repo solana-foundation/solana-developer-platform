@@ -440,6 +440,18 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       expect(secretStore.destroyVersion).toHaveBeenCalledWith({ secretVersionRef: versionRef(1) });
     });
 
+    // The one handler where a missed cleanup is unrecoverable: a retry 404s, because
+    // getWorkflowById excludes the row the first call soft-deleted.
+    it("retires the secret even when execution cancellation fails", async () => {
+      const workflowId = await createRuleWithSecret();
+      repoRejects.cancelOpenExecutionsForWorkflow = new Error("deadlock detected");
+
+      const res = await request("DELETE", `${base}/${workflowId}`);
+
+      expect(res.status).toBe(500);
+      expect(secretStore.destroyVersion).toHaveBeenCalledWith({ secretVersionRef: versionRef(1) });
+    });
+
     // Cleanup is best effort by contract: the rule is already gone, so a backend failure
     // must not turn a successful delete into an error the caller retries.
     it("succeeds even when the backend refuses the destroy", async () => {

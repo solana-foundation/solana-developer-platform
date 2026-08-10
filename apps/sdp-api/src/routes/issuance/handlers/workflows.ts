@@ -410,17 +410,22 @@ export const deleteWorkflow = async (c: AppContext) => {
   assertWorkflowActionPermitted(c, existing.action_type);
 
   const removed = await repo.deleteWorkflow({ workflowId, organizationId: orgId, projectId });
+  // The rule is gone from every read path, so its signing key has no reader left. The
+  // soft delete keeps the reference on the row for history; the value itself is retired
+  // rather than left recoverable from the secret backend.
+  //
+  // Retired immediately after the delete commits, before anything else that can throw.
+  // This is the one handler where a missed cleanup cannot be repaired by retrying: the
+  // caller's retry gets a 404, because getWorkflowById excludes the row it just
+  // soft-deleted, so the secret would stay recoverable with nothing left to reach it.
+  if (removed) {
+    await destroyActionSecret(c.env, existing.definition.actionSecret);
+  }
   // Anything this rule had queued or held is withdrawn with it — otherwise a held mint
   // from a deleted rule stays in the approval queue, approvable.
   const cancelled = await createWorkflowExecutionsRepository(c.env).cancelOpenExecutionsForWorkflow(
     { workflowId, organizationId: orgId, projectId }
   );
-  // The rule is gone from every read path, so its signing key has no reader left. The
-  // soft delete keeps the reference on the row for history; the value itself is retired
-  // rather than left recoverable from the secret backend.
-  if (removed) {
-    await destroyActionSecret(c.env, existing.definition.actionSecret);
-  }
   return success(c, { deleted: true, cancelledExecutions: cancelled });
 };
 
