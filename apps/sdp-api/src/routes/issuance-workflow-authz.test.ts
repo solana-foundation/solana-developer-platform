@@ -24,6 +24,8 @@ const TOKEN_ID = "tok_workflow_authz_test";
 // Two principals differing only in `tokens:admin` — the exact line the tier gate draws.
 const MEMBER_KEY = { id: "key_wf_member", raw: "sk_test_wf_member", prefix: "sk_test_wf_" };
 const ADMIN_KEY = { id: "key_wf_admin", raw: "sk_test_wf_admin", prefix: "sk_test_wf_a" };
+// Read-only principal (the `api_readonly` scope set) for the holder-enrollment boundary.
+const READONLY_KEY = { id: "key_wf_readonly", raw: "sk_test_wf_readonly", prefix: "sk_test_wf_r" };
 
 function cachedKey(id: string, permissions: string[]): CachedApiKey {
   return {
@@ -134,6 +136,7 @@ describe("workflow authorization (routes)", () => {
     for (const [key, permissions] of [
       [MEMBER_KEY, ["tokens:read", "tokens:write"]],
       [ADMIN_KEY, ["tokens:read", "tokens:write", "tokens:admin"]],
+      [READONLY_KEY, ["tokens:read"]],
     ] as const) {
       const hash = await hashString(key.raw, (env as { API_KEY_PEPPER: string }).API_KEY_PEPPER);
       await db
@@ -295,5 +298,32 @@ describe("workflow authorization (routes)", () => {
       .first<{ status: string; decided_by: string | null }>();
     expect(decided?.status).toBe("pending");
     expect(decided?.decided_by).toBe(ADMIN_KEY.id);
+  });
+
+  // Holder enrollment is a write: it creates kyc_wallets/wallet_asset_enrollments rows and
+  // can complete clearance, which emits kyc_approved and drives automated rules. The
+  // permission is declared on the route (`requirePermissions("tokens:write")`), not in the
+  // handler, so these pin the boundary at the HTTP layer where it is actually enforced.
+  describe("holder enrollment", () => {
+    const holders = `/v1/issuance/tokens/${TOKEN_ID}/holders`;
+    const wallet = { walletAddress: "So11111111111111111111111111111111111111112" };
+
+    it("refuses a read-only principal", async () => {
+      const res = await post(READONLY_KEY, holders, wallet);
+      expect(res.status).toBe(403);
+
+      // Nothing was written — a 403 that still enrolled would be no protection at all.
+      const row = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS n FROM kyc_wallets WHERE wallet_address = ?")
+        .bind(wallet.walletAddress)
+        .first<{ n: number }>();
+      expect(row?.n).toBe(0);
+    });
+
+    // Proves the 403 above is the permission gate rather than an unreachable route (a
+    // disabled feature flag or bad path would fail this too).
+    it("allows a tokens:write principal", async () => {
+      expect((await post(MEMBER_KEY, holders, wallet)).status).toBe(201);
+    });
   });
 });
