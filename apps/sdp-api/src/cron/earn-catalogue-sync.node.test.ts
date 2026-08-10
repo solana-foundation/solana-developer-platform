@@ -4,7 +4,7 @@ import type {
   EarnVaultProvider,
   ProviderStrategySnapshot,
 } from "@sdp/earn/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
@@ -101,6 +101,11 @@ describe("runEarnCatalogueSyncIfDue", () => {
     installProviders({});
   });
 
+  afterEach(() => {
+    // Undo per-test spies (e.g. on the global performance clock).
+    vi.restoreAllMocks();
+  });
+
   it("claims the hourly slot with a fixed once-per-TTL window and syncs", async () => {
     const listStrategies = vi.fn(async (_ctx: EarnRuntimeContext) => [makeSnapshot("vault-a")]);
     installProviders({ ground: makeProvider("ground", listStrategies) });
@@ -174,6 +179,28 @@ describe("runEarnCatalogueSyncIfDue", () => {
     // Released so the next five-minute tick retries instead of waiting out
     // the hourly TTL.
     expect(mocks.deleteKey).toHaveBeenCalledExactlyOnceWith("cron:earn-catalogue-sync:slot");
+  });
+
+  it("leaves an outlived claim to its current owner instead of deleting it", async () => {
+    installProviders({
+      ground: makeProvider(
+        "ground",
+        vi.fn(async () => [])
+      ),
+    });
+    vi.mocked(createEarnRepository).mockImplementation(() => {
+      throw new Error("database unreachable");
+    });
+    // First reading stamps the claim, second measures the failed sync's hold
+    // time — simulate a sync that outlived the slot TTL, where the key may
+    // already belong to a newer tick.
+    vi.spyOn(performance, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS * 1000);
+
+    await expect(runEarnCatalogueSyncIfDue(env)).rejects.toThrow("database unreachable");
+
+    expect(mocks.deleteKey).not.toHaveBeenCalled();
   });
 
   it("never lets a slot-release failure mask the sync error", async () => {

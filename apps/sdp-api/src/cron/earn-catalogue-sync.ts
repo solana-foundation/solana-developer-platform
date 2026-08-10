@@ -54,6 +54,11 @@ const EARN_CATALOGUE_SYNC_SLOT_KEY = "cron:earn-catalogue-sync:slot";
 // admitSlidingWindow needs a previous-window key; nothing ever increments this
 // one, which collapses the sliding window into a fixed once-per-TTL claim.
 const EARN_CATALOGUE_SYNC_SLOT_PREVIOUS_KEY = "cron:earn-catalogue-sync:slot-previous";
+// A failed sync releases its claim only while it provably still owns it: for
+// the TTL minus this margin, the key cannot have expired, so a delete can only
+// land on our own claim. Past that, a newer tick may have re-claimed the
+// expired key and deleting would cancel *that* claim (see the release site).
+const EARN_CATALOGUE_SYNC_SLOT_RELEASE_MARGIN_SECONDS = 60;
 
 // The catalogue is platform-global but environment-scoped (sandbox rows carry
 // devnet mints, production rows mainnet mints), so each provider syncs once
@@ -191,7 +196,9 @@ export type EarnCatalogueSyncTickOutcome = "synced" | "skipped";
  * A failed sync releases the slot — the next five-minute tick retries instead
  * of waiting out the hour — and rethrows: syncEarnCatalogue already degrades
  * per provider and per row, so anything escaping it is infrastructure-level
- * and must fail the job loudly.
+ * and must fail the job loudly. The release is ownership-guarded: a sync that
+ * outlived the slot TTL leaves the key alone, because a newer tick may have
+ * re-claimed it and deleting would cancel that claim.
  *
  * Callers gate on isEarnEnabled first, mirroring the in-process registration
  * in cron/runner.ts.
@@ -214,6 +221,8 @@ export async function runEarnCatalogueSyncIfDue(
     getLogger().info("syncEarnCatalogue: hourly slot already claimed, skipping this tick");
     return "skipped";
   }
+  // Monotonic, so a wall-clock step (NTP) cannot fake an outlived claim.
+  const claimedAtMs = performance.now();
 
   const work = () => syncEarnCatalogue(env);
   try {
@@ -223,14 +232,32 @@ export async function runEarnCatalogueSyncIfDue(
         })
       : work());
   } catch (err) {
-    try {
-      await cache.delete(EARN_CATALOGUE_SYNC_SLOT_KEY);
-    } catch (releaseErr) {
-      // Log-and-continue: a release failure must never mask the sync error,
-      // and the slot's TTL bounds the damage to one skipped window.
-      getLogger().error(
-        { error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr) },
-        "syncEarnCatalogue: failed to release hourly slot after sync failure"
+    // Release only while the claim is provably still ours. Inside
+    // TTL - margin the key cannot have expired, and nothing else deletes it,
+    // so the delete lands on our own claim. A sync that outlived that window
+    // may be racing a newer tick that re-claimed the expired key —
+    // unconditionally deleting would cancel that claim and invite overlapping
+    // syncs — so the outlived claim is left to its current owner instead
+    // (worst case: the failure waits out the hourly window to retry).
+    const heldSeconds = (performance.now() - claimedAtMs) / 1000;
+    if (
+      heldSeconds <
+      EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS - EARN_CATALOGUE_SYNC_SLOT_RELEASE_MARGIN_SECONDS
+    ) {
+      try {
+        await cache.delete(EARN_CATALOGUE_SYNC_SLOT_KEY);
+      } catch (releaseErr) {
+        // Log-and-continue: a release failure must never mask the sync error,
+        // and the slot's TTL bounds the damage to one skipped window.
+        getLogger().error(
+          { error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr) },
+          "syncEarnCatalogue: failed to release hourly slot after sync failure"
+        );
+      }
+    } else {
+      getLogger().warn(
+        { held_seconds: Math.round(heldSeconds) },
+        "syncEarnCatalogue: failed sync outlived its slot TTL, leaving the slot to its current owner"
       );
     }
     throw err;
