@@ -10,6 +10,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
+import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
@@ -221,6 +222,11 @@ export const deleteOrganization = async (c: AppContext) => {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
+  const orgKeyHashes = await db
+    .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
+    .bind(orgId)
+    .all<{ key_hash: string }>();
+
   await db.batch([
     db
       .prepare(
@@ -236,6 +242,15 @@ export const deleteOrganization = async (c: AppContext) => {
       )
       .bind(orgId),
   ]);
+
+  // Push the revoked state into the auth cache for every one of the org's
+  // keys before reporting success — otherwise cached entries keep
+  // authenticating for the remainder of the cache TTL.
+  await Promise.all(
+    (orgKeyHashes.results ?? []).map((row) =>
+      refreshApiKeyCache(db, c.var.kv.apiKeys, row.key_hash)
+    )
+  );
 
   const sessionService = new SessionService(db);
   await sessionService

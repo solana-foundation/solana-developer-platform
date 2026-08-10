@@ -42,7 +42,12 @@ export interface KVStore {
    * Atomically replace a value only when its current value is exactly the
    * expected value. `null` means the key must not exist.
    */
-  compareAndSet(key: string, expected: string | null, value: string): Promise<boolean>;
+  compareAndSet(
+    key: string,
+    expected: string | null,
+    value: string,
+    options?: KVPutOptions
+  ): Promise<boolean>;
   /** Atomically delete a key only when its current value exactly matches. */
   compareAndDelete(key: string, expected: string): Promise<boolean>;
   list(): Promise<KVListResult>;

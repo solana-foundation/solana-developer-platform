@@ -14,6 +14,7 @@ import {
   createPolicyRepository,
   type UpsertApiKeyWalletPolicyBindingInput,
 } from "@/db/repositories";
+import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -394,13 +395,16 @@ export const updateApiKey = async (c: AppContext) => {
     await replaceApiKeyWalletBindings(getDb(c.env), keyId, walletSelection.bindings);
   }
 
-  // Invalidate cache if auth-relevant fields changed
+  // Refresh cache if auth-relevant fields changed. expiresAt matters too:
+  // the middleware enforces expiration from the cached entry, so a stale one
+  // would honor the old deadline for the full cache TTL.
   if (
     parsed.data.allowedIps !== undefined ||
     parsed.data.permissions !== undefined ||
+    parsed.data.expiresAt !== undefined ||
     walletSelection.touched
   ) {
-    await c.var.kv.apiKeys.delete(`key:${existing.key_hash}`);
+    await refreshApiKeyCache(getDb(c.env), c.var.kv.apiKeys, existing.key_hash);
   }
 
   // Audit log
@@ -607,8 +611,9 @@ export const rotateApiKey = async (c: AppContext) => {
     throw notFound("API key");
   }
 
-  // Invalidate old key cache
-  await c.var.kv.apiKeys.delete(`key:${rotation.previousKeyHash}`);
+  // Refresh the old key's cache entry so its rotation deadline is enforced
+  // immediately instead of after the previous entry's TTL runs out.
+  await refreshApiKeyCache(getDb(c.env), c.var.kv.apiKeys, rotation.previousKeyHash);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -647,16 +652,26 @@ export const revokeApiKey = async (c: AppContext) => {
 
   const existing = await getDb(c.env)
     .prepare(
-      "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+      "SELECT id, name, key_hash, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
     )
     .bind(keyId, actor.organizationId, projectId)
-    .first<{ id: string; name: string; status: string; revoked_at: string | null }>();
+    .first<{
+      id: string;
+      name: string;
+      key_hash: string;
+      status: string;
+      revoked_at: string | null;
+    }>();
 
   if (!existing) {
     throw notFound("API key");
   }
 
   if (existing.status === "deactivated" || existing.status === "revoked") {
+    // Already revoked in Postgres, but the cache may still say otherwise
+    // (e.g. the earlier revocation crashed between the DB write and the
+    // cache write). Re-assert before reporting success.
+    await refreshApiKeyCache(getDb(c.env), c.var.kv.apiKeys, existing.key_hash);
     return success(c, {
       success: true,
       revokedAt: existing.revoked_at ?? new Date().toISOString(),
@@ -678,8 +693,10 @@ export const revokeApiKey = async (c: AppContext) => {
     throw notFound("API key");
   }
 
-  // Invalidate KV cache
-  await c.var.kv.apiKeys.delete(`key:${revokedKey.keyHash}`);
+  // Overwrite the cache with the revoked state before reporting success.
+  // A plain delete would leave a window where an in-flight fill from a
+  // pre-revocation DB read repopulates the entry for the full cache TTL.
+  await refreshApiKeyCache(getDb(c.env), c.var.kv.apiKeys, revokedKey.keyHash);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

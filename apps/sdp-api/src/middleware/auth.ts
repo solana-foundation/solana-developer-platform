@@ -11,15 +11,16 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyWalletBinding, CachedApiKey } from "@sdp/types";
-import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
+import type {
+  ApiKeyEnvironment,
+  ApiKeyRole,
+  ApiKeyWalletBinding,
+  CachedApiKey,
+  Permission,
+} from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db";
-import {
-  parseOptionalPostgresJson,
-  parsePostgresJson,
-  parsePostgresJsonOr,
-} from "@/db/postgres-utils";
+import { apiKeyCacheKey, fillApiKeyCache, loadCachedApiKeyFromDb } from "@/lib/api-key-cache";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
@@ -31,7 +32,6 @@ import { tryApprovedOperationReplayAuth } from "@/services/policy/approved-opera
 import type { Env } from "@/types/env";
 import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
 
-const KV_TTL_SECONDS = 3600; // 1 hour cache
 const INVALID_KEY_CACHE_TTL_SECONDS = 30;
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
 
@@ -78,7 +78,7 @@ function looksLikeJwt(token: string): boolean {
 
 /** Look up API key in KV cache */
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
-  const cached = await kv.get<CachedApiKey>(`key:${keyHash}`, "json");
+  const cached = await kv.get<CachedApiKey>(apiKeyCacheKey(keyHash), "json");
   // Payloads written before rotation-deadline enforcement do not contain this
   // property. Treat them as misses so a deploy cannot extend an old key's
   // validity until the legacy one-hour cache entry expires.
@@ -106,80 +106,15 @@ async function getFromDatabaseAndCache(
   kv: KVStore,
   keyHash: string
 ): Promise<CachedApiKey | null> {
-  const result = await db
-    .prepare(
-      `SELECT ak.id, ak.organization_id, ak.project_id, ak.role, ak.permissions,
-              p.environment,
-              ak.rate_limit_tier, ak.allowed_ips, ak.signing_wallet_id, ak.status, ak.expires_at,
-              ak.rotation_deadline
-       FROM api_keys ak
-       JOIN projects p ON p.id = ak.project_id
-       WHERE ak.key_hash = ?`
-    )
-    .bind(keyHash)
-    .first<{
-      id: string;
-      organization_id: string;
-      project_id: string;
-      role: ApiKeyRole;
-      permissions: string | null;
-      environment: string;
-      rate_limit_tier: string;
-      allowed_ips: string | null;
-      signing_wallet_id: string | null;
-      status: string;
-      expires_at: string | null;
-      rotation_deadline: string | null;
-    }>();
+  const cached = await loadCachedApiKeyFromDb(db, keyHash);
 
-  if (!result) {
+  if (!cached) {
     return null;
   }
 
-  const walletBindingsResult = await db
-    .prepare(
-      `SELECT wallet_id, permissions
-       FROM api_key_wallet_permissions
-       WHERE api_key_id = ?
-       ORDER BY created_at ASC`
-    )
-    .bind(result.id)
-    .all<{ wallet_id: string; permissions: string }>();
-
-  const walletBindings: ApiKeyWalletBinding[] = (walletBindingsResult.results ?? []).map((row) => {
-    const parsed = safeParsePermissionsArray(row.permissions);
-    return {
-      walletId: row.wallet_id,
-      permissions: parsed.length > 0 ? parsed : ["*"],
-    };
-  });
-
-  const signingWalletIds = walletBindings.map((binding) => binding.walletId);
-  const signingWalletId = result.signing_wallet_id ?? signingWalletIds[0] ?? null;
-
-  const cached: CachedApiKey = {
-    id: result.id,
-    organizationId: result.organization_id,
-    projectId: result.project_id,
-    role: result.role,
-    permissions: result.permissions
-      ? parsePostgresJson<Permission[]>(result.permissions)
-      : getPermissionsForApiKeyRole(result.role),
-    environment: result.environment as "sandbox" | "production",
-    rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
-    allowedIps: parseOptionalPostgresJson<string[]>(result.allowed_ips),
-    signingWalletId,
-    signingWalletIds,
-    walletBindings,
-    status: result.status as "active" | "revoked" | "expired" | "deactivated",
-    expiresAt: result.expires_at,
-    rotationDeadline: result.rotation_deadline,
-  };
-
-  // Cache to KV
-  await kv.put(`key:${keyHash}`, JSON.stringify(cached), {
-    expirationTtl: KV_TTL_SECONDS,
-  });
+  // Write-if-absent: a fill must never overwrite authoritative state a
+  // concurrent revocation wrote after this function's DB read.
+  await fillApiKeyCache(kv, keyHash, cached);
 
   return cached;
 }
@@ -276,19 +211,6 @@ export function scheduleApiKeyLastUsedUpdate(
   state.inFlight = pending;
   cache.writes.set(keyId, state);
   return pending;
-}
-
-function safeParsePermissionsArray(value: string | null | undefined): Permission[] {
-  if (!value) {
-    return [];
-  }
-
-  const parsed = parsePostgresJsonOr<unknown>(value, []);
-  if (!Array.isArray(parsed)) {
-    return [];
-  }
-
-  return parsed.filter((entry): entry is Permission => typeof entry === "string");
 }
 
 function normalizeWalletBindings(cachedKey: CachedApiKey): {
