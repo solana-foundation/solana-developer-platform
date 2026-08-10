@@ -2875,6 +2875,7 @@ export class TokenService {
     tokenId: string,
     address: string
   ): Promise<string | null> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare(
         "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"

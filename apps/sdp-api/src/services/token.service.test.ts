@@ -1297,6 +1297,14 @@ describe("TokenService", () => {
       await expect(scoped.listAllowlistLabels("tok_foreign_child")).rejects.toThrow(
         "TOKEN_NOT_FOUND"
       );
+      // Keyed by (token id, address) rather than by entry id, so the token predicate is
+      // the only thing standing between a scoped caller and a foreign tenant's entry.
+      await expect(
+        scoped.getActiveAllowlistEntryIdByAddress(
+          "tok_foreign_child",
+          "ForeignAllowlist111111111111111111111111111111"
+        )
+      ).rejects.toThrow("TOKEN_NOT_FOUND");
       await expect(scoped.revokeAllowlistEntry(foreignEntry.id)).rejects.toThrow(
         "ALLOWLIST_ENTRY_NOT_FOUND"
       );
@@ -1485,6 +1493,41 @@ describe("TokenService", () => {
         (index) => index.indexname === "idx_token_allowlist_search_trgm"
       );
       expect(trgmIndex?.indexdef).toContain("gin_trgm_ops");
+    });
+  });
+
+  // The cross-tenant refusal is asserted alongside the other child-resource predicates
+  // above; these pin the other half, so the boundary can't be satisfied by refusing
+  // everyone. The unscoped case is the one the workflow `allowlist_remove` action takes.
+  describe("getActiveAllowlistEntryIdByAddress within the tenant", () => {
+    const TOKEN_ID = "tok_freeze_refreeze";
+    const ADDRESS = "Fff6666666666666666666666666666666666666666";
+
+    it("resolves the active entry id for scoped and unscoped callers alike", async () => {
+      const { entry } = await tokenService.addAllowlistEntry({
+        tokenId: TOKEN_ID,
+        address: ADDRESS,
+        addedBy: TEST_USER.id,
+      });
+
+      const scoped = new TokenService(
+        db,
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      );
+
+      await expect(scoped.getActiveAllowlistEntryIdByAddress(TOKEN_ID, ADDRESS)).resolves.toBe(
+        entry.id
+      );
+      await expect(
+        tokenService.getActiveAllowlistEntryIdByAddress(TOKEN_ID, ADDRESS)
+      ).resolves.toBe(entry.id);
+
+      // Revoked entries stay invisible to both — the caller uses this to decide whether
+      // there is anything left to remove.
+      await tokenService.revokeAllowlistEntry(entry.id);
+      await expect(
+        scoped.getActiveAllowlistEntryIdByAddress(TOKEN_ID, ADDRESS)
+      ).resolves.toBeNull();
     });
   });
 
