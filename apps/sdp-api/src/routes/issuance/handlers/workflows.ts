@@ -206,26 +206,33 @@ export const createWorkflow = async (c: AppContext) => {
     actionSecret,
   };
 
-  const workflow = await repo.createWorkflow({
-    id: workflowId,
-    organizationId: orgId,
-    projectId,
-    tokenId,
-    triggerType: parsed.data.triggerType,
-    actionType: parsed.data.actionType,
-    definition,
-    version: WORKFLOW_RULE_VERSION,
-    // A tier that the engine will hold for review anyway, or that disrupts every holder
-    // when it misfires, defaults to manual — the permissive default belongs only to the
-    // tier whose actions are reversible side effects.
-    reviewMode: parsed.data.reviewMode ?? defaultReviewMode(parsed.data.actionType),
-    enabled: parsed.data.enabled,
-    createdBy: auth.id,
-  });
+  // Every exit from here that doesn't commit a row leaves the credential unreferenced, so
+  // both of them retire it. A rejected insert is the case that actually happens: the
+  // driver propagates Postgres errors, and `INSERT … RETURNING *` yields a row whenever it
+  // succeeds, so the null result below is close to unreachable by comparison.
+  const workflow = await repo
+    .createWorkflow({
+      id: workflowId,
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      triggerType: parsed.data.triggerType,
+      actionType: parsed.data.actionType,
+      definition,
+      version: WORKFLOW_RULE_VERSION,
+      // A tier that the engine will hold for review anyway, or that disrupts every holder
+      // when it misfires, defaults to manual — the permissive default belongs only to the
+      // tier whose actions are reversible side effects.
+      reviewMode: parsed.data.reviewMode ?? defaultReviewMode(parsed.data.actionType),
+      enabled: parsed.data.enabled,
+      createdBy: auth.id,
+    })
+    .catch(async (error: unknown) => {
+      await destroyActionSecret(c.env, actionSecret);
+      throw error;
+    });
 
   if (!workflow) {
-    // Nothing references the credential now, so retire it rather than leaving a version
-    // no rule can ever reach.
     await destroyActionSecret(c.env, actionSecret);
     throw badRequest("Failed to create workflow");
   }
@@ -340,19 +347,40 @@ export const updateWorkflow = async (c: AppContext) => {
       }
     : undefined;
 
-  const workflow = await repo.updateWorkflow({
-    workflowId,
-    organizationId: orgId,
-    projectId,
-    definition,
-    reviewMode: parsed.data.reviewMode,
-    enabled: parsed.data.enabled,
-  });
+  // As in create: a rejected write leaves the version just written unreferenced, so it is
+  // retired on the way out. Only when this edit wrote one — otherwise `actionSecret` is
+  // the reference the untouched row still points at.
+  const workflow = await repo
+    .updateWorkflow({
+      workflowId,
+      organizationId: orgId,
+      projectId,
+      definition,
+      reviewMode: parsed.data.reviewMode,
+      enabled: parsed.data.enabled,
+    })
+    .catch(async (error: unknown) => {
+      await destroyActionSecret(c.env, secret ? actionSecret : null);
+      throw error;
+    });
   if (!workflow) {
     // The rule went away between the read and the write, so no row points at the version
     // we just wrote.
     await destroyActionSecret(c.env, secret ? actionSecret : null);
     throw notFound("Workflow");
+  }
+
+  // The row now points at the new version, so the one it replaced has no reader left.
+  // Retired here, before anything else that can throw, for the same reason: past this
+  // point a failure would strand the superseded version with nothing to retire it.
+  // Guarded on the refs actually differing — destroying the version the rule still points
+  // at would break every subsequent delivery.
+  if (
+    secret &&
+    previousSecret?.secretVersionRef &&
+    previousSecret.secretVersionRef !== actionSecret?.secretVersionRef
+  ) {
+    await destroyActionSecret(c.env, previousSecret);
   }
 
   // Turning a rule off withdraws what it already queued: an execution held for approval
@@ -363,17 +391,6 @@ export const updateWorkflow = async (c: AppContext) => {
       organizationId: orgId,
       projectId,
     });
-  }
-
-  // The row now points at the new version, so the one it replaced has no reader left.
-  // Guarded on the refs actually differing: destroying the version the rule still points
-  // at would break every subsequent delivery.
-  if (
-    secret &&
-    previousSecret?.secretVersionRef &&
-    previousSecret.secretVersionRef !== actionSecret?.secretVersionRef
-  ) {
-    await destroyActionSecret(c.env, previousSecret);
   }
 
   return success(c, { workflow: toWorkflowResponse(workflow) });

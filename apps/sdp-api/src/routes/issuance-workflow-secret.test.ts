@@ -43,6 +43,58 @@ vi.mock("@/services/credential-secret-store", async (importOriginal) => ({
   createCredentialSecretStore,
 }));
 
+// Set to make the corresponding repository write reject, standing in for the Postgres
+// errors the driver propagates (constraint violation, statement timeout, dropped
+// connection). Everything else delegates to the real repository.
+const repoRejects = vi.hoisted(
+  () =>
+    ({
+      createWorkflow: null,
+      updateWorkflow: null,
+      cancelOpenExecutionsForWorkflow: null,
+    }) as Record<string, Error | null>
+);
+
+vi.mock("@/db/repositories", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db/repositories")>();
+  return {
+    ...actual,
+    createAssetWorkflowsRepository: (
+      env: Parameters<typeof actual.createAssetWorkflowsRepository>[0]
+    ) => {
+      const repo = actual.createAssetWorkflowsRepository(env);
+      return {
+        ...repo,
+        createWorkflow(input: Parameters<typeof repo.createWorkflow>[0]) {
+          return repoRejects.createWorkflow
+            ? Promise.reject(repoRejects.createWorkflow)
+            : repo.createWorkflow(input);
+        },
+        updateWorkflow(input: Parameters<typeof repo.updateWorkflow>[0]) {
+          return repoRejects.updateWorkflow
+            ? Promise.reject(repoRejects.updateWorkflow)
+            : repo.updateWorkflow(input);
+        },
+      };
+    },
+    createWorkflowExecutionsRepository: (
+      env: Parameters<typeof actual.createWorkflowExecutionsRepository>[0]
+    ) => {
+      const repo = actual.createWorkflowExecutionsRepository(env);
+      return {
+        ...repo,
+        cancelOpenExecutionsForWorkflow(
+          input: Parameters<typeof repo.cancelOpenExecutionsForWorkflow>[0]
+        ) {
+          return repoRejects.cancelOpenExecutionsForWorkflow
+            ? Promise.reject(repoRejects.cancelOpenExecutionsForWorkflow)
+            : repo.cancelOpenExecutionsForWorkflow(input);
+        },
+      };
+    },
+  };
+});
+
 const TOKEN_ID = "tok_workflow_secret_test";
 const WRITE_KEY = { id: "key_wf_secret", raw: "sk_test_wf_secret", prefix: "sk_test_wf_s" };
 const WEBHOOK_URL = "https://hooks.example.com/sdp";
@@ -119,6 +171,9 @@ describe("workflow signing-secret lifecycle (routes)", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    repoRejects.createWorkflow = null;
+    repoRejects.updateWorkflow = null;
+    repoRejects.cancelOpenExecutionsForWorkflow = null;
     createCredentialSecretStore.mockReturnValue(secretStore);
     // Each write mints the next version, the way Secret Manager's addVersion does — that
     // difference between the old and new ref is what rotation cleanup keys on.
@@ -260,6 +315,20 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       expect(JSON.stringify(row.definition)).not.toContain(SECRET);
     });
 
+    // The realistic failure: the driver propagates Postgres errors, and an
+    // `INSERT … RETURNING *` that succeeds always yields a row — so the write rejects far
+    // more readily than it resolves null. Cleanup that only ran on the null result left
+    // the signing-secret version alive with no rule that could ever reference it.
+    it("retires the secret when the insert rejects", async () => {
+      repoRejects.createWorkflow = new Error("deadlock detected");
+
+      const res = await createRule({ url: WEBHOOK_URL, secret: SECRET });
+
+      expect(res.status).toBe(500);
+      expect(secretStore.destroyVersion).toHaveBeenCalledWith({ secretVersionRef: versionRef(1) });
+      expect(await storedRules()).toHaveLength(0);
+    });
+
     it("still creates a rule that needs no secret", async () => {
       const res = await createRule({ url: WEBHOOK_URL });
 
@@ -298,6 +367,51 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       expect(secretStore.destroyVersion).not.toHaveBeenCalled();
       const [row] = await storedRules();
       expect(row.definition.actionSecret?.secretVersionRef).toBe(versionRef(1));
+    });
+
+    // Once the row points at the new version the old one is unreferenced, so retiring it
+    // must not be left behind whatever else the handler still has to do. Cancelling the
+    // rule's open executions runs in the same request and can fail on its own.
+    it("retires the superseded version even when a later step fails", async () => {
+      const workflowId = await createRuleWithSecret();
+      repoRejects.cancelOpenExecutionsForWorkflow = new Error("deadlock detected");
+
+      const res = await request("PATCH", `${base}/${workflowId}`, {
+        enabled: false,
+        actionParams: { url: WEBHOOK_URL, secret: ROTATED_SECRET },
+      });
+
+      expect(res.status).toBe(500);
+      expect(secretStore.destroyVersion).toHaveBeenCalledWith({ secretVersionRef: versionRef(1) });
+    });
+
+    it("retires the newly written version when the update rejects", async () => {
+      const workflowId = await createRuleWithSecret();
+      repoRejects.updateWorkflow = new Error("deadlock detected");
+
+      const res = await request("PATCH", `${base}/${workflowId}`, {
+        actionParams: { url: WEBHOOK_URL, secret: ROTATED_SECRET },
+      });
+
+      expect(res.status).toBe(500);
+      // The rotation never landed, so it is the new version that has no reader — the row
+      // still points at the first one, which must survive.
+      expect(secretStore.destroyVersion).toHaveBeenCalledTimes(1);
+      expect(secretStore.destroyVersion).toHaveBeenCalledWith({ secretVersionRef: versionRef(2) });
+      const [row] = await storedRules();
+      expect(row.definition.actionSecret?.secretVersionRef).toBe(versionRef(1));
+    });
+
+    // An edit that rewrites no secret has nothing unreferenced to clean up: `actionSecret`
+    // is the reference the untouched row still points at.
+    it("retires nothing when a secretless update rejects", async () => {
+      const workflowId = await createRuleWithSecret();
+      repoRejects.updateWorkflow = new Error("deadlock detected");
+
+      const res = await request("PATCH", `${base}/${workflowId}`, { enabled: false });
+
+      expect(res.status).toBe(500);
+      expect(secretStore.destroyVersion).not.toHaveBeenCalled();
     });
 
     it("applies no part of an edit whose secret write fails", async () => {
