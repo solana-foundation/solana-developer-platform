@@ -354,7 +354,7 @@ export function RecurringPaymentCreateWorkspace({
           badge = t("Shared.SharedComponents.sdpMintedToken");
           badgeVariant = "outline";
         } else if (!token.isWellKnown) {
-          badge = t("Shared.SharedComponents.customToken");
+          badge = t("Shared.SharedComponents.unknownToken");
         }
         return {
           value: asset.value,
