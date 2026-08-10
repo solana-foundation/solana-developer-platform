@@ -138,9 +138,11 @@ async function syncProviderCatalogue(
         redemptionDelayDays: snapshot.redemptionDelayDays ?? null,
         riskMetadata: snapshot.riskMetadata ?? {},
         // Providers report no status; being listed is what makes a strategy
-        // depositable, so every pass re-asserts `active`. A hand-paused row
-        // therefore only stays paused while the provider stops listing its
-        // reference — delisting is the durable way off the depositable set.
+        // depositable, so the sync submits `active` for anything a provider
+        // still lists. The repository upsert refuses to overwrite an operator
+        // `paused`/`deprecated` status (earn.repository.postgres.ts) — an
+        // operator stop outranks the sync; only an explicit status write
+        // reopens the row.
         status: "active",
         environment: ctx.environment,
       });
