@@ -14,6 +14,7 @@ import {
   TEST_API_KEY,
   TEST_BVNK_API_BASE_URL,
   TEST_BVNK_HAWK_AUTH_ID,
+  TEST_CONFIG_ID,
   TEST_MOONPAY_API_KEY,
   TEST_MOONPAY_ONRAMP_URL,
   TEST_MOONPAY_SECRET_KEY,
@@ -378,6 +379,139 @@ describe("Payments routes — ramps", () => {
       data: { transfer: { rampsMemo: Record<string, string> } };
     };
     expect(transferBody.data.transfer.rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
+  });
+
+  it("dry-runs an on-ramp quote with zero writes", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "moonpay_onramp_dry_run" });
+
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "SOL",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { decision: "allow", criteria: [] },
+    });
+
+    const [transferCount, operationCount] = await Promise.all([
+      getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
+        .first<{ count: number }>(),
+      getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+        .first<{ count: number }>(),
+    ]);
+    expect(transferCount).toEqual({ count: 0 });
+    expect(operationCount).toEqual({ count: 0 });
+  });
+
+  it("dry-runs an off-ramp quote with zero writes", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "moonpay_offramp_dry_run" });
+
+    const response = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "SOL",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { decision: "allow", criteria: [] },
+    });
+
+    const [transferCount, operationCount] = await Promise.all([
+      getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
+        .first<{ count: number }>(),
+      getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+        .first<{ count: number }>(),
+    ]);
+    expect(transferCount).toEqual({ count: 0 });
+    expect(operationCount).toEqual({ count: 0 });
+  });
+
+  it("stops a denied ramp quote before provider and transfer side effects", async () => {
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+      .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
+      .run();
+    const policyResponse = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationAllowlist: [],
+          defaultAction: "allow",
+          rules: [{ id: "deny-ramp-quotes", kind: "always", action: "deny" }],
+        }),
+      },
+      env
+    );
+    expect(policyResponse.status).toBe(200);
+    const counterpartyId = await seedCounterparty({ externalId: "moonpay_denied_quote" });
+
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "SOL",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    const transferCount = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
+      .first<{ count: number }>();
+    expect(transferCount).toEqual({ count: 0 });
   });
 
   it("rejects a ramp quote memo with more than 20 fields", async () => {
