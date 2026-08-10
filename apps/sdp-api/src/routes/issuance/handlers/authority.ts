@@ -5,15 +5,18 @@ import { AuthorityType } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { AuditService } from "@/services/audit.service";
 import {
   approvedWalletOperationId,
   beginApprovedWalletOperationEffect,
   runApprovedWalletOperationEffectTransaction,
-  walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
+import { resolvePolicyCustodyWallet } from "@/services/policy/enforcement.service";
+import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -29,7 +32,7 @@ import {
   resolveCurrentAuthorityForRole,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { enforceIssuanceWalletOperationPolicy } from "./policy";
+import { buildIssuancePolicyCandidate } from "./policy";
 import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
@@ -37,6 +40,18 @@ import {
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicAuthorityRole = Parameters<MosaicService["prepareUpdateAuthority"]>[0]["role"];
+type UpdateAuthorityBody = z.output<typeof updateAuthoritySchema>;
+
+interface UpdateAuthorityPolicyResolved {
+  tokenId: string;
+  auth: ApiKeyContext;
+  tokenService: TokenService;
+  role: AuthorityRole;
+  currentAuthorityRaw: string;
+  walletId: string;
+  mintAddress: ReturnType<typeof assertValidAddress>;
+  newAuthority: ReturnType<typeof assertValidAddress> | null;
+}
 
 const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
   switch (role) {
@@ -160,43 +175,46 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
   });
 };
 
-export const executeUpdateAuthority = async (c: AppContext) => {
+/**
+ * Parse and resolve an authority update into its wallet-operation policy candidate.
+ *
+ * @param c - Request context.
+ * @returns The candidate, validated body, resolved resources, and raw payload.
+ */
+export async function extractUpdateAuthorityPolicyCandidate(
+  c: AppContext
+): Promise<PolicyGateExtraction> {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-
-  const body = await c.req.json();
-  const parsed = updateAuthoritySchema.safeParse(body);
-
+  const parsed = updateAuthoritySchema.safeParse(await c.req.json());
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
+  const input = parsed.data;
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
     projectId,
   });
-
   if (!token) {
     throw notFound("Token");
   }
-
   if (!token.mintAddress || token.status === "pending") {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const role = parsed.data.authority.role;
+  const role = input.authority.role;
   const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
     c.env,
     tokenService,
     token,
     role,
-    parsed.data.authority.currentAuthority
+    input.authority.currentAuthority
   );
-
   if (!currentAuthorityRaw) {
     throw badRequest("Current authority is not available for this token");
   }
@@ -205,35 +223,67 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     env: c.env,
     auth,
     token,
-    requestedWalletId: parsed.data.signingWalletId,
+    requestedWalletId: input.signingWalletId,
     currentAuthority: currentAuthorityRaw,
   });
-
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const newAuthority = parsed.data.authority.newAuthority
-    ? assertValidAddress(parsed.data.authority.newAuthority, "newAuthority")
+  const newAuthority = input.authority.newAuthority
+    ? assertValidAddress(input.authority.newAuthority, "newAuthority")
     : null;
+  const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, walletId);
 
-  await enforceIssuanceWalletOperationPolicy(c, {
-    auth,
-    token,
-    walletId,
-    operationType: "issuance_update_authority_execute",
-    destination: newAuthority,
+  return {
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId: policyWallet === null ? null : policyWallet.id,
+      walletId,
+      operationType: "issuance_update_authority_execute",
+      amount: null,
+      destination: newAuthority,
+    }),
+    body: input,
+    resolved: {
+      tokenId,
+      auth,
+      tokenService,
+      role,
+      currentAuthorityRaw,
+      walletId,
+      mintAddress,
+      newAuthority,
+    },
     rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
       action: "update_authority",
       role,
       currentAuthority: currentAuthorityRaw,
       newAuthority,
-      executionRequest: walletOperationExecutionRequest(c, parsed.data),
     },
-  });
+  };
+}
+
+export const executeUpdateAuthority = async (c: AppContext) => {
+  const {
+    body: input,
+    resolved: {
+      tokenId,
+      auth,
+      tokenService,
+      role,
+      currentAuthorityRaw,
+      walletId,
+      mintAddress,
+      newAuthority,
+    },
+  } = getPolicyGateContext<UpdateAuthorityBody, UpdateAuthorityPolicyResolved>(c);
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
     operation: "update_authority",
     mode: "execute",
-    params: parsed.data,
+    params: input,
   });
 
   const { transaction: tx, replayed } = await runApprovedWalletOperationEffectTransaction(c, (db) =>
