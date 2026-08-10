@@ -140,7 +140,8 @@
     "invalidApiKeyFormat": "Định dạng khóa API không hợp lệ. Dùng giá trị thô như sk_test_... hoặc sk_live_... với hậu tố hợp lệ.",
     "playgroundExecutionFailed": "Thực thi Playground thất bại.",
     "requestExecutionFailed": "Thực thi request thất bại.",
-    "customToken": "Tùy chỉnh"
+    "unknownToken": "Không xác định",
+    "sdpMintedToken": "SDP-Minted"
   },
   "dashboardShell": {
     "workspace": "Không gian làm việc",

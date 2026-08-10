@@ -356,7 +356,7 @@
       "recipientsTitle": "Thanh toán nhiều người nhận",
       "reviewStep": "Xem lại",
       "reviewTitle": "Xem lại batch",
-      "customToken": "Token tùy chỉnh",
+      "unknownToken": "Token không xác định",
       "tokenUnavailableOnNetwork": "{currency} không khả dụng trên mạng này.",
       "importExceedsMaximumRecipients": "Một batch tối đa {max} người nhận. Import này sẽ đưa tổng lên {total}.",
       "submitting": "Đang gửi batch.",

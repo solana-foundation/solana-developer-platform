@@ -324,7 +324,6 @@
     "policyOperationControls": "Điều khiển thao tác",
     "policyOperationControlsDescription": "Chọn quyết định cho nhóm thao tác Wallet và loại thao tác cụ thể.",
     "policyPerTransaction": "Mỗi giao dịch",
-    "policyAssetBadgeIssued": "Đã phát hành",
     "policyAssetBadgeCustom": "Tuỳ chỉnh",
     "policySummarySelectedCount": "{count} đã chọn",
     "policyDailyTotal": "Tổng ngày",
