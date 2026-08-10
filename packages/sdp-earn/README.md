@@ -19,24 +19,33 @@ Companion docs:
 
 ## The product model (V1, Ground)
 
-- **Curators, not vaults, are the primary decision.** Users pick the team that
-  manages the allocation (Steakhouse, Gauntlet, …). Curators are **open-string
-  data** derived from provider catalogue metadata — onboarding a curator is a
-  data change, zero code (see `EARN_KNOWN_CURATOR_LABELS` in `@sdp/types`).
+- **One strategy is the whole decision.** The wizard runs funding wallet →
+  profile → filtered catalogue → one strategy; there is no curator step, because
+  picking a house first gated the catalogue behind a choice the reader had no
+  facts to make. Curator is metadata rendered beside a strategy, never a gate —
+  but still **open-string data** derived from provider catalogue metadata, so
+  onboarding a curator is a data change, zero code (see
+  `EARN_KNOWN_CURATOR_LABELS` in `@sdp/types`).
 - **One shared portfolio wallet per (organization, environment, provider).**
-  Choosing a curator (optionally with a custom split) sets the shared wallet's
-  strategy weights. Enforced by a DB unique constraint
+  Selecting a strategy sets that wallet's strategy weights as a *single*
+  allocation — `pct: 100` for the selected strategy's stablecoin lane
+  (`singleStrategyAllocation`, `earn-deposit-model.ts`) — and an omitted token
+  lane keeps its current weights, so a USDC pick never disturbs an existing USDT
+  one. One wallet per org is enforced by a DB unique constraint
   (`earn_provider_wallets`, migration 0049). This is SDP's product model, not a
   provider constraint: Ground has no concept of an SDP organization, one Ground
   account holds many portfolio wallets, and every SDP org shares a single account
   per environment. A provider account's other wallets therefore belong to other
   orgs — which is why a provider console's account-wide total will exceed what any
   one org sees in SDP.
-- **Solana-only surface.** Deposits are funded by sending USDC/USDT on Solana
-  to the wallet's deposit address (`solana_devnet` in sandbox, `solana` in
-  production); withdrawals settle to a Solana address the org controls. Ground
-  routes capital to yield sources on other chains internally — that is
-  provider plumbing, never exposed in SDP's product surface.
+- **Solana-only surface, and USDC-only on it.** Deposits are funded by sending
+  **USDC** on Solana to the wallet's deposit address (`solana_devnet` in
+  sandbox, `solana` in production); withdrawals settle to a Solana address the
+  org controls. USDT is not a second option here: Ground routes it on Ethereum
+  only (`GROUND_SOLANA_ROUTED_TOKENS`), so a USDT source never enters the
+  catalogue and a USDT payout is refused before any network call. Ground routes
+  capital to yield sources on other chains internally — that is provider
+  plumbing, never exposed in SDP's product surface.
 - **Funding is address-based in V1**: show the deposit address, track incoming
   deposits via the provider's deposits API. No custody signing in the flow.
   Webhooks (Ground supports Stripe-style HMAC) are future work; V1 polls.
@@ -92,9 +101,10 @@ one (`solana_devnet` in sandbox, `solana` in production).
 
 ### Deposits are two-phase (this is why `cash` exists)
 
-1. A customer sends USDC/USDT on Solana to the wallet's deposit address —
-   an ordinary SPL transfer, initiated from **their** custody (Fireblocks,
-   Anchorage, …). SDP builds and signs nothing.
+1. A customer sends USDC on Solana to the wallet's deposit address — an
+   ordinary SPL transfer, initiated from **their** custody (Fireblocks,
+   Anchorage, …). SDP builds and signs nothing. (Ground's own rails accept
+   USDT too, but on Ethereum, which SDP never surfaces.)
 2. Ground detects it and the funds land as **cash** in the portfolio wallet.
 3. A **later Ground-managed rebalance** deploys that cash per the strategy
    weights: `Portfolio Wallet → MasterRouter → AdapterRegistry → Protocol
@@ -143,6 +153,17 @@ valid USDT destination — and Ground's sandbox USDT faucet
 (`POST /v2/sandbox/faucets/usdt`) funds Sepolia addresses only, so exercising
 the Solana lane in sandbox means devnet USDC.
 
+**Getting devnet USDC — Circle's faucet: <https://faucet.circle.com/>.**
+Select **USDC** and **Solana Devnet**, paste the recipient address, submit.
+The faucet mints official devnet USDC
+(`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`) — the exact mint pinned in
+the well-known-token catalogue and carried in every sandbox strategy's
+`depositMints`, so what it sends is what deposits credit. Send either straight
+to the program's Solana deposit address (dashboard → Fund) to watch the real
+two-phase deposit, or to your own devnet wallet first when you want to
+exercise the transfer yourself. The faucet rate-limits per address, so drip
+ahead of time for larger test amounts.
+
 ### Withdrawals unwind in reverse — approval is policy-conditional, and we surface it
 
 Redemption reverses the flow: vaults settle, the wallet claims stablecoin, and
@@ -154,7 +175,17 @@ times, and each leg can gate on its own customer approval.
 > wallet with no approval policy settled end to end ($5 USDT → Sepolia, wallet
 > `5fe239ad…`, withdrawal `907001f5…`) while
 > `GET /v2/turnkey/activities/pending` stayed empty for the entire lifecycle —
-> no stamp, no vote, funds paid out. The approval flow engages only when an
+> no stamp, no vote, funds paid out.
+>
+> **Confirmed on the Solana lane the same day**, which is the lane SDP actually
+> ships: $1 USDC from the same wallet to a devnet address, submitted through the
+> dashboard (withdrawal `fd8857cf…`). Ground reserved the amount immediately
+> (`withdrawableUsd` $20 → $19, `reservedUsd` $1.001004), unwound it from the
+> Kamino vault while reporting `withdrawal_active`, and returned to `idle`
+> ~40s later with the USDC confirmed on-chain at the destination —
+> `pendingApprovals` polled `0` at every step. So neither lane requires a stamp
+> by default, and the Solana path is now observed end to end rather than
+> inferred from the Sepolia one. The approval flow engages only when an
 > org-level approval policy is in place; Ground's docs tie that to production
 > withdrawal limits (`403 withdrawal_policy_required` — *"Production
 > withdrawal limit reached. Contact Ground to increase your limit."*).
@@ -325,9 +356,10 @@ Two things write `earn_strategies`, and only one of them is a production path.
   seed after your first Clerk sign-in and it moves its own link onto your real
   org; a program you created through the wizard is never moved. `--clean` removes
   the link, never the Ground wallet.
-  The seeded program starts at **$0** deliberately — it is an all-Solana/USDC
-  wallet you fund yourself via its devnet deposit address. Pointing the seed at a
-  funded sandbox wallet instead would surface a withdrawable balance SDP cannot
+  The seeded program is an all-Solana/USDC wallet, funded via its devnet deposit
+  address (Circle's faucet, above) — shared with teammates, so its balance moves
+  and no particular figure is the baseline. Pointing the seed at one of the other
+  funded sandbox wallets instead would surface a withdrawable balance SDP cannot
   withdraw, because those balances sit off the Solana rail while
   `balance.withdrawableUsd` reports a wallet-level total.
   Full local-dev detail: `CLAUDE.md` → "Get a program — one org, one portfolio

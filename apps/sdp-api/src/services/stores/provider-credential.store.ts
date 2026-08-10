@@ -54,6 +54,22 @@ export interface CustodyConnectionRow {
   created_at: string;
 }
 
+export interface ProjectConnectionListRow {
+  id: string;
+  provider: "privy";
+  status: CustodyConnectionStatus;
+  setup_metadata: unknown;
+  last_check_status: string | null;
+  last_check_at: string | null;
+  last_check_failure_code: string | null;
+  activated_at: string | null;
+  created_at: string;
+  credential_id: string;
+  credential_label: string;
+  credential_status: ProviderCredentialStatus;
+  credential_display_metadata: unknown;
+}
+
 export interface ProjectConnectionState extends CustodyConnectionRow {
   credential_status: ProviderCredentialStatus;
   credential_version: number;
@@ -128,6 +144,61 @@ export class ProviderCredentialStore {
        ${options.lock ? "FOR UPDATE" : ""}`,
       [id]
     );
+  }
+
+  /**
+   * Paginated dashboard read: every connection for a project scope, newest
+   * first, joined with the safe credential columns the dashboard may show.
+   * Secret references never leave this query. Distinct from
+   * listProjectConnections, the setup planner's locking read.
+   */
+  async listProjectConnectionsPage(
+    organizationId: string,
+    projectId: string,
+    options: { limit: number; offset: number }
+  ): Promise<{ connections: ProjectConnectionListRow[]; total: number }> {
+    const totalRow = await this.db.queryOne<{ total: number | string }>(
+      `SELECT COUNT(*) AS total
+         FROM custody_connections
+        WHERE organization_id = ? AND project_id = ?`,
+      [organizationId, projectId]
+    );
+    const connections = await this.db.queryMany<ProjectConnectionListRow>(
+      `SELECT c.id,
+              c.provider,
+              c.status,
+              c.setup_metadata,
+              c.last_check_status,
+              c.last_check_at,
+              c.last_check_failure_code,
+              c.activated_at,
+              c.created_at,
+              pc.id AS credential_id,
+              pc.label AS credential_label,
+              pc.status AS credential_status,
+              pc.display_metadata AS credential_display_metadata
+         FROM custody_connections c
+         JOIN provider_credentials pc ON pc.id = c.provider_credential_id
+        WHERE c.organization_id = ? AND c.project_id = ?
+        ORDER BY c.created_at DESC, c.id DESC
+        LIMIT ? OFFSET ?`,
+      [organizationId, projectId, options.limit, options.offset]
+    );
+    return { connections, total: Number(totalRow?.total ?? 0) };
+  }
+
+  async hasActiveProjectLegacyConfig(organizationId: string, projectId: string): Promise<boolean> {
+    const row = await this.db.queryOne<{ id: string }>(
+      `SELECT id
+       FROM custody_configs
+       WHERE organization_id = ?
+         AND project_id = ?
+         AND provider = 'privy'
+         AND status = 'active'
+       LIMIT 1`,
+      [organizationId, projectId]
+    );
+    return row !== null;
   }
 
   async findCredentialForInstallCheck(

@@ -258,8 +258,12 @@ interface EarnWithdrawModalProps {
   /** Live portfolio slices; power the per-stablecoin available figures. */
   positions: readonly EarnPortfolioPosition[];
   onClose: () => void;
-  /** Fired once a withdrawal is accepted, so the caller can refresh balances. */
-  onWithdrawalCreated: () => void;
+  /**
+   * Fired once a withdrawal is accepted, carrying the provider's ref so the
+   * caller can refresh balances AND follow that withdrawal to its outcome —
+   * the wallet returning to idle does not say whether the money arrived.
+   */
+  onWithdrawalCreated: (withdrawalRef: string) => void;
 }
 
 /**
@@ -374,7 +378,7 @@ export function EarnWithdrawModal({
       return;
     }
     setCreated(result.data.data.withdrawal);
-    onWithdrawalCreated();
+    onWithdrawalCreated(result.data.data.withdrawal.withdrawalRef);
   };
 
   if (created) {

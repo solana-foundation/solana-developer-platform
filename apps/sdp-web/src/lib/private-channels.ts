@@ -7,6 +7,7 @@ import type {
   PrivateChannelDto,
   PrivateChannelEventFamily,
   PrivateChannelEventListEnvelope,
+  PrivateChannelEventReferencesEnvelope,
   PrivateChannelEventStatus,
   PrivateChannelHealth,
   PrivateChannelInstance,
@@ -222,6 +223,16 @@ export function fetchPrivateChannelEvents(
   if (params.before) query.set("before", params.before);
   const qs = query.toString();
   return client.fetch(`/v1/private-channels/events${qs ? `?${qs}` : ""}`);
+}
+
+/** Flat id→name dictionary for enriching event list/detail rows. */
+export async function fetchPrivateChannelEventReferences(
+  client: SdpApiClient
+): Promise<Record<string, string>> {
+  const { references } = await client.fetch<PrivateChannelEventReferencesEnvelope>(
+    "/v1/private-channels/events/references"
+  );
+  return references;
 }
 
 /** List workspace users (invited SDP users), each joined with channel memberships. */

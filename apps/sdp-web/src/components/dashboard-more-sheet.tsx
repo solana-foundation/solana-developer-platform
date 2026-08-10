@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BlocksIcon,
   CircleCheckBigIcon,
   KeyRoundIcon,
   LibraryIcon,
@@ -64,6 +65,11 @@ function getMoreGroups(
           label: t("Shared.dashboardShell.policies"),
           href: DASHBOARD_SIDE_NAV_HREFS.policies,
           icon: ShieldCheckIcon,
+        },
+        {
+          label: t("Shared.dashboardShell.integrations"),
+          href: DASHBOARD_SIDE_NAV_HREFS.integrations,
+          icon: BlocksIcon,
         },
         ...(options.canReadApprovals
           ? [

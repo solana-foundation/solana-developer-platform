@@ -45,7 +45,7 @@ import {
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
   updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
   updateSubscriptionSchema as updateSubscriptionSchemaBase,
-  updateWalletPolicySchema as updateWalletPolicySchemaBase,
+  updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
 } from "../../routes/payments/schemas";
 import {
@@ -97,6 +97,9 @@ const walletControlProfileSummarySchema = z
     revisionId: z.string().nullable().openapi({ description: "Returned revision ID." }),
     revisionNumber: z.number().int().nullable().openapi({
       description: "Returned immutable revision number.",
+    }),
+    commitMessage: z.string().nullable().openapi({
+      description: "Message describing the returned revision's changes, when provided.",
     }),
     defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
       description: "Decision used when no rule matches.",
@@ -221,6 +224,10 @@ const walletControlProfileRevisionSchema = z
     }),
     rules: z.array(policyRuleSchema).openapi({ description: "Rules stored in this revision." }),
     defaultAction: z.enum(["allow", "deny", "approval_required", "review"]),
+    commitMessage: updateWalletPolicySchemaBase.shape.commitMessage
+      .unwrap()
+      .nullable()
+      .openapi({ description: "Message describing the revision changes, when provided." }),
     createdBy: z.string().nullable(),
     createdAt: isoDateTimeSchema,
     activatedAt: isoDateTimeSchema.nullable(),
@@ -427,6 +434,10 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
       description:
         "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
       example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
+    }),
+    commitMessage: withOpenApi(updateWalletPolicySchemaBase.shape.commitMessage, {
+      description: "Optional message describing the wallet policy revision changes.",
+      example: "Require approval for transfers above 10,000 USDC.",
     }),
     maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
       description: "Maximum amount allowed per transfer.",

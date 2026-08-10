@@ -253,6 +253,64 @@ function actionPageConfig(config: {
   };
 }
 
+/** Title for a Private Channels sub-view, from its route segment. */
+function privateChannelsSubPageTitle(
+  t: ReturnType<typeof useTranslations>,
+  segment: string
+): string {
+  switch (segment) {
+    case "instance":
+      return t("DashboardPrivateChannels.tabs.instance");
+    case "channels":
+      return t("DashboardPrivateChannels.tabs.channels");
+    case "deposit":
+      return t("DashboardPrivateChannels.tabs.deposit");
+    case "transfer":
+      return t("DashboardPrivateChannels.tabs.transfer");
+    case "withdraw":
+      return t("DashboardPrivateChannels.tabs.withdraw");
+    case "members":
+      return t("DashboardPrivateChannels.tabs.members");
+    case "wallets":
+      return t("DashboardPrivateChannels.overview.walletsTitle");
+    case "events":
+      return t("DashboardPrivateChannels.tabs.events");
+    default:
+      return t("Shared.dashboardShell.privateChannels");
+  }
+}
+
+/**
+ * Header config for the Private Channels segment. The Overview hub is a plain
+ * section title; every other view is entered from the Overview and so carries a
+ * "Back to private channels" action. Returns null for non-PC routes.
+ */
+function getPrivateChannelsRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (!pathname.startsWith("/dashboard/payments/private-channels")) {
+    return null;
+  }
+  const isHub =
+    pathname === "/dashboard/payments/private-channels" ||
+    pathname.startsWith("/dashboard/payments/private-channels/overview");
+  if (isHub) {
+    return {
+      title: t("Shared.dashboardShell.privateChannels"),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  return {
+    title: privateChannelsSubPageTitle(t, pathname.split("/")[4] ?? ""),
+    contentWidthClass: "max-w-none",
+    backAction: {
+      href: "/dashboard/payments/private-channels/overview",
+      label: t("Shared.dashboardShell.backToPrivateChannels"),
+    },
+  };
+}
+
 function getCounterpartyRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
@@ -433,24 +491,36 @@ function getIssuanceRoutePageConfig(
   };
 }
 
-export function getDashboardPageConfig(
+function getIntegrationsPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>,
-  assetProfilesEnabled: boolean,
-  privateChannelsEnabled: boolean
-): DashboardPageConfig {
-  const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
-  if (accessControlPageConfig) return accessControlPageConfig;
-  if (pathname === "/dashboard") {
-    // Home names itself: the sidebar marks it active and the page opens on a
-    // balance. A 36px "Home" above that spent a slice of the viewport saying
-    // nothing, so the workspace renders an sr-only heading instead.
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) {
     return {
-      title: t("Shared.dashboardShell.home"),
-      hideTitle: true,
-      contentWidthClass: "max-w-none",
+      title: t("Shared.dashboardShell.integrations"),
+      contentWidthClass: "max-w-5xl",
+      backAction: {
+        href: "/dashboard/integrations",
+        label: t("Shared.integrations.backToIntegrations"),
+      },
     };
   }
+  if (pathname.startsWith("/dashboard/integrations")) {
+    // Card-grid page: fill the shell's wide container instead of stacking a
+    // second max-width inside the centered default and stranding gutters.
+    return { title: t("Shared.dashboardShell.integrations"), contentWidthClass: "max-w-7xl" };
+  }
+  return null;
+}
+
+/**
+ * Header config for the wallet section's three landing routes, under both the
+ * `/wallets` and legacy `/custody` prefixes. Returns null elsewhere.
+ */
+function getWalletSectionPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: t("Shared.dashboardShell.wallets"),
@@ -478,6 +548,41 @@ export function getDashboardPageConfig(
       },
     };
   }
+  return null;
+}
+
+export function getDashboardPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>,
+  assetProfilesEnabled: boolean,
+  privateChannelsEnabled: boolean
+): DashboardPageConfig {
+  const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
+  if (accessControlPageConfig) return accessControlPageConfig;
+  if (pathname === "/dashboard") {
+    // Home names itself: the sidebar marks it active and the page opens on a
+    // balance. A 36px "Home" above that spent a slice of the viewport saying
+    // nothing, so the workspace renders an sr-only heading instead.
+    return {
+      title: t("Shared.dashboardShell.home"),
+      hideTitle: true,
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/tokens") {
+    // Reached from the home allocation card, so it carries a way back rather than
+    // relying on the sidebar, which does not list it.
+    return {
+      title: t("Shared.dashboardShell.holdings"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard",
+        label: t("Shared.dashboardShell.backToHome"),
+      },
+    };
+  }
+  const walletSectionPageConfig = getWalletSectionPageConfig(pathname, t);
+  if (walletSectionPageConfig) return walletSectionPageConfig;
   const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
   if (pathname === "/dashboard/policies") {
@@ -555,6 +660,10 @@ export function getDashboardPageConfig(
       },
     };
   }
+  const privateChannelsConfig = getPrivateChannelsRoutePageConfig(pathname, t);
+  if (privateChannelsConfig) {
+    return privateChannelsConfig;
+  }
   if (pathname.startsWith("/dashboard/payments/")) {
     const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
       pathname.startsWith(item.href)
@@ -571,6 +680,10 @@ export function getDashboardPageConfig(
       backLabel: t("Shared.dashboardShell.backToPayments"),
       contentWidthClass: "max-w-none",
     });
+  }
+  const integrationsConfig = getIntegrationsPageConfig(pathname, t);
+  if (integrationsConfig) {
+    return integrationsConfig;
   }
   if (pathname.startsWith("/dashboard/settings")) {
     // Settings was the only route left on the `max-w-5xl` default, which stranded a

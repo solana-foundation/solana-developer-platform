@@ -17,6 +17,10 @@ import {
 } from "../helpers";
 import { pauseTokenSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
@@ -50,10 +54,6 @@ export const pauseToken = async (c: AppContext) => {
 
   if (!token) {
     throw notFound("Token");
-  }
-
-  if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to pause");
   }
 
   if (!token.mintAddress) {
@@ -90,9 +90,35 @@ export const pauseToken = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    return success(c, { transaction: tx });
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "pause",
+    });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledTokenStatus(tx.id, tokenId, "paused");
+    }
+    return success(c, { transaction });
   }
+
+  if (token.status !== "active") {
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: "Token must be active to pause",
+    });
+    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to pause");
+  }
+
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "pause",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: { tokenId, mode: "execute" },
+  });
+  let onChainEffectCompleted = false;
 
   try {
     const signer = await createOrgSigner(
@@ -112,39 +138,44 @@ export const pauseToken = async (c: AppContext) => {
       pauseAuthority: signer,
       feePayer: signer,
     });
+    onChainEffectCompleted = true;
 
-    await tokenService.updateToken(tokenId, { status: "paused" });
-    const confirmedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
-
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "pause",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
-      metadata: {
-        tokenId,
+    const confirmedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
         signature: result.signature,
-        slot: result.slot.toString(),
+        slot: Number(result.slot),
       },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
+    await tokenService.applySettledTokenStatus(tx.id, tokenId, "paused");
 
     return success(c, { transaction: confirmedTx });
   } catch (error) {
-    if (error instanceof Error && error.message === MINT_ALREADY_PAUSED_ERROR) {
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      if (error instanceof Error && error.message === MINT_ALREADY_PAUSED_ERROR) {
+        await tokenService.updateTransaction(tx.id, {
+          status: "failed",
+          error: error.message,
+        });
+        throw badRequest("Token is already paused");
+      }
       await tokenService.updateTransaction(tx.id, {
         status: "failed",
-        error: error.message,
+        error: error instanceof Error ? error.message : "Unknown error",
       });
-      throw badRequest("Token is already paused");
     }
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
     throw error;
   }
 };
@@ -171,10 +202,6 @@ export const unpauseToken = async (c: AppContext) => {
 
   if (!token) {
     throw notFound("Token");
-  }
-
-  if (token.status !== "paused") {
-    throw badRequest("Token is not paused");
   }
 
   if (!token.mintAddress) {
@@ -211,9 +238,35 @@ export const unpauseToken = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    return success(c, { transaction: tx });
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "unpause",
+    });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledTokenStatus(tx.id, tokenId, "active");
+    }
+    return success(c, { transaction });
   }
+
+  if (token.status !== "paused") {
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: "Token is not paused",
+    });
+    throw badRequest("Token is not paused");
+  }
+
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "unpause",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: { tokenId, mode: "execute" },
+  });
+  let onChainEffectCompleted = false;
 
   try {
     const signer = await createOrgSigner(
@@ -233,39 +286,44 @@ export const unpauseToken = async (c: AppContext) => {
       pauseAuthority: signer,
       feePayer: signer,
     });
+    onChainEffectCompleted = true;
 
-    await tokenService.updateToken(tokenId, { status: "active" });
-    const confirmedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
-
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "unpause",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
-      metadata: {
-        tokenId,
+    const confirmedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
         signature: result.signature,
-        slot: result.slot.toString(),
+        slot: Number(result.slot),
       },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
+    await tokenService.applySettledTokenStatus(tx.id, tokenId, "active");
 
     return success(c, { transaction: confirmedTx });
   } catch (error) {
-    if (error instanceof Error && error.message === MINT_NOT_PAUSED_ERROR) {
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      if (error instanceof Error && error.message === MINT_NOT_PAUSED_ERROR) {
+        await tokenService.updateTransaction(tx.id, {
+          status: "failed",
+          error: error.message,
+        });
+        throw badRequest("Token is not paused");
+      }
       await tokenService.updateTransaction(tx.id, {
         status: "failed",
-        error: error.message,
+        error: error instanceof Error ? error.message : "Unknown error",
       });
-      throw badRequest("Token is not paused");
     }
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
     throw error;
   }
 };

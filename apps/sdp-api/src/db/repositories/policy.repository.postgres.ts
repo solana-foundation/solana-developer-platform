@@ -166,7 +166,7 @@ api_key_binding_aggregates AS (
   SELECT
     b.api_key_id,
     BOOL_OR(b.binding_scope = 'all') AS has_all_scope,
-    COUNT(DISTINCT b.wallet_id) FILTER (WHERE b.binding_scope = 'selected') AS selected_wallet_count,
+    COUNT(DISTINCT b.custody_wallet_id) FILTER (WHERE b.binding_scope = 'selected') AS selected_wallet_count,
     COUNT(*) AS binding_count
   FROM api_key_wallet_policy_bindings b
   INNER JOIN api_key_targets target ON target.target_id = b.api_key_id
@@ -375,6 +375,7 @@ function mapWalletControlProfileRevisionRow(
     revision_number: row.revision_number as number,
     rules: asPostgresJsonArray(row.rules),
     default_action: row.default_action as WalletControlProfileRevisionRow["default_action"],
+    commit_message: row.commit_message as string | null,
     created_by: (row.created_by as string | null | undefined) ?? null,
     created_at: row.created_at as string,
     activated_at: (row.activated_at as string | null | undefined) ?? null,
@@ -643,6 +644,10 @@ function validateApiKeyWalletPolicyBindingInput(input: UpsertApiKeyWalletPolicyB
     throw badRequest("walletId is required for selected API key wallet policy bindings");
   }
 
+  if (input.bindingScope === "selected" && !input.custodyWalletId) {
+    throw badRequest("custodyWalletId is required for selected API key wallet policy bindings");
+  }
+
   if (input.bindingScope === "all" && (input.walletId || input.custodyWalletId)) {
     throw badRequest("walletId and custodyWalletId must be omitted for all-wallet policy bindings");
   }
@@ -766,7 +771,20 @@ async function getWalletControlProfileRevisionById(
   revisionId: string
 ): Promise<WalletControlProfileRevisionRow | null> {
   const row = await db
-    .prepare("SELECT * FROM wallet_control_profile_revisions WHERE id = ?")
+    .prepare(
+      `SELECT
+         id,
+         profile_id,
+         revision_number,
+         rules,
+         default_action,
+         commit_message,
+         created_by,
+         created_at,
+         activated_at
+       FROM wallet_control_profile_revisions
+       WHERE id = ?`
+    )
     .bind(revisionId)
     .first<Record<string, unknown>>();
 
@@ -802,10 +820,12 @@ async function upsertApiKeyWalletPolicyBindingInternal(
   input: UpsertApiKeyWalletPolicyBindingInput
 ): Promise<ApiKeyWalletPolicyBindingRow | null> {
   const id = generateApiKeyWalletPolicyBindingId();
+  const walletId = input.bindingScope === "selected" ? input.walletId : null;
+  const custodyWalletId = input.bindingScope === "selected" ? input.custodyWalletId : null;
   const conflictTarget =
     input.bindingScope === "all"
       ? "(api_key_id) WHERE binding_scope = 'all'"
-      : "(api_key_id, wallet_id) WHERE binding_scope = 'selected'";
+      : "(api_key_id, custody_wallet_id) WHERE binding_scope = 'selected'";
 
   const row = await db
     .prepare(
@@ -830,8 +850,8 @@ async function upsertApiKeyWalletPolicyBindingInternal(
       id,
       input.apiKeyId,
       input.bindingScope,
-      input.walletId ?? null,
-      input.custodyWalletId ?? null,
+      walletId,
+      custodyWalletId,
       input.walletControlProfileId ?? null,
       input.apiKeyControlProfileId ?? null
     )
@@ -1171,6 +1191,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
                revision_number,
                rules,
                default_action,
+               commit_message,
                created_by
              )
              SELECT
@@ -1178,6 +1199,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
                ?,
                COALESCE(MAX(revision_number), 0) + 1,
                ?::jsonb,
+               ?,
                ?,
                ?
              FROM wallet_control_profile_revisions
@@ -1189,6 +1211,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
             input.profileId,
             JSON.stringify(input.rules ?? []),
             input.defaultAction ?? "allow",
+            input.commitMessage === undefined ? null : input.commitMessage,
             input.createdBy ?? null,
             input.profileId
           )
@@ -1344,7 +1367,16 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       const mappedProfile = mapWalletControlProfileRow(profile);
       const revisions = await db
         .prepare(
-          `SELECT *
+          `SELECT
+             id,
+             profile_id,
+             revision_number,
+             rules,
+             default_action,
+             commit_message,
+             created_by,
+             created_at,
+             activated_at
            FROM wallet_control_profile_revisions
            WHERE profile_id = ?
            ORDER BY revision_number DESC
@@ -1760,10 +1792,10 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       return rows.results;
     },
 
-    async getApiKeyWalletPolicyBindingResolution(apiKeyId: string, walletId: string) {
+    async getApiKeyWalletPolicyBindingResolution(apiKeyId: string, custodyWalletId: string) {
       if (
         !(await tenantOwnsRow(db, scope, "api_keys", apiKeyId)) ||
-        !(await tenantOwnsWallet(db, scope, walletId))
+        !(await tenantOwnsWallet(db, scope, custodyWalletId))
       ) {
         return {
           total_binding_count: 0,
@@ -1783,7 +1815,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
              WHERE api_key_id = ?
                AND (
                  binding_scope = 'all'
-                 OR (binding_scope = 'selected' AND wallet_id = ?)
+                 OR (binding_scope = 'selected' AND custody_wallet_id = ?)
                )
              ORDER BY
                CASE WHEN binding_scope = 'selected' THEN 0 ELSE 1 END,
@@ -1797,16 +1829,16 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
            FROM binding_count
            LEFT JOIN applicable ON TRUE`
         )
-        .bind(apiKeyId, apiKeyId, walletId)
+        .bind(apiKeyId, apiKeyId, custodyWalletId)
         .first<Record<string, unknown>>();
 
       return mapApiKeyWalletPolicyBindingResolutionRow(row);
     },
 
-    async getApiKeyWalletPolicyTarget(apiKeyId: string, walletId: string) {
+    async getApiKeyWalletPolicyTarget(apiKeyId: string, custodyWalletId: string) {
       if (
         !(await tenantOwnsRow(db, scope, "api_keys", apiKeyId)) ||
-        !(await tenantOwnsWallet(db, scope, walletId))
+        !(await tenantOwnsWallet(db, scope, custodyWalletId))
       ) {
         return null;
       }
@@ -1840,7 +1872,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
            JOIN custody_wallets w
              ON w.custody_config_id = c.id
             AND w.status = 'active'
-            AND w.wallet_id = ?
+            AND w.id = ?
            LEFT JOIN endpoint_scope es ON es.api_key_id = ak.id
            LEFT JOIN api_key_wallet_permissions perm
              ON perm.api_key_id = ak.id
@@ -1854,7 +1886,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
              w.created_at DESC
            LIMIT 1`
         )
-        .bind(apiKeyId, apiKeyId, walletId)
+        .bind(apiKeyId, apiKeyId, custodyWalletId)
         .first<Record<string, unknown>>();
 
       return row ? mapApiKeyWalletPolicyTargetRow(row) : null;

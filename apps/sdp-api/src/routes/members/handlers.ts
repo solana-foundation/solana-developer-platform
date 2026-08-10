@@ -274,7 +274,7 @@ export const listMembers = async (c: AppContext) => {
 
   const results = await getDb(c.env)
     .prepare(
-      // A misconfigured Clerk JWT template stored an unsubstituted placeholder as
+      // A misconfigured Clerk token customization stored an unsubstituted placeholder as
       // the email. Sign-in repairs `auth_user_identities` (its upsert overwrites the
       // email) but never `users`, whose insert is ON CONFLICT DO NOTHING — so the
       // directory kept showing the placeholder until a deploy re-ran migration 0040.

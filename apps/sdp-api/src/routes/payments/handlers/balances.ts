@@ -47,6 +47,7 @@ function mapWalletControlProfileSummary(
     activeRevisionId: active.profile.active_revision_id,
     revisionId: active.revision?.id ?? null,
     revisionNumber: active.revision?.revision_number ?? null,
+    commitMessage: active.revision === null ? null : active.revision.commit_message,
     defaultAction: active.revision?.default_action ?? "allow",
     rules: (active.revision?.rules ?? []) as unknown as PolicyRule[],
     providerMappingStatus: "not_applicable",
@@ -111,6 +112,7 @@ async function activateWalletControlProfileRevisionInTransaction({
   profileName,
   rules,
   defaultAction,
+  commitMessage,
   createdBy,
   activatedAt,
 }: {
@@ -121,6 +123,7 @@ async function activateWalletControlProfileRevisionInTransaction({
   profileName: string;
   rules: PolicyRule[];
   defaultAction: PolicyDefaultAction;
+  commitMessage?: string;
   createdBy: string | null;
   activatedAt: string;
 }): Promise<void> {
@@ -165,6 +168,7 @@ async function activateWalletControlProfileRevisionInTransaction({
          revision_number,
          rules,
          default_action,
+         commit_message,
          created_by
        )
        SELECT
@@ -173,12 +177,21 @@ async function activateWalletControlProfileRevisionInTransaction({
          COALESCE(MAX(revision_number), 0) + 1,
          ?::jsonb,
          ?,
+         ?,
          ?
        FROM wallet_control_profile_revisions
        WHERE profile_id = ?
        RETURNING id`
     )
-    .bind(revisionId, profileId, JSON.stringify(rules), defaultAction, createdBy, profileId)
+    .bind(
+      revisionId,
+      profileId,
+      JSON.stringify(rules),
+      defaultAction,
+      commitMessage === undefined ? null : commitMessage,
+      createdBy,
+      profileId
+    )
     .first<{ id: string }>();
 
   if (!revision) {
@@ -364,6 +377,7 @@ export async function updateWalletPolicy(c: AppContext) {
         profileName: `${wallet.label ?? wallet.walletId} controls`,
         rules: parsed.data.rules ?? [],
         defaultAction: parsed.data.defaultAction ?? "allow",
+        commitMessage: parsed.data.commitMessage,
         createdBy: auth.userId ?? auth.apiKeyId ?? null,
         activatedAt: now,
       });

@@ -292,10 +292,28 @@ export interface EarnPortfolioPosition {
   token?: EarnPortfolioToken;
 }
 
+/**
+ * What a `busy` wallet is actually doing, in provider-neutral terms.
+ *
+ * `status` alone answers "can it take a mutation"; this answers "what is
+ * happening to my money", which is the question a reader waiting on a screen
+ * is asking. Every provider client derives it from its OWN status vocabulary,
+ * so no consumer ever parses a provider's raw strings — the same reason
+ * position labels arrive display-ready.
+ *
+ * Optional by design: absent whenever the wallet is not busy, and absent for a
+ * busy state the provider client does not recognize (which still reports
+ * `busy`, never a guessed activity).
+ */
+export const EARN_PORTFOLIO_WALLET_ACTIVITIES = ["withdrawing", "rebalancing"] as const;
+export type EarnPortfolioWalletActivity = (typeof EARN_PORTFOLIO_WALLET_ACTIVITIES)[number];
+
 /** Live provider read of the shared wallet; never persisted, always fetched. */
 export interface EarnPortfolioWalletSnapshot {
   providerWalletRef: string;
   status: EarnPortfolioWalletStatus;
+  /** Named operation behind `busy`; see {@link EarnPortfolioWalletActivity}. */
+  activity?: EarnPortfolioWalletActivity;
   /** Raw provider status string, for diagnostics/detail display. */
   providerStatus?: string;
   /**

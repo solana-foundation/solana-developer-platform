@@ -37,6 +37,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/markets/earn", "earn-overview"],
     ["/dashboard/markets/earn/deposit", "earn-deposit"],
     ["/dashboard/markets/earn/strategies/strategy-1", "earn-strategy-detail"],
+    ["/dashboard/tokens", "token-holdings"],
     ["/dashboard/api-keys", "api-keys-list"],
     ["/dashboard/api-keys/new", "api-key-new"],
     ["/dashboard/api-keys/key-1/edit", "api-key-edit"],
@@ -44,6 +45,8 @@ describe("dashboard loading route", () => {
     ["/dashboard/approvals", "approvals-list"],
     ["/dashboard/approvals/request-1", "approval-detail"],
     ["/dashboard/settings", "settings"],
+    ["/dashboard/integrations", "integrations"],
+    ["/dashboard/integrations/privy", "integration-detail"],
     ["/dashboard/allowlist", "allowlist"],
   ])("maps %s to its exact route skeleton", (pathname, route) => {
     expect(resolveDashboardLoadingRoute(pathname)).toBe(route);
@@ -106,6 +109,18 @@ describe("dashboard navigation intent", () => {
   });
 });
 
+describe("integrations route", () => {
+  it("keeps the Integrations nav item lit across its subtree", () => {
+    expect(isDashboardNavItemActive("/dashboard/integrations", "/dashboard/integrations")).toBe(
+      true
+    );
+    expect(
+      isDashboardNavItemActive("/dashboard/integrations/privy", "/dashboard/integrations")
+    ).toBe(true);
+    expect(isDashboardNavItemActive("/dashboard/wallets", "/dashboard/integrations")).toBe(false);
+  });
+});
+
 describe("dashboard navigation active state", () => {
   it.each([
     "/dashboard/markets/earn",
@@ -117,5 +132,20 @@ describe("dashboard navigation active state", () => {
 
   it("does not claim unrelated dashboard routes for Markets", () => {
     expect(isDashboardNavItemActive("/dashboard/payments", "/dashboard/markets/earn")).toBe(false);
+  });
+});
+
+describe("holdings route", () => {
+  it("resolves its own loading route rather than falling back to home", () => {
+    expect(resolveDashboardLoadingRoute("/dashboard/tokens")).toBe("token-holdings");
+  });
+
+  it("keeps Home highlighted so the sidebar does not go blank", () => {
+    expect(isDashboardNavItemActive("/dashboard/tokens", "/dashboard")).toBe(true);
+  });
+
+  it("does not light up an unrelated nav item", () => {
+    expect(isDashboardNavItemActive("/dashboard/tokens", "/dashboard/wallets")).toBe(false);
+    expect(isDashboardNavItemActive("/dashboard/tokens", "/dashboard/payments")).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import type { Member } from "@/app/members/actions";
 
 /**
- * A misconfigured Clerk JWT template can store an unsubstituted placeholder —
+ * A misconfigured Clerk token customization can store an unsubstituted placeholder —
  * literally `{{user.primary_email_address.email_address}}` — as a user's email.
  * Printing that verbatim reads as a rendering bug rather than as the data problem
  * it is, so anything that is not an address is discarded.

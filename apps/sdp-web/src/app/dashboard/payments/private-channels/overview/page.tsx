@@ -1,36 +1,49 @@
-import { redirect } from "next/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import {
-  PRIVATE_CHANNELS_INSTANCE_PATH,
-  requirePrivateChannelsAccess,
-} from "../private-channels-access";
+import { requirePrivateChannelsAccess } from "../private-channels-access";
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
 import {
   loadChannelBalances,
+  loadChannels,
+  loadEvents,
   loadOverview,
   loadWalletVerification,
 } from "../private-channels-page.data";
-import { InstanceOverviewCard } from "./instance-overview-card";
-import { VerifiedWalletsSection } from "./verified-wallets-section";
+import {
+  PRIVATE_CHANNELS_CHANNELS_PATH,
+  PRIVATE_CHANNELS_INSTANCE_PATH,
+  PRIVATE_CHANNELS_WALLETS_PATH,
+} from "../private-channels-routes";
+import { AllowedTokensPanel } from "./allowed-tokens-panel";
+import { ConnectedInstancePanel } from "./connected-instance-panel";
+import { channelNameById } from "./overview-data";
+import { PrivateBalancePanel } from "./private-balance-panel";
+import { RecentActivityPanel } from "./recent-activity-panel";
 
 export default async function PrivateChannelsOverviewPage() {
   await requirePrivateChannelsAccess();
 
-  const t = await getTranslations();
-
   const client = await createSdpApiClient();
-  const [overview, wallets] = await Promise.all([
+  const [overview, wallets, channels, events] = await Promise.all([
     loadOverview(client),
     loadWalletVerification(client),
+    loadChannels(client),
+    loadEvents(client),
   ]);
 
-  // `ok` with no data is the expected "no active instance" 404 — route to the
-  // connect form. A genuine failure keeps the user here and shows the error.
-  if (overview.ok && !overview.data) {
-    redirect(PRIVATE_CHANNELS_INSTANCE_PATH);
+  // The overview always renders — even with no connected instance, in which case it
+  // shows the "Not connected" state and a connect link. Only a genuine load failure
+  // (not the expected "no active instance" 404, which resolves to ok+null data) keeps
+  // the user on an error screen.
+  // Channels feed both the connected-instance summary and activity labels, so their
+  // fallback cannot produce a truthful partial page. Surface that failure just like
+  // the overview request instead of presenting missing channel data as an empty state.
+  if (!overview.ok || !channels.ok) {
+    return <PrivateChannelsLoadError message={overview.error ?? channels.error} />;
   }
+  const instance = overview.data?.instance ?? null;
+  const instanceOverview = overview.data?.overview ?? null;
+  const isConnected = instance !== null;
+  const defaultChannelName = channels.data.find((channel) => channel.isDefault)?.name ?? null;
 
   // Channel balances only exist for verified wallets — unverified reads would 403.
   const channelBalances = wallets.ok
@@ -38,40 +51,36 @@ export default async function PrivateChannelsOverviewPage() {
     : {};
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("DashboardPrivateChannels.overview.title")}</CardTitle>
-          <CardDescription>{t("DashboardPrivateChannels.overview.description")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {overview.data ? (
-            <InstanceOverviewCard
-              instance={overview.data.instance}
-              overview={overview.data.overview}
-            />
-          ) : (
-            <PrivateChannelsLoadError message={overview.error} />
-          )}
-        </CardContent>
-      </Card>
+    // The segment layout owns viewport scrolling and gutters. Keep this page height-bound
+    // so the summary panels take their natural height while the activity panel fills the
+    // remainder and scrolls only its table, leaving the "View all" footer pinned in view.
+    <div className="flex h-full min-h-0 w-full flex-col gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <ConnectedInstancePanel
+          instance={instance}
+          overview={instanceOverview}
+          connectHref={PRIVATE_CHANNELS_INSTANCE_PATH}
+          instanceHref={PRIVATE_CHANNELS_INSTANCE_PATH}
+          channelsHref={PRIVATE_CHANNELS_CHANNELS_PATH}
+          defaultChannelName={defaultChannelName}
+        />
+        <PrivateBalancePanel
+          channelBalances={channelBalances}
+          walletsHref={PRIVATE_CHANNELS_WALLETS_PATH}
+          connected={isConnected}
+          loadError={!wallets.ok}
+        />
+        <AllowedTokensPanel instance={instance} />
+      </div>
 
-      <Card id="verified-wallets">
-        <CardHeader>
-          <CardTitle>{t("DashboardPrivateChannels.verifiedWallets.title")}</CardTitle>
-          <CardDescription>
-            {t("DashboardPrivateChannels.verifiedWallets.description")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <VerifiedWalletsSection
-            verifiedWallets={wallets.data.verified}
-            custodyWallets={wallets.data.custody}
-            channelBalances={channelBalances}
-            loadError={!wallets.ok}
-          />
-        </CardContent>
-      </Card>
+      {/* Activity only exists once an instance is connected — hide the panel until then. */}
+      {isConnected ? (
+        <RecentActivityPanel
+          initialEvents={events.data.events}
+          channelNames={channelNameById(channels.data)}
+          loadError={!events.ok}
+        />
+      ) : null}
     </div>
   );
 }

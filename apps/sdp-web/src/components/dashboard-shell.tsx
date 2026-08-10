@@ -20,6 +20,10 @@ import {
   ApprovalInboxSkeleton,
 } from "@/app/dashboard/approvals/approval-page-skeletons";
 import {
+  IntegrationDetailSkeleton,
+  IntegrationsSkeleton,
+} from "@/app/dashboard/integrations/integrations-skeleton";
+import {
   IssuanceCreateSkeleton,
   IssuanceDetailSkeleton,
   IssuancePageSkeleton,
@@ -47,6 +51,7 @@ import {
   RecurringPaymentsPageSkeleton,
 } from "@/app/dashboard/payments/payments-route-skeletons";
 import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
+import TokenHoldingsLoading from "@/app/dashboard/tokens/loading";
 import {
   WalletDetailSkeleton,
   WalletPolicyAuditDetailSkeleton,
@@ -128,6 +133,12 @@ function resolvePageLoadingComponent(
   switch (route) {
     case "home":
       return DashboardLoading;
+    case "integrations":
+      return IntegrationsSkeleton;
+    case "integration-detail":
+      return IntegrationDetailSkeleton;
+    case "token-holdings":
+      return TokenHoldingsLoading;
     case "wallets-overview":
       return WalletsOverviewSkeleton;
     case "wallet-setup":

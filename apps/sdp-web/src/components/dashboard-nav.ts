@@ -4,6 +4,7 @@ import {
   ArrowDownLeftIcon,
   ArrowLeftRightIcon,
   ArrowUpRightIcon,
+  BlocksIcon,
   CircleCheckBigIcon,
   CoinsIcon,
   FileTextIcon,
@@ -197,6 +198,11 @@ export function getNavSections(
           label: t("Shared.dashboardShell.policies"),
           href: DASHBOARD_SIDE_NAV_HREFS.policies,
           icon: ShieldCheckIcon,
+        },
+        {
+          label: t("Shared.dashboardShell.integrations"),
+          href: DASHBOARD_SIDE_NAV_HREFS.integrations,
+          icon: BlocksIcon,
         },
         ...(options.canReadApprovals
           ? [

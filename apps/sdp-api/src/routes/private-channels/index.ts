@@ -30,6 +30,7 @@ import {
   listChannelEvents,
   listChannels,
   listPrivateChannelDeposits,
+  listPrivateChannelEventReferences,
   listPrivateChannelTransferRecipients,
   listPrivateChannelTransfers,
   listPrivateChannelUsers,
@@ -121,6 +122,11 @@ privateChannels.get(
 );
 
 // --- /events --------------------------------------------------------------
+privateChannels.get(
+  "/events/references",
+  requirePermissions("payments:read"),
+  listPrivateChannelEventReferences
+);
 privateChannels.get("/events", requirePermissions("payments:read"), listProjectEvents);
 
 // --- /channels ------------------------------------------------------------

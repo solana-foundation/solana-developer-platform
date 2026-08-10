@@ -484,3 +484,108 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     );
   });
 });
+
+describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
+  const SOL_MINT_ADDRESS = "So11111111111111111111111111111111111111112";
+
+  beforeAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  afterAll(async () => {
+    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+  });
+
+  beforeEach(async () => {
+    const db = getDb(env);
+    await db.prepare("DELETE FROM payment_transfers").run();
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      )
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+      .run();
+  });
+
+  function transfer(token: string, suffix: string) {
+    return {
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: `Source${suffix}`,
+      destinationAddress: `Dest${suffix}`,
+      token,
+      amount: "1",
+      memo: null,
+      type: "transfer" as const,
+      direction: "outbound" as const,
+      status: "processing" as const,
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: null,
+      idempotencyKey: `token-filter-${suffix}`,
+      idempotencyFingerprint: `fp-${suffix}`,
+    };
+  }
+
+  async function seedMixedForms() {
+    // Exactly the shape the local ledger holds: the same asset written as a bare
+    // symbol on some rows and as its mint on others, all with type = transfer.
+    const repo = createPostgresPaymentsRepository(getDb(env));
+    await repo.createTransfer(transfer("SOL", "sym-1"));
+    await repo.createTransfer(transfer("SOL", "sym-2"));
+    await repo.createTransfer(transfer(SOL_MINT_ADDRESS, "mint-1"));
+    return repo;
+  }
+
+  const listArgs = { organizationId: TEST_ORG.id, projectId: null, limit: 50, offset: 0 };
+
+  it("returns the mint rows and the symbol rows for one filter", async () => {
+    const repo = await seedMixedForms();
+
+    // An exact match returned 2 for the symbol and 1 for the mint. Both are the
+    // same asset, so either spelling has to answer with all three.
+    const bySymbol = await repo.listTransfers({ ...listArgs, token: "SOL" });
+    const byMint = await repo.listTransfers({ ...listArgs, token: SOL_MINT_ADDRESS });
+
+    expect(bySymbol.rows).toHaveLength(3);
+    expect(byMint.rows).toHaveLength(3);
+  });
+
+  it("does not pull in a different asset that happens to share the catalogue", async () => {
+    const repo = await seedMixedForms();
+    await repo.createTransfer(transfer("USDC", "usdc-1"));
+
+    const bySymbol = await repo.listTransfers({ ...listArgs, token: "SOL" });
+
+    expect(bySymbol.rows).toHaveLength(3);
+    expect(bySymbol.rows.every((row) => row.token !== "USDC")).toBe(true);
+  });
+
+  it("treats a blank token as no filter rather than as a value to match", async () => {
+    const repo = await seedMixedForms();
+
+    // The query schema takes `token` as a bare optional string, so whitespace
+    // reaches the repository truthy. Matching it literally returned zero rows for
+    // what is really an absent filter.
+    const blank = await repo.listTransfers({ ...listArgs, token: "   " });
+
+    expect(blank.rows).toHaveLength(3);
+  });
+
+  it("returns nothing for a token the organization has never transferred", async () => {
+    const repo = await seedMixedForms();
+
+    const none = await repo.listTransfers({ ...listArgs, token: "JUP" });
+
+    expect(none.rows).toHaveLength(0);
+  });
+});
