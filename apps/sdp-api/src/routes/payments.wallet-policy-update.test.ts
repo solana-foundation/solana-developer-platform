@@ -310,6 +310,17 @@ describe("Payments routes — wallet policy partial updates", () => {
     expect(firstRes.status).toBe(200);
     expect(secondRes.status).toBe(200);
 
+    // Each response reports the revision its own transaction activated — a
+    // post-commit read would let both echo the final revision.
+    const firstPolicy = ((await firstRes.json()) as WalletPolicyBody).data.policy;
+    const secondPolicy = ((await secondRes.json()) as WalletPolicyBody).data.policy;
+    expect(
+      new Set([
+        firstPolicy.controlProfile?.revisionNumber,
+        secondPolicy.controlProfile?.revisionNumber,
+      ])
+    ).toEqual(new Set([2, 3]));
+
     const policy = await getPolicy();
     // Whichever update ran second merged on top of the first: the wallet must
     // end with the seeded controls only explicitly replaced, never reset.

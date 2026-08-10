@@ -509,7 +509,16 @@ export async function updateWalletPolicy(
   walletId: string,
   policy: WalletPolicy,
   t: Translate,
-  commitMessage?: string
+  commitMessage?: string,
+  options?: {
+    /**
+     * The control-profile revision this edit was based on: the active
+     * revision id, or null when the wallet was loaded with no active
+     * profile. Omit only when the caller has no server-read base — the API
+     * then skips the stale-revision check.
+     */
+    expectedRevisionId?: string | null;
+  }
 ): Promise<WalletPolicy> {
   const trimmedCommitMessage = commitMessage?.trim();
 
@@ -531,8 +540,8 @@ export async function updateWalletPolicy(
         maxDailyAmount: policy.maxDailyAmount ?? null,
         ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
         ...(policy.rules ? { rules: policy.rules } : {}),
-        ...(policy.controlProfile?.revisionId
-          ? { expectedRevisionId: policy.controlProfile.revisionId }
+        ...(options?.expectedRevisionId !== undefined
+          ? { expectedRevisionId: options.expectedRevisionId }
           : {}),
       }),
     }

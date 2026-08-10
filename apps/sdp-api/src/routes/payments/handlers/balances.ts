@@ -117,6 +117,70 @@ interface LockedActiveWalletControlProfile {
   default_action: PolicyDefaultAction | null;
 }
 
+/**
+ * Reads the active control-profile summary on the update transaction's own
+ * connection, so the response reflects exactly the state this request
+ * committed — a post-commit read could mix in a concurrent update's profile.
+ */
+async function readWalletControlProfileSummaryInTransaction(
+  db: DatabaseExecutor,
+  custodyWalletId: string
+): Promise<PaymentWalletControlProfileSummary | null> {
+  const row = await db
+    .prepare(
+      `SELECT p.id AS id,
+              p.status AS status,
+              p.active_revision_id AS active_revision_id,
+              p.created_at AS created_at,
+              p.updated_at AS updated_at,
+              p.activated_at AS activated_at,
+              r.id AS revision_id,
+              r.revision_number AS revision_number,
+              r.commit_message AS commit_message,
+              r.rules AS rules,
+              r.default_action AS default_action
+       FROM wallet_control_profiles p
+       LEFT JOIN wallet_control_profile_revisions r ON r.id = p.active_revision_id
+       WHERE p.custody_wallet_id = ?
+         AND p.status = 'active'
+       ORDER BY p.activated_at DESC NULLS LAST, p.created_at DESC
+       LIMIT 1`
+    )
+    .bind(custodyWalletId)
+    .first<{
+      id: string;
+      status: PaymentWalletControlProfileSummary["status"];
+      active_revision_id: string | null;
+      created_at: string;
+      updated_at: string;
+      activated_at: string | null;
+      revision_id: string | null;
+      revision_number: number | null;
+      commit_message: string | null;
+      rules: unknown;
+      default_action: PolicyDefaultAction | null;
+    }>();
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    status: row.status,
+    activeRevisionId: row.active_revision_id,
+    revisionId: row.revision_id,
+    revisionNumber: row.revision_number,
+    commitMessage: row.revision_id === null ? null : row.commit_message,
+    defaultAction: row.default_action ?? "allow",
+    rules: row.revision_id ? (asPostgresJsonArray(row.rules) as unknown as PolicyRule[]) : [],
+    providerMappingStatus: "not_applicable",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    activatedAt: row.activated_at,
+  };
+}
+
 async function lockActiveWalletControlProfile(
   db: DatabaseExecutor,
   custodyWalletId: string
@@ -357,7 +421,7 @@ export async function updateWalletPolicy(c: AppContext) {
   const patch = parsed.data;
   const now = new Date().toISOString();
 
-  const rows = await getDb(c.env).transaction(async (tx) => {
+  const { rows, controlProfile } = await getDb(c.env).transaction(async (tx) => {
     // Serialize concurrent policy updates for this wallet so read-merge-write
     // cannot interleave and silently drop another request's controls.
     const lockedWallet = await tx
@@ -442,10 +506,12 @@ export async function updateWalletPolicy(c: AppContext) {
       });
     }
 
-    return savedRows;
+    return {
+      rows: savedRows,
+      controlProfile: await readWalletControlProfileSummaryInTransaction(tx, wallet.id),
+    };
   });
 
-  const controlProfile = await getWalletControlProfileSummary(c, wallet.id);
   const payload = buildWalletPolicyPayload(wallet.walletId, rows, now);
   const audit = await getWalletPolicyAudit(c, {
     organizationId: auth.organizationId,

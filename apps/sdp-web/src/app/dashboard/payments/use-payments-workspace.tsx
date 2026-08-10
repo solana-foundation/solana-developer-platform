@@ -303,7 +303,11 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
           ...addPolicy,
           destinationAllowlist: [...allowlistAddresses, addAddressTrimmed],
         },
-        t
+        t,
+        undefined,
+        // addPolicy is server-read state, so null asserts "no active profile"
+        // and a concurrently created profile surfaces as a 409.
+        { expectedRevisionId: addPolicy.controlProfile?.revisionId ?? null }
       );
       setAddPolicy(updated);
       void mutateWallets();
