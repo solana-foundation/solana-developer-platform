@@ -238,6 +238,83 @@ describe("Custody wallet scope routes", () => {
     getSplTokenBalancesMock.mockReset();
   });
 
+  it("dry-runs a signer check with zero writes", async () => {
+    await seedCachedKey({
+      signingWalletId: "privy_wallet_a",
+      walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+    });
+
+    const response = await app.request(
+      "/v1/wallets/signer-check",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({ walletId: "privy_wallet_a", memo: "policy dry run" }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { decision: "allow", criteria: [] },
+    });
+    expect(createSigningServiceMock).not.toHaveBeenCalled();
+
+    const operationCount = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+      .first<{ count: number }>();
+    expect(operationCount).toEqual({ count: 0 });
+  });
+
+  it("stops a denied signer check before signing side effects", async () => {
+    await seedCachedKey({
+      signingWalletId: "privy_wallet_a",
+      walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+    });
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+      .bind(TEST_PROJECT.id, PRIVY_CONFIG_ID)
+      .run();
+    const policyResponse = await app.request(
+      "/v1/payments/wallets/privy_wallet_a/policies",
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationAllowlist: [],
+          defaultAction: "allow",
+          rules: [{ id: "deny-signer-check", kind: "always", action: "deny" }],
+        }),
+      },
+      env
+    );
+    expect(policyResponse.status).toBe(200);
+    createSigningServiceMock.mockClear();
+
+    const response = await app.request(
+      "/v1/wallets/signer-check",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ walletId: "privy_wallet_a", memo: "denied signer check" }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(createSigningServiceMock).not.toHaveBeenCalled();
+  });
+
   it("filters listed wallets to the API key bindings", async () => {
     await seedCachedKey({
       walletBindings: [{ walletId: "para_wallet_a", permissions: ["wallets:read"] }],
