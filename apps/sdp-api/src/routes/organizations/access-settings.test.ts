@@ -450,6 +450,32 @@ describe("Organization access settings", () => {
       expect(allowed.status).toBe(200);
     });
 
+    it("dies at the rate limiter before the organization row is read", async () => {
+      // The allowlist check is an uncached Postgres read per request — the
+      // price of immediate enforcement. The rate limiter is KV-backed. If the
+      // read ran first, a key flooding past its tier would still cost one
+      // database query per rejected request, so the limiter would bound the
+      // handlers but never the database. Once the tier is exhausted the
+      // request must die with the limiter's 429, not the allowlist's 403 —
+      // which is only possible if the database read sits behind the limiter.
+      await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
+
+      const headers = {
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        // Outside the allowlist, so on the wrong ordering every one of these
+        // returns the allowlist's 403 without ever counting toward the tier.
+        "x-forwarded-for": "198.51.100.42",
+      };
+
+      // Standard tier allows 100 requests per window; the 101st must trip it.
+      let finalStatus = 0;
+      for (let request = 0; request < 101; request++) {
+        finalStatus = (await get(headers)).status;
+      }
+
+      expect(finalStatus).toBe(429);
+    });
+
     it("intersects with the API key's own allowlist rather than replacing it", async () => {
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
       await clearKVStores(env);
