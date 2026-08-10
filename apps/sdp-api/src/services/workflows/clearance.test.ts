@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
   createAssetWorkflowsRepository,
@@ -7,7 +7,7 @@ import {
 } from "@/db/repositories";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { emitKycApprovedForClearedEnrollments, emitKycRejectedForEnrollments } from "./clearance";
 
 const TEST_PROJECT_ID = "prj_clearance_test";
@@ -25,10 +25,6 @@ const nextMillisecond = () => new Promise((resolve) => setTimeout(resolve, 5));
 describe("KYC clearance idempotency across redelivered webhooks (postgres)", () => {
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
-
-  afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
   });
 
   beforeEach(async () => {

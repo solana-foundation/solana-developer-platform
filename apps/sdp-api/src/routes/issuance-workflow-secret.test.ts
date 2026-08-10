@@ -17,7 +17,7 @@
 
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { AssetWorkflowDefinition } from "@/db/repositories";
 import app from "@/index";
@@ -26,7 +26,7 @@ import { CredentialSecretStoreError } from "@/services/credential-secret-store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 const secretStore = vi.hoisted(() => ({
   storageBackend: "gcp_secret_manager" as const,
@@ -163,10 +163,6 @@ async function storedRules() {
 describe("workflow signing-secret lifecycle (routes)", () => {
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
-
-  afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
   });
 
   beforeEach(async () => {

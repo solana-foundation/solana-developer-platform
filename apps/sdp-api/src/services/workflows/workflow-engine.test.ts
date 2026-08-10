@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
   createAssetWorkflowsRepository,
@@ -9,7 +9,7 @@ import {
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { emitKycApprovedForClearedEnrollments } from "./clearance";
 
 const TEST_PROJECT_ID = "prj_workflow_engine_test";
@@ -20,10 +20,6 @@ const TEST_TOKEN_ID = "tok_workflow_engine_test";
 describe("workflow engine (postgres)", () => {
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
-
-  afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
   });
 
   beforeEach(async () => {

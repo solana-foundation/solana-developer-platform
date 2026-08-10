@@ -10,14 +10,14 @@
 
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 const TOKEN_ID = "tok_workflow_authz_test";
 
@@ -62,10 +62,6 @@ function post(key: { raw: string }, path: string, body?: unknown) {
 describe("workflow authorization (routes)", () => {
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
-
-  afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
   });
 
   beforeEach(async () => {
@@ -183,20 +179,17 @@ describe("workflow authorization (routes)", () => {
     expect(Number(stored?.count ?? 0)).toBe(0);
   });
 
-  it.each([
-    "mint",
-    "burn",
-    "force_burn",
-    "pause",
-    "freeze",
-  ])("refuses a tokens:write principal a %s rule", async (actionType) => {
-    const res = await post(MEMBER_KEY, base, {
-      triggerType: "kyc_approved",
-      actionType,
-      actionParams: actionType === "pause" || actionType === "freeze" ? {} : { amount: "1" },
-    });
-    expect(res.status).toBe(403);
-  });
+  it.each(["mint", "burn", "force_burn", "pause", "freeze"])(
+    "refuses a tokens:write principal a %s rule",
+    async (actionType) => {
+      const res = await post(MEMBER_KEY, base, {
+        triggerType: "kyc_approved",
+        actionType,
+        actionParams: actionType === "pause" || actionType === "freeze" ? {} : { amount: "1" },
+      });
+      expect(res.status).toBe(403);
+    }
+  );
 
   it("lets a tokens:write principal author an automated rule", async () => {
     const res = await post(MEMBER_KEY, base, {
