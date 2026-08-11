@@ -72,6 +72,11 @@ const CONCURRENT_KEY = {
   raw: "sk_test_delete_race_concurrent",
 };
 
+const ESCAPED_KEY = {
+  id: "key_delete_race_escaped",
+  raw: "sk_test_delete_race_escaped",
+};
+
 async function seedKeyRow(keyId: string, keyHash: string): Promise<void> {
   await getDb(env)
     .prepare(
@@ -168,5 +173,37 @@ describe("organization deletion vs concurrent API key creation", () => {
       env
     );
     expect(withConcurrentKey.status).toBe(401);
+  });
+
+  it("rejects a key that commits after the deletion's hash snapshot", async () => {
+    // A key whose INSERT lands after the deletion handler snapshotted the
+    // org's hashes is neither revoked by the batch's WHERE nor covered by the
+    // refresh set. Authentication must reject it on the organization's status
+    // rather than trusting the key's own row.
+    const res = await app.request(
+      `/v1/organizations/${TEST_ORG.id}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${ADMIN_KEY.raw}` },
+      },
+      env
+    );
+    expect(res.status).toBe(204);
+
+    const escapedHash = await hashString(ESCAPED_KEY.raw, env.API_KEY_PEPPER);
+    await seedKeyRow(ESCAPED_KEY.id, escapedHash);
+
+    const row = await getDb(env)
+      .prepare("SELECT status FROM api_keys WHERE id = ?")
+      .bind(ESCAPED_KEY.id)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("active");
+
+    const withEscapedKey = await app.request(
+      "/v1/api-keys",
+      { headers: { Authorization: `Bearer ${ESCAPED_KEY.raw}` } },
+      env
+    );
+    expect(withEscapedKey.status).toBe(401);
   });
 });

@@ -79,10 +79,15 @@ function looksLikeJwt(token: string): boolean {
 /** Look up API key in KV cache */
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
   const cached = await kv.get<CachedApiKey>(apiKeyCacheKey(keyHash), "json");
-  // Payloads written before rotation-deadline enforcement do not contain this
-  // property. Treat them as misses so a deploy cannot extend an old key's
-  // validity until the legacy one-hour cache entry expires.
-  return cached && Object.hasOwn(cached, "rotationDeadline") ? cached : null;
+  // Payloads written before rotation-deadline or organization-status
+  // enforcement do not contain these properties. Treat them as misses so a
+  // deploy cannot extend an old key's validity until the legacy one-hour
+  // cache entry expires.
+  return cached &&
+    Object.hasOwn(cached, "rotationDeadline") &&
+    Object.hasOwn(cached, "organizationStatus")
+    ? cached
+    : null;
 }
 
 async function isKnownInvalidKey(kv: KVStore, keyHash: string): Promise<boolean> {
@@ -282,6 +287,14 @@ export function authMiddleware() {
 
     if (!cachedKey) {
       throw new AppError("INVALID_API_KEY", "Invalid API key");
+    }
+
+    // A key whose organization is gone must not authenticate even if its own
+    // row still says active: a key created or rotated after an organization
+    // deletion enumerated that org's keys is covered by neither the deletion's
+    // revocation nor its cache refresh.
+    if (cachedKey.organizationStatus !== "active") {
+      throw new AppError("REVOKED_API_KEY");
     }
 
     // Check status

@@ -85,6 +85,14 @@ export interface CachedApiKey {
    * entries written before rotation-deadline enforcement was deployed.
    */
   rotationDeadline?: string | null;
+  /**
+   * Status of the owning organization. Authentication rejects any key whose
+   * organization is not active, independently of the key's own status — a key
+   * created or rotated after an organization deletion enumerated its keys is
+   * never covered by that deletion's revocation or cache refresh. Undefined is
+   * reserved for legacy cache entries written before this check was deployed.
+   */
+  organizationStatus?: string;
 }
 
 // API Request/Response types

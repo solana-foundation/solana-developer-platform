@@ -24,6 +24,7 @@ export async function seedCachedApiKey(
     JSON.stringify({
       ...data,
       rotationDeadline: data.rotationDeadline ?? null,
+      organizationStatus: data.organizationStatus ?? "active",
     }),
     {
       expirationTtl: 3600,

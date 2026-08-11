@@ -61,9 +61,10 @@ export async function loadCachedApiKeyFromDb(
       `SELECT ak.id, ak.organization_id, ak.project_id, ak.role, ak.permissions,
               p.environment,
               ak.rate_limit_tier, ak.allowed_ips, ak.signing_wallet_id, ak.status, ak.expires_at,
-              ak.rotation_deadline
+              ak.rotation_deadline, o.status AS organization_status
        FROM api_keys ak
        JOIN projects p ON p.id = ak.project_id
+       JOIN organizations o ON o.id = ak.organization_id
        WHERE ak.key_hash = ?`
     )
     .bind(keyHash)
@@ -80,6 +81,7 @@ export async function loadCachedApiKeyFromDb(
       status: string;
       expires_at: string | null;
       rotation_deadline: string | null;
+      organization_status: string;
     }>();
 
   if (!result) {
@@ -124,6 +126,7 @@ export async function loadCachedApiKeyFromDb(
     status: result.status as ApiKeyStatus,
     expiresAt: result.expires_at,
     rotationDeadline: result.rotation_deadline,
+    organizationStatus: result.organization_status,
   };
 }
 
@@ -135,7 +138,9 @@ export async function loadCachedApiKeyFromDb(
 function tryParseAuthoritativeEntry(raw: string): CachedApiKey | null {
   try {
     const parsed = JSON.parse(raw) as CachedApiKey;
-    return Object.hasOwn(parsed, "rotationDeadline") ? parsed : null;
+    return Object.hasOwn(parsed, "rotationDeadline") && Object.hasOwn(parsed, "organizationStatus")
+      ? parsed
+      : null;
   } catch {
     return null;
   }

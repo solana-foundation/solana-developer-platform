@@ -30,6 +30,7 @@ function entryWithStatus(status: CachedApiKey["status"]): CachedApiKey {
     status,
     expiresAt: null,
     rotationDeadline: null,
+    organizationStatus: "active",
   };
 }
 
