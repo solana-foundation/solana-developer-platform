@@ -49,7 +49,7 @@ export async function enforceMeteredQuota(
 ): Promise<void> {
   const auth = getAuth(c);
 
-  const actor = auth.apiKeyId ? `key:${auth.apiKeyId}` : `user:${auth.userId ?? "unknown"}`;
+  const actor = auth.authType === "api_key" ? `key:${auth.apiKeyId}` : `user:${auth.userId}`;
   const orgScope = `metered:${config.name}:org:${auth.organizationId}`;
 
   try {
