@@ -3,6 +3,7 @@
 import {
   BlocksIcon,
   CircleCheckBigIcon,
+  CircleDotDashedIcon,
   KeyRoundIcon,
   LibraryIcon,
   type LucideIcon,
@@ -40,6 +41,7 @@ function getMoreGroups(
     canReadApprovals: boolean;
     canManageOrgSettings: boolean;
     earnEnabled: boolean;
+    heliusRingsEnabled: boolean;
     marketsEnabled: boolean;
   }
 ): MoreGroup[] {
@@ -53,6 +55,15 @@ function getMoreGroups(
                 label: t("Shared.dashboardShell.earn"),
                 href: DASHBOARD_SIDE_NAV_HREFS.markets,
                 icon: TrendingUpIcon,
+              },
+            ]
+          : []),
+        ...(options.heliusRingsEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.heliusRings"),
+                href: DASHBOARD_SIDE_NAV_HREFS.heliusRings,
+                icon: CircleDotDashedIcon,
               },
             ]
           : []),
@@ -149,6 +160,7 @@ export function DashboardMoreSheet({
   canReadApprovals,
   canManageOrgSettings,
   earnEnabled,
+  heliusRingsEnabled,
   marketsEnabled,
   onClose,
 }: {
@@ -156,6 +168,7 @@ export function DashboardMoreSheet({
   canReadApprovals: boolean;
   canManageOrgSettings: boolean;
   earnEnabled: boolean;
+  heliusRingsEnabled: boolean;
   marketsEnabled: boolean;
   onClose: () => void;
 }) {
@@ -164,6 +177,7 @@ export function DashboardMoreSheet({
     canReadApprovals,
     canManageOrgSettings,
     earnEnabled,
+    heliusRingsEnabled,
     marketsEnabled,
   });
 
