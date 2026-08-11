@@ -20,6 +20,31 @@ describe("workflow catalog", () => {
     assert.equal(WORKFLOW_TRIGGER_TYPES.length, 6);
   });
 
+  it("treats prototype property names as unknown, not catalog hits", () => {
+    for (const key of ["toString", "constructor", "valueOf", "__proto__", "hasOwnProperty"]) {
+      assert.equal(resolveWorkflowAction(key), undefined, key);
+      assert.equal(resolveWorkflowTrigger(key), undefined, key);
+      assert.deepEqual(
+        validateActionSupported({
+          action: key as WorkflowActionType,
+          selectedSettings: {},
+          hasAllowlist: false,
+        }),
+        { ok: false, reason: "unknown_action" },
+        key
+      );
+    }
+  });
+
+  it("ignores prototype property names in selected settings instead of throwing", () => {
+    const result = validateActionSupported({
+      action: "freeze",
+      selectedSettings: { toString: {}, constructor: {}, valueOf: {} },
+      hasAllowlist: false,
+    });
+    assert.deepEqual(result, { ok: false, reason: "capability_disabled" });
+  });
+
   it("keeps the dropped catalog entries dropped", () => {
     // create_approval_task / approval_decided were removed in favor of the built-in
     // review flow (re-introduced only with the deferred workflow-tasks system).

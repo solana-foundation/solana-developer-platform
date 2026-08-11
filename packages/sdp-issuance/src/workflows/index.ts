@@ -30,7 +30,9 @@ export const WORKFLOW_RULE_VERSION = 1;
  * @returns The catalog entry, or undefined if the type is unknown.
  */
 export function resolveWorkflowTrigger(type: string): WorkflowTrigger | undefined {
-  return (WORKFLOW_TRIGGERS as Record<string, WorkflowTrigger>)[type];
+  return Object.hasOwn(WORKFLOW_TRIGGERS, type)
+    ? WORKFLOW_TRIGGERS[type as WorkflowTriggerType]
+    : undefined;
 }
 
 /**
@@ -39,7 +41,9 @@ export function resolveWorkflowTrigger(type: string): WorkflowTrigger | undefine
  * @returns The catalog entry, or undefined if the type is unknown.
  */
 export function resolveWorkflowAction(type: string): WorkflowAction | undefined {
-  return (WORKFLOW_ACTIONS as Record<string, WorkflowAction>)[type];
+  return Object.hasOwn(WORKFLOW_ACTIONS, type)
+    ? WORKFLOW_ACTIONS[type as WorkflowActionType]
+    : undefined;
 }
 
 export interface CatalogTrigger {

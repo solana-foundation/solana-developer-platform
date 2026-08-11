@@ -41,7 +41,7 @@ function selectedSettingsUnlock(
 ): boolean {
   const expanded = expandLegacySettingKeys(selectedSettings);
   for (const key of Object.keys(expanded)) {
-    if (!(key in ADVANCED_SETTINGS)) {
+    if (!Object.hasOwn(ADVANCED_SETTINGS, key)) {
       continue;
     }
     const setting = ADVANCED_SETTINGS[key as SettingKey];
@@ -63,7 +63,9 @@ function selectedSettingsUnlock(
  * @returns Whether the action is supported, or the reason it is not.
  */
 export function validateActionSupported(input: ValidateActionInput): ActionSupportResult {
-  const action = WORKFLOW_ACTIONS[input.action];
+  const action = Object.hasOwn(WORKFLOW_ACTIONS, input.action)
+    ? WORKFLOW_ACTIONS[input.action]
+    : undefined;
   if (!action) {
     return { ok: false, reason: "unknown_action" };
   }

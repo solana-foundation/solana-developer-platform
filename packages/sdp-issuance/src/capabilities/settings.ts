@@ -167,7 +167,9 @@ export function expandLegacySettingKeys<T>(
 ): Record<string, T> {
   const result: Record<string, T> = {};
   for (const [key, value] of Object.entries(selected)) {
-    const targets = LEGACY_SETTING_ALIASES[key];
+    const targets = Object.hasOwn(LEGACY_SETTING_ALIASES, key)
+      ? LEGACY_SETTING_ALIASES[key]
+      : undefined;
     if (!targets) {
       result[key] = value;
       continue;
