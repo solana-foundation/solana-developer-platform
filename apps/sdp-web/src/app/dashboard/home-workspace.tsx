@@ -59,6 +59,7 @@ function TruncatedTableText({ value, className }: { value: string; className?: s
   const textRef = useRef<HTMLDivElement>(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: flipping isOverflowing swaps the div between plain and tooltip-trigger positions (a remount), so the observer must re-attach to the new node; a value change alters scrollWidth without any resize event.
   useEffect(() => {
     const node = textRef.current;
     if (!node) return;
