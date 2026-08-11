@@ -3,7 +3,7 @@
 import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { TokenMark } from "@/components/token-mark";
@@ -57,21 +57,32 @@ const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
 /** Table text that ellipsizes, with a full-value tooltip only while it actually overflows. */
 function TruncatedTableText({ value, className }: { value: string; className?: string }) {
   const textRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  useEffect(() => {
+    const node = textRef.current;
+    if (!node) return;
+
+    const measure = () => setIsOverflowing(node.scrollWidth > node.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [value, isOverflowing]);
+
+  const text = (
+    <div ref={textRef} className={className ?? "truncate"}>
+      {value}
+    </div>
+  );
+
+  if (!isOverflowing) {
+    return text;
+  }
 
   return (
-    <Tooltip
-      open={open}
-      onOpenChange={(next) => {
-        const node = textRef.current;
-        setOpen(next && node !== null && node.scrollWidth > node.clientWidth);
-      }}
-    >
-      <TooltipTrigger asChild>
-        <div ref={textRef} className={className ?? "truncate"}>
-          {value}
-        </div>
-      </TooltipTrigger>
+    <Tooltip>
+      <TooltipTrigger asChild>{text}</TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[32rem] break-all text-xs">
         {value}
       </TooltipContent>
