@@ -201,7 +201,7 @@ importers:
         specifier: ^6.2.7
         version: 6.2.8
       nanoid:
-        specifier: ^6.0.0
+        specifier: 6.0.0
         version: 6.0.0
       node-cron:
         specifier: ^4.6.0
