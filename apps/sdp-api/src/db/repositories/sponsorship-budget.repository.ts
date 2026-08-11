@@ -367,14 +367,17 @@ export class SponsorshipBudgetRepository {
     );
   }
 
-  async getWindowUsage(input: {
-    network: SponsorshipNetwork;
-    organizationId: string;
-    projectId: string | null;
-    hourBucket: string;
-    dayBucket: string;
-  }): Promise<{ hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage }> {
-    const row = await this.db.queryOne<Record<string, number>>(
+  async getWindowUsage(
+    input: {
+      network: SponsorshipNetwork;
+      organizationId: string;
+      projectId: string | null;
+      hourBucket: string;
+      dayBucket: string;
+    },
+    executor: DatabaseExecutor = this.db
+  ): Promise<{ hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage }> {
+    const row = await executor.queryOne<Record<string, number>>(
       `SELECT
          COALESCE(SUM(CASE WHEN hour_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0) AS global_hour,
          COALESCE(SUM(CASE WHEN hour_bucket = ? AND organization_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0) AS organization_hour,
@@ -416,15 +419,18 @@ export class SponsorshipBudgetRepository {
     };
   }
 
-  async listLiveWindowReservations(input: {
-    network: SponsorshipNetwork;
-    hourBucket: string;
-    dayBucket: string;
-  }): Promise<{
+  async listLiveWindowReservations(
+    input: {
+      network: SponsorshipNetwork;
+      hourBucket: string;
+      dayBucket: string;
+    },
+    executor: DatabaseExecutor = this.db
+  ): Promise<{
     hour: SponsorshipLiveWindowReservation[];
     day: SponsorshipLiveWindowReservation[];
   }> {
-    const rows = await this.db.queryMany<{
+    const rows = await executor.queryMany<{
       id: string;
       attempt: number;
       reserved_lamports: number;
@@ -453,6 +459,30 @@ export class SponsorshipBudgetRepository {
       }
     }
     return { hour, day };
+  }
+
+  async loadWindowAdmissionSnapshot(input: {
+    network: SponsorshipNetwork;
+    organizationId: string;
+    projectId: string | null;
+    hourBucket: string;
+    dayBucket: string;
+  }): Promise<{
+    usage: { hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage };
+    liveReservations: {
+      hour: SponsorshipLiveWindowReservation[];
+      day: SponsorshipLiveWindowReservation[];
+    };
+  }> {
+    return this.db.transaction(async (tx) => {
+      await tx.queryMany("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+      const usage = await this.getWindowUsage(input, tx);
+      const liveReservations = await this.listLiveWindowReservations(
+        { network: input.network, hourBucket: input.hourBucket, dayBucket: input.dayBucket },
+        tx
+      );
+      return { usage, liveReservations };
+    });
   }
 
   async listReconciliationCandidates(

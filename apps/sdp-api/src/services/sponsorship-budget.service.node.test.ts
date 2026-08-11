@@ -64,11 +64,13 @@ function harness() {
     resolvePolicies: vi
       .fn()
       .mockResolvedValue([policy("global"), policy("organization"), policy("project")]),
-    getWindowUsage: vi.fn().mockResolvedValue({
-      hour: { global: 0, organization: 0, project: 0 },
-      day: { global: 0, organization: 0, project: 0 },
+    loadWindowAdmissionSnapshot: vi.fn().mockResolvedValue({
+      usage: {
+        hour: { global: 0, organization: 0, project: 0 },
+        day: { global: 0, organization: 0, project: 0 },
+      },
+      liveReservations: { hour: [], day: [] },
     }),
-    listLiveWindowReservations: vi.fn().mockResolvedValue({ hour: [], day: [] }),
     getReservation: vi.fn().mockResolvedValue(null),
     createReservation: vi.fn().mockResolvedValue(true),
     reopenReleasedReservation: vi.fn().mockResolvedValue(null),
@@ -406,7 +408,7 @@ describe("BudgetedFeePayment", () => {
 
   it("opens the breaker and returns 503 when durable usage reconstruction fails", async () => {
     const { feePayment, provider, repository } = harness();
-    repository.getWindowUsage.mockRejectedValueOnce(new Error("postgres unavailable"));
+    repository.loadWindowAdmissionSnapshot.mockRejectedValueOnce(new Error("postgres unavailable"));
     await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",
     });

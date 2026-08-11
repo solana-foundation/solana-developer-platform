@@ -30,8 +30,7 @@ const MAX_SAFE_LAMPORTS = BigInt(Number.MAX_SAFE_INTEGER);
 type BudgetRepository = Pick<
   SponsorshipBudgetRepository,
   | "resolvePolicies"
-  | "getWindowUsage"
-  | "listLiveWindowReservations"
+  | "loadWindowAdmissionSnapshot"
   | "getReservation"
   | "createReservation"
   | "reopenReleasedReservation"
@@ -440,15 +439,10 @@ export class BudgetedFeePayment implements FeePaymentPort {
     attempt: number
   ): Promise<Awaited<ReturnType<SponsorshipBudgetRedis["reserve"]>>> {
     try {
-      const usage = await this.repository.getWindowUsage({
+      const { usage, liveReservations } = await this.repository.loadWindowAdmissionSnapshot({
         network: context.network,
         organizationId: this.scope.organizationId,
         projectId: this.scope.projectId,
-        hourBucket: context.hourBucket,
-        dayBucket: context.dayBucket,
-      });
-      const liveReservations = await this.repository.listLiveWindowReservations({
-        network: context.network,
         hourBucket: context.hourBucket,
         dayBucket: context.dayBucket,
       });
