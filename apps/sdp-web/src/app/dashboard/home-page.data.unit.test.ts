@@ -108,3 +108,26 @@ describe("home issuance activity", () => {
     expect(row?.token).toBe("9xQeWv…nLpQ");
   });
 });
+
+describe("token mint passthrough", () => {
+  it("keeps the raw mint so the client can name a token this builder cannot", () => {
+    // The builder only knows issued-token symbols. A holding the organization did
+    // not issue used to degrade to a shortened mint with no way back to a symbol.
+    const mint = "9xQeWvG816bUx9EPfuxEzHh9VY5kvJkFqRk3nJvHnLpQ";
+    const [row] = buildHomeActivityRows(
+      [
+        {
+          id: "t1",
+          createdAt: "2026-07-30T10:00:00.000Z",
+          token: mint,
+          amount: "12",
+          direction: "inbound",
+        } as never,
+      ],
+      [],
+      ((key: string) => key) as never
+    );
+
+    expect(row.tokenMint).toBe(mint);
+  });
+});

@@ -1,4 +1,6 @@
+import { tokenFilterAliases } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
+import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import type {
   CreatePaymentTransferInput,
   ListTransfersByStatusInput,
@@ -93,7 +95,18 @@ function buildTransferListWhere(params: ListTransfersInput): {
     values.push(...transferScopeValues, searchPattern, ...counterpartyScopeValues, searchPattern);
   }
 
-  addEquals("pt.token", params.token);
+  // `pt.token` is not written consistently — the same asset appears as a mint on
+  // some rows and as a bare symbol on others, including within one transfer type.
+  // Matching a single form silently dropped every row written the other way, so a
+  // filter for SOL missed its mint rows and vice versa.
+  //
+  // A blank token is treated as no filter at all. The query schema takes `token`
+  // as a bare optional string with no trim, so a whitespace-only value arrives
+  // truthy; matching it literally is what the previous exact-match did, and it
+  // returned zero rows for what is really an absent filter. Trimming here makes
+  // that deliberate instead of a side effect of the alias list coming back empty.
+  const tokenFilter = params.token?.trim();
+  addIn("pt.token", tokenFilter ? tokenFilterAliases(tokenFilter) : undefined);
   addEquals("pt.direction", params.direction);
   addIn("pt.status", params.statuses);
   addIn("pt.type", params.types);
@@ -163,6 +176,7 @@ function mapPolicyRow(row: Record<string, unknown>): PaymentWalletPolicyRow {
 function buildTransferScopeWhere(params: {
   organizationId: string;
   projectId: string | null;
+  includeAllOrganizationProjects?: boolean;
   tableAlias?: string;
   extraClauses?: string[];
   extraValues?: unknown[];
@@ -171,8 +185,8 @@ function buildTransferScopeWhere(params: {
   const clauses = [`${prefix}organization_id = ?`];
   const values: unknown[] = [params.organizationId];
 
-  if (params.projectId) {
-    clauses.push(`${prefix}project_id = ?`);
+  if (!params.includeAllOrganizationProjects) {
+    clauses.push(`${prefix}project_id IS NOT DISTINCT FROM ?`);
     values.push(params.projectId);
   }
 
@@ -207,9 +221,45 @@ async function getWalletPoliciesInternal(
   return rows.results.map(mapPolicyRow);
 }
 
-export function createPostgresPaymentsRepository(db: DatabaseExecutor): PaymentsRepository {
+export function createPostgresPaymentsRepository(
+  db: DatabaseExecutor,
+  tenantScope?: TenantScope
+): PaymentsRepository {
+  const canAccessAllOrganizationProjects = tenantScope?.projectId === null;
+  const assertScope = (claim: { organizationId: string; projectId: string | null }) => {
+    if (tenantScope) {
+      assertTenantClaim(tenantScope, claim, "PaymentsRepository");
+    }
+  };
+  const ownsCustodyWallet = async (
+    custodyWalletId: string,
+    access: "read" | "write"
+  ): Promise<boolean> => {
+    if (!tenantScope) return true;
+    const projectClause =
+      tenantScope.projectId === null
+        ? ""
+        : access === "read"
+          ? "AND (cc.project_id = ? OR cc.project_id IS NULL)"
+          : "AND cc.project_id = ?";
+    const projectValues = tenantScope.projectId === null ? [] : [tenantScope.projectId];
+    const row = await db
+      .prepare(
+        `SELECT cw.id
+         FROM custody_wallets cw
+         JOIN custody_configs cc ON cc.id = cw.custody_config_id
+         WHERE cw.id = ?
+           AND cc.organization_id = ?
+           ${projectClause}`
+      )
+      .bind(custodyWalletId, tenantScope.organizationId, ...projectValues)
+      .first<{ id: string }>();
+    return row !== null;
+  };
+
   return {
     async createTransfer(input: CreatePaymentTransferInput) {
+      assertScope(input);
       const row = await db
         .prepare(
           `INSERT INTO payment_transfers (
@@ -278,6 +328,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async findTransferByIdempotency({ organizationId, projectId, idempotencyKey }) {
+      assertScope({ organizationId, projectId });
       const row = await db
         .prepare(
           `SELECT * FROM payment_transfers
@@ -292,6 +343,23 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async updateTransfer(input: UpdatePaymentTransferInput) {
+      if (tenantScope) {
+        if (input.organizationId !== undefined) {
+          assertTenantClaim(
+            tenantScope,
+            {
+              organizationId: input.organizationId,
+              projectId: input.projectId ?? tenantScope.projectId,
+            },
+            "PaymentsRepository"
+          );
+        }
+        input = {
+          ...input,
+          organizationId: tenantScope.organizationId,
+          projectId: canAccessAllOrganizationProjects ? undefined : tenantScope.projectId,
+        };
+      }
       const clauses = ["id = ?"];
       const values: unknown[] = [input.transferId];
 
@@ -360,32 +428,52 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async updateTransferStatusGuarded(input) {
+      assertScope(input);
       const scope = buildTransferScopeWhere({
         organizationId: input.organizationId,
         projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: ["id = ?", "status = ANY(?)"],
         extraValues: [input.transferId, [...input.fromStatuses]],
       });
 
-      const amountClause = input.amount === undefined ? "" : ", amount = ?";
-      const amountValues = input.amount === undefined ? [] : [input.amount];
+      const assignments = ["status = ?", "updated_at = ?"];
+      const assignmentValues: unknown[] = [input.toStatus, input.updatedAt];
+      if (input.amount !== undefined) {
+        assignments.push("amount = ?");
+        assignmentValues.push(input.amount);
+      }
+      if (input.fiatAmount !== undefined) {
+        assignments.push("fiat_amount = ?");
+        assignmentValues.push(input.fiatAmount);
+      }
+      if (input.providerData !== undefined) {
+        assignments.push("provider_data = provider_data || ?::jsonb");
+        assignmentValues.push(JSON.stringify(input.providerData));
+      }
+      if (input.error !== undefined) {
+        assignments.push("error = ?");
+        assignmentValues.push(input.error);
+      }
       const row = await db
         .prepare(
           `UPDATE payment_transfers
-           SET status = ?, updated_at = ?${amountClause}
+           SET ${assignments.join(", ")}
            WHERE ${scope.where}
            RETURNING *`
         )
-        .bind(input.toStatus, input.updatedAt, ...amountValues, ...scope.values)
+        .bind(...assignmentValues, ...scope.values)
         .first<Record<string, unknown>>();
 
       return row ? mapTransferRow(row) : null;
     },
 
     async getTransferById(params) {
+      assertScope(params);
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: ["id = ?"],
         extraValues: [params.transferId],
       });
@@ -399,9 +487,11 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async getTransferBySignature(params) {
+      assertScope(params);
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: ["signature = ?"],
         extraValues: [params.signature],
       });
@@ -415,6 +505,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async listTransfersByIds(params) {
+      assertScope(params);
       if (params.transferIds.length === 0) {
         return [];
       }
@@ -422,6 +513,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: ["id = ANY(?)"],
         extraValues: [params.transferIds],
       });
@@ -435,10 +527,19 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async getTransferByProviderReference(params) {
-      const scope = params.organizationId
+      if (tenantScope && params.organizationId !== undefined) {
+        assertScope({
+          organizationId: params.organizationId,
+          projectId: params.projectId,
+        });
+      }
+      const effectiveOrganizationId = tenantScope?.organizationId ?? params.organizationId;
+      const effectiveProjectId = tenantScope?.projectId ?? params.projectId;
+      const scope = effectiveOrganizationId
         ? buildTransferScopeWhere({
-            organizationId: params.organizationId,
-            projectId: params.projectId,
+            organizationId: effectiveOrganizationId,
+            projectId: effectiveProjectId ?? null,
+            includeAllOrganizationProjects: canAccessAllOrganizationProjects,
             extraClauses: ["provider = ?", "provider_reference = ?"],
             extraValues: [params.provider, params.providerReference],
           })
@@ -456,6 +557,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async listTransfersBySignatures(params) {
+      assertScope(params);
       if (params.signatures.length === 0) {
         return [];
       }
@@ -463,6 +565,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         tableAlias: "pt",
         extraClauses: [`pt.signature IN (${buildInClause(params.signatures.length)})`],
         extraValues: params.signatures,
@@ -485,6 +588,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async listTransfers(params: ListTransfersInput): Promise<ListTransfersResult> {
+      assertScope(params);
       const { whereClause, values } = buildTransferListWhere(params);
       const paginationValues = [...values, params.limit, params.offset];
       const sort = {
@@ -528,6 +632,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async listTransferAmounts(params) {
+      assertScope(params);
       if (params.statuses.length === 0) {
         return [];
       }
@@ -535,6 +640,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: [
           "wallet_id = ?",
           "token = ?",
@@ -570,6 +676,11 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
       limit,
       offset,
     }: ListTransfersByStatusInput) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.listTransfersByStatus is system-only"
+        );
+      }
       if (statuses.length === 0) {
         return [];
       }
@@ -611,6 +722,9 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async getWalletPoliciesByCustodyWalletId(custodyWalletId) {
+      if (!(await ownsCustodyWallet(custodyWalletId, "read"))) {
+        return [];
+      }
       return getWalletPoliciesInternal(db, custodyWalletId);
     },
 
@@ -620,6 +734,11 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
       }
 
       for (const input of inputs) {
+        if (!(await ownsCustodyWallet(input.custodyWalletId, "write"))) {
+          throw new TenantScopeViolationError(
+            "PaymentsRepository.upsertWalletPolicies rejected a foreign custody wallet"
+          );
+        }
         await db
           .prepare(
             `INSERT INTO payment_wallet_policies (

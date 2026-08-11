@@ -13,6 +13,7 @@ import {
   privateChannelDepositListSchema,
   privateChannelDepositSchema,
   privateChannelEventListSchema,
+  privateChannelEventReferencesSchema,
   privateChannelEventsQuerySchema,
   privateChannelHealthQuerySchema,
   privateChannelHealthSchema,
@@ -203,8 +204,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Read an owner's channel token balance",
     operationId: "getPrivateChannelBalance",
     description:
-      "Reads an owner's token balance on the channel via the gateway (per wallet+mint; shared across the wallet's channels). `owner` accepts a walletId, wallet public key, or raw address; `mint` defaults to the instance cluster's USDC mint. A never-credited owner reads as a zero balance.",
-    security: [{ apiKeyAuth: [] }],
+      "Reads an owner's token balance on the channel via the gateway (per wallet+mint; shared across the wallet's channels). `owner` accepts a walletId, wallet public key, or raw address; `mint` defaults to the instance cluster's USDC mint. A never-credited owner reads as a zero balance. Requires a user session — API-key auth is not accepted at runtime.",
+    security: [{ sessionCookie: [] }],
     request: { headers: projectScopeHeaders, query: privateChannelBalanceQuerySchema },
     responses: {
       200: {
@@ -222,8 +223,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Create a deposit into the channel escrow",
     operationId: "createPrivateChannelDeposit",
     description:
-      "Builds, server-signs, and broadcasts an escrow deposit from a custody wallet to the instance chain (devnet), crediting `recipient` (defaults to the depositor) in the channel. Returns the deposit with its current status (submitted/confirmed, or failed). The credit (`credited`) is detected asynchronously via the gateway balance.",
-    security: [{ apiKeyAuth: [] }],
+      "Builds, server-signs, and broadcasts an escrow deposit from a custody wallet to the instance chain (devnet), crediting `recipient` (defaults to the depositor) in the channel. Returns the deposit with its current status (submitted/confirmed, or failed). The credit (`credited`) is detected asynchronously via the gateway balance. Requires a user session — API-key auth is not accepted at runtime.",
+    security: [{ sessionCookie: [] }],
     request: {
       headers: projectScopeHeaders,
       body: { content: jsonContent(createPrivateChannelDepositBodySchema) },
@@ -280,8 +281,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Create a withdrawal from the channel balance",
     operationId: "createPrivateChannelWithdrawal",
     description:
-      "Server-signs a burn of the custody wallet's channel-chain balance and broadcasts it to the gateway; the operator later releases the matching real USDC on devnet to `destination` (defaults to the owner). Returns the withdrawal with its current status (submitted/burn_confirmed, or failed). The release (`released`) is detected asynchronously from the devnet release on the instance ATA.",
-    security: [{ apiKeyAuth: [] }],
+      "Server-signs a burn of the custody wallet's channel-chain balance and broadcasts it to the gateway; the operator later releases the matching real USDC on devnet to `destination` (defaults to the owner). Returns the withdrawal with its current status (submitted/burn_confirmed, or failed). The release (`released`) is detected asynchronously from the devnet release on the instance ATA. Requires a user session — API-key auth is not accepted at runtime.",
+    security: [{ sessionCookie: [] }],
     request: {
       headers: projectScopeHeaders,
       body: { content: jsonContent(createPrivateChannelWithdrawalBodySchema) },
@@ -338,7 +339,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "List eligible verified-wallet transfer recipients",
     operationId: "listPrivateChannelTransferRecipients",
     description:
-      "Requires a user identity and explicit membership in the active channel. Returns only verified wallets of other members in that channel.",
+      "Requires a user identity and explicit membership in the active channel. Returns every verified wallet in that channel, one entry per wallet, including the caller's own. A transfer to the same wallet it is sent from is rejected on create.",
     security: [{ sessionCookie: [] }],
     request: {
       headers: sessionProjectScopeHeaders,
@@ -346,7 +347,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: {
-        description: "Eligible recipients grouped by member.",
+        description: "Eligible recipient wallets, the caller's own listed first.",
         content: jsonContent(successResponseSchema(privateChannelTransferRecipientListSchema)),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
@@ -502,6 +503,27 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
+    path: "/v1/private-channels/events/references",
+    tags: [TAG],
+    summary: "List display-name references for events",
+    operationId: "listPrivateChannelEventReferences",
+    description:
+      "Flat id→name dictionary for enriching Private Channels event feeds: channel names, custody wallet labels (by pubkey and wallet id), member display names (by private-channel-user id and SDP user id), issued-token symbols (by mint address), and instance gateway URLs. Channels, members, and instances follow the same viewer rules as the events feed. Token symbols are project-wide, and wallet labels follow the same `wallets:read` and selected-wallet scope as the custody endpoints.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+    },
+    responses: {
+      200: {
+        description: "Reference dictionary",
+        content: jsonContent(successResponseSchema(privateChannelEventReferencesSchema)),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
     path: "/v1/private-channels/events",
     tags: [TAG],
     summary: "List activity events for the project",
@@ -544,8 +566,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "List the caller's verified wallets",
     operationId: "listPrivateChannelVerifiedWallets",
     description:
-      "Lists the caller's own custody wallets that have completed SPC verification for this project.",
-    security: [{ apiKeyAuth: [] }],
+      "Lists the caller's own custody wallets that have completed SPC verification for this project. Requires a user session — under API-key auth this returns an empty list because there is no acting-member identity.",
+    security: [{ sessionCookie: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
       200: {
@@ -563,8 +585,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Verify a custody wallet with the SPC auth service",
     operationId: "verifyPrivateChannelWallet",
     description:
-      "Runs the SPC challenge → sign → verify handshake for a custody wallet (any SDP provider), then records the verification. A member may verify many wallets; idempotent per (member, instance, wallet). Requires the caller to be an invited member of the connected instance.",
-    security: [{ apiKeyAuth: [] }],
+      "Runs the SPC challenge → sign → verify handshake for a custody wallet (any SDP provider), then records the verification. A member may verify many wallets; idempotent per (member, instance, wallet). Requires the caller to be an invited member of the connected instance. Requires a user session — API-key auth is not accepted at runtime.",
+    security: [{ sessionCookie: [] }],
     request: { headers: projectScopeHeaders, params: privateChannelVerifyWalletParamSchema },
     responses: {
       200: {
@@ -584,8 +606,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Revoke a verified wallet",
     operationId: "deletePrivateChannelVerifiedWallet",
     description:
-      "Revokes a wallet verification with the SPC auth service and removes the SDP mirror row. Requires the caller to be an invited member of the connected instance.",
-    security: [{ apiKeyAuth: [] }],
+      "Revokes a wallet verification with the SPC auth service and removes the SDP mirror row. Requires the caller to be an invited member of the connected instance. Requires a user session — API-key auth is not accepted at runtime.",
+    security: [{ sessionCookie: [] }],
     request: { headers: projectScopeHeaders, params: privateChannelDeleteWalletParamSchema },
     responses: {
       200: {

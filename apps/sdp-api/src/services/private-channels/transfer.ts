@@ -21,6 +21,7 @@ import {
   getTransferInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
+import { getTransferCheckedInstruction as getToken2022TransferCheckedInstruction } from "@solana-program/token-2022";
 import {
   createPrivateChannelTransferRepository,
   mapPrivateChannelTransferRow,
@@ -33,7 +34,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { getChannelBalance } from "./balance";
-import { defaultChannelMint, inferCluster, knownMintDecimals } from "./mint";
+import { inferCluster, resolveChannelToken } from "./mint";
 import { confirmAndPersistTransfer } from "./transfer-confirm";
 import { emitTransferEvent } from "./transfer-events";
 import { describeTxError, isNodeAtCapacityError } from "./tx-error";
@@ -45,6 +46,8 @@ export interface CreateChannelTransferInput {
   organizationId: string;
   projectId: string;
   channelId: string;
+  /** SDP user initiating the transfer; copied onto every activity event. */
+  sdpUserId: string;
   /** The already-resolved SDP custody wallet selected by the acting user. */
   wallet: CustodyWallet;
   /**
@@ -60,25 +63,62 @@ export interface CreateChannelTransferInput {
     pubkey: string;
   };
   amount: string;
+  /** Mint to transfer; must be on the instance's allowlist. Defaults to its first entry. */
+  mint?: string;
   gatewayAuth: SpcAuthContext;
 }
 
-export async function buildClassicTransferInstructions(input: {
+/**
+ * Build the ATA-create + transfer pair for a member-to-member channel transfer.
+ *
+ * `tokenProgram` seeds both ATA derivations, so it must be the program that owns
+ * the mint — spl-token and token-2022 derive different addresses for the same
+ * (owner, mint) pair.
+ *
+ * The transfer instruction itself has to branch because `@solana-program/token`'s
+ * builders bake their program address into the instruction: there is no
+ * `tokenProgram` to override. Classic keeps plain `Transfer` — SPC validates
+ * instruction encoding against a program allowlist before queueing (see
+ * `./transfer-confirm`), so the one path proven to pass that check stays
+ * byte-identical. Token-2022 has no legacy path to preserve and its `Transfer` is
+ * deprecated in favour of `TransferChecked`, which is what it gets.
+ */
+export async function buildTokenTransferInstructions(input: {
   signer: TransactionSigner;
   mint: Address;
+  tokenProgram: Address;
+  decimals: number;
   recipient: Address;
   amountBaseUnits: bigint;
 }) {
+  const { tokenProgram } = input;
   const [sourceTokenAccount] = await findAssociatedTokenPda({
     owner: input.signer.address,
     mint: input.mint,
-    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    tokenProgram,
   });
   const [destinationTokenAccount] = await findAssociatedTokenPda({
     owner: input.recipient,
     mint: input.mint,
-    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    tokenProgram,
   });
+
+  const transferInstruction =
+    tokenProgram === TOKEN_PROGRAM_ADDRESS
+      ? getTransferInstruction({
+          source: sourceTokenAccount,
+          destination: destinationTokenAccount,
+          authority: input.signer,
+          amount: input.amountBaseUnits,
+        })
+      : getToken2022TransferCheckedInstruction({
+          source: sourceTokenAccount,
+          mint: input.mint,
+          destination: destinationTokenAccount,
+          authority: input.signer,
+          amount: input.amountBaseUnits,
+          decimals: input.decimals,
+        });
 
   return {
     sourceTokenAccount,
@@ -89,14 +129,9 @@ export async function buildClassicTransferInstructions(input: {
         ata: destinationTokenAccount,
         owner: input.recipient,
         mint: input.mint,
-        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+        tokenProgram,
       }),
-      getTransferInstruction({
-        source: sourceTokenAccount,
-        destination: destinationTokenAccount,
-        authority: input.signer,
-        amount: input.amountBaseUnits,
-      }),
+      transferInstruction,
     ] as const,
   };
 }
@@ -107,6 +142,9 @@ async function broadcastTransfer(
     instance: TransferInstance;
     signer: TransactionSigner;
     mint: Address;
+    /** Program owning the mint; seeds both ATA derivations. */
+    tokenProgram: Address;
+    decimals: number;
     recipient: Address;
     amountBaseUnits: bigint;
     gatewayAuth: SpcAuthContext;
@@ -116,9 +154,11 @@ async function broadcastTransfer(
   // The (blockhash-independent) instructions are built ONCE, outside the retried
   // gateway unit — a 401 retry re-signs against a fresh blockhash but must not
   // rebuild the instructions.
-  const { instructions } = await buildClassicTransferInstructions({
+  const { instructions } = await buildTokenTransferInstructions({
     signer,
     mint: input.mint,
+    tokenProgram: input.tokenProgram,
+    decimals: input.decimals,
     recipient: input.recipient,
     amountBaseUnits: input.amountBaseUnits,
   });
@@ -210,8 +250,10 @@ export async function createChannelTransfer(
   input: CreateChannelTransferInput
 ): Promise<PrivateChannelTransfer> {
   const cluster = inferCluster(input.instance.chainRpcUrl);
-  const mint = address(defaultChannelMint(cluster));
-  const decimals = knownMintDecimals(mint, cluster) ?? 6;
+  const token = resolveChannelToken(cluster, input.mint);
+  const mint = address(token.mint);
+  const tokenProgram = address(token.tokenProgram);
+  const { decimals } = token;
   let amountBaseUnits: bigint;
   try {
     amountBaseUnits = parseDecimalAmount(input.amount, decimals);
@@ -265,7 +307,8 @@ export async function createChannelTransfer(
       env,
       failed,
       PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_FAILED,
-      PRIVATE_CHANNEL_EVENT_STATUSES.FAILED
+      PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
+      input.sdpUserId
     );
     return mapPrivateChannelTransferRow(failed);
   };
@@ -276,6 +319,8 @@ export async function createChannelTransfer(
       instance: input.instance,
       signer: input.signer,
       mint,
+      tokenProgram,
+      decimals,
       recipient: recipientAddress,
       amountBaseUnits,
       gatewayAuth: input.gatewayAuth,
@@ -297,7 +342,8 @@ export async function createChannelTransfer(
     env,
     latest,
     PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
-    PRIVATE_CHANNEL_EVENT_STATUSES.PENDING
+    PRIVATE_CHANNEL_EVENT_STATUSES.PENDING,
+    input.sdpUserId
   );
 
   const settled = await confirmAndPersistTransfer(env, repo, {
@@ -313,14 +359,16 @@ export async function createChannelTransfer(
         env,
         latest,
         PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_CONFIRMED,
-        PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED
+        PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED,
+        input.sdpUserId
       );
     } else if (latest.status === "failed") {
       await emitTransferEvent(
         env,
         latest,
         PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_FAILED,
-        PRIVATE_CHANNEL_EVENT_STATUSES.FAILED
+        PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
+        input.sdpUserId
       );
     }
   }

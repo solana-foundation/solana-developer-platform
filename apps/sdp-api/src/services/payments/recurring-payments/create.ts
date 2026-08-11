@@ -4,6 +4,7 @@ import {
   type PaymentRecurringPaymentRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
@@ -25,7 +26,7 @@ export async function createRecurringPayment(input: {
   createdBy: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const [tokenMint, destination] = await Promise.all([
-    assertRecurringPaymentTokenMint(input.token, input.projectId, input.env),
+    assertRecurringPaymentTokenMint(input.token, input.organizationId, input.projectId, input.env),
     resolveSolanaCounterpartyAccount({
       env: input.env,
       organizationId: input.organizationId,
@@ -35,7 +36,11 @@ export async function createRecurringPayment(input: {
     }),
   ]);
 
-  await assertWalletPolicyAllowsTransferWithRepository(createPaymentsRepository(input.env), {
+  const scope = createTenantScope({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  await assertWalletPolicyAllowsTransferWithRepository(createPaymentsRepository(input.env, scope), {
     organizationId: input.organizationId,
     projectId: input.projectId,
     wallet: input.sourceWallet,
@@ -47,7 +52,8 @@ export async function createRecurringPayment(input: {
 
   const now = new Date().toISOString();
   const recurringPayment = await createPaymentRecurringPaymentsRepository(
-    input.env
+    input.env,
+    scope
   ).createRecurringPayment({
     id: `prp_${crypto.randomUUID()}`,
     organizationId: input.organizationId,

@@ -6,18 +6,24 @@ import { getDb } from "@/db";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/issuance/mosaic";
-import { TokenService } from "@/services/token.service";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { forceBurnSchema } from "../schemas";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import {
+  persistSettledTransactionThenOutcome,
+  recoverSettledTransactionReplay,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -34,7 +40,7 @@ export const prepareForceBurn = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -68,7 +74,7 @@ export const prepareForceBurn = async (c: AppContext) => {
   const source = assertValidAddress(parsed.data.forceBurn.source, "source");
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
   const prepared = await mosaic.prepareForceBurn({
     mint: mintAddress,
     source,
@@ -93,6 +99,7 @@ export const prepareForceBurn = async (c: AppContext) => {
       amount: parsed.data.forceBurn.amount,
       delegateAuthority: permanentDelegateRaw,
       memo: parsed.data.forceBurn.memo,
+      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     serializedTx: prepared.serializedTx,
     initiatedByKeyId: auth.id,
@@ -136,7 +143,7 @@ export const executeForceBurn = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -186,17 +193,41 @@ export const executeForceBurn = async (c: AppContext) => {
       amount: parsed.data.forceBurn.amount,
       delegateAuthority: permanentDelegateRaw,
       memo: parsed.data.forceBurn.memo,
+      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     idempotencyKey: idempotencyMetadata.idempotencyKey,
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
     initiatedByKeyId: auth.id,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
-    return success(c, { transaction: tx });
+    const transaction = await recoverSettledTransactionReplay({
+      auditService,
+      tokenService,
+      transaction: tx,
+      action: "force_burn",
+    });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.forceBurn.amount);
+    }
+    return success(c, { transaction });
   }
 
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "force_burn",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      source: parsed.data.forceBurn.source,
+      amount: parsed.data.forceBurn.amount,
+      delegateAuthority: permanentDelegateRaw,
+      mode: "execute",
+    },
+  });
+  let onChainEffectCompleted = false;
 
   try {
     const result = await mosaic.forceBurn({
@@ -206,37 +237,38 @@ export const executeForceBurn = async (c: AppContext) => {
       permanentDelegate: signer,
       feePayer: signer,
     });
+    onChainEffectCompleted = true;
 
-    const updatedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
-
-    await tokenService.updateSupply(tokenId, parsed.data.forceBurn.amount, "burn");
-
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "force_burn",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
-      metadata: {
-        tokenId,
-        source: parsed.data.forceBurn.source,
-        amount: parsed.data.forceBurn.amount,
-        delegateAuthority: permanentDelegateRaw,
+    const updatedTx = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: {
         signature: result.signature,
-        slot: result.slot.toString(),
-        mode: "execute",
+        slot: Number(result.slot),
       },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+          },
+        }),
     });
+
+    await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.forceBurn.amount);
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    if (!onChainEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
     throw error;
   }
 };

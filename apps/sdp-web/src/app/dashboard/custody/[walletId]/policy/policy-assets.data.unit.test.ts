@@ -33,7 +33,7 @@ describe("getIssuedPolicyTokens", () => {
     );
 
     await expect(getIssuedPolicyTokens(request)).resolves.toEqual([
-      { token: "ACME", name: "Acme Token", mint: "MintAcme" },
+      { token: "ACME", name: "Acme Token", mint: "MintAcme", imageUrl: null },
     ]);
   });
 
@@ -56,7 +56,7 @@ describe("getIssuedPolicyTokens", () => {
     );
 
     await expect(getIssuedPolicyTokens(request)).resolves.toEqual([
-      { token: "BETA", name: "Beta Token", mint: "MintBeta" },
+      { token: "BETA", name: "Beta Token", mint: "MintBeta", imageUrl: null },
     ]);
   });
 
@@ -64,7 +64,7 @@ describe("getIssuedPolicyTokens", () => {
     const request = vi.fn(async () => tokenPage([{ mintAddress: "MintBare" }]));
 
     await expect(getIssuedPolicyTokens(request)).resolves.toEqual([
-      { token: "MintBare", name: "MintBare", mint: "MintBare" },
+      { token: "MintBare", name: "MintBare", mint: "MintBare", imageUrl: null },
     ]);
   });
 

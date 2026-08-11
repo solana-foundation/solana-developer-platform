@@ -6,9 +6,16 @@
  */
 
 import { getDb } from "@/db";
+import { createKVStoreSet } from "@/runtime/kv-redis";
+import { AUDIT_LEDGER_CHECKPOINT_KEY } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 const POSTGRES_TEST_TABLES = [
+  "earn_provider_wallets",
+  "earn_nav_snapshots",
+  "earn_movements",
+  "earn_positions",
+  "earn_strategies",
   "policy_provider_sync_status",
   "policy_evaluations",
   "approval_requests",
@@ -63,6 +70,7 @@ const POSTGRES_TEST_TABLES = [
   "api_keys",
   "projects",
   "invitations",
+  "audit_ledger_anchors",
   "audit_logs",
   "auth_organization_identities",
   "auth_user_identities",
@@ -72,27 +80,28 @@ const POSTGRES_TEST_TABLES = [
   "allowlist",
 ] as const;
 
-async function truncateAllTables(env: Env): Promise<void> {
+/**
+ * Resets this worker's database to empty by truncating every test table.
+ * Call from beforeEach; there is deliberately no afterEach counterpart —
+ * the next test's reset makes trailing cleanup a redundant round trip.
+ *
+ * @param env - Test environment bindings for this worker's database.
+ * @returns Resolves once every table is truncated.
+ */
+export async function seedTestDatabase(env: Env): Promise<void> {
   const db = getDb(env);
 
   try {
     await db
       .prepare(`TRUNCATE TABLE ${POSTGRES_TEST_TABLES.join(", ")} RESTART IDENTITY CASCADE`)
       .run();
+    await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
   } catch (error) {
     throw new Error(
-      "Postgres schema is not bootstrapped. Run `pnpm db:postgres:up` and `pnpm --filter @sdp/api db:postgres:bootstrap` first.",
+      "Postgres schema is not bootstrapped. Run `pnpm infra:up` and `pnpm --filter @sdp/api db:postgres:bootstrap` first.",
       {
         cause: error,
       }
     );
   }
-}
-
-export async function seedTestDatabase(env: Env): Promise<void> {
-  await truncateAllTables(env);
-}
-
-export async function clearTestDatabase(env: Env): Promise<void> {
-  await truncateAllTables(env);
 }

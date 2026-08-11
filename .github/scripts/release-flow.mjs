@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { createCommitOnBranch, githubGraphqlRequest } from "./github-commit-on-branch.mjs";
+import { nextReleaseVersion, releaseCommitSemantics } from "./release-version.mjs";
 
 const mode = process.argv[2];
 const dryRun = process.argv.includes("--dry-run");
@@ -143,14 +145,14 @@ function parseConventionalCommit(subject, body) {
   const match = subject.match(/^([a-z]+)(?:\(([^)]+)\))?(!)?: (.+)$/i);
   const prMatch = subject.match(/\(#(\d+)\)$/);
   const prNumber = prMatch ? prMatch[1] : null;
-  const breaking = Boolean(match?.[3]) || body.includes("BREAKING CHANGE");
+  const semantics = releaseCommitSemantics(subject, body);
 
   if (!match) {
     return {
-      type: "other",
+      type: semantics.type,
       description: subject.replace(/\s+\(#\d+\)$/, ""),
       prNumber,
-      breaking,
+      breaking: semantics.breaking,
     };
   }
 
@@ -159,34 +161,7 @@ function parseConventionalCommit(subject, body) {
   const baseDescription = rawDescription.replace(/\s+\(#\d+\)$/, "").trim();
   const description = scope ? `**${scope}:** ${baseDescription}` : baseDescription;
 
-  return { type, description, prNumber, breaking };
-}
-
-function bumpLevel(commits) {
-  if (commits.some((commit) => commit.breaking)) {
-    return "major";
-  }
-  if (commits.some((commit) => commit.type === "feat")) {
-    return "minor";
-  }
-  return "patch";
-}
-
-function incrementVersion(version, level) {
-  const [major, minor, patch] = version.split(".").map((part) => Number.parseInt(part, 10));
-
-  if ([major, minor, patch].some(Number.isNaN)) {
-    throw new Error(`Invalid semver version: ${version}`);
-  }
-
-  switch (level) {
-    case "major":
-      return `${major + 1}.0.0`;
-    case "minor":
-      return `${major}.${minor + 1}.0`;
-    default:
-      return `${major}.${minor}.${patch + 1}`;
-  }
+  return { type, description, prNumber, breaking: semantics.breaking };
 }
 
 function escapeRegExp(value) {
@@ -300,33 +275,6 @@ async function githubRequest(method, resourcePath, body) {
   return response.json();
 }
 
-async function githubGraphqlRequest(query, variables) {
-  const response = await fetch("https://api.github.com/graphql", {
-    method: "POST",
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-
-  const text = await response.text();
-  let payload = {};
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`GraphQL request failed: ${response.status} ${text}`);
-  }
-
-  if (!response.ok || payload.errors?.length) {
-    const message = payload.errors?.map((error) => error.message).join("; ") || text;
-    throw new Error(`GraphQL request failed: ${response.status} ${message}`);
-  }
-
-  return payload.data;
-}
-
 async function githubReleaseExists(tagName) {
   try {
     await githubRequest("GET", `/repos/${repo}/releases/tags/${encodeURIComponent(tagName)}`);
@@ -414,38 +362,19 @@ async function createReleaseBranchCommit(version) {
   const expectedHeadOid = git(["rev-parse", "HEAD"]);
   await resetReleaseBranch(expectedHeadOid);
 
-  const query = `
-    mutation CreateReleaseBranchCommit($input: CreateCommitOnBranchInput!) {
-      createCommitOnBranch(input: $input) {
-        commit {
-          oid
-          url
-        }
-      }
-    }
-  `;
-
-  const data = await githubGraphqlRequest(query, {
-    input: {
-      branch: {
-        repositoryNameWithOwner: repo,
-        branchName: releaseBranch,
-      },
-      expectedHeadOid,
-      message: {
-        headline: `chore(main): release ${version}`,
-      },
-      fileChanges: {
-        additions: [
-          releaseFileAddition("package.json"),
-          releaseFileAddition("CHANGELOG.md"),
-          releaseFileAddition(".github/.release-please-manifest.json"),
-        ],
-      },
-    },
+  const commit = await createCommitOnBranch({
+    repository: repo,
+    branch: releaseBranch,
+    expectedHeadOid,
+    headline: `chore(main): release ${version}`,
+    additions: [
+      releaseFileAddition("package.json"),
+      releaseFileAddition("CHANGELOG.md"),
+      releaseFileAddition(".github/.release-please-manifest.json"),
+    ],
+    token,
   });
 
-  const commit = data.createCommitOnBranch.commit;
   console.log(`Created release branch commit ${commit.oid}`);
   return commit.oid;
 }
@@ -469,9 +398,13 @@ async function enableAutoMerge(pullRequestId, version) {
   `;
 
   try {
-    await githubGraphqlRequest(query, {
-      pullRequestId,
-      commitHeadline: `chore(main): release ${version}`,
+    await githubGraphqlRequest({
+      query,
+      variables: {
+        pullRequestId,
+        commitHeadline: `chore(main): release ${version}`,
+      },
+      token,
     });
   } catch (error) {
     if (error.message.includes("Auto merge is already enabled")) {
@@ -726,7 +659,7 @@ async function prepareRelease(attempt = 1) {
     return;
   }
 
-  const nextVersion = incrementVersion(packageJson.version, bumpLevel(parsedCommits));
+  const nextVersion = nextReleaseVersion(packageJson.version, parsedCommits);
   const sectionMarkdown = buildSectionMarkdown(nextVersion, previousTag, parsedCommits);
 
   console.log(`Preparing release ${nextVersion}`);

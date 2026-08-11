@@ -4,8 +4,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG_ID = "org_policy_audit_routes";
@@ -218,7 +219,10 @@ async function seedAuthAndWallet() {
 }
 
 async function seedPoliciesAndEvaluations() {
-  const repository = createPostgresPolicyRepository(getDb(env));
+  const repository = createPostgresPolicyRepository(
+    getDb(env),
+    createTenantScope({ organizationId: TEST_ORG_ID, projectId: TEST_PROJECT_ID })
+  );
   const profile = await repository.createWalletControlProfile({
     organizationId: TEST_ORG_ID,
     projectId: TEST_PROJECT_ID,
@@ -245,6 +249,7 @@ async function seedPoliciesAndEvaluations() {
     profileId,
     rules: [{ id: "review-ramps", kind: "operation_family", family: "ramp" }],
     defaultAction: "review",
+    commitMessage: "Review ramp operations.",
     createdBy: TEST_USER_ID,
   });
   activeRevisionId = activeRevision?.id ?? "";
@@ -383,52 +388,68 @@ async function seedPoliciesAndEvaluations() {
       .run();
   }
 
-  const foreignOperation = await repository.createWalletOperation({
+  const seedForeignEvaluation = async (input: {
+    key: "foreign" | "crossOrganization";
+    organizationId: string;
+    projectId: string;
+    operationType: string;
+  }) => {
+    const operationId = `wop_${crypto.randomUUID()}`;
+    const evaluationId = `pev_${crypto.randomUUID()}`;
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO wallet_operations (
+             id, organization_id, project_id, custody_wallet_id, wallet_id,
+             source, operation_family, operation_type, raw_payload, status
+           ) VALUES (?, ?, ?, ?, ?, 'api', 'payment', ?, '{}'::jsonb, 'created')`
+        )
+        .bind(
+          operationId,
+          input.organizationId,
+          input.projectId,
+          TEST_CUSTODY_WALLET_ID,
+          TEST_WALLET_ID,
+          input.operationType
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO policy_evaluations (
+             id, wallet_operation_id, decision, reason_code, matched_rules,
+             evaluation_context, requires_approval
+           ) VALUES (?, ?, 'allow', 'implicit_default_allow', '[]'::jsonb, ?::jsonb, false)`
+        )
+        .bind(
+          evaluationId,
+          operationId,
+          JSON.stringify(
+            evaluationContext({
+              operationId,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              family: "payment",
+              operationType: input.operationType,
+              walletRevisionId: null,
+              apiKeyRevisionId: null,
+            })
+          )
+        ),
+    ]);
+    evaluationIds[input.key] = evaluationId;
+  };
+
+  await seedForeignEvaluation({
+    key: "foreign",
     organizationId: TEST_ORG_ID,
     projectId: OTHER_PROJECT_ID,
-    custodyWalletId: TEST_CUSTODY_WALLET_ID,
-    walletId: TEST_WALLET_ID,
-    operationFamily: "payment",
     operationType: "foreign_project_payment",
   });
-  const foreignEvaluation = await repository.createPolicyEvaluation({
-    walletOperationId: foreignOperation?.id ?? "",
-    decision: "allow",
-    reasonCode: "implicit_default_allow",
-    evaluationContext: evaluationContext({
-      operationId: foreignOperation?.id ?? "",
-      projectId: OTHER_PROJECT_ID,
-      family: "payment",
-      operationType: "foreign_project_payment",
-      walletRevisionId: null,
-      apiKeyRevisionId: null,
-    }),
-  });
-  evaluationIds.foreign = foreignEvaluation?.id ?? "";
-
-  const crossOrganizationOperation = await repository.createWalletOperation({
+  await seedForeignEvaluation({
+    key: "crossOrganization",
     organizationId: OTHER_ORG_ID,
     projectId: TEST_PROJECT_ID,
-    custodyWalletId: TEST_CUSTODY_WALLET_ID,
-    walletId: TEST_WALLET_ID,
-    operationFamily: "payment",
     operationType: "foreign_organization_payment",
   });
-  const crossOrganizationEvaluation = await repository.createPolicyEvaluation({
-    walletOperationId: crossOrganizationOperation?.id ?? "",
-    decision: "allow",
-    reasonCode: "implicit_default_allow",
-    evaluationContext: evaluationContext({
-      operationId: crossOrganizationOperation?.id ?? "",
-      organizationId: OTHER_ORG_ID,
-      projectId: TEST_PROJECT_ID,
-      family: "payment",
-      operationType: "foreign_organization_payment",
-      walletRevisionId: null,
-      apiKeyRevisionId: null,
-    }),
-  });
-  evaluationIds.crossOrganization = crossOrganizationEvaluation?.id ?? "";
 }
 
 describe("Wallet policy audit detail routes", () => {
@@ -439,7 +460,6 @@ describe("Wallet policy audit detail routes", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
@@ -454,13 +474,28 @@ describe("Wallet policy audit detail routes", () => {
     const body = (await response.json()) as {
       data: {
         profile: { id: string; activeRevisionId: string };
-        revisions: Array<{ id: string; revisionNumber: number; isActive: boolean }>;
+        revisions: Array<{
+          id: string;
+          revisionNumber: number;
+          commitMessage: string | null;
+          isActive: boolean;
+        }>;
       };
     };
     expect(body.data.profile).toMatchObject({ id: profileId, activeRevisionId });
     expect(body.data.revisions).toEqual([
-      expect.objectContaining({ id: activeRevisionId, revisionNumber: 2, isActive: true }),
-      expect.objectContaining({ id: firstRevisionId, revisionNumber: 1, isActive: false }),
+      expect.objectContaining({
+        id: activeRevisionId,
+        revisionNumber: 2,
+        commitMessage: "Review ramp operations.",
+        isActive: true,
+      }),
+      expect.objectContaining({
+        id: firstRevisionId,
+        revisionNumber: 1,
+        commitMessage: null,
+        isActive: false,
+      }),
     ]);
   });
 

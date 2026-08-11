@@ -19,8 +19,17 @@ import type {
   TokenTransactionStatus,
   TokenTransactionType,
 } from "@sdp/types";
+import type { DatabaseExecutor } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
+import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
+
+// How long a mint can still land after SDP last touched its row. A Solana blockhash
+// is valid for ~150 slots (roughly 60-90s), so a transaction older than this can no
+// longer be submitted; five minutes leaves generous room for a slow signer without
+// letting an abandoned mint hold the supply record hostage.
+const MINT_IN_FLIGHT_WINDOW_MS = 5 * 60 * 1000;
 
 // Escapes LIKE/ILIKE wildcards so operator-supplied search text matches
 // literally (mirrors the payments/policy repositories' `ESCAPE '\'` idiom).
@@ -175,6 +184,11 @@ export interface UpdateTokenInput {
   signingWalletId?: string | null;
   /** Only accepted while the token is undeployed (enforced by the route handler). */
   requiresAllowlist?: boolean;
+  /**
+   * Whole-token decimal string, or null to uncap. Only accepted while the supply
+   * is not yet locked on-chain (enforced by the route handler).
+   */
+  maxSupply?: string | null;
 }
 
 export interface CreateTokenTransactionInput {
@@ -195,6 +209,13 @@ export interface UpdateTokenTransactionInput {
   blockTime?: string;
   fee?: number;
   error?: string;
+  /**
+   * Attached only after the mint's supply reservation is admitted: a serialized
+   * transaction in the row is readable through the transactions API and, in the
+   * wallet-authority flow, submittable by whoever reads it — so a row must never
+   * carry one the cap refused.
+   */
+  serializedTx?: string;
   params?: Record<string, unknown>;
 }
 
@@ -232,6 +253,7 @@ export interface AddAllowlistInput {
   address: string;
   addedBy: string;
   label?: string;
+  initialStatus?: Extract<AllowlistEntryStatus, "pending" | "active">;
 }
 
 export interface FreezeAccountInput {
@@ -396,13 +418,88 @@ interface WalletTransactionScope {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class TokenService {
-  constructor(private db: DatabaseClient) {}
+  constructor(
+    private db: DatabaseClient,
+    private readonly tenantScope?: TenantScope
+  ) {}
+
+  private tenantMutationScope(): { clause: string; values: Array<string | null> } {
+    if (!this.tenantScope) {
+      return { clause: "", values: [] };
+    }
+
+    return {
+      clause: " AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?",
+      values: [this.tenantScope.organizationId, this.tenantScope.projectId],
+    };
+  }
+
+  private tenantTokenScope(alias = ""): { clause: string; values: Array<string | null> } {
+    if (!this.tenantScope) {
+      return { clause: "", values: [] };
+    }
+
+    const prefix = alias ? `${alias}.` : "";
+    return {
+      clause: ` AND ${prefix}organization_id = ? AND ${prefix}project_id IS NOT DISTINCT FROM ?`,
+      values: [this.tenantScope.organizationId, this.tenantScope.projectId],
+    };
+  }
+
+  /**
+   * Enforce the service's immutable tenant boundary before touching a child
+   * resource keyed only by token id. Token ownership is immutable, so this
+   * check remains valid for the following child-row operation.
+   */
+  private async assertTokenInTenant(tokenId: string): Promise<void> {
+    if (!this.tenantScope) {
+      return;
+    }
+
+    const row = await this.db
+      .prepare(
+        `SELECT id
+         FROM issued_tokens
+         WHERE id = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?`
+      )
+      .bind(tokenId, this.tenantScope.organizationId, this.tenantScope.projectId)
+      .first<{ id: string }>();
+
+    if (!row) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
+  }
+
+  private assertTenantOptions(options: {
+    organizationId: string;
+    projectId?: string | null;
+  }): void {
+    if (!this.tenantScope) {
+      return;
+    }
+
+    assertTenantClaim(
+      this.tenantScope,
+      {
+        organizationId: options.organizationId,
+        projectId: options.projectId ?? null,
+      },
+      "TokenService"
+    );
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Token CRUD
   // ═══════════════════════════════════════════════════════════════════════════
 
   async createToken(input: CreateTokenInput): Promise<Token> {
+    if (this.tenantScope) {
+      assertTenantClaim(
+        this.tenantScope,
+        { organizationId: input.organizationId, projectId: input.projectId },
+        "TokenService"
+      );
+    }
     const id = `tok_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const decimals = input.decimals ?? 9;
@@ -514,6 +611,9 @@ export class TokenService {
     organizationId: string;
     projectId: string;
   }): Promise<Token | null> {
+    if (this.tenantScope) {
+      assertTenantClaim(this.tenantScope, params, "TokenService");
+    }
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
@@ -536,6 +636,12 @@ export class TokenService {
   }
 
   private async _getTokenById(tokenId: string): Promise<Token | null> {
+    const tenantWhere = this.tenantScope
+      ? " AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?"
+      : "";
+    const tenantValues = this.tenantScope
+      ? [this.tenantScope.organizationId, this.tenantScope.projectId]
+      : [];
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
@@ -544,9 +650,9 @@ export class TokenService {
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                 freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
                 created_at, updated_at
-         FROM issued_tokens WHERE id = ?`
+         FROM issued_tokens WHERE id = ?${tenantWhere}`
       )
-      .bind(tokenId)
+      .bind(tokenId, ...tenantValues)
       .first<TokenRow>();
 
     if (!row) {
@@ -605,6 +711,7 @@ export class TokenService {
   }
 
   async getTokenByMint(mintAddress: string): Promise<Token | null> {
+    const tenant = this.tenantTokenScope();
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
@@ -613,9 +720,9 @@ export class TokenService {
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                 freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
                 created_at, updated_at
-         FROM issued_tokens WHERE mint_address = ?`
+         FROM issued_tokens WHERE mint_address = ?${tenant.clause}`
       )
-      .bind(mintAddress)
+      .bind(mintAddress, ...tenant.values)
       .first<TokenRow>();
 
     if (!row) {
@@ -639,16 +746,22 @@ export class TokenService {
     projectId: string,
     options: ListTokensOptions = {}
   ): Promise<{ tokens: Token[]; total: number }> {
+    if (this.tenantScope && this.tenantScope.projectId !== projectId) {
+      throw new AppError("FORBIDDEN", "Token project is outside the authenticated tenant");
+    }
     const { limit = 50, offset = 0, sortBy = "createdAt", sortDirection = "desc" } = options;
 
     const { whereClause, values } = buildTokenListFilter(projectId, options);
+    const tenant = this.tenantTokenScope();
+    const scopedWhereClause = `${whereClause}${tenant.clause}`;
+    const scopedValues = [...values, ...tenant.values];
     const sortColumn = TOKEN_LIST_SORT_COLUMNS[sortBy] ?? TOKEN_LIST_SORT_COLUMNS.createdAt;
     const direction = sortDirection === "asc" ? "ASC" : "DESC";
 
     const [countResult, result] = await Promise.all([
       this.db
-        .prepare(`SELECT COUNT(*)::int as count FROM issued_tokens WHERE ${whereClause}`)
-        .bind(...values)
+        .prepare(`SELECT COUNT(*)::int as count FROM issued_tokens WHERE ${scopedWhereClause}`)
+        .bind(...scopedValues)
         .first<{ count: number }>(),
       this.db
         .prepare(
@@ -659,11 +772,11 @@ export class TokenService {
                   freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
                   created_at, updated_at
            FROM issued_tokens
-           WHERE ${whereClause}
+           WHERE ${scopedWhereClause}
            ORDER BY ${sortColumn} ${direction}, id ${direction}
            LIMIT ? OFFSET ?`
         )
-        .bind(...values, limit, offset)
+        .bind(...scopedValues, limit, offset)
         .all<TokenRow>(),
     ]);
 
@@ -692,16 +805,20 @@ export class TokenService {
    * over-filtered one.
    */
   async listTokenFacets(projectId: string): Promise<TokenListFacets> {
+    if (this.tenantScope && this.tenantScope.projectId !== projectId) {
+      throw new AppError("FORBIDDEN", "Token project is outside the authenticated tenant");
+    }
+    const tenant = this.tenantTokenScope();
     const [templateRows, counts] = await Promise.all([
       this.db
         .prepare(
           `SELECT template, COUNT(*)::int as count
            FROM issued_tokens
-           WHERE project_id = ?
+           WHERE project_id = ?${tenant.clause}
            GROUP BY template
            ORDER BY template ASC`
         )
-        .bind(projectId)
+        .bind(projectId, ...tenant.values)
         .all<{ template: string | null; count: number }>(),
       this.db
         .prepare(
@@ -710,9 +827,9 @@ export class TokenService {
                   COUNT(*) FILTER (WHERE ${TOKEN_DEPLOYMENT_STATUS_PREDICATES.active})::int as active,
                   COUNT(*) FILTER (WHERE ${TOKEN_DEPLOYMENT_STATUS_PREDICATES.paused})::int as paused
            FROM issued_tokens
-           WHERE project_id = ?`
+           WHERE project_id = ?${tenant.clause}`
         )
-        .bind(projectId)
+        .bind(projectId, ...tenant.values)
         .first<{ total: number; draft: number; active: number; paused: number }>(),
     ]);
 
@@ -731,7 +848,11 @@ export class TokenService {
     };
   }
 
-  async updateToken(tokenId: string, input: UpdateTokenInput): Promise<Token> {
+  async updateToken(
+    tokenId: string,
+    input: UpdateTokenInput,
+    expectedDeploymentState?: Pick<Token, "status" | "mintAddress">
+  ): Promise<Token> {
     const existing = await this._getTokenById(tokenId);
     if (!existing) {
       throw new Error("TOKEN_NOT_FOUND");
@@ -786,13 +907,22 @@ export class TokenService {
       values.push(input.requiresAllowlist ? 1 : 0);
     }
 
+    // The supply the cap was validated against, kept so the write can be guarded
+    // on that same read — see the guards below.
+    let supplyAtCapCheck: string | null = null;
+    if (input.maxSupply !== undefined) {
+      const resolved = await this._resolveMaxSupplyBaseUnits(input, existing);
+      supplyAtCapCheck = resolved.supplyBaseUnits;
+      updates.push("max_supply = ?");
+      values.push(resolved.maxSupplyBaseUnits);
+    }
+
     if (updates.length === 0) {
       return existing;
     }
 
     updates.push("updated_at = ?");
     values.push(now);
-    values.push(tokenId);
 
     // symbol/decimals/requiresAllowlist are only mutable pre-deploy. The route
     // handler enforces that from a read of `existing`, but a concurrent
@@ -804,23 +934,66 @@ export class TokenService {
       input.symbol !== undefined ||
       input.decimals !== undefined ||
       input.requiresAllowlist !== undefined;
+    const requiresStableDeploymentGuard =
+      input.name !== undefined ||
+      input.description !== undefined ||
+      input.uri !== undefined ||
+      input.imageUrl !== undefined ||
+      input.status !== undefined;
 
-    const whereClause = requiresUndeployedGuard
-      ? "WHERE id = ? AND status = 'pending' AND mint_address IS NULL"
-      : "WHERE id = ?";
+    // Same race, one step later in the lifecycle: the cap is only meaningful
+    // while the mint authority still exists, and a concurrent lock-supply can
+    // revoke it between the handler's read and this write.
+    const requiresUnlockedSupplyGuard =
+      input.maxSupply !== undefined && Boolean(existing.mintAddress);
+
+    const whereConditions = ["id = ?"];
+    const whereValues: (string | null)[] = [tokenId];
+    if (requiresUndeployedGuard) {
+      whereConditions.push("status = 'pending'", "mint_address IS NULL");
+    } else if (requiresStableDeploymentGuard) {
+      whereConditions.push("status <> 'deploying'");
+    }
+    if (requiresUnlockedSupplyGuard) {
+      whereConditions.push("is_mintable = 1", "mint_authority IS NOT NULL");
+    }
+    // And the same race one step further out: the cap was checked against a supply
+    // read, and a mint landing in this window is exactly what makes that read
+    // stale. Guarding on it means losing to a mint costs a 409 the operator can
+    // retry against the real supply, rather than storing a cap below what was just
+    // minted. (COALESCE because the column is nullable, and NULL never equals a
+    // bound value.)
+    if (supplyAtCapCheck !== null) {
+      whereConditions.push("COALESCE(total_supply_cached, '0') = ?");
+      whereValues.push(supplyAtCapCheck);
+    }
+    if (expectedDeploymentState) {
+      whereConditions.push("status = ?", "mint_address IS NOT DISTINCT FROM ?");
+      whereValues.push(expectedDeploymentState.status, expectedDeploymentState.mintAddress);
+    }
+    if (this.tenantScope) {
+      whereConditions.push("organization_id = ?", "project_id IS NOT DISTINCT FROM ?");
+      whereValues.push(this.tenantScope.organizationId, this.tenantScope.projectId);
+    }
 
     const rowsAffected = await this.db
-      .prepare(`UPDATE issued_tokens SET ${updates.join(", ")} ${whereClause}`)
-      .bind(...values)
+      .prepare(
+        `UPDATE issued_tokens SET ${updates.join(", ")} WHERE ${whereConditions.join(" AND ")}`
+      )
+      .bind(...values, ...whereValues)
       .run();
 
     // The row existed at the top-of-method read, so a guarded 0-row result means
-    // it was deployed during the window — surface a 409 rather than a 404.
-    if (requiresUndeployedGuard && rowsAffected === 0) {
-      throw new AppError(
-        "CONFLICT",
-        "Token was deployed while this update was in flight; re-fetch and retry"
-      );
+    // the lifecycle moved on during the window — surface a 409 rather than a 404.
+    if (
+      (requiresUndeployedGuard ||
+        requiresStableDeploymentGuard ||
+        requiresUnlockedSupplyGuard ||
+        supplyAtCapCheck !== null ||
+        expectedDeploymentState) &&
+      rowsAffected === 0
+    ) {
+      throw new AppError("CONFLICT", await this._describeUpdateConflict(existing));
     }
 
     const updated = await this._getTokenById(tokenId);
@@ -829,6 +1002,111 @@ export class TokenService {
     }
 
     return updated;
+  }
+
+  /**
+   * The `max_supply` column value for an update: base units, or null to uncap.
+   *
+   * Mirrors `createToken`'s parse — precision is checked against the effective
+   * decimals, which a pre-deploy update may be changing in the same request —
+   * and additionally refuses a cap the token has already outgrown, since minting
+   * can only ever push the total further past it.
+   *
+   * Returns the supply it compared against, in base units, so the caller can
+   * guard the write on that same read: a mint landing in between is exactly what
+   * would make a cap that passed this check wrong by the time it is stored. Read
+   * from the column rather than round-tripped through `existing.totalSupply`,
+   * which is formatted for display and would not compare byte-for-byte.
+   */
+  private async _resolveMaxSupplyBaseUnits(
+    input: UpdateTokenInput,
+    existing: Token
+  ): Promise<{ maxSupplyBaseUnits: string | null; supplyBaseUnits: string | null }> {
+    // Clearing a cap depends on no supply at all — uncapping can never conflict
+    // with a mint — so it neither reads one nor gets guarded on one.
+    if (!input.maxSupply) {
+      return { maxSupplyBaseUnits: null, supplyBaseUnits: null };
+    }
+
+    const decimals = input.decimals ?? existing.decimals;
+    let baseUnits: bigint;
+    try {
+      baseUnits = parseDecimalAmount(input.maxSupply, decimals);
+    } catch {
+      throw badRequest("Invalid maxSupply for this token's decimals", {
+        errors: {
+          maxSupply: [`Must be a number with at most ${decimals} decimal place(s)`],
+        },
+      });
+    }
+
+    // Only compared for deployed tokens: their decimals are immutable (so both
+    // sides share a scale) and a draft has no minted supply to undercut.
+    if (!existing.mintAddress) {
+      return { maxSupplyBaseUnits: baseUnits.toString(), supplyBaseUnits: null };
+    }
+
+    // The recorded supply counts every mint SDP has admitted — settled ones, and
+    // reservations for ones that could still land, executed or prepared — because
+    // `reserveMintSupply` runs before any transaction can reach the chain. So a cap
+    // at or above this figure cannot be outrun by an in-flight mint, and the
+    // supply-unchanged guard on the write catches one admitted in this window: the
+    // reservation and the cap change contend for the same row, and whichever
+    // commits second sees the other.
+    const supplyBaseUnits = await this._getCachedSupplyBaseUnits(existing.id);
+    if (baseUnits < BigInt(supplyBaseUnits)) {
+      throw badRequest("maxSupply cannot be below the already-minted supply", {
+        errors: {
+          maxSupply: [
+            `Must be at least the current supply of ${formatDecimalAmount(supplyBaseUnits, decimals)}`,
+          ],
+        },
+      });
+    }
+
+    return { maxSupplyBaseUnits: baseUnits.toString(), supplyBaseUnits };
+  }
+
+  /**
+   * The cached supply exactly as stored, for comparing against and then guarding
+   * on. Anything that isn't a base-unit integer reads as `0`, so a malformed
+   * cache can't make a cap check throw from inside a bigint parse.
+   */
+  private async _getCachedSupplyBaseUnits(tokenId: string): Promise<string> {
+    const tenant = this.tenantTokenScope();
+    const row = await this.db
+      .prepare(
+        `SELECT COALESCE(total_supply_cached, '0') AS supply
+         FROM issued_tokens
+         WHERE id = ?${tenant.clause}`
+      )
+      .bind(tokenId, ...tenant.values)
+      .first<{ supply: string }>();
+    const supply = row?.supply ?? "0";
+    return /^\d+$/.test(supply) ? supply : "0";
+  }
+
+  /**
+   * Why a guarded update matched no rows. The row existed at the top-of-method
+   * read, so something moved it out from under one of the guards in the window —
+   * re-read to name which, since a `maxSupply` update carries three of them and
+   * an operator retrying deserves to know what actually changed.
+   */
+  private async _describeUpdateConflict(before: Token): Promise<string> {
+    const after = await this._getTokenById(before.id);
+    if (!after) {
+      return "Token was deleted while this update was in flight; re-fetch and retry";
+    }
+    if (after.mintAddress && !before.mintAddress) {
+      return "Token was deployed while this update was in flight; re-fetch and retry";
+    }
+    if (before.mintAddress && (!after.mintAuthority || !after.isMintable)) {
+      return "Token supply was locked on-chain while this update was in flight; re-fetch and retry";
+    }
+    if (after.totalSupply !== before.totalSupply) {
+      return "Token supply changed while this update was in flight; re-fetch and retry";
+    }
+    return "Token changed while this update was in flight; re-fetch and retry";
   }
 
   /**
@@ -884,17 +1162,20 @@ export class TokenService {
       values.push(now);
       values.push(tokenId);
 
+      const tenant = this.tenantMutationScope();
+
       await this.db
-        .prepare(`UPDATE issued_tokens SET ${fields.join(", ")} WHERE id = ?`)
-        .bind(...values)
+        .prepare(`UPDATE issued_tokens SET ${fields.join(", ")} WHERE id = ?${tenant.clause}`)
+        .bind(...values, ...tenant.values)
         .run();
     }
 
     if (updates.permanentDelegate !== undefined) {
       if (fields.length === 0) {
+        const tenant = this.tenantMutationScope();
         await this.db
-          .prepare("UPDATE issued_tokens SET updated_at = ? WHERE id = ?")
-          .bind(now, tokenId)
+          .prepare(`UPDATE issued_tokens SET updated_at = ? WHERE id = ?${tenant.clause}`)
+          .bind(now, tokenId, ...tenant.values)
           .run();
       }
       await this.setTokenExtension(tokenId, "permanentDelegate", updates.permanentDelegate, now);
@@ -929,12 +1210,13 @@ export class TokenService {
    */
   async beginTokenDeploy(tokenId: string): Promise<Token | null> {
     const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
     const rowsAffected = await this.db
       .prepare(
         `UPDATE issued_tokens SET status = 'deploying', updated_at = ?
-         WHERE id = ? AND status = 'pending' AND mint_address IS NULL`
+         WHERE id = ?${tenant.clause} AND status = 'pending' AND mint_address IS NULL`
       )
-      .bind(now, tokenId)
+      .bind(now, tokenId, ...tenant.values)
       .run();
 
     if (rowsAffected === 0) {
@@ -952,12 +1234,13 @@ export class TokenService {
    */
   async releaseTokenDeploy(tokenId: string): Promise<void> {
     const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
     await this.db
       .prepare(
         `UPDATE issued_tokens SET status = 'pending', updated_at = ?
-         WHERE id = ? AND status = 'deploying' AND mint_address IS NULL`
+         WHERE id = ?${tenant.clause} AND status = 'deploying' AND mint_address IS NULL`
       )
-      .bind(now, tokenId)
+      .bind(now, tokenId, ...tenant.values)
       .run();
   }
 
@@ -969,8 +1252,9 @@ export class TokenService {
     ablListAddress?: string | null
   ): Promise<Token> {
     const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
 
-    await this.db
+    const rowsAffected = await this.db
       .prepare(
         `UPDATE issued_tokens SET
           mint_address = ?,
@@ -981,7 +1265,7 @@ export class TokenService {
           status = 'active',
           deployed_at = ?,
           updated_at = ?
-         WHERE id = ?`
+         WHERE id = ?${tenant.clause}`
       )
       .bind(
         mintAddress,
@@ -991,9 +1275,14 @@ export class TokenService {
         ablListAddress ?? null,
         now,
         now,
-        tokenId
+        tokenId,
+        ...tenant.values
       )
       .run();
+
+    if (rowsAffected === 0) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
@@ -1003,58 +1292,792 @@ export class TokenService {
     return updated;
   }
 
+  /**
+   * Count a mint against the cap, atomically, before it can reach the chain —
+   * executed mints at the moment of submission, prepared mints before the
+   * serialized transaction is handed to the client.
+   *
+   * This — not the handler's read of a cached total — is where the cap is
+   * enforced. Two requests that each check a cached supply in their own process
+   * both pass and both land; two conditional UPDATEs against the same row cannot,
+   * because the row lock serializes them and the second one adds to what the first
+   * committed. A cap change touches the same row, so it serializes here too: it
+   * either lands first (and this reservation fails against the lower cap) or
+   * second (and it fails its own "not below the minted supply" check). The
+   * recorded supply can no longer end up above the persisted cap.
+   *
+   * The reservation *is* the count: nothing adds to it when the transaction
+   * settles, and nothing hands it back when the send fails — a send can fail
+   * ambiguously, and giving the headroom back to a transaction that lands anyway is
+   * how two mints end up above the cap. Only `setSupplyFromBaseUnits`, reading the
+   * mint account itself, lowers the record, and only once the mint can no longer
+   * land.
+   *
+   * @returns the recorded supply after reserving, or null if the cap refused it.
+   */
+  async reserveMintSupply(tokenId: string, deltaBaseUnits: string): Promise<string | null> {
+    const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
+    const row = await this.db
+      .prepare(
+        `UPDATE issued_tokens
+         SET total_supply_cached = (COALESCE(total_supply_cached, '0')::numeric + ?::numeric)::text,
+             total_supply_updated_at = ?,
+             updated_at = ?
+         WHERE id = ?${tenant.clause}
+           AND (max_supply IS NULL
+                OR COALESCE(total_supply_cached, '0')::numeric + ?::numeric <= max_supply::numeric)
+         RETURNING total_supply_cached`
+      )
+      .bind(deltaBaseUnits, now, now, tokenId, ...tenant.values, deltaBaseUnits)
+      .first<{ total_supply_cached: string }>();
+    return row?.total_supply_cached ?? null;
+  }
+
+  /**
+   * Record a supply change that has already settled on-chain — today, a burn.
+   *
+   * A cache write, not an admission check: the balance is enforced against the
+   * authority's token account before the burn is sent, and re-checking a cached
+   * total here could only report a settled burn as failed or leave the cache
+   * ahead of the chain. Mints do not come through here at all; they are counted by
+   * `reserveMintSupply` before they can reach the chain, because a cap cannot be
+   * enforced after the fact — SPL has no cap of its own and a settled mint cannot
+   * be taken back.
+   */
   async updateSupply(tokenId: string, delta: string, operation: "mint" | "burn"): Promise<void> {
     const token = await this._getTokenById(tokenId);
     if (!token) {
       throw new Error("TOKEN_NOT_FOUND");
     }
 
-    const currentSupply = parseDecimalAmount(token.totalSupply, token.decimals);
-    const deltaAmount = parseDecimalAmount(delta, token.decimals);
-    let newSupply: bigint;
+    const deltaBaseUnits = parseDecimalAmount(delta, token.decimals).toString();
+    await this._applySupplyDelta(
+      tokenId,
+      deltaBaseUnits,
+      operation === "mint" ? "add" : "subtract"
+    );
+  }
 
-    if (operation === "mint") {
-      newSupply = currentSupply + deltaAmount;
+  /**
+   * Apply a settled burn's cached-supply delta exactly once.
+   *
+   * The chain effect cannot be rolled back, so an idempotent request must be
+   * able to retry this bookkeeping after a database failure without subtracting
+   * twice. Locking the transaction row and committing its marker with the
+   * supply change makes both the initial request and every replay safe.
+   */
+  async applySettledBurnSupply(
+    transactionId: string,
+    tokenId: string,
+    amount: string
+  ): Promise<void> {
+    const tokenScope = this.tenantTokenScope("t");
+    await this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.supply_bookkeeping_applied_at, it.operation_params,
+                  t.decimals, t.total_supply_updated_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(transactionId, tokenId, ...tokenScope.values)
+        .first<{
+          supply_bookkeeping_applied_at: string | null;
+          operation_params: string;
+          decimals: number;
+          total_supply_updated_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+      if (row.supply_bookkeeping_applied_at !== null) return;
 
-      // Check max supply
-      if (token.maxSupply) {
-        const maxSupply = parseDecimalAmount(token.maxSupply, token.decimals);
-        if (newSupply > maxSupply) {
-          throw new Error("MAX_SUPPLY_EXCEEDED");
+      const deltaBaseUnits = parseDecimalAmount(amount, row.decimals).toString();
+      const now = new Date().toISOString();
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      const baseline = params.supplyBaselineUpdatedAt;
+      const hasBaseline = baseline === null || typeof baseline === "string";
+      const supplyChangedSinceAdmission = hasBaseline && baseline !== row.total_supply_updated_at;
+
+      // A chain reconciliation after this burn was admitted already includes
+      // the settled burn. Subtracting again would undercount supply and create
+      // false mint headroom, so in that case only consume the retry marker.
+      if (!supplyChangedSinceAdmission) {
+        const tokenMutation = this.tenantMutationScope();
+        const updatedToken = await tx
+          .prepare(
+            `UPDATE issued_tokens
+             SET total_supply_cached = GREATEST(
+                   COALESCE(total_supply_cached, '0')::numeric - ?::numeric,
+                   0
+                 )::text,
+                 total_supply_updated_at = ?,
+                 updated_at = ?
+             WHERE id = ?${tokenMutation.clause}`
+          )
+          .bind(deltaBaseUnits, now, now, tokenId, ...tokenMutation.values)
+          .run();
+        if (updatedToken !== 1) throw new Error("TOKEN_NOT_FOUND");
+      }
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET supply_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND supply_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, transactionId, tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_SUPPLY_MARKER_CONFLICT");
+    });
+  }
+
+  /** Atomically mirror a settled pause/unpause exactly once. */
+  async applySettledTokenStatus(
+    transactionId: string,
+    tokenId: string,
+    status: "active" | "paused"
+  ): Promise<void> {
+    const tokenScope = this.tenantTokenScope("t");
+    await this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.type, it.status, it.signature, it.slot, it.created_at,
+                  it.lifecycle_bookkeeping_applied_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(transactionId, tokenId, ...tokenScope.values)
+        .first<{
+          type: string;
+          status: string;
+          signature: string | null;
+          slot: number | null;
+          created_at: string;
+          lifecycle_bookkeeping_applied_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+      const expectedType = status === "paused" ? "pause" : "unpause";
+      if (row.type !== expectedType) {
+        throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+      }
+      if (row.lifecycle_bookkeeping_applied_at !== null) {
+        if (row.status !== "confirmed") {
+          throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
         }
+        return;
       }
-    } else {
-      newSupply = currentSupply - deltaAmount;
-      if (newSupply < 0n) {
-        throw new Error("INSUFFICIENT_SUPPLY");
+
+      const now = new Date().toISOString();
+      await this.promoteJournaledLifecycleTransaction(tx, transactionId, tokenId, row, now);
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions newer
+           WHERE newer.token_id = ?
+             AND newer.type IN ('pause', 'unpause')
+             AND newer.status = 'confirmed'
+             AND (
+               newer.slot > ?
+               OR (newer.slot = ? AND newer.created_at > ?)
+               OR (newer.slot = ? AND newer.created_at = ? AND newer.id > ?)
+             )
+           LIMIT 1`
+        )
+        .bind(tokenId, row.slot, row.slot, row.created_at, row.slot, row.created_at, transactionId)
+        .first<{ exists: number }>();
+
+      if (!newer) {
+        const tokenMutation = this.tenantMutationScope();
+        const updatedToken = await tx
+          .prepare(
+            `UPDATE issued_tokens SET status = ?, updated_at = ?
+             WHERE id = ?${tokenMutation.clause}`
+          )
+          .bind(status, now, tokenId, ...tokenMutation.values)
+          .run();
+        if (updatedToken !== 1) throw new Error("TOKEN_NOT_FOUND");
       }
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET lifecycle_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND lifecycle_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, transactionId, tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_MARKER_CONFLICT");
+    });
+  }
+
+  /**
+   * Mirror a settled freeze/unfreeze without allowing an older replay to
+   * overwrite a later on-chain transition for the same token account.
+   */
+  async applySettledAccountFreezeState(input: {
+    transactionId: string;
+    tokenId: string;
+    accountAddress: string;
+    state: "frozen" | "unfrozen";
+    actorId: string;
+    reason?: string;
+  }): Promise<FrozenAccount> {
+    const tokenScope = this.tenantTokenScope("t");
+    return this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.type, it.status, it.signature, it.slot, it.created_at,
+                  it.operation_params,
+                  it.lifecycle_bookkeeping_applied_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(input.transactionId, input.tokenId, ...tokenScope.values)
+        .first<{
+          type: string;
+          status: string;
+          signature: string | null;
+          slot: number | null;
+          created_at: string;
+          operation_params: string;
+          lifecycle_bookkeeping_applied_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+
+      const expectedType = input.state === "frozen" ? "freeze" : "unfreeze";
+      if (row.type !== expectedType) {
+        throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+      }
+
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      const recordedAccount = params.tokenAccountAddress ?? params.accountAddress;
+      if (recordedAccount !== input.accountAddress) {
+        throw new Error("TOKEN_TRANSACTION_LIFECYCLE_PARAMS_MISMATCH");
+      }
+
+      const existing = await tx
+        .prepare(
+          `SELECT id, token_id, account_address, reason, frozen_at, frozen_by,
+                  unfrozen_at, unfrozen_by
+           FROM frozen_accounts
+           WHERE token_id = ? AND account_address = ?
+           FOR UPDATE`
+        )
+        .bind(input.tokenId, input.accountAddress)
+        .first<FrozenAccountRow>();
+
+      if (row.lifecycle_bookkeeping_applied_at !== null) {
+        if (row.status !== "confirmed" || !existing) {
+          throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+        }
+        return this.mapRowToFrozenAccount(existing);
+      }
+
+      const now = new Date().toISOString();
+      await this.promoteJournaledLifecycleTransaction(
+        tx,
+        input.transactionId,
+        input.tokenId,
+        row,
+        now
+      );
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions newer
+           WHERE newer.token_id = ?
+             AND newer.type IN ('freeze', 'unfreeze')
+             AND newer.status = 'confirmed'
+             AND COALESCE(
+               newer.operation_params::jsonb ->> 'tokenAccountAddress',
+               newer.operation_params::jsonb ->> 'accountAddress'
+             ) = ?
+             AND (
+               newer.slot > ?
+               OR (newer.slot = ? AND newer.created_at > ?)
+               OR (newer.slot = ? AND newer.created_at = ? AND newer.id > ?)
+             )
+           LIMIT 1`
+        )
+        .bind(
+          input.tokenId,
+          input.accountAddress,
+          row.slot,
+          row.slot,
+          row.created_at,
+          row.slot,
+          row.created_at,
+          input.transactionId
+        )
+        .first<{ exists: number }>();
+
+      let frozenAccount = existing;
+      if (!newer) {
+        frozenAccount = await this.applyAccountFreezeMirror(tx, input, existing, now);
+      }
+
+      if (!frozenAccount) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET lifecycle_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND lifecycle_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, input.transactionId, input.tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_MARKER_CONFLICT");
+
+      return this.mapRowToFrozenAccount(frozenAccount);
+    });
+  }
+
+  /**
+   * The settlement fallback deliberately persists only the chain receipt when
+   * the normal confirmed-status write fails. Promote that durable pending row
+   * inside the same transaction as lifecycle bookkeeping so the completed
+   * operation can return success without waiting for an idempotent replay.
+   *
+   * Status history is intentionally not retried here: it is auxiliary, and it
+   * may be the part of the normal write that failed after status was updated.
+   */
+  private async promoteJournaledLifecycleTransaction(
+    tx: DatabaseExecutor,
+    transactionId: string,
+    tokenId: string,
+    row: { status: string; signature: string | null; slot: number | null },
+    now: string
+  ): Promise<void> {
+    if (row.status === "confirmed") {
+      if (row.slot === null) throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
+      return;
+    }
+    if (row.status !== "pending" || !row.signature || row.slot === null) {
+      throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
     }
 
-    const now = new Date().toISOString();
-    await this.db
+    const promoted = await tx
       .prepare(
-        "UPDATE issued_tokens SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ? WHERE id = ?"
+        `UPDATE issuance_transactions
+         SET status = 'confirmed', error = NULL, updated_at = ?
+         WHERE id = ? AND token_id = ? AND status = 'pending'
+           AND signature = ? AND slot = ?`
       )
-      .bind(newSupply.toString(), now, now, tokenId)
+      .bind(now, transactionId, tokenId, row.signature, row.slot)
+      .run();
+    if (promoted !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_PROMOTION_CONFLICT");
+  }
+
+  private async applyAccountFreezeMirror(
+    tx: DatabaseExecutor,
+    input: {
+      tokenId: string;
+      accountAddress: string;
+      state: "frozen" | "unfrozen";
+      actorId: string;
+      reason?: string;
+    },
+    existing: FrozenAccountRow | null,
+    now: string
+  ): Promise<FrozenAccountRow> {
+    if (input.state === "frozen") {
+      if (existing?.unfrozen_at === null) return existing;
+      if (existing) {
+        const updated = await tx
+          .prepare(
+            `UPDATE frozen_accounts
+             SET reason = ?, frozen_at = ?, frozen_by = ?,
+                 unfrozen_at = NULL, unfrozen_by = NULL
+             WHERE id = ?
+             RETURNING id, token_id, account_address, reason, frozen_at, frozen_by,
+                       unfrozen_at, unfrozen_by`
+          )
+          .bind(input.reason ?? null, now, input.actorId, existing.id)
+          .first<FrozenAccountRow>();
+        if (!updated) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+        return updated;
+      }
+
+      const inserted = await tx
+        .prepare(
+          `INSERT INTO frozen_accounts (
+             id, token_id, account_address, reason, frozen_at, frozen_by,
+             unfrozen_at, unfrozen_by
+           ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
+           RETURNING id, token_id, account_address, reason, frozen_at, frozen_by,
+                     unfrozen_at, unfrozen_by`
+        )
+        .bind(
+          `frz_${crypto.randomUUID()}`,
+          input.tokenId,
+          input.accountAddress,
+          input.reason ?? null,
+          now,
+          input.actorId
+        )
+        .first<FrozenAccountRow>();
+      if (!inserted) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+      return inserted;
+    }
+
+    if (!existing) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+    if (existing.unfrozen_at !== null) return existing;
+
+    const updated = await tx
+      .prepare(
+        `UPDATE frozen_accounts
+         SET unfrozen_at = ?, unfrozen_by = ?
+         WHERE id = ?
+         RETURNING id, token_id, account_address, reason, frozen_at, frozen_by,
+                   unfrozen_at, unfrozen_by`
+      )
+      .bind(now, input.actorId, existing.id)
+      .first<FrozenAccountRow>();
+    if (!updated) throw new Error("FROZEN_ACCOUNT_NOT_FOUND");
+    return updated;
+  }
+
+  /**
+   * Mirror a settled authority change without allowing an older replay to
+   * overwrite a later on-chain authority. The settlement slot is the primary
+   * ordering key; request creation time and id provide a deterministic tie
+   * break for transactions confirmed in the same slot.
+   */
+  async applySettledTokenAuthority(
+    transactionId: string,
+    tokenId: string,
+    role: "mint" | "freeze" | "permanentDelegate" | "metadata",
+    newAuthority: string | null
+  ): Promise<void> {
+    const tokenScope = this.tenantTokenScope("t");
+    await this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(
+          `SELECT it.type, it.status, it.slot, it.created_at, it.operation_params,
+                  it.authority_bookkeeping_applied_at
+           FROM issuance_transactions it
+           JOIN issued_tokens t ON t.id = it.token_id
+           WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
+           FOR UPDATE OF it, t`
+        )
+        .bind(transactionId, tokenId, ...tokenScope.values)
+        .first<{
+          type: string;
+          status: string;
+          slot: number | null;
+          created_at: string;
+          operation_params: string;
+          authority_bookkeeping_applied_at: string | null;
+        }>();
+      if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
+      if (row.type !== "update_authority" || row.status !== "confirmed" || row.slot === null) {
+        throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_AUTHORITY");
+      }
+      if (row.authority_bookkeeping_applied_at !== null) return;
+
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      if (params.role !== role || params.newAuthority !== newAuthority) {
+        throw new Error("TOKEN_TRANSACTION_AUTHORITY_PARAMS_MISMATCH");
+      }
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions newer
+           WHERE newer.token_id = ?
+             AND newer.type = 'update_authority'
+             AND newer.status = 'confirmed'
+             AND newer.operation_params::jsonb ->> 'role' = ?
+             AND (
+               newer.slot > ?
+               OR (newer.slot = ? AND newer.created_at > ?)
+               OR (newer.slot = ? AND newer.created_at = ? AND newer.id > ?)
+             )
+           LIMIT 1`
+        )
+        .bind(
+          tokenId,
+          role,
+          row.slot,
+          row.slot,
+          row.created_at,
+          row.slot,
+          row.created_at,
+          transactionId
+        )
+        .first<{ exists: number }>();
+
+      const now = new Date().toISOString();
+      if (!newer) {
+        await this.applyTokenAuthorityMirror(tx, tokenId, role, newAuthority, now);
+      }
+
+      const marked = await tx
+        .prepare(
+          `UPDATE issuance_transactions
+           SET authority_bookkeeping_applied_at = ?, updated_at = ?
+           WHERE id = ? AND token_id = ? AND authority_bookkeeping_applied_at IS NULL`
+        )
+        .bind(now, now, transactionId, tokenId)
+        .run();
+      if (marked !== 1) throw new Error("TOKEN_TRANSACTION_AUTHORITY_MARKER_CONFLICT");
+    });
+  }
+
+  private async applyTokenAuthorityMirror(
+    tx: DatabaseExecutor,
+    tokenId: string,
+    role: "mint" | "freeze" | "permanentDelegate" | "metadata",
+    newAuthority: string | null,
+    now: string
+  ): Promise<void> {
+    const tokenMutation = this.tenantMutationScope();
+    if (role === "mint" || role === "freeze") {
+      const authorityField = role === "mint" ? "mint_authority" : "freeze_authority";
+      const enabledField = role === "mint" ? "is_mintable" : "freeze_authority_enabled";
+      const updated = await tx
+        .prepare(
+          `UPDATE issued_tokens
+           SET ${authorityField} = ?, ${enabledField} = ?, updated_at = ?
+           WHERE id = ?${tokenMutation.clause}`
+        )
+        .bind(newAuthority, newAuthority === null ? 0 : 1, now, tokenId, ...tokenMutation.values)
+        .run();
+      if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+      return;
+    }
+
+    if (role === "metadata") {
+      const updated = await tx
+        .prepare(
+          `UPDATE issued_tokens
+           SET metadata_authority = ?, updated_at = ?
+           WHERE id = ?${tokenMutation.clause}`
+        )
+        .bind(newAuthority, now, tokenId, ...tokenMutation.values)
+        .run();
+      if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+
+      // Older rows may still carry the authority in the legacy extension. It
+      // takes precedence when tokens are mapped, so remove it atomically with
+      // the canonical column update instead of leaving a stale authority visible.
+      await tx
+        .prepare(
+          "DELETE FROM issued_token_extensions WHERE token_id = ? AND extension = 'metadataAuthority'"
+        )
+        .bind(tokenId)
+        .run();
+      return;
+    }
+
+    if (role !== "permanentDelegate") return;
+
+    const updated = await tx
+      .prepare(`UPDATE issued_tokens SET updated_at = ? WHERE id = ?${tokenMutation.clause}`)
+      .bind(now, tokenId, ...tokenMutation.values)
+      .run();
+    if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+
+    if (newAuthority === null) {
+      await tx
+        .prepare(
+          "DELETE FROM issued_token_extensions WHERE token_id = ? AND extension = 'permanentDelegate'"
+        )
+        .bind(tokenId)
+        .run();
+      return;
+    }
+
+    await tx
+      .prepare(
+        `INSERT INTO issued_token_extensions (id, token_id, extension, config, created_at)
+         VALUES (?, ?, 'permanentDelegate', ?, ?)
+         ON CONFLICT(token_id, extension) DO UPDATE SET config = excluded.config`
+      )
+      .bind(`tex_${crypto.randomUUID()}`, tokenId, JSON.stringify(newAuthority), now)
       .run();
   }
 
+  /**
+   * Move the cached supply by a base-unit delta, in one statement.
+   *
+   * The arithmetic belongs in SQL. Reading the total, changing it in memory and
+   * writing the sum back lost one of every concurrent pair — and the cache then
+   * stayed short for good, which let admission pass mints the cap should have
+   * refused. One UPDATE takes the row lock, so each change applies to whatever the
+   * other left behind. Subtraction clamps at zero rather than recording a negative
+   * supply: the operation happened, and a cache that was already behind reality is
+   * not a reason to write nonsense.
+   */
+  private async _applySupplyDelta(
+    tokenId: string,
+    deltaBaseUnits: string,
+    direction: "add" | "subtract"
+  ): Promise<void> {
+    const expression =
+      direction === "add"
+        ? "(COALESCE(total_supply_cached, '0')::numeric + ?::numeric)::text"
+        : "GREATEST(COALESCE(total_supply_cached, '0')::numeric - ?::numeric, 0)::text";
+    const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
+    await this.db
+      .prepare(
+        `UPDATE issued_tokens
+         SET total_supply_cached = ${expression},
+             total_supply_updated_at = ?,
+             updated_at = ?
+         WHERE id = ?${tenant.clause}`
+      )
+      .bind(deltaBaseUnits, now, now, tokenId, ...tenant.values)
+      .run();
+  }
+
+  /**
+   * Reconcile the recorded supply against what the mint itself reports.
+   *
+   * The chain is the authority on what has settled — but not on what is about to.
+   * A mint SDP admits is counted before it can reach the chain
+   * (`reserveMintSupply`) and the mint account will not show it until it lands, so
+   * overwriting inside that window put the record back below the reservation and
+   * handed the same headroom to the next mint: both then settled, together above
+   * the cap.
+   *
+   * What that protects is a quantity, not a flag. The floor a refresh must respect
+   * is the on-chain total plus what the mints that could still land could still
+   * add — each unsettled mint row carries its amount — and the record may come
+   * down to that floor at once. A hold that only asked "is anything in flight?"
+   * kept everything above the floor too, and on a busy token the window never
+   * reopened: reservations whose transactions had expired unsubmittable leaked
+   * forever, until the cap refused mints for supply that did not exist. Upward is
+   * never held — an on-chain total above the record came from outside SDP and has
+   * to start refusing mints at once. One statement, so a mint cannot start between
+   * the check and the write.
+   *
+   * "Could still land" deliberately includes mints recorded as failed: a send that
+   * fails ambiguously (a timeout on a transaction the cluster accepted anyway) keeps
+   * its reservation because nobody can yet say otherwise, and the age bound is what
+   * finally settles it — after which this reads the answer off the chain. A mint
+   * that already landed counts twice for the length of the window (once in the
+   * chain total, once as its row); the floor is deliberately an upper bound, and
+   * the excess falls away as rows settle or age out.
+   */
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
       throw new Error("INVALID_SUPPLY");
     }
 
     const now = new Date().toISOString();
-    await this.db
+    const tenantRead = this.tenantTokenScope("tok");
+    const tenantWrite = this.tenantTokenScope("issued_tokens");
+    const since = new Date(Date.now() - MINT_IN_FLIGHT_WINDOW_MS).toISOString();
+    const applied = await this.db
       .prepare(
-        "UPDATE issued_tokens SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ? WHERE id = ?"
+        `WITH live AS (
+           SELECT COALESCE(SUM(CASE
+             WHEN t.operation_params::jsonb ->> 'amount' ~ '^\\d+(\\.\\d+)?$'
+               THEN trunc(
+                 (t.operation_params::jsonb ->> 'amount')::numeric
+                   * (10::numeric ^ tok.decimals),
+                 0
+               )
+             ELSE 0
+           END), 0) AS reserved
+           FROM issuance_transactions t
+           JOIN issued_tokens tok ON tok.id = t.token_id
+           WHERE t.token_id = ? AND t.type = 'mint'
+             AND t.status IN ('pending', 'processing', 'failed')
+             AND t.updated_at >= ?
+         ),
+         resolved AS (
+           SELECT
+             GREATEST(
+               ?::numeric,
+               LEAST(
+                 COALESCE(tok.total_supply_cached, '0')::numeric,
+                 ?::numeric + live.reserved
+               )
+             ) AS supply,
+             live.reserved AS reserved
+           FROM issued_tokens tok, live
+           WHERE tok.id = ?${tenantRead.clause}
+         )
+         UPDATE issued_tokens
+         SET total_supply_cached = resolved.supply::text,
+             total_supply_updated_at = CASE
+               WHEN resolved.supply = ?::numeric THEN ?
+               ELSE issued_tokens.total_supply_updated_at
+             END,
+             updated_at = ?
+         FROM resolved
+         WHERE issued_tokens.id = ?${tenantWrite.clause}
+         RETURNING issued_tokens.total_supply_cached, resolved.reserved::text AS live_reserved`
       )
-      .bind(supplyBaseUnits, now, now, tokenId)
-      .run();
+      .bind(
+        tokenId,
+        since,
+        supplyBaseUnits,
+        supplyBaseUnits,
+        tokenId,
+        ...tenantRead.values,
+        supplyBaseUnits,
+        now,
+        now,
+        tokenId,
+        ...tenantWrite.values
+      )
+      .first<{ total_supply_cached: string; live_reserved: string }>();
+
+    if (!applied) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
+    }
+
+    // Held above the reading, so the figure on screen is SDP's own count and its
+    // "as of" stamp stays where it was — the next refresh past the window is what
+    // finishes the reconciliation.
+    if (applied && applied.total_supply_cached !== supplyBaseUnits) {
+      getLogger().warn(
+        {
+          event: "token_supply_refresh_deferred",
+          tokenId,
+          onChainSupplyBaseUnits: supplyBaseUnits,
+          recordedSupplyBaseUnits: applied.total_supply_cached,
+          liveReservedBaseUnits: applied.live_reserved,
+        },
+        "SDP's recorded supply is above the on-chain total by what in-flight mints could still add; kept the difference so no reservation is handed out twice. Refresh again once they settle."
+      );
+    }
+
+    // Reservations keep SDP's own mints under the cap, so a total above it means
+    // supply came from somewhere SDP does not admit — a mint authority used
+    // outside the platform.
+    // Worth saying out loud: the only other trace is a supply figure quietly larger
+    // than the cap beside it, and no further mints will be admitted.
+    if (updated.maxSupply) {
+      const maxSupply = parseDecimalAmount(updated.maxSupply, updated.decimals);
+      if (BigInt(supplyBaseUnits) > maxSupply) {
+        getLogger().warn(
+          {
+            event: "token_supply_exceeds_max_supply",
+            tokenId,
+            onChainSupplyBaseUnits: supplyBaseUnits,
+            maxSupplyBaseUnits: maxSupply.toString(),
+          },
+          "On-chain supply is above the token's configured max supply; it was not minted through SDP's cap. No further mints are admitted until the cap is raised."
+        );
+      }
     }
 
     return updated;
@@ -1065,6 +2088,14 @@ export class TokenService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   async createTransaction(input: CreateTokenTransactionInput): Promise<CreateTransactionResult> {
+    if (this.tenantScope) {
+      this.assertTenantOptions({
+        organizationId: input.organizationId,
+        projectId: this.tenantScope.projectId,
+      });
+      await this.assertTokenInTenant(input.tokenId);
+    }
+
     if (input.idempotencyKey && !input.idempotencyFingerprint) {
       throw badRequest("Missing idempotency fingerprint for idempotency key");
     }
@@ -1169,6 +2200,29 @@ export class TokenService {
   }
 
   /**
+   * Remove a transaction record that is known not to have reached an external
+   * submission boundary. Approved-operation recovery uses this to release its
+   * durable idempotency key after a fenced attempt fails before submission.
+   */
+  async deleteUnsubmittedTransaction(transactionId: string): Promise<boolean> {
+    const tenant = this.tenantTokenScope("token");
+    const row = await this.db
+      .prepare(
+        `DELETE FROM issuance_transactions AS tx
+         USING issued_tokens AS token
+         WHERE tx.id = ?
+           AND tx.token_id = token.id
+           AND tx.status = 'pending'
+           AND tx.signature IS NULL
+           AND tx.serialized_tx IS NULL${tenant.clause}
+         RETURNING tx.id`
+      )
+      .bind(transactionId, ...tenant.values)
+      .first<{ id: string }>();
+    return row?.id === transactionId;
+  }
+
+  /**
    * Update a token transaction
    */
   async updateTransaction(
@@ -1209,6 +2263,11 @@ export class TokenService {
       values.push(input.error);
     }
 
+    if (input.serializedTx !== undefined) {
+      updates.push("serialized_tx = ?");
+      values.push(input.serializedTx);
+    }
+
     if (input.params !== undefined) {
       updates.push("operation_params = ?");
       values.push(JSON.stringify(input.params));
@@ -1218,44 +2277,53 @@ export class TokenService {
     values.push(now);
     values.push(txId);
 
-    await this.db
-      .prepare(`UPDATE issuance_transactions SET ${updates.join(", ")} WHERE id = ?`)
-      .bind(...values)
+    const tenant = this.tenantTokenScope("tenant_token");
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE issuance_transactions
+         SET ${updates.join(", ")}
+         WHERE id = ?
+           AND EXISTS (
+             SELECT 1
+             FROM issued_tokens tenant_token
+             WHERE tenant_token.id = issuance_transactions.token_id${tenant.clause}
+           )`
+      )
+      .bind(...values, ...tenant.values)
       .run();
+
+    if (rowsAffected === 0) {
+      throw new Error("TRANSACTION_NOT_FOUND");
+    }
 
     if (input.status) {
       await this.insertTransactionStatus(txId, input.status, now);
     }
 
-    const row = await this.db
-      .prepare(
-        `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
-                signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id,
-                created_at, updated_at
-         FROM issuance_transactions WHERE id = ?`
-      )
-      .bind(txId)
-      .first<TokenTransactionRow>();
-
-    if (!row) {
+    const transaction = await this.getTransaction(txId);
+    if (!transaction) {
       throw new Error("TRANSACTION_NOT_FOUND");
     }
 
-    return this.mapRowToTransaction(row);
+    return transaction;
   }
 
   /**
    * Get a token transaction by ID
    */
   async getTransaction(txId: string): Promise<TokenTransaction | null> {
+    const tenant = this.tenantTokenScope("tenant_token");
     const row = await this.db
       .prepare(
-        `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
-                signature, serialized_tx, operation_params, slot, block_time, fee, error,
-                initiated_by_key_id, created_at, updated_at
-         FROM issuance_transactions WHERE id = ?`
+        `SELECT tx.id, tx.token_id, tx.organization_id, tx.type, tx.status, tx.idempotency_key,
+                tx.idempotency_fingerprint, tx.signature, tx.serialized_tx, tx.operation_params,
+                tx.slot, tx.block_time, tx.fee, tx.error, tx.initiated_by_key_id,
+                tx.created_at, tx.updated_at
+         FROM issuance_transactions tx
+         JOIN issued_tokens tenant_token ON tenant_token.id = tx.token_id
+         WHERE tx.id = ?${tenant.clause}`
       )
-      .bind(txId)
+      .bind(txId, ...tenant.values)
       .first<TokenTransactionRow>();
 
     if (!row) {
@@ -1269,15 +2337,21 @@ export class TokenService {
     organizationId: string,
     idempotencyKey: string
   ): Promise<TokenTransaction | null> {
+    if (this.tenantScope) {
+      this.assertTenantOptions({ organizationId, projectId: this.tenantScope.projectId });
+    }
+    const tenant = this.tenantTokenScope("tenant_token");
     const row = await this.db
       .prepare(
-        `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
-                signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id,
-                created_at, updated_at
-         FROM issuance_transactions
-         WHERE organization_id = ? AND idempotency_key = ?`
+        `SELECT tx.id, tx.token_id, tx.organization_id, tx.type, tx.status, tx.idempotency_key,
+                tx.idempotency_fingerprint, tx.signature, tx.serialized_tx, tx.operation_params,
+                tx.slot, tx.block_time, tx.fee, tx.error, tx.initiated_by_key_id,
+                tx.created_at, tx.updated_at
+         FROM issuance_transactions tx
+         JOIN issued_tokens tenant_token ON tenant_token.id = tx.token_id
+         WHERE tx.organization_id = ? AND tx.idempotency_key = ?${tenant.clause}`
       )
-      .bind(organizationId, idempotencyKey)
+      .bind(organizationId, idempotencyKey, ...tenant.values)
       .first<TokenTransactionRow>();
 
     if (!row) {
@@ -1298,6 +2372,11 @@ export class TokenService {
     } = {}
   ): Promise<{ transactions: TokenTransaction[]; total: number }> {
     const { status, type, organizationId, limit = 50, offset = 0 } = options;
+
+    await this.assertTokenInTenant(tokenId);
+    if (organizationId && this.tenantScope) {
+      this.assertTenantOptions({ organizationId, projectId: this.tenantScope.projectId });
+    }
 
     let countQuery = "SELECT COUNT(*) as count FROM issuance_transactions WHERE token_id = ?";
     let selectQuery = `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
@@ -1348,6 +2427,7 @@ export class TokenService {
     organizationId: string;
     projectId?: string | null;
   }): Promise<Array<{ tokenId: string; mintAddress: string }>> {
+    this.assertTenantOptions(options);
     const params: string[] = [options.organizationId];
     let query = `
       SELECT id, mint_address
@@ -1383,6 +2463,7 @@ export class TokenService {
     limit?: number;
     offset?: number;
   }): Promise<{ transactions: TokenTransactionListItem[]; total: number }> {
+    this.assertTenantOptions(options);
     const {
       organizationId,
       projectId,
@@ -1540,16 +2621,16 @@ export class TokenService {
   /**
    * Add an address to the token allowlist.
    *
-   * Returns `{ entry, wasReactivated }`. `wasReactivated` is `true` when this
-   * call promoted a previously-revoked row back to `active` (vs. inserting a
-   * fresh row). Callers rolling back after a downstream on-chain failure need
-   * this to choose between `deleteAllowlistEntry` (fresh row → hard-delete)
-   * and `revokeAllowlistEntry` (reactivated row → restore the prior `revoked`
-   * state, preserving the operator's original revocation record).
+   * `initialStatus: "pending"` gives on-chain callers a durable intent record
+   * before submission. A retry reuses that pending row; confirmed membership
+   * is promoted with `activateAllowlistEntry`. Database-only callers keep the
+   * default immediate `active` status.
    */
   async addAllowlistEntry(
     input: AddAllowlistInput
   ): Promise<{ entry: TokenAllowlistEntry; wasReactivated: boolean }> {
+    await this.assertTokenInTenant(input.tokenId);
+    const requestedStatus = input.initialStatus ?? "active";
     const existing = await this.db
       .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(input.tokenId, input.address)
@@ -1559,21 +2640,23 @@ export class TokenService {
       if (existing.status === "active") {
         throw new Error("ADDRESS_ALREADY_ALLOWLISTED");
       }
-      // Reactivate revoked entry — operator-initiated re-add.
+      const wasReactivated = existing.status === "revoked";
       await this.db
         .prepare(
-          "UPDATE token_allowlists SET status = 'active', revoked_at = NULL, label = ?, added_by = ? WHERE id = ?"
+          "UPDATE token_allowlists SET status = ?, revoked_at = NULL, label = ?, added_by = ? WHERE id = ?"
         )
-        .bind(input.label ?? null, input.addedBy, existing.id)
+        .bind(requestedStatus, input.label ?? null, input.addedBy, existing.id)
         .run();
 
-      await this.insertAllowlistStatus(existing.id, "active", new Date().toISOString());
+      if (existing.status !== requestedStatus) {
+        await this.insertAllowlistStatus(existing.id, requestedStatus, new Date().toISOString());
+      }
 
       const entry = await this.getAllowlistEntry(existing.id);
       if (!entry) {
         throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
       }
-      return { entry, wasReactivated: true };
+      return { entry, wasReactivated };
     }
 
     const entry = await this.insertNewAllowlistEntry(input);
@@ -1594,6 +2677,7 @@ export class TokenService {
    *   so the mint short-circuits to 403 instead of silently un-revoking.
    */
   async addAllowlistEntryStrict(input: AddAllowlistInput): Promise<TokenAllowlistEntry> {
+    await this.assertTokenInTenant(input.tokenId);
     const existing = await this.db
       .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(input.tokenId, input.address)
@@ -1618,7 +2702,7 @@ export class TokenService {
       tokenId: input.tokenId,
       address: input.address,
       label: input.label ?? null,
-      status: "active",
+      status: input.initialStatus ?? "active",
       addedBy: input.addedBy,
       createdAt: now,
       revokedAt: null,
@@ -1661,13 +2745,16 @@ export class TokenService {
   }
 
   async getAllowlistEntry(entryId: string): Promise<TokenAllowlistEntry | null> {
+    const tenant = this.tenantTokenScope("tenant_token");
     const row = await this.db
       .prepare(
-        `SELECT id, token_id, address, label,
-                status, added_by, created_at, revoked_at
-         FROM token_allowlists WHERE id = ?`
+        `SELECT allowlist.id, allowlist.token_id, allowlist.address, allowlist.label,
+                allowlist.status, allowlist.added_by, allowlist.created_at, allowlist.revoked_at
+         FROM token_allowlists allowlist
+         JOIN issued_tokens tenant_token ON tenant_token.id = allowlist.token_id
+         WHERE allowlist.id = ?${tenant.clause}`
       )
-      .bind(entryId)
+      .bind(entryId, ...tenant.values)
       .first<AllowlistRow>();
 
     if (!row) {
@@ -1687,6 +2774,7 @@ export class TokenService {
       offset?: number;
     } = {}
   ): Promise<{ entries: TokenAllowlistEntry[]; total: number }> {
+    await this.assertTokenInTenant(tokenId);
     const { status = "active", search, label, limit = 50, offset = 0 } = options;
 
     // Shared WHERE for the data + count queries. Search is a contains-style
@@ -1741,6 +2829,7 @@ export class TokenService {
     tokenId: string,
     options: { status?: AllowlistEntryStatus } = {}
   ): Promise<{ labels: string[]; total: number }> {
+    await this.assertTokenInTenant(tokenId);
     const { status = "active" } = options;
 
     const [labelsResult, countResult] = await Promise.all([
@@ -1766,6 +2855,7 @@ export class TokenService {
   }
 
   async isAddressAllowed(tokenId: string, address: string): Promise<boolean> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare(
         "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
@@ -1787,23 +2877,65 @@ export class TokenService {
   async getAllowlistEntryStatusByAddress(
     tokenId: string,
     address: string
-  ): Promise<"active" | "revoked" | null> {
+  ): Promise<AllowlistEntryStatus | null> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare("SELECT status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(tokenId, address)
-      .first<{ status: "active" | "revoked" }>();
+      .first<{ status: AllowlistEntryStatus }>();
 
     return row?.status ?? null;
   }
 
   async revokeAllowlistEntry(entryId: string): Promise<void> {
     const now = new Date().toISOString();
-    await this.db
-      .prepare("UPDATE token_allowlists SET status = 'revoked', revoked_at = ? WHERE id = ?")
-      .bind(now, entryId)
+    const tenant = this.tenantTokenScope("tenant_token");
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE token_allowlists
+         SET status = 'revoked', revoked_at = ?
+         WHERE id = ?
+           AND EXISTS (
+             SELECT 1
+             FROM issued_tokens tenant_token
+             WHERE tenant_token.id = token_allowlists.token_id${tenant.clause}
+           )`
+      )
+      .bind(now, entryId, ...tenant.values)
       .run();
 
+    if (rowsAffected === 0) {
+      throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
+    }
+
     await this.insertAllowlistStatus(entryId, "revoked", now);
+  }
+
+  async activateAllowlistEntry(entryId: string): Promise<TokenAllowlistEntry> {
+    const now = new Date().toISOString();
+    const tenant = this.tenantTokenScope("tenant_token");
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE token_allowlists
+         SET status = 'active', revoked_at = NULL
+         WHERE id = ? AND status = 'pending'
+           AND EXISTS (
+             SELECT 1
+             FROM issued_tokens tenant_token
+             WHERE tenant_token.id = token_allowlists.token_id${tenant.clause}
+           )`
+      )
+      .bind(entryId, ...tenant.values)
+      .run();
+
+    if (rowsAffected > 0) {
+      await this.insertAllowlistStatus(entryId, "active", now);
+    }
+    const entry = await this.getAllowlistEntry(entryId);
+    if (!entry) {
+      throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
+    }
+    return entry;
   }
 
   /**
@@ -1817,7 +2949,23 @@ export class TokenService {
    * `ON DELETE CASCADE`, so status history rows are removed by the database.
    */
   async deleteAllowlistEntry(entryId: string): Promise<void> {
-    await this.db.prepare("DELETE FROM token_allowlists WHERE id = ?").bind(entryId).run();
+    const tenant = this.tenantTokenScope("tenant_token");
+    const rowsAffected = await this.db
+      .prepare(
+        `DELETE FROM token_allowlists
+         WHERE id = ?
+           AND EXISTS (
+             SELECT 1
+             FROM issued_tokens tenant_token
+             WHERE tenant_token.id = token_allowlists.token_id${tenant.clause}
+           )`
+      )
+      .bind(entryId, ...tenant.values)
+      .run();
+
+    if (rowsAffected === 0) {
+      throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1825,6 +2973,7 @@ export class TokenService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   async freezeAccount(input: FreezeAccountInput): Promise<FrozenAccount> {
+    await this.assertTokenInTenant(input.tokenId);
     const existing = await this.db
       .prepare(
         `SELECT id, token_id, account_address, reason, frozen_at, frozen_by, unfrozen_at, unfrozen_by
@@ -1897,6 +3046,7 @@ export class TokenService {
     accountAddress: string,
     unfrozenBy: string
   ): Promise<FrozenAccount> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare(
         `SELECT id, token_id, account_address, reason, frozen_at, frozen_by, unfrozen_at, unfrozen_by
@@ -1932,6 +3082,7 @@ export class TokenService {
    * Check if an account is frozen
    */
   async isAccountFrozen(tokenId: string, accountAddress: string): Promise<boolean> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare(
         "SELECT id FROM frozen_accounts WHERE token_id = ? AND account_address = ? AND unfrozen_at IS NULL"
@@ -1950,6 +3101,7 @@ export class TokenService {
     accountAddress: string,
     includeUnfrozen = false
   ): Promise<FrozenAccount | null> {
+    await this.assertTokenInTenant(tokenId);
     const row = await this.db
       .prepare(
         `SELECT id, token_id, account_address, reason, frozen_at, frozen_by, unfrozen_at, unfrozen_by
@@ -1975,6 +3127,7 @@ export class TokenService {
     tokenId: string,
     options: { includeUnfrozen?: boolean; limit?: number; offset?: number } = {}
   ): Promise<{ frozenAccounts: FrozenAccount[]; total: number }> {
+    await this.assertTokenInTenant(tokenId);
     const { includeUnfrozen = false, limit = 50, offset = 0 } = options;
 
     const unfrozenFilter = includeUnfrozen ? "" : "AND unfrozen_at IS NULL";

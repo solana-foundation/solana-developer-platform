@@ -34,7 +34,10 @@ export function emitLifecycle(
   c: AppContext,
   instance: PrivateChannelInstanceRow,
   type: PrivateChannelEventType,
-  extra?: { channelId?: string | null; payload?: Record<string, unknown> }
+  extra?: {
+    channelId?: string | null;
+    payload?: Record<string, unknown>;
+  }
 ): Promise<void> {
   return getPrivateChannelEventService(c).emit({
     organizationId: instance.organization_id,
@@ -65,7 +68,10 @@ export function emitMember(
   c: AppContext,
   scope: PrivateChannelEventScope,
   type: PrivateChannelEventType,
-  extra?: { channelId?: string | null; payload?: Record<string, unknown> }
+  extra?: {
+    channelId?: string | null;
+    payload?: Record<string, unknown>;
+  }
 ): Promise<void> {
   return getPrivateChannelEventService(c).emit({
     organizationId: scope.organizationId,

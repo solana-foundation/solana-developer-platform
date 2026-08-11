@@ -9,6 +9,7 @@
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
+import { SdpEarnError } from "@sdp/earn/errors";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
@@ -18,6 +19,7 @@ import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
+import { dryRunMiddleware } from "@/middleware/dry-run";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -31,6 +33,7 @@ import compliance from "@/routes/compliance";
 import counterparties from "@/routes/counterparties";
 import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
+import earn from "@/routes/earn";
 import health from "@/routes/health";
 import internalCustody from "@/routes/internal-custody";
 import issuance from "@/routes/issuance";
@@ -92,6 +95,7 @@ function mapErrorStatusCode(statusCode: number): ContentfulStatusCode {
     case 409:
     case 429:
     case 500:
+    case 501:
     case 502:
     case 503:
       return statusCode;
@@ -285,6 +289,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Idempotency-Key validation + response echo (public API only)
   app.use("/v1/*", idempotencyKeyMiddleware());
+  app.use("/v1/*", dryRunMiddleware());
 
   // Request trace + duration logging
   app.use("*", requestTracingMiddleware());
@@ -351,6 +356,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/wallets", wallets);
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
+  v1.route("/earn", earn);
   v1.route("/places", places);
   v1.route("/policies", policies);
   v1.route("/private-channels", privateChannels);
@@ -398,7 +404,11 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       );
     }
 
-    if (err instanceof SdpRpcError || err instanceof SdpPaymentsError) {
+    if (
+      err instanceof SdpRpcError ||
+      err instanceof SdpPaymentsError ||
+      err instanceof SdpEarnError
+    ) {
       const details = err.details ? redactCredentialSecrets(err.details) : undefined;
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(

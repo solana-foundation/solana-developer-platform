@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresPrivateChannelInstanceRepository } from "./private-channel-instance.repository.postgres";
 import type { PrivateChannelUserRepository } from "./private-channel-user.repository";
 import { createPostgresPrivateChannelUserRepository } from "./private-channel-user.repository.postgres";
@@ -11,6 +11,7 @@ import { createPostgresPrivateChannelVerifiedWalletRepository } from "./private-
 
 const TEST_PROJECT_ID = "prj_pcu_repo_test";
 const PCU_ID = "pcu_pcu_repo_test";
+const PROJECT_MEMBER_ID = "pm_pcu_repo_test";
 const PUBKEY_A = "So11111111111111111111111111111111111111112";
 const PUBKEY_B = "So11111111111111111111111111111111111111113";
 
@@ -28,7 +29,7 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {
@@ -36,6 +37,7 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
     await db.prepare("DELETE FROM private_channel_verified_wallets").run();
     await db.prepare("DELETE FROM private_channel_users").run();
     await db.prepare("DELETE FROM private_channel_instances").run();
+    await db.prepare("DELETE FROM project_members").run();
     await db.prepare("DELETE FROM projects").run();
 
     await db
@@ -56,6 +58,13 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
            VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
       )
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'developer')`
+      )
+      .bind(PROJECT_MEMBER_ID, TEST_PROJECT_ID, TEST_USER.id)
       .run();
     await db
       .prepare(
@@ -144,5 +153,31 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
 
     const [listed] = await repo.listByProject(scope);
     expect(listed.verified_wallet_count).toBe(0);
+  });
+
+  // project_role sources from project_members via LEFT JOIN so orphaned PCU
+  // rows (user removed from project) stay visible for cleanup; invite-time
+  // enforcement lives in the invite handler.
+  it("surfaces the caller's project_members role", async () => {
+    const db = getDb(env);
+    await db
+      .prepare("UPDATE project_members SET role = 'admin' WHERE id = ?")
+      .bind(PROJECT_MEMBER_ID)
+      .run();
+
+    const [listed] = await repo.listByProject(scope);
+    expect(listed.project_role).toBe("admin");
+    const fetched = await repo.getByProjectAndUser(scope, TEST_USER.id);
+    expect(fetched?.project_role).toBe("admin");
+  });
+
+  it("keeps the PCU visible with null role when project_members is removed", async () => {
+    const db = getDb(env);
+    await db.prepare("DELETE FROM project_members WHERE id = ?").bind(PROJECT_MEMBER_ID).run();
+
+    const [listed] = await repo.listByProject(scope);
+    expect(listed.project_role).toBeNull();
+    const fetched = await repo.getByProjectAndUser(scope, TEST_USER.id);
+    expect(fetched?.project_role).toBeNull();
   });
 });

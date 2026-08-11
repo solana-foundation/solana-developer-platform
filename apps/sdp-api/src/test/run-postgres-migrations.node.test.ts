@@ -25,6 +25,14 @@ function readMigration(migrationFile: string) {
 }
 
 describe("Postgres migration runner", () => {
+  it("backfills historical confirmed burns before enabling replay bookkeeping", () => {
+    const sql = readMigration("0050_issuance_supply_bookkeeping.sql");
+
+    expect(sql).toMatch(
+      /UPDATE issuance_transactions\s+SET supply_bookkeeping_applied_at = updated_at\s+WHERE type IN \('burn', 'force_burn'\)\s+AND status = 'confirmed'\s+AND supply_bookkeeping_applied_at IS NULL;/
+    );
+  });
+
   it("installs pg_trgm before building each ledger index concurrently", () => {
     const extensionMigration = "0027_payment_transfer_ledger_indexes.sql";
     const extensionRepairMigration = "0027a_enable_pg_trgm.sql";

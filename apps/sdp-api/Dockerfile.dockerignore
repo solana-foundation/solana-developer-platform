@@ -18,9 +18,11 @@ apps/sdp-docs
 packages/*
 !packages/sdp-types
 !packages/sdp-env-config
+!packages/sdp-earn
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-solana
+!packages/sdp-policy
 !packages/sdp-payments
 !packages/sdp-issuance
 !packages/sdp-private-channels

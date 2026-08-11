@@ -38,6 +38,7 @@ COPY apps/sdp-web/package.json ./apps/sdp-web/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
+COPY packages/sdp-policy/package.json ./packages/sdp-policy/
 # sdp-web imports @sdp/issuance/capabilities (advanced-settings catalog); pull the
 # package and its workspace deps (@sdp/payments) into the frozen-install closure.
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
@@ -58,6 +59,7 @@ COPY apps/sdp-web ./apps/sdp-web
 COPY packages/sdp-types ./packages/sdp-types
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-solana ./packages/sdp-solana
+COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-issuance ./packages/sdp-issuance
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-private-channels ./packages/sdp-private-channels
@@ -71,7 +73,6 @@ ARG NEXT_PUBLIC_SOLANA_NETWORK=__SDP_RT_NEXT_PUBLIC_SOLANA_NETWORK__
 ARG NEXT_PUBLIC_SENTRY_DSN
 ARG NEXT_PUBLIC_ENABLE_NETWORK_DEBUG
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=__SDP_RT_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY__
-ARG NEXT_PUBLIC_CLERK_JWT_TEMPLATE
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL
@@ -83,7 +84,6 @@ ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
     NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN \
     NEXT_PUBLIC_ENABLE_NETWORK_DEBUG=$NEXT_PUBLIC_ENABLE_NETWORK_DEBUG \
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
-    NEXT_PUBLIC_CLERK_JWT_TEMPLATE=$NEXT_PUBLIC_CLERK_JWT_TEMPLATE \
     NEXT_PUBLIC_CLERK_SIGN_IN_URL=$NEXT_PUBLIC_CLERK_SIGN_IN_URL \
     NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=$NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL \
     NEXT_PUBLIC_CLERK_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_URL \

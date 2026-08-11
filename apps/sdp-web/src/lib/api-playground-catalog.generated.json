@@ -4,7 +4,7 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "modules": {
       "wallets": 19,
-      "payments": 40,
+      "payments": 38,
       "counterparties": 12,
       "issuance": 35
     }
@@ -49,12 +49,12 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"local\"\n}",
+            "defaultValue": "{\n  \"provider\": \"privy\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
-          "configId": "cfg_example",
+          "connectionId": "cconn_example",
           "publicKey": "So11111111111111111111111111111111111111112",
           "walletId": "privy_wallet_123"
         }
@@ -615,6 +615,9 @@
                   "amount": "example",
                   "destination": "example",
                   "status": "pending_approval",
+                  "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                  "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                  "executionError": "example",
                   "createdAt": "2025-01-01T00:00:00.000Z",
                   "updatedAt": "2025-01-01T00:00:00.000Z"
                 },
@@ -687,6 +690,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -758,6 +764,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -829,6 +838,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -900,6 +912,9 @@
                 "amount": "example",
                 "destination": "example",
                 "status": "pending_approval",
+                "executionStartedAt": "2025-01-01T00:00:00.000Z",
+                "executionCompletedAt": "2025-01-01T00:00:00.000Z",
+                "executionError": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               },
@@ -3338,7 +3353,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"authorizationSignature\": \"sig_example\",\n  \"status\": \"active\"\n}",
+            "defaultValue": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
             "required": true
           }
         ],
@@ -3684,7 +3699,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"amount\": \"25.00\",\n  \"receiverTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
+            "defaultValue": "{\n  \"receiverTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
             "required": true
           }
         ],
@@ -3775,113 +3790,6 @@
               "cancelAt": "2025-01-01T00:00:00.000Z",
               "canceledAt": "2025-01-01T00:00:00.000Z",
               "createdBy": "example",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "updatedAt": "2025-01-01T00:00:00.000Z"
-            }
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "update-payment-subscription",
-        "operationId": "updatePaymentSubscription",
-        "title": "Update subscription",
-        "method": "PATCH",
-        "path": "/v1/payments/subscriptions/{subscriptionId}",
-        "pathFields": [
-          {
-            "key": "subscriptionId",
-            "label": "{subscriptionId}",
-            "description": "SDP subscription record ID.",
-            "defaultValue": "psub_example",
-            "required": true
-          }
-        ],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"status\": \"active\"\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "data": {
-            "subscription": {
-              "id": "psub_example",
-              "organizationId": "org_example",
-              "projectId": "prj_example",
-              "planId": "plan_example",
-              "counterpartyId": "counterparty_example",
-              "subscriberAddress": "So11111111111111111111111111111111111111112",
-              "subscriberTokenAccount": "So11111111111111111111111111111111111111112",
-              "subscriptionPda": "So11111111111111111111111111111111111111112",
-              "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
-              "authorizationSignature": "example",
-              "status": "active",
-              "currentPeriodStartAt": "2025-01-01T00:00:00.000Z",
-              "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
-              "cancelAt": "2025-01-01T00:00:00.000Z",
-              "canceledAt": "2025-01-01T00:00:00.000Z",
-              "createdBy": "example",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "updatedAt": "2025-01-01T00:00:00.000Z"
-            }
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "create-payment-subscription-collection-attempt",
-        "operationId": "createPaymentSubscriptionCollectionAttempt",
-        "title": "Create subscription collection attempt",
-        "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
-        "pathFields": [
-          {
-            "key": "subscriptionId",
-            "label": "{subscriptionId}",
-            "description": "SDP subscription record ID.",
-            "defaultValue": "psub_example",
-            "required": true
-          }
-        ],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"status\": \"pending\",\n  \"metadata\": {}\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "data": {
-            "collectionAttempt": {
-              "id": "psca_example",
-              "organizationId": "org_example",
-              "projectId": "prj_example",
-              "subscriptionId": "subscription_example",
-              "transferId": "xfr_example",
-              "token": "example",
-              "amount": "100.00",
-              "dueAt": "2025-01-01T00:00:00.000Z",
-              "attemptedAt": "2025-01-01T00:00:00.000Z",
-              "status": "pending",
-              "signature": "example",
-              "error": "example",
-              "metadata": {},
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
             }
@@ -4015,10 +3923,6 @@
                 "value": "AMD"
               },
               {
-                "label": "ANG",
-                "value": "ANG"
-              },
-              {
                 "label": "AOA",
                 "value": "AOA"
               },
@@ -4049,10 +3953,6 @@
               {
                 "label": "BDT",
                 "value": "BDT"
-              },
-              {
-                "label": "BGN",
-                "value": "BGN"
               },
               {
                 "label": "BHD",
@@ -4121,10 +4021,6 @@
               {
                 "label": "CRC",
                 "value": "CRC"
-              },
-              {
-                "label": "CUC",
-                "value": "CUC"
               },
               {
                 "label": "CUP",
@@ -4217,10 +4113,6 @@
               {
                 "label": "HNL",
                 "value": "HNL"
-              },
-              {
-                "label": "HRK",
-                "value": "HRK"
               },
               {
                 "label": "HTG",
@@ -4491,10 +4383,6 @@
                 "value": "SLE"
               },
               {
-                "label": "SLL",
-                "value": "SLL"
-              },
-              {
                 "label": "SOS",
                 "value": "SOS"
               },
@@ -4509,10 +4397,6 @@
               {
                 "label": "STN",
                 "value": "STN"
-              },
-              {
-                "label": "SVC",
-                "value": "SVC"
               },
               {
                 "label": "SYP",
@@ -4788,10 +4672,6 @@
                 "value": "AMD"
               },
               {
-                "label": "ANG",
-                "value": "ANG"
-              },
-              {
                 "label": "AOA",
                 "value": "AOA"
               },
@@ -4822,10 +4702,6 @@
               {
                 "label": "BDT",
                 "value": "BDT"
-              },
-              {
-                "label": "BGN",
-                "value": "BGN"
               },
               {
                 "label": "BHD",
@@ -4894,10 +4770,6 @@
               {
                 "label": "CRC",
                 "value": "CRC"
-              },
-              {
-                "label": "CUC",
-                "value": "CUC"
               },
               {
                 "label": "CUP",
@@ -4990,10 +4862,6 @@
               {
                 "label": "HNL",
                 "value": "HNL"
-              },
-              {
-                "label": "HRK",
-                "value": "HRK"
               },
               {
                 "label": "HTG",
@@ -5264,10 +5132,6 @@
                 "value": "SLE"
               },
               {
-                "label": "SLL",
-                "value": "SLL"
-              },
-              {
                 "label": "SOS",
                 "value": "SOS"
               },
@@ -5282,10 +5146,6 @@
               {
                 "label": "STN",
                 "value": "STN"
-              },
-              {
-                "label": "SVC",
-                "value": "SVC"
               },
               {
                 "label": "SYP",
@@ -5946,10 +5806,6 @@
                 "value": "AMD"
               },
               {
-                "label": "ANG",
-                "value": "ANG"
-              },
-              {
                 "label": "AOA",
                 "value": "AOA"
               },
@@ -5980,10 +5836,6 @@
               {
                 "label": "BDT",
                 "value": "BDT"
-              },
-              {
-                "label": "BGN",
-                "value": "BGN"
               },
               {
                 "label": "BHD",
@@ -6052,10 +5904,6 @@
               {
                 "label": "CRC",
                 "value": "CRC"
-              },
-              {
-                "label": "CUC",
-                "value": "CUC"
               },
               {
                 "label": "CUP",
@@ -6148,10 +5996,6 @@
               {
                 "label": "HNL",
                 "value": "HNL"
-              },
-              {
-                "label": "HRK",
-                "value": "HRK"
               },
               {
                 "label": "HTG",
@@ -6422,10 +6266,6 @@
                 "value": "SLE"
               },
               {
-                "label": "SLL",
-                "value": "SLL"
-              },
-              {
                 "label": "SOS",
                 "value": "SOS"
               },
@@ -6440,10 +6280,6 @@
               {
                 "label": "STN",
                 "value": "STN"
-              },
-              {
-                "label": "SVC",
-                "value": "SVC"
               },
               {
                 "label": "SYP",
@@ -7456,7 +7292,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true\n}",
+            "defaultValue": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
             "required": true
           }
         ],

@@ -4,7 +4,7 @@ import { getDb } from "@/db";
 import type { KVStore, KVStoreSet } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
 const TEST_ORG_ID = "org_rpc_service_test";
@@ -48,7 +48,7 @@ describe("rpc-relay.service", () => {
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {

@@ -4,11 +4,17 @@ import { SigningError } from "@sdp/custody/signing";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";
-import { isPrivyByokProvisioningEnabled } from "@/lib/feature-flags";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
+import {
+  type CustodyConnectionSelectionResult,
+  CustodyRuntimeTargets,
+  selectCustodyConnectionTarget,
+} from "@/services/domain/signing/custody-runtime-target";
 import {
   type FireblocksProviderConfig,
   parseConfigRecord,
@@ -25,7 +31,7 @@ import {
   type InitializeSigningResponse,
   initializeSigningSchema,
   type SwitchProviderOptionsResponse,
-  type SwitchSigningRequest,
+  type SwitchSigningResponse,
   switchSigningSchema,
 } from "../schemas";
 
@@ -81,7 +87,7 @@ export const initializeSigning = async (c: AppContext) => {
     });
   }
 
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
 
   try {
     const result = await initializeProviderConnection(
@@ -127,19 +133,60 @@ export const switchSigning = async (c: AppContext) => {
     });
   }
 
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const auditService = new AuditService(getDb(c.env));
   const projectId = c.get("projectId");
-  const targetProvider = parsed.data.provider;
-
-  const existingScopeConfig = await findScopeConfigByProvider(
-    c,
-    actor.organizationId,
-    projectId,
-    targetProvider
-  );
+  const requestedProvider = parsed.data.provider;
+  const providerRequest = "connectionId" in parsed.data ? null : parsed.data;
 
   try {
+    let connectionId = "connectionId" in parsed.data ? parsed.data.connectionId : undefined;
+    if (
+      !connectionId &&
+      projectId &&
+      requestedProvider &&
+      isCustodyConnectionRuntimeEnabled(c.env, requestedProvider)
+    ) {
+      const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
+        kind: "provider",
+        organizationId: actor.organizationId,
+        projectId,
+        provider: requestedProvider,
+      });
+      if (target?.kind === "connection") {
+        connectionId = target.connectionId;
+      }
+    }
+
+    if (connectionId) {
+      if (!projectId) {
+        throw badRequest("Project scope is required");
+      }
+      const result = await selectCustodyConnectionTarget(getDb(c.env), c.env, {
+        organizationId: actor.organizationId,
+        projectId,
+        connectionId,
+        provider: requestedProvider,
+      });
+      await logDefaultProviderChanged(c, auditService, result.connectionId, {
+        projectId,
+        provider: result.provider,
+        resourceType: "custody_connection",
+      });
+      clearWalletCaches();
+      return created(c, toSwitchSigningResponse(result));
+    }
+
+    if (!providerRequest) {
+      throw badRequest("Provider is required when connectionId is omitted");
+    }
+    const targetProvider = providerRequest.provider;
+    const existingScopeConfig = await findScopeConfigByProvider(
+      c,
+      actor.organizationId,
+      projectId,
+      targetProvider
+    );
     let result: SigningInitializationResult;
 
     if (existingScopeConfig?.status === "active") {
@@ -173,7 +220,7 @@ export const switchSigning = async (c: AppContext) => {
         actor.organizationId,
         await resolveOrganizationSlug(c, actor.organizationId),
         projectId,
-        parsed.data
+        providerRequest
       );
 
       await signingService.setDefaultConfiguration(
@@ -204,7 +251,7 @@ export const switchSigning = async (c: AppContext) => {
 
     clearWalletCaches();
 
-    return created(c, toInitializeSigningResponse(result));
+    return created(c, toSwitchSigningResponse(result));
   } catch (error) {
     handleSigningInitializationError(error);
   }
@@ -213,7 +260,7 @@ export const switchSigning = async (c: AppContext) => {
 export const getSwitchProviderOptions = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
-  const signingService = createSigningService(c.env);
+  const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const enabledProviders = (await getEnabledProviders(c.env, getDb(c.env), actor.organizationId))
     .custody;
   const [reuseState, configurations] = await Promise.all([
@@ -266,7 +313,7 @@ async function initializeProviderConnection(
   organizationId: string,
   organizationSlug: string,
   projectId: string | undefined,
-  request: InitializeSigningRequest | SwitchSigningRequest
+  request: InitializeSigningRequest
 ): Promise<SigningInitializationResult> {
   if (request.provider === "privy") {
     await assertFreshPrivyLegacySetupAllowed(c, organizationId, projectId);
@@ -365,6 +412,10 @@ async function assertFreshPrivyLegacySetupAllowed(
     throw badRequest("Project scope is required");
   }
 
+  if (!isCustodyConnectionRuntimeEnabled(c.env, "privy")) {
+    return;
+  }
+
   const blockingConnection = await getDb(c.env)
     .prepare(
       `SELECT id
@@ -387,7 +438,7 @@ async function assertFreshPrivyLegacySetupAllowed(
   }
 
   const availability = await getProviderAvailability(c.env, getDb(c.env), organizationId);
-  if (availability.providers.custody.privy.entitled && isPrivyByokProvisioningEnabled(c.env)) {
+  if (availability.providers.custody.privy.entitled) {
     throw forbidden("New Privy setup must use stored credentials");
   }
 }
@@ -535,11 +586,12 @@ async function logDefaultProviderChanged(
   params: {
     projectId: string | undefined;
     provider: CustodyProvider;
+    resourceType?: "custody_config" | "custody_connection";
   }
 ): Promise<void> {
   await auditService.log(c, {
     action: "update",
-    resourceType: "custody_config",
+    resourceType: params.resourceType ?? "custody_config",
     resourceId,
     metadata: {
       event: "default_provider_changed",
@@ -557,6 +609,19 @@ function toInitializeSigningResponse(
     publicKey: result.publicKey,
     walletId: result.walletId,
   };
+}
+
+function toSwitchSigningResponse(
+  result: SigningInitializationResult | CustodyConnectionSelectionResult
+): SwitchSigningResponse {
+  if ("connectionId" in result) {
+    return {
+      connectionId: result.connectionId,
+      publicKey: result.publicKey,
+      walletId: result.walletId,
+    };
+  }
+  return toInitializeSigningResponse(result);
 }
 
 function handleSigningInitializationError(error: unknown): never {

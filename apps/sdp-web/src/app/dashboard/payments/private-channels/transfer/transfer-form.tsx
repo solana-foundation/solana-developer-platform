@@ -3,6 +3,7 @@
 import type {
   CustodyWalletSummary,
   PrivateChannelMembershipChannelDto,
+  PrivateChannelToken,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
 } from "@sdp/types";
@@ -40,6 +41,7 @@ interface TransferFormProps {
   channels: PrivateChannelMembershipChannelDto[];
   scopeKey: string;
   sourceWallets: CustodyWalletSummary[];
+  tokens: PrivateChannelToken[];
 }
 
 function shortenPubkey(pubkey: string): string {
@@ -51,34 +53,44 @@ function walletLabel(wallet: CustodyWalletSummary): string {
   return wallet.label ? `${wallet.label} (${short})` : short;
 }
 
-function flattenRecipientOptions(
-  recipients: PrivateChannelTransferRecipientDto[]
+/**
+ * Recipients are wallets, not people, so a member holding several verified
+ * wallets yields several options. The source wallet is dropped because a
+ * transfer to itself is rejected by the API.
+ */
+function toRecipientOptions(
+  recipients: PrivateChannelTransferRecipientDto[],
+  sourcePubkey: string | undefined
 ): RecipientOption[] {
-  return recipients.flatMap((recipient) => {
-    const member = recipient.name?.trim()
-      ? `${recipient.name.trim()} (${recipient.email})`
-      : recipient.email;
-    return recipient.wallets.map((wallet) => ({
-      id: wallet.id,
-      label: `${member} · ${shortenPubkey(wallet.pubkey)}`,
-    }));
-  });
+  return recipients
+    .filter((recipient) => recipient.pubkey !== sourcePubkey)
+    .map((recipient) => {
+      const short = shortenPubkey(recipient.pubkey);
+      const walletName = recipient.walletName?.trim();
+      return { id: recipient.id, label: walletName ? `${walletName} (${short})` : short };
+    });
 }
 
 export function TransferForm({ scopeKey, ...props }: TransferFormProps) {
   return <TransferFormState key={scopeKey} {...props} />;
 }
 
-function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, "scopeKey">) {
+function TransferFormState({
+  channels,
+  sourceWallets,
+  tokens,
+}: Omit<TransferFormProps, "scopeKey">) {
   const t = useTranslations();
   const [channelId, setChannelId] = useState(channels[0]?.id ?? "");
   const [walletId, setWalletId] = useState(sourceWallets[0]?.walletId ?? "");
+  const [mint, setMint] = useState(tokens[0]?.mint ?? "");
   const [recipientVerifiedWalletId, setRecipientVerifiedWalletId] = useState("");
   const [amount, setAmount] = useState("");
   const [showAmountError, setShowAmountError] = useState(false);
   const [recipientLoad, setRecipientLoad] = useState<RecipientLoadState>({ status: "idle" });
   const [recipientReload, setRecipientReload] = useState(0);
   const [balances, setBalances] = useState<WalletBalanceView>({ channel: null, onChain: null });
+  const [balanceRefetchKey, setBalanceRefetchKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [submittedTransfer, setSubmittedTransfer] = useState<SubmittedTransfer | null>(null);
   const [isSubmitting, startTransition] = useTransition();
@@ -92,10 +104,14 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
    */
   const submitting = useRef(false);
 
+  const selectedSource = sourceWallets.find((wallet) => wallet.walletId === walletId);
+  const sourcePubkey = selectedSource?.publicKey;
   const recipientOptions = useMemo(
     () =>
-      recipientLoad.status === "ready" ? flattenRecipientOptions(recipientLoad.recipients) : [],
-    [recipientLoad]
+      recipientLoad.status === "ready"
+        ? toRecipientOptions(recipientLoad.recipients, sourcePubkey)
+        : [],
+    [recipientLoad, sourcePubkey]
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: recipientReload intentionally triggers a fresh server-action request.
@@ -142,6 +158,20 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
     };
   }, [channelId, channels.length, recipientReload, sourceWallets.length, t]);
 
+  /**
+   * Switching the source wallet to the one already chosen as recipient drops that
+   * option, so a selection that is no longer offered must not survive as state.
+   */
+  useEffect(() => {
+    if (
+      recipientVerifiedWalletId &&
+      !recipientOptions.some((option) => option.id === recipientVerifiedWalletId)
+    ) {
+      setRecipientVerifiedWalletId("");
+    }
+  }, [recipientOptions, recipientVerifiedWalletId]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: balanceRefetchKey intentionally triggers a fresh balance read.
   useEffect(() => {
     if (!walletId) {
       setBalances({ channel: null, onChain: null });
@@ -149,13 +179,13 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
     }
     let active = true;
     setBalances({ channel: null, onChain: null });
-    fetchWalletBalancesAction(walletId).then((result) => {
+    fetchWalletBalancesAction(walletId, mint || undefined).then((result) => {
       if (active) setBalances(result);
     });
     return () => {
       active = false;
     };
-  }, [walletId]);
+  }, [walletId, mint, balanceRefetchKey]);
 
   if (channels.length === 0) {
     return (
@@ -171,7 +201,6 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
     );
   }
 
-  const selectedSource = sourceWallets.find((wallet) => wallet.walletId === walletId);
   const selectedRecipient = recipientOptions.find(
     (recipient) => recipient.id === recipientVerifiedWalletId
   );
@@ -181,10 +210,12 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
     setSubmittedTransfer(null);
     setChannelId(channels[0]?.id ?? "");
     setWalletId(sourceWallets[0]?.walletId ?? "");
+    setMint(tokens[0]?.mint ?? "");
     setRecipientVerifiedWalletId("");
     setAmount("");
     setShowAmountError(false);
     setError(null);
+    setBalanceRefetchKey((value) => value + 1);
     setRecipientReload((value) => value + 1);
   };
 
@@ -201,6 +232,10 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
 
   const amountErrorKey = showAmountError ? getAmountError(amount) : null;
   const amountError = amountErrorKey ? t(amountErrorKey) : null;
+  // Falls back to the first token so a `mint` left over from a changed token list
+  // cannot leave the label and the payload disagreeing. Relevant here because the
+  // remount key excludes the instance's RPC URL, so `tokens` can change in place.
+  const selectedToken = tokens.find((token) => token.mint === mint) ?? tokens[0];
 
   const submit = () => {
     if (submitting.current) {
@@ -234,6 +269,7 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
           walletId,
           recipientVerifiedWalletId,
           amount: amount.trim(),
+          mint: selectedToken?.mint,
         });
         if (result.ok) {
           setSubmittedTransfer({ transfer: result.transfer, ...submittedLabels });
@@ -377,12 +413,39 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
         )}
       </div>
 
+      {tokens.length > 0 && (
+        <div className="space-y-1.5">
+          <Label>{t("DashboardPrivateChannels.common.tokenLabel")}</Label>
+          <Select
+            ariaLabel={t("DashboardPrivateChannels.common.tokenLabel")}
+            disabled={isSubmitting}
+            value={mint}
+            onValueChange={(value) => {
+              // Same freeze as the other financial fields — see the `submitting` note.
+              if (submitting.current) return;
+              const next = value ?? "";
+              if (next !== mint) {
+                setError(null);
+                setMint(next);
+              }
+            }}
+          >
+            {tokens.map((token) => (
+              <SelectItem key={token.mint} value={token.mint}>
+                {token.symbol}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
+      )}
+
       <AmountField
         balances={balances}
         disabled={isSubmitting}
         error={amountError}
         id="transfer-amount"
         spends="channel"
+        symbol={selectedToken?.symbol ?? ""}
         onBlur={() => {
           if (!submitting.current) setShowAmountError(true);
         }}

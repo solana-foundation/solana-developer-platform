@@ -3,7 +3,6 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import {
   createOnrampQuoteRequestSchema,
   createRecurringPaymentRequestSchema,
-  createSubscriptionCollectionAttemptRequestSchema,
   createSubscriptionPlanRequestSchema,
   createSubscriptionRequestSchema,
   createTransferBatchRequestSchema,
@@ -33,7 +32,6 @@ import {
   simulateSandboxTransferRequestSchema,
   updateRecurringPaymentRequestSchema,
   updateSubscriptionPlanRequestSchema,
-  updateSubscriptionRequestSchema,
   updateWalletPolicyRequestSchema,
 } from "../schemas";
 import {
@@ -50,7 +48,6 @@ import {
   paymentRecurringPaymentListResponse,
   paymentRecurringPaymentResponse,
   paymentSubscriptionCollectionAttemptListResponse,
-  paymentSubscriptionCollectionAttemptResponse,
   paymentSubscriptionListResponse,
   paymentSubscriptionPlanListResponse,
   paymentSubscriptionPlanResponse,
@@ -853,57 +850,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(paymentSubscriptionResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "patch",
-    path: "/v1/payments/subscriptions/{subscriptionId}",
-    tags: ["Payments"],
-    summary: "Update subscription",
-    operationId: "updatePaymentSubscription",
-    description: "Updates mutable subscription status and on-chain identifiers.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: paymentSubscriptionIdParamsSchema,
-      body: {
-        required: true,
-        content: jsonContent(updateSubscriptionRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Subscription updated",
-        content: jsonContent(paymentSubscriptionResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
-    tags: ["Payments"],
-    summary: "Create subscription collection attempt",
-    operationId: "createPaymentSubscriptionCollectionAttempt",
-    description:
-      "Creates a collection-attempt record for a due recurring-payment subscription. Actual Solana settlement is owned by the collection worker/transaction submitter.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: paymentSubscriptionIdParamsSchema,
-      body: {
-        required: true,
-        content: jsonContent(createSubscriptionCollectionAttemptRequestSchema),
-      },
-    },
-    responses: {
-      201: {
-        description: "Collection attempt created",
-        content: jsonContent(paymentSubscriptionCollectionAttemptResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 

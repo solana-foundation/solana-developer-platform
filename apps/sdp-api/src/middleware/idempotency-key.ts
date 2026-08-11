@@ -2,7 +2,7 @@ import type { Context, Next } from "hono";
 import { badRequest } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
-const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+export const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
 
 export const IDEMPOTENCY_KEY_PATTERN = /^[\x20-\x7e]{1,255}$/;
 

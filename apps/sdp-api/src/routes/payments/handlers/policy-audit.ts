@@ -14,6 +14,7 @@ import {
 } from "@/db/repositories";
 import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { AppContext } from "../context";
 import {
   walletPolicyEvaluationListQuerySchema,
@@ -50,6 +51,7 @@ function mapRevisionHistory(
       revisionNumber: revision.revision_number,
       rules: redactCredentialSecrets(revision.rules as unknown as PolicyRule[]),
       defaultAction: revision.default_action,
+      commitMessage: revision.commit_message,
       createdBy: revision.created_by,
       createdAt: revision.created_at,
       activatedAt: revision.activated_at,
@@ -128,7 +130,10 @@ function mapPolicyEvaluation(row: WalletPolicyEvaluationAuditRow): WalletPolicyE
 
 export async function listWalletControlProfileRevisions(c: AppContext) {
   const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
-  const history = await createPolicyRepository(c.env).getWalletControlProfileRevisionHistory({
+  const history = await createPolicyRepository(
+    c.env,
+    getRequestTenantScope(c)
+  ).getWalletControlProfileRevisionHistory({
     organizationId: auth.organizationId,
     projectId: auth.projectId ?? null,
     custodyWalletId: wallet.id,
@@ -151,7 +156,10 @@ export async function listWalletPolicyEvaluations(c: AppContext) {
   }
 
   const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
-  const result = await createPolicyRepository(c.env).listWalletPolicyEvaluationAudits({
+  const result = await createPolicyRepository(
+    c.env,
+    getRequestTenantScope(c)
+  ).listWalletPolicyEvaluationAudits({
     organizationId: auth.organizationId,
     projectId: auth.projectId ?? null,
     custodyWalletId: wallet.id,
@@ -172,7 +180,10 @@ export async function getWalletPolicyEvaluation(c: AppContext) {
   }
 
   const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
-  const evaluation = await createPolicyRepository(c.env).getWalletPolicyEvaluationAudit({
+  const evaluation = await createPolicyRepository(
+    c.env,
+    getRequestTenantScope(c)
+  ).getWalletPolicyEvaluationAudit({
     organizationId: auth.organizationId,
     projectId: auth.projectId ?? null,
     custodyWalletId: wallet.id,

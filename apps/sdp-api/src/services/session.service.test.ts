@@ -2,7 +2,7 @@ import { getPermissionsForOrgRole } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import { SessionService } from "./session.service";
 
@@ -57,7 +57,6 @@ describe("SessionService", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

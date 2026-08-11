@@ -8,6 +8,7 @@ import * as FeePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
 import type { Address } from "@sdp/solana/address";
+import { address, createNoopSigner } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +18,7 @@ import { AppError } from "@/lib/errors";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { rootLogger } from "@/runtime/logger";
+import { reserveMintSupplyAtApprovedEffectBoundary } from "@/services/policy/approved-operation-replay";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -29,7 +31,7 @@ import {
   TEST_SOLANA_ADDRESSES,
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 // Check if running in mock mode (no RPC access)
 const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";
@@ -222,7 +224,7 @@ describe("Issuance Routes", () => {
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {
@@ -236,6 +238,10 @@ describe("Issuance Routes", () => {
     }
 
     // Clear token-related tables
+    await db
+      .prepare("DELETE FROM wallet_operations")
+      .run()
+      .catch(() => {});
     await db
       .prepare("DELETE FROM frozen_accounts")
       .run()
@@ -329,6 +335,350 @@ describe("Issuance Routes", () => {
 
     // Cache API key in KV
     await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
+  });
+
+  describe("approved mint submission boundary", () => {
+    async function seedExecutingMintOperation(params: {
+      id: string;
+      attemptId: string;
+      leaseExpiresAt: string;
+    }) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO wallet_operations
+             (id, organization_id, project_id, wallet_id, api_key_id, source,
+              operation_family, operation_type, raw_payload, status,
+              execution_started_at, execution_attempt_id, execution_lease_expires_at,
+              execution_attempts)
+           VALUES (?, ?, ?, ?, ?, 'api', 'issuance', 'issuance_mint_execute',
+                   '{}'::jsonb, 'executing', ?, ?, ?, 1)`
+        )
+        .bind(
+          params.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          "wallet_approved_mint_boundary",
+          TEST_PROJECT_API_KEY.id,
+          new Date().toISOString(),
+          params.attemptId,
+          params.leaseExpiresAt
+        )
+        .run();
+    }
+
+    function approvedMintContext(operationId: string, attemptId: string) {
+      const values: Record<string, unknown> = {
+        apiKey: TEST_PROJECT_CACHED_KEY,
+        projectId: TEST_PROJECT.id,
+        approvedWalletOperationId: operationId,
+        approvedWalletOperationAttemptId: attemptId,
+      };
+      return {
+        env,
+        get(key: string) {
+          return values[key];
+        },
+      } as never;
+    }
+
+    it("does not reserve supply after the approved execution lease expires", async () => {
+      const token = await seedIssuedToken({ id: "tok_approved_mint_expired" });
+      await getDb(env)
+        .prepare(
+          "UPDATE issued_tokens SET total_supply_cached = '100', max_supply = '1000' WHERE id = ?"
+        )
+        .bind(token.id)
+        .run();
+      await seedExecutingMintOperation({
+        id: "wop_approved_mint_expired",
+        attemptId: "attempt_approved_mint_expired",
+        leaseExpiresAt: "2000-01-01T00:00:00.000Z",
+      });
+
+      await expect(
+        reserveMintSupplyAtApprovedEffectBoundary(
+          approvedMintContext("wop_approved_mint_expired", "attempt_approved_mint_expired"),
+          token.id,
+          "200"
+        )
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: "Approved-operation execution lease was lost",
+      });
+
+      const state = await getDb(env)
+        .prepare(
+          `SELECT token.total_supply_cached, operation.execution_effect_started_at
+           FROM issued_tokens token
+           CROSS JOIN wallet_operations operation
+           WHERE token.id = ? AND operation.id = ?`
+        )
+        .bind(token.id, "wop_approved_mint_expired")
+        .first<{ total_supply_cached: string; execution_effect_started_at: string | null }>();
+      expect(state).toEqual({
+        total_supply_cached: "100",
+        execution_effect_started_at: null,
+      });
+    });
+
+    it("rolls back the effect fence when the atomic cap reservation is refused", async () => {
+      const token = await seedIssuedToken({ id: "tok_approved_mint_capped" });
+      await getDb(env)
+        .prepare(
+          "UPDATE issued_tokens SET total_supply_cached = '900', max_supply = '1000' WHERE id = ?"
+        )
+        .bind(token.id)
+        .run();
+      await seedExecutingMintOperation({
+        id: "wop_approved_mint_capped",
+        attemptId: "attempt_approved_mint_capped",
+        leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+      });
+
+      await expect(
+        reserveMintSupplyAtApprovedEffectBoundary(
+          approvedMintContext("wop_approved_mint_capped", "attempt_approved_mint_capped"),
+          token.id,
+          "200"
+        )
+      ).rejects.toMatchObject({ code: "MAX_SUPPLY_EXCEEDED" });
+
+      const state = await getDb(env)
+        .prepare(
+          `SELECT token.total_supply_cached, operation.execution_effect_started_at
+           FROM issued_tokens token
+           CROSS JOIN wallet_operations operation
+           WHERE token.id = ? AND operation.id = ?`
+        )
+        .bind(token.id, "wop_approved_mint_capped")
+        .first<{ total_supply_cached: string; execution_effect_started_at: string | null }>();
+      expect(state).toEqual({
+        total_supply_cached: "900",
+        execution_effect_started_at: null,
+      });
+    });
+  });
+
+  describe("wallet-operation policy gate", () => {
+    const policyMintAuthority = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
+
+    it("dry-runs a governed mint with zero writes", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_mint_dry_run",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_mint_dry_run",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/mint`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Dry-Run": "true",
+            },
+            body: JSON.stringify({
+              mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: { decision: "allow", criteria: [] },
+        });
+        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        const operationCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        expect(operationCount).toEqual({ count: 0 });
+      } finally {
+        createOrgSignerSpy.mockRestore();
+      }
+    });
+
+    it("dry-runs an authority update with zero writes", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_authority_dry_run",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_authority_dry_run",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/authority`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Dry-Run": "true",
+            },
+            body: JSON.stringify({
+              authority: {
+                role: "mint",
+                newAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: { decision: "allow", criteria: [] },
+        });
+        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        const operationCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        expect(operationCount).toEqual({ count: 0 });
+      } finally {
+        createOrgSignerSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied mint before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_mint_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_mint_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            destinationAllowlist: [],
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-mint", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/mint`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+      } finally {
+        createOrgSignerSpy.mockRestore();
+      }
+    });
+
+    it("allows an ungoverned mint dry-run and executes without policy enforcement", async () => {
+      const token = await seedIssuedToken({
+        id: "tok_issuance_ungoverned_mint",
+        signingWalletId: null,
+      });
+      const createOrgSignerSpy = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValue(createNoopSigner(address(policyMintAuthority)));
+      const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo").mockResolvedValue({
+        signature: "sig_ungoverned_mint",
+        slot: 321n,
+        tokenAccount: address(TEST_SOLANA_ADDRESSES.wallet2),
+      });
+      const requestBody = JSON.stringify({
+        mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+      });
+
+      try {
+        const dryRun = await app.request(
+          `/v1/issuance/tokens/${token.id}/mint`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Dry-Run": "true",
+            },
+            body: requestBody,
+          },
+          env
+        );
+        expect(dryRun.status).toBe(200);
+        expect(await dryRun.json()).toMatchObject({
+          data: { decision: "allow", criteria: [] },
+        });
+        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+
+        const executed = await app.request(
+          `/v1/issuance/tokens/${token.id}/mint`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: requestBody,
+          },
+          env
+        );
+        expect(executed.status).toBe(200);
+        expect(createOrgSignerSpy).toHaveBeenCalledTimes(1);
+        expect(mintToSpy).toHaveBeenCalledTimes(1);
+
+        const operationCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 0 });
+      } finally {
+        createOrgSignerSpy.mockRestore();
+        mintToSpy.mockRestore();
+      }
+    });
   });
 
   describe("GET /v1/issuance/tokens/{tokenId}/transactions", () => {
@@ -1466,6 +1816,33 @@ describe("Issuance Routes", () => {
       expect(body.data.token.description).toBe("New description");
     });
 
+    it("rejects metadata updates while token deployment is in progress", async () => {
+      await getDb(env)
+        .prepare("UPDATE issued_tokens SET status = 'deploying' WHERE id = ?")
+        .bind(tokenId)
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Divergent metadata" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(409);
+      const row = await getDb(env)
+        .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+        .bind(tokenId)
+        .first<{ name: string }>();
+      expect(row?.name).toBe("Update Token");
+    });
+
     it("updates deployed token metadata on-chain before persisting local fields", async () => {
       const db = getDb(env);
       const activeTokenId = "tok_metadataupdate1";
@@ -1685,6 +2062,114 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error.message).toContain("symbol and decimals");
+    });
+
+    // The supply cap has no on-chain counterpart: SDP enforces it at mint time,
+    // so it stays editable for exactly as long as SDP holds the mint authority.
+    describe("maxSupply", () => {
+      // A deployed, still-mintable token with `supply` already minted.
+      const insertMintableToken = async (id: string, supplyBaseUnits: string) => {
+        await getDb(env)
+          .prepare(
+            `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+             name, symbol, decimals, total_supply_cached, max_supply, is_mintable, freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, 'Capped Token', 'CAP', 6, ?, '1000000000', 1, 1, 0, 'active', '2024-01-02T00:00:00.000Z', ?)`
+          )
+          .bind(
+            id,
+            TEST_PROJECT.id,
+            TEST_ORG.id,
+            TEST_ACTIVE_TOKEN.mintAddress,
+            TEST_ACTIVE_TOKEN.mintAuthority,
+            TEST_ACTIVE_TOKEN.freezeAuthority,
+            supplyBaseUnits,
+            TEST_PROJECT_API_KEY.id
+          )
+          .run();
+      };
+
+      const patchMaxSupply = (id: string, maxSupply: string | null) =>
+        app.request(
+          `/v1/issuance/tokens/${id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ maxSupply }),
+          },
+          env
+        );
+
+      it("updates the cap on an undeployed draft", async () => {
+        const res = await patchMaxSupply(tokenId, "2500.5");
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.token.maxSupply).toBe("2500.5");
+      });
+
+      it("clears the cap with null", async () => {
+        expect((await patchMaxSupply(tokenId, "2500")).status).toBe(200);
+
+        const res = await patchMaxSupply(tokenId, null);
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.token.maxSupply).toBeNull();
+      });
+
+      it("updates the cap on a deployed token that still has its mint authority", async () => {
+        const deployedTokenId = "tok_capmintable1";
+        await insertMintableToken(deployedTokenId, "500000000");
+
+        const res = await patchMaxSupply(deployedTokenId, "2000");
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.token.maxSupply).toBe("2000");
+      });
+
+      it("rejects a cap below the already-minted supply", async () => {
+        const deployedTokenId = "tok_capbelowsupply1";
+        // 1500 minted, so a 1000 cap could never be satisfied.
+        await insertMintableToken(deployedTokenId, "1500000000");
+
+        const res = await patchMaxSupply(deployedTokenId, "1000");
+
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error.message).toContain("already-minted supply");
+      });
+
+      it("rejects a cap with more precision than the token's decimals", async () => {
+        const deployedTokenId = "tok_capprecision1";
+        await insertMintableToken(deployedTokenId, "0");
+
+        const res = await patchMaxSupply(deployedTokenId, "1000.1234567");
+
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error.message).toContain("maxSupply");
+      });
+
+      it("rejects a cap change once the supply is locked on-chain", async () => {
+        const db = getDb(env);
+        const lockedTokenId = "tok_capsupplylocked1";
+        await insertMintableToken(lockedTokenId, "1000000000");
+        // What lock-supply leaves behind: no mint authority, minting disabled.
+        await db
+          .prepare("UPDATE issued_tokens SET mint_authority = NULL, is_mintable = 0 WHERE id = ?")
+          .bind(lockedTokenId)
+          .run();
+
+        const res = await patchMaxSupply(lockedTokenId, "2000");
+
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error.message).toContain("locked on-chain");
+      });
     });
   });
 
@@ -1937,6 +2422,143 @@ describe("Issuance Routes", () => {
       expect(body.error.code).toBe("MAX_SUPPLY_EXCEEDED");
     });
 
+    it("counts a prepared mint against the cap before the transaction leaves", async () => {
+      // A prepared transaction is a mint the client can settle at any point until
+      // its blockhash expires, so it is reserved like an executed one — handing it
+      // out is prepare's point of no return.
+      const db = getDb(env);
+      await db
+        .prepare(
+          "UPDATE issued_tokens SET max_supply = '500000000000', total_supply_cached = '100000000000' WHERE id = ?"
+        )
+        .bind(activeTokenId)
+        .run();
+
+      const createOrgSignerSpy = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
+      const prepareMintToSpy = vi
+        .spyOn(MosaicService.prototype, "prepareMintTo")
+        .mockResolvedValueOnce({
+          serializedTx: "cHJlcGFyZWQtbWludA==",
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 0n,
+          requiredSigners: [],
+          tokenAccount: TEST_SOLANA_ADDRESSES.wallet1,
+        } as never);
+
+      try {
+        const res = await app.request(
+          `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              mint: { destination: TEST_SOLANA_ADDRESSES.wallet1, amount: "200" },
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.transaction.status).toBe("pending");
+        expect(body.data.transaction.serializedTx).toBe("cHJlcGFyZWQtbWludA==");
+
+        // The reservation is in the recorded supply, where cap checks and cap
+        // changes will see it.
+        const row = await db
+          .prepare("SELECT total_supply_cached FROM issued_tokens WHERE id = ?")
+          .bind(activeTokenId)
+          .first<{ total_supply_cached: string }>();
+        expect(row?.total_supply_cached).toBe("300000000000");
+      } finally {
+        createOrgSignerSpy.mockRestore();
+        prepareMintToSpy.mockRestore();
+      }
+    });
+
+    it("enforces the cap in the database even when prepare read a stale one", async () => {
+      // The pre-flight check reads a cached token in this process; the reservation
+      // is a conditional UPDATE on the token row. A stale generous cap, made
+      // deterministic by stubbing `getToken`, must be refused by the database —
+      // after the transaction is built, before it leaves.
+      const db = getDb(env);
+      await db
+        .prepare(
+          "UPDATE issued_tokens SET max_supply = '500000000000', total_supply_cached = '400000000000' WHERE id = ?"
+        )
+        .bind(activeTokenId)
+        .run();
+
+      const createOrgSignerSpy = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
+      const prepareMintToSpy = vi
+        .spyOn(MosaicService.prototype, "prepareMintTo")
+        .mockResolvedValueOnce({
+          serializedTx: "cmVmdXNlZC1taW50",
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 0n,
+          requiredSigners: [],
+          tokenAccount: TEST_SOLANA_ADDRESSES.wallet1,
+        } as never);
+
+      const originalGetToken = TokenService.prototype.getToken;
+      const getTokenSpy = vi
+        .spyOn(TokenService.prototype, "getToken")
+        .mockImplementation(async function (this: TokenService, params) {
+          const token = await originalGetToken.call(this, params);
+          return token ? { ...token, maxSupply: "100000" } : token;
+        });
+
+      try {
+        const res = await app.request(
+          `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              mint: { destination: TEST_SOLANA_ADDRESSES.wallet1, amount: "200" },
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error.code).toBe("MAX_SUPPLY_EXCEEDED");
+
+        // No reservation left behind, and — decisive for the wallet-authority
+        // flow, where the client could sign and submit whatever it can read — the
+        // failed row must not carry the serialized transaction the cap refused.
+        const supply = await db
+          .prepare("SELECT total_supply_cached FROM issued_tokens WHERE id = ?")
+          .bind(activeTokenId)
+          .first<{ total_supply_cached: string }>();
+        expect(supply?.total_supply_cached).toBe("400000000000");
+
+        const tx = await db
+          .prepare(
+            "SELECT status, serialized_tx FROM issuance_transactions WHERE token_id = ? AND type = 'mint' ORDER BY created_at DESC LIMIT 1"
+          )
+          .bind(activeTokenId)
+          .first<{ status: string; serialized_tx: string | null }>();
+        expect(tx?.status).toBe("failed");
+        expect(tx?.serialized_tx).toBeNull();
+      } finally {
+        getTokenSpy.mockRestore();
+        createOrgSignerSpy.mockRestore();
+        prepareMintToSpy.mockRestore();
+      }
+    });
+
     it("returns 400 for paused token", async () => {
       const db = getDb(env);
       await db
@@ -2161,7 +2783,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("surfaces both errors when add compensation fails", async () => {
+      it("keeps a pending DB row and audit trail when on-chain confirmation is ambiguous", async () => {
         const db = getDb(env);
         await db
           .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
@@ -2170,19 +2792,15 @@ describe("Issuance Routes", () => {
 
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
-          .mockRejectedValueOnce(new Error("on-chain add failed"));
-        // After addToList fails the handler re-checks on-chain membership; if
-        // it returns true, we'd keep the DB row and succeed — for this test we
-        // want the rollback path, so return false.
+          .mockRejectedValueOnce(new Error("on-chain add failed"))
+          .mockResolvedValueOnce(undefined as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(false);
-        const deleteAllowlistEntrySpy = vi
-          .spyOn(TokenService.prototype, "deleteAllowlistEntry")
-          .mockRejectedValueOnce(new Error("rollback failed"));
+        const deleteAllowlistEntrySpy = vi.spyOn(TokenService.prototype, "deleteAllowlistEntry");
 
         try {
           const res = await app.request(
@@ -2202,10 +2820,44 @@ describe("Issuance Routes", () => {
           );
 
           expect(res.status).toBe(500);
-          const body = await res.json();
-          expect(body.error.code).toBe("INTERNAL_ERROR");
-          expect(body.error.details.originalError).toBe("on-chain add failed");
-          expect(body.error.details.restoreError).toBe("rollback failed");
+          expect(deleteAllowlistEntrySpy).not.toHaveBeenCalled();
+
+          const entry = await db
+            .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
+            .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
+            .first<{ id: string; status: string }>();
+          expect(entry?.status).toBe("pending");
+          const audit = await db
+            .prepare(
+              `SELECT id FROM audit_logs
+               WHERE action = 'create' AND resource_type = 'token_allowlist'
+                 AND resource_id = ?`
+            )
+            .bind(entry?.id)
+            .first<{ id: string }>();
+          expect(audit).not.toBeNull();
+
+          const retry = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                address: TEST_SOLANA_ADDRESSES.wallet1,
+                label: "On-chain Wallet",
+              }),
+            },
+            env
+          );
+          expect(retry.status).toBe(201);
+          const reconciled = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry?.id)
+            .first<{ status: string }>();
+          expect(reconciled?.status).toBe("active");
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
@@ -2298,11 +2950,7 @@ describe("Issuance Routes", () => {
         expect(res.status).toBe(409);
       });
 
-      it("restores prior revoked state on rollback when re-adding a previously-revoked entry", async () => {
-        // Reactivated row (previously revoked → addAllowlistEntry promotes back
-        // to active in-place). If addToList then fails and on-chain membership
-        // is not confirmed, rollback must re-revoke (not hard-delete) so the
-        // operator's original revocation record survives.
+      it("keeps a re-added entry pending when on-chain membership is uncertain", async () => {
         const db = getDb(env);
         await db
           .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
@@ -2354,7 +3002,7 @@ describe("Issuance Routes", () => {
             .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
             .first<{ id: string; status: string }>();
           expect(row?.id).toBe(entry.id);
-          expect(row?.status).toBe("revoked");
+          expect(row?.status).toBe("pending");
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
@@ -2500,7 +3148,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("restores the database entry if on-chain control-list removal fails", async () => {
+      it("keeps the database entry active until a retry confirms on-chain removal", async () => {
         await app.request(
           `/v1/issuance/tokens/${tokenId}/allowlist`,
           {
@@ -2532,10 +3180,14 @@ describe("Issuance Routes", () => {
 
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const removeFromListSpy = vi
           .spyOn(MosaicService.prototype, "removeFromList")
-          .mockRejectedValueOnce(new Error("mosaic removal failed"));
+          .mockRejectedValueOnce(new Error("mosaic removal failed"))
+          .mockResolvedValueOnce(undefined as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
 
         try {
           const res = await app.request(
@@ -2549,19 +3201,79 @@ describe("Issuance Routes", () => {
 
           expect(res.status).toBe(500);
 
-          const restoredListRes = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+          const stillActive = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entryId)
+            .first<{ status: string }>();
+          expect(stillActive?.status).toBe("active");
+
+          const retry = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
             {
+              method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
             },
             env
           );
-          const restoredListBody = await restoredListRes.json();
-          expect(restoredListBody.data).toHaveLength(1);
-          expect(restoredListBody.data[0].id).toBe(entryId);
+          expect(retry.status).toBe(204);
+          expect(removeFromListSpy).toHaveBeenCalledTimes(2);
+
+          const revoked = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entryId)
+            .first<{ status: string }>();
+          expect(revoked?.status).toBe("revoked");
         } finally {
           createOrgSignerSpy.mockRestore();
           removeFromListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+        }
+      });
+
+      it("treats a timed-out removal as success when on-chain absence is confirmed", async () => {
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+        const tokenService = new TokenService(db);
+        const { entry } = await tokenService.addAllowlistEntry({
+          tokenId,
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+          addedBy: TEST_PROJECT_API_KEY.id,
+          initialStatus: "pending",
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const removeFromListSpy = vi
+          .spyOn(MosaicService.prototype, "removeFromList")
+          .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist/${entry.id}`,
+            {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+
+          expect(res.status).toBe(204);
+          const revoked = await db
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry.id)
+            .first<{ status: string }>();
+          expect(revoked?.status).toBe("revoked");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          removeFromListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
         }
       });
     });
@@ -3052,11 +3764,9 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(200);
     });
 
-    // When an allowlist token has on-chain ABL active (ablListAddress populated),
-    // mint to a fresh destination auto-adds the wallet to the on-chain list and
-    // mirrors it into token_allowlists, instead of rejecting with
-    // NOT_ON_TOKEN_ALLOWLIST. Without this, the SDK's permissionless-thaw step
-    // fails because the destination ATA is frozen and not on the on-chain list.
+    // The execute route may auto-add a destination to an on-chain ABL after
+    // policy enforcement. The prepare route is deliberately read-only and only
+    // succeeds when the destination is already on-chain.
     describe("on-chain allowlist auto-add on mint", () => {
       const ablList = TEST_SOLANA_ADDRESSES.wallet3;
       const signerAddress = TEST_SOLANA_ADDRESSES.wallet2;
@@ -3083,7 +3793,7 @@ describe("Issuance Routes", () => {
           .run();
       };
 
-      it("auto-adds destination to on-chain allowlist on prepare mint", async () => {
+      it("rejects prepare mint without mutating an absent on-chain allowlist entry", async () => {
         await seedAblListAddress();
 
         const createOrgSignerSpy = vi
@@ -3115,13 +3825,11 @@ describe("Issuance Routes", () => {
             env
           );
 
-          expect(res.status).toBe(200);
-          expect(addToListSpy).toHaveBeenCalledTimes(1);
-          expect(addToListSpy).toHaveBeenCalledWith({
-            list: ablList,
-            wallet: freshDestination,
-          });
-          expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as { error: { code: string } };
+          expect(body.error.code).toBe("NOT_ON_TOKEN_ALLOWLIST");
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(prepareMintToSpy).not.toHaveBeenCalled();
 
           const entry = await getDb(env)
             .prepare(
@@ -3129,26 +3837,7 @@ describe("Issuance Routes", () => {
             )
             .bind(allowlistTokenId, freshDestination)
             .first<{ id: string }>();
-          expect(entry?.id).toMatch(/^tal_/);
-
-          const body = (await res.json()) as { data: { transaction: { id: string } } };
-          const transactionId = body.data.transaction.id;
-          const audit = await getDb(env)
-            .prepare(
-              `SELECT metadata FROM audit_logs
-               WHERE action = 'mint' AND resource_type = 'token_transaction'
-                 AND resource_id = ?
-               LIMIT 1`
-            )
-            .bind(transactionId)
-            .first<{ metadata: string }>();
-          expect(audit).not.toBeNull();
-          const meta = JSON.parse(audit?.metadata ?? "{}") as {
-            mode: string;
-            addedToAllowlist: boolean;
-          };
-          expect(meta.mode).toBe("prepare");
-          expect(meta.addedToAllowlist).toBe(true);
+          expect(entry).toBeNull();
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
@@ -3157,21 +3846,18 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("reports addedToAllowlist when the on-chain add errors but membership is confirmed", async () => {
+      it("prepares for an existing on-chain entry without mutating the DB mirror", async () => {
         await seedAblListAddress();
 
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
           .mockResolvedValueOnce({ address: signerAddress } as never);
-        // First check (before add) sees the wallet absent; the recheck after the
-        // add error sees it present — the transient-error / TOCTOU recovery path.
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
-          .mockResolvedValueOnce(false)
           .mockResolvedValueOnce(true);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
-          .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
+          .mockResolvedValueOnce(undefined as never);
         const prepareMintToSpy = vi
           .spyOn(MosaicService.prototype, "prepareMintTo")
           .mockResolvedValueOnce(mockPreparedMint as never);
@@ -3193,7 +3879,7 @@ describe("Issuance Routes", () => {
           );
 
           expect(res.status).toBe(200);
-          expect(addToListSpy).toHaveBeenCalledTimes(1);
+          expect(addToListSpy).not.toHaveBeenCalled();
           expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
 
           const entry = await getDb(env)
@@ -3202,7 +3888,7 @@ describe("Issuance Routes", () => {
             )
             .bind(allowlistTokenId, freshDestination)
             .first<{ id: string }>();
-          expect(entry?.id).toMatch(/^tal_/);
+          expect(entry).toBeNull();
 
           const body = (await res.json()) as { data: { transaction: { id: string } } };
           const transactionId = body.data.transaction.id;
@@ -3220,7 +3906,7 @@ describe("Issuance Routes", () => {
             addedToAllowlist: boolean;
           };
           expect(meta.mode).toBe("prepare");
-          expect(meta.addedToAllowlist).toBe(true);
+          expect(meta.addedToAllowlist).toBe(false);
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
@@ -3241,9 +3927,9 @@ describe("Issuance Routes", () => {
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockResolvedValueOnce(undefined as never);
-        const prepareMintToSpy = vi
-          .spyOn(MosaicService.prototype, "prepareMintTo")
-          .mockResolvedValueOnce(mockPreparedMint as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
 
         // First call: simulate a parallel request having beaten us to the INSERT
         // — we don't own the row. Second call (the re-assert) succeeds, modeling
@@ -3265,7 +3951,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -3282,13 +3968,207 @@ describe("Issuance Routes", () => {
           expect(res.status).toBe(200);
           expect(addToListSpy).toHaveBeenCalledTimes(1);
           expect(addAllowlistEntryStrictSpy).toHaveBeenCalledTimes(2);
-          expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
-          prepareMintToSpy.mockRestore();
+          mintToSpy.mockRestore();
           addAllowlistEntryStrictSpy.mockRestore();
+        }
+      });
+
+      const storedSupply = (tokenId: string) =>
+        getDb(env)
+          .prepare("SELECT total_supply_cached FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ total_supply_cached: string }>();
+
+      const latestMintTransaction = (tokenId: string) =>
+        getDb(env)
+          .prepare(
+            "SELECT status FROM issuance_transactions WHERE token_id = ? AND type = 'mint' ORDER BY created_at DESC LIMIT 1"
+          )
+          .bind(tokenId)
+          .first<{ status: string }>();
+
+      // The handler's own cap check reads a cached total, which two concurrent
+      // mints — or a concurrent cap change — can both pass. The reservation is a
+      // conditional UPDATE on the token row, so it holds even when the process
+      // read a cap that is no longer there. Stubbing `getToken` to return a
+      // generous cap is that stale read, made deterministic.
+      it("enforces the cap in the database even when the request read a stale one", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '500000000000', total_supply_cached = '400000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        // Stands in for the real submit path: run the caller's pre-submit gate, then
+        // submit. The gate is where the cap is enforced, so `submitted` staying false
+        // is the assertion that a refused cap costs no transaction.
+        let submitted = false;
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementation(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            submitted = true;
+            return mockMintResult as never;
+          });
+
+        const originalGetToken = TokenService.prototype.getToken;
+        const getTokenSpy = vi
+          .spyOn(TokenService.prototype, "getToken")
+          .mockImplementation(async function (this: TokenService, params) {
+            const token = await originalGetToken.call(this, params);
+            return token ? { ...token, maxSupply: "100000" } : token;
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          const body = (await res.json()) as { error: { code: string } };
+          expect(body.error.code).toBe("MAX_SUPPLY_EXCEEDED");
+          // The gate refused before submission, so there is no settled mint to
+          // reconcile and no reservation left behind.
+          expect(submitted).toBe(false);
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("400000000000");
+          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("failed");
+        } finally {
+          getTokenSpy.mockRestore();
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("keeps the reservation when a submitted mint fails", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '1000000000000', total_supply_cached = '100000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        // Submitted, then lost during confirmation: the gate ran, so the transaction
+        // is out there and may land whatever this request reports.
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementation(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            throw new Error("transaction was not confirmed in time");
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBeGreaterThanOrEqual(400);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+          // Nothing past submission can prove the mint did not land. So the
+          // reservation stands (100 + 200 recorded) and `POST /supply/refresh`
+          // reconciles it once the transaction cannot land; handing the headroom back
+          // here is what let two mints exceed the cap.
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("300000000000");
+          // Submission is ambiguous after the point-of-no-return hook. Keep the
+          // transaction pending and its durable audit intent unresolved until
+          // supply reconciliation proves whether the mint landed.
+          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("pending");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("reserves nothing when the mint fails before it is submitted", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '1000000000000', total_supply_cached = '100000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        // Building, resolving the token account and signing all happen before the
+        // gate, so failing there means no transaction exists to account for.
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockRejectedValueOnce(new Error("failed to build mint transaction") as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBeGreaterThanOrEqual(400);
+          // Untouched: holding a reservation through a failure that never reached the
+          // cluster would refuse later legitimate mints with MAX_SUPPLY_EXCEEDED until
+          // someone refreshed the supply by hand.
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("100000000000");
+          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("failed");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
         }
       });
 
@@ -3362,6 +4242,126 @@ describe("Issuance Routes", () => {
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
+        }
+      });
+
+      it("repairs settled mint bookkeeping from durable audit evidence on replay", async () => {
+        await seedAblListAddress();
+
+        const idempotencyKey = `idem_${crypto.randomUUID()}`;
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValue(true);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementationOnce(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            return mockMintResult as never;
+          });
+        const updateTransactionSpy = vi
+          .spyOn(TokenService.prototype, "updateTransaction")
+          .mockRejectedValueOnce(new Error("transaction bookkeeping unavailable"));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                "Idempotency-Key": idempotencyKey,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+          const firstBody = (await res.json()) as {
+            data: { transaction: { status: string; signature: string | null } };
+          };
+          expect(firstBody.data.transaction).toMatchObject({
+            status: "confirmed",
+            signature: mockMintResult.signature,
+          });
+
+          const db = getDb(env);
+          const transaction = await db
+            .prepare(
+              "SELECT id, status FROM issuance_transactions WHERE idempotency_key = ? LIMIT 1"
+            )
+            .bind(idempotencyKey)
+            .first<{ id: string; status: string }>();
+          expect(transaction?.status).toBe("pending");
+
+          const intent = await db
+            .prepare(
+              `SELECT resource_id FROM audit_logs
+               WHERE action = 'maintenance' AND resource_type = 'audit_ledger'
+                 AND metadata::jsonb #>> '{target,resourceId}' = ?
+               ORDER BY ledger_sequence DESC LIMIT 1`
+            )
+            .bind(transaction?.id)
+            .first<{ resource_id: string }>();
+          expect(intent?.resource_id).toMatch(/^aint_/);
+
+          const outcome = await db
+            .prepare(
+              `SELECT id, status FROM audit_logs
+               WHERE metadata::jsonb ->> 'auditIntentId' = ?
+               LIMIT 1`
+            )
+            .bind(intent?.resource_id)
+            .first<{ id: string; status: string }>();
+          expect(outcome).toMatchObject({ status: "success" });
+
+          const replay = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                "Idempotency-Key": idempotencyKey,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+          expect(replay.status).toBe(200);
+          const replayBody = (await replay.json()) as {
+            data: { transaction: { status: string; signature: string | null } };
+          };
+          expect(replayBody.data.transaction).toMatchObject({
+            status: "confirmed",
+            signature: mockMintResult.signature,
+          });
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+
+          const repaired = await db
+            .prepare(
+              "SELECT status, signature FROM issuance_transactions WHERE idempotency_key = ? LIMIT 1"
+            )
+            .bind(idempotencyKey)
+            .first<{ status: string; signature: string | null }>();
+          expect(repaired).toMatchObject({
+            status: "confirmed",
+            signature: mockMintResult.signature,
+          });
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+          updateTransactionSpy.mockRestore();
         }
       });
 
@@ -3730,13 +4730,13 @@ describe("Issuance Routes", () => {
           .spyOn(MosaicService.prototype, "addToList")
           .mockRejectedValueOnce(new Error("RPC confirmation timeout"))
           .mockResolvedValueOnce(undefined as never);
-        const prepareMintToSpy = vi
-          .spyOn(MosaicService.prototype, "prepareMintTo")
-          .mockResolvedValueOnce(mockPreparedMint as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
 
         try {
           const failedRes = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -3764,7 +4764,7 @@ describe("Issuance Routes", () => {
           // Retry on the same address with the on-chain add succeeding must
           // not be blocked by a stale "revoked" row from the prior rollback.
           const retryRes = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -3790,7 +4790,7 @@ describe("Issuance Routes", () => {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
-          prepareMintToSpy.mockRestore();
+          mintToSpy.mockRestore();
         }
       });
 
@@ -3822,11 +4822,11 @@ describe("Issuance Routes", () => {
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(false);
         const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
-        const prepareMintToSpy = vi.spyOn(MosaicService.prototype, "prepareMintTo");
+        const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
             {
               method: "POST",
               headers: {
@@ -3854,13 +4854,13 @@ describe("Issuance Routes", () => {
 
           // The mint must not have proceeded any further on-chain.
           expect(addToListSpy).not.toHaveBeenCalled();
-          expect(prepareMintToSpy).not.toHaveBeenCalled();
+          expect(mintToSpy).not.toHaveBeenCalled();
         } finally {
           statusSpy.mockRestore();
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
-          prepareMintToSpy.mockRestore();
+          mintToSpy.mockRestore();
         }
       });
     });

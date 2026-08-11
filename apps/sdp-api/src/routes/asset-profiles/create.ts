@@ -15,6 +15,7 @@ import {
 } from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { created } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
@@ -110,10 +111,11 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
   const createdBy = await resolveCreatorUserId(c);
 
   const db = getDb(c.env);
+  const tenantScope = getRequestTenantScope(c);
 
   const { token, profileRow } = await db.transaction(async (tx) => {
     const client = asTransactionalClient(tx);
-    const tokenService = new TokenService(client);
+    const tokenService = new TokenService(client, tenantScope);
     const assetProfilesRepo = createPostgresAssetProfilesRepository(client);
 
     const token = await tokenService.createToken({

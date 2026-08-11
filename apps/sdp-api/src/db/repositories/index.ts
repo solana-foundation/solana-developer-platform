@@ -33,6 +33,33 @@ export type {
 } from "./counterparty-account.repository";
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
+  CreateEarnMovementInput,
+  CreateEarnPositionInput,
+  EarnMovementRow,
+  EarnNavSnapshotRow,
+  EarnPositionRow,
+  EarnProviderWalletRow,
+  EarnRepository,
+  EarnStrategyRow,
+  InsertEarnNavSnapshotInput,
+  InsertEarnProviderWalletInput,
+  ListEarnMovementsInput,
+  ListEarnMovementsResult,
+  ListEarnPositionsInput,
+  ListEarnPositionsResult,
+  ListEarnStrategiesInput,
+  ListEarnStrategiesResult,
+  UpdateEarnMovementStatusInput,
+  UpsertEarnStrategyInput,
+} from "./earn.repository";
+export {
+  generateEarnMovementId,
+  generateEarnNavSnapshotId,
+  generateEarnPositionId,
+  generateEarnStrategyId,
+} from "./earn.repository";
+export { createPostgresEarnRepository } from "./earn.repository.postgres";
+export type {
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   CreatePaymentRecurringPaymentLifecycleAttemptInput,
@@ -196,6 +223,7 @@ export type {
   PrivateChannelEventRepository,
   PrivateChannelEventRepositoryContext,
   PrivateChannelEventRow,
+  PrivateChannelEventViewerScope,
   PrivateChannelEventWriteInput,
 } from "./private-channel-event.repository";
 export { generatePrivateChannelEventId } from "./private-channel-event.repository";
@@ -214,6 +242,13 @@ export {
   mapPrivateChannelInstanceRow,
 } from "./private-channel-instance.repository";
 export { createPostgresPrivateChannelInstanceRepository } from "./private-channel-instance.repository.postgres";
+export type {
+  ListPrivateChannelReferencesParams,
+  PrivateChannelReferenceRepository,
+  PrivateChannelReferenceRow,
+  PrivateChannelReferenceWalletScope,
+} from "./private-channel-reference.repository";
+export { createPostgresPrivateChannelReferenceRepository } from "./private-channel-reference.repository.postgres";
 export type {
   ClaimSettlementInput,
   PrivateChannelSettlementIntentKind,
@@ -287,6 +322,7 @@ export {
   createAssetProfilesRepository,
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
+  createEarnRepository,
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
@@ -295,6 +331,7 @@ export {
   createPrivateChannelDepositRepository,
   createPrivateChannelEventRepository,
   createPrivateChannelInstanceRepository,
+  createPrivateChannelReferenceRepository,
   createPrivateChannelRepository,
   createPrivateChannelSettlementObservationRepository,
   createPrivateChannelTransferRepository,
@@ -302,6 +339,11 @@ export {
   createPrivateChannelVerifiedWalletRepository,
   createPrivateChannelWithdrawalRepository,
   createProjectUserRepository,
+  createSystemAssetProfilesRepository,
+  createSystemCounterpartiesRepository,
+  createSystemPaymentRequestsRepository,
+  createSystemPaymentsRepository,
+  createSystemPaymentTransferBatchesRepository,
   createTokenRepository,
 } from "./repository-factory";
 export type {

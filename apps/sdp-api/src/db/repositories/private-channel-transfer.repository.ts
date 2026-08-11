@@ -76,6 +76,7 @@ export interface ListEligiblePrivateChannelTransferRecipientsInput
   extends PrivateChannelTransferProjectScope {
   instanceId: string;
   channelId: string;
+  /** Marks results as `isSelf` and sorts them first; never excludes them. */
   initiatingPrivateChannelUserId: string;
 }
 
@@ -96,7 +97,11 @@ export interface PrivateChannelTransferRepository {
   listTransfersByProject(
     input: ListPrivateChannelTransfersInput
   ): Promise<PrivateChannelTransferRow[]>;
-  /** Other members and their verified wallets in an active channel/instance. */
+  /**
+   * Every verified wallet on an active channel/instance, one entry per wallet,
+   * including the initiating member's own. Wallet-level self-sends are rejected
+   * at the access layer, not filtered out here.
+   */
   listEligibleRecipients(
     input: ListEligiblePrivateChannelTransferRecipientsInput
   ): Promise<PrivateChannelTransferRecipientDto[]>;

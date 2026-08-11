@@ -9,6 +9,7 @@ export * from "./audit";
 export * from "./counterparties";
 export * from "./countries";
 export * from "./custody";
+export * from "./earn";
 export * from "./generated/ramp-support.generated";
 export * from "./organizations";
 export * from "./pagination";

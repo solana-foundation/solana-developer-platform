@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { PaymentTransferBatchesRepository } from "./payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
 
@@ -19,7 +19,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {

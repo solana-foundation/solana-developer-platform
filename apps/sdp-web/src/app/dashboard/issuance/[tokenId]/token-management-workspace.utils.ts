@@ -1,6 +1,7 @@
 import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/types";
 import type { AppLocale } from "@/i18n/config";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { formatDisplayLabel } from "@/lib/utils";
 import { type AccessControlMode, getTokenAccessControlMode } from "../access-control.utils";
 import type {
@@ -11,7 +12,6 @@ import type {
   AuthorityFormState,
   BurnFormState,
   BurnValidationErrors,
-  ExecuteRouteResponse,
   ExtensionRow,
   ForceBurnFormState,
   ForceBurnValidationErrors,
@@ -379,6 +379,22 @@ export function hasReachedMaxSupply(totalSupply: string, maxSupply: string | nul
   return comparison !== null && comparison >= 0;
 }
 
+// A cap the token has already outgrown can never be satisfied — minting only
+// pushes the total further past it. Unparseable input reads as "not below" and is
+// left to the format validation. The API rejects it too.
+export function isMaxSupplyBelowMintedSupply(maxSupply: string, totalSupply: string): boolean {
+  const comparison = compareNonNegativeDecimalStrings(maxSupply, totalSupply);
+  return comparison !== null && comparison < 0;
+}
+
+// True once the mint authority is gone: the total can never change again, so the
+// configured cap is frozen with it. Pre-deploy there is no on-chain authority yet
+// (it's assigned at deploy from the signing wallet's custody), so a draft's cap is
+// always still editable.
+export function isSupplyLockedOnChain(token: Token): boolean {
+  return Boolean(token.mintAddress) && (!token.isMintable || !token.mintAuthority);
+}
+
 function compareNonNegativeDecimalStrings(left: string, right: string): number | null {
   const leftMatch = /^(\d+)(?:\.(\d+))?$/.exec(left.trim());
   const rightMatch = /^(\d+)(?:\.(\d+))?$/.exec(right.trim());
@@ -455,8 +471,9 @@ export function getLockSupplyDisabledReason(token: Token, t: Translate): string 
   if (!token.maxSupply) {
     return t("DashboardIssuance.management.lockSupplyNoMaxSupply");
   }
-  // Both mean the authority is already gone, i.e. supply is already permanent.
-  if (!token.isMintable || !token.mintAuthority) {
+  // The authority is already gone, i.e. supply is already permanent. (The
+  // lifecycle gate above has established the token is active, hence deployed.)
+  if (isSupplyLockedOnChain(token)) {
     return t("DashboardIssuance.management.lockSupplyAlreadyLocked");
   }
   if (getRemainingMintableSupply(token) === null) {
@@ -533,26 +550,6 @@ export function formatValue(value: string | null | undefined, t: Translate): str
   return `${value.slice(0, 6)}...${value.slice(-6)}`;
 }
 
-export function extractApiError(body: unknown, t: Translate): string {
-  if (typeof body === "string") {
-    return body;
-  }
-
-  if (body && typeof body === "object") {
-    const maybeError = (body as { error?: { message?: string } }).error;
-    if (maybeError?.message) {
-      return maybeError.message;
-    }
-
-    const maybeMessage = (body as { message?: string }).message;
-    if (typeof maybeMessage === "string" && maybeMessage) {
-      return maybeMessage;
-    }
-  }
-
-  return t("DashboardIssuance.management.unknownError");
-}
-
 export function getExplorerHref(mintAddress: string | null): string | null {
   if (!mintAddress) {
     return null;
@@ -570,64 +567,36 @@ export async function executeActionRequest(
   input: ActionExecutionInput,
   t: Translate
 ): Promise<ActionExecutionResult> {
-  try {
-    const response = await fetch("/api/playground/execute", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        method: input.method,
-        path: input.path,
-        body: input.body,
-      }),
-    });
+  const result = await dashboardFetch<unknown>(input.path, {
+    method: input.method,
+    body: input.body,
+  });
 
-    const payload = (await response.json()) as ExecuteRouteResponse;
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        message:
-          payload.error ??
-          t("DashboardIssuance.management.executionRouteFailed", { status: response.status }),
-        status: response.status,
-        body: payload,
-      };
-    }
-
-    if (!payload.ok) {
-      const status = payload.status ?? null;
-      return {
-        ok: false,
-        message: t("DashboardIssuance.management.actionFailed", {
-          action: input.label,
-          status: status ?? t("DashboardIssuance.management.unknown"),
-          error: extractApiError(payload.body, t),
-        }),
-        status,
-        body: payload.body,
-      };
-    }
-
-    return {
-      ok: true,
-      message: t("DashboardIssuance.management.actionSucceeded", {
-        action: input.label,
-        status: payload.status ?? t("DashboardIssuance.management.ok"),
-      }),
-      status: payload.status ?? null,
-      body: payload.body ?? null,
-    };
-  } catch (error) {
+  if (!result.ok) {
     return {
       ok: false,
       message:
-        error instanceof Error ? error.message : t("DashboardIssuance.management.requestFailed"),
-      status: null,
-      body: null,
+        result.status === null
+          ? result.error
+          : t("DashboardIssuance.management.actionFailed", {
+              action: input.label,
+              status: result.status,
+              error: result.error,
+            }),
+      status: result.status,
+      body: result.body,
     };
   }
+
+  return {
+    ok: true,
+    message: t("DashboardIssuance.management.actionSucceeded", {
+      action: input.label,
+      status: result.status,
+    }),
+    status: result.status,
+    body: result.data,
+  };
 }
 
 export function getPermissionRows(

@@ -11,6 +11,8 @@ export {
   createOnrampQuote,
   estimateOfframp,
   estimateOnramp,
+  extractOfframpQuotePolicyCandidate,
+  extractOnrampQuotePolicyCandidate,
   listOfframpCurrencies,
   listOnrampCurrencies,
   simulateSandboxTransfer,
@@ -28,7 +30,6 @@ export {
 } from "./handlers/recurring-payments";
 export {
   createSubscription,
-  createSubscriptionCollectionAttempt,
   createSubscriptionPlan,
   getSubscription,
   getSubscriptionPlan,
@@ -40,13 +41,20 @@ export {
   prepareResumeSubscription,
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
-  updateSubscription,
   updateSubscriptionPlan,
 } from "./handlers/subscriptions";
 export {
   createTransferBatch,
   estimateTransferBatch,
+  extractTransferBatchPolicyCandidate,
+  findTransferBatchIdempotentKeyReplay,
   getTransferBatch,
   listTransferBatches,
 } from "./handlers/transfer-batches";
-export { createTransfer, getTransfer, listTransfers } from "./handlers/transfers";
+export {
+  createTransfer,
+  extractTransferPolicyCandidate,
+  findTransferIdempotentKeyReplay,
+  getTransfer,
+  listTransfers,
+} from "./handlers/transfers";

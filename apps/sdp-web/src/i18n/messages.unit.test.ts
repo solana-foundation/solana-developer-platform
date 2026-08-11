@@ -20,13 +20,17 @@ function flattenKeys(value: unknown, prefix = ""): string[] {
 describe("i18n messages", () => {
   it("only accepts configured locales", () => {
     expect(isAppLocale("en")).toBe(true);
+    expect(isAppLocale("es")).toBe(true);
     expect(isAppLocale("fr")).toBe(true);
+    expect(isAppLocale("pt")).toBe(true);
     expect(isAppLocale("de")).toBe(false);
   });
 
   it("resolves typed catalog entries", () => {
     expect(translate(getMessages("en"), "Home.trySdp")).toBe("Try SDP");
+    expect(translate(getMessages("es"), "Home.contactUs")).toBe("Contáctanos");
     expect(translate(getMessages("fr"), "Home.contactUs")).toBe("Nous contacter");
+    expect(translate(getMessages("pt"), "Home.contactUs")).toBe("Fale conosco");
   });
 
   it("keeps non-English catalogs inventory-matched to English", () => {
@@ -59,6 +63,27 @@ describe("i18n messages", () => {
         description: "New English-only copy",
       },
     });
+  });
+
+  it("keeps catalogs free of ICU syntax translate cannot render", () => {
+    // translate only substitutes {name}. An ICU construct such as
+    // {count, plural, one {#} other {#}} matches nothing, throws nothing, and
+    // reaches the user verbatim, so no catalog may contain one.
+    for (const locale of supportedLocales) {
+      const messages = getMessages(locale) as unknown;
+      const offenders = flattenKeys(messages).filter((key) => {
+        const value = key.split(".").reduce<unknown>((carry, segment) => {
+          return carry && typeof carry === "object"
+            ? (carry as Record<string, unknown>)[segment]
+            : undefined;
+        }, messages);
+        return (
+          typeof value === "string" && /\{\s*\w+\s*,\s*(plural|select|selectordinal)\b/.test(value)
+        );
+      });
+
+      expect(offenders).toEqual([]);
+    }
   });
 
   it("rejects missing interpolation values", () => {

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { updateOrganizationRpcSettingsAction } from "./actions";
 
 type OrganizationSettings = {
@@ -59,51 +60,25 @@ async function runRpcProviderTest(
   const startedAt = Date.now();
 
   try {
-    const executeResponse = await fetch("/api/playground/execute", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const result = await dashboardFetch<{ data: RpcProxyResponse }>(
+      "/api/dashboard/settings/rpc-test",
+      {
         method: "POST",
-        path: "/v1/rpc/test",
         body: {
           jsonrpc: "2.0",
           id: "org-rpc-test",
           method: "getVersion",
           params: [],
         },
-        apiKey: null,
-      }),
-    });
+      }
+    );
 
     const latencyMs = Date.now() - startedAt;
-    const envelope = (await executeResponse.json()) as {
-      ok?: boolean;
-      status?: number;
-      statusText?: string;
-      body?: {
-        data?: RpcProxyResponse;
-        error?: { message?: string };
-      };
-      error?: string;
-    };
 
-    if (!executeResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
+    if (!result.ok) {
       return {
         status: "error",
-        message: envelope.error ?? t("DashboardCustody.rpcTestFailed"),
-        requestedProvider,
-        latencyMs,
-      };
-    }
-
-    if (!envelope.ok || !envelope.body?.data) {
-      return {
-        status: "error",
-        message:
-          envelope.body?.error?.message ||
-          t("DashboardCustody.rpcTestFailedStatus", { status: envelope.status }),
+        message: result.error,
         requestedProvider,
         latencyMs,
       };
@@ -112,7 +87,7 @@ async function runRpcProviderTest(
     const {
       provider: { id: resolvedProvider, endpoint, selectionMode },
       upstream,
-    } = envelope.body.data;
+    } = result.data.data;
 
     if (requestedProvider !== "default" && resolvedProvider !== requestedProvider) {
       return {

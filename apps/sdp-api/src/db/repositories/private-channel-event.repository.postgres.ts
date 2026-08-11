@@ -73,8 +73,18 @@ export function createPostgresPrivateChannelEventRepository(
       const limit = Math.min(Math.max(params.limit, 1), 100);
       const fetchLimit = limit + 1;
 
-      const clauses = ["instance_id = ?", "(channel_id = ? OR channel_id IS NULL)"];
-      const binds: (string | number)[] = [params.instanceId, params.channelId];
+      // Channel-less rows carry instance-wide context. Lifecycle stays visible to
+      // everyone in the channel; anything else (member/error) is only the author's
+      // to see, and transfers never belong to a single channel.
+      const channelScope =
+        params.viewer.scope === "member"
+          ? "(channel_id = ? OR (channel_id IS NULL AND (family = 'lifecycle' OR (family <> 'transfer' AND sdp_user_id = ?))))"
+          : "(channel_id = ? OR (channel_id IS NULL AND family <> 'transfer'))";
+      const clauses = ["instance_id = ?", channelScope];
+      const binds: (string | number | string[])[] = [params.instanceId, params.channelId];
+      if (params.viewer.scope === "member") {
+        binds.push(params.viewer.userId);
+      }
 
       if (params.family) {
         clauses.push("family = ?");
@@ -83,6 +93,10 @@ export function createPostgresPrivateChannelEventRepository(
       if (params.type) {
         clauses.push("type = ?");
         binds.push(params.type);
+      }
+      if (params.status) {
+        clauses.push("status = ?");
+        binds.push(params.status);
       }
       // Composite cursor: (occurred_at, id) is a total order, so ties on
       // occurred_at can't skip or duplicate rows across pages.
@@ -113,7 +127,7 @@ export function createPostgresPrivateChannelEventRepository(
       const fetchLimit = limit + 1;
 
       const clauses = ["organization_id = ?", "project_id = ?"];
-      const binds: (string | number)[] = [params.organizationId, params.projectId];
+      const binds: (string | number | string[])[] = [params.organizationId, params.projectId];
 
       if (params.family) {
         clauses.push("family = ?");
@@ -122,6 +136,21 @@ export function createPostgresPrivateChannelEventRepository(
       if (params.type) {
         clauses.push("type = ?");
         binds.push(params.type);
+      }
+      if (params.status) {
+        clauses.push("status = ?");
+        binds.push(params.status);
+      }
+      if (params.viewer.scope === "member") {
+        // Instance lifecycle context comes with channel membership; a viewer who
+        // belongs to no channel only keeps the channel-less events they authored.
+        const channelLessScope = params.viewer.channelIds.length
+          ? "(family = 'lifecycle' OR sdp_user_id = ?)"
+          : "sdp_user_id = ?";
+        clauses.push(
+          `(channel_id = ANY(?::text[]) OR (channel_id IS NULL AND ${channelLessScope}))`
+        );
+        binds.push(params.viewer.channelIds, params.viewer.userId);
       }
       if (params.beforeOccurredAt && params.beforeId) {
         clauses.push("(occurred_at < ? OR (occurred_at = ? AND id < ?))");

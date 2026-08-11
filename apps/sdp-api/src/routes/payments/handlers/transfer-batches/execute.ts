@@ -14,6 +14,8 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { internalError, transactionFailed } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
+import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import {
   type AppContext,
   type getFeePayment,
@@ -174,7 +176,13 @@ export async function executeChunk(params: {
   const firstRecipient = recipientRows[0];
   const linkedTransfer = await getDb(c.env).transaction(async (tx) => {
     const txClient = asTransactionalClient(tx);
-    const created = await createPostgresPaymentsRepository(txClient).createTransfer({
+    const created = await createPostgresPaymentsRepository(
+      txClient,
+      createTenantScope({
+        organizationId: resolved.scope.auth.organizationId,
+        projectId: resolved.projectId,
+      })
+    ).createTransfer({
       organizationId: resolved.scope.auth.organizationId,
       projectId: resolved.projectId,
       walletId: resolved.sourceWallet.walletId,
@@ -250,9 +258,8 @@ export async function executeChunk(params: {
     });
   };
 
-  let signature: Awaited<ReturnType<typeof params.feePayment.signAndSend>>;
-  try {
-    if (params.preflight) {
+  if (params.preflight) {
+    try {
       const simulated = await solanaRpc.simulateTransaction(resolved.rpc, txBytes);
       if (!simulated.success) {
         throw transactionFailed(
@@ -260,7 +267,19 @@ export async function executeChunk(params: {
           { logs: simulated.logs }
         );
       }
+    } catch (error) {
+      await settle({
+        status: "failed",
+        recipientStatus: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
     }
+  }
+
+  await beginApprovedWalletOperationEffect(c);
+  let signature: Awaited<ReturnType<typeof params.feePayment.signAndSend>>;
+  try {
     signature = await params.feePayment.signAndSend(txBytes);
   } catch (error) {
     await settle({

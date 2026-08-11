@@ -1,11 +1,11 @@
 import type { CachedSession } from "@sdp/types";
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { projectContextMiddleware } from "./project-context";
 
@@ -31,7 +31,12 @@ function buildApp(setup: (c: Context<{ Bindings: Env }>) => void) {
     await next();
   });
   app.use("*", projectContextMiddleware());
-  app.get("/probe", (c) => c.json({ projectId: c.get("projectId") }));
+  app.get("/probe", (c) =>
+    c.json({
+      projectId: c.get("projectId"),
+      projectEnvironment: c.get("projectEnvironment"),
+    })
+  );
 
   app.onError((err, c) => {
     if (err instanceof AppError) {
@@ -92,10 +97,6 @@ describe("projectContextMiddleware", () => {
       .run();
   });
 
-  afterEach(async () => {
-    await clearTestDatabase(env);
-  });
-
   it("resolves projectId from the x-project-id header for a project the session user belongs to", async () => {
     const app = buildApp((c) => c.set("session", session));
 
@@ -106,8 +107,12 @@ describe("projectContextMiddleware", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { projectId: string };
+    const body = (await res.json()) as {
+      projectId: string;
+      projectEnvironment: string;
+    };
     expect(body.projectId).toBe(MEMBER_PROJECT_ID);
+    expect(body.projectEnvironment).toBe("sandbox");
   });
 
   it("rejects an x-project-id header for a project in the same org the user does not belong to", async () => {
@@ -155,8 +160,12 @@ describe("projectContextMiddleware", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { projectId: string };
+    const body = (await res.json()) as {
+      projectId: string;
+      projectEnvironment: string;
+    };
     expect(body.projectId).toBe(MEMBER_PROJECT_ID);
+    expect(body.projectEnvironment).toBe("sandbox");
   });
 
   it("returns 401 when neither API key nor session is present", async () => {

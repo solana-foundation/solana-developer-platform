@@ -21,6 +21,13 @@ export interface HomeActivityRow {
   createdAt: string;
   type: string;
   token: string;
+  /**
+   * Raw mint behind `token`, when there is one. `token` is already resolved here,
+   * but this builder only sees issued-token symbols — a holding the organization
+   * did not issue degrades to a shortened mint. Carrying the mint lets the client,
+   * which has the symbols that came back with the balances, name it properly.
+   */
+  tokenMint: string | null;
   amount: string;
   address: string;
   explorer: HomeActivityExplorerRef | null;
@@ -151,6 +158,7 @@ export function buildHomeActivityRows(
       // transfer.token is a mint address; without this the row renders the raw
       // base58 while the Transactions table shows the symbol for the same row.
       token: resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint) ?? "—",
+      tokenMint: transfer.token?.trim() || null,
       amount: transfer.amount ?? "—",
       address: resolvePaymentsAddress(transfer),
       explorer: resolvePaymentsExplorer(transfer),
@@ -170,6 +178,7 @@ export function buildHomeActivityRows(
       createdAt: transaction.createdAt,
       type: toTitleCase(transaction.type),
       token: token.symbol || token.name || "—",
+      tokenMint: token.mintAddress?.trim() || null,
       amount: resolveIssuanceAmount(transaction),
       address: resolveIssuanceAddress(transaction),
       explorer: resolveIssuanceExplorer(transaction),

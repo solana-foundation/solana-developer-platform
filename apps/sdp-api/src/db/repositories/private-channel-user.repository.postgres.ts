@@ -35,6 +35,7 @@ function mapUserWithIdentityRow(row: Record<string, unknown>): PrivateChannelUse
     user_email: row.user_email as string,
     user_name: (row.user_name ?? null) as string | null,
     verified_wallet_count: Number(row.verified_wallet_count ?? 0),
+    project_role: (row.project_role ?? null) as string | null,
   };
 }
 
@@ -56,6 +57,7 @@ const USER_SELECT = `
   pcu.*,
   u.email AS user_email,
   u.name  AS user_name,
+  pm.role AS project_role,
   (
     SELECT COUNT(*)
       FROM private_channel_verified_wallets vw
@@ -67,6 +69,12 @@ const USER_SELECT = `
   ) AS verified_wallet_count
 `;
 
+// LEFT JOIN so PCU rows survive later removal from project_members (orphans stay visible for cleanup).
+const USER_JOINS = `
+  INNER JOIN users u ON u.id = pcu.user_id
+  LEFT  JOIN project_members pm ON pm.project_id = pcu.project_id AND pm.user_id = pcu.user_id
+`;
+
 export function createPostgresPrivateChannelUserRepository(
   db: AppDb
 ): PrivateChannelUserRepository {
@@ -76,7 +84,7 @@ export function createPostgresPrivateChannelUserRepository(
         .prepare(
           `SELECT ${USER_SELECT}
              FROM private_channel_users pcu
-             INNER JOIN users u ON u.id = pcu.user_id
+             ${USER_JOINS}
             WHERE pcu.organization_id = ?
               AND pcu.project_id = ?
             ORDER BY pcu.created_at DESC, pcu.id DESC`
@@ -91,7 +99,7 @@ export function createPostgresPrivateChannelUserRepository(
         .prepare(
           `SELECT ${USER_SELECT}
              FROM private_channel_users pcu
-             INNER JOIN users u ON u.id = pcu.user_id
+             ${USER_JOINS}
             WHERE pcu.id = ?
               AND pcu.organization_id = ?
               AND pcu.project_id = ?`
@@ -119,7 +127,7 @@ export function createPostgresPrivateChannelUserRepository(
         .prepare(
           `SELECT ${USER_SELECT}
              FROM private_channel_users pcu
-             INNER JOIN users u ON u.id = pcu.user_id
+             ${USER_JOINS}
             WHERE pcu.organization_id = ?
               AND pcu.project_id = ?
               AND pcu.user_id = ?`
@@ -157,7 +165,7 @@ export function createPostgresPrivateChannelUserRepository(
         .prepare(
           `SELECT ${USER_SELECT}
              FROM private_channel_users pcu
-             INNER JOIN users u ON u.id = pcu.user_id
+             ${USER_JOINS}
             WHERE pcu.id = ?`
         )
         .bind(row.id)

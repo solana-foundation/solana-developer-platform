@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedTestDatabase } from "@/test/mocks/db";
 import {
   generatePrivateChannelEventId,
   type PrivateChannelEventRepository,
@@ -43,11 +44,8 @@ describe("PrivateChannelEventRepository (postgres)", () => {
   let repo: PrivateChannelEventRepository;
 
   beforeEach(async () => {
+    await seedTestDatabase(env);
     const db = getDb(env);
-    await db.prepare("DELETE FROM private_channel_events").run();
-    await db.prepare("DELETE FROM private_channels").run();
-    await db.prepare("DELETE FROM private_channel_instances").run();
-    await db.prepare("DELETE FROM projects").run();
 
     await db
       .prepare(
@@ -111,6 +109,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const { rows, hasMore } = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 50,
     });
     expect(hasMore).toBe(false);
@@ -118,7 +117,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     expect(rows[0]?.payload).toEqual({ name: "Default" });
   });
 
-  it("includes instance-level events (channel_id null) in the channel feed", async () => {
+  it("includes instance-level events but excludes channel-less transfers from channel feeds", async () => {
     await repo.insert(
       baseEvent({
         channelId: null,
@@ -126,9 +125,17 @@ describe("PrivateChannelEventRepository (postgres)", () => {
         payload: { gatewayUrl: "http://gw" },
       })
     );
+    await repo.insert(
+      baseEvent({
+        channelId: null,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+      })
+    );
     const { rows } = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 10,
     });
     expect(rows).toHaveLength(1);
@@ -156,6 +163,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
       family: PRIVATE_CHANNEL_EVENT_FAMILIES.ERROR,
+      viewer: { scope: "all" },
       limit: 10,
     });
     expect(byFamily.rows).toHaveLength(1);
@@ -165,9 +173,160 @@ describe("PrivateChannelEventRepository (postgres)", () => {
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
       type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_CHANNEL_CREATED,
+      viewer: { scope: "all" },
       limit: 10,
     });
     expect(byType.rows).toHaveLength(1);
+  });
+
+  it("keeps lifecycle and self-authored instance events in a member's channel feed", async () => {
+    await repo.insert(baseEvent({ id: "pce_member_channel" }));
+    await repo.insert(
+      baseEvent({
+        id: "pce_instance_level",
+        channelId: null,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_CONNECTED,
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_own_wallet",
+        channelId: null,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_other_wallet",
+        channelId: null,
+        sdpUserId: "usr_other",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
+      })
+    );
+
+    const { rows } = await repo.listByChannel({
+      channelId: TEST_CHANNEL_ID,
+      instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "member", channelIds: [TEST_CHANNEL_ID], userId: TEST_USER.id },
+      limit: 10,
+    });
+
+    expect(rows.map((row) => row.id).sort()).toEqual(
+      ["pce_member_channel", "pce_instance_level", "pce_own_wallet"].sort()
+    );
+  });
+
+  it("shows a member's channel events, lifecycle, and their own channel-less transfers", async () => {
+    await repo.insert(baseEvent({ id: "pce_member_channel" }));
+    await repo.insert(
+      baseEvent({
+        id: "pce_other_channel",
+        channelId: "pch_other",
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_own_transfer",
+        channelId: null,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+        sdpUserId: TEST_USER.id,
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_other_transfer",
+        channelId: null,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+        sdpUserId: "usr_other",
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_instance_level",
+        channelId: null,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_CONNECTED,
+      })
+    );
+
+    const { rows } = await repo.listByProject({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      viewer: { scope: "member", channelIds: [TEST_CHANNEL_ID], userId: TEST_USER.id },
+      limit: 10,
+    });
+
+    expect(rows.map((row) => row.id).sort()).toEqual(
+      ["pce_member_channel", "pce_own_transfer", "pce_instance_level"].sort()
+    );
+  });
+
+  it("keeps authored channel-less events visible after the member leaves every channel", async () => {
+    await repo.insert(
+      baseEvent({
+        id: "pce_authored_member_event",
+        channelId: null,
+        sdpUserId: TEST_USER.id,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED,
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_other_member_event",
+        channelId: null,
+        sdpUserId: "usr_other",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED,
+      })
+    );
+
+    const { rows } = await repo.listByProject({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      viewer: { scope: "member", channelIds: [], userId: TEST_USER.id },
+      limit: 10,
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["pce_authored_member_event"]);
+  });
+
+  it("filters channel and project feeds by exact status", async () => {
+    await repo.insert(
+      baseEvent({
+        id: "pce_status_info",
+        status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_status_failed",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.ERROR,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.ERROR_SPC_UNREACHABLE,
+        status: PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
+      })
+    );
+
+    const channel = await repo.listByChannel({
+      channelId: TEST_CHANNEL_ID,
+      instanceId: TEST_INSTANCE_ID,
+      status: PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
+      viewer: { scope: "all" },
+      limit: 10,
+    });
+    expect(channel.rows.map((row) => row.id)).toEqual(["pce_status_failed"]);
+
+    const project = await repo.listByProject({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
+      viewer: { scope: "all" },
+      limit: 10,
+    });
+    expect(project.rows.map((row) => row.id)).toEqual(["pce_status_info"]);
   });
 
   it("paginates with before cursor and hasMore", async () => {
@@ -178,6 +337,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page1 = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 2,
     });
     expect(page1.rows.map((r) => r.id)).toEqual(["pce_c", "pce_b"]);
@@ -186,6 +346,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page2 = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 2,
       beforeOccurredAt: page1.rows[1]?.occurred_at,
       beforeId: page1.rows[1]?.id,
@@ -203,6 +364,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page1 = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 2,
     });
     expect(page1.rows.map((r) => r.id)).toEqual(["pce_t3", "pce_t2"]);
@@ -211,6 +373,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page2 = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 2,
       beforeOccurredAt: page1.rows[1]?.occurred_at,
       beforeId: page1.rows[1]?.id,
@@ -226,6 +389,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const { rows } = await repo.listByChannel({
       channelId: TEST_CHANNEL_ID,
       instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "all" },
       limit: 10,
     });
     // Denormalized rows: deleting the channel does not remove its events.
@@ -252,6 +416,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const { rows, hasMore } = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      viewer: { scope: "all" },
       limit: 50,
     });
     expect(hasMore).toBe(false);
@@ -266,6 +431,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page1 = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      viewer: { scope: "all" },
       limit: 2,
     });
     expect(page1.rows.map((r) => r.id)).toEqual(["pce_x3", "pce_x2"]);
@@ -274,6 +440,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const page2 = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      viewer: { scope: "all" },
       limit: 2,
       beforeOccurredAt: page1.rows[1]?.occurred_at,
       beforeId: page1.rows[1]?.id,
@@ -284,6 +451,7 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     const other = await repo.listByProject({
       organizationId: TEST_ORG.id,
       projectId: "prj_other",
+      viewer: { scope: "all" },
       limit: 50,
     });
     expect(other.rows).toHaveLength(0);

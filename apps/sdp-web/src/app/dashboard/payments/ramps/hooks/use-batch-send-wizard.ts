@@ -152,7 +152,7 @@ export function useBatchSendWizard({
         return {
           value: option.value,
           label: option.label === option.value ? shortenAddress(option.value) : option.label,
-          description: known ? undefined : t("DashboardPayments.batchSend.customToken"),
+          description: known ? undefined : t("DashboardPayments.batchSend.unknownToken"),
         };
       }),
     [issuedTokenSymbolsByMint, selectedWallet, t]
