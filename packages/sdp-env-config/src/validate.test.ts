@@ -130,6 +130,21 @@ test("Privy runtime BYOK setup does not require an existing wallet", () => {
   assert.equal(errors.PRIVY_WALLET_ID, undefined);
 });
 
+test("stored-only Privy BYOK setup does not require deployment credentials", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    SIGNING_PROVIDERS: "local",
+    SIGNING_PROVIDER: "local",
+    PRIVY_BYOK_ENABLED: "true",
+    SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED: "true",
+    PRIVY_APP_ID: "",
+    PRIVY_APP_SECRET: "",
+  });
+
+  assert.equal(errors.PRIVY_APP_ID, undefined);
+  assert.equal(errors.PRIVY_APP_SECRET, undefined);
+});
+
 test("legacy Privy setup still requires an existing wallet", () => {
   const errors = validateValues({
     ...defaultValues(),
