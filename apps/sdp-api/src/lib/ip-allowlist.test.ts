@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  canonicalizeIpAllowlist,
   canonicalizeIpAllowlistEntry,
   isClientIpAllowed,
   isValidIpAllowlistEntry,
@@ -73,33 +72,6 @@ describe("canonicalizeIpAllowlistEntry", () => {
     const canonical = canonicalizeIpAllowlistEntry("203.0.113.5/24") as string;
     expect(isClientIpAllowed("203.0.113.42", [canonical])).toBe(true);
     expect(isClientIpAllowed("203.0.114.42", [canonical])).toBe(false);
-  });
-});
-
-describe("canonicalizeIpAllowlist", () => {
-  it("collapses entries that differ only in spelling", () => {
-    expect(
-      canonicalizeIpAllowlist(["203.0.113.5/24", "203.0.113.0/24", "203.0.113.99/24"])
-    ).toEqual(["203.0.113.0/24"]);
-    expect(canonicalizeIpAllowlist(["2001:DB8::1", "2001:0db8:0000::1"])).toEqual(["2001:db8::1"]);
-    expect(canonicalizeIpAllowlist(["::ffff:203.0.113.42", "203.0.113.42"])).toEqual([
-      "203.0.113.42",
-    ]);
-  });
-
-  it("keeps distinct ranges, in the order they were given", () => {
-    expect(canonicalizeIpAllowlist(["2001:db8::/48", "203.0.113.5"])).toEqual([
-      "2001:db8::/48",
-      "203.0.113.5",
-    ]);
-  });
-
-  it("rejects the whole list when any entry is invalid", () => {
-    expect(canonicalizeIpAllowlist(["203.0.113.0/24", "not-an-ip"])).toBeNull();
-  });
-
-  it("returns an empty list unchanged", () => {
-    expect(canonicalizeIpAllowlist([])).toEqual([]);
   });
 });
 

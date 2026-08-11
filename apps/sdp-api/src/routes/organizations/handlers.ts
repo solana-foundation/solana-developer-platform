@@ -13,7 +13,7 @@ import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, notFound } from "@/lib/errors";
-import { canonicalizeIpAllowlist, isClientIpAllowed } from "@/lib/ip-allowlist";
+import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import { noContent, success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -109,33 +109,6 @@ export const getOrganization = async (c: AppContext) => {
   return success(c, response);
 };
 
-type OrganizationSettingsPatch = NonNullable<z.infer<typeof updateOrgSchema>["settings"]>;
-
-/**
- * Canonicalizes the allowlist before storage: `203.0.113.5/24` displays as one
- * host but authorizes 256, so the stored form must be the range it selects.
- */
-function resolveSettingsPatch(
-  patch: OrganizationSettingsPatch | undefined
-): OrganizationSettingsPatch | undefined {
-  if (patch?.allowedIpAddresses === undefined) {
-    return patch;
-  }
-
-  const allowedIpAddresses = canonicalizeIpAllowlist(patch.allowedIpAddresses);
-
-  if (!allowedIpAddresses) {
-    // Unreachable behind the schema; kept so a future caller cannot skip it.
-    throw badRequest("Invalid request body", {
-      errors: {
-        settings: ["allowedIpAddresses must contain only valid IP addresses or CIDR ranges"],
-      },
-    });
-  }
-
-  return { ...patch, allowedIpAddresses };
-}
-
 /**
  * Refuses an allowlist that would shut out the request installing it. The
  * restriction covers this endpoint and the dashboard, so such a list is
@@ -175,7 +148,7 @@ export const updateOrganization = async (c: AppContext) => {
     });
   }
 
-  const settingsPatch = resolveSettingsPatch(parsed.data.settings);
+  const settingsPatch = parsed.data.settings;
 
   if (parsed.data.name === undefined && settingsPatch === undefined) {
     throw badRequest("No valid updates provided");

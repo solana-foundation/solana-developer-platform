@@ -1,64 +1,12 @@
 import { BlockList, isIP } from "node:net";
 
-type IpVersion = 4 | 6;
 type IpType = "ipv4" | "ipv6";
 
 interface ParsedIpRange {
   address: string;
+  groups: number[];
   prefix: number;
   type: IpType;
-}
-
-function parseIpRange(value: string): ParsedIpRange | null {
-  if (value.length === 0 || value !== value.trim()) {
-    return null;
-  }
-
-  const segments = value.split("/");
-  if (segments.length > 2) {
-    return null;
-  }
-
-  const address = segments[0] ?? "";
-  // Zone identifiers are meaningful only on the local host and are not valid
-  // request-origin restrictions.
-  if (address.includes("%")) {
-    return null;
-  }
-
-  const version = isIP(address) as IpVersion | 0;
-  if (version === 0) {
-    return null;
-  }
-
-  const maximumPrefix = version === 4 ? 32 : 128;
-  const rawPrefix = segments[1];
-  if (rawPrefix === undefined) {
-    return {
-      address,
-      prefix: maximumPrefix,
-      type: version === 4 ? "ipv4" : "ipv6",
-    };
-  }
-
-  if (!/^(0|[1-9]\d*)$/.test(rawPrefix)) {
-    return null;
-  }
-
-  const prefix = Number(rawPrefix);
-  if (prefix > maximumPrefix) {
-    return null;
-  }
-
-  return {
-    address,
-    prefix,
-    type: version === 4 ? "ipv4" : "ipv6",
-  };
-}
-
-export function isValidIpAllowlistEntry(value: string): boolean {
-  return parseIpRange(value) !== null;
 }
 
 function parseIpv4Octets(address: string): number[] | null {
@@ -138,6 +86,51 @@ function parseIpv6Hextets(address: string): number[] | null {
   return [...head, ...Array.from({ length: elided }, () => 0), ...tail];
 }
 
+function parseIpRange(value: string): ParsedIpRange | null {
+  if (value.length === 0 || value !== value.trim()) {
+    return null;
+  }
+
+  const segments = value.split("/");
+  if (segments.length > 2) {
+    return null;
+  }
+
+  const address = segments[0];
+  // Zone identifiers are meaningful only on the local host and are not valid
+  // request-origin restrictions.
+  if (address.includes("%")) {
+    return null;
+  }
+
+  const type: IpType = address.includes(":") ? "ipv6" : "ipv4";
+  const groups = type === "ipv4" ? parseIpv4Octets(address) : parseIpv6Hextets(address);
+  if (!groups) {
+    return null;
+  }
+
+  const maximumPrefix = type === "ipv4" ? 32 : 128;
+  const rawPrefix = segments[1];
+  if (rawPrefix === undefined) {
+    return { address, groups, prefix: maximumPrefix, type };
+  }
+
+  if (!/^(0|[1-9]\d*)$/.test(rawPrefix)) {
+    return null;
+  }
+
+  const prefix = Number(rawPrefix);
+  if (prefix > maximumPrefix) {
+    return null;
+  }
+
+  return { address, groups, prefix, type };
+}
+
+export function isValidIpAllowlistEntry(value: string): boolean {
+  return parseIpRange(value) !== null;
+}
+
 /** Zero every bit past the prefix, so a range names the network it selects. */
 function maskGroups(groups: readonly number[], bitsPerGroup: number, prefix: number): number[] {
   const width = (1 << bitsPerGroup) - 1;
@@ -209,19 +202,10 @@ export function canonicalizeIpAllowlistEntry(value: string): string | null {
   }
 
   if (parsed.type === "ipv4") {
-    const octets = parseIpv4Octets(parsed.address);
-    if (!octets) {
-      return null;
-    }
-    return formatRange(maskGroups(octets, 8, parsed.prefix).join("."), parsed.prefix, 32);
+    return formatRange(maskGroups(parsed.groups, 8, parsed.prefix).join("."), parsed.prefix, 32);
   }
 
-  const hextets = parseIpv6Hextets(parsed.address);
-  if (!hextets) {
-    return null;
-  }
-
-  const masked = maskGroups(hextets, 16, parsed.prefix);
+  const masked = maskGroups(parsed.groups, 16, parsed.prefix);
 
   // Below /96 the range escapes the IPv4-mapped space and must stay IPv6.
   if (parsed.prefix >= 96 && isIpv4Mapped(masked)) {
@@ -232,22 +216,16 @@ export function canonicalizeIpAllowlistEntry(value: string): string | null {
   return formatRange(formatIpv6(masked), parsed.prefix, 128);
 }
 
-/**
- * Canonicalize a whole allowlist, deduped. Null when any entry is invalid —
- * a partially understood list must never be persisted.
- */
-export function canonicalizeIpAllowlist(values: readonly string[]): string[] | null {
-  const canonical = new Set<string>();
-
-  for (const value of values) {
-    const entry = canonicalizeIpAllowlistEntry(value);
-    if (!entry) {
+/** node's `isIP` result narrowed to the BlockList family labels. */
+function clientIpType(value: string): IpType | null {
+  switch (isIP(value)) {
+    case 4:
+      return "ipv4";
+    case 6:
+      return "ipv6";
+    default:
       return null;
-    }
-    canonical.add(entry);
   }
-
-  return [...canonical];
 }
 
 /**
@@ -270,8 +248,8 @@ export function isClientIpAllowed(clientIp: string | null, allowedIps: unknown):
     return false;
   }
 
-  const clientVersion = isIP(clientIp) as IpVersion | 0;
-  if (clientVersion === 0) {
+  const clientType = clientIpType(clientIp);
+  if (!clientType) {
     return false;
   }
 
@@ -291,5 +269,5 @@ export function isClientIpAllowed(clientIp: string | null, allowedIps: unknown):
     return false;
   }
 
-  return blockList.check(clientIp, clientVersion === 4 ? "ipv4" : "ipv6");
+  return blockList.check(clientIp, clientType);
 }
