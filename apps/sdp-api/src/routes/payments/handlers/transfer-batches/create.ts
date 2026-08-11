@@ -142,10 +142,15 @@ export async function extractTransferBatchPolicyCandidate(
       externalId: input.externalId === undefined ? null : input.externalId,
       source: input.source,
       token: input.token,
-      recipients: input.recipients.map((recipient) => ({
-        externalId: recipient.externalId === undefined ? null : recipient.externalId,
+      // Resolved destinations ride in the payload so an approved batch pins
+      // the exact addresses that were evaluated: a counterparty account whose
+      // address changes between approval and replay fails the replay match
+      // instead of executing to a destination policy never saw.
+      recipients: resolved.recipients.map((recipient) => ({
+        externalId: recipient.externalId,
         counterpartyId: recipient.counterpartyId,
         counterpartyAccountId: recipient.counterpartyAccountId,
+        destinationAddress: recipient.destinationAddress,
         amount: recipient.amount,
       })),
       options: input.options === undefined ? null : input.options,

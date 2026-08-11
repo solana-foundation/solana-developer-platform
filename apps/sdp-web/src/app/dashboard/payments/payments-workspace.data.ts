@@ -237,32 +237,6 @@ export async function fetchWalletAggregate(
   return body.data.aggregate;
 }
 
-export async function fetchWalletPolicy(walletId: string, t: Translate): Promise<WalletPolicy> {
-  const response = await fetch(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
-    {
-      method: "GET",
-      cache: "no-store",
-    }
-  );
-  const body = (await response.json().catch(() => ({}))) as WalletPolicyEnvelope;
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.walletPolicyRequestFailed", { status: response.status })
-      )
-    );
-  }
-
-  const policy = body.data?.policy;
-  if (!policy) {
-    throw new Error(t("DashboardPayments.workspace.walletPolicyMissing", { walletId }));
-  }
-
-  return policy;
-}
-
 interface TransferListEnvelope {
   data?: TransferRecord[];
   error?: {

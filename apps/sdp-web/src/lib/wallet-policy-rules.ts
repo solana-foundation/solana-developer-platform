@@ -22,20 +22,6 @@ export function collectDestinationAllowlist(rules: PolicyRule[]): string[] {
 }
 
 /**
- * Whether the rules permit a transfer destination. A destination allowlist
- * denies every address it does not name, while a policy without one leaves
- * destinations unrestricted.
- *
- * @param rules - Policy rules to inspect.
- * @param destination - The destination address to test.
- * @returns True when no destination allowlist exists, or when it names the destination.
- */
-export function isDestinationAllowlisted(rules: PolicyRule[], destination: string): boolean {
-  const allowlist = collectDestinationAllowlist(rules);
-  return allowlist.length === 0 || allowlist.includes(destination);
-}
-
-/**
  * The per-transaction transfer cap authored on the policy: the first "amount"
  * rule carrying a maximum. Amount rules are always keyed by asset mint, so the
  * cap bounds the assets its rule names.
