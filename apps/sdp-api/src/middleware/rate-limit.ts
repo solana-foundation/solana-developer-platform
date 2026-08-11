@@ -30,6 +30,14 @@ const ANONYMOUS_MAX_REQUESTS = 20;
 export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIMIT_TIERS)) * 5;
 
 /**
+ * Per-user ceiling for verified Clerk dashboard traffic. Set well above what a person
+ * driving the UI produces — a dashboard page can fan out to a dozen endpoints, and the
+ * notification bell polls on a timer — so this is a runaway-loop backstop, not a
+ * throttle anyone should meet while using the product.
+ */
+export const CLERK_USER_MAX_REQUESTS = 600;
+
+/**
  * Builds the KV key for one identifier's counter in one window bucket.
  *
  * @param identifier - Counter scope (client IP or API key id).
@@ -128,18 +136,28 @@ function looksLikeClerkJwt(token: string, env: Env): boolean {
 }
 
 /**
- * Verifies the token's signature against Clerk's JWKS.
+ * Verifies the token's signature against Clerk's JWKS and resolves the user it
+ * belongs to.
+ *
+ * Dashboard traffic used to skip rate limiting entirely, which left every authenticated
+ * endpoint unbounded per user: a signed-in caller could loop rule creation or execution
+ * decisions (each several queries plus a write), and a `notify` rule turns that into
+ * unbounded outbound email. Verification is already cached per request by
+ * `verifyClerkJwtForRequest`, so keying on the user costs nothing extra.
  *
  * @param c - Request context (provides the JWKS configuration).
  * @param token - JWT-shaped bearer token.
- * @returns True when verification succeeds; false on any verification error.
+ * @returns The verified Clerk user id, or null when the token isn't a valid Clerk JWT.
  */
-async function isVerifiedClerkJwt(c: Context<{ Bindings: Env }>, token: string): Promise<boolean> {
+async function verifiedClerkUserId(
+  c: Context<{ Bindings: Env }>,
+  token: string
+): Promise<string | null> {
   try {
-    await verifyClerkJwtForRequest(c, token);
-    return true;
+    const payload = await verifyClerkJwtForRequest(c, token);
+    return payload.sub ?? null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -226,10 +244,17 @@ export async function enforceRateLimit(
  * Pre-auth rate limiting middleware. Paths matching an exempt pattern pass
  * straight through (exact, segment-prefix, or single-segment `*` wildcard —
  * see matchesFreePath; bare `startsWith` would mis-skip the whole API when
- * `/` is listed). For everything else: verified Clerk dashboard JWTs are
- * exempt, sk_-shaped requests get the high per-IP backstop (their real limit
- * is enforced per key after auth via enforceRateLimit), and everything else
- * gets the anonymous per-IP limit.
+ * `/` is listed). For everything else: verified Clerk dashboard JWTs get a
+ * generous per-user limit (not an exemption — see CLERK_USER_MAX_REQUESTS),
+ * sk_-shaped requests get the high per-IP backstop (their real limit is
+ * enforced per key after auth via enforceRateLimit), and everything else gets
+ * the anonymous per-IP limit.
+ *
+ * The Clerk limit is keyed per user, not per IP: an office behind one NAT
+ * address is many people, and the dashboard's own background polling would
+ * otherwise pool against them. A JWT-shaped token that fails verification
+ * falls through to the anonymous per-IP limit, which is what bounds
+ * signature-spray against the JWKS check.
  *
  * Requires c.var.kv to be populated (by kvStoreMiddleware) on non-exempt
  * paths, so every path kv-store skips must be listed here too — the
@@ -249,8 +274,9 @@ export function skipRateLimitPaths(...paths: string[]) {
 
     const bearerToken = extractBearerToken(c);
     if (bearerToken && looksLikeJwt(bearerToken) && looksLikeClerkJwt(bearerToken, c.env)) {
-      const isClerkToken = await isVerifiedClerkJwt(c, bearerToken);
-      if (isClerkToken) {
+      const clerkUserId = await verifiedClerkUserId(c, bearerToken);
+      if (clerkUserId) {
+        await enforceRateLimit(c, `clerk:${clerkUserId}`, CLERK_USER_MAX_REQUESTS);
         await next();
         return;
       }
