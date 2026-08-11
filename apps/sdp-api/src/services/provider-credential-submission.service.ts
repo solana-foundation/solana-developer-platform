@@ -278,7 +278,9 @@ async function loadReplay(context: SubmissionContext): Promise<ProviderCredentia
   }
 }
 
-async function resolveSubmissionSource(context: SubmissionContext): Promise<
+async function resolveSubmissionSource(
+  context: SubmissionContext
+): Promise<
   | { kind: "source"; source: SubmissionSource }
   | { kind: "replay"; result: ProviderCredentialSubmissionResult }
 > {
@@ -905,11 +907,7 @@ async function resolveLateReplayBeforeFingerprint(
   if (!replay) {
     return null;
   }
-  return resolveReplayWithAudit(
-    context,
-    replay,
-    await computeSubmissionFingerprint(context)
-  );
+  return resolveReplayWithAudit(context, replay, await computeSubmissionFingerprint(context));
 }
 
 async function classifySetup(
