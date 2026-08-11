@@ -6,6 +6,18 @@ import type { Env } from "@/types/env";
 import { PostgresPolicyEnforcementStore } from "./enforcement.store";
 
 /**
+ * The dry-run verdict for an operation that resolves no custody wallet: no
+ * wallet policy governs it, so it is allowed with nothing to evaluate.
+ */
+export const UNGOVERNED_POLICY_DRY_RUN_RESULT: PolicyDryRunResult = {
+  decision: "allow",
+  reason: "The operation resolves no custody wallet, so no wallet policy governs it.",
+  criteria: [],
+  walletPolicyRevisionId: null,
+  apiKeyPolicyRevisionId: null,
+};
+
+/**
  * Evaluate a candidate wallet operation against its effective policies
  * without persisting anything: no wallet-operation row, no approval request,
  * no evaluation audit row. Backs the Dry-Run exit of the policy gate, where

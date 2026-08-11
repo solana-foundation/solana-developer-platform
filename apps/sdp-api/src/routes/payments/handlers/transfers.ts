@@ -281,7 +281,7 @@ function buildTransferPolicyCandidate(
     projectId: scope.auth.projectId,
     custodyWalletId: operation.sourceWallet.id,
     walletId: operation.sourceWallet.walletId,
-    apiKeyId: scope.auth.apiKeyId === undefined ? null : scope.auth.apiKeyId,
+    apiKeyId: scope.auth.apiKeyId,
     actor: walletOperationActorFromAuth(scope.auth),
     source: "api",
     operationFamily: "payment",
@@ -394,12 +394,12 @@ export async function findTransferIdempotentKeyReplay(
   idempotencyKey: string
 ): Promise<Response | null> {
   const body = extraction.body as CreateTransferBody;
-  const { operation, privateTransfer } = extraction.resolved as TransferPolicyResolved;
+  const { scope, operation, privateTransfer } = extraction.resolved as TransferPolicyResolved;
 
   const replay = await resolveTransferIdempotencyReplay(
     getPaymentsRepository(c),
-    extraction.candidate.organizationId,
-    extraction.candidate.projectId,
+    scope.auth.organizationId,
+    scope.auth.projectId,
     idempotencyKey,
     buildPaymentTransferFingerprint({
       sourceAddress: operation.sourceWallet.publicKey,

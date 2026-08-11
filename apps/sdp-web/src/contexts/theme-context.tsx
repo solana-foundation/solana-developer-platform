@@ -1,8 +1,14 @@
 "use client";
 
-import { ThemeProvider as NextThemeProvider, useTheme as useNextTheme } from "next-themes";
 import {
+  ThemeProvider as NextThemeProvider,
+  type ThemeProviderProps as NextThemeProviderProps,
+  useTheme as useNextTheme,
+} from "next-themes";
+import {
+  type ComponentType,
   createContext,
+  type PropsWithChildren,
   type ReactNode,
   useCallback,
   useContext,
@@ -33,6 +39,9 @@ type ThemeContextValue = {
 };
 
 const ThemeProviderContext = createContext(false);
+const NextThemeProviderWithChildren = NextThemeProvider as ComponentType<
+  PropsWithChildren<NextThemeProviderProps>
+>;
 
 // The no-op store intentionally changes only between the server and client snapshots.
 // React schedules the post-hydration render without an effect or a browser event listener.
@@ -49,7 +58,7 @@ export function resolvePreference(storedTheme: string | undefined): ThemePrefere
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   return (
-    <NextThemeProvider
+    <NextThemeProviderWithChildren
       attribute="class"
       defaultTheme="system"
       enableColorScheme
@@ -57,7 +66,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       storageKey={THEME_STORAGE_KEY}
     >
       <ThemeProviderContext.Provider value>{children}</ThemeProviderContext.Provider>
-    </NextThemeProvider>
+    </NextThemeProviderWithChildren>
   );
 }
 

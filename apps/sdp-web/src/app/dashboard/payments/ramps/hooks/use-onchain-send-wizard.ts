@@ -6,6 +6,7 @@ import type {
   PaymentTransferSummary,
 } from "@sdp/types";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -15,7 +16,6 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { useZodForm } from "@/lib/use-zod-form";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
@@ -70,7 +70,7 @@ export function useOnchainSendWizard({
   counterpartyId,
   onExit,
 }: UseOnchainSendWizardProps) {
-  const router = useDashboardRouter();
+  const router = useRouter();
   const t = useTranslations();
   const locale = useLocale();
   const steps = getOnchainSendSteps(t);

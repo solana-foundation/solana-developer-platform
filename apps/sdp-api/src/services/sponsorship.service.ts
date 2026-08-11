@@ -10,6 +10,7 @@ import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
 import { BudgetedFeePayment } from "./sponsorship-budget.service";
@@ -96,11 +97,7 @@ export function resolveRequestSponsorshipScope(c: AppContext): SponsorshipScope 
 /** Resolve either project or organization scope from trusted authentication state. */
 export function resolveAuthenticatedSponsorshipScope(c: AppContext): SponsorshipScope {
   const auth = getAuth(c);
-  const environment = c.get("projectEnvironment") ?? auth.environment;
-
-  if (environment !== "sandbox" && environment !== "production") {
-    throw new AppError("INTERNAL_ERROR", "Sponsorship project environment is unavailable");
-  }
+  const environment = resolveSdpEnvironment(c);
 
   return {
     environment,

@@ -148,6 +148,7 @@ copyable precedent (`ground` id, `GroundEarnClient`, `GROUND_API_KEY` /
 | 5. Availability | `apps/sdp-api/src/services/provider-availability.service.ts` | One line: `<id>: keyPairCredentialDefinition("<Label>", "<ID>")`. |
 | 6. Credential keys | `apps/sdp-api/src/types/env.d.ts` | `<ID>_API_KEY` + `<ID>_SANDBOX_API_KEY`. `keyPairCredentialDefinition` binds its derived keys to `keyof Env`, so skipping this is a compile error. |
 | 7. Key projections | `turbo.json` `globalEnv` + `scripts/secret-keys.mjs` | Both keys in both files (+ the secret manager for deployed environments). |
+| 8. Managed deployments | sdp-infra `terraform/envs/<env>/terraform.tfvars` | Append the credential key(s) to `app_secret_keys` (the Doppler → Secret Manager mirror; also add the value to that env's Doppler config). Dev carries sandbox keys only — production keys are a launch-gated decision (PRO-1647). Nothing else: the Cloud Run service and Job read the same secret set, and the hourly catalogue sync picks the provider up from `EARN_PROVIDER_CLIENTS` with zero job changes (`src/job.ts` never names providers; an un-credentialed provider skips fail-closed with `PROVIDER_NOT_CONFIGURED`). |
 
 Tests that enforce the checklist (run them; they fail on the exact step you
 missed):
@@ -223,9 +224,12 @@ process before anything can talk to Ground's sandbox. Locally that means
 (`scripts/doppler/run-with-config.sh`) overlays `apps/*/.env.local` on top of
 the Doppler-injected values, so the file wins with no `DOPPLER_PRESERVE_ENV`
 opt-in — a plain shell export, by contrast, is dropped. Deployed environments
-take the key from Doppler/Secret Manager instead. Until it resolves, the
-provider is `configured: false` and every call fails closed with
-`PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't care).
+take the key from Doppler/Secret Manager instead — reaching a *managed* runtime
+additionally requires the key in sdp-infra's `app_secret_keys` (step 8 of the
+§4 checklist), which feeds both the Cloud Run service and the cron Job. Until
+it resolves, the provider is `configured: false` and every call fails closed
+with `PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't
+care).
 
 **Reaching Earn at all needs both module flags:** `MARKETS_ENABLED` (parent)
 and `EARN_ENABLED` (child) are off by default in *every* environment, local dev

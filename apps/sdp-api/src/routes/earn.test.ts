@@ -45,14 +45,21 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
 };
+const TEST_PRODUCTION_PROJECT = {
+  id: "prj_test_earn_routes_prod",
+  slug: "test-earn-routes-project-prod",
+};
+const TEST_SESSION_ID = "ses_earn_routes";
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const VEDA_SANDBOX_KEY = "veda-sandbox-test-api-key";
+const VEDA_PRODUCTION_KEY = "veda-production-test-api-key";
 
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
 let originalVedaSandboxApiKey: string | undefined;
+let originalVedaApiKey: string | undefined;
 
 /**
  * Earn provider entitlement defaults to OFF for every organization
@@ -109,6 +116,51 @@ async function seedAuth({ entitleVeda = true }: { entitleVeda?: boolean } = {}):
         JSON.stringify(["*"]),
         "active"
       ),
+  ]);
+}
+
+/**
+ * Dashboard (session) callers resolve their environment from the membership-
+ * verified x-project-id project, so the session fixture carries both the
+ * sandbox project seedAuth created and a production sibling. Call after
+ * seedAuth().
+ */
+async function seedSessionAuth(): Promise<void> {
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES (?, ?, ?, 'member', 'active')`
+      )
+      .bind("om_earn_routes_session", TEST_ORG.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, 'production', 'active', ?)`
+      )
+      .bind(
+        TEST_PRODUCTION_PROJECT.id,
+        TEST_ORG.id,
+        "Production Project",
+        TEST_PRODUCTION_PROJECT.slug,
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
+      )
+      .bind("pm_earn_routes_sandbox", TEST_PROJECT.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
+      )
+      .bind("pm_earn_routes_production", TEST_PRODUCTION_PROJECT.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+         VALUES (?, ?, ?, 'session', ?)`
+      )
+      .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
   ]);
 }
 
@@ -189,16 +241,46 @@ function postEarn(path: string, body: Record<string, unknown>) {
   );
 }
 
+function getEarnAsSession(path: string, projectId: string) {
+  return app.request(
+    path,
+    {
+      method: "GET",
+      headers: { Cookie: `sdp_session=${TEST_SESSION_ID}`, "x-project-id": projectId },
+    },
+    env
+  );
+}
+
+function postEarnAsSession(path: string, projectId: string, body: Record<string, unknown>) {
+  return app.request(
+    path,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `sdp_session=${TEST_SESSION_ID}`,
+        "x-project-id": projectId,
+      },
+      body: JSON.stringify(body),
+    },
+    env
+  );
+}
+
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
   originalVedaSandboxApiKey = env.VEDA_SANDBOX_API_KEY;
+  originalVedaApiKey = env.VEDA_API_KEY;
   // Earn is a Markets sub-module, so both gates have to be on to reach a route.
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   // Sandbox credentials so the provider-configured gates pass; provider HTTP
-  // itself is stubbed per-test via EARN_PROVIDER_CLIENTS spies.
+  // itself is stubbed per-test via EARN_PROVIDER_CLIENTS spies. The production
+  // credential stays absent unless a test opts in.
   env.VEDA_SANDBOX_API_KEY = VEDA_SANDBOX_KEY;
+  env.VEDA_API_KEY = undefined;
   await seedTestDatabase(env);
 });
 
@@ -207,6 +289,7 @@ afterEach(async () => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
   env.VEDA_SANDBOX_API_KEY = originalVedaSandboxApiKey;
+  env.VEDA_API_KEY = originalVedaApiKey;
   await clearKVStores(env);
 });
 
@@ -262,6 +345,106 @@ describe("Earn routes — environment scoping", () => {
     const list = await getEarn("/v1/earn/strategies");
     const listBody = (await list.json()) as { data: { strategies: Array<{ id: string }> } };
     expect(listBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
+  });
+});
+
+describe("Earn routes — session-caller environment resolution", () => {
+  it("scopes the catalogue to the session's selected project environment", async () => {
+    await seedAuth();
+    await seedSessionAuth();
+    const sandbox = await seedStrategy();
+    const production = await seedStrategy({ environment: "production" });
+
+    // A production-project session sees the production catalogue…
+    const productionList = await getEarnAsSession(
+      "/v1/earn/strategies",
+      TEST_PRODUCTION_PROJECT.id
+    );
+    expect(productionList.status).toBe(200);
+    const productionBody = (await productionList.json()) as {
+      data: { strategies: Array<{ id: string }> };
+    };
+    expect(productionBody.data.strategies.map((s) => s.id)).toEqual([production.id]);
+
+    const hidden = await getEarnAsSession(
+      `/v1/earn/strategies/${sandbox.id}`,
+      TEST_PRODUCTION_PROJECT.id
+    );
+    expect(hidden.status).toBe(404);
+
+    // …and a sandbox-project session keeps today's behavior exactly.
+    const sandboxList = await getEarnAsSession("/v1/earn/strategies", TEST_PROJECT.id);
+    expect(sandboxList.status).toBe(200);
+    const sandboxBody = (await sandboxList.json()) as {
+      data: { strategies: Array<{ id: string }> };
+    };
+    expect(sandboxBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
+  });
+
+  it("refuses production deposit quotes while only the sandbox credential exists", async () => {
+    await seedAuth();
+    await seedSessionAuth();
+    const production = await seedStrategy({ environment: "production" });
+
+    // The entitled org passes the availability gate on the credential union;
+    // the mode-specific re-check must still refuse production when only
+    // VEDA_SANDBOX_API_KEY is configured (every non-production deployment).
+    const res = await postEarnAsSession("/v1/earn/deposits/quote", TEST_PRODUCTION_PROJECT.id, {
+      strategyId: production.id,
+      tokenMint: USDC_MINT,
+      amount: "1000000",
+    });
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("PROVIDER_NOT_CONFIGURED");
+    expect(body.error.message).toContain("not configured for production mode");
+  });
+
+  it("keeps the entitlement gate closed for production deposits", async () => {
+    await seedAuth({ entitleVeda: false });
+    await seedSessionAuth();
+    const production = await seedStrategy({ environment: "production" });
+    // Credentials alone must not open production: entitlement is the gate.
+    env.VEDA_API_KEY = VEDA_PRODUCTION_KEY;
+
+    const res = await postEarnAsSession("/v1/earn/deposits/quote", TEST_PRODUCTION_PROJECT.id, {
+      strategyId: production.id,
+      tokenMint: USDC_MINT,
+      amount: "1000000",
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("manual activation");
+  });
+
+  it("carries the production environment into the provider runtime", async () => {
+    await seedAuth();
+    await seedSessionAuth();
+    env.VEDA_API_KEY = VEDA_PRODUCTION_KEY;
+    const production = await seedStrategy({ environment: "production" });
+    const quoteDeposit = vi.spyOn(EARN_PROVIDER_CLIENTS.veda, "quoteDeposit").mockResolvedValue({
+      provider: "veda",
+      strategyProviderReference: production.provider_reference,
+      expectedShareAmount: "980000",
+    });
+
+    const res = await postEarnAsSession("/v1/earn/deposits/quote", TEST_PRODUCTION_PROJECT.id, {
+      strategyId: production.id,
+      tokenMint: USDC_MINT,
+      amount: "1000000",
+    });
+
+    expect(res.status).toBe(200);
+    expect(quoteDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "production" }),
+      {
+        strategyProviderReference: production.provider_reference,
+        tokenMint: USDC_MINT,
+        amount: "1000000",
+      }
+    );
   });
 });
 
