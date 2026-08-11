@@ -50,6 +50,7 @@
     "check:env-contract": "node scripts/check-env-contract.mjs",
     "check:env-configurator-drift": "node scripts/check-env-configurator-drift.mjs",
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
+    "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
     "check:well-known-mints": "pnpm --filter @sdp/api exec tsx ../../scripts/check-well-known-mints.mjs",
     "check:api-playground": "pnpm -C apps/sdp-api playground:check",
     "generate:api-playground": "pnpm -C apps/sdp-api playground:generate",
@@ -85,9 +86,10 @@
     "kora:devnet:test": "TEST_DATABASE_URL=${KORA_DEVNET_DATABASE_URL:-${TEST_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp_test}} node scripts/run-workspace-tests.mjs integration -- src/tests/kora.test.ts src/tests/kora-flow.test.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.6",
-    "turbo": "^2.10.8",
-    "typescript": "^6.0.3"
+    "@biomejs/biome": "2.5.7",
+    "turbo": "2.10.9",
+    "typescript": "6.0.3",
+    "yaml": "2.9.0"
   },
   "overrides": {
     "@solana/rpc-spec": "6.5.0",
@@ -99,19 +101,19 @@
       "packages/*"
     ],
     "catalog": {
-      "@solana-program/system": "^0.12.0",
-      "@solana-program/token-2022": "^0.9.0",
-      "@solana/addresses": "^6.5.0",
-      "@solana/codecs": "^6.5.0",
-      "@solana/instructions": "^6.5.0",
-      "@solana/keys": "^6.5.0",
-      "@solana/kit": "^6.5.0",
+      "@solana-program/system": "0.13.0",
+      "@solana-program/token-2022": "0.14.0",
+      "@solana/addresses": "6.9.0",
+      "@solana/codecs": "6.8.0",
+      "@solana/instructions": "6.8.0",
+      "@solana/keys": "6.8.0",
+      "@solana/kit": "6.8.0",
       "@solana/mosaic-sdk": "0.1.1",
-      "@solana/programs": "^6.5.0",
-      "@solana/rpc": "^6.5.0",
-      "@solana/signers": "^6.5.0",
-      "@solana/sysvars": "^6.5.0",
-      "@solana/transactions": "^6.5.0"
+      "@solana/programs": "6.8.0",
+      "@solana/rpc": "6.8.0",
+      "@solana/signers": "6.9.0",
+      "@solana/sysvars": "6.8.0",
+      "@solana/transactions": "6.9.0"
     }
   }
 }

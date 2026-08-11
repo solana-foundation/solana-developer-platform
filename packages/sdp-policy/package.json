@@ -20,7 +20,7 @@
     "@sdp/types": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "26.1.2",
     "tsx": "4.23.5"
   }
 }

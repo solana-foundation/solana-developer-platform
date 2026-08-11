@@ -48,6 +48,6 @@
     "@solana/kit": "catalog:",
     "@solana/signers": "catalog:",
     "@solana/transactions": "catalog:",
-    "jose": "^6.2.7"
+    "jose": "6.2.8"
   }
 }
