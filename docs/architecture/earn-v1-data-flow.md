@@ -176,8 +176,10 @@ flowchart LR
   `pct: 100` of that strategy's stablecoin lane (`singleStrategyAllocation`) —
   a shape the API enforces, not just a wizard convention: PRO-1667 caps each
   token group at one allocation entry per program, leaving the weighted wire
-  shape dormant so post-V1 re-enablement is a validation-only relaxation
-  (concurrent strategies arrive as separate single-vault programs, PRO-1670).
+  shape dormant — the API side of post-V1 re-enablement is just relaxing that
+  cap, while the dashboard would separately need weight authoring and share
+  display back (concurrent strategies arrive as separate single-vault
+  programs, PRO-1670).
   The curator-first step and the weight editor were removed on purpose —
   curator is metadata rendered beside a strategy, never a gate — and an
   omitted lane keeps its current allocation server-side. Positions and

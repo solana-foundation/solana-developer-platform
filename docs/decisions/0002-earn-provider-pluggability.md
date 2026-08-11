@@ -301,9 +301,14 @@ what V1 ships.
 **What is deliberately kept, dormant.** The weighted wire shape (arrays of
 `{yieldSourceId, pct}` per token group), the provider contract
 (`updatePortfolioStrategy`, the `weightBps` types), and Ground's
-strategy-update client are untouched — re-enabling weighted portfolios
-post-V1 is a validation-only relaxation of the group cap, never a wire or
-provider-contract change. The update branch's in-place full re-target
+strategy-update client are untouched — the API and provider side of
+re-enabling weighted portfolios post-V1 is a validation-only relaxation of
+the group cap, never a wire or provider-contract change. That is the server
+half only: the dashboard ships no weight authoring (the weight editor was
+removed before V1) and no share display (removed by this change), so weights
+returning as a product carries that dashboard work with it — relaxing the
+cap alone would recreate the exact API/dashboard mismatch this decision
+removes. The update branch's in-place full re-target
 (switching vaults at 100%) also stays; whether it survives once program
 multiplicity exists is PRO-1670's design decision.
 

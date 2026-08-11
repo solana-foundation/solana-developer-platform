@@ -24,9 +24,13 @@ them; that is an ADR 0002 addendum acceptance criterion, not a style choice.
   exactly ONE allocation entry**, which the sum-to-100 rule then pins to
   `pct: 100` — one vault per deposit token per program. The weighted
   multi-entry validation (0.1 grid, sum to exactly 100, duplicate check) is
-  dormant, not removed: re-enabling weights post-V1 relaxes the group cap in
-  `schemas.ts` and nothing else. Every `yieldSourceId` must exist as an
-  **active** synced strategy for that provider+environment.
+  dormant, not removed: the API side of re-enabling weights post-V1 is
+  relaxing the group cap in `schemas.ts` — wire shape and provider contract
+  need nothing. Relaxing it alone does NOT ship weights: the dashboard has no
+  weight authoring or share display (removed by design), and the cap is what
+  keeps the API from accepting portfolios the dashboard cannot manage until
+  that work returns. Every `yieldSourceId` must exist as an **active** synced
+  strategy for that provider+environment.
   - `requestId` (UUIDv4) is the caller-owned idempotency key, forwarded to the
     provider on BOTH branches. Absent ⇒ the provider client mints one per
     call, which is NOT idempotent: a double-submit fires two mutations.
