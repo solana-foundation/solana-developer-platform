@@ -467,6 +467,7 @@ export function DashboardShell({
   assetProfilesEnabled,
   children,
   earnEnabled,
+  heliusRingsEnabled,
   marketsEnabled,
   onboardingStatus,
   privateChannelsEnabled,
@@ -474,6 +475,7 @@ export function DashboardShell({
   assetProfilesEnabled: boolean;
   children: ReactNode;
   earnEnabled: boolean;
+  heliusRingsEnabled: boolean;
   marketsEnabled: boolean;
   onboardingStatus: OrganizationOnboardingStatus | null;
   privateChannelsEnabled: boolean;
@@ -511,6 +513,7 @@ export function DashboardShell({
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     earnEnabled,
+    heliusRingsEnabled,
     marketsEnabled,
     pendingApprovalCount,
     privateChannelsEnabled,
@@ -772,6 +775,7 @@ export function DashboardShell({
             canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
             canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
             earnEnabled={earnEnabled}
+            heliusRingsEnabled={heliusRingsEnabled}
             marketsEnabled={marketsEnabled}
             onClose={() => setMoreSheetOpen(false)}
           />
