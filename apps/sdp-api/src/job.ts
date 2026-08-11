@@ -1,8 +1,10 @@
 import { pathToFileURL } from "node:url";
 
 import * as Sentry from "@sentry/node";
+import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { closeDatabasePools } from "@/db/client";
+import { isEarnEnabled } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
@@ -32,6 +34,15 @@ export async function runCronJob(): Promise<void> {
           schedule: { type: "crontab", value: PENDING_TRANSFERS_CRON },
         })
       : work());
+    // The Earn catalogue sync rides this job behind the same gate as its
+    // in-process registration (cron/runner.ts): both Earn feature flags on.
+    // Its hourly cadence comes from the Redis slot inside
+    // runEarnCatalogueSyncIfDue — not this job's schedule — and it reports to
+    // its own Sentry monitor, so a sync failure never masquerades as a
+    // reconciliation failure (and vice versa).
+    if (isEarnEnabled(env)) {
+      await runEarnCatalogueSyncIfDue(env, isSentryEnabled(env) ? nodeObservability : undefined);
+    }
   } finally {
     await Promise.allSettled([closeAllRedisClients(), closeDatabasePools()]);
     await Sentry.close(2000);
