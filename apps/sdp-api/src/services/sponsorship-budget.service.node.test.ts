@@ -275,6 +275,27 @@ describe("BudgetedFeePayment", () => {
     expect(budgetRedis.cancel).not.toHaveBeenCalled();
   });
 
+  it("does not refund or open the breaker when a persisted reservation already owns the budget", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    budgetRedis.reserve.mockResolvedValue("admitted");
+    repository.createReservation.mockResolvedValue(false);
+    repository.getReservation.mockResolvedValueOnce(null).mockResolvedValue({
+      id: "reservation_1",
+      status: "reserved",
+      signature: null,
+      signedTransaction: null,
+      reservedLamports: 5_000,
+      actualLamports: null,
+      attempt: 1,
+    });
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(provider.signAndSend).not.toHaveBeenCalled();
+    expect(budgetRedis.cancel).not.toHaveBeenCalled();
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+  });
+
   it("hashes compiled message bytes so added signatures cannot double-reserve", async () => {
     const { feePayment, repository } = harness();
     const first = buildTransaction();

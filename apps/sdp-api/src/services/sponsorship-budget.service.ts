@@ -521,10 +521,16 @@ export class BudgetedFeePayment implements FeePaymentPort {
         }
       }
       if (existing) {
-        throw new Error("A durable sponsorship reservation already owns provider execution");
+        throw new FeePaymentError(
+          "A durable sponsorship reservation already owns provider execution",
+          "PROVIDER_NOT_AVAILABLE"
+        );
       }
       throw new Error("Reservation insert conflicted without a durable ledger row");
     } catch (error) {
+      if (error instanceof FeePaymentError) {
+        throw error;
+      }
       let cause = error;
       try {
         await this.compensateReservation(context, attempt);
