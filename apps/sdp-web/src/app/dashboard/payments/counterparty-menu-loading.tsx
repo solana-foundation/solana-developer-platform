@@ -21,17 +21,9 @@ export function CounterpartyPlaygroundLoading() {
   );
 }
 
-export function CounterpartyMenuLoading({
-  overview,
-  targetSearch,
-}: {
-  overview: CounterpartyMenuOverview;
-  targetSearch?: string;
-}) {
+export function CounterpartyMenuLoading({ overview }: { overview: CounterpartyMenuOverview }) {
   const searchParams = useSearchParams();
-  const activeSearchParams =
-    targetSearch === undefined ? searchParams : new URLSearchParams(targetSearch);
-  const isPlaygroundTab = activeSearchParams.get("tab") === "playground";
+  const isPlaygroundTab = searchParams.get("tab") === "playground";
   return (
     <div className="h-full min-h-0 w-full">
       {isPlaygroundTab ? (

@@ -9,6 +9,7 @@ import {
   PanelLeftIcon,
   Settings2Icon,
 } from "lucide-react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -78,7 +79,6 @@ import {
   type NavItem,
   type NavSection,
 } from "@/components/dashboard-nav";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SelectOrganizationPanel } from "@/components/select-organization-panel";
@@ -88,11 +88,8 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
-  DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS,
-  DASHBOARD_NAVIGATION_START_EVENT,
   DASHBOARD_SIDE_NAV_HREFS,
   type DashboardLoadingRoute,
-  type DashboardNavigationStartDetail,
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
@@ -116,15 +113,14 @@ function AllowlistLoading() {
 
 interface PageLoadingProps {
   assetProfilesEnabled?: boolean;
-  targetSearch?: string;
 }
 
-function CounterpartyDirectoryLoading({ targetSearch }: PageLoadingProps) {
-  return <CounterpartyMenuLoading overview="counterparty-directory" targetSearch={targetSearch} />;
+function CounterpartyDirectoryLoading() {
+  return <CounterpartyMenuLoading overview="counterparty-directory" />;
 }
 
-function PaymentRequestsLoading({ targetSearch }: PageLoadingProps) {
-  return <CounterpartyMenuLoading overview="payment-requests" targetSearch={targetSearch} />;
+function PaymentRequestsLoading() {
+  return <CounterpartyMenuLoading overview="payment-requests" />;
 }
 
 function resolvePageLoadingComponent(
@@ -260,7 +256,7 @@ function SidebarGroup({
           return (
             <div key={item.label}>
               <div className="relative flex items-center">
-                <DashboardNavigationLink
+                <Link
                   href={item.href}
                   onClick={onNavigate}
                   title={isCollapsed ? item.label : undefined}
@@ -295,7 +291,7 @@ function SidebarGroup({
                       aria-hidden="true"
                     />
                   ) : null}
-                </DashboardNavigationLink>
+                </Link>
                 {subnavKey && !isCollapsed ? (
                   <button
                     type="button"
@@ -344,7 +340,7 @@ function SidebarGroup({
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
                         ) : (
-                          <DashboardNavigationLink
+                          <Link
                             href={child.href}
                             onClick={onNavigate}
                             className={cn(
@@ -356,7 +352,7 @@ function SidebarGroup({
                               <child.icon aria-hidden="true" className="size-4 shrink-0" />
                             ) : null}
                             {child.label}
-                          </DashboardNavigationLink>
+                          </Link>
                         )}
                       </div>
                     );
@@ -442,7 +438,7 @@ function DashboardSidebarContent({
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
           return (
-            <DashboardNavigationLink
+            <Link
               key={item.label}
               href={item.href}
               target={item.external ? "_blank" : undefined}
@@ -457,7 +453,7 @@ function DashboardSidebarContent({
             >
               <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
               {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
-            </DashboardNavigationLink>
+            </Link>
           );
         })}
         {variant === "desktop" ? <NetworkDebugToggle collapsed={isCollapsed} /> : null}
@@ -491,11 +487,6 @@ export function DashboardShell({
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
-  const [pendingNavigation, setPendingNavigation] = useState<{
-    fromPathname: string;
-    toPathname: string;
-    toSearch: string;
-  } | null>(null);
   const [pendingApprovalCount, setPendingApprovalCount] = useState<number | null>(null);
   const [openSubnavs, setOpenSubnavs] = useState<Record<DashboardSubnavKey, boolean>>(() => {
     const initial = {} as Record<DashboardSubnavKey, boolean>;
@@ -506,17 +497,13 @@ export function DashboardShell({
   });
   const subnavHydratedRef = useRef(false);
   const previousPathnameRef = useRef(pathname);
-  const pendingNavigationPathname =
-    pendingNavigation?.fromPathname === pathname ? pendingNavigation.toPathname : null;
-  const shellPathname = pendingNavigationPathname ?? pathname;
-  const loadingRoute = resolveDashboardLoadingRoute(shellPathname) ?? "home";
+  const loadingRoute = resolveDashboardLoadingRoute(pathname) ?? "home";
   const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute);
-  const isNavigationPending =
-    Boolean(pendingNavigationPathname) || isProjectSwitching || isOrganizationSwitching;
+  const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(
-    shellPathname,
+    pathname,
     t,
     assetProfilesEnabled,
     privateChannelsEnabled
@@ -560,34 +547,34 @@ export function DashboardShell({
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
   const shouldRenderTopBarBorder = (Boolean(centeredTitle) || showBackInTopBar) && !hasHeaderTabs;
   const shouldClipHorizontalOverflow =
-    shellPathname === "/dashboard/payments" ||
-    shellPathname === "/dashboard/payments/transactions" ||
-    (shellPathname.startsWith("/dashboard/payments/") &&
-      !shellPathname.startsWith("/dashboard/payments/counterparty"));
+    pathname === "/dashboard/payments" ||
+    pathname === "/dashboard/payments/transactions" ||
+    (pathname.startsWith("/dashboard/payments/") &&
+      !pathname.startsWith("/dashboard/payments/counterparty"));
   const isWalletDetailRoute =
-    (shellPathname.startsWith("/dashboard/wallets/") &&
-      shellPathname !== "/dashboard/wallets/setup" &&
-      shellPathname !== "/dashboard/wallets/switch") ||
-    (shellPathname.startsWith("/dashboard/custody/") &&
-      shellPathname !== "/dashboard/custody/setup" &&
-      shellPathname !== "/dashboard/custody/switch");
+    (pathname.startsWith("/dashboard/wallets/") &&
+      pathname !== "/dashboard/wallets/setup" &&
+      pathname !== "/dashboard/wallets/switch") ||
+    (pathname.startsWith("/dashboard/custody/") &&
+      pathname !== "/dashboard/custody/setup" &&
+      pathname !== "/dashboard/custody/switch");
   const isWalletSetupRoute =
-    shellPathname === "/dashboard/wallets/setup" || shellPathname === "/dashboard/custody/setup";
-  const isOrganizationOnboardingRoute = shellPathname === "/dashboard/onboarding";
+    pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup";
+  const isOrganizationOnboardingRoute = pathname === "/dashboard/onboarding";
   const shouldUseWorkspaceViewport =
-    shellPathname === "/dashboard/issuance" ||
-    shellPathname === "/dashboard/issuance/create" ||
-    shellPathname === "/dashboard/policies" ||
-    shellPathname === "/dashboard/api-keys" ||
-    shellPathname === "/dashboard/api-keys/new" ||
-    (shellPathname.startsWith("/dashboard/api-keys/") && shellPathname.endsWith("/edit")) ||
-    shellPathname.startsWith("/dashboard/payments") ||
-    shellPathname === "/dashboard/markets/earn/deposit" ||
-    shellPathname === "/dashboard/wallets" ||
-    shellPathname === "/dashboard/custody" ||
+    pathname === "/dashboard/issuance" ||
+    pathname === "/dashboard/issuance/create" ||
+    pathname === "/dashboard/policies" ||
+    pathname === "/dashboard/api-keys" ||
+    pathname === "/dashboard/api-keys/new" ||
+    (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
+    pathname.startsWith("/dashboard/payments") ||
+    pathname === "/dashboard/markets/earn/deposit" ||
+    pathname === "/dashboard/wallets" ||
+    pathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
     isOrganizationOnboardingRoute ||
-    shellPathname.startsWith("/dashboard/approvals") ||
+    pathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
@@ -627,34 +614,8 @@ export function DashboardShell({
   };
 
   useEffect(() => {
-    const handleProgrammaticNavigation = (event: Event) => {
-      const detail = (event as CustomEvent<DashboardNavigationStartDetail>).detail;
-      if (!detail?.fromPathname || !detail.toPathname) return;
-      setPendingNavigation(detail);
-    };
-
-    window.addEventListener(DASHBOARD_NAVIGATION_START_EVENT, handleProgrammaticNavigation);
-    return () => {
-      window.removeEventListener(DASHBOARD_NAVIGATION_START_EVENT, handleProgrammaticNavigation);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!pendingNavigation) return;
-
-    // A router error or middleware cancellation may never update usePathname.
-    // Restore the current page instead of leaving an indefinite loading shell.
-    const recoveryTimeout = window.setTimeout(() => {
-      setPendingNavigation((current) => (current === pendingNavigation ? null : current));
-    }, DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS);
-
-    return () => window.clearTimeout(recoveryTimeout);
-  }, [pendingNavigation]);
-
-  useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
       previousPathnameRef.current = pathname;
-      setPendingNavigation(null);
       setMobileSidebarOpen(false);
     }
   }, [pathname]);
@@ -749,7 +710,7 @@ export function DashboardShell({
 
   return (
     <main
-      aria-busy={isNavigationPending}
+      aria-busy={isWorkspaceSwitching}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
         shouldLockShellViewport ? "h-screen overflow-hidden" : "",
@@ -771,7 +732,7 @@ export function DashboardShell({
           <DashboardSidebarContent
             bottomNavItems={bottomNavItems}
             navSections={navSections}
-            pathname={shellPathname}
+            pathname={pathname}
             onNavigate={undefined}
             onClose={() => setSidebarOpen(false)}
             isCollapsed={!isSidebarOpen}
@@ -802,12 +763,12 @@ export function DashboardShell({
         {/* Unmounted, not CSS-hidden, while the slide-over is open: a covered
             duplicate of every destination would otherwise sit behind the overlay. */}
         {isMobileSidebarOpen || isMoreSheetOpen ? null : (
-          <DashboardBottomNav pathname={shellPathname} onOpenMore={() => setMoreSheetOpen(true)} />
+          <DashboardBottomNav pathname={pathname} onOpenMore={() => setMoreSheetOpen(true)} />
         )}
 
         {isMoreSheetOpen ? (
           <DashboardMoreSheet
-            pathname={shellPathname}
+            pathname={pathname}
             canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
             canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
             earnEnabled={earnEnabled}
@@ -828,7 +789,7 @@ export function DashboardShell({
               <DashboardSidebarContent
                 bottomNavItems={bottomNavItems}
                 navSections={navSections}
-                pathname={shellPathname}
+                pathname={pathname}
                 onNavigate={() => setMobileSidebarOpen(false)}
                 onClose={() => setMobileSidebarOpen(false)}
                 isCollapsed={false}
@@ -887,7 +848,7 @@ export function DashboardShell({
               ) : null}
             </div>
             <div
-              data-dashboard-page-content={isNavigationPending ? undefined : ""}
+              data-dashboard-page-content={isWorkspaceSwitching ? undefined : ""}
               className={[
                 "mx-auto min-w-0 w-full",
                 contentWidthClass,
@@ -900,7 +861,7 @@ export function DashboardShell({
                 shouldLockViewportScroll ? "min-h-0 flex-1 overflow-hidden" : "",
               ].join(" ")}
             >
-              {isNavigationPending ? (
+              {isWorkspaceSwitching ? (
                 <div
                   className="h-full min-h-0"
                   data-dashboard-navigation-pending={loadingRoute}
@@ -908,10 +869,7 @@ export function DashboardShell({
                   aria-live="polite"
                 >
                   <span className="sr-only">{t("Shared.dashboardShell.loadingDashboard")}</span>
-                  <PageLoadingComponent
-                    assetProfilesEnabled={assetProfilesEnabled}
-                    targetSearch={pendingNavigation?.toSearch}
-                  />
+                  <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
                 </div>
               ) : (
                 children

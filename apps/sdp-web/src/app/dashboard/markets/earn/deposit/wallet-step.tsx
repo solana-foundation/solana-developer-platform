@@ -2,9 +2,9 @@
 
 import type { CustodyWalletSummary } from "@sdp/types";
 import { ExternalLinkIcon, LockIcon, PlusIcon, ShieldCheckIcon } from "lucide-react";
+import Link from "next/link";
 import { useId, useMemo, useState } from "react";
 import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-catalog";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
@@ -123,16 +123,14 @@ function ConnectWalletCard({ fireblocksEnabled }: { fireblocksEnabled: boolean }
           {/* Not-entitled still gets a way forward: Wallets is where provider
               activation is requested, so the card never dead-ends. */}
           <Button asChild className="mt-3" size="sm" variant="secondary">
-            <DashboardNavigationLink
-              href={fireblocksEnabled ? EARN_CONNECT_WALLET_HREF : "/dashboard/wallets"}
-            >
+            <Link href={fireblocksEnabled ? EARN_CONNECT_WALLET_HREF : "/dashboard/wallets"}>
               {t(
                 fireblocksEnabled
                   ? "DashboardEarn.deposit.connectFireblocksTitle"
                   : "DashboardEarn.deposit.goToWallets"
               )}
               <ExternalLinkIcon />
-            </DashboardNavigationLink>
+            </Link>
           </Button>
         </div>
       </div>

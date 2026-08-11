@@ -130,8 +130,6 @@ export function createCounterpartiesRepository(
       "findActiveCounterpartyById",
       "findActiveCounterpartyByBvnkCustomerReference",
       "findCounterpartyByMuralOrganizationId",
-      "mutateProviderData",
-      "upsertBvnkCustomerProviderData",
       "patchMuralOrganizationById",
     ]
   );
