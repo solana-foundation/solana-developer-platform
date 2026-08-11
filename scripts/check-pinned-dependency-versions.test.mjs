@@ -38,3 +38,25 @@ test("rejects ranges in pnpm catalogs", () => {
     "pnpm-workspace.yaml: catalog.@solana/kit must be an exact version (found ^6.5.0).",
   ]);
 });
+
+test("checks catalogs with alternate valid YAML formatting", () => {
+  const violations = validatePnpmCatalog(
+    '"catalog": # exact pins only\n    "@solana/kit": "^6.5.0"\n',
+    "pnpm-workspace.yaml"
+  );
+
+  assert.deepEqual(violations, [
+    "pnpm-workspace.yaml: catalog.@solana/kit must be an exact version (found ^6.5.0).",
+  ]);
+});
+
+test("checks named pnpm catalogs", () => {
+  const violations = validatePnpmCatalog(
+    "catalogs:\n  solana:\n    '@solana/kit': ^6.5.0\n",
+    "pnpm-workspace.yaml"
+  );
+
+  assert.deepEqual(violations, [
+    "pnpm-workspace.yaml: catalogs.solana.@solana/kit must be an exact version (found ^6.5.0).",
+  ]);
+});

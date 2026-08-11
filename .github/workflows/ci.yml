@@ -20,6 +20,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7.0.1
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
       - name: Require exact direct dependency versions
         run: node scripts/check-pinned-dependency-versions.mjs
 

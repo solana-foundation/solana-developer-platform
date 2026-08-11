@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMap, parseDocument } from "yaml";
 
 const directDependencyFields = ["dependencies", "devDependencies", "optionalDependencies"];
 const exactVersion = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -38,27 +39,44 @@ export function validateManifest(manifest, manifestPath) {
 
 export function validatePnpmCatalog(workspaceConfig, workspacePath) {
   const violations = [];
-  let inCatalog = false;
+  const document = parseDocument(workspaceConfig);
 
-  for (const line of workspaceConfig.split("\n")) {
-    if (line === "catalog:") {
-      inCatalog = true;
-      continue;
+  if (document.errors.length > 0) {
+    return [`${workspacePath}: could not parse pnpm workspace configuration.`];
+  }
+
+  const validateCatalogMap = (catalog, label) => {
+    if (!isMap(catalog)) {
+      violations.push(
+        `${workspacePath}: ${label} must be a mapping of package names to exact versions.`
+      );
+      return;
     }
 
-    if (inCatalog && /^[^\s#]/.test(line)) break;
-    if (!inCatalog) continue;
+    for (const { key, value } of catalog.items) {
+      const name = String(key?.value ?? "<unknown>");
+      const specifier = value?.value;
+      if (typeof specifier !== "string" || !exactVersion.test(specifier)) {
+        violations.push(
+          `${workspacePath}: ${label}.${name} must be an exact version (found ${String(specifier)}).`
+        );
+      }
+    }
+  };
 
-    const entry = line.match(/^ {2}('[^']+'|[^:#]+):\s*(?:'([^']+)'|"([^"]+)"|([^\s#]+))/);
-    if (!entry) continue;
+  const defaultCatalog = document.get("catalog", true);
+  if (defaultCatalog !== undefined) validateCatalogMap(defaultCatalog, "catalog");
 
-    const [, rawName, singleQuoted, doubleQuoted, bare] = entry;
-    const name = rawName.replace(/^'|'$/g, "");
-    const specifier = singleQuoted ?? doubleQuoted ?? bare;
-    if (!exactVersion.test(specifier)) {
+  const namedCatalogs = document.get("catalogs", true);
+  if (namedCatalogs !== undefined) {
+    if (!isMap(namedCatalogs)) {
       violations.push(
-        `${workspacePath}: catalog.${name} must be an exact version (found ${specifier}).`
+        `${workspacePath}: catalogs must be a mapping of catalog names to package mappings.`
       );
+    } else {
+      for (const { key, value } of namedCatalogs.items) {
+        validateCatalogMap(value, `catalogs.${String(key?.value ?? "<unknown>")}`);
+      }
     }
   }
 
