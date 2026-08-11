@@ -94,14 +94,14 @@ export const WORKFLOW_ACTIONS = {
   burn: {
     labelKey: action("burn"),
     descriptionKey: desc("burn"),
-    requires: { kind: "base", action: "burn" },
+    requires: { kind: "native", action: "burn" },
     execution: "requires_approval",
     idempotent: false,
   },
   mint: {
     labelKey: action("mint"),
     descriptionKey: desc("mint"),
-    requires: { kind: "base", action: "mint" },
+    requires: { kind: "native", action: "mint" },
     execution: "requires_approval",
     idempotent: false,
   },

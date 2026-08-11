@@ -71,7 +71,7 @@ export function validateActionSupported(input: ValidateActionInput): ActionSuppo
   switch (requires.kind) {
     case "none":
       return { ok: true };
-    case "base":
+    case "native":
       return requires.action === "mint" && input.isMintable === false
         ? { ok: false, reason: "not_mintable" }
         : { ok: true };

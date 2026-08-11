@@ -116,7 +116,7 @@ if (process.env.NODE_ENV !== "production") {
     }
     const requires = action.requires;
     if (
-      (requires.kind === "token_transaction" || requires.kind === "base") &&
+      (requires.kind === "token_transaction" || requires.kind === "native") &&
       !tokenTxns.has(requires.action)
     ) {
       throw new Error(

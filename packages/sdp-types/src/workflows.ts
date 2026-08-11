@@ -52,8 +52,12 @@ export type WorkflowActionRequirement =
   /** Token-2022 op unlocked by an enabled AdvancedSetting. */
   | { kind: "token_transaction"; action: TokenTransactionType }
   | { kind: "allowlist" }
-  /** Base op on any deployed token; finer checks happen at execution time. */
-  | { kind: "base"; action: TokenTransactionType }
+  /**
+   * An op every deployed token supports natively (mint, burn) — no opt-in
+   * extension to check. The only revocable native capability is minting,
+   * checked live via `isMintable`; finer checks happen at execution time.
+   */
+  | { kind: "native"; action: TokenTransactionType }
   | { kind: "none" };
 
 export interface WorkflowAction {
