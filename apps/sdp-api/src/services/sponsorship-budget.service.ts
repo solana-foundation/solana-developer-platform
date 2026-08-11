@@ -30,6 +30,7 @@ type BudgetRepository = Pick<
   SponsorshipBudgetRepository,
   | "resolvePolicies"
   | "getWindowUsage"
+  | "listLiveWindowReservations"
   | "getReservation"
   | "createReservation"
   | "reopenReleasedReservation"
@@ -442,6 +443,11 @@ export class BudgetedFeePayment implements FeePaymentPort {
         hourBucket: context.hourBucket,
         dayBucket: context.dayBucket,
       });
+      const liveReservations = await this.repository.listLiveWindowReservations({
+        network: context.network,
+        hourBucket: context.hourBucket,
+        dayBucket: context.dayBucket,
+      });
       return await this.budgetRedis.reserve({
         network: context.network,
         organizationId: this.scope.organizationId,
@@ -453,6 +459,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
         amount: context.amount,
         policies,
         usage,
+        liveReservations,
       });
     } catch (error) {
       return this.accountingUnavailable(

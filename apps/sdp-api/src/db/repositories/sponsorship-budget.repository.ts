@@ -60,6 +60,12 @@ export interface SponsorshipReservation {
   attempt: number;
 }
 
+export interface SponsorshipLiveWindowReservation {
+  id: string;
+  attempt: number;
+  reservedLamports: number;
+}
+
 export interface SponsorshipReconciliationReservation extends SponsorshipReservation {
   network: SponsorshipNetwork;
   organizationId: string;
@@ -408,6 +414,45 @@ export class SponsorshipBudgetRepository {
         project: row?.project_day ?? 0,
       },
     };
+  }
+
+  async listLiveWindowReservations(input: {
+    network: SponsorshipNetwork;
+    hourBucket: string;
+    dayBucket: string;
+  }): Promise<{
+    hour: SponsorshipLiveWindowReservation[];
+    day: SponsorshipLiveWindowReservation[];
+  }> {
+    const rows = await this.db.queryMany<{
+      id: string;
+      attempt: number;
+      reserved_lamports: number;
+      hour_bucket: string;
+      day_bucket: string;
+    }>(
+      `SELECT id, attempt, reserved_lamports, hour_bucket, day_bucket
+       FROM sponsorship_budget_reservations
+       WHERE network = ? AND status IN ('reserved', 'signed', 'submitted')
+         AND (hour_bucket = ? OR day_bucket = ?)`,
+      [input.network, input.hourBucket, input.dayBucket]
+    );
+    const hour: SponsorshipLiveWindowReservation[] = [];
+    const day: SponsorshipLiveWindowReservation[] = [];
+    for (const row of rows) {
+      const reservation = {
+        id: row.id,
+        attempt: row.attempt,
+        reservedLamports: row.reserved_lamports,
+      };
+      if (row.hour_bucket === input.hourBucket) {
+        hour.push(reservation);
+      }
+      if (row.day_bucket === input.dayBucket) {
+        day.push(reservation);
+      }
+    }
+    return { hour, day };
   }
 
   async listReconciliationCandidates(

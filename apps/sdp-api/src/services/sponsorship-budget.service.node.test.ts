@@ -68,6 +68,7 @@ function harness() {
       hour: { global: 0, organization: 0, project: 0 },
       day: { global: 0, organization: 0, project: 0 },
     }),
+    listLiveWindowReservations: vi.fn().mockResolvedValue({ hour: [], day: [] }),
     getReservation: vi.fn().mockResolvedValue(null),
     createReservation: vi.fn().mockResolvedValue(true),
     reopenReleasedReservation: vi.fn().mockResolvedValue(null),
@@ -116,14 +117,14 @@ describe("BudgetedFeePayment", () => {
     expect(harness().feePayment.providerId).toBe("kora");
   });
 
-  it.each([
-    0,
-    "legacy",
-  ] as const)("admits and persists %s transaction messages", async (version) => {
-    const { feePayment, repository } = harness();
-    await expect(feePayment.signAndSend(buildTransaction(version))).resolves.toBe("signature_1");
-    expect(repository.createReservation).toHaveBeenCalledOnce();
-  });
+  it.each([0, "legacy"] as const)(
+    "admits and persists %s transaction messages",
+    async (version) => {
+      const { feePayment, repository } = harness();
+      await expect(feePayment.signAndSend(buildTransaction(version))).resolves.toBe("signature_1");
+      expect(repository.createReservation).toHaveBeenCalledOnce();
+    }
+  );
 
   it("denies the tiny-limit Surfpool/Kora canary before Kora or KMS execution", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();

@@ -3,6 +3,7 @@ import type { Redis } from "ioredis";
 import type {
   SponsorshipBudgetPolicy,
   SponsorshipBudgetUsage,
+  SponsorshipLiveWindowReservation,
   SponsorshipNetwork,
 } from "@/db/repositories/sponsorship-budget.repository";
 import type { Env } from "@/types/env";
@@ -10,6 +11,8 @@ import { getRedisClient } from "./kv-redis";
 
 const INITIALIZE_LUA = `
 local count = tonumber(ARGV[1])
+local hour_existed = redis.call('EXISTS', KEYS[1]) == 1
+local day_existed = redis.call('EXISTS', KEYS[2]) == 1
 for i = 1, count do
   local field = ARGV[1 + i]
   local marker = '__initialized:' .. field
@@ -24,6 +27,27 @@ for i = 1, count do
 end
 redis.call('PEXPIRE', KEYS[1], ARGV[2 + count * 3])
 redis.call('PEXPIRE', KEYS[2], ARGV[3 + count * 3])
+local cursor = 3 + count * 3
+local hour_reservations = tonumber(ARGV[cursor + 1])
+cursor = cursor + 1
+for i = 1, hour_reservations do
+  local field = ARGV[cursor + 1]
+  local amount = ARGV[cursor + 2]
+  cursor = cursor + 2
+  if not hour_existed and not redis.call('HGET', KEYS[1], field) then
+    redis.call('HSET', KEYS[1], field, amount)
+  end
+end
+local day_reservations = tonumber(ARGV[cursor + 1])
+cursor = cursor + 1
+for i = 1, day_reservations do
+  local field = ARGV[cursor + 1]
+  local amount = ARGV[cursor + 2]
+  cursor = cursor + 2
+  if not day_existed and not redis.call('HGET', KEYS[2], field) then
+    redis.call('HSET', KEYS[2], field, amount)
+  end
+end
 return 1
 `;
 
@@ -187,6 +211,10 @@ export interface BudgetAdmissionInput {
   amount: number;
   policies: SponsorshipBudgetPolicy[];
   usage: { hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage };
+  liveReservations?: {
+    hour: SponsorshipLiveWindowReservation[];
+    day: SponsorshipLiveWindowReservation[];
+  };
 }
 
 export class SponsorshipBudgetRedis {
@@ -206,6 +234,12 @@ export class SponsorshipBudgetRedis {
       hourUsage.push(input.usage.hour.project);
       dayUsage.push(input.usage.day.project);
     }
+    const liveReservations = input.liveReservations ?? { hour: [], day: [] };
+    const reservationMarkerArgs = (reservations: SponsorshipLiveWindowReservation[]) =>
+      reservations.flatMap((reservation) => [
+        this.ownershipField({ reservationId: reservation.id, attempt: reservation.attempt }),
+        reservation.reservedLamports,
+      ]);
     await this.runScript(
       client,
       "initialize",
@@ -218,6 +252,10 @@ export class SponsorshipBudgetRedis {
         ...dayUsage,
         this.ttlUntilNextHour(),
         this.ttlUntilNextDay(),
+        liveReservations.hour.length,
+        ...reservationMarkerArgs(liveReservations.hour),
+        liveReservations.day.length,
+        ...reservationMarkerArgs(liveReservations.day),
       ]
     );
     const policyByScope = new Map(input.policies.map((policy) => [policy.scopeType, policy]));

@@ -435,6 +435,73 @@ describe("SponsorshipBudgetRedis", () => {
     expect(await raw.hget(hourKey, "__reservation:reservation_after_rebuild:1")).toBe("3");
   });
 
+  it("restores a live reservation marker so partial reconstruction settles both counters consistently", async () => {
+    const base = {
+      network: "devnet" as const,
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+    };
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+
+    await expect(
+      budget.reserve({
+        ...base,
+        reservationId: "reservation_partial",
+        attempt: 1,
+        amount: 5,
+        usage: EMPTY_USAGE,
+        liveReservations: { hour: [], day: [] },
+      })
+    ).resolves.toBe("admitted");
+
+    await raw.del(hourKey, "sdp:sponsorship:{devnet}:reservation:reservation_partial:1");
+
+    await expect(
+      budget.reserve({
+        ...base,
+        reservationId: "reservation_other",
+        attempt: 1,
+        amount: 3,
+        usage: {
+          hour: { global: 5, organization: 5, project: 0 },
+          day: { global: 5, organization: 5, project: 0 },
+        },
+        liveReservations: {
+          hour: [{ id: "reservation_partial", attempt: 1, reservedLamports: 5 }],
+          day: [{ id: "reservation_partial", attempt: 1, reservedLamports: 5 }],
+        },
+      })
+    ).resolves.toBe("admitted");
+
+    expect(await raw.hget(hourKey, "global")).toBe("8");
+    expect(await raw.hget(dayKey, "global")).toBe("8");
+    expect(await raw.hget(hourKey, "__reservation:reservation_partial:1")).toBe("5");
+
+    await expect(
+      budget.settle({
+        network: base.network,
+        organizationId: base.organizationId,
+        projectId: base.projectId,
+        hourBucket: base.hourBucket,
+        dayBucket: base.dayBucket,
+        reservationId: "reservation_partial",
+        attempt: 1,
+        reservedLamports: 5,
+        actualLamports: 2,
+        detectMissingReservation: true,
+      })
+    ).resolves.toBe(-3);
+
+    expect(await raw.hget(hourKey, "global")).toBe("5");
+    expect(await raw.hget(dayKey, "global")).toBe("5");
+    expect(await raw.hget(hourKey, "__reservation:reservation_partial:1")).toBeNull();
+    expect(await raw.hget(dayKey, "__reservation:reservation_partial:1")).toBeNull();
+  });
+
   it("rejects settlement when an existing reservation has the wrong amount", async () => {
     const input = {
       network: "devnet" as const,
