@@ -163,6 +163,8 @@ export interface WorkflowExecution {
   nextAttemptAt: string | null;
   lockedAt: string | null;
   error: string | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

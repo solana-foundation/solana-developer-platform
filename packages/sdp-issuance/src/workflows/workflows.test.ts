@@ -136,8 +136,6 @@ describe("validateActionSupported (capability gate)", () => {
 describe("listActionsForAsset", () => {
   it("annotates every action with a support verdict", () => {
     const available = listActionsForAsset({
-      category: "generic",
-      type: "generic",
       selectedSettings: { freezeTransfers: {} },
       hasAllowlist: true,
     });

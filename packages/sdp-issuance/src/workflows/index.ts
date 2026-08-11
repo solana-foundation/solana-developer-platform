@@ -1,5 +1,4 @@
 import {
-  type AssetCategory,
   type SelectedSetting,
   TOKEN_TRANSACTION_TYPES,
   WORKFLOW_ACTION_TYPES,
@@ -81,8 +80,6 @@ export interface AvailableAction extends CatalogAction {
  * @returns Every action type paired with its catalog entry and support verdict.
  */
 export function listActionsForAsset(input: {
-  category: AssetCategory;
-  type: string;
   selectedSettings: Record<string, SelectedSetting>;
   hasAllowlist: boolean;
   isMintable?: boolean;
