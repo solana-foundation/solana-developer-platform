@@ -6,13 +6,13 @@ import {
 } from "../capabilities/settings";
 import { WORKFLOW_ACTIONS } from "./actions";
 
-export type ActionSupportReason =
+export type ActionUnsupportedReason =
   | "unknown_action"
   | "no_allowlist"
   | "capability_disabled"
   | "not_mintable";
 
-export type ActionSupportResult = { ok: true } | { ok: false; reason: ActionSupportReason };
+export type ActionSupportResult = { ok: true } | { ok: false; reason: ActionUnsupportedReason };
 
 export interface ValidateActionInput {
   action: WorkflowActionType;

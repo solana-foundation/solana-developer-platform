@@ -15,8 +15,8 @@ import { WORKFLOW_TRIGGERS } from "./triggers";
 
 export { WORKFLOW_ACTIONS } from "./actions";
 export {
-  type ActionSupportReason,
   type ActionSupportResult,
+  type ActionUnsupportedReason,
   type ValidateActionInput,
   validateActionSupported,
 } from "./resolver";
