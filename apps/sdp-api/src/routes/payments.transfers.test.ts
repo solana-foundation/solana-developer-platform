@@ -42,6 +42,7 @@ import {
   TEST_KORA_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
+  TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_USER,
   TEST_WALLET_ID,
   updateSeededWalletPublicKey,
@@ -1377,6 +1378,7 @@ describe("Payments routes — transfers", () => {
         getTokenSupply: () => ({
           send: async () => ({ value: { decimals: 6 } }),
         }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
       createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
       const signAndSendMock = vi
@@ -1387,6 +1389,7 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1481,6 +1484,7 @@ describe("Payments routes — transfers", () => {
       await updateSeededWalletPublicKey(sourceSigner.address);
       createRpcMock.mockReturnValue({
         getTokenSupply: () => ({ send: async () => ({ value: { decimals: 6 } }) }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
       createOrgSignerMock.mockResolvedValue(sourceSigner);
       const signAndSendMock = vi
@@ -1491,6 +1495,7 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1564,6 +1569,7 @@ describe("Payments routes — transfers", () => {
       await updateSeededWalletPublicKey(sourceSigner.address);
       createRpcMock.mockReturnValue({
         getTokenSupply: () => ({ send: async () => ({ value: { decimals: 6 } }) }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
       createOrgSignerMock.mockResolvedValue(sourceSigner);
       const signAndSendMock = vi
@@ -1574,6 +1580,7 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1650,6 +1657,7 @@ describe("Payments routes — transfers", () => {
         getTokenSupply: () => ({
           send: async () => ({ value: { decimals: 6 } }),
         }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
       createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
       const signAndSendMock = vi
@@ -1660,6 +1668,7 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1793,6 +1802,7 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1856,6 +1866,7 @@ describe("Payments routes — transfers", () => {
         getTokenSupply: () => ({
           send: async () => ({ value: { decimals: 6 } }),
         }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -2030,6 +2041,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2070,6 +2085,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2113,6 +2132,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2215,6 +2238,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2242,6 +2269,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2284,6 +2315,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: vi
           .fn()

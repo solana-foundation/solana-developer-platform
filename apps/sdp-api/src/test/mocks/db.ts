@@ -6,7 +6,7 @@
  */
 
 import { getDb } from "@/db";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import { AUDIT_LEDGER_CHECKPOINT_KEY } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
@@ -127,6 +127,11 @@ export async function seedTestDatabase(env: Env): Promise<void> {
       .prepare(`TRUNCATE TABLE ${POSTGRES_TEST_TABLES.join(", ")} RESTART IDENTITY CASCADE`)
       .run();
     await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+    const redis = await getRedisClient(env);
+    const sponsorshipKeys = await redis.keys("sdp:sponsorship:*");
+    if (sponsorshipKeys.length > 0) {
+      await redis.del(...sponsorshipKeys);
+    }
   } catch (error) {
     throw new Error(
       "Postgres schema is not bootstrapped. Run `pnpm infra:up` and `pnpm --filter @sdp/api db:postgres:bootstrap` first.",

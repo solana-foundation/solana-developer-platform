@@ -83,6 +83,13 @@ export const TEST_API_KEY = {
 
 export const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
 
+export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
+  signerAddress: address(TEST_KORA_FEE_PAYER),
+  maxAllowedLamports: 0n,
+  feePayerMayTransferLamports: false,
+  feePayerPolicy: { test: "zero-outflow" },
+} satisfies feePaymentAdapters.SponsorshipProviderConfiguration;
+
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
@@ -302,6 +309,9 @@ export function mockTokenSupplyDecimalsOnce(decimals = 6): void {
     getTokenSupply: () => ({
       send: async () => ({ value: { decimals } }),
     }),
+    getFeeForMessage: () => ({
+      send: async () => ({ value: 5000n }),
+    }),
   } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 }
 
@@ -352,6 +362,9 @@ export function mockRecurringActivationRpc(options?: {
           decimals: 6,
         },
       }),
+    }),
+    getFeeForMessage: () => ({
+      send: async () => ({ value: 5000n }),
     }),
   } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 }
@@ -453,7 +466,14 @@ export function installPaymentsRouteTestHooks(): void {
   beforeEach(async () => {
     vi.clearAllMocks();
 
-    createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
+    createRpcMock.mockReturnValue({
+      getTokenSupply: () => ({
+        send: async () => ({ value: { decimals: 6 } }),
+      }),
+      getFeeForMessage: () => ({
+        send: async () => ({ value: 5000n }),
+      }),
+    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
@@ -513,6 +533,10 @@ export function installPaymentsRouteTestHooks(): void {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+        signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      }),
       signAsFeePayer: vi.fn(),
       signAndSend: vi
         .fn()
