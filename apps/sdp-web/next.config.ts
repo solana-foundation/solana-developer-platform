@@ -16,6 +16,11 @@ const nextConfig: NextConfig = {
     // navigation re-runs the server component and flashes loading.tsx). Within the
     // TTL a revisited page renders instantly from cache and SWR revalidates the
     // data client-side. Drop per-route staleness handling on top if 5min ever bites.
+    //
+    // Tenant safety: this TTL never spans a tenant switch. Project and org changes
+    // both run a Server Action that mutates the project cookie (or fall back to
+    // router.refresh()), and either operation purges the entire client Router Cache.
+    // Any future tenant-switch path must keep doing one of those two things.
     staleTimes: { dynamic: 300 },
   },
   async rewrites() {
