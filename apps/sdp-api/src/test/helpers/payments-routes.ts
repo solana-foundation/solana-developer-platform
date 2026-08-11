@@ -20,7 +20,7 @@ export const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 
 export const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 
-const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
+export const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 
 export const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 

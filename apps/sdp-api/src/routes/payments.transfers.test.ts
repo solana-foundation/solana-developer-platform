@@ -31,6 +31,7 @@ import {
   createOrgSignerMock,
   createRpcMock,
   DEVNET_USDC_MINT,
+  getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   mockRecurringActivationRpc,
   mockTokenSupplyDecimalsOnce,
@@ -2256,6 +2257,19 @@ describe("Payments routes — transfers", () => {
         token: "SOL",
         amount: "1",
       });
+      getRecentBlockhashMock
+        .mockResolvedValueOnce({
+          blockhash: "29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2" as Awaited<
+            ReturnType<typeof solanaRpc.getRecentBlockhash>
+          >["blockhash"],
+          lastValidBlockHeight: 1000n,
+        })
+        .mockResolvedValueOnce({
+          blockhash: "3JF3sEqM796hk5WFqA6EtmEwJQ9quALszsfJyvXNQKy3" as Awaited<
+            ReturnType<typeof solanaRpc.getRecentBlockhash>
+          >["blockhash"],
+          lastValidBlockHeight: 1000n,
+        });
 
       const a = await app.request("/v1/payments/transfers", { method: "POST", headers, body }, env);
       const b = await app.request("/v1/payments/transfers", { method: "POST", headers, body }, env);

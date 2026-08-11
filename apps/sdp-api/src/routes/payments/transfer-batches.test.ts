@@ -1022,6 +1022,19 @@ describe("payment transfer batches", () => {
       recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
       options: { preflight: false },
     });
+    getRecentBlockhashMock
+      .mockResolvedValueOnce({
+        blockhash: "29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2" as Awaited<
+          ReturnType<typeof solanaRpc.getRecentBlockhash>
+        >["blockhash"],
+        lastValidBlockHeight: 1000n,
+      })
+      .mockResolvedValueOnce({
+        blockhash: "3JF3sEqM796hk5WFqA6EtmEwJQ9quALszsfJyvXNQKy3" as Awaited<
+          ReturnType<typeof solanaRpc.getRecentBlockhash>
+        >["blockhash"],
+        lastValidBlockHeight: 1000n,
+      });
 
     const first = await app.request(
       "/v1/payments/transfer-batches",
