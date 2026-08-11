@@ -150,30 +150,22 @@ export async function resolveTransferCreateContext(
     );
   }
 
-  let recipient:
-    | {
-        privateChannelUserId: string;
-        verifiedWalletId: string;
-        pubkey: string;
-      }
-    | undefined;
-  for (const candidate of context.recipients) {
-    const verifiedWallet = candidate.wallets.find(
-      (entry) => entry.id === input.recipientVerifiedWalletId
-    );
-    if (verifiedWallet) {
-      recipient = {
-        privateChannelUserId: candidate.privateChannelUserId,
-        verifiedWalletId: verifiedWallet.id,
-        pubkey: verifiedWallet.pubkey,
-      };
-      break;
-    }
-  }
-  if (!recipient) {
+  const match = context.recipients.find(
+    (candidate) => candidate.id === input.recipientVerifiedWalletId
+  );
+  if (!match) {
     throw notFound("Eligible transfer recipient");
   }
+  const recipient = {
+    privateChannelUserId: match.privateChannelUserId,
+    verifiedWalletId: match.id,
+    pubkey: match.pubkey,
+  };
 
+  /**
+   * Sending to another wallet you own is allowed, so this pubkey comparison —
+   * not wallet ownership — is what stops a transfer to itself.
+   */
   if (wallet.publicKey === recipient.pubkey) {
     throw badRequest("Sender and recipient must be different verified wallets.");
   }

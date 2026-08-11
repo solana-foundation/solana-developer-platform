@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createCommitOnBranch, githubGraphqlRequest } from "./github-commit-on-branch.mjs";
+import { nextReleaseVersion, releaseCommitSemantics } from "./release-version.mjs";
 
 const mode = process.argv[2];
 const dryRun = process.argv.includes("--dry-run");
@@ -144,14 +145,14 @@ function parseConventionalCommit(subject, body) {
   const match = subject.match(/^([a-z]+)(?:\(([^)]+)\))?(!)?: (.+)$/i);
   const prMatch = subject.match(/\(#(\d+)\)$/);
   const prNumber = prMatch ? prMatch[1] : null;
-  const breaking = Boolean(match?.[3]) || body.includes("BREAKING CHANGE");
+  const semantics = releaseCommitSemantics(subject, body);
 
   if (!match) {
     return {
-      type: "other",
+      type: semantics.type,
       description: subject.replace(/\s+\(#\d+\)$/, ""),
       prNumber,
-      breaking,
+      breaking: semantics.breaking,
     };
   }
 
@@ -160,34 +161,7 @@ function parseConventionalCommit(subject, body) {
   const baseDescription = rawDescription.replace(/\s+\(#\d+\)$/, "").trim();
   const description = scope ? `**${scope}:** ${baseDescription}` : baseDescription;
 
-  return { type, description, prNumber, breaking };
-}
-
-function bumpLevel(commits) {
-  if (commits.some((commit) => commit.breaking)) {
-    return "major";
-  }
-  if (commits.some((commit) => commit.type === "feat")) {
-    return "minor";
-  }
-  return "patch";
-}
-
-function incrementVersion(version, level) {
-  const [major, minor, patch] = version.split(".").map((part) => Number.parseInt(part, 10));
-
-  if ([major, minor, patch].some(Number.isNaN)) {
-    throw new Error(`Invalid semver version: ${version}`);
-  }
-
-  switch (level) {
-    case "major":
-      return `${major + 1}.0.0`;
-    case "minor":
-      return `${major}.${minor + 1}.0`;
-    default:
-      return `${major}.${minor}.${patch + 1}`;
-  }
+  return { type, description, prNumber, breaking: semantics.breaking };
 }
 
 function escapeRegExp(value) {
@@ -685,7 +659,7 @@ async function prepareRelease(attempt = 1) {
     return;
   }
 
-  const nextVersion = incrementVersion(packageJson.version, bumpLevel(parsedCommits));
+  const nextVersion = nextReleaseVersion(packageJson.version, parsedCommits);
   const sectionMarkdown = buildSectionMarkdown(nextVersion, previousTag, parsedCommits);
 
   console.log(`Preparing release ${nextVersion}`);

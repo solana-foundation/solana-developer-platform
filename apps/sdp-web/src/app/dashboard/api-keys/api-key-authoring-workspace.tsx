@@ -23,6 +23,7 @@ import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DateTimePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
@@ -251,12 +252,11 @@ function DetailsStep({
             </div>
             <div>
               <Label htmlFor="api-key-expiration">{t("DashboardCustody.expirationOptional")}</Label>
-              <Input
+              <DateTimePicker
                 id="api-key-expiration"
                 className="mt-2"
-                type="datetime-local"
                 value={draft.expiresAt}
-                onChange={(event) => update({ expiresAt: event.currentTarget.value })}
+                onChange={(value) => update({ expiresAt: value })}
               />
             </div>
           </div>

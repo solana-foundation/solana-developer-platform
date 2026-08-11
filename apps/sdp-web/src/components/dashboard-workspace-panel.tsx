@@ -19,16 +19,27 @@ export function DashboardWorkspaceOverviewPanel({ className, ...props }: Compone
 /**
  * Full-height bordered card that list pages render inside a
  * DashboardWorkspaceOverviewPanel: filter header, rows, and paginated footer
- * stack in a column that stretches to the panel's height.
+ * stack in a column that stretches to the panel's height when short and grows
+ * past it when rows overflow, so the panel scrolls. `shrink-0 grow` (not
+ * `flex-1`) is load-bearing: `overflow-hidden` zeroes a flex item's automatic
+ * min-height, and a shrinkable card would clamp to the panel and clip rows.
  *
  * @param props - Standard div props; `className` is merged onto the card.
+ * @param props.clamp - Clamp the card to the panel's height instead of growing
+ * past it, for pages that scroll their rows in an internal overflow region
+ * (the panel then carries `overflow-hidden` instead of scrolling).
  * @returns The card element.
  */
-export function DashboardWorkspaceCard({ className, ...props }: ComponentProps<"div">) {
+export function DashboardWorkspaceCard({
+  className,
+  clamp,
+  ...props
+}: ComponentProps<"div"> & { clamp?: boolean }) {
   return (
     <div
       className={cn(
-        "flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border-default bg-surface-raised",
+        "flex min-w-0 shrink-0 grow flex-col overflow-hidden rounded-lg border border-border-default bg-surface-raised",
+        clamp && "shrink basis-0",
         className
       )}
       {...props}

@@ -3,6 +3,7 @@
 import type { CustodyProvider, OrganizationRpcProvider } from "@sdp/types";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { type FormEvent, useMemo, useState, useTransition } from "react";
+import type { OnboardingProvisionedWallet } from "@/app/dashboard/custody/actions";
 import {
   CUSTODY_PROVIDER_CATALOG,
   type CustodyProviderCatalogEntry,
@@ -14,6 +15,7 @@ import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { completeOrganizationOnboardingAction, saveOnboardingRpcAction } from "./actions";
+import { OnboardingCompletePanel } from "./onboarding-complete-panel";
 import { RpcProviderMark } from "./rpc-provider-mark";
 
 const RPC_LABELS: Record<OrganizationRpcProvider, string> = {
@@ -74,6 +76,10 @@ export function OrganizationOnboardingFlow({
       : null
   );
   const [custodyProvider, setCustodyProvider] = useState<CustodyProvider | null>(null);
+  const [completion, setCompletion] = useState<{
+    provider: CustodyProvider;
+    wallet: OnboardingProvisionedWallet;
+  } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const custodyEntries = useMemo(() => {
     const providers = new Set(custodyProviders);
@@ -112,10 +118,21 @@ export function OrganizationOnboardingFlow({
         setErrorMessage(result.message);
         return;
       }
-      router.refresh();
-      router.push("/dashboard");
+      // Setup provisions a real wallet. Redirecting straight out of the wizard
+      // spent that moment silently and left the user to discover it, so the
+      // flow ends by naming what was created and where to go next.
+      //
+      // Deliberately no router.refresh() here: setup is complete now, so
+      // re-rendering this route's server page would hit its completion redirect
+      // and unmount this panel. The panel's exits are full navigations, which
+      // refetch every server boundary on the way out.
+      setCompletion({ provider: custodyProvider, wallet: result.wallet });
     });
   };
+
+  if (completion) {
+    return <OnboardingCompletePanel provider={completion.provider} wallet={completion.wallet} />;
+  }
 
   const onboardingSteps: readonly ("rpc" | "custody")[] = useDefaultRpc
     ? ["custody"]

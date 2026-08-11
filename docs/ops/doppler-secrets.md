@@ -55,7 +55,6 @@ The web and docs configs additionally provide their public URLs and browser-safe
 - `SDP_DOCS_PROXY_ORIGIN`
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
-- `CLERK_JWT_TEMPLATE`
 - `NEXT_PUBLIC_SENTRY_DSN`
 
 `SDP_DOCS_PROXY_ORIGIN` is the internal rewrite target for `sdp-web` `/docs` traffic. In production it must point to the docs project origin, `https://docs.platform.solana.com`, rather than the public canonical URL `https://platform.solana.com/docs`; otherwise the web app rewrites `/docs` back to itself.

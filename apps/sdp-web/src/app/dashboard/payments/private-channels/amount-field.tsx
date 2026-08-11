@@ -16,6 +16,14 @@ interface AmountFieldProps {
   balances?: WalletBalanceView;
   /** Balance this flow spends, listed first because it is the one to check. */
   spends: "channel" | "onChain";
+  /**
+   * Symbol of the selected token, shown in the label. Required rather than
+   * defaulted: the label interpolates it, and a missing interpolation value is a
+   * render-time throw that typecheck cannot catch. Empty string means the token
+   * list could not be loaded, and the label falls back to a bare "Amount" rather
+   * than naming a token this form cannot confirm.
+   */
+  symbol: string;
 }
 
 const BALANCE_LABEL_KEYS = {
@@ -24,9 +32,10 @@ const BALANCE_LABEL_KEYS = {
 } as const;
 
 /**
- * The USDC amount input shared by the deposit, withdrawal, and transfer forms:
- * one label, one placeholder, one error treatment, and the wallet's balances
- * under the field so the amount can be checked against them while typing.
+ * The amount input shared by the deposit, withdrawal, and transfer forms: one
+ * label, one placeholder, one error treatment, and the wallet's balances under
+ * the field so the amount can be checked against them while typing. The label
+ * names the selected token so the field says what it is about to move.
  */
 export function AmountField({
   balances,
@@ -36,6 +45,7 @@ export function AmountField({
   onBlur,
   onChange,
   spends,
+  symbol,
   value,
 }: AmountFieldProps) {
   const t = useTranslations();
@@ -49,7 +59,11 @@ export function AmountField({
 
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>{t("DashboardPrivateChannels.common.amountUsdc")}</Label>
+      <Label htmlFor={id}>
+        {symbol
+          ? t("DashboardPrivateChannels.common.amountForToken", { symbol })
+          : t("DashboardPrivateChannels.common.amount")}
+      </Label>
       <Input
         aria-describedby={error ? errorId : undefined}
         aria-invalid={Boolean(error)}

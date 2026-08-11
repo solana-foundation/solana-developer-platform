@@ -637,8 +637,8 @@ export function EnvConfigurator() {
                 <ul>
                   <li>Docker Engine and Docker Compose v2 on the host.</li>
                   <li>
-                    A Clerk development app with API keys and a JWT template named{" "}
-                    <code>sdp-api</code>.
+                    A Clerk development app with API keys and the session token customized with
+                    SDP&apos;s claims (org_id, org_role, org_slug, email).
                   </li>
                   <li>
                     A devnet RPC endpoint. A dedicated RPC key is more reliable than the public

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   ActiveApiKeyControlProfileResult,
   ActiveWalletControlProfileResult,
+  ApiKeyWalletPolicyBindingRow,
   ApprovalRequestRow,
   CreatePolicyEvaluationInput,
   CreateWalletOperationInput,
@@ -56,6 +57,7 @@ function walletProfile(
       revision_number: 1,
       rules: rules as unknown as Record<string, unknown>[],
       default_action: defaultAction,
+      commit_message: null,
       created_by: "usr_1",
       created_at: "2026-06-18T00:00:00.000Z",
       activated_at: "2026-06-18T00:00:00.000Z",
@@ -98,6 +100,7 @@ function apiKeyProfile(
 function createRepository(options: {
   walletPolicy?: ActiveWalletControlProfileResult | null;
   apiKeyPolicy?: ActiveApiKeyControlProfileResult | null;
+  hasApiKeyWalletPolicyBindings?: boolean;
   evaluationError?: Error;
   policyEvaluationError?: Error;
   approvalStatusUpdateError?: Error;
@@ -132,6 +135,14 @@ function createRepository(options: {
         },
         idempotency_key: input.idempotencyKey ?? null,
         status: input.status ?? "created",
+        execution_started_at: null,
+        execution_completed_at: null,
+        execution_error: null,
+        execution_result: null,
+        execution_attempt_id: null,
+        execution_lease_expires_at: null,
+        execution_effect_started_at: null,
+        execution_attempts: 0,
         created_at: "2026-06-18T00:00:00.000Z",
         updated_at: "2026-06-18T00:00:00.000Z",
       };
@@ -253,6 +264,24 @@ function createRepository(options: {
     listPolicyEvaluationsForOperation: vi.fn(async () => []),
     getActiveWalletControlProfileByCustodyWalletId: vi.fn(async () => options.walletPolicy ?? null),
     getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => options.apiKeyPolicy ?? null),
+    listApiKeyWalletPolicyBindings: vi.fn(async (): Promise<ApiKeyWalletPolicyBindingRow[]> => {
+      if (!options.hasApiKeyWalletPolicyBindings) {
+        return [];
+      }
+      return [
+        {
+          id: "akwpol_1",
+          api_key_id: "key_1",
+          binding_scope: "selected",
+          wallet_id: "wal_bound",
+          custody_wallet_id: "cw_bound",
+          wallet_control_profile_id: null,
+          api_key_control_profile_id: "akcp_1",
+          created_at: "2026-06-18T00:00:00.000Z",
+          updated_at: "2026-06-18T00:00:00.000Z",
+        },
+      ];
+    }),
     getApiKeyWalletPolicyBindingResolution: vi.fn(async () => {
       if (options.evaluationError) {
         throw options.evaluationError;
@@ -282,7 +311,10 @@ describe("WalletPolicyEnforcementService", () => {
 
   it("records default-allow operations and marks them evaluated", async () => {
     const repository = createRepository({});
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     const result = await service.enforce(baseOperation);
 
@@ -306,7 +338,10 @@ describe("WalletPolicyEnforcementService", () => {
       statusUpdateFailures: 1,
       statusUpdateError: new Error("status update unavailable"),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toThrow("status update unavailable");
     expect(repository.updateWalletOperationStatus).toHaveBeenNthCalledWith(1, "wop_1", "evaluated");
@@ -319,7 +354,10 @@ describe("WalletPolicyEnforcementService", () => {
         { id: "destinations", kind: "destination", allowlist: ["recipient_allowed"] },
       ]),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toMatchObject({
       code: "FORBIDDEN",
@@ -339,7 +377,10 @@ describe("WalletPolicyEnforcementService", () => {
         { id: "large-payment-approval", kind: "approval", families: ["payment"] },
       ]),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toMatchObject({
       code: "SIGNING_PENDING",
@@ -372,7 +413,10 @@ describe("WalletPolicyEnforcementService", () => {
     const repository = createRepository({
       walletPolicy: walletProfile([], "review"),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toMatchObject({
       code: "SIGNING_PENDING",
@@ -403,7 +447,10 @@ describe("WalletPolicyEnforcementService", () => {
       ]),
       existingApprovalRequestStatus: "failed",
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toThrow(
       "Wallet operation approval request is no longer pending"
@@ -430,7 +477,10 @@ describe("WalletPolicyEnforcementService", () => {
         },
       ]),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(
       service.enforce({
@@ -469,7 +519,10 @@ describe("WalletPolicyEnforcementService", () => {
         { id: "large-payment-approval", kind: "approval", families: ["payment"] },
       ]),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toMatchObject({
       code: "SIGNING_PENDING",
@@ -493,7 +546,10 @@ describe("WalletPolicyEnforcementService", () => {
         { id: "large-payment-approval", kind: "approval", families: ["payment"] },
       ]),
     });
-    const secondService = new WalletPolicyEnforcementService(secondRepository);
+    const secondService = new WalletPolicyEnforcementService(
+      secondRepository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(secondService.enforce(baseOperation)).rejects.toMatchObject({
       code: "SIGNING_PENDING",
@@ -516,7 +572,10 @@ describe("WalletPolicyEnforcementService", () => {
         { id: "large-payment-approval", kind: "approval", families: ["payment"] },
       ]),
     });
-    const thirdService = new WalletPolicyEnforcementService(thirdRepository);
+    const thirdService = new WalletPolicyEnforcementService(
+      thirdRepository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(thirdService.enforce(baseOperation)).rejects.toMatchObject({
       code: "SIGNING_PENDING",
@@ -541,7 +600,10 @@ describe("WalletPolicyEnforcementService", () => {
         { id: "large-payment-approval", kind: "approval", families: ["payment"] },
       ]),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toMatchObject({
       code: "SIGNING_PENDING",
@@ -560,7 +622,10 @@ describe("WalletPolicyEnforcementService", () => {
         { id: "large-payment-approval", kind: "approval", families: ["payment"] },
       ]),
     });
-    const secondService = new WalletPolicyEnforcementService(secondRepository);
+    const secondService = new WalletPolicyEnforcementService(
+      secondRepository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(secondService.enforce(baseOperation)).rejects.toMatchObject({
       code: "SIGNING_PENDING",
@@ -582,7 +647,10 @@ describe("WalletPolicyEnforcementService", () => {
       ]),
       policyEvaluationError: new Error("evaluation write unavailable"),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toThrow("evaluation write unavailable");
 
@@ -604,7 +672,10 @@ describe("WalletPolicyEnforcementService", () => {
       policyEvaluationError: new Error("evaluation write unavailable"),
       approvalStatusUpdateError: new Error("approval cleanup unavailable"),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toThrow(
       "Wallet operation policy enforcement failed (evaluation write unavailable) and cleanup failed (approval cleanup unavailable)"
@@ -626,7 +697,10 @@ describe("WalletPolicyEnforcementService", () => {
         { id: "api-key-destination", kind: "destination", blocklist: ["recipient_1"] },
       ]),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toMatchObject({
       code: "FORBIDDEN",
@@ -638,11 +712,59 @@ describe("WalletPolicyEnforcementService", () => {
     expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");
   });
 
+  it("applies the API key policy without wallet binding resolution when custody identity is absent", async () => {
+    const repository = createRepository({
+      apiKeyPolicy: apiKeyProfile([
+        { id: "api-key-destination", kind: "destination", blocklist: ["recipient_1"] },
+      ]),
+    });
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
+
+    await expect(
+      service.enforce({
+        ...baseOperation,
+        custodyWalletId: null,
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      details: {
+        decision: "deny",
+        reasonCode: "api_key_policy_match",
+      },
+    });
+    expect(repository.getApiKeyWalletPolicyBindingResolution).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when wallet bindings exist without a custody identity to match", async () => {
+    const repository = createRepository({ hasApiKeyWalletPolicyBindings: true });
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
+
+    await expect(
+      service.enforce({
+        ...baseOperation,
+        custodyWalletId: null,
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "API key policy binding is not configured for the requested wallet",
+    });
+    expect(repository.getApiKeyWalletPolicyBindingResolution).not.toHaveBeenCalled();
+  });
+
   it("marks the operation failed when policy evaluation throws", async () => {
     const repository = createRepository({
       evaluationError: new Error("policy resolver unavailable"),
     });
-    const service = new WalletPolicyEnforcementService(repository);
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
 
     await expect(service.enforce(baseOperation)).rejects.toThrow("policy resolver unavailable");
     expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");

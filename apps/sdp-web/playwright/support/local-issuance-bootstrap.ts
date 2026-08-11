@@ -15,7 +15,6 @@ import {
   bootstrapLocalWalletFixtures,
   createExternalSolanaAddress,
   getBootstrapApiBaseUrl,
-  getBootstrapClerkJwtTemplate,
   getPlaywrightCustodyProvider,
   type PlaywrightWalletFixture,
   resolvePlaywrightProjectId,
@@ -282,4 +281,4 @@ export async function bootstrapLocalPaymentFixtures({
   };
 }
 
-export { getBootstrapApiBaseUrl, getBootstrapClerkJwtTemplate, seedLocalClerkOrganizationMapping };
+export { getBootstrapApiBaseUrl, seedLocalClerkOrganizationMapping };

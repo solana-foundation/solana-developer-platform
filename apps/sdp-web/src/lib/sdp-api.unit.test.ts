@@ -17,11 +17,9 @@ import { createRequestScopedSdpApiClients, SdpApiResponseError } from "./sdp-api
 
 describe("createRequestScopedSdpApiClients", () => {
   const originalApiBaseUrl = process.env.SDP_API_BASE_URL;
-  const originalClerkJwtTemplate = process.env.CLERK_JWT_TEMPLATE;
 
   beforeEach(() => {
     process.env.SDP_API_BASE_URL = "https://api.example.test";
-    delete process.env.CLERK_JWT_TEMPLATE;
     vi.spyOn(console, "info").mockImplementation(() => undefined);
   });
 
@@ -35,12 +33,6 @@ describe("createRequestScopedSdpApiClients", () => {
       delete process.env.SDP_API_BASE_URL;
     } else {
       process.env.SDP_API_BASE_URL = originalApiBaseUrl;
-    }
-
-    if (originalClerkJwtTemplate === undefined) {
-      delete process.env.CLERK_JWT_TEMPLATE;
-    } else {
-      process.env.CLERK_JWT_TEMPLATE = originalClerkJwtTemplate;
     }
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { FilterIcon, SearchIcon, XIcon } from "lucide-react";
+import { DownloadIcon, FilterIcon, LoaderCircleIcon, SearchIcon, XIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   createContext,
@@ -18,16 +18,19 @@ import {
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
+import { DateRangePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { downloadResponseBlob } from "@/lib/download";
 import { RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
 import {
+  assetFilterOptions,
   fetchTransactionFilterOptions,
   type TransactionFilterOptions,
 } from "./transactions-filter-options";
@@ -89,21 +92,40 @@ const TYPE_LABELS = {
   offramp: "DashboardPayments.transactions.offramp",
 } as const satisfies Record<TransactionTypeFilter, MessageKey>;
 
-function AssetFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+/**
+ * Held tokens, by symbol.
+ *
+ * Was a free-text input, which could not work by hand: the filter matches
+ * `pt.token` exactly and that column stores a mint, so typing "USDC" never
+ * matched anything, and arriving from a holding put a 44-character address on
+ * screen. The option value carries the mint; the label carries the symbol.
+ */
+function AssetFilter({
+  value,
+  options,
+  onChange,
+}: {
+  value: string | undefined;
+  options: Array<{ id: string; label: string }>;
+  onChange: (value: string | undefined) => void;
+}) {
   const t = useTranslations();
+  const assets = assetFilterOptions(value, options);
 
   return (
-    <FieldWithLabel
-      htmlFor="transactions-asset"
+    <SelectFilter
       label={t("DashboardPayments.transactions.filterAsset")}
+      value={value}
+      allLabel={t("DashboardPayments.transactions.allAssets")}
+      ariaLabel={t("DashboardPayments.transactions.filterAsset")}
+      onChange={onChange}
     >
-      <Input
-        id="transactions-asset"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={t("DashboardPayments.transactions.assetPlaceholder")}
-      />
-    </FieldWithLabel>
+      {assets.map((asset) => (
+        <SelectItem key={asset.id} value={asset.id}>
+          {asset.label}
+        </SelectItem>
+      ))}
+    </SelectFilter>
   );
 }
 
@@ -116,14 +138,16 @@ function AssetFilter({ value, onChange }: { value: string; onChange: (value: str
 function FieldWithLabel({
   htmlFor,
   label,
+  className,
   children,
 }: {
   htmlFor?: string;
   label: string;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="min-w-0">
+    <div className={cn("min-w-0", className)}>
       {htmlFor ? (
         <label htmlFor={htmlFor} className="mb-1 block text-tertiary text-xs">
           {label}
@@ -139,6 +163,11 @@ function FieldWithLabel({
 function buildTransactionsHref(filters: TransactionFilters): string {
   const query = serializeTransactionFilters(filters).toString();
   return `/dashboard/payments/transactions${query ? `?${query}` : ""}`;
+}
+
+function buildTransactionsExportHref(filters: TransactionFilters): string {
+  const query = serializeTransactionFilters({ ...filters, page: 1 }).toString();
+  return `/api/dashboard/payments/transactions/export${query ? `?${query}` : ""}`;
 }
 
 function SelectFilter({
@@ -276,30 +305,25 @@ function AdvancedFilters({
           </SelectItem>
         ))}
       </SelectFilter>
-      <AssetFilter value={assetValue} onChange={onAssetChange} />
-      {/* Every Select in this grid names itself through its "All …" option. The
-          date inputs only had an invisible aria-label, so they read as two
-          unexplained dd/mm/yyyy boxes. Visible captions put them on the same
-          footing without changing what they accept. */}
+      <AssetFilter
+        value={assetValue || undefined}
+        options={options?.assets ?? []}
+        // Routed through the same setter the text input used, so the debounced
+        // filter plumbing keeps a single path rather than gaining a second one.
+        onChange={(asset) => onAssetChange(asset ?? "")}
+      />
+      {/* The range keeps the API's separate from/to values while presenting one
+          connected selection, so users cannot accidentally invert the dates. */}
       <FieldWithLabel
-        htmlFor="transactions-from"
-        label={t("DashboardPayments.transactions.fromDate")}
+        htmlFor="transactions-date-range"
+        label={t("Shared.SharedComponents.dateRange")}
+        className="xl:col-span-2"
       >
-        <Input
-          id="transactions-from"
-          type="date"
-          value={filters.from ?? ""}
-          onChange={(event) => updateFilters({ from: event.target.value || undefined })}
-          max={filters.to || undefined}
-        />
-      </FieldWithLabel>
-      <FieldWithLabel htmlFor="transactions-to" label={t("DashboardPayments.transactions.toDate")}>
-        <Input
-          id="transactions-to"
-          type="date"
-          value={filters.to ?? ""}
-          onChange={(event) => updateFilters({ to: event.target.value || undefined })}
-          min={filters.from || undefined}
+        <DateRangePicker
+          id="transactions-date-range"
+          from={filters.from ?? ""}
+          to={filters.to ?? ""}
+          onChange={(from, to) => updateFilters({ from: from || undefined, to: to || undefined })}
         />
       </FieldWithLabel>
       {/* Spans the row so the switch is not mistaken for another dropdown.
@@ -337,6 +361,8 @@ export function TransactionsWorkspace({
   const [displayFilters, setDisplayFilters] = useState(filters);
   const [searchValue, setSearchValue] = useState(filters.search ?? "");
   const [assetValue, setAssetValue] = useState(filters.asset ?? "");
+  const [csvDownloading, setCsvDownloading] = useState(false);
+  const [csvError, setCsvError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const advancedFilterCount = countActiveTransactionFilters(displayFilters);
   const hasAdvancedFilter = Boolean(
@@ -483,6 +509,34 @@ export function TransactionsWorkspace({
   };
   const sortValue = `${displayFilters.sortBy}:${displayFilters.sortDirection}`;
 
+  const downloadCsv = async () => {
+    if (csvDownloading) return;
+    setCsvDownloading(true);
+    setCsvError(null);
+
+    try {
+      const response = await fetch(buildTransactionsExportHref(displayFilters));
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: { message?: string };
+        };
+        throw new Error(
+          body.error?.message ?? t("DashboardPayments.transactions.downloadCsvFailed")
+        );
+      }
+
+      await downloadResponseBlob(response, "sdp-transactions.csv");
+    } catch (error) {
+      setCsvError(
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.transactions.downloadCsvFailed")
+      );
+    } finally {
+      setCsvDownloading(false);
+    }
+  };
+
   return (
     <TransactionFilterContext.Provider
       value={{ filters: displayFilters, isPending, clearFilters, updateFilters }}
@@ -490,7 +544,7 @@ export function TransactionsWorkspace({
       <DashboardWorkspaceOverviewPanel className="flex flex-col">
         <DashboardWorkspaceCard>
           <div className="border-b border-border-default p-3">
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto]">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto_auto]">
               <Input
                 value={searchValue}
                 onChange={(event) => updateSearchValue(event.target.value)}
@@ -560,14 +614,27 @@ export function TransactionsWorkspace({
                 aria-controls="payments-transaction-advanced-filters"
                 onClick={() => setFiltersOpen((open) => !open)}
               >
+                {/* No count badge here: "N active" renders directly below on the
+                    same condition, so the badge repeated it in a less useful form —
+                    a bare number, crowded against the button edge, next to a line
+                    that says what the number actually means and offers to clear it. */}
                 {t("DashboardPayments.transactions.filters")}
-                {advancedFilterCount > 0 ? (
-                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[11px] text-white">
-                    {advancedFilterCount}
-                  </span>
-                ) : null}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={csvDownloading}
+                iconLeft={
+                  csvDownloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />
+                }
+                onClick={downloadCsv}
+              >
+                {csvDownloading
+                  ? t("DashboardPayments.transactions.downloadingCsv")
+                  : t("DashboardPayments.transactions.downloadCsv")}
               </Button>
             </div>
+            {csvError ? <p className="mt-2 text-xs text-error">{csvError}</p> : null}
             {advancedFilterCount > 0 ? (
               <div className="mt-2 flex items-center justify-between gap-3">
                 <span className="text-xs text-secondary">

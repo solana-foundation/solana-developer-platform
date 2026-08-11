@@ -9,7 +9,7 @@ import * as custodyProvisioning from "@/services/custody/provisioning";
 import { parseConfigRecord } from "@/services/domain/signing/provider-config";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const provisionParaWalletMock = vi.spyOn(custodyProvisioning, "provisionParaWallet");
@@ -140,7 +140,6 @@ describe("Custody switch rollback", () => {
     env.PARA_API_KEY = originalParaApiKey;
     env.PARA_API_BASE_URL = originalParaApiBaseUrl;
     env.CUSTODY_ENCRYPTION_KEY = originalCustodyEncryptionKey;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

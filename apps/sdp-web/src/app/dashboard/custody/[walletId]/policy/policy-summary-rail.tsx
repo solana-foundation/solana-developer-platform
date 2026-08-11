@@ -6,13 +6,16 @@ import {
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import { ChevronRight, Copy } from "lucide-react";
-import type { ReactNode } from "react";
+import { AnimatePresence } from "motion/react";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
+import { HeightReveal } from "@/components/ui/height-reveal";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import type { PolicyAssetOption, PolicyAuthoringState } from "./wallet-policy-authoring";
 import {
   CATEGORY_OPTIONS,
@@ -99,16 +102,16 @@ export function PolicySummaryRail({
           const option = assetByMint.get(mint);
           return (
             <span key={mint} className="flex items-center gap-2" title={mint}>
-              <TokenMark mint={mint} symbol={option?.token} size="sm" />
+              <TokenMark mint={mint} symbol={option?.token} logoUrl={option?.imageUrl} size="sm" />
               <span className="min-w-0 truncate text-sm font-medium text-primary">
                 {option?.token ?? t("DashboardCustody.policyCustomMint")}
               </span>
-              {WELL_KNOWN_TOKEN_BY_MINT.has(mint) ? null : (
-                <Badge className="shrink-0">
-                  {option?.source === "issued"
-                    ? t("DashboardCustody.policyAssetBadgeIssued")
-                    : t("DashboardCustody.policyAssetBadgeCustom")}
+              {WELL_KNOWN_TOKEN_BY_MINT.has(mint) ? null : option?.sdpIssued ? (
+                <Badge variant="outline" className="shrink-0">
+                  {t("Shared.SharedComponents.sdpMintedToken")}
                 </Badge>
+              ) : (
+                <Badge className="shrink-0">{t("DashboardCustody.policyAssetBadgeCustom")}</Badge>
               )}
               <span className="ml-auto shrink-0 text-xs text-muted">{shortenAddress(mint)}</span>
             </span>
@@ -179,20 +182,9 @@ export function PolicySummaryRail({
         </div>
         {rows.map((row) =>
           row.collapsedCount !== undefined ? (
-            <div key={row.label} className="py-3">
-              <details className="group/summary-row">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 [&::-webkit-details-marker]:hidden">
-                  <span className="text-sm text-muted">{row.label}</span>
-                  <span className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-primary">
-                    {t("DashboardCustody.policySummarySelectedCount", {
-                      count: row.collapsedCount,
-                    })}
-                    <ChevronRight className="size-4 shrink-0 text-muted transition-transform group-open/summary-row:rotate-90" />
-                  </span>
-                </summary>
-                <div className="mt-2.5 space-y-2">{row.value}</div>
-              </details>
-            </div>
+            <CollapsibleSummaryRow key={row.label} label={row.label} count={row.collapsedCount}>
+              {row.value}
+            </CollapsibleSummaryRow>
           ) : (
             <div key={row.label} className="flex items-center justify-between gap-4 py-3">
               <dt className="shrink-0 text-sm text-muted">{row.label}</dt>
@@ -202,6 +194,54 @@ export function PolicySummaryRail({
         )}
       </dl>
     </aside>
+  );
+}
+
+/**
+ * Summary-rail row whose value list expands beneath the count with the shared
+ * height-reveal animation.
+ *
+ * @param props.label - Row label shown on the left.
+ * @param props.count - Number of selected entries shown as the collapsed value.
+ * @param props.children - The expanded entry list.
+ * @returns The toggleable row.
+ */
+function CollapsibleSummaryRow({
+  label,
+  count,
+  children,
+}: {
+  label: string;
+  count: number;
+  children: ReactNode;
+}) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="py-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full cursor-pointer items-center justify-between gap-4"
+      >
+        <span className="text-sm text-muted">{label}</span>
+        <span className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-primary">
+          {t("DashboardCustody.policySummarySelectedCount", { count })}
+          <ChevronRight
+            className={cn("size-4 shrink-0 text-muted transition-transform", open && "rotate-90")}
+          />
+        </span>
+      </button>
+      <AnimatePresence>
+        {open ? (
+          <HeightReveal key="summary-row">
+            <div className="space-y-2 pt-2.5">{children}</div>
+          </HeightReveal>
+        ) : null}
+      </AnimatePresence>
+    </div>
   );
 }
 

@@ -111,7 +111,7 @@ describe("SponsorshipBudgetRepository", () => {
 
   it("keeps the reviewed devnet/mainnet seed limits exact", () => {
     const migration = readFileSync(
-      path.resolve(import.meta.dirname, "../migrations/postgres/0047_sponsorship_budgets.sql"),
+      path.resolve(import.meta.dirname, "../migrations/postgres/0055_sponsorship_budgets.sql"),
       "utf8"
     );
     expect(migration).toContain(

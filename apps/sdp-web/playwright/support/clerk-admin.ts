@@ -37,7 +37,7 @@ function isRetryableClerkError(error: unknown): boolean {
     : "";
 
   return (
-    (typeof statusNumber === "number" && statusNumber >= 500) ||
+    (typeof statusNumber === "number" && (statusNumber >= 500 || statusNumber === 429)) ||
     name === "ClerkAPIResponseError" ||
     message.includes("Internal Server Error") ||
     message.includes("fetch failed") ||
@@ -72,20 +72,25 @@ async function withTransientClerkRetry<T>(operation: () => Promise<T>): Promise<
 
 async function requestClerk<T>(path: string, options: RequestInit = {}): Promise<T> {
   const env = getE2EEnv();
-  const response = await fetch(`https://api.clerk.com/v1${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${env.clerkSecretKey}`,
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
+
+  return withTransientClerkRetry(async () => {
+    const response = await fetch(`https://api.clerk.com/v1${path}`, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${env.clerkSecretKey}`,
+        "Content-Type": "application/json",
+        ...(options.headers ?? {}),
+      },
+    });
+
+    if (!response.ok) {
+      throw Object.assign(new Error(`Clerk request failed (${response.status}) for ${path}`), {
+        status: response.status,
+      });
+    }
+
+    return (await response.json()) as T;
   });
-
-  if (!response.ok) {
-    throw new Error(`Clerk request failed (${response.status}) for ${path}`);
-  }
-
-  return (await response.json()) as T;
 }
 
 async function resolveOrganizationId(

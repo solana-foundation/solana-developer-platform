@@ -132,6 +132,14 @@ export const updateTokenSchema = z.object({
   // Access-control enforcement input for deploy; only accepted while the token
   // is still undeployed (the handler rejects it after deployment).
   requiresAllowlist: z.boolean().optional(),
+  // SPL has no supply-cap field: the cap is enforced by SDP while it holds the
+  // mint authority, so it stays editable until the supply is locked on-chain
+  // (the handler rejects it once the authority is gone). null = uncapped.
+  maxSupply: z
+    .string()
+    .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+    .nullable()
+    .optional(),
 });
 
 export const mintSchema = z.object({

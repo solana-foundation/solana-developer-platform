@@ -9,6 +9,7 @@ import {
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { toTitleCase } from "../activity-format-utils";
+import type { PaymentsIssuedTokenSymbol } from "./payments-page.data";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -138,6 +139,77 @@ export function formatTokenAmount(value: number | string, locale?: string): stri
 
 export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
   return `${formatTokenAmount(formatUiAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
+}
+
+/**
+ * Builds an amount-input placeholder that communicates an asset's precision.
+ *
+ * @param decimals - The asset's fractional digit count.
+ * @returns A zero amount padded to the asset's decimals, e.g. `0.000000` for 6.
+ */
+export function amountInputPlaceholder(decimals: number): string {
+  return decimals <= 0 ? "0" : `0.${"0".repeat(decimals)}`;
+}
+
+/**
+ * Checks that a stored URL is safe to render as a link target: parseable and
+ * http(s). `new URL` alone accepts `javascript:` and `data:` schemes, which
+ * must never reach an href.
+ *
+ * @param value - The candidate URL.
+ * @returns Whether the value parses as an http or https URL.
+ */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+export interface ResolvedTokenPresentation {
+  /** Issued-token id (`tok_…`) when the mint belongs to a token issued on SDP. */
+  tokenId: string | null;
+  tokenName: string;
+  /** Issuer-supplied metadata image, when the issued token declares one. */
+  metadataImageUrl: string | null;
+  mint: string;
+  /** Whether the mint is in the verified well-known registry. */
+  isWellKnown: boolean;
+}
+
+/**
+ * Resolves a mint to the token identity the dashboard should present: the
+ * well-known registry name when the mint is verified, the issued token's name,
+ * id, and metadata image when it was issued on SDP, and the caller's fallback
+ * name otherwise. Rendering stays with the caller.
+ *
+ * The literal "SOL" is accepted as the native alias: rows written by the
+ * native send path record it in place of the wrapped SOL mint, and only the
+ * API writes that value, so it can never be a self-reported symbol.
+ *
+ * @param mint - The mint address to resolve, or the native "SOL" alias.
+ * @param issuedTokensByMint - The org's issued tokens keyed by mint address.
+ * @param fallbackName - Name used when the mint is neither well known nor issued.
+ * @returns The resolved token identity.
+ */
+export function resolveTokenByMint(
+  mint: string,
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>,
+  fallbackName?: string
+): ResolvedTokenPresentation {
+  const trimmed = mint.trim();
+  const normalized = trimmed.toUpperCase() === "SOL" ? SOL_MINT : trimmed;
+  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(normalized);
+  const issued = issuedTokensByMint[normalized];
+  return {
+    tokenId: issued ? issued.id : null,
+    tokenName: wellKnown?.symbol ?? issued?.symbol ?? fallbackName ?? shortenAddress(normalized),
+    metadataImageUrl: issued ? issued.imageUrl : null,
+    mint: normalized,
+    isWellKnown: wellKnown !== undefined,
+  };
 }
 
 export function formatDisplayAmount(value?: string, token?: string, locale?: string): string {

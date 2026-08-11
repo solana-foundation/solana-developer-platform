@@ -231,13 +231,6 @@ export const FIELDS: EnvField[] = [
     help: "https://<slug>.clerk.accounts.dev for dev instances",
   },
   {
-    key: "CLERK_JWT_TEMPLATE",
-    section: "clerk",
-    kind: "text",
-    label: "JWT template name",
-    defaultValue: "sdp-api",
-  },
-  {
     key: "CLERK_WEBHOOK_SECRET",
     section: "clerk",
     kind: "password",
@@ -670,7 +663,7 @@ export const FIELDS: EnvField[] = [
     help: "Development is always enabled. This setting controls production only.",
   },
   {
-    key: "PRIVY_BYOK_PROVISIONING_ENABLED",
+    key: "PRIVY_BYOK_ENABLED",
     section: "advanced",
     kind: "select",
     label: "Privy stored-credential provisioning",

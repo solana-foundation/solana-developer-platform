@@ -201,25 +201,42 @@ export async function resolveAuthoritySigner(params: {
   requestedWalletId?: string | null;
   currentAuthority: string;
 }): Promise<{ signer: TransactionSigner; walletId: string | null }> {
+  const resolved = await resolveAuthorityWallet(params);
+  const signer = await createResolvedAuthoritySigner({
+    env: params.env,
+    auth: params.auth,
+    walletId: resolved.walletId,
+    currentAuthority: params.currentAuthority,
+  });
+
+  return { signer, walletId: resolved.walletId };
+}
+
+/** Resolve the custody wallet for an authority without loading signing material. */
+export async function resolveAuthorityWallet(params: {
+  env: Env;
+  auth: ApiKeyContext;
+  token: TokenRecord;
+  requestedWalletId?: string | null;
+  currentAuthority: string;
+}): Promise<{ walletId: string }> {
   const { env, auth, token, requestedWalletId, currentAuthority } = params;
   const preferredWalletId =
     requestedWalletId ?? token?.signingWalletId ?? auth.signingWalletId ?? null;
+  const custodyStore = new CustodyConfigStore(getDb(env), env);
 
   if (preferredWalletId) {
     assertApiKeyWalletAccess(auth, preferredWalletId, ["tokens:admin"]);
-    const signer = await solanaServices.createOrgSigner(
-      env,
+    const preferredWallet = await custodyStore.findActiveWalletByIdentifier(
       auth.organizationId,
-      auth.projectId,
+      auth.projectId ?? undefined,
       preferredWalletId
     );
-
-    if (signer.address === (currentAuthority as Address)) {
-      return { signer, walletId: preferredWalletId };
+    if (preferredWallet?.publicKey === currentAuthority) {
+      return { walletId: preferredWallet.walletId };
     }
   }
 
-  const custodyStore = new CustodyConfigStore(getDb(env), env);
   const authorityWallet = await custodyStore.findActiveWalletByPublicKey(
     auth.organizationId,
     auth.projectId ?? undefined,
@@ -231,18 +248,30 @@ export async function resolveAuthoritySigner(params: {
   }
 
   assertApiKeyWalletAccess(auth, authorityWallet.walletId, ["tokens:admin"]);
+
+  return { walletId: authorityWallet.walletId };
+}
+
+/** Load the already-authorized authority signer and bind it to the expected public key. */
+export async function createResolvedAuthoritySigner(params: {
+  env: Env;
+  auth: ApiKeyContext;
+  walletId: string;
+  currentAuthority: string;
+}): Promise<TransactionSigner> {
+  const { env, auth, walletId, currentAuthority } = params;
   const signer = await solanaServices.createOrgSigner(
     env,
     auth.organizationId,
     auth.projectId,
-    authorityWallet.walletId
+    walletId
   );
 
   if (signer.address !== (currentAuthority as Address)) {
     throw badRequest("Current authority is not controlled by custody");
   }
 
-  return { signer, walletId: authorityWallet.walletId };
+  return signer;
 }
 
 export function getInitialPermanentDelegateAuthority(

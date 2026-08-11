@@ -23,7 +23,7 @@ import {
   resolveDfnsNetwork,
 } from "@sdp/custody/dfns";
 import type { SigningPort, SignRequest, SignResult, SignStatus } from "@sdp/custody/signing";
-import { isFullSigningPort, SigningError } from "@sdp/custody/signing";
+import { SigningError } from "@sdp/custody/signing";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
@@ -45,6 +45,7 @@ import {
   custodyProviderCanSign,
   shouldSetCustodyScopeDefault,
 } from "@/services/custody-provider-lifecycle.service";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import {
   type AnchorageProviderConfig,
@@ -280,6 +281,7 @@ interface ListWalletsOptions {
 export class SigningService {
   private providerCache = new Map<string, SigningPort>();
   private custodyCipher: CustodyCipher | null = null;
+  private readonly runtimeTargets: CustodyRuntimeTargets;
 
   constructor(
     private configStore: SigningConfigStore & {
@@ -293,7 +295,9 @@ export class SigningService {
     },
     private signingStore: SigningRequestStore,
     private env: Env
-  ) {}
+  ) {
+    this.runtimeTargets = new CustodyRuntimeTargets(getDb(env), env, this.providerCache);
+  }
 
   /**
    * Get the encryption service, lazily initialized.
@@ -1738,17 +1742,12 @@ export class SigningService {
     projectId?: string,
     walletId?: string | null
   ): Promise<TransactionSigner> {
-    const resolved = await this.resolveAdapterForRequest(orgId, projectId, walletId);
-    const adapter = resolved.adapter;
-
-    if (!isFullSigningPort(adapter)) {
-      throw new SigningError(
-        `Provider does not support transaction signing: ${adapter.providerId}`,
-        "INVALID_REQUEST"
-      );
-    }
-
-    return adapter.getTransactionSigner(resolved.walletId, resolved.walletPublicKey);
+    return this.runtimeTargets.getTransactionSigner(
+      orgId,
+      projectId,
+      walletId ?? undefined,
+      (organizationId, config) => this.getAdapterForConfig(organizationId, config)
+    );
   }
 
   private mapWalletLookup(

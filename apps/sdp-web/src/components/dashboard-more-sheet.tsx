@@ -1,12 +1,14 @@
 "use client";
 
 import {
+  BlocksIcon,
   CircleCheckBigIcon,
   KeyRoundIcon,
   LibraryIcon,
   type LucideIcon,
   Settings2Icon,
   ShieldCheckIcon,
+  TrendingUpIcon,
   XIcon,
 } from "lucide-react";
 import { useEffect } from "react";
@@ -29,15 +31,31 @@ type MoreGroup = { title: string; items: MoreItem[] };
  * The payments sub-actions are deliberately absent: the Payments tab already opens
  * a page carrying its own sub-navigation, so repeating Transactions, Pay, Deposit
  * and the rest here would be a second copy of a menu the destination already has.
+ * Earn stays here because Markets does not have a dedicated bottom-bar destination;
+ * it needs the Markets module flag as well as its own, matching the sidebar group.
  */
 function getMoreGroups(
   t: ReturnType<typeof useTranslations>,
-  options: { canReadApprovals: boolean; canManageOrgSettings: boolean }
+  options: {
+    canReadApprovals: boolean;
+    canManageOrgSettings: boolean;
+    earnEnabled: boolean;
+    marketsEnabled: boolean;
+  }
 ): MoreGroup[] {
   return [
     {
       title: t("Shared.dashboardShell.manage"),
       items: [
+        ...(options.marketsEnabled && options.earnEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.earn"),
+                href: DASHBOARD_SIDE_NAV_HREFS.markets,
+                icon: TrendingUpIcon,
+              },
+            ]
+          : []),
         {
           label: t("Shared.dashboardShell.apiKeys"),
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
@@ -47,6 +65,11 @@ function getMoreGroups(
           label: t("Shared.dashboardShell.policies"),
           href: DASHBOARD_SIDE_NAV_HREFS.policies,
           icon: ShieldCheckIcon,
+        },
+        {
+          label: t("Shared.dashboardShell.integrations"),
+          href: DASHBOARD_SIDE_NAV_HREFS.integrations,
+          icon: BlocksIcon,
         },
         ...(options.canReadApprovals
           ? [
@@ -125,15 +148,24 @@ export function DashboardMoreSheet({
   pathname,
   canReadApprovals,
   canManageOrgSettings,
+  earnEnabled,
+  marketsEnabled,
   onClose,
 }: {
   pathname: string;
   canReadApprovals: boolean;
   canManageOrgSettings: boolean;
+  earnEnabled: boolean;
+  marketsEnabled: boolean;
   onClose: () => void;
 }) {
   const t = useTranslations();
-  const groups = getMoreGroups(t, { canReadApprovals, canManageOrgSettings });
+  const groups = getMoreGroups(t, {
+    canReadApprovals,
+    canManageOrgSettings,
+    earnEnabled,
+    marketsEnabled,
+  });
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

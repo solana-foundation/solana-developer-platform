@@ -1,8 +1,10 @@
 "use server";
 
 import type { CustodyProvider, OrganizationRpcProvider } from "@sdp/types";
-import { revalidatePath } from "next/cache";
-import { initializeOnboardingCustodyAction } from "@/app/dashboard/custody/actions";
+import {
+  initializeOnboardingCustodyAction,
+  type OnboardingProvisionedWallet,
+} from "@/app/dashboard/custody/actions";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import { updateOrganizationRpcSettingsAction } from "@/app/dashboard/settings/actions";
 import { getTranslations } from "@/i18n/server";
@@ -10,6 +12,11 @@ import { createOrgSdpApiClient } from "@/lib/sdp-api";
 
 export type OrganizationOnboardingActionResult =
   | { status: "success" }
+  | { status: "error"; message: string };
+
+/** Completion carries the wallet it provisioned so the wizard can show it. */
+export type OrganizationOnboardingCompletionResult =
+  | { status: "success"; wallet: OnboardingProvisionedWallet }
   | { status: "error"; message: string };
 
 export async function saveOnboardingRpcAction(input: {
@@ -28,7 +35,7 @@ export async function saveOnboardingRpcAction(input: {
 export async function completeOrganizationOnboardingAction(input: {
   custodyProvider: CustodyProvider;
   useDefaultRpc: boolean;
-}): Promise<OrganizationOnboardingActionResult> {
+}): Promise<OrganizationOnboardingCompletionResult> {
   const t = await getTranslations();
   try {
     const client = await createOrgSdpApiClient();
@@ -63,8 +70,12 @@ export async function completeOrganizationOnboardingAction(input: {
       method: "POST",
       body: JSON.stringify({ custodyProvider: input.custodyProvider }),
     });
-    revalidatePath("/dashboard", "layout");
-    return { status: "success" };
+    // Deliberately no layout revalidation here: it re-renders the onboarding
+    // route mid-transition, and that page redirects once setup is complete,
+    // killing the completion panel before it paints. The panel's exits are
+    // full document navigations, so every server boundary is fresh on the way
+    // out without it.
+    return { status: "success", wallet: walletResult.wallet };
   } catch (error) {
     return {
       status: "error",

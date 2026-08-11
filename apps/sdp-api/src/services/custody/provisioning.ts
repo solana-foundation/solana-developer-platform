@@ -9,6 +9,7 @@ import {
   type ProvisionTurnkeyOptions as CustodyProvisionTurnkeyOptions,
   type ProvisionUtilaOptions as CustodyProvisionUtilaOptions,
   deleteAnchorageWallet as deleteAnchorageWalletInCustody,
+  findPrivyWalletByExternalId as findPrivyWalletByExternalIdInCustody,
   type ProvisionAnchorageResult,
   type ProvisionCoinbaseCdpResult,
   type ProvisionFireblocksResult,
@@ -37,6 +38,11 @@ export type { ProvisionFireblocksResult };
 
 export type ProvisionPrivyOptions = CustodyProvisionPrivyOptions;
 export type { ProvisionPrivyResult };
+
+export interface PrivyCredentialAuthentication {
+  appId: string;
+  appSecret: string;
+}
 
 export type ProvisionCoinbaseCdpOptions = CustodyProvisionCoinbaseCdpOptions & {
   network?: "solana" | "solana-devnet";
@@ -80,16 +86,33 @@ export async function provisionFireblocksVaultAccount(
 
 export async function provisionPrivyWallet(
   env: Env,
-  options: ProvisionPrivyOptions
+  options: ProvisionPrivyOptions,
+  authentication?: PrivyCredentialAuthentication
 ): Promise<ProvisionPrivyResult> {
   return provisionPrivyWalletInCustody(
     createRuntime(),
     {
-      appId: env.PRIVY_APP_ID,
-      appSecret: env.PRIVY_APP_SECRET,
+      appId: authentication?.appId ?? env.PRIVY_APP_ID,
+      appSecret: authentication?.appSecret ?? env.PRIVY_APP_SECRET,
       apiBaseUrl: env.PRIVY_API_BASE_URL,
     },
     options
+  );
+}
+
+export async function findPrivyWalletByExternalId(
+  env: Env,
+  externalId: string,
+  authentication?: PrivyCredentialAuthentication
+): Promise<ProvisionPrivyResult | undefined> {
+  return findPrivyWalletByExternalIdInCustody(
+    createRuntime(),
+    {
+      appId: authentication?.appId ?? env.PRIVY_APP_ID,
+      appSecret: authentication?.appSecret ?? env.PRIVY_APP_SECRET,
+      apiBaseUrl: env.PRIVY_API_BASE_URL,
+    },
+    externalId
   );
 }
 

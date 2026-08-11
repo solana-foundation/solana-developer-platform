@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getMessages, translate } from "@/i18n/messages";
 import {
   buildPolicyAuditSearchParams,
+  fetchMemberNames,
   fetchPolicyAuditContext,
   fetchPolicyAuditList,
   fetchPolicyEvaluationNeighbors,
@@ -16,6 +17,7 @@ import {
 import {
   decisionHeading,
   decisionLabel,
+  formatPolicyDate,
   formatRevisionReference,
   type PolicyTranslate,
   policyActor,
@@ -141,6 +143,7 @@ describe("policy audit data", () => {
     expect(
       parsePolicyAuditFilters({
         page: "2",
+        pageSize: "50",
         decision: "deny",
         status: "failed",
         operationFamily: "payment",
@@ -150,6 +153,7 @@ describe("policy audit data", () => {
       })
     ).toEqual({
       page: 2,
+      pageSize: 50,
       decision: "deny",
       status: "failed",
       operationFamily: "payment",
@@ -157,8 +161,11 @@ describe("policy audit data", () => {
       from: "2026-07-01",
       to: "2026-07-31",
     });
-    expect(parsePolicyAuditFilters({ page: "0", decision: "maybe", from: "2026-02-31" })).toEqual({
+    expect(
+      parsePolicyAuditFilters({ page: "0", pageSize: "17", decision: "maybe", from: "2026-02-31" })
+    ).toEqual({
       page: 1,
+      pageSize: 25,
       decision: undefined,
       status: undefined,
       operationFamily: undefined,
@@ -172,6 +179,7 @@ describe("policy audit data", () => {
     expect(
       buildPolicyAuditSearchParams({
         page: 3,
+        pageSize: 25,
         decision: "review",
         status: "pending_approval",
         operationFamily: "ramp",
@@ -188,6 +196,7 @@ describe("policy audit data", () => {
     const request = vi.fn(async () => apiPage([evaluation("deny")], { total: 26, page: 2 }));
     const result = await fetchPolicyAuditList(request, "wallet/one", {
       page: 2,
+      pageSize: 25,
       decision: "deny",
       status: "failed",
       operationFamily: "payment",
@@ -220,6 +229,7 @@ describe("policy audit data", () => {
 
     const result = await fetchPolicyAuditList(request, "wallet-1", {
       page: 1,
+      pageSize: 25,
       decision: "approval_required",
     });
 
@@ -241,6 +251,7 @@ describe("policy audit data", () => {
 
     const result = await fetchPolicyAuditList(request, "wallet-1", {
       page: 1,
+      pageSize: 25,
       from: "2026-07-01",
       to: "2026-07-31",
     });
@@ -257,6 +268,7 @@ describe("policy audit data", () => {
     await expect(
       fetchPolicyAuditList(request, "wallet-1", {
         page: 1,
+        pageSize: 25,
         to: "2026-07-31",
       })
     ).rejects.toThrow("Policy audit history exceeds the local filtering limit");
@@ -274,6 +286,7 @@ describe("policy audit data", () => {
 
     const result = await fetchPolicyEvaluationNeighbors(request, "wallet-1", "evaluation-24", {
       page: 1,
+      pageSize: 25,
       from: "2026-07-01",
     });
 
@@ -290,6 +303,7 @@ describe("policy audit data", () => {
       "wallet-1",
       {
         page: 1,
+        pageSize: 25,
       }
     );
     expect(result).toMatchObject({ evaluations: [], total: 0, page: 1 });
@@ -347,6 +361,7 @@ describe("policy audit presentation invariants", () => {
           revisionNumber: 2,
           rules: [],
           defaultAction: "deny",
+          commitMessage: null,
           createdBy: null,
           createdAt: "2026-07-15T12:00:00.000Z",
           activatedAt: "2026-07-15T12:00:00.000Z",
@@ -358,6 +373,7 @@ describe("policy audit presentation invariants", () => {
           revisionNumber: 1,
           rules: [],
           defaultAction: "allow",
+          commitMessage: null,
           createdBy: null,
           createdAt: "2026-07-14T12:00:00.000Z",
           activatedAt: "2026-07-14T12:00:00.000Z",
@@ -373,21 +389,21 @@ describe("policy audit presentation invariants", () => {
         item.policyRevisions.wallet.evaluatedRevisionId,
         "Default allow"
       )
-    ).toBe("v1");
+    ).toBe("#1");
     expect(
       formatRevisionReference(
         history,
         item.policyRevisions.wallet.activeRevisionId,
         "No active revision"
       )
-    ).toBe("v2");
+    ).toBe("#2");
   });
 
   it("covers provider-partial, missing API-key, and legacy context states", () => {
     const partial = evaluation("review", { reasonCode: "provider_mapping_partial" });
     expect(providerMappingState(partial)).toBe("partial");
 
-    const missingKey = policyActor(evaluation("allow"), {});
+    const missingKey = policyActor(evaluation("allow"), {}, {});
     expect(missingKey).toMatchObject({ type: "api_key", id: "api-key-1", name: null });
 
     const legacy = evaluation("allow", { evaluationContext: null });
@@ -404,5 +420,55 @@ describe("policy audit presentation invariants", () => {
     });
 
     expect(decisionHeading(rawSign)).toBe("Raw Sign · Custody Signer Check");
+  });
+
+  it("formats revision dates per locale and passes invalid values through", () => {
+    expect(formatPolicyDate("2026-08-01T12:00:00.000Z", "en-US")).toBe("Aug 1, 2026");
+    expect(formatPolicyDate("not-a-date", "en-US")).toBe("not-a-date");
+  });
+});
+
+describe("member directory", () => {
+  function member(id: string, name: string | null, email: string) {
+    return {
+      id: `member-${id}`,
+      role: "member",
+      status: "active",
+      createdAt: "2026-08-01T12:00:00.000Z",
+      user: { id, name, email },
+    };
+  }
+
+  it("maps member ids to canonical labels and drops unresolved members", async () => {
+    const request = vi.fn(async () =>
+      Response.json({
+        data: {
+          members: [
+            member("usr_named", "Ada Lovelace", "ada@example.com"),
+            member("usr_email_only", null, "grace@example.com"),
+            member("usr_unresolved", null, "{{user.primary_email_address.email_address}}"),
+          ],
+        },
+      })
+    );
+
+    await expect(fetchMemberNames(request)).resolves.toEqual({
+      usr_named: "Ada Lovelace",
+      usr_email_only: "grace@example.com",
+    });
+    expect(request).toHaveBeenCalledWith("/v1/members?pageSize=100");
+  });
+
+  it("returns an empty directory when the members request fails", async () => {
+    await expect(
+      fetchMemberNames(vi.fn(async () => new Response(null, { status: 500 })))
+    ).resolves.toEqual({});
+    await expect(
+      fetchMemberNames(
+        vi.fn(async () => {
+          throw new Error("network down");
+        })
+      )
+    ).resolves.toEqual({});
   });
 });

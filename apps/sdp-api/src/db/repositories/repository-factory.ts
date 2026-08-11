@@ -9,6 +9,8 @@ import type { CounterpartiesRepository } from "./counterparty.repository";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { CounterpartyAccountsRepository } from "./counterparty-account.repository";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
+import type { EarnRepository } from "./earn.repository";
+import { createPostgresEarnRepository } from "./earn.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
@@ -29,6 +31,8 @@ import type { PrivateChannelEventRepository } from "./private-channel-event.repo
 import { createPostgresPrivateChannelEventRepository } from "./private-channel-event.repository.postgres";
 import type { PrivateChannelInstanceRepository } from "./private-channel-instance.repository";
 import { createPostgresPrivateChannelInstanceRepository } from "./private-channel-instance.repository.postgres";
+import type { PrivateChannelReferenceRepository } from "./private-channel-reference.repository";
+import { createPostgresPrivateChannelReferenceRepository } from "./private-channel-reference.repository.postgres";
 import type { PrivateChannelSettlementObservationRepository } from "./private-channel-settlement-observation.repository";
 import { createPostgresPrivateChannelSettlementObservationRepository } from "./private-channel-settlement-observation.repository.postgres";
 import type { PrivateChannelTransferRepository } from "./private-channel-transfer.repository";
@@ -174,6 +178,10 @@ export function createSystemAssetProfilesRepository(env: Env): AssetProfilesRepo
   return createPostgresAssetProfilesRepository(getDb(env));
 }
 
+export function createEarnRepository(env: Env): EarnRepository {
+  return createPostgresEarnRepository(getDb(env));
+}
+
 export function createPrivateChannelInstanceRepository(env: Env): PrivateChannelInstanceRepository {
   return createPostgresPrivateChannelInstanceRepository(getDb(env));
 }
@@ -198,6 +206,12 @@ export function createPrivateChannelVerifiedWalletRepository(
 
 export function createPrivateChannelEventRepository(env: Env): PrivateChannelEventRepository {
   return createPostgresPrivateChannelEventRepository(getDb(env));
+}
+
+export function createPrivateChannelReferenceRepository(
+  env: Env
+): PrivateChannelReferenceRepository {
+  return createPostgresPrivateChannelReferenceRepository(getDb(env));
 }
 
 export function createPrivateChannelUserRepository(env: Env): PrivateChannelUserRepository {

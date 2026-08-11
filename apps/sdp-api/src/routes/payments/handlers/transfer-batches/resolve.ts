@@ -2,7 +2,7 @@ import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { SOL_DECIMALS } from "@sdp/types";
+import { SOL_DECIMALS, SOL_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { requireProjectId } from "@/lib/auth";
@@ -11,6 +11,7 @@ import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
   assertPositivePaymentAmount,
+  isNativePaymentToken,
   normalizePaymentToken,
 } from "@/services/payment-operation.service";
 import { type AppContext, getCounterpartyAccountsRepository } from "../../context";
@@ -58,8 +59,8 @@ async function resolveTokenContext(
   token: string,
   sourceAddress: Address
 ): Promise<TokenContext> {
-  if (token === "SOL") {
-    return { kind: "sol", token: "SOL", decimals: SOL_DECIMALS };
+  if (isNativePaymentToken(token)) {
+    return { kind: "sol", token: SOL_MINT, decimals: SOL_DECIMALS };
   }
 
   const mintAddress = assertValidAddress(token, "token");

@@ -7,6 +7,7 @@ import { env as testEnv } from "@/test/helpers/env";
 import {
   getInitialPermanentDelegateAuthority,
   resolveAuthoritySigner,
+  resolveAuthorityWallet,
   resolveMetadataAuthority,
   resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
@@ -177,13 +178,22 @@ describe("authority-resolution", () => {
       apiKeyId: null,
     };
 
-    createOrgSignerMock
-      .mockResolvedValueOnce({
-        address: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
-      } as never)
-      .mockResolvedValueOnce({
-        address: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
-      } as never);
+    createOrgSignerMock.mockResolvedValueOnce({
+      address: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
+    } as never);
+
+    vi.spyOn(CustodyConfigStore.prototype, "findActiveWalletByIdentifier").mockResolvedValue({
+      id: "cwlt_stale",
+      custodyConfigId: "cust_cfg",
+      walletId: "wal_default",
+      publicKey: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
+      label: "Stale",
+      purpose: "root",
+      status: "active",
+      createdAt: new Date().toISOString(),
+      provider: "privy",
+      projectId: "proj_test",
+    });
 
     vi.spyOn(CustodyConfigStore.prototype, "findActiveWalletByPublicKey").mockResolvedValue({
       id: "cwlt_root",
@@ -211,7 +221,50 @@ describe("authority-resolution", () => {
 
     expect(result.walletId).toBe("wal_root");
     expect(result.signer.address).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
-    expect(createOrgSignerMock).toHaveBeenCalledTimes(2);
+    expect(createOrgSignerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves authority ownership without loading signing material", async () => {
+    const auth: ApiKeyContext = {
+      id: "user_test",
+      organizationId: "org_test",
+      projectId: "proj_test",
+      role: "admin",
+      permissions: [],
+      environment: "dashboard",
+      signingWalletId: null,
+      signingWalletIds: [],
+      walletBindings: [],
+      authType: "session",
+      userId: "user_test",
+      apiKeyId: null,
+    };
+    vi.spyOn(CustodyConfigStore.prototype, "findActiveWalletByIdentifier").mockResolvedValue({
+      id: "cwlt_authority",
+      custodyConfigId: "cust_cfg",
+      walletId: "wal_authority",
+      publicKey: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
+      label: "Authority",
+      purpose: "root",
+      status: "active",
+      createdAt: new Date().toISOString(),
+      provider: "privy",
+      projectId: "proj_test",
+    });
+
+    await expect(
+      resolveAuthorityWallet({
+        env: {
+          DATABASE_URL: testEnv.DATABASE_URL,
+          CUSTODY_ENCRYPTION_KEY: "test",
+        } as never,
+        auth,
+        token: createToken({ signingWalletId: "wal_authority" }),
+        requestedWalletId: "wal_authority",
+        currentAuthority: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
+      })
+    ).resolves.toEqual({ walletId: "wal_authority" });
+    expect(createOrgSignerMock).not.toHaveBeenCalled();
   });
 
   it("persists the initial permanent delegate for template tokens on deploy", () => {

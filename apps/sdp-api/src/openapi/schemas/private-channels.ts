@@ -192,7 +192,8 @@ export const privateChannelBalanceQuerySchema = z.object({
     }),
   mint: solanaAddressSchema.optional().openapi({
     param: { name: "mint", in: "query" },
-    description: "Token mint to read. Defaults to the instance cluster's USDC mint.",
+    description:
+      "Token mint to read. Any mint is accepted here — this is a general read. Defaults to the instance's first allowed token.",
   }),
 });
 
@@ -256,10 +257,14 @@ export const createPrivateChannelDepositBodySchema = z
       description: "Source custody wallet (walletId or public key).",
       example: "wlt_…",
     }),
-    amount: z
-      .string()
-      .min(1)
-      .openapi({ description: "Decimal amount to deposit.", example: "1.5" }),
+    amount: withOpenApi(privateChannelTransferAmountSchema, {
+      description: "Positive decimal amount with at most six fractional digits.",
+      example: "1.5",
+    }),
+    mint: solanaAddressSchema.optional().openapi({
+      description:
+        "Token mint to deposit. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
+    }),
     recipient: z.string().min(1).optional().openapi({
       description: "Address/walletId to credit in the channel. Defaults to the depositor.",
     }),
@@ -361,10 +366,14 @@ export const createPrivateChannelWithdrawalBodySchema = z
       description: "Custody wallet to burn from (walletId or public key).",
       example: "wlt_…",
     }),
-    amount: z
-      .string()
-      .min(1)
-      .openapi({ description: "Decimal amount to withdraw.", example: "1.5" }),
+    amount: withOpenApi(privateChannelTransferAmountSchema, {
+      description: "Positive decimal amount with at most six fractional digits.",
+      example: "1.5",
+    }),
+    mint: solanaAddressSchema.optional().openapi({
+      description:
+        "Token mint to withdraw. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
+    }),
     destination: z.string().min(1).optional().openapi({
       description: "Devnet address/walletId to release to. Defaults to the owner wallet.",
     }),
@@ -413,18 +422,24 @@ export const privateChannelTransferListSchema = z.object({
   transfers: z.array(privateChannelTransferSchema),
 });
 
-const privateChannelTransferRecipientWalletSchema = z.object({
-  id: z.string().openapi({ description: "Opaque verified-wallet id." }),
-  pubkey: solanaAddressSchema,
-});
-
-const privateChannelTransferRecipientSchema = z.object({
-  privateChannelUserId: z.string(),
-  userId: z.string(),
-  email: z.string(),
-  name: z.string().nullable(),
-  wallets: z.array(privateChannelTransferRecipientWalletSchema),
-});
+const privateChannelTransferRecipientSchema = z
+  .object({
+    id: z.string().openapi({ description: "Opaque verified-wallet id." }),
+    pubkey: solanaAddressSchema,
+    walletName: z.string().nullable().openapi({
+      description: "User-assigned custody wallet name, when available.",
+    }),
+    privateChannelUserId: z.string().openapi({
+      description: "Opaque private-channel member id that owns this verified wallet.",
+    }),
+    isSelf: z.boolean().openapi({
+      description: "True when the wallet belongs to the requesting member.",
+    }),
+  })
+  .openapi({
+    description:
+      "One verified wallet that may receive a transfer. A member holding several verified wallets appears once per wallet. Owner identity (email, SDP user id, display name) is not included.",
+  });
 
 export const privateChannelTransferRecipientListSchema = z.object({
   recipients: z.array(privateChannelTransferRecipientSchema),
@@ -442,8 +457,12 @@ export const createPrivateChannelTransferBodySchema = z
       example: "pcvw_9f1c...",
     }),
     amount: withOpenApi(privateChannelTransferAmountSchema, {
-      description: "Positive decimal USDC amount with at most six fractional digits.",
+      description: "Positive decimal amount with at most six fractional digits.",
       example: "1.5",
+    }),
+    mint: solanaAddressSchema.optional().openapi({
+      description:
+        "Token mint to transfer. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
     }),
   })
   .openapi({ description: "Create a verified member-to-member channel transfer." });
@@ -515,6 +534,25 @@ export const privateChannelEventListSchema = z.object({
     .openapi({ description: "Opaque cursor for the next page; null when there are no more." }),
 });
 
+export const privateChannelEventReferencesSchema = z
+  .object({
+    references: z.record(z.string(), z.string()).openapi({
+      description:
+        "Flat id→name dictionary for event enrichment. Keys are channel ids, wallet pubkeys/ids, private-channel-user ids, SDP user ids, instance ids, and issued-token mint addresses.",
+      example: {
+        pch_treasury: "Treasury",
+        TreasuryPubkey1111111111111111111111111: "Treasury Wallet",
+        usr_ada: "Ada Lovelace",
+        pci_production: "https://gateway.example",
+        EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: "USDC",
+      },
+    }),
+  })
+  .openapi({
+    description:
+      "Display-name references for Private Channels events (channels, wallets, members, instances, tokens).",
+  });
+
 export const privateChannelEventsQuerySchema = z.object({
   family: privateChannelEventFamilySchema.optional().openapi({
     param: { name: "family", in: "query" },
@@ -528,6 +566,10 @@ export const privateChannelEventsQuerySchema = z.object({
       param: { name: "type", in: "query" },
       description: `Exact event type match (e.g. ${PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_CHANNEL_CREATED}).`,
     }),
+  status: privateChannelEventStatusSchema.optional().openapi({
+    param: { name: "status", in: "query" },
+    description: "Filter by exact event status.",
+  }),
   limit: z.coerce
     .number()
     .int()

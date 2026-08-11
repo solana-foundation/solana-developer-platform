@@ -60,20 +60,26 @@ export interface ChannelTokenBalanceResult {
 }
 
 /**
- * Read an owner's channel token balance for `mint`. Channel token accounts derive
- * under the CLASSIC Token program, not Token-2022, so its program id is
- * used as the ATA `tokenProgram` seed. Returns `balance: null` (not an error) when
- * the owner has no token account on the channel yet.
+ * Read an owner's channel token balance for `mint`.
+ *
+ * `tokenProgram` is the program that owns the mint and seeds the ATA derivation —
+ * spl-token or token-2022. It is a parameter rather than a constant because the
+ * two derive DIFFERENT addresses for the same (owner, mint): assuming one would
+ * silently probe an account that holds nothing.
+ *
+ * Returns `balance: null` (not an error) when the owner has no token account on
+ * the channel yet.
  */
 export async function getChannelTokenBalance(
   rpc: SolanaRpc,
   owner: Address,
-  mint: Address
+  mint: Address,
+  tokenProgram: Address = TOKEN_PROGRAM_ADDRESS
 ): Promise<ChannelTokenBalanceResult> {
   const [tokenAccount] = await findAssociatedTokenPda({
     owner,
     mint,
-    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    tokenProgram,
   });
 
   // Disambiguate "no account" from a real RPC failure up front: a missing ATA is

@@ -22,7 +22,6 @@ import { getIntegrationCustodyProvider } from "./custody-provider";
 
 const {
   app,
-  clearTestDatabase,
   createKVStoreSet,
   createFeePaymentAdapter,
   createMosaicService,
@@ -205,7 +204,7 @@ export async function resetIntegrationState(
 }
 
 export async function cleanupIntegrationSuite() {
-  await clearTestDatabase(env);
+  await seedTestDatabase(env);
 }
 
 type IntegrationRequestInit = RequestInit & {
