@@ -228,10 +228,8 @@ function normalizeWalletBindings(cachedKey: CachedApiKey): {
     .filter((binding) => typeof binding.walletId === "string" && binding.walletId.length > 0)
     .map((binding) => ({
       walletId: binding.walletId,
-      permissions:
-        binding.permissions && binding.permissions.length > 0
-          ? binding.permissions
-          : (["*"] as Permission[]),
+      // An explicitly empty list grants nothing; a missing one fails closed.
+      permissions: binding.permissions ?? ([] as Permission[]),
     }));
 
   if (walletBindings.length === 0 && cachedKey.signingWalletId) {

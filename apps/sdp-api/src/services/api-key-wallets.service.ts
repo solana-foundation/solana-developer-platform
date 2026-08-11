@@ -14,7 +14,10 @@ export interface ApiKeyWalletBindingForKey extends ApiKeyWalletBinding {
 export const DEFAULT_API_KEY_WALLET_PERMISSIONS: Permission[] = ["*"];
 
 export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | null): Permission[] {
-  if (!permissions || permissions.length === 0) {
+  // Only an ABSENT permissions list means "unrestricted". An explicitly empty
+  // array is an intent to grant nothing and must never widen to the wildcard
+  // default — that would turn an attempt to restrict a key into full access.
+  if (permissions == null) {
     return [...DEFAULT_API_KEY_WALLET_PERMISSIONS];
   }
 

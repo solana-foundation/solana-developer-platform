@@ -99,10 +99,11 @@ export async function loadCachedApiKeyFromDb(
     .all<{ wallet_id: string; permissions: string }>();
 
   const walletBindings: ApiKeyWalletBinding[] = (walletBindingsResult.results ?? []).map((row) => {
-    const parsed = safeParsePermissionsArray(row.permissions);
+    // Stored permissions are authoritative: an explicitly empty array grants
+    // nothing, and unparseable values fail closed — never widen to "*".
     return {
       walletId: row.wallet_id,
-      permissions: parsed.length > 0 ? parsed : ["*"],
+      permissions: safeParsePermissionsArray(row.permissions),
     };
   });
 
