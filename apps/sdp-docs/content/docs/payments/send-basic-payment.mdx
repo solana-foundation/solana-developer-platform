@@ -7,7 +7,7 @@ steps:
   - Verify the transfer
 ---
 
-SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**. The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
+SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**. The `source` field on the request is the provider `walletId` returned by `GET /v1/wallets` (for example `privy_...`). The wallet record `id` (`cwlt_...`) and the public key are not accepted. `destination` is the recipient's on-chain **wallet (owner) address**. For SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
 
 Transfers are available through the Payments dashboard and the API.
 
