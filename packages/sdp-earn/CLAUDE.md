@@ -119,7 +119,8 @@ Practical notes:
   design. Use the dashboard, or mint a key for your own org.
 - **The seeded program starts at whatever the shared wallet currently holds.**
   It carries a live single-strategy allocation (one strategy at 100% — the
-  shape the deposit flow authors), so the overview shows a real forward APY.
+  only shape the V1 API accepts, PRO-1667), so the overview shows a real
+  forward APY.
   The wallet is shared with teammates and IS funded from time to time for
   exit-path testing, so do not treat any particular balance as the baseline —
   read it from the dashboard. Fund it by sending devnet USDC to the wallet's

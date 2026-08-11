@@ -172,7 +172,10 @@ strategies and draining positions first, then removing the id.
 Some providers front a *portfolio* wallet (one wallet, weighted allocations
 across yield sources) rather than per-strategy deposits. That surface is an
 **optional** extension of the base contract — implement it only when the
-provider actually offers it.
+provider actually offers it. Note the capability is weighted by design, but
+the V1 product caps each token group at ONE allocation entry per program
+(PRO-1667, ADR 0002 addendum) — a new provider only ever receives
+single-vault targets until weights are re-enabled post-V1.
 
 1. **Implement the full interface, or none of it.**
    `EarnPortfolioWalletProvider` (`packages/sdp-earn/src/types.ts`) extends

@@ -19,10 +19,14 @@ them; that is an ADR 0002 addendum acceptance criterion, not a style choice.
   exactly one of them. GET is a **live provider** snapshot per request —
   balances/positions/yield are never persisted. PUT is idempotent
   create-or-update: first call creates the provider wallet + row (concurrent
-  races surface the unique violation as 409); later calls update strategy
-  weights. Allocation weights validate on a 0.1 grid summing to exactly 100
-  per token group, and every `yieldSourceId` must exist as an **active**
-  synced strategy for that provider+environment.
+  races surface the unique violation as 409); later calls re-target the
+  strategy. **Earn V1 is single-vault (PRO-1667): each token group accepts
+  exactly ONE allocation entry**, which the sum-to-100 rule then pins to
+  `pct: 100` — one vault per deposit token per program. The weighted
+  multi-entry validation (0.1 grid, sum to exactly 100, duplicate check) is
+  dormant, not removed: re-enabling weights post-V1 relaxes the group cap in
+  `schemas.ts` and nothing else. Every `yieldSourceId` must exist as an
+  **active** synced strategy for that provider+environment.
   - `requestId` (UUIDv4) is the caller-owned idempotency key, forwarded to the
     provider on BOTH branches. Absent ⇒ the provider client mints one per
     call, which is NOT idempotent: a double-submit fires two mutations.
