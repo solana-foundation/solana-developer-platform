@@ -560,6 +560,23 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
 
   assertEarnProviderConfigured(c.env, client.provider, resolveSdpEnvironment(c) === "sandbox");
 
+  const repo = getEarnRepository(c);
+
+  // BOLA guard, defense in depth: every SDP organization shares one provider
+  // account, so a foreign org's withdrawal ref must 404 HERE — before any
+  // provider call — regardless of how the provider scopes its own lookup
+  // (Ground's read is wallet-scoped, but that is the provider's promise, not
+  // ours). The ledger knows who owns every ref it has seen; a ref it has
+  // never seen (pre-ledger withdrawals) falls through to the provider's
+  // wallet-scoped read, which cannot name another wallet's withdrawal.
+  const ledgerRow = await repo.getProgramWithdrawalByProviderReference({
+    provider: client.provider,
+    providerReference: withdrawalRef,
+  });
+  if (ledgerRow && ledgerRow.organization_id !== getAuth(c).organizationId) {
+    throw notFound("Earn withdrawal");
+  }
+
   const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
     providerWalletRef: row.provider_wallet_ref,
     withdrawalRef,
@@ -570,7 +587,7 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   // without provider_reference are invisible to this path by design.
   try {
     await applyEarnWithdrawalObservationByReference({
-      repo: getEarnRepository(c),
+      repo,
       provider: client.provider,
       organizationId: getAuth(c).organizationId,
       observed: withdrawal,

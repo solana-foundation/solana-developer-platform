@@ -1061,6 +1061,69 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     await expect(readLedgerRows()).resolves.toHaveLength(0);
   });
 
+  it("404s a foreign organization's withdrawal ref BEFORE any provider call (BOLA guard)", async () => {
+    await seedAuth();
+    await seedProgramWallet();
+    const getWithdrawal = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal");
+
+    // A sibling organization with its own program and a ledger-known
+    // withdrawal ref — the shared provider account is exactly why the ledger,
+    // not the provider, must own cross-tenant scoping.
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
+        )
+        .bind("org_earn_program_victim", "Victim Org", "earn-program-victim"),
+      db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Victim Project', ?, 'sandbox', 'active', ?)`
+        )
+        .bind("prj_earn_program_victim", "org_earn_program_victim", "victim-project", TEST_USER.id),
+    ]);
+    const repo = createPostgresEarnRepository(db);
+    const victimWallet = await repo.insertProviderWallet({
+      organizationId: "org_earn_program_victim",
+      projectId: "prj_earn_program_victim",
+      environment: "sandbox",
+      provider: "ground",
+      providerWalletRef: "9a35f56f-deeb-578f-0c7c-4d2b6d8f0e32",
+      label: null,
+      createdBy: TEST_USER.id,
+    });
+    const victimRow = await repo.createProgramWithdrawal({
+      organizationId: "org_earn_program_victim",
+      projectId: "prj_earn_program_victim",
+      walletId: victimWallet?.id ?? "",
+      provider: "ground",
+      amountRequestedUsd: "50.00",
+      token: "usdc",
+      destinationAddress: SOLANA_DESTINATION,
+      requestId: crypto.randomUUID(),
+      idempotencyFingerprint: '{"scope":"earn_program_withdrawal"}',
+      providerData: {},
+      createdBy: TEST_USER.id,
+      initiatedByKeyId: null,
+    });
+    await repo.updateProgramWithdrawalStatusGuarded({
+      selector: { withdrawalId: victimRow?.id ?? "" },
+      organizationId: "org_earn_program_victim",
+      fromStatuses: ["requested"],
+      toStatus: "processing",
+      providerReference: "wd_victim_org",
+    });
+
+    const res = await requestEarn(
+      "GET",
+      "/v1/earn/program/withdrawals/wd_victim_org?provider=ground"
+    );
+
+    expect(res.status).toBe(404);
+    expect(getWithdrawal).not.toHaveBeenCalled();
+  });
+
   describe("GET /program/withdrawals — the ledger list", () => {
     it("returns the house list envelope from the ledger, newest first", async () => {
       await seedAuth();

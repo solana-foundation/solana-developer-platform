@@ -59,7 +59,11 @@ them; that is an ADR 0002 addendum acceptance criterion, not a style choice.
   observation: the response is always the provider's live object; the matching
   ledger row (found via the global (provider, provider_reference) unique) is
   advanced best-effort as a side effect. Unknown refs serve live state and
-  touch nothing (pre-ledger withdrawals must keep polling fine).
+  touch nothing (pre-ledger withdrawals must keep polling fine). A **BOLA
+  guard** runs before the provider call: a ref the ledger knows belongs to
+  another organization 404s here — every org shares one provider account, so
+  cross-tenant scoping is SDP's job, never delegated to the provider's own
+  path scoping.
 - `GET /program/withdrawals` — **DB ledger list** (`earn_program_withdrawals`),
   the house `{withdrawals, total, page, pageSize}` envelope, wallet-scoped so
   one program = one history across sibling projects. Deliberately takes NO
