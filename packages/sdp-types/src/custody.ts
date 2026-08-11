@@ -500,7 +500,13 @@ export interface SwitchFireblocksSigningRequest extends FireblocksCustodyOptions
   projectId?: string;
 }
 
+export interface SwitchConnectionSigningRequest {
+  connectionId: string;
+  provider?: CustodyProvider;
+}
+
 export type SwitchSigningRequest =
+  | SwitchConnectionSigningRequest
   | InitializeLocalSigningRequest
   | SwitchFireblocksSigningRequest
   | InitializePrivySigningRequest
@@ -651,6 +657,14 @@ export interface InitializeSigningResponse {
   publicKey: string;
   walletId: string;
 }
+
+export type SwitchSigningResponse =
+  | InitializeSigningResponse
+  | {
+      connectionId: string;
+      publicKey: string;
+      walletId: string;
+    };
 
 export interface SignerCheckResponse {
   walletId: string;

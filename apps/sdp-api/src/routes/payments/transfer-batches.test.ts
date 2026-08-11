@@ -662,6 +662,102 @@ describe("payment transfer batches", () => {
     expect(listBody.data.map((batch) => batch.id)).toContain(body.data.batch.id);
   });
 
+  it("dry-runs a transfer batch with zero writes", async () => {
+    const counterpartyId = await seedCounterparty("batch_dry_run_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const response = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { decision: "allow", criteria: [] },
+    });
+    expect(createOrgSignerMock).not.toHaveBeenCalled();
+
+    const batchCount = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM payment_transfer_batches")
+      .first<{ count: number }>();
+    const operationCount = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+      .first<{ count: number }>();
+    expect(batchCount).toEqual({ count: 0 });
+    expect(operationCount).toEqual({ count: 0 });
+  });
+
+  it("stops a denied transfer batch before signer and batch side effects", async () => {
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+      .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
+      .run();
+    const policyResponse = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationAllowlist: [],
+          defaultAction: "allow",
+          rules: [{ id: "deny-transfer-batches", kind: "always", action: "deny" }],
+        }),
+      },
+      env
+    );
+    expect(policyResponse.status).toBe(200);
+    const counterpartyId = await seedCounterparty("batch_policy_denial_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const response = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(createOrgSignerMock).not.toHaveBeenCalled();
+    const batchCount = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM payment_transfer_batches")
+      .first<{ count: number }>();
+    expect(batchCount).toEqual({ count: 0 });
+  });
+
   it("replays the original transfer batch for the same idempotency key and payload", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
@@ -697,17 +793,27 @@ describe("payment transfer batches", () => {
       { method: "POST", headers, body: requestBody },
       env
     );
+    const operationsAfterFirst = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ count: number }>();
     const second = await app.request(
       "/v1/payments/transfer-batches",
       { method: "POST", headers, body: requestBody },
       env
     );
+    const operationsAfterSecond = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ count: number }>();
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     const firstBody = (await first.json()) as { data: unknown };
     const secondBody = (await second.json()) as { data: unknown };
     expect(secondBody.data).toEqual(firstBody.data);
+    expect(operationsAfterFirst).toEqual({ count: 1 });
+    expect(operationsAfterSecond).toEqual(operationsAfterFirst);
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
     expect(createOrgSignerMock).toHaveBeenCalledTimes(1);
 

@@ -49,6 +49,9 @@ const DFNS_CONFIG_ID = "cust_cfg_dfns_legacy";
 const IBM_HAVEN_CONFIG_ID = "cust_cfg_ibm_haven";
 
 let originalParaApiKey: string | undefined;
+let originalPrivyByokEnabled: string | undefined;
+let originalPrivyAppId: string | undefined;
+let originalPrivyAppSecret: string | undefined;
 
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -195,9 +198,59 @@ async function seedAuthAndConfigs(): Promise<void> {
   ]);
 }
 
+async function seedActivePrivyConnection(suffix: string, projectId = TEST_PROJECT.id) {
+  const credentialId = `pcred_switch_${suffix}`;
+  const connectionId = `cconn_switch_${suffix}`;
+  const walletRecordId = `cwlt_switch_${suffix}`;
+  const walletId = `privy_switch_${suffix}`;
+  const publicKey = "11111111111111111111111111111111";
+
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO provider_credentials (
+           id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, encrypted_secret_payload, status, created_by
+         ) VALUES (?, ?, ?, 'privy', ?, 'project', 'stored',
+                   'encrypted_db', 'ciphertext', 'active', ?)`
+      )
+      .bind(credentialId, TEST_ORG.id, projectId, `Privy ${suffix}`, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_connections (
+           id, organization_id, project_id, provider, scope,
+           provider_credential_id, provider_credential_scope_key, status, created_by
+         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+      )
+      .bind(connectionId, TEST_ORG.id, projectId, credentialId, projectId, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, status
+         ) VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(walletRecordId, connectionId, walletId, publicKey),
+    getDb(env)
+      .prepare(
+        `UPDATE custody_connections
+         SET default_custody_wallet_id = ?, status = 'active',
+             last_check_status = 'success', last_check_at = sdp_iso_now(),
+             provider_account_fingerprint = ?,
+             activated_at = sdp_iso_now()
+         WHERE id = ?`
+      )
+      .bind(walletRecordId, `sha256:${credentialId}`, connectionId),
+  ]);
+
+  return { connectionId, walletId, publicKey };
+}
+
 describe("Custody multi-provider routes", () => {
   beforeEach(async () => {
     originalParaApiKey = env.PARA_API_KEY;
+    originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
+    originalPrivyAppId = env.PRIVY_APP_ID;
+    originalPrivyAppSecret = env.PRIVY_APP_SECRET;
     env.PARA_API_KEY = "para_test_api_key";
     await seedTestDatabase(env);
     await seedAuthAndConfigs();
@@ -205,6 +258,9 @@ describe("Custody multi-provider routes", () => {
 
   afterEach(async () => {
     env.PARA_API_KEY = originalParaApiKey;
+    env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
+    env.PRIVY_APP_ID = originalPrivyAppId;
+    env.PRIVY_APP_SECRET = originalPrivyAppSecret;
     await clearKVStores(env);
   });
 
@@ -252,6 +308,262 @@ describe("Custody multi-provider routes", () => {
       .first<{ default_custody_config_id: string }>();
 
     expect(defaultPointer?.default_custody_config_id).toBe(PARA_CONFIG_ID);
+  });
+
+  it("switches to an exact Connection without clearing the legacy Config pointer", async () => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    const connection = await seedActivePrivyConnection("exact");
+
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ connectionId: connection.connectionId, provider: "privy" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({
+      data: {
+        connectionId: connection.connectionId,
+        walletId: connection.walletId,
+        publicKey: connection.publicKey,
+      },
+    });
+    const target = await getDb(env)
+      .prepare(
+        `SELECT default_custody_config_id, default_custody_connection_id
+         FROM custody_scope_defaults
+         WHERE organization_id = ? AND project_id = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .first<{
+        default_custody_config_id: string | null;
+        default_custody_connection_id: string | null;
+      }>();
+    expect(target).toEqual({
+      default_custody_config_id: PRIVY_CONFIG_ID,
+      default_custody_connection_id: connection.connectionId,
+    });
+
+    const mismatch = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ connectionId: connection.connectionId, provider: "turnkey" }),
+      },
+      env
+    );
+    expect(mismatch.status).toBe(400);
+    expect(await mismatch.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+  });
+
+  it("does not expose a Connection owned by another Project", async () => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    const otherProjectId = "prj_custody_multi_provider_other";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (
+           id, organization_id, name, slug, environment, status, created_by
+         ) VALUES (?, ?, 'Other project', 'other-project', 'sandbox', 'active', ?)`
+      )
+      .bind(otherProjectId, TEST_ORG.id, TEST_USER.id)
+      .run();
+    const connection = await seedActivePrivyConnection("foreign", otherProjectId);
+
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ connectionId: connection.connectionId }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
+  });
+
+  it("rejects an active Connection without a Provider Account fingerprint", async () => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    const connection = await seedActivePrivyConnection("missing_fingerprint");
+    await getDb(env)
+      .prepare("UPDATE custody_connections SET provider_account_fingerprint = NULL WHERE id = ?")
+      .bind(connection.connectionId)
+      .run();
+
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ connectionId: connection.connectionId }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: { code: "CONFLICT" } });
+  });
+
+  it.each([
+    [{ connectionId: "cconn_missing" }, 404, "NOT_FOUND"],
+    [{ connectionId: "cconn_switch_unusable" }, 409, "CONFLICT"],
+  ] as const)("rejects an unavailable exact Connection with %s", async (request, status, code) => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    if (request.connectionId === "cconn_switch_unusable") {
+      const credentialId = "pcred_switch_unusable";
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            `INSERT INTO provider_credentials (
+               id, organization_id, project_id, provider, label, scope, source,
+               storage_backend, encrypted_secret_payload, status, created_by
+             ) VALUES (?, ?, ?, 'privy', 'Privy unusable', 'project', 'stored',
+                       'encrypted_db', 'ciphertext', 'pending', ?)`
+          )
+          .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_connections (
+               id, organization_id, project_id, provider, scope,
+               provider_credential_id, provider_credential_scope_key, status, created_by
+             ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+          )
+          .bind(
+            request.connectionId,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            credentialId,
+            TEST_PROJECT.id,
+            TEST_USER.id
+          ),
+      ]);
+    }
+
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify(request),
+      },
+      env
+    );
+
+    expect(res.status).toBe(status);
+    expect(await res.json()).toMatchObject({ error: { code } });
+  });
+
+  it("rejects an exact Connection while Connection runtime is disabled", async () => {
+    env.PRIVY_BYOK_ENABLED = "false";
+    const connection = await seedActivePrivyConnection("disabled");
+
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ connectionId: connection.connectionId }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+  });
+
+  it.each([null, "", 42])("rejects a malformed Connection selector: %s", async (connectionId) => {
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ provider: "privy", connectionId }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+  });
+
+  it("keeps provider-only switching on the active Config when Connections are candidates", async () => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    env.PRIVY_APP_ID = "privy_test_app_id";
+    env.PRIVY_APP_SECRET = "privy_test_app_secret";
+    await seedActivePrivyConnection("candidate_a");
+    await seedActivePrivyConnection("candidate_b");
+    await getDb(env)
+      .prepare(
+        `UPDATE custody_scope_defaults
+         SET default_custody_config_id = ?
+         WHERE organization_id = ? AND project_id = ?`
+      )
+      .bind(PARA_CONFIG_ID, TEST_ORG.id, TEST_PROJECT.id)
+      .run();
+
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ provider: "privy" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({
+      data: {
+        configId: PRIVY_CONFIG_ID,
+        walletId: "privy_wallet_a",
+        publicKey: "privy_pubkey_a",
+      },
+    });
+    const target = await getDb(env)
+      .prepare(
+        `SELECT default_custody_config_id, default_custody_connection_id
+         FROM custody_scope_defaults
+         WHERE organization_id = ? AND project_id = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .first<{
+        default_custody_config_id: string | null;
+        default_custody_connection_id: string | null;
+      }>();
+    expect(target).toEqual({
+      default_custody_config_id: PRIVY_CONFIG_ID,
+      default_custody_connection_id: null,
+    });
   });
 
   it("lists all provider wallets by default and can opt into default-provider-only results", async () => {

@@ -125,6 +125,27 @@ describe("credentialAdminAuthMiddleware", () => {
     expect(await response.json()).toEqual({ authType: "clerk" });
   });
 
+  it("allows an organization admin dashboard session", async () => {
+    const sessionId = "ses_credential_admin_auth";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+         VALUES (?, ?, ?, 'session', ?)`
+      )
+      .bind(sessionId, ADMIN_USER_ID, ORG_ID, "2999-01-01T00:00:00.000Z")
+      .run();
+    const { app } = buildProbe();
+
+    const response = await app.request(
+      "/probe",
+      { headers: { Cookie: `sdp_session=${sessionId}` } },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ authType: "session" });
+  });
+
   it("denies a Clerk organization member before the handler", async () => {
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_member",

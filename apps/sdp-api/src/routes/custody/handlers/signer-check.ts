@@ -15,19 +15,13 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
+import { type ApiKeyContext, getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
+import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import {
-  approvedWalletOperationAttemptId,
-  approvedWalletOperationId,
-  beginApprovedWalletOperationEffect,
-  walletOperationExecutionRequest,
-} from "@/services/policy/approved-operation-replay";
-import {
-  enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
   walletOperationActorFromAuth,
 } from "@/services/policy/enforcement.service";
@@ -42,6 +36,14 @@ const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Ad
 const KORA_MEMO_ALLOWED_PROGRAM_HINT =
   "Add MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr to Kora validation.allowed_programs.";
 
+type SignerCheckBody = z.output<typeof signerCheckSchema>;
+
+interface SignerCheckPolicyResolved {
+  auth: ApiKeyContext;
+  resolvedWalletId: string;
+  memo: string;
+}
+
 function isKoraMemoProgramPolicyError(message: string): boolean {
   const normalized = message.toLowerCase();
   return (
@@ -50,7 +52,15 @@ function isKoraMemoProgramPolicyError(message: string): boolean {
   );
 }
 
-export const signerCheck = async (c: AppContext) => {
+/**
+ * Parse and resolve a signer check into its wallet-operation policy candidate.
+ *
+ * @param c - Request context.
+ * @returns The candidate, validated body, resolved auth and wallet, and raw payload.
+ */
+export async function extractSignerCheckPolicyCandidate(
+  c: AppContext
+): Promise<PolicyGateExtraction> {
   const auth = getAuth(c);
   if (auth.authType !== "api_key") {
     throw new AppError("UNAUTHORIZED", "API key authentication is required");
@@ -58,7 +68,6 @@ export const signerCheck = async (c: AppContext) => {
 
   const body = await c.req.json().catch(() => ({}));
   const parsed = signerCheckSchema.safeParse(body);
-
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,
@@ -75,34 +84,38 @@ export const signerCheck = async (c: AppContext) => {
   }
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, resolvedWalletId);
-  const policyScope = getRequestTenantScope(c);
-  const policyInput = {
-    organizationId: auth.organizationId,
-    projectId: auth.projectId,
-    custodyWalletId: policyWallet?.id ?? null,
-    walletId: resolvedWalletId,
-    apiKeyId: auth.apiKeyId,
-    actor: walletOperationActorFromAuth(auth),
-    operationFamily: "raw_sign" as const,
-    operationType: "custody_signer_check" as const,
-    context: {
-      memo,
+  return {
+    candidate: {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      custodyWalletId: policyWallet === null ? null : policyWallet.id,
+      walletId: resolvedWalletId,
+      apiKeyId: auth.apiKeyId,
+      actor: walletOperationActorFromAuth(auth),
+      source: "api",
+      operationFamily: "raw_sign",
+      operationType: "custody_signer_check",
+      asset: null,
+      amount: null,
+      destination: null,
+      context: {
+        memo,
+      },
+      providerExtensions: {},
     },
+    body: parsed.data,
+    resolved: { auth, resolvedWalletId, memo },
     rawPayload: {
-      requestedWalletId: parsed.data.walletId ?? null,
+      requestedWalletId: parsed.data.walletId === undefined ? null : parsed.data.walletId,
       memo,
-      executionRequest: walletOperationExecutionRequest(c, parsed.data),
     },
   };
-  const approvedOperationId = approvedWalletOperationId(c);
-  const attemptId = approvedWalletOperationAttemptId(c);
-  await enforceWalletOperationPolicy(
-    c.env,
-    policyScope,
-    policyInput,
-    approvedOperationId,
-    attemptId
-  );
+}
+
+export const signerCheck = async (c: AppContext) => {
+  const {
+    resolved: { auth, resolvedWalletId, memo },
+  } = getPolicyGateContext<SignerCheckBody, SignerCheckPolicyResolved>(c);
 
   try {
     const signer = await createOrgSigner(

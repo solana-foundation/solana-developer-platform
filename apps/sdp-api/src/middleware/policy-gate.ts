@@ -9,7 +9,10 @@ import {
   approvedWalletOperationId,
   walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
-import { dryRunPolicyCandidate } from "@/services/policy/candidate-evaluation.service";
+import {
+  dryRunPolicyCandidate,
+  UNGOVERNED_POLICY_DRY_RUN_RESULT,
+} from "@/services/policy/candidate-evaluation.service";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
 import { isDryRunRequest } from "./dry-run";
@@ -18,7 +21,7 @@ import { IDEMPOTENCY_KEY_HEADER } from "./idempotency-key";
 type GateContext = Context<{ Bindings: Env }>;
 
 export interface PolicyGateExtraction {
-  candidate: PolicyCandidate;
+  candidate: PolicyCandidate | null;
   body: Record<string, unknown>;
   resolved: unknown;
   rawPayload: Record<string, unknown>;
@@ -33,11 +36,15 @@ export interface PolicyGateConfig {
   ) => Promise<Response | null>;
 }
 
-export interface PolicyGateContext<TBody = unknown, TResolved = unknown> {
+export interface PolicyGateContext<
+  TBody = unknown,
+  TResolved = unknown,
+  TEnforcement extends WalletOperationPolicyEnforcement | null = WalletOperationPolicyEnforcement,
+> {
   body: TBody;
-  candidate: PolicyCandidate;
+  candidate: PolicyCandidate | null;
   resolved: TResolved;
-  enforcement: WalletOperationPolicyEnforcement;
+  enforcement: TEnforcement;
 }
 
 /**
@@ -69,6 +76,11 @@ export interface PolicyGateContext<TBody = unknown, TResolved = unknown> {
  * The gate stores the replay envelope on the operation uniformly, so routes
  * no longer hand-build enforcement inputs.
  *
+ * An extraction may return a null candidate when the operation resolves no
+ * custody wallet and is therefore ungoverned: dry-run answers allow with no
+ * criteria, enforcement is skipped, and the handler receives a null
+ * enforcement.
+ *
  * @param config - The route's extractor and optional idempotent-replay finder.
  * @returns Hono middleware enforcing policy ahead of the handler.
  */
@@ -79,7 +91,12 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
     const scope = getRequestTenantScope(c);
 
     if (isDryRunRequest(c)) {
-      return success(c, await dryRunPolicyCandidate(c.env, scope, candidate));
+      return success(
+        c,
+        candidate === null
+          ? UNGOVERNED_POLICY_DRY_RUN_RESULT
+          : await dryRunPolicyCandidate(c.env, scope, candidate)
+      );
     }
 
     const idempotencyKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
@@ -88,6 +105,11 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
       if (replayed !== null) {
         return replayed;
       }
+    }
+
+    if (candidate === null) {
+      c.set("policyGate", { body, candidate: null, resolved, enforcement: null });
+      return next();
     }
 
     const enforcement = await enforceWalletOperationPolicy(
@@ -116,12 +138,14 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
  * @param c - Request context.
  * @returns The validated body, resolved resources, candidate, and enforcement.
  */
-export function getPolicyGateContext<TBody, TResolved>(
-  c: GateContext
-): PolicyGateContext<TBody, TResolved> {
+export function getPolicyGateContext<
+  TBody,
+  TResolved,
+  TEnforcement extends WalletOperationPolicyEnforcement | null = WalletOperationPolicyEnforcement,
+>(c: GateContext): PolicyGateContext<TBody, TResolved, TEnforcement> {
   const context = c.get("policyGate");
   if (context === undefined) {
     throw internalError("Policy gate context is unavailable");
   }
-  return context as PolicyGateContext<TBody, TResolved>;
+  return context as unknown as PolicyGateContext<TBody, TResolved, TEnforcement>;
 }

@@ -2,14 +2,21 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest } from "@/lib/errors";
+import { badRequest, badRequestParams } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
-import { checkProviderCredential } from "@/services/provider-credential-check.service";
-import { submitProviderCredential } from "@/services/provider-credential-submission.service";
+import {
+  cancelProviderCredentialInstallation,
+  completeProviderCredentialInstallation,
+  getProviderCredentialInstallation,
+} from "@/services/provider-credential-installation.service";
+import {
+  replaceProviderCredential,
+  submitProviderCredential,
+} from "@/services/provider-credential-submission.service";
 import {
   getPendingWalletLabel,
   ProviderCredentialStore,
@@ -23,13 +30,15 @@ const privyCredentialSubmissionSchema = z
     fields: z
       .object({
         credentialLabel: z.string().trim().min(1),
-        scope: z.enum(["organization", "project"]),
+        scope: z.literal("project"),
         appId: z.string().trim().min(1),
         appSecret: z.string().min(1),
       })
       .strict(),
   })
   .strict();
+
+const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
 
 const internalCustody = new Hono<{ Bindings: Env }>();
 
@@ -115,8 +124,53 @@ internalCustody.post("/provider-credentials", async (c) => {
   return created(c, result);
 });
 
-internalCustody.post("/provider-credentials/:providerCredentialId/check", async (c) => {
-  return success(c, await checkProviderCredential(c, c.req.param("providerCredentialId")));
+internalCustody.post("/connections/:connectionId/provider-credentials", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = privyCredentialSubmissionSchema.safeParse(body);
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  if (!idempotencyKey) {
+    throw badRequest("Idempotency-Key is required");
+  }
+
+  return created(
+    c,
+    await replaceProviderCredential(c, params.data.connectionId, parsed.data, idempotencyKey)
+  );
+});
+
+internalCustody.get("/connections/:connectionId", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  return success(c, await getProviderCredentialInstallation(c, params.data.connectionId));
+});
+
+internalCustody.post("/connections/:connectionId/complete", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  return success(c, await completeProviderCredentialInstallation(c, params.data.connectionId));
+});
+
+internalCustody.post("/connections/:connectionId/cancel", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  return success(c, await cancelProviderCredentialInstallation(c, params.data.connectionId));
 });
 
 export default internalCustody;
