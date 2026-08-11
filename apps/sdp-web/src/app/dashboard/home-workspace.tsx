@@ -667,7 +667,7 @@ export function HomeWorkspace({
                               {timeTooltip ? (
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <span className="first-letter:capitalize">{timeLabel}</span>
+                                    <span className="capitalize">{timeLabel}</span>
                                   </TooltipTrigger>
                                   <TooltipContent side="top" align="start" className="text-xs">
                                     {timeTooltip}
