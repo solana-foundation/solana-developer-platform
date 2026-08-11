@@ -2,10 +2,10 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { WalletIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { optionalDetail } from "../wizard-summary";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
@@ -47,7 +47,7 @@ export function useOnchainReceiveWizard({
   counterpartyId,
   onExit,
 }: UseOnchainReceiveWizardProps) {
-  const router = useDashboardRouter();
+  const router = useRouter();
   const t = useTranslations();
   const steps = getOnchainReceiveSteps(t);
   const [stepIndex, setStepIndex] = useState(0);

@@ -2,6 +2,7 @@
 
 import type { CustodyProvider, OrganizationRpcProvider } from "@sdp/types";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState, useTransition } from "react";
 import type { OnboardingProvisionedWallet } from "@/app/dashboard/custody/actions";
 import {
@@ -13,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { ProviderSelectionCard } from "@/components/ui/provider-selection-card";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { completeOrganizationOnboardingAction, saveOnboardingRpcAction } from "./actions";
 import { OnboardingCompletePanel } from "./onboarding-complete-panel";
 import { RpcProviderMark } from "./rpc-provider-mark";
@@ -65,7 +65,7 @@ export function OrganizationOnboardingFlow({
   useDefaultRpc?: boolean;
 }) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [currentStep, setCurrentStep] = useState(initialStep);
   const [rpcProvider, setRpcProvider] = useState<OrganizationRpcProvider | null>(

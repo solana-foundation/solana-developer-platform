@@ -15,8 +15,8 @@ vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("@/lib/use-dashboard-router", () => ({
-  useDashboardRouter: () => ({ push: mocks.push }),
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mocks.push }),
 }));
 
 vi.mock("../counterparty-create-context", () => ({

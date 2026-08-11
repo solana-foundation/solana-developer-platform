@@ -16,8 +16,8 @@ import {
   UserCheck,
   Wallet,
 } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -689,10 +689,10 @@ function PermissionsAction({
 
   if (href) {
     return (
-      <DashboardNavigationLink href={href} className={styles}>
+      <Link href={href} className={styles}>
         {label}
         <ArrowUpRight className="h-3 w-3" />
-      </DashboardNavigationLink>
+      </Link>
     );
   }
   if (!onClick) {

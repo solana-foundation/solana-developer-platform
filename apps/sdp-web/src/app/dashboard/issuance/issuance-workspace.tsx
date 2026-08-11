@@ -15,8 +15,9 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,6 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { cn } from "@/lib/utils";
 import { AuthoritiesGlyph } from "./asset-overview-hero";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
@@ -457,7 +457,7 @@ export function IssuanceWorkspace({
     selectedPlaygroundApiKeyId,
     setPlaygroundApiKeys,
   } = useDashboardWorkspace();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [isCreateTokenModalOpen, setIsCreateTokenModalOpen] = useState(false);
   const isPlaygroundTab = issuanceTab === "playground";
 

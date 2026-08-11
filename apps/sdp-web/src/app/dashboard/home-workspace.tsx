@@ -2,10 +2,10 @@
 
 import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
 import { ExternalLink } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -614,10 +614,10 @@ export function HomeWorkspace({
                   <Table className="min-w-0 [&_table]:table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[7rem] pl-6">
+                        <TableHead className="w-[8rem] pl-6">
                           {t("Shared.homeWorkspace.time")}
                         </TableHead>
-                        <TableHead className="w-[calc(100%-7rem)] md:hidden">
+                        <TableHead className="w-[calc(100%-8rem)] md:hidden">
                           {t("Shared.homeWorkspace.activity")}
                         </TableHead>
                         <TableHead className="hidden w-[9.5rem] md:table-cell">
@@ -637,6 +637,13 @@ export function HomeWorkspace({
                     <TableBody>
                       {activityRows.map((row) => {
                         const timeLabel = formatRelativeTime(row.createdAt, locale);
+                        const createdAtDate = new Date(row.createdAt);
+                        const timeTooltip = Number.isNaN(createdAtDate.getTime())
+                          ? null
+                          : new Intl.DateTimeFormat(locale, {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            }).format(createdAtDate);
                         // `row.token` is already resolved, but only against issued
                         // tokens — anything else arrives as a shortened mint. Re-resolve
                         // from the mint using the balance symbols before falling back.
@@ -656,7 +663,20 @@ export function HomeWorkspace({
 
                         return (
                           <TableRow key={row.id}>
-                            <TableCell className="pl-6 text-secondary">{timeLabel}</TableCell>
+                            <TableCell className="pl-6 text-secondary">
+                              {timeTooltip ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="first-letter:capitalize">{timeLabel}</span>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" align="start" className="text-xs">
+                                    {timeTooltip}
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : (
+                                timeLabel
+                              )}
+                            </TableCell>
                             <TableCell className="min-w-0 md:hidden">
                               <div className="min-w-0">
                                 <div className="truncate font-medium">{row.type}</div>

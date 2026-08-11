@@ -8,7 +8,7 @@ import {
   type LucideIcon,
   WalletIcon,
 } from "lucide-react";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
+import Link from "next/link";
 import { useTranslations } from "@/i18n/provider";
 import {
   DASHBOARD_SIDE_NAV_HREFS,
@@ -30,11 +30,8 @@ const itemBase =
  * with everything else behind "More".
  *
  * Deliberately **additive**: the top bar's navigation button and the slide-over it
- * opens are untouched. The navigation-loading contract drives its pending state off
- * links rendered by `DashboardNavigationLink`, and its mobile case opens that
- * slide-over by accessible name — so this bar uses the same link component (to keep
- * pre-commit feedback) and gives "More" its own name (so there is only ever one
- * control named for opening navigation).
+ * opens are untouched, and "More" gets its own accessible name so there is only
+ * ever one control named for opening navigation.
  *
  * The caller unmounts this while the slide-over is open rather than hiding it with
  * CSS, so a covered duplicate of each destination never sits in the accessibility
@@ -86,7 +83,7 @@ export function DashboardBottomNav({
           const Icon = item.icon;
           return (
             <li key={item.href} className="flex min-w-0 flex-1">
-              <DashboardNavigationLink
+              <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
@@ -96,7 +93,7 @@ export function DashboardBottomNav({
               >
                 <Icon className="size-5 shrink-0" aria-hidden="true" />
                 <span className="w-full truncate text-center">{item.label}</span>
-              </DashboardNavigationLink>
+              </Link>
             </li>
           );
         })}
