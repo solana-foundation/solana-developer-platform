@@ -21,10 +21,7 @@ import {
 } from "@sdp/types";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
-import {
-  isCustodyConnectionRuntimeEnabled,
-  resolveNewCustodySetupMethod,
-} from "@/lib/feature-flags";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 
@@ -522,32 +519,6 @@ export async function getProviderAvailability(
       earn: buildAvailabilityEntries(entitled.earn, configured.earn),
     },
   };
-}
-
-export async function isStoredCustodySetupEnabled(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  provider: CustodyProvider
-): Promise<boolean> {
-  if (resolveNewCustodySetupMethod(env, provider) !== "stored_credentials") {
-    return false;
-  }
-
-  return isPersistedCustodyCompletionEnabled(env, db, organizationId, provider, "stored");
-}
-
-export async function isDeploymentCredentialCustodySetupEnabled(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  provider: CustodyProvider
-): Promise<boolean> {
-  if (resolveNewCustodySetupMethod(env, provider) !== "deployment_credentials") {
-    return false;
-  }
-
-  return isPersistedCustodyCompletionEnabled(env, db, organizationId, provider, "runtime");
 }
 
 export async function isPersistedCustodyCompletionEnabled(

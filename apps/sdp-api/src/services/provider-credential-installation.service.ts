@@ -89,7 +89,7 @@ interface InstallationContext {
   audit: AuditService;
   organizationId: string;
   projectId: string;
-  userId?: string;
+  userId: string;
 }
 
 interface LoadedInstallation {
@@ -119,13 +119,7 @@ export async function completeProviderCredentialInstallation(
   c: Context<{ Bindings: Env }>,
   connectionId: string
 ): Promise<ProviderCredentialCompletionResult> {
-  return completeInstallation(createInstallationContext(c), connectionId);
-}
-
-async function completeInstallation(
-  context: InstallationContext,
-  connectionId: string
-): Promise<ProviderCredentialCompletionResult> {
+  const context = createInstallationContext(c);
   const loaded = await loadInstallation(context, connectionId);
   if (loaded.decisions.complete.kind === "replay") {
     return completionResult(loaded);
@@ -356,7 +350,7 @@ function createInstallationContext(c: Context<{ Bindings: Env }>): InstallationC
     audit: new AuditService(db),
     organizationId: auth.organizationId,
     projectId,
-    ...(auth.userId ? { userId: auth.userId } : {}),
+    userId: auth.userId,
   };
 }
 

@@ -517,7 +517,7 @@ export class ProviderCredentialStore {
       throw new Error("Installation changed during success persistence");
     }
 
-    const credential = await this.db.queryOne<ProviderCredentialRow>(
+    return this.db.queryOne<ProviderCredentialRow>(
       `UPDATE provider_credentials
        SET status = 'active',
            last_validated_at = sdp_iso_now(),
@@ -530,7 +530,6 @@ export class ProviderCredentialStore {
                  idempotency_fingerprint, created_at`,
       [params.providerCredentialId]
     );
-    return credential;
   }
 
   async recordInstallationFailure(params: {
@@ -691,7 +690,7 @@ export class ProviderCredentialStore {
     rotatedFromId: string | null;
     idempotencyKey: string;
     idempotencyFingerprint: string;
-    createdBy: string | null;
+    createdBy: string;
   }): Promise<ProviderCredentialRow> {
     const scopeKey = params.scope === "organization" ? "__organization__" : params.projectId;
     const row = await this.db.queryOne<ProviderCredentialRow>(
@@ -743,7 +742,7 @@ export class ProviderCredentialStore {
     providerCredentialScopeKey: string;
     requestDelayMs?: number;
     pendingWalletLabel?: string;
-    createdBy: string | null;
+    createdBy: string;
   }): Promise<CustodyConnectionRow> {
     const row = await this.db.queryOne<CustodyConnectionRow>(
       `INSERT INTO custody_connections (

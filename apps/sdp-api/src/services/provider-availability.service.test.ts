@@ -5,9 +5,7 @@ import {
   assertEarnProviderConfigured,
   assertProviderAvailable,
   getProviderAvailability,
-  isDeploymentCredentialCustodySetupEnabled,
   isPersistedCustodyCompletionEnabled,
-  isStoredCustodySetupEnabled,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { env } from "@/test/helpers/env";
@@ -403,28 +401,6 @@ describe("provider-availability.service", () => {
     expect(availability.providers.compliance.range.entitled).toBe(true);
     expect(availability.providers.ramps.lightspark.entitled).toBe(true);
     expect(availability.providers.ramps.bvnk.entitled).toBe(true);
-  });
-
-  it("selects exactly one self-hosted Privy Connection setup source", async () => {
-    env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    env.PRIVY_BYOK_ENABLED = "true";
-    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "false";
-
-    await expect(
-      isDeploymentCredentialCustodySetupEnabled(env, getDb(env), TEST_ORG_ID, "privy")
-    ).resolves.toBe(true);
-    await expect(isStoredCustodySetupEnabled(env, getDb(env), TEST_ORG_ID, "privy")).resolves.toBe(
-      false
-    );
-
-    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "true";
-
-    await expect(
-      isDeploymentCredentialCustodySetupEnabled(env, getDb(env), TEST_ORG_ID, "privy")
-    ).resolves.toBe(false);
-    await expect(isStoredCustodySetupEnabled(env, getDb(env), TEST_ORG_ID, "privy")).resolves.toBe(
-      true
-    );
   });
 
   it("keeps persisted Privy sources eligible when the fresh setup preference changes", async () => {

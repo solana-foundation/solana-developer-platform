@@ -23,11 +23,7 @@ import {
   CredentialSecretStoreError,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
-import {
-  isDeploymentCredentialCustodySetupEnabled,
-  isPersistedCustodyCompletionEnabled,
-  isStoredCustodySetupEnabled,
-} from "@/services/provider-availability.service";
+import { isPersistedCustodyCompletionEnabled } from "@/services/provider-availability.service";
 import {
   decideInstallation,
   type InstallationConflictReason,
@@ -293,49 +289,36 @@ async function resolveSubmissionSource(
         ? "stored"
         : null;
 
-  if (!source) {
-    const lateReplay = await resolveLateReplayBeforeFingerprint(context);
-    if (lateReplay) {
-      return { kind: "replay", result: lateReplay };
+  if (source) {
+    if (source === "stored" && !context.input.fields) {
+      throw badRequest("Credential fields are required for stored setup");
     }
-    throw forbidden(PROVISIONING_DISABLED_MESSAGE);
-  }
-
-  if (source === "stored" && !context.input.fields) {
-    throw badRequest("Credential fields are required for stored setup");
-  }
-  if (source === "runtime" && context.input.fields) {
-    throw badRequest("Credential fields are not accepted for runtime setup");
-  }
-
-  const enabled = context.replacementConnectionId
-    ? await isPersistedCustodyCompletionEnabled(
+    if (source === "runtime" && context.input.fields) {
+      throw badRequest("Credential fields are not accepted for runtime setup");
+    }
+    if (
+      await isPersistedCustodyCompletionEnabled(
         context.c.env,
         context.db,
         context.organizationId,
         "privy",
-        "stored"
+        source
       )
-    : source === "stored"
-      ? await isStoredCustodySetupEnabled(
-          context.c.env,
-          context.db,
-          context.organizationId,
-          "privy"
-        )
-      : await isDeploymentCredentialCustodySetupEnabled(
-          context.c.env,
-          context.db,
-          context.organizationId,
-          "privy"
-        );
-  if (enabled) {
-    return { kind: "source", source };
+    ) {
+      return { kind: "source", source };
+    }
   }
 
-  const lateReplay = await resolveLateReplayBeforeFingerprint(context);
-  if (lateReplay) {
-    return { kind: "replay", result: lateReplay };
+  const replay = await loadReplay(context);
+  if (replay) {
+    return {
+      kind: "replay",
+      result: await resolveReplayWithAudit(
+        context,
+        replay,
+        await computeSubmissionFingerprint(context)
+      ),
+    };
   }
   throw forbidden(PROVISIONING_DISABLED_MESSAGE);
 }
@@ -898,16 +881,6 @@ async function resolveLateReplay(params: {
     return null;
   }
   return resolveReplayWithAudit(params, replay, params.fingerprint);
-}
-
-async function resolveLateReplayBeforeFingerprint(
-  context: SubmissionContext
-): Promise<ProviderCredentialSubmissionResult | null> {
-  const replay = await loadReplay(context);
-  if (!replay) {
-    return null;
-  }
-  return resolveReplayWithAudit(context, replay, await computeSubmissionFingerprint(context));
 }
 
 async function classifySetup(
