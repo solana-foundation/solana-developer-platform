@@ -184,22 +184,22 @@ describe("KoraAdapter user_id forwarding", () => {
     });
   });
 
-  it.each([
-    undefined,
-    null,
-  ])("treats a nullish fee-payer policy conservatively (%s)", async (feePayerPolicy) => {
-    getConfig.mockResolvedValueOnce({
-      validation_config: {
-        max_allowed_lamports: "2000000",
-        fee_payer_policy: feePayerPolicy,
-      },
-    });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
-    await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
-      maxAllowedLamports: 2_000_000n,
-      feePayerMayTransferLamports: true,
-    });
-  });
+  it.each([undefined, null])(
+    "treats a nullish fee-payer policy conservatively (%s)",
+    async (feePayerPolicy) => {
+      getConfig.mockResolvedValueOnce({
+        validation_config: {
+          max_allowed_lamports: "2000000",
+          fee_payer_policy: feePayerPolicy,
+        },
+      });
+      const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+      await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
+        maxAllowedLamports: 2_000_000n,
+        feePayerMayTransferLamports: true,
+      });
+    }
+  );
 
   it("forwards user_id on signAsFeePayer when configured", async () => {
     const adapter = new KoraAdapter({
