@@ -6,10 +6,8 @@ vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("@/components/dashboard-navigation-link", () => ({
-  DashboardNavigationLink: ({ children, ...props }: ComponentProps<"a">) => (
-    <a {...props}>{children}</a>
-  ),
+vi.mock("next/link", () => ({
+  default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,
 }));
 
 vi.mock("@/components/workspace-switcher", () => ({

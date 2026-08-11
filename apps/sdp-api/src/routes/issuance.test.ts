@@ -8,6 +8,7 @@ import * as FeePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
 import type { Address } from "@sdp/solana/address";
+import { address, createNoopSigner } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -238,6 +239,10 @@ describe("Issuance Routes", () => {
 
     // Clear token-related tables
     await db
+      .prepare("DELETE FROM wallet_operations")
+      .run()
+      .catch(() => {});
+    await db
       .prepare("DELETE FROM frozen_accounts")
       .run()
       .catch(() => {});
@@ -451,6 +456,228 @@ describe("Issuance Routes", () => {
         total_supply_cached: "900",
         execution_effect_started_at: null,
       });
+    });
+  });
+
+  describe("wallet-operation policy gate", () => {
+    const policyMintAuthority = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
+
+    it("dry-runs a governed mint with zero writes", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_mint_dry_run",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_mint_dry_run",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/mint`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Dry-Run": "true",
+            },
+            body: JSON.stringify({
+              mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: { decision: "allow", criteria: [] },
+        });
+        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        const operationCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        expect(operationCount).toEqual({ count: 0 });
+      } finally {
+        createOrgSignerSpy.mockRestore();
+      }
+    });
+
+    it("dry-runs an authority update with zero writes", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_authority_dry_run",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_authority_dry_run",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/authority`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Dry-Run": "true",
+            },
+            body: JSON.stringify({
+              authority: {
+                role: "mint",
+                newAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: { decision: "allow", criteria: [] },
+        });
+        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        const operationCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        expect(operationCount).toEqual({ count: 0 });
+      } finally {
+        createOrgSignerSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied mint before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_mint_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_mint_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            destinationAllowlist: [],
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-mint", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/mint`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+      } finally {
+        createOrgSignerSpy.mockRestore();
+      }
+    });
+
+    it("allows an ungoverned mint dry-run and executes without policy enforcement", async () => {
+      const token = await seedIssuedToken({
+        id: "tok_issuance_ungoverned_mint",
+        signingWalletId: null,
+      });
+      const createOrgSignerSpy = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValue(createNoopSigner(address(policyMintAuthority)));
+      const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo").mockResolvedValue({
+        signature: "sig_ungoverned_mint",
+        slot: 321n,
+        tokenAccount: address(TEST_SOLANA_ADDRESSES.wallet2),
+      });
+      const requestBody = JSON.stringify({
+        mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+      });
+
+      try {
+        const dryRun = await app.request(
+          `/v1/issuance/tokens/${token.id}/mint`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Dry-Run": "true",
+            },
+            body: requestBody,
+          },
+          env
+        );
+        expect(dryRun.status).toBe(200);
+        expect(await dryRun.json()).toMatchObject({
+          data: { decision: "allow", criteria: [] },
+        });
+        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+
+        const executed = await app.request(
+          `/v1/issuance/tokens/${token.id}/mint`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: requestBody,
+          },
+          env
+        );
+        expect(executed.status).toBe(200);
+        expect(createOrgSignerSpy).toHaveBeenCalledTimes(1);
+        expect(mintToSpy).toHaveBeenCalledTimes(1);
+
+        const operationCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 0 });
+      } finally {
+        createOrgSignerSpy.mockRestore();
+        mintToSpy.mockRestore();
+      }
     });
   });
 

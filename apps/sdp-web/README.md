@@ -24,7 +24,7 @@ SDP Web is a Next.js application with two main surfaces:
 
 ### Prerequisites
 
-- **Node.js 22+**
+- **Node.js 24+**
 - **pnpm 10.16+**
 - **Clerk account** (free tier) — required for authentication
 - **SDP API running** — the dashboard proxies to `sdp-api` via BFF routes

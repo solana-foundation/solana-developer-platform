@@ -2,11 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
-  resolveDashboardNavigationIntent,
-  resolveDashboardNavigationTarget,
 } from "./dashboard-navigation-loading";
-
-const CURRENT_DASHBOARD_URL = "http://localhost:3100/dashboard";
 
 describe("dashboard loading route", () => {
   it.each([
@@ -60,52 +56,6 @@ describe("dashboard loading route", () => {
     "/sign-in",
   ])("does not invent a fallback for unsupported route %s", (pathname) => {
     expect(resolveDashboardLoadingRoute(pathname)).toBeNull();
-  });
-});
-
-describe("dashboard navigation intent", () => {
-  it("starts immediate loading feedback for a different dashboard route", () => {
-    expect(
-      resolveDashboardNavigationIntent({
-        currentHref: CURRENT_DASHBOARD_URL,
-        targetHref: "/dashboard/wallets",
-      })
-    ).toBe("/dashboard/wallets");
-  });
-
-  it("keeps the target query with cross-route loading intent", () => {
-    expect(
-      resolveDashboardNavigationTarget({
-        currentHref: `${CURRENT_DASHBOARD_URL}/payments?tab=playground`,
-        targetHref: "/dashboard/payments/requests",
-      })
-    ).toEqual({ pathname: "/dashboard/payments/requests", search: "" });
-    expect(
-      resolveDashboardNavigationTarget({
-        currentHref: CURRENT_DASHBOARD_URL,
-        targetHref: "/dashboard/payments/requests?tab=playground",
-      })
-    ).toEqual({
-      pathname: "/dashboard/payments/requests",
-      search: "?tab=playground",
-    });
-  });
-
-  it.each([
-    ["same route query", { targetHref: "/dashboard?tab=playground" }],
-    ["external route", { targetHref: "https://platform.solana.com/docs" }],
-    ["new tab", { targetHref: "/dashboard/wallets", target: "_blank" }],
-    ["download", { targetHref: "/dashboard/wallets", download: true }],
-    ["modified click", { targetHref: "/dashboard/wallets", metaKey: true }],
-    ["unsupported dashboard route", { targetHref: "/dashboard/unknown" }],
-    ["non-dashboard route", { targetHref: "/sign-in" }],
-  ])("ignores %s navigation", (_label, input) => {
-    expect(
-      resolveDashboardNavigationIntent({
-        currentHref: CURRENT_DASHBOARD_URL,
-        ...input,
-      })
-    ).toBeNull();
   });
 });
 

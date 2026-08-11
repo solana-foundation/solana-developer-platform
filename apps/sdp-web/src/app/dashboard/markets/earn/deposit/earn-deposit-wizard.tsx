@@ -2,12 +2,12 @@
 
 import type { EarnPortfolioAllocationInput, EarnStrategy } from "@sdp/types";
 import { ArrowLeftIcon, ArrowRightIcon, Loader2Icon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { formatApy } from "../earn-format";
 import {
   EARN_PORTFOLIO_PROVIDER,
@@ -176,7 +176,7 @@ export function EarnDepositWizard({
   initialStrategyId,
 }: EarnDepositWizardProps) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const liquidityLabel = useLiquidityLabel();
 
   const {
