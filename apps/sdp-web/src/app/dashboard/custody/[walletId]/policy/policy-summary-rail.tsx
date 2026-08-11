@@ -79,18 +79,13 @@ export function PolicySummaryRail({
 
   if (stepIndex >= 1 && state.categories.includes("limits")) {
     const maxTransferAmount = state.maxTransferAmount.trim();
-    const maxDailyAmount = state.maxDailyAmount.trim();
-    if (!maxTransferAmount && !maxDailyAmount) {
+    if (!maxTransferAmount) {
       rows.push({
         label: t("DashboardCustody.policyReviewTransferLimits"),
         value: t("DashboardCustody.policyNotConfigured"),
       });
-    }
-    if (maxTransferAmount) {
+    } else {
       rows.push({ label: t("DashboardCustody.policyPerTransaction"), value: maxTransferAmount });
-    }
-    if (maxDailyAmount) {
-      rows.push({ label: t("DashboardCustody.policyDailyTotal"), value: maxDailyAmount });
     }
   }
   if (stepIndex >= 1 && state.categories.includes("assets")) {

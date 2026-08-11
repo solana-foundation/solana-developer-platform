@@ -580,7 +580,6 @@ describe("Issuance Routes", () => {
             Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
           },
           body: JSON.stringify({
-            destinationAllowlist: [],
             defaultAction: "allow",
             rules: [{ id: "deny-issuance-mint", kind: "always", action: "deny" }],
           }),

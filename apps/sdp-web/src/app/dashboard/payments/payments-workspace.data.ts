@@ -255,12 +255,12 @@ export async function fetchWalletPolicy(walletId: string, t: Translate): Promise
     );
   }
 
-  return (
-    body.data?.policy ?? {
-      walletId,
-      destinationAllowlist: [],
-    }
-  );
+  const policy = body.data?.policy;
+  if (!policy) {
+    throw new Error(t("DashboardPayments.workspace.walletPolicyMissing", { walletId }));
+  }
+
+  return policy;
 }
 
 interface TransferListEnvelope {
@@ -507,7 +507,7 @@ export async function fetchWalletBalances(
 
 export async function updateWalletPolicy(
   walletId: string,
-  policy: WalletPolicy,
+  policy: Pick<WalletPolicy, "defaultAction" | "rules">,
   t: Translate,
   commitMessage?: string
 ): Promise<WalletPolicy> {
@@ -521,12 +521,9 @@ export async function updateWalletPolicy(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        destinationAllowlist: policy.destinationAllowlist,
+        defaultAction: policy.defaultAction,
+        rules: policy.rules,
         ...(trimmedCommitMessage ? { commitMessage: trimmedCommitMessage } : {}),
-        ...(policy.maxTransferAmount ? { maxTransferAmount: policy.maxTransferAmount } : {}),
-        ...(policy.maxDailyAmount ? { maxDailyAmount: policy.maxDailyAmount } : {}),
-        ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
-        ...(policy.rules ? { rules: policy.rules } : {}),
       }),
     }
   );

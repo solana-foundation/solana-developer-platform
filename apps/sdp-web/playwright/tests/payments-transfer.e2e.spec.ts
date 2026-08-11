@@ -60,7 +60,16 @@ test.describe
       });
 
       await api.put(`/v1/payments/wallets/${sourceWalletId}/policies`, {
-        destinationAllowlist: [destinationAddress],
+        defaultAction: "allow",
+        rules: [
+          {
+            id: "allowlist-destinations",
+            kind: "destination",
+            allowlist: [destinationAddress],
+            action: "allow",
+            name: "Allowed destinations",
+          },
+        ],
       });
       await session.page.close();
     });

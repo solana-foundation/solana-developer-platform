@@ -28,6 +28,8 @@ export interface CreateWalletOperationInput {
   asset?: string | null;
   amount?: string | null;
   destination?: string | null;
+  /** Per-leg evaluation views of a multi-leg operation (batch recipients); empty otherwise. */
+  legs: PolicyCandidate[];
   context?: WalletOperationContext;
   providerExtensions?: WalletOperationProviderExtensions;
   rawPayload?: Record<string, unknown>;
