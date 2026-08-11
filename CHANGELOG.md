@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.58.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.57.0...v0.58.0) (2026-08-11)
+
+### Features
+
+* **sdp-web:** general improvements on ux ([#1221](https://github.com/solana-foundation/solana-developer-platform/pull/1221)) ([9aa7e46](https://github.com/solana-foundation/solana-developer-platform/commit/9aa7e46d73d7cbd0128f913cfc050d3e7200686a))
+* **sdp-api:** run the gated Earn catalogue sync in the managed Cloud Run job (PRO-1655) ([#1211](https://github.com/solana-foundation/solana-developer-platform/pull/1211)) ([10e80a7](https://github.com/solana-foundation/solana-developer-platform/commit/10e80a7c2b23e189b59b16e6ad8ec87f06652428))
+* **sdp-api:** gate ramps, transfer batches, issuance, and signer-check through policyGate (PRO-1657) ([#1209](https://github.com/solana-foundation/solana-developer-platform/pull/1209)) ([a7c9f0d](https://github.com/solana-foundation/solana-developer-platform/commit/a7c9f0d89a418de551120f7597e5848eecdde447))
+* **sdp-api:** resolve session environment from the selected project (PRO-1641) ([#1204](https://github.com/solana-foundation/solana-developer-platform/pull/1204)) ([83001e8](https://github.com/solana-foundation/solana-developer-platform/commit/83001e88dc8548aec8f1aa6c4dc705ff9447bb40))
+* support multiple Privy connections ([#1148](https://github.com/solana-foundation/solana-developer-platform/pull/1148)) ([debe33a](https://github.com/solana-foundation/solana-developer-platform/commit/debe33af2d5eb912689d2c9606af000d1593ee8e))
+
+### Bug Fixes
+
+* **api:** allow tenant callers to mutate counterparty provider data ([#1235](https://github.com/solana-foundation/solana-developer-platform/pull/1235)) ([8748ed7](https://github.com/solana-foundation/solana-developer-platform/commit/8748ed712ba758f5c0a402910f926900cb526e2b))
+
+### Maintenance
+
+* **deps:** bump the actions group across 1 directory with 3 updates ([#1205](https://github.com/solana-foundation/solana-developer-platform/pull/1205)) ([83883d9](https://github.com/solana-foundation/solana-developer-platform/commit/83883d9bbb86c6be40e09a77282f4f124f6eb6ca))
+* **deps:** bump pino from 9.14.0 to 10.3.1 ([#1192](https://github.com/solana-foundation/solana-developer-platform/pull/1192)) ([913097d](https://github.com/solana-foundation/solana-developer-platform/commit/913097dcf1e636125fc4e13a86beb6eb33a65258))
+* pin direct dependency versions ([#1225](https://github.com/solana-foundation/solana-developer-platform/pull/1225)) ([6309ad6](https://github.com/solana-foundation/solana-developer-platform/commit/6309ad67c7ca550a343f190ff0e8e2cdaa152c52))
+* pin nanoid version ([#1223](https://github.com/solana-foundation/solana-developer-platform/pull/1223)) ([39b3e28](https://github.com/solana-foundation/solana-developer-platform/commit/39b3e289aa7dc8d523184f9f2e285e414e89d2e5))
+* **deps:** bump nanoid from 5.1.11 to 6.0.0 ([#1191](https://github.com/solana-foundation/solana-developer-platform/pull/1191)) ([49dd02d](https://github.com/solana-foundation/solana-developer-platform/commit/49dd02de431d5116773d56760ace85289b19a097))
+* **deps:** bump the solana group with 15 updates ([#1187](https://github.com/solana-foundation/solana-developer-platform/pull/1187)) ([40d651f](https://github.com/solana-foundation/solana-developer-platform/commit/40d651fbab72c3863d15d7755ca6227891d965a5))
+* **deps-dev:** bump @types/node from 25.9.2 to 26.1.2 ([#1189](https://github.com/solana-foundation/solana-developer-platform/pull/1189)) ([0982541](https://github.com/solana-foundation/solana-developer-platform/commit/0982541569bf72308edb7fc33d1aa5afe231a748))
+* **deps:** bump ioredis from 5.11.1 to 6.0.0 ([#1190](https://github.com/solana-foundation/solana-developer-platform/pull/1190)) ([6d0b8e1](https://github.com/solana-foundation/solana-developer-platform/commit/6d0b8e14843181c1d354d0fbc856b59930d09ddf))
+* remove AlphaLedger tokenization engine code and feature flag ([#1203](https://github.com/solana-foundation/solana-developer-platform/pull/1203)) ([3eba05e](https://github.com/solana-foundation/solana-developer-platform/commit/3eba05e571c915ef4f80f7f478cc6b17e6eb068e))
+
 ## [0.57.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.56.0...v0.57.0) (2026-08-10)
 
 ### Features
