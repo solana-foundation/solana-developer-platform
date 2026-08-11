@@ -1,3 +1,4 @@
+import { createECDH } from "node:crypto";
 import { KeychainTurnkeyAdapter } from "@sdp/custody/keychain";
 import type { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
@@ -7,9 +8,11 @@ const DEFAULT_WALLET_PUBLIC_KEY = "1".repeat(32);
 
 describe("turnkey adapter", () => {
   it("signs transaction message bytes via signMessages", async () => {
+    const apiKey = createECDH("prime256v1");
+    apiKey.generateKeys();
     const adapter = new KeychainTurnkeyAdapter({
-      apiPublicKey: "public-key",
-      apiPrivateKey: "private-key",
+      apiPublicKey: apiKey.getPublicKey("hex", "compressed"),
+      apiPrivateKey: apiKey.getPrivateKey("hex"),
       organizationId: "org-id",
       defaultWalletId: "turnkey_private-key-id",
       defaultWalletPublicKey: DEFAULT_WALLET_PUBLIC_KEY,

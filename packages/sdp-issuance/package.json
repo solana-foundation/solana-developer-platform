@@ -61,7 +61,7 @@
     "@solana/kit": "catalog:",
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:",
-    "@solana/token-acl-gate-sdk": "0.2.0"
+    "@solana/token-acl-gate-sdk": "0.3.0"
   },
   "devDependencies": {
     "tsx": "4.23.5",
