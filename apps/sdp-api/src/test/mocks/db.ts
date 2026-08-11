@@ -80,7 +80,15 @@ const POSTGRES_TEST_TABLES = [
   "allowlist",
 ] as const;
 
-async function truncateAllTables(env: Env): Promise<void> {
+/**
+ * Resets this worker's database to empty by truncating every test table.
+ * Call from beforeEach; there is deliberately no afterEach counterpart —
+ * the next test's reset makes trailing cleanup a redundant round trip.
+ *
+ * @param env - Test environment bindings for this worker's database.
+ * @returns Resolves once every table is truncated.
+ */
+export async function seedTestDatabase(env: Env): Promise<void> {
   const db = getDb(env);
 
   try {
@@ -96,12 +104,4 @@ async function truncateAllTables(env: Env): Promise<void> {
       }
     );
   }
-}
-
-export async function seedTestDatabase(env: Env): Promise<void> {
-  await truncateAllTables(env);
-}
-
-export async function clearTestDatabase(env: Env): Promise<void> {
-  await truncateAllTables(env);
 }

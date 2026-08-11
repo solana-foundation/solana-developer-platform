@@ -1,4 +1,4 @@
-import type { DestinationPolicyRule, WalletOperationEnvelope } from "@sdp/types";
+import type { DestinationPolicyRule, PolicyCandidate } from "@sdp/types";
 import { type RuleEvaluation, ruleValues } from "./helpers";
 
 /**
@@ -11,7 +11,7 @@ import { type RuleEvaluation, ruleValues } from "./helpers";
  */
 export function evaluateDestinationRule(
   rule: DestinationPolicyRule,
-  operation: WalletOperationEnvelope
+  operation: PolicyCandidate
 ): RuleEvaluation | null {
   const blocklist = ruleValues(undefined, rule.blocklist);
   const allowlist = ruleValues(rule.destination, rule.destinations).concat(

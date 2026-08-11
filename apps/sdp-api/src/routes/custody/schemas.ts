@@ -15,6 +15,7 @@ import type {
   InitializeSigningResponse,
   SignerCheckResponse,
   SwitchProviderOptionsResponse,
+  SwitchSigningResponse,
 } from "@sdp/types";
 import { z } from "zod";
 
@@ -130,18 +131,28 @@ export type UpdateWalletRequest = z.infer<typeof updateWalletSchema>;
 // Switch Signing Provider
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const switchSigningSchema = z.discriminatedUnion("provider", [
-  initializeLocalSchema,
-  initializeFireblocksSchema,
-  initializePrivySchema,
-  initializeCoinbaseCdpSchema,
-  initializeParaSchema,
-  initializeTurnkeySchema,
-  initializeDfnsSchema,
-  initializeIbmHavenSchema,
-  initializeAnchorageSchema,
-  initializeUtilaSchema,
-]);
+const exactConnectionSwitchSchema = z
+  .object({
+    connectionId: z.string().min(1),
+    provider: custodyProviderSchema.optional(),
+  })
+  .strict();
+
+const providerSwitchSchema = z
+  .preprocess((value, ctx) => {
+    if (value !== null && typeof value === "object" && Object.hasOwn(value, "connectionId")) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["connectionId"],
+        message: "connectionId selects the exact-connection request variant",
+      });
+      return z.NEVER;
+    }
+    return value;
+  }, initializeSigningSchema)
+  .meta({ not: { required: ["connectionId"] } });
+
+export const switchSigningSchema = z.union([exactConnectionSwitchSchema, providerSwitchSchema]);
 
 export type SwitchSigningRequest = z.infer<typeof switchSigningSchema>;
 
@@ -216,4 +227,5 @@ export type {
   InitializeSigningResponse,
   SignerCheckResponse,
   SwitchProviderOptionsResponse,
+  SwitchSigningResponse,
 };

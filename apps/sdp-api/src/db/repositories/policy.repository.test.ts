@@ -16,7 +16,7 @@ import { TEST_CUSTODY_CONFIG, TEST_CUSTODY_WALLET } from "@/test/fixtures/custod
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   ApiKeyControlProfileRevisionRow,
   ApiKeyControlProfileRow,
@@ -35,7 +35,10 @@ import { createPostgresPolicyRepository } from "./policy.repository.postgres";
 function policyStores(repo: PolicyRepository) {
   const wallet = new WalletPolicyStore(repo);
   const apiKey = new ApiKeyPolicyStore(repo);
-  const enforcement = new PostgresPolicyEnforcementStore(repo);
+  const enforcement = new PostgresPolicyEnforcementStore(
+    repo,
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: null })
+  );
   return {
     resolveEffectiveWalletPolicy: wallet.resolveEffectiveWalletPolicy.bind(wallet),
     resolveEffectiveApiKeyPolicy: apiKey.resolveEffectiveApiKeyPolicy.bind(apiKey),
@@ -90,11 +93,11 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
     await seedPolicyFoundationFixtures();
     repo = createPostgresPolicyRepository(getDb(env), TEST_SCOPE);
   });

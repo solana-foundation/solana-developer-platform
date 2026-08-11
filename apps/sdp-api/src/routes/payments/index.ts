@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
@@ -18,6 +19,12 @@ import {
   estimateOfframp,
   estimateOnramp,
   estimateTransferBatch,
+  extractOfframpQuotePolicyCandidate,
+  extractOnrampQuotePolicyCandidate,
+  extractTransferBatchPolicyCandidate,
+  extractTransferPolicyCandidate,
+  findTransferBatchIdempotentKeyReplay,
+  findTransferIdempotentKeyReplay,
   getRecurringPayment,
   getSubscription,
   getSubscriptionPlan,
@@ -174,7 +181,15 @@ payments.get(
   requirePermissions("payments:read"),
   listSubscriptionCollectionAttempts
 );
-payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
+payments.post(
+  "/transfers",
+  requirePermissions("payments:write", "wallets:read"),
+  policyGate({
+    extract: extractTransferPolicyCandidate,
+    findIdempotentKeyReplay: findTransferIdempotentKeyReplay,
+  }),
+  createTransfer
+);
 payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
 payments.post(
   "/transfer-batches/estimate",
@@ -184,6 +199,10 @@ payments.post(
 payments.post(
   "/transfer-batches",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  policyGate({
+    extract: extractTransferBatchPolicyCandidate,
+    findIdempotentKeyReplay: findTransferBatchIdempotentKeyReplay,
+  }),
   createTransferBatch
 );
 payments.get("/transfer-batches", requirePermissions("payments:read"), listTransferBatches);
@@ -202,11 +221,13 @@ payments.post("/ramps/offramp/estimate", requirePermissions("payments:read"), es
 payments.post(
   "/ramps/onramp/quote",
   requirePermissions("payments:write", "wallets:read"),
+  policyGate({ extract: extractOnrampQuotePolicyCandidate }),
   createOnrampQuote
 );
 payments.post(
   "/ramps/offramp/quote",
   requirePermissions("payments:write", "wallets:read"),
+  policyGate({ extract: extractOfframpQuotePolicyCandidate }),
   createOfframpQuote
 );
 payments.post(

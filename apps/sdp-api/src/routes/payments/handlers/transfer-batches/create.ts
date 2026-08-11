@@ -9,16 +9,21 @@ import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositorie
 import { AppError, badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import {
   approvedWalletOperationId,
   beginApprovedWalletOperationEffect,
   runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
+import {
+  recordLegacyWalletPolicyDenial,
+  walletOperationActorFromAuth,
+} from "@/services/policy/enforcement.service";
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../../context";
 import { createTransferBatchSchema } from "../../schemas";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
-import { enforceBatchPolicies } from "./policy";
+import { assertLegacyBatchPolicies } from "./policy";
 import { resolveBatchRequest } from "./resolve";
 import { buildTransferBatchResponse, resolveTransferBatchIdempotencyReplay } from "./respond";
 import {
@@ -26,8 +31,13 @@ import {
   chunkInstructionGroups,
   DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
 } from "./transaction";
+import type { CreateTransferBatchInput, ResolvedBatchRequest } from "./types";
 
 type TransferBatchResponse = Awaited<ReturnType<typeof buildTransferBatchResponse>>;
+
+interface TransferBatchGateResolved extends ResolvedBatchRequest {
+  idempotencyFingerprint: string;
+}
 
 async function assertApprovedBatchReplayCompleted(
   c: AppContext,
@@ -78,6 +88,123 @@ async function respondToTransferBatchReplay(
 }
 
 /**
+ * Parse and resolve a transfer-batch request into its wallet-operation policy candidate.
+ *
+ * @param c - Request context.
+ * @returns The candidate, validated body, resolved request, and raw payload.
+ */
+export async function extractTransferBatchPolicyCandidate(
+  c: AppContext
+): Promise<PolicyGateExtraction> {
+  const parsed = createTransferBatchSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const input = parsed.data;
+  const resolved = await resolveBatchRequest(c, input, ["payments:write"]);
+
+  return {
+    candidate: {
+      organizationId: resolved.scope.auth.organizationId,
+      projectId: resolved.scope.auth.projectId,
+      custodyWalletId: resolved.sourceWallet.id,
+      walletId: resolved.sourceWallet.walletId,
+      apiKeyId: resolved.scope.auth.apiKeyId,
+      actor: walletOperationActorFromAuth(resolved.scope.auth),
+      source: "api",
+      operationFamily: "payment",
+      operationType: "payment_transfer_batch_execute",
+      asset: resolved.tokenContext.token,
+      amount: resolved.totalAmount,
+      destination: null,
+      context: {
+        sourceAddress: resolved.sourceAddress,
+        recipientCount: resolved.recipients.length,
+        transactionCount: null,
+      },
+      providerExtensions: {},
+    },
+    body: input,
+    resolved: {
+      ...resolved,
+      idempotencyFingerprint: buildBatchIdempotencyFingerprint(resolved, input.options),
+    },
+    rawPayload: {
+      externalId: input.externalId === undefined ? null : input.externalId,
+      source: input.source,
+      token: input.token,
+      recipients: input.recipients.map((recipient) => ({
+        externalId: recipient.externalId === undefined ? null : recipient.externalId,
+        counterpartyId: recipient.counterpartyId,
+        counterpartyAccountId: recipient.counterpartyAccountId,
+        amount: recipient.amount,
+      })),
+      options: input.options === undefined ? null : input.options,
+    },
+  };
+}
+
+/**
+ * Build the batch idempotency fingerprint from the resolved request.
+ *
+ * @param resolved - The resolved batch request.
+ * @param options - The request's batch options.
+ * @returns The fingerprint string.
+ */
+function buildBatchIdempotencyFingerprint(
+  resolved: ResolvedBatchRequest,
+  options: CreateTransferBatchInput["options"]
+): string {
+  return buildTransferBatchFingerprint({
+    sourceAddress: resolved.sourceAddress,
+    token: resolved.tokenContext.token,
+    recipients: resolved.recipients.map((recipient) => ({
+      externalId: recipient.externalId,
+      counterpartyId: recipient.counterpartyId,
+      counterpartyAccountId: recipient.counterpartyAccountId,
+      destinationAddress: recipient.destinationAddress,
+      amount: recipient.amount,
+    })),
+    options,
+  });
+}
+
+/**
+ * Resolve an Idempotency-Key replay before transfer-batch policy enforcement.
+ *
+ * @param c - Request context.
+ * @param extraction - The transfer-batch gate extraction.
+ * @param idempotencyKey - The Idempotency-Key header value.
+ * @returns The recorded batch response, or null for a new request.
+ */
+export async function findTransferBatchIdempotentKeyReplay(
+  c: AppContext,
+  extraction: PolicyGateExtraction,
+  idempotencyKey: string
+): Promise<Response | null> {
+  const resolved = extraction.resolved as TransferBatchGateResolved;
+  const replay = await resolveTransferBatchIdempotencyReplay(
+    getPaymentTransferBatchesRepository(c),
+    resolved.scope.auth.organizationId,
+    resolved.projectId,
+    idempotencyKey,
+    resolved.idempotencyFingerprint
+  );
+  if (replay === null) {
+    return null;
+  }
+  return respondToTransferBatchReplay(
+    c,
+    replay,
+    resolved.scope.auth.organizationId,
+    resolved.projectId
+  );
+}
+
+/**
  * POST /transfer-batches — creates the batch aggregate, submits all chunks
  * concurrently, and responds without waiting for on-chain confirmation:
  * transfers come back processing and the pending-transfers job settles them.
@@ -97,49 +224,19 @@ async function respondToTransferBatchReplay(
  * @returns JSON batch response with recipients and chunk transfers.
  */
 export async function createTransferBatch(c: AppContext) {
-  const body = await c.req.json();
-  const parsed = createTransferBatchSchema.safeParse(body);
-  const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
+  const { body, resolved, enforcement } = getPolicyGateContext<
+    CreateTransferBatchInput,
+    TransferBatchGateResolved
+  >(c);
+  const idempotencyKeyHeader = c.req.header("Idempotency-Key");
+  const idempotencyKey = idempotencyKeyHeader === undefined ? null : idempotencyKeyHeader;
+  const idempotencyFingerprint = idempotencyKey ? resolved.idempotencyFingerprint : null;
+  try {
+    await assertLegacyBatchPolicies(c, resolved);
+  } catch (error) {
+    await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
+    throw error;
   }
-
-  const resolved = await resolveBatchRequest(c, parsed.data, ["payments:write"]);
-  const idempotencyFingerprint = idempotencyKey
-    ? buildTransferBatchFingerprint({
-        sourceAddress: resolved.sourceAddress,
-        token: resolved.tokenContext.token,
-        recipients: resolved.recipients.map((recipient) => ({
-          externalId: recipient.externalId,
-          counterpartyId: recipient.counterpartyId,
-          counterpartyAccountId: recipient.counterpartyAccountId,
-          destinationAddress: recipient.destinationAddress,
-          amount: recipient.amount,
-        })),
-        options: parsed.data.options,
-      })
-    : null;
-  if (idempotencyKey && idempotencyFingerprint) {
-    const replay = await resolveTransferBatchIdempotencyReplay(
-      getPaymentTransferBatchesRepository(c),
-      resolved.scope.auth.organizationId,
-      resolved.projectId,
-      idempotencyKey,
-      idempotencyFingerprint
-    );
-    if (replay) {
-      return respondToTransferBatchReplay(
-        c,
-        replay,
-        resolved.scope.auth.organizationId,
-        resolved.projectId
-      );
-    }
-  }
-  await enforceBatchPolicies(c, resolved, parsed.data);
 
   const feePayment = getFeePayment(c);
   const [signer, feePayer, lifetime] = await Promise.all([
@@ -167,7 +264,9 @@ export async function createTransferBatch(c: AppContext) {
     feePayer,
     lifetime,
     maxRecipientsPerTransaction:
-      parsed.data.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
+      body.options?.maxRecipientsPerTransaction === undefined
+        ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION
+        : body.options.maxRecipientsPerTransaction,
   });
 
   const batchRepository = getPaymentTransferBatchesRepository(c);
@@ -179,7 +278,7 @@ export async function createTransferBatch(c: AppContext) {
         batch: {
           organizationId: resolved.scope.auth.organizationId,
           projectId: resolved.projectId,
-          externalId: parsed.data.externalId ?? null,
+          externalId: body.externalId === undefined ? null : body.externalId,
           sourceWalletId: resolved.sourceWallet.walletId,
           sourceAddress: resolved.sourceAddress,
           token: resolved.tokenContext.token,
@@ -187,7 +286,7 @@ export async function createTransferBatch(c: AppContext) {
           totalAmount: resolved.totalAmount,
           recipientCount: resolved.recipients.length,
           transactionCount: chunks.length,
-          options: parsed.data.options ?? {},
+          options: body.options === undefined ? {} : body.options,
           initiatedByKeyId: resolved.scope.auth.id,
           idempotencyKey,
           idempotencyFingerprint,
@@ -239,7 +338,7 @@ export async function createTransferBatch(c: AppContext) {
         chunk,
         recipientsByIndex,
         feePayment,
-        preflight: parsed.data.options?.preflight !== false,
+        preflight: body.options?.preflight !== false,
       })
     )
   );

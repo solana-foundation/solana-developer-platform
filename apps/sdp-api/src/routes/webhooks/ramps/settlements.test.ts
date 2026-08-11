@@ -1,8 +1,8 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { AppContext } from "./processor";
 import { applyRampSettlementEvent } from "./settlements";
 
@@ -98,10 +98,6 @@ describe("applyRampSettlementEvent", () => {
           USER_ID
         ),
     ]);
-  });
-
-  afterEach(async () => {
-    await clearTestDatabase(env);
   });
 
   it("never reopens a canceled transfer", async () => {

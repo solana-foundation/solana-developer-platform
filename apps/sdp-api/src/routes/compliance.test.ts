@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
@@ -155,7 +155,6 @@ describe("Compliance routes", () => {
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
 
     vi.restoreAllMocks();
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
