@@ -40,9 +40,8 @@ the closed unions live in code, per the ADR 0001 asset-profiles pattern.
 1. Add the value to the matching const array in
    `packages/sdp-types/src/earn.ts`: `EARN_STRATEGY_SOURCE_KINDS`,
    `EARN_APY_TYPES`, `EARN_LIQUIDITY_TERMS`, or
-   `EARN_DEPOSIT_TOKEN_SYMBOLS`. (`EARN_KNOWN_UNDERLYING_SOURCES` is
-   deliberately non-exhaustive — new yield sources need no entry at all,
-   an entry only labels a known one.)
+   `EARN_DEPOSIT_TOKEN_SYMBOLS`. (`underlyingSource` is an open string with
+   no registry at all — new yield sources need no entry anywhere.)
 2. That's the whole DB story — no migration, no CHECK constraint to alter.
 3. Filters follow automatically: `apps/sdp-api/src/routes/earn/schemas.ts`
    builds its query validation as `z.enum(EARN_STRATEGY_SOURCE_KINDS)` (etc.),
@@ -79,8 +78,7 @@ being a `NOT_IMPLEMENTED` stub) never sinks the others' pass.
 **Local dev.** Provider credentials aren't needed to get a catalogue:
 
 ```bash
-pnpm -C apps/sdp-api db:seed:earn                            # sandbox catalogue + NAV history
-pnpm -C apps/sdp-api db:seed:earn -- --days 30               # longer NAV history
+pnpm -C apps/sdp-api db:seed:earn                            # sandbox catalogue fixtures
 pnpm -C apps/sdp-api db:seed:earn -- --clean                 # remove seeded rows again
 ```
 
@@ -89,9 +87,9 @@ The seed is **local-development only**: it refuses any non-local
 `--environment production` — passing it exits with an error).
 
 The script (`apps/sdp-api/scripts/seed-earn-demo.ts`) writes through the same
-`upsertStrategy`/`insertNavSnapshot` API and declared-support validation the
-sync uses, so seeded rows behave exactly like synced ones; it is idempotent
-on the `seed-demo-` provider-reference prefix.
+`upsertStrategy` API and declared-support validation the sync uses, so seeded
+rows behave exactly like synced ones; it is idempotent on the `seed-demo-`
+provider-reference prefix.
 
 **Update.** Sync-owned fields (name, APY, mints, risk metadata, ...) converge
 on the next run; manual edits to those columns get overwritten. `status` is the
@@ -103,10 +101,10 @@ catalogue and cannot be undone by a sync pass.
 **Remove — flip status, never delete.** `EARN_STRATEGY_STATUSES` is
 `active | paused | deprecated`:
 
-- `paused` — reversible stop. Deposit quotes/execution are refused
-  (409 `STRATEGY_NOT_AVAILABLE`); withdrawals and all reads keep working
-  (the row leaves the default catalogue list, which filters to `active`, but
-  stays fetchable by id).
+- `paused` — reversible stop. The strategy cannot be selected as a program
+  allocation target (`PUT /program` validates against the *active* catalogue);
+  withdrawals and all reads keep working (the row leaves the default catalogue
+  list, which filters to `active`, but stays fetchable by id).
 - `deprecated` — terminal wind-down. Same runtime semantics as `paused`;
   the difference is intent (the strategy will not come back).
 
@@ -120,13 +118,15 @@ entitlement override off, or pull the environment credentials — withdrawals
 continue either way.
 
 The asymmetry is the ADR 0002 exit-safety invariant — **money out always
-beats money off**: deposits require an *active* strategy plus the full
-entitled+configured provider gate, while withdrawals ignore strategy status
-and need only provider credentials (`assertEarnProviderConfigured`). Both
-halves are enforced in `requireQuotableStrategy`
-(`apps/sdp-api/src/routes/earn/handlers/quotes.ts`) and covered by route
-tests (`apps/sdp-api/src/routes/earn.test.ts`). Never delete a strategy row:
-positions and movements FK into it, and history must survive wind-down.
+beats money off**: money-in requires an *active* strategy plus the full
+entitled+configured provider gate (`PUT /program` via
+`assertProviderAvailable` + `assertKnownYieldSources`), while withdrawals
+ignore strategy status and need only provider credentials
+(`assertEarnProviderConfigured`) — and the withdrawal-ledger list needs not
+even that. Both halves are covered by route tests
+(`apps/sdp-api/src/routes/earn-program.test.ts`). Never delete a strategy
+row: catalogue history must survive wind-down, and program allocations
+reference strategies by provider reference.
 
 ## 4. Add a vault-infra provider — add the id, follow the compiler
 

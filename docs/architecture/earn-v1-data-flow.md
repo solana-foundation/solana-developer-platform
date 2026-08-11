@@ -21,17 +21,14 @@ flowchart LR
 
     subgraph SDP["sdp-api  /v1/earn"]
         ROUTES["earn routes<br/>auth · project scope · earn:read/write"]
-        SVC["@sdp/earn provider clients<br/>(Veda / Upshift / Perena / Ground)"]
-        DB[("Postgres<br/>earn_strategies · earn_positions<br/>earn_movements · earn_nav_snapshots")]
-        CRON["cron: catalogue sync ·<br/>NAV snapshot · movement reconcile"]
-        WH["webhook dispatch<br/>/webhooks/earn/:env/:provider"]
-        SIGN["custody signing service<br/>(existing)"]
-        RPC["RPC relay + Helius DAS<br/>(existing)"]
+        SVC["@sdp/earn provider clients<br/>(Ground live; Veda/Upshift/Perena stubs)"]
+        DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_program_withdrawals")]
+        CRON["cron: catalogue sync"]
     end
 
     subgraph External
-        VAULT["Vault-infra APIs<br/>Veda · Upshift · Perena · Ground"]
-        CHAIN["Solana<br/>(vault programs, share tokens)"]
+        VAULT["Vault-infra APIs<br/>Ground (+ future providers)"]
+        CHAIN["Solana<br/>(funding: customer → wallet deposit address)"]
         CURATOR["Curator risk frameworks<br/>Gauntlet · Steakhouse · Sentora<br/>(via vault-infra metadata)"]
     end
 
@@ -40,102 +37,78 @@ flowchart LR
     ROUTES --> DB
     ROUTES --> SVC
     SVC -->|REST| VAULT
-    VAULT -.->|strategies + NAV + risk metadata| CRON
+    VAULT -.->|strategies + risk metadata| CRON
     CURATOR -.-> VAULT
     CRON --> DB
-    VAULT -->|settlement webhooks| WH
-    WH --> DB
-    ROUTES --> SIGN
-    SIGN --> CHAIN
-    RPC --> CHAIN
-    CRON -->|share balances / tx confirm| RPC
+    Clients -.->|send stablecoins to the wallet's deposit address| CHAIN
+    CHAIN -.-> VAULT
 ```
+
+Execution-era boxes (custody signing, per-strategy movement webhooks, NAV/
+reconcile crons) left this diagram with PRO-1628: V1 ships none of them, and
+the machinery they described was removed rather than documented as aspiration.
+PRO-1634 owns whatever returns.
 
 ## Where each surface gets its data (source of truth)
 
 | Surface | Serving read | Fed by | Freshness |
 |---|---|---|---|
 | Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) |
-| APY / NAV / TVL | `earn_nav_snapshots` (DB time series) | NAV cron ← provider `getNav` **and/or** on-chain share-price read via RPC relay (open decision below) | Cron cadence (e.g. 15m) |
-| Positions | `earn_positions` (DB ledger) — **design only; no V1 writer, see callout** | Written by execution path; **verified** against on-chain share-token balances via Helius DAS / RPC (reconciliation cron) | Ledger = immediate; reconcile = cron |
-| Deposits/withdrawals | `earn_movements` (DB ledger) — **design only; no V1 writer, see callout** | Execution endpoints write `pending`; settled via provider webhook (primary) + status-poll cron (backstop) — same ack-then-reconcile shape as ramps | Webhook ≈ real-time |
-| Quotes (rate previews) | Live passthrough | Provider `quoteDeposit`/`quoteWithdrawal`, no DB | Real-time |
+| APY (headline + blended) | `earn_strategies.current_apy` (latest observed, overwritten by sync) + live `getPortfolioYield` | Catalogue sync; live provider read | Hourly / real-time |
+| Positions & balances | **Live provider snapshot** (`GET /v1/earn/program` ← `getPortfolioWallet`) — never persisted | Provider | Real-time |
+| Deposits | **Live provider** (`GET /program/deposits` ← provider-observed on-chain deposits) — customer-initiated, so SDP has no intent moment to ledger | Provider | Real-time |
+| Withdrawals (detail) | **Live provider** (`GET /program/withdrawals/:ref`); the matching ledger row advances as a side effect | Provider | Real-time |
+| Withdrawals (history/audit) | `earn_program_withdrawals` (**DB ledger** — `GET /program/withdrawals`) | Written at intent by `POST /program/withdrawals`; advanced by guarded CAS on every observation (`services/earn-withdrawal-ledger.service.ts`) | Intent = immediate; status = each observation (+ ledger sweep) |
 | Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
-> **Ledger vs live — how it actually sits today (open, PRO-1628).** The two
-> ledger rows above are the execution-era *design*, and **nothing in V1 writes
-> them**. This is stranding, not ambiguity: the ledger's writer was the
-> execution endpoints, and the portfolio-wallet model shipped without them
-> (PRO-1634), so migration 0048's tables and the `/v1/earn/positions` +
-> `/v1/earn/movements` routes serve **permanently empty ledgers** a partner
-> could mistake for authoritative. The operative source of truth for anything
-> money-shaped is the provider, live: `GET /v1/earn/program` reads positions
-> and balances from the wallet snapshot per request, and withdrawals are
-> created and polled directly against the provider with no SDP row (which is
-> why the caller's idempotency key is the entire duplicate-defense on that
-> path). PRO-1628 settles it — either wire the ledger from observed movements
-> plus a reconcile cron, or stay live-only and remove/document the dead
-> surface — and the decision lands as an ADR 0002 addendum. Whichever way,
-> the provider remains the authority; a ledger would relay and reconcile
-> provider truth, never replace it.
+> **Ledger vs live — DECIDED (PRO-1628, ADR 0002 addendum 2026-08-11).**
+> *SDP ledgers what SDP initiates; SDP reads live what the provider observes.*
+> Positions/balances/deposits are live provider reads, permanently — the
+> empty execution-era ledgers (`earn_positions`, `earn_movements`, their
+> routes) were dropped by migration `0055`. Withdrawals — the one money
+> movement SDP initiates — get `earn_program_withdrawals`: written at intent
+> (which also gives the derived idempotency key an SDP-side anchor, ending
+> the era when the caller's key was the entire duplicate-defense), advanced
+> by guarded CAS on every observation, and listed as the audit surface. The
+> provider remains the authority for live status and final amounts; the
+> ledger relays provider truth, never replaces it.
 
-**No new indexer.** V1 needs no event-sourced chain indexer: catalogue and NAV
-come from provider APIs (optionally cross-checked on-chain), and position truth
-is the live provider snapshot today — or, should the ledger option win
-PRO-1628, SDP's own ledger reconciled against token balances the existing
-Helius DAS service can already read. If V2 needs richer on-chain history (per-block share
+**No new indexer.** V1 needs no event-sourced chain indexer: the catalogue
+comes from provider APIs and position truth is the live provider snapshot.
+That is now decided, not provisional (PRO-1628) — deposits stay unledgered in
+V1 precisely because observing customer-initiated transfers from chain is
+indexer-shaped work. If V2 needs richer on-chain history (per-block share
 price, protocol events), that's the point to evaluate an indexer — not V1.
 
-## Deposit execution (the real thing)
+## Execution era (PRO-1634 — not V1, and no longer in the tree)
 
-```mermaid
-sequenceDiagram
-    participant C as Caller (dashboard / partner)
-    participant API as sdp-api /v1/earn
-    participant P as Vault-infra API
-    participant S as Custody signing (existing)
-    participant SOL as Solana
-    participant DB as Postgres
-
-    C->>API: POST /deposits {strategyId, mint, amount, walletId}
-    API->>API: auth + earn:write + assertProviderAvailable(earn)
-    API->>P: createDeposit(strategyRef, mint, amount, depositor)
-    P-->>API: unsigned tx (transactionBase64) or provider ref
-    API->>DB: insert earn_movements (pending)
-    alt Dashboard / custody wallet (float sweeping)
-        API->>S: sign with org custody wallet (+ Kora fee sponsorship if used)
-        S->>SOL: submit + confirm
-        API->>DB: movement → submitted (tx signature)
-    else B2B2C partner (sign-and-return)
-        API-->>C: signing {transaction, signers, lastValidBlockHeight}
-        C->>API: POST /movements/:id/submit {signedTx}
-        API->>SOL: submit + confirm
-        API->>DB: movement → submitted
-    end
-    P-->>API: webhook: settled (shares minted)
-    API->>DB: movement → settled · position upsert (+shares)
-    Note over API,DB: backstop: reconcile cron polls getMovementStatus,<br/>verifies share balance on-chain (Helius DAS)
-```
-
-Withdrawals mirror this with the liquidity-term fork: instant → same-loop
-settlement; delayed → movement holds `redemption_available_at`, surfaces as a
-pending redemption, settles on the provider's T+n webhook (or poll).
+V1's funding model is "send stablecoins to the program's Solana deposit
+address"; there are no SDP-built deposit/withdrawal transactions, no custody
+signing, and no per-strategy movement ledger. The execution-era design that
+used to be diagrammed here (per-strategy `createDeposit`/`createWithdrawal`,
+`/movements/:id/submit`, movement webhooks + `getMovementStatus` reconcile
+polling) was **removed from the codebase by PRO-1628** because none of it had
+an implementation in any provider and its types referenced tables that no
+longer exist. If PRO-1634 revives execution endpoints, design them against
+real flows then — git history (`0048_earn.sql`, the pre-0055 `@sdp/earn`
+contract) preserves the sketch, and the withdrawal ledger's insert-at-intent +
+guarded-CAS shape is the pattern to extend.
 
 ## Existing SDP we leverage (build ≠ rebuild)
 
 | Existing component | Where | Earn uses it for | Status |
 |---|---|---|---|
 | Auth + API keys + permissions | `middleware/auth.ts`, `@sdp/types/permissions` | `earn:read`/`earn:write` gating, partner `sk_live` access | ✅ wired in scaffold |
-| Org/project tenancy | `projectContextMiddleware` | Position/movement scoping | ✅ wired |
+| Org/project tenancy | `projectContextMiddleware` | Program + withdrawal-ledger scoping (rows carry org/project; the ledger anchors on the shared wallet) | ✅ wired |
 | Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable (override-only: every org needs an explicit `providerOverrides.earn.<id>`), env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
-| Custody + signing | `services/domain/signing.service.ts`, `@sdp/custody` | Signing deposits/withdrawals from org wallets — full-signing custodians (Fireblocks, ...) work as-is; Anchorage is lifecycle-only today (playbook §5) | 🔨 execution phase — extend `SigningMetadata.operationType` (closed union at `packages/sdp-custody/src/signing.ts:99`) with earn ops |
-| Fee sponsorship | `@sdp/payments/fee-payment` (Kora) | Sponsored fees on earn txs (same as payments) | 🔨 execution phase |
-| RPC relay (org-selected providers) | `@sdp/rpc` (`packages/sdp-rpc/src/relay.ts`) | On-chain reads: share balances, tx confirmation, optional NAV cross-check | 🔨 NAV/reconcile phase |
-| Helius DAS | `services/helius-das.service.ts` | Share-token balance reads for position reconciliation (the "indexer-lite") | 🔨 reconcile phase |
-| Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events (`EarnSettlementEvent`, mirrors `RampSettlementEvent`) | 🔨 per-provider processors |
-| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts`; precedent `cron/pending-transfers.ts` | Catalogue sync, NAV snapshots, movement reconciliation | ✅ catalogue sync (`cron/earn-catalogue-sync.ts`, hourly, gated on `isEarnEnabled` — `MARKETS_ENABLED` **and** `EARN_ENABLED`) · 🔨 NAV + reconcile tasks |
-| Idempotency | `middleware/idempotency-key.ts` + `earn_movements.external_id` unique index | Partner-safe deposit/withdraw retries | ✅ schema ready |
+| Custody + signing | `services/domain/signing.service.ts`, `@sdp/custody` | Nothing in V1 (funding is a customer-initiated transfer) | ⏸ execution era (PRO-1634) |
+| Fee sponsorship | `@sdp/payments/fee-payment` (Kora) | Nothing in V1 (no SDP-built earn txs) | ⏸ execution era (PRO-1634) |
+| RPC relay (org-selected providers) | `@sdp/rpc` (`packages/sdp-rpc/src/relay.ts`) | No V1 consumer — the NAV/reconcile designs that wanted it were unpublished (PRO-1628); returns if a real NAV consumer appears | ⏸ none in V1 |
+| Helius DAS | `services/helius-das.service.ts` | No V1 consumer — positions are live provider reads, nothing to reconcile | ⏸ none in V1 |
+| Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |
+| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts`; precedent `cron/pending-transfers.ts` | Catalogue sync + the withdrawal-ledger sweep (heals ref-less intent rows; launch-coupled follow-up ticket) | ✅ catalogue sync (`cron/earn-catalogue-sync.ts`, hourly, gated on `isEarnEnabled` — `MARKETS_ENABLED` **and** `EARN_ENABLED`) · 🔨 ledger sweep |
+| Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_program_withdrawals` (wallet, request_id) unique | Two-layer withdrawal retry safety: SDP intent row first, provider request-id dedupe as the crash-window backstop | ✅ wired (PRO-1628) |
 | Compliance providers | `services/compliance/`, compliance family | RWA strategy KYC / depositor checks (open decision) | ⏸ decision pending |
 | Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Graft point for doc's risk tooling (whitelists, buffers, limits, timelocks, maker-checker) | ⏸ the audit's flagged gap — decide V1 vs later |
 | Audit log | `services/audit.service.ts` | Deposit/withdraw/config audit events | 🔨 execution phase |
@@ -149,10 +122,11 @@ portfolio-wallet capability (`EarnPortfolioWalletProvider` +
 `supportsPortfolioWallets` in `@sdp/earn/capabilities`), the
 `earn_provider_wallets` table (migration `0049`, one shared wallet per
 org+environment+provider — SDP's model, not a provider limit: one provider
-account holds many wallets, one per org), the catalogue-sync cron
+account holds many wallets, one per org), the withdrawal ledger
+(`earn_program_withdrawals`, migration `0055`) with its status machine in
+`services/earn-withdrawal-ledger.service.ts`, and the catalogue-sync cron
 (`cron/earn-catalogue-sync.ts`) + dev seed (`db:seed:earn` →
-`scripts/seed-earn-demo.ts`), the NAV cron task, earn webhook processors, and
-the execution endpoints + `/movements/:id/submit`.
+`scripts/seed-earn-demo.ts`).
 
 ## Ground — the first live provider (portfolio-wallet flow)
 
@@ -227,16 +201,19 @@ flowchart LR
   leaving a blocked exit indistinguishable from one in flight. It never
   overrides a terminal status: once a withdrawal settles, leg states are
   history. Destination whitelisting is available as an explicit address-book
-  call, not folded into the withdrawal flow.
+  call, not folded into the withdrawal flow. Every create also writes the
+  SDP-side intent row and every observation advances it (PRO-1628) — see the
+  source-of-truth table above.
 - **Settlement signal: polling, for now.** Ground offers Stripe-style
   HMAC-signed webhooks; wiring them into the existing webhook dispatch is
   future work — V1 polls deposit and withdrawal status.
 
 ## Open infra decisions (mirror of the V1 decision list)
 
-1. **NAV source of truth** — provider API (simple, trusts partner) vs on-chain
-   share-price read via RPC relay (trustless, needs per-vault program
-   knowledge) vs both with drift alerting. Cadence + retention for snapshots.
+1. **NAV source of truth** — *rescoped by PRO-1628*: the unreachable NAV
+   surface was unpublished (no table, no endpoint, no contract method), so the
+   remaining question is purely a decision — provider API vs on-chain read vs
+   both — to be made when a real NAV-history consumer exists.
 2. **Settlement signal** — webhook-primary with poll backstop (ramps pattern,
    assumed above) vs poll-only for providers without webhooks. *Resolved for
    Ground V1: poll-only; its HMAC webhooks are future work (see above).*

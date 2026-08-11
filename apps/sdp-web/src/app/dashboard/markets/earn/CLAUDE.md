@@ -39,8 +39,10 @@ reintroduce fixture modules. Data flows: BFF proxies
   the wallet only reports that the provider stopped, and a failed, cancelled or
   partial payout leaves it exactly as idle as a settled one — so
   `useEarnWithdrawalOutcomeToast(ref)` follows the WITHDRAWAL's own status
-  instead (terminal = completed / partially_completed / failed / cancelled;
-  `pending_approval` keeps waiting, since it still resolves). Only `completed`
+  instead (terminal = the shared `EARN_TERMINAL_WITHDRAWAL_STATUSES` from
+  `@sdp/types` — completed / partially_completed / failed / cancelled — the
+  same set the API's withdrawal ledger uses; `pending_approval` keeps waiting,
+  since it still resolves). Only `completed`
   is a success toast — partial is a problem, not a win. Sourcing a settlement
   claim from a wallet transition is the bug to never reintroduce. SWR suspends
   polling for a hidden tab and revalidates on focus — which is why the cadence

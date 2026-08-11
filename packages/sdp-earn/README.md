@@ -247,7 +247,8 @@ packages/sdp-types/src/earn.ts     Wire DTOs shared by API + web: strategies,
 
 packages/sdp-earn/src/
   types.ts                         Provider contracts. EarnVaultProvider (base:
-                                   listStrategies/getNav/quotes) and the
+                                   provider + declaredSupport + listStrategies
+                                   — every member real and called) and the
                                    OPTIONAL EarnPortfolioWalletProvider
                                    capability (create/get wallet, update
                                    strategy, deposits, withdrawal preview/
@@ -263,7 +264,6 @@ packages/sdp-earn/src/
   support.ts                       Declared-support validation: catalogue rows
                                    outside a provider's declared envelope are
                                    drift, not data.
-  nav.ts                           Share-price/NAV bigint math.
   providers/stub.ts                StubEarnClient — every method NOT_IMPLEMENTED;
                                    a new provider starts as a ~10-line subclass.
   providers/ground/client.ts       The live Ground integration (catalogue
@@ -272,13 +272,19 @@ packages/sdp-earn/src/
 
 apps/sdp-api/src/
   routes/earn/                     /v1/earn HTTP surface. handlers/program.ts is
-                                   the shared-wallet family; strategies/
-                                   positions/movements/quotes are the
-                                   catalogue + per-strategy families.
-  db/migrations/postgres/0048,0049 earn_strategies, earn_positions,
-                                   earn_movements, earn_nav_snapshots (0048);
+                                   the shared-wallet family (live provider
+                                   reads + the withdrawal ledger); strategies
+                                   is the catalogue family.
+  db/migrations/postgres/0048–0055 earn_strategies (0048);
                                    earn_provider_wallets (0049, shared-wallet
-                                   link).
+                                   link); earn_program_withdrawals (0055, the
+                                   withdrawal ledger — 0055 also dropped the
+                                   never-written positions/movements/NAV
+                                   tables, PRO-1628).
+  services/earn-withdrawal-ledger.service.ts
+                                   Withdrawal-ledger status machine + appliers
+                                   (Hono-free; poll path today, sweep/webhooks
+                                   later).
   db/repositories/earn.*           Row types + Postgres impl (open-string
                                    provider columns; dispatch must go through
                                    the fail-closed resolver).
@@ -341,10 +347,10 @@ Two things write `earn_strategies`, and only one of them is a production path.
 - **Why it exists:** browse a populated catalogue without a Ground API key and
   without waiting for the cron; deterministic data for demos and UI work.
 - **What it seeds:** 10 fixtures whose ids/names/APYs/liquidity/curators mirror
-  Ground's real sandbox catalogue (so local dev looks like production), plus NAV
-  history, plus exactly one **paused** row (`ground-jtrsy-usdc-vault`) that
-  exercises the ADR 0002 exit-safety split — deposits blocked, withdrawals still
-  quotable.
+  Ground's real sandbox catalogue (so local dev looks like production), plus
+  exactly one **paused** row (`ground-jtrsy-usdc-vault`) that exercises the
+  operator-pause invariants — hidden from the default catalogue, unselectable
+  as an allocation target, and sticky against the sync re-asserting `active`.
 - **Fixtures are labelled, never confused with real data:** every seeded row
   carries the `seed-demo-` `provider_reference` prefix and
   `riskMetadata.seedFixture`. `--clean` deletes **only** prefixed rows, so it can
@@ -372,7 +378,6 @@ Two things write `earn_strategies`, and only one of them is a production path.
 
   ```bash
   DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm -C apps/sdp-api db:seed:earn
-  DATABASE_URL=... pnpm -C apps/sdp-api db:seed:earn -- --days 30   # longer NAV history
   DATABASE_URL=... pnpm -C apps/sdp-api db:seed:earn -- --clean     # remove the fixtures
   ```
 
@@ -384,10 +389,11 @@ Two things write `earn_strategies`, and only one of them is a production path.
 
 ## Invariants (do not break)
 
-1. **Money out beats money off.** Deposit-side operations (`PUT /program`,
-   deposit quotes) gate on full provider *availability* (entitlement +
-   enablement + credentials). Withdrawal and read paths gate only on
-   *configured credentials* — disabling a provider must never trap funds.
+1. **Money out beats money off.** The deposit-side operation (`PUT /program`)
+   gates on full provider *availability* (entitlement + enablement +
+   credentials). Withdrawal and live-read paths gate only on *configured
+   credentials*, and the withdrawal-ledger list takes no provider gate at all
+   — disabling a provider must never trap funds or hide their history.
 2. **Fail closed on drift.** Provider ids from the DB are open strings; all
    dispatch goes through `resolveEarnProviderClient`, which throws on unknown
    ids rather than guessing.
