@@ -165,7 +165,10 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 
 ## Contracts
 
-- `EarnVaultProvider` (src/types.ts) is the base contract; the portfolio-wallet
+- `EarnVaultProvider` (src/types.ts) is the base contract — slimmed by
+  PRO-1628 to `provider` + `declaredSupport` + `listStrategies`, every member
+  real and called (the per-strategy quote/execution seams live in git history
+  until PRO-1634 gives them a consumer); the portfolio-wallet
   surface (`EarnPortfolioWalletProvider`) is an **optional capability** detected
   via `supportsPortfolioWallets()` (src/capabilities.ts, all-or-nothing method
   presence). New optional surfaces follow the same pattern: interface extension

@@ -4,6 +4,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   issuance: "/dashboard/issuance",
   payments: "/dashboard/payments",
   markets: "/dashboard/markets/earn",
+  heliusRings: "/dashboard/helius-rings",
   apiKeys: "/dashboard/api-keys",
   policies: "/dashboard/policies",
   approvals: "/dashboard/approvals",

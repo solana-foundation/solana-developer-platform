@@ -707,9 +707,10 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     expect(statusBody.data.withdrawal.status).toBe("processing");
   });
 
-  // The provider dedupes a withdrawal on its request id and SDP stores no row
-  // for one, so that id is the ONLY thing between a retry and a second payout.
-  // Every case here exists to keep it stable across attempts.
+  // The provider dedupes a withdrawal on its request id, and since PRO-1628
+  // that same derived id also anchors the SDP-side intent row — a two-layer
+  // defence. Every case here exists to keep the id stable across attempts and
+  // to prove a replay never reaches the provider as a second create.
   describe("withdrawal idempotency", () => {
     const withdrawalBody = (extra: Record<string, unknown> = {}) => ({
       provider: "ground",
@@ -719,11 +720,14 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       ...extra,
     });
 
-    it("keeps a caller-owned requestId stable across retries without forwarding it raw", async () => {
+    it("resolves a caller-key retry from the ledger: one provider create, replay served live", async () => {
       await seedAuth();
       await seedProgramWallet();
       const createWithdrawal = vi
         .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+      const getWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
       // Every org shares one provider account, so a key that reached the
@@ -742,12 +746,22 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       );
 
       expect(first.status).toBe(201);
-      expect(retry.status).toBe(201);
+      // The retry is a REPLAY: nothing was created, so it answers 200 with
+      // live provider state and never re-sends the create.
+      expect(retry.status).toBe(200);
+      const retryBody = (await retry.json()) as { data: { withdrawal: { status: string } } };
+      expect(retryBody.data.withdrawal.status).toBe("processing");
+      expect(createWithdrawal).toHaveBeenCalledTimes(1);
+      expect(getWithdrawal).toHaveBeenCalledTimes(1);
       const sent = createWithdrawal.mock.calls[0]?.[1]?.requestId;
       expect(sent).not.toBe(callerKey);
       expect(sent).toMatch(UUID_V4_PATTERN);
-      // The property the caller actually depends on survives the derivation.
-      expect(createWithdrawal.mock.calls[1]?.[1]?.requestId).toBe(sent);
+
+      // Exactly ONE intent row anchors both attempts.
+      const count = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS total FROM earn_program_withdrawals")
+        .first<{ total: number }>();
+      expect(count?.total).toBe(1);
     });
 
     it("sends a key no other organization could produce from the same input", async () => {
@@ -778,14 +792,16 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       );
     });
 
-    it("derives the same provider key every time from one Idempotency-Key", async () => {
+    it("re-drives a crash-window retry with the SAME derived key from one Idempotency-Key", async () => {
       await seedAuth();
       await seedProgramWallet();
+      // First attempt: the provider call dies after the intent row was
+      // written (network blip, process crash — the ref-less window).
       const createWithdrawal = vi
         .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockRejectedValueOnce(new Error("connection reset"))
         .mockResolvedValue(WITHDRAWAL);
 
-      // The retry a client's own loop would send: identical request, twice.
       const headers = { "Idempotency-Key": "checkout-9f2b" };
       const first = await requestEarn(
         "POST",
@@ -793,6 +809,15 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
         withdrawalBody(),
         headers
       );
+      expect(first.status).toBe(500);
+      // The intent row survives the failure, ref-less and re-drivable.
+      const stranded = await getDb(env)
+        .prepare(
+          "SELECT status, provider_reference FROM earn_program_withdrawals ORDER BY created_at DESC"
+        )
+        .first<{ status: string; provider_reference: string | null }>();
+      expect(stranded).toEqual({ status: "requested", provider_reference: null });
+
       const retry = await requestEarn(
         "POST",
         "/v1/earn/program/withdrawals",
@@ -800,14 +825,21 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
         headers
       );
 
-      expect(first.status).toBe(201);
       expect(retry.status).toBe(201);
       const [firstCall, retryCall] = createWithdrawal.mock.calls;
       // Must be v4-SHAPED even though it is derived: Ground rejects any other
       // version outright (`400 requestId must be a valid UUID v4`).
       expect(firstCall?.[1]?.requestId).toMatch(UUID_V4_PATTERN);
-      // The whole point: the provider sees ONE withdrawal, not two.
+      // The whole point: the provider sees ONE withdrawal id across the crash,
+      // so it replays rather than paying out twice.
       expect(retryCall?.[1]?.requestId).toBe(firstCall?.[1]?.requestId);
+      // And the re-drive healed the row.
+      const healed = await getDb(env)
+        .prepare(
+          "SELECT status, provider_reference FROM earn_program_withdrawals ORDER BY created_at DESC"
+        )
+        .first<{ status: string; provider_reference: string | null }>();
+      expect(healed).toEqual({ status: "processing", provider_reference: "wd_test_1" });
     });
 
     it("keeps two different Idempotency-Keys apart", async () => {
@@ -883,5 +915,321 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(JSON.stringify(body)).toContain("base58 Solana address");
     expect(createWithdrawal).not.toHaveBeenCalled();
+  });
+});
+
+describe("Earn program — withdrawal ledger (PRO-1628)", () => {
+  const LEDGER_KEY = "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
+
+  const createBody = (extra: Record<string, unknown> = {}) => ({
+    provider: "ground",
+    requestId: LEDGER_KEY,
+    amountUsd: "10.00",
+    token: "usdc",
+    destinationAddress: SOLANA_DESTINATION,
+    ...extra,
+  });
+
+  async function readLedgerRows(): Promise<Array<Record<string, unknown>>> {
+    const { results } = await getDb(env)
+      .prepare("SELECT * FROM earn_program_withdrawals ORDER BY created_at DESC, id DESC")
+      .all<Record<string, unknown>>();
+    return results ?? [];
+  }
+
+  it("persists an intent row and advances it on provider acceptance", async () => {
+    await seedAuth();
+    await seedProgramWallet();
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
+      WITHDRAWAL
+    );
+
+    const res = await requestEarn("POST", "/v1/earn/program/withdrawals", createBody());
+    expect(res.status).toBe(201);
+
+    const [row] = await readLedgerRows();
+    expect(row?.id).toMatch(/^earn_program_withdrawal_/);
+    expect(row?.status).toBe("processing");
+    expect(row?.provider).toBe("ground");
+    expect(row?.provider_reference).toBe(WITHDRAWAL.withdrawalRef);
+    expect(row?.amount_requested_usd).toBe("10.00");
+    expect(row?.destination_address).toBe(SOLANA_DESTINATION);
+    // The anchor is the DERIVED id, never the caller's raw key.
+    expect(row?.request_id).toBe(
+      deriveProviderRequestId(["earn_program_withdrawal", WALLET_REF], LEDGER_KEY)
+    );
+    expect(row?.idempotency_fingerprint).toBeTruthy();
+    expect(row?.provider_data).toMatchObject({ lastObservation: { status: "processing" } });
+    // Money-out forensics: who and which key pulled the money.
+    expect(row?.created_by).toBe(TEST_USER.id);
+    expect(row?.initiated_by_key_id).toBe(TEST_API_KEY.id);
+  });
+
+  it("refuses the same key with a different payload before any provider call", async () => {
+    await seedAuth();
+    await seedProgramWallet();
+    const createWithdrawal = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+
+    const first = await requestEarn("POST", "/v1/earn/program/withdrawals", createBody());
+    expect(first.status).toBe(201);
+
+    // An idempotency key names ONE intent; changing the payload under it is a
+    // conflict — answered by SDP without touching the provider.
+    const conflicting = await requestEarn(
+      "POST",
+      "/v1/earn/program/withdrawals",
+      createBody({ amountUsd: "11.00" })
+    );
+
+    expect(conflicting.status).toBe(409);
+    const body = (await conflicting.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("CONFLICT");
+    expect(createWithdrawal).toHaveBeenCalledTimes(1);
+    await expect(readLedgerRows()).resolves.toHaveLength(1);
+  });
+
+  it("treats decimal-equivalent amounts as one request — never stricter than the provider", async () => {
+    await seedAuth();
+    await seedProgramWallet();
+    const createWithdrawal = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
+
+    const first = await requestEarn(
+      "POST",
+      "/v1/earn/program/withdrawals",
+      createBody({ amountUsd: "10.00" })
+    );
+    // The provider wire sends amountUsd as a JSON number, so '10' IS '10.00'
+    // to Ground — SDP's fingerprint must replay it, not 409 it.
+    const retry = await requestEarn(
+      "POST",
+      "/v1/earn/program/withdrawals",
+      createBody({ amountUsd: "10" })
+    );
+
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(200);
+    expect(createWithdrawal).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists provider observations from the withdrawal detail poll", async () => {
+    await seedAuth();
+    await seedProgramWallet();
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
+      WITHDRAWAL
+    );
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal").mockResolvedValue({
+      ...WITHDRAWAL,
+      status: "completed",
+      amountPaidUsd: "9.90",
+      feeUsd: "0.10",
+      completedAt: "2026-08-11T05:00:00.000Z",
+    });
+
+    await requestEarn("POST", "/v1/earn/program/withdrawals", createBody());
+    const res = await requestEarn(
+      "GET",
+      `/v1/earn/program/withdrawals/${WITHDRAWAL.withdrawalRef}?provider=ground`
+    );
+
+    expect(res.status).toBe(200);
+    const [row] = await readLedgerRows();
+    expect(row?.status).toBe("completed");
+    expect(row?.amount_paid_usd).toBe("9.90");
+    expect(row?.fee_usd).toBe("0.10");
+    expect(row?.completed_at).toBe("2026-08-11T05:00:00.000Z");
+  });
+
+  it("serves live state for a pre-ledger withdrawal without inventing a row", async () => {
+    await seedAuth();
+    await seedProgramWallet();
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal").mockResolvedValue({
+      ...WITHDRAWAL,
+      withdrawalRef: "wd_pre_ledger",
+    });
+
+    const res = await requestEarn(
+      "GET",
+      "/v1/earn/program/withdrawals/wd_pre_ledger?provider=ground"
+    );
+
+    expect(res.status).toBe(200);
+    await expect(readLedgerRows()).resolves.toHaveLength(0);
+  });
+
+  it("404s a foreign organization's withdrawal ref BEFORE any provider call (BOLA guard)", async () => {
+    await seedAuth();
+    await seedProgramWallet();
+    const getWithdrawal = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal");
+
+    // A sibling organization with its own program and a ledger-known
+    // withdrawal ref — the shared provider account is exactly why the ledger,
+    // not the provider, must own cross-tenant scoping.
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
+        )
+        .bind("org_earn_program_victim", "Victim Org", "earn-program-victim"),
+      db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Victim Project', ?, 'sandbox', 'active', ?)`
+        )
+        .bind("prj_earn_program_victim", "org_earn_program_victim", "victim-project", TEST_USER.id),
+    ]);
+    const repo = createPostgresEarnRepository(db);
+    const victimWallet = await repo.insertProviderWallet({
+      organizationId: "org_earn_program_victim",
+      projectId: "prj_earn_program_victim",
+      environment: "sandbox",
+      provider: "ground",
+      providerWalletRef: "9a35f56f-deeb-578f-0c7c-4d2b6d8f0e32",
+      label: null,
+      createdBy: TEST_USER.id,
+    });
+    const victimRow = await repo.createProgramWithdrawal({
+      organizationId: "org_earn_program_victim",
+      projectId: "prj_earn_program_victim",
+      walletId: victimWallet?.id ?? "",
+      provider: "ground",
+      amountRequestedUsd: "50.00",
+      token: "usdc",
+      destinationAddress: SOLANA_DESTINATION,
+      requestId: crypto.randomUUID(),
+      idempotencyFingerprint: '{"scope":"earn_program_withdrawal"}',
+      providerData: {},
+      createdBy: TEST_USER.id,
+      initiatedByKeyId: null,
+    });
+    await repo.updateProgramWithdrawalStatusGuarded({
+      selector: { withdrawalId: victimRow?.id ?? "" },
+      organizationId: "org_earn_program_victim",
+      fromStatuses: ["requested"],
+      toStatus: "processing",
+      providerReference: "wd_victim_org",
+    });
+
+    const res = await requestEarn(
+      "GET",
+      "/v1/earn/program/withdrawals/wd_victim_org?provider=ground"
+    );
+
+    expect(res.status).toBe(404);
+    expect(getWithdrawal).not.toHaveBeenCalled();
+  });
+
+  describe("GET /program/withdrawals — the ledger list", () => {
+    it("returns the house list envelope from the ledger, newest first", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValueOnce({ ...WITHDRAWAL, withdrawalRef: "wd_a" })
+        .mockResolvedValueOnce({ ...WITHDRAWAL, withdrawalRef: "wd_b", status: "completed" });
+      await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        createBody({ requestId: crypto.randomUUID(), amountUsd: "10.00" })
+      );
+      await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        createBody({ requestId: crypto.randomUUID(), amountUsd: "20.00" })
+      );
+
+      const res = await requestEarn("GET", "/v1/earn/program/withdrawals?provider=ground");
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          withdrawals: Array<Record<string, unknown>>;
+          total: number;
+          page: number;
+          pageSize: number;
+        };
+      };
+      expect(body.data.total).toBe(2);
+      expect(body.data.page).toBe(1);
+      expect(body.data.pageSize).toBe(20);
+      expect(body.data.withdrawals.map((w) => w.withdrawalRef).sort()).toEqual(["wd_a", "wd_b"]);
+      const [record] = body.data.withdrawals;
+      expect(record?.id).toMatch(/^earn_program_withdrawal_/);
+      expect(record?.provider).toBe("ground");
+      expect(record?.destinationAddress).toBe(SOLANA_DESTINATION);
+      // Ledger records never leak the derivation internals.
+      expect(record).not.toHaveProperty("requestId");
+      expect(record).not.toHaveProperty("idempotencyFingerprint");
+
+      // Pagination is DB-windowed, not in-memory: a 1-per-page second page
+      // still reports the full total and exactly one row.
+      const page2 = await requestEarn(
+        "GET",
+        "/v1/earn/program/withdrawals?provider=ground&page=2&pageSize=1"
+      );
+      expect(page2.status).toBe(200);
+      const page2Body = (await page2.json()) as {
+        data: {
+          withdrawals: Array<Record<string, unknown>>;
+          total: number;
+          page: number;
+          pageSize: number;
+        };
+      };
+      expect(page2Body.data).toMatchObject({ total: 2, page: 2, pageSize: 1 });
+      expect(page2Body.data.withdrawals).toHaveLength(1);
+    });
+
+    it("serves the audit trail even with provider credentials absent (exit-safety-adjacent)", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
+        WITHDRAWAL
+      );
+      await requestEarn("POST", "/v1/earn/program/withdrawals", createBody());
+
+      // Pull the provider's credentials entirely: live reads break…
+      env.GROUND_SANDBOX_API_KEY = undefined;
+      const live = await requestEarn("GET", "/v1/earn/program?provider=ground");
+      expect(live.status).toBe(503);
+
+      // …but the ledger keeps answering. History must outlive credentials.
+      const list = await requestEarn("GET", "/v1/earn/program/withdrawals?provider=ground");
+      expect(list.status).toBe(200);
+      const body = (await list.json()) as { data: { total: number } };
+      expect(body.data.total).toBe(1);
+    });
+
+    it("returns 404 while no program wallet exists", async () => {
+      await seedAuth();
+
+      const res = await requestEarn("GET", "/v1/earn/program/withdrawals?provider=ground");
+
+      expect(res.status).toBe(404);
+    });
+
+    it("never serves the sandbox ledger to a production-project session", async () => {
+      await seedAuth();
+      await seedSessionAuth();
+      await seedProgramWallet();
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
+        WITHDRAWAL
+      );
+      await requestEarn("POST", "/v1/earn/program/withdrawals", createBody());
+
+      // The production project has no program wallet, so the wallet-scoped
+      // ledger is structurally unreachable from that environment.
+      const res = await requestEarnAsSession(
+        "GET",
+        "/v1/earn/program/withdrawals?provider=ground",
+        TEST_PRODUCTION_PROJECT.id
+      );
+
+      expect(res.status).toBe(404);
+    });
   });
 });

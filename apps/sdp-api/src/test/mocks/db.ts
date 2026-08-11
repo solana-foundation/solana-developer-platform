@@ -11,10 +11,8 @@ import { AUDIT_LEDGER_CHECKPOINT_KEY } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 const POSTGRES_TEST_TABLES = [
+  "earn_program_withdrawals",
   "earn_provider_wallets",
-  "earn_nav_snapshots",
-  "earn_movements",
-  "earn_positions",
   "earn_strategies",
   "policy_provider_sync_status",
   "policy_evaluations",

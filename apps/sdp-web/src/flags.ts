@@ -105,6 +105,19 @@ export const privateChannels = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
+export const heliusRings = flag<boolean, DashboardFlagEntities>({
+  key: "helius-rings",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("HELIUS_RINGS_ENABLED", false),
+  description:
+    "Show the Helius Rings devnet workspace (shielded wallets, private transfers, zones, timelocks).",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
 export const markets = flag<boolean, DashboardFlagEntities>({
   key: "markets",
   adapter: vercelAdapter(),

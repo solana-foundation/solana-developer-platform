@@ -19,6 +19,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/types` |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
+| `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | None |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/kit-augment` | Shared @solana/kit type augmentation for the generated Codama clients. | None |
 | `@sdp/payments` | Payment domain services, fee payment, and ramp providers. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
@@ -39,6 +40,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/custody` -> `@sdp/types`
 - `@sdp/earn` -> `@sdp/types`
 - `@sdp/env-config` -> None
+- `@sdp/helius-rings` -> None
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/kit-augment` -> None
 - `@sdp/payments` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
