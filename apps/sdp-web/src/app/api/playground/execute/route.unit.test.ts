@@ -158,6 +158,28 @@ describe("POST /api/playground/execute", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["literal parent segments", "/v1/../internal/playground/api-key/verify"],
+    ["nested parent segments", "/v1/payments/../../admin/allowlist"],
+    ["percent-encoded parent segments", "/v1/%2e%2e/admin/allowlist"],
+    ["backslash parent segments", "/v1/..\\internal/playground/api-key/verify"],
+  ])("refuses to replay a path containing %s", async (_label, path) => {
+    const request = vi.fn();
+    mocks.createSdpApiClient.mockResolvedValue({ request });
+
+    const response = await POST(
+      new Request("https://dashboard.example.com/api/playground/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: "POST", path, apiKey: OWNED_API_KEY }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Path must start with '/v1/'" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("rejects an oversized request envelope before parsing it", async () => {
     const request = vi.fn();
     mocks.createSdpApiClient.mockResolvedValue({ request });

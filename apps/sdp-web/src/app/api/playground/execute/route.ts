@@ -3,17 +3,32 @@ import { z } from "zod";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
 
+const PUBLIC_API_PATH_PREFIX = "/v1/";
+const INVALID_PATH_MESSAGE = "Path must start with '/v1/'";
+
+function normalizePublicApiPath(path: string, requestUrl: string): string | null {
+  if (!path.startsWith("/")) return null;
+
+  try {
+    const normalizedUrl = new URL(path, requestUrl);
+    if (!normalizedUrl.pathname.startsWith(PUBLIC_API_PATH_PREFIX)) return null;
+    return `${normalizedUrl.pathname}${normalizedUrl.search}`;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Playground request envelope. The path is restricted to public /v1 mounts so
- * the proxy cannot replay keys against internal or admin routes, and apiKey
- * must be non-empty — an absent key previously fell back to the caller's
- * dashboard session, escalating scope past the selected key (Hacktron audit).
+ * the proxy cannot replay keys against internal or admin routes. It is parsed
+ * as a URL before the mount check so fetch cannot reinterpret traversal
+ * segments after validation. apiKey must be non-empty — an absent key
+ * previously fell back to the caller's dashboard session, escalating scope
+ * past the selected key (Hacktron audit).
  */
 const playgroundExecuteSchema = z.object({
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"], { error: "Invalid method" }),
-  path: z
-    .string({ error: "Invalid path" })
-    .startsWith("/v1/", { error: "Path must start with '/v1/'" }),
+  path: z.string({ error: "Invalid path" }),
   body: z.unknown().optional(),
   apiKey: z
     .string({ error: "API key is required" })
@@ -74,7 +89,11 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return failureResponse(trace, 400, parsed.error.issues[0].message);
     }
-    const { method, path, body: requestBody, apiKey } = parsed.data;
+    const { method, path: requestedPath, body: requestBody, apiKey } = parsed.data;
+    const path = normalizePublicApiPath(requestedPath, request.url);
+    if (!path) {
+      return failureResponse(trace, 400, INVALID_PATH_MESSAGE);
+    }
 
     const client = await createSdpApiClient(trace.childContext("route.playground.execute.api"));
     const verification = await client.request("/internal/playground/api-key/verify", {
