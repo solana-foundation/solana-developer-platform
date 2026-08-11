@@ -104,6 +104,15 @@ evolution is that adding concrete **jurisdiction / accreditation / sanctions** c
 change to the single `evaluateHolderClearance` predicate — no engine, catalog, or schema
 change — and every rule downstream tightens automatically.
 
+**Workflow-driven operations never emit workflow events.** Only the manual HTTP handlers
+emit `token_operation_completed`; the engine's own actions (mint, burn, freeze, …) do
+not re-dispatch. This asymmetry is the loop guard: a rule's on-chain effect can never
+trigger another rule, so "WHEN mint THEN mint" cannot cascade — there is deliberately no
+cascade-depth tracking anywhere else. The trade-off is that rule-driven operations do not
+fire anyone's `token_operation_completed` rules (e.g. a notify-on-mint rule misses
+unattended mints; the execution log is the audit surface for those). Anyone adding an
+emit inside an engine action must add a cascade-depth cap in the same change.
+
 ### 4. A durable execution ledger that is also the retry state machine and the log
 
 `workflow_executions` (`0049_workflow_executions.sql`) is written **before any side effect
