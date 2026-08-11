@@ -19,10 +19,9 @@
 //
 // Run it through the root script, not with bare `node`. It imports the
 // catalogue straight from TypeScript source, and `engines.node` here is
-// `>=22.0.0` while unflagged type stripping only arrives in Node 23.6. Bare
-// `node` would therefore fail on the Node 22 that CI itself uses, so the root
-// script borrows the `tsx` that `@sdp/api` already depends on rather than
-// adding one this workspace's release-age policy will not resolve.
+// `>=24.0.0`. Keep using the workspace `tsx` command so this check follows the
+// same TypeScript execution path as the API tooling without adding another
+// dependency that the workspace release-age policy would need to resolve.
 
 import {
   SPL_TOKEN_PROGRAMS,
