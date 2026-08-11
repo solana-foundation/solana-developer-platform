@@ -22,6 +22,7 @@ type ReconciliationRepository = Pick<
   | "recordReconciliationMiss"
   | "settleReservation"
   | "markChargedUnknown"
+  | "getReservation"
   | "tripGlobalBreaker"
   | "markRedisSettled"
 >;
@@ -134,20 +135,14 @@ async function reconcileReservation(input: {
     return;
   }
   if (!reservation.signature) {
-    const persisted = await repository.markChargedUnknown(
-      reservation.id,
-      reservation.attempt,
-      "No signature was durably captured before reconciliation timeout"
-    );
-    if (!persisted) {
-      await tripBreaker(
-        repository,
-        budgetRedis,
-        reservation.network,
-        "Signature-less ambiguous reservation lost its durable transition"
-      );
-      throw new Error("Failed to persist signature-less ambiguous sponsorship outcome");
-    }
+    await persistAmbiguousCharge({
+      reservation,
+      repository,
+      budgetRedis,
+      reason: "No signature was durably captured before reconciliation timeout",
+      breakerReason: "Signature-less ambiguous reservation lost its durable transition",
+      lostTransitionError: "Failed to persist signature-less ambiguous sponsorship outcome",
+    });
     return;
   }
 
@@ -172,20 +167,14 @@ async function reconcileReservation(input: {
     return;
   }
   if (reservation.status === "submitted") {
-    const persisted = await repository.markChargedUnknown(
-      reservation.id,
-      reservation.attempt,
-      "Submitted signature absent after blockhash expiry on two reconciliation passes"
-    );
-    if (!persisted) {
-      await tripBreaker(
-        repository,
-        budgetRedis,
-        reservation.network,
-        "Ambiguous submitted reservation lost its durable transition"
-      );
-      throw new Error("Failed to retain ambiguous submitted sponsorship charge");
-    }
+    await persistAmbiguousCharge({
+      reservation,
+      repository,
+      budgetRedis,
+      reason: "Submitted signature absent after blockhash expiry on two reconciliation passes",
+      breakerReason: "Ambiguous submitted reservation lost its durable transition",
+      lostTransitionError: "Failed to retain ambiguous submitted sponsorship charge",
+    });
     return;
   }
   await settleDurably(
@@ -273,6 +262,32 @@ async function tripBreaker(
 ): Promise<void> {
   const policy = await repository.tripGlobalBreaker(network, reason);
   if (policy) await budgetRedis.syncPolicy(policy);
+}
+
+async function persistAmbiguousCharge(input: {
+  reservation: SponsorshipReconciliationReservation;
+  repository: ReconciliationRepository;
+  budgetRedis: ReconciliationRedis;
+  reason: string;
+  breakerReason: string;
+  lostTransitionError: string;
+}): Promise<void> {
+  const { reservation, repository, budgetRedis } = input;
+  if (await repository.markChargedUnknown(reservation.id, reservation.attempt, input.reason)) {
+    return;
+  }
+  const current = await repository.getReservation(reservation.id);
+  const concurrentlyResolved =
+    current !== null &&
+    (current.attempt !== reservation.attempt ||
+      current.status === "charged_unknown" ||
+      current.status === "committed" ||
+      current.status === "released");
+  if (concurrentlyResolved) {
+    return;
+  }
+  await tripBreaker(repository, budgetRedis, reservation.network, input.breakerReason);
+  throw new Error(input.lostTransitionError);
 }
 
 function assertRpc(rpc: solanaRpc.SolanaRpc | null): solanaRpc.SolanaRpc {

@@ -100,6 +100,7 @@ function harness(candidate: SponsorshipReconciliationReservation) {
     recordReconciliationMiss: vi.fn().mockResolvedValue(true),
     settleReservation: vi.fn().mockResolvedValue(true),
     markChargedUnknown: vi.fn().mockResolvedValue(true),
+    getReservation: vi.fn().mockResolvedValue(null),
     tripGlobalBreaker: vi.fn().mockResolvedValue(breakerPolicy),
     markRedisSettled: vi.fn().mockResolvedValue(true),
   };
@@ -295,19 +296,19 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(repository.markRedisSettled).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { feePayer: "changed_signer" },
-    { providerConfigFingerprint: "changed_configuration" },
-  ])("trips the breaker when Kora security identity drifts ($feePayer)", async (override) => {
-    const { repository, budgetRedis, getTransaction, run } = harness(reservation(override));
-    await expect(run()).rejects.toThrow("failed reconciliation");
-    expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
-      "devnet",
-      expect.stringContaining("configuration changed")
-    );
-    expect(budgetRedis.syncPolicy).toHaveBeenCalledOnce();
-    expect(getTransaction).not.toHaveBeenCalled();
-  });
+  it.each([{ feePayer: "changed_signer" }, { providerConfigFingerprint: "changed_configuration" }])(
+    "trips the breaker when Kora security identity drifts ($feePayer)",
+    async (override) => {
+      const { repository, budgetRedis, getTransaction, run } = harness(reservation(override));
+      await expect(run()).rejects.toThrow("failed reconciliation");
+      expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
+        "devnet",
+        expect.stringContaining("configuration changed")
+      );
+      expect(budgetRedis.syncPolicy).toHaveBeenCalledOnce();
+      expect(getTransaction).not.toHaveBeenCalled();
+    }
+  );
 
   it("trips the breaker when Kora security configuration cannot be read", async () => {
     const candidate = reservation();
@@ -327,5 +328,40 @@ describe("reconcileSponsorshipBudgets", () => {
       expect.stringContaining("unavailable")
     );
     expect(getTransaction).not.toHaveBeenCalled();
+  });
+
+  it("does not trip the breaker when a concurrent pass already recorded the ambiguous charge", async () => {
+    const { repository, budgetRedis, run } = harness(reservation({ signature: null, attempt: 1 }));
+    repository.markChargedUnknown.mockResolvedValue(false);
+    repository.getReservation.mockResolvedValue({
+      id: "reservation_1",
+      status: "charged_unknown",
+      signature: null,
+      signedTransaction: null,
+      reservedLamports: 3,
+      actualLamports: null,
+      attempt: 1,
+    });
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(repository.getReservation).toHaveBeenCalledWith("reservation_1");
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+    expect(budgetRedis.syncPolicy).not.toHaveBeenCalled();
+  });
+
+  it("trips the breaker when the ambiguous charge is lost with no concurrent terminal transition", async () => {
+    const { repository, budgetRedis, run } = harness(reservation({ signature: null, attempt: 1 }));
+    repository.markChargedUnknown.mockResolvedValue(false);
+    repository.getReservation.mockResolvedValue(null);
+
+    await expect(run()).rejects.toThrow("failed reconciliation");
+
+    expect(repository.getReservation).toHaveBeenCalledWith("reservation_1");
+    expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
+      "devnet",
+      expect.stringContaining("lost its durable transition")
+    );
+    expect(budgetRedis.syncPolicy).toHaveBeenCalledOnce();
   });
 });
