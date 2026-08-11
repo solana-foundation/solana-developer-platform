@@ -10,6 +10,7 @@ type BadgeVariant = "default" | "primary" | "success" | "warning" | "danger" | "
 
 type BadgeProps = PropsWithChildren<
   Omit<SolanaBadgeProps, "variant"> & {
+    className?: string;
     variant?: BadgeVariant;
   }
 >;
