@@ -34,6 +34,11 @@
       "import": "./src/capabilities/index.ts",
       "default": "./src/capabilities/index.ts"
     },
+    "./workflows": {
+      "types": "./src/workflows/index.ts",
+      "import": "./src/workflows/index.ts",
+      "default": "./src/workflows/index.ts"
+    },
     "./templates": {
       "types": "./src/templates/index.ts",
       "import": "./src/templates/index.ts",
