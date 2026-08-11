@@ -84,23 +84,13 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isDefaultProvider": true,
+              "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
               "status": "active",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "balances": [
-                {
-                  "token": "USDC",
-                  "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-                  "amount": "1250000",
-                  "uiAmount": "1.25",
-                  "decimals": 6,
-                  "usdPrice": 1,
-                  "usdValue": 125.5
-                }
-              ]
+              "createdAt": "2025-01-01T00:00:00.000Z"
             }
           },
           "meta": {
@@ -247,23 +237,13 @@
                 "custodyConfigId": "cfg_example",
                 "provider": "privy",
                 "isDefaultProvider": true,
+                "isRuntimeExecutionAllowed": true,
                 "walletId": "privy_wallet_123",
                 "publicKey": "So11111111111111111111111111111111111111112",
                 "label": "Root Signing Wallet",
                 "purpose": "root",
                 "status": "active",
-                "createdAt": "2025-01-01T00:00:00.000Z",
-                "balances": [
-                  {
-                    "token": "USDC",
-                    "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-                    "amount": "1250000",
-                    "uiAmount": "1.25",
-                    "decimals": 6,
-                    "usdPrice": 1,
-                    "usdValue": 125.5
-                  }
-                ]
+                "createdAt": "2025-01-01T00:00:00.000Z"
               }
             ]
           },
@@ -976,19 +956,13 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isDefaultProvider": true,
+              "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
               "status": "active",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "balance": {
-                "token": "SOL",
-                "mint": "So11111111111111111111111111111111111111112",
-                "amount": "123456789",
-                "uiAmount": "0.123456789",
-                "decimals": 9
-              }
+              "createdAt": "2025-01-01T00:00:00.000Z"
             }
           },
           "meta": {
@@ -1030,23 +1004,13 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isDefaultProvider": true,
+              "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
               "status": "active",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "balances": [
-                {
-                  "token": "USDC",
-                  "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-                  "amount": "1250000",
-                  "uiAmount": "1.25",
-                  "decimals": 6,
-                  "usdPrice": 1,
-                  "usdValue": 125.5
-                }
-              ]
+              "createdAt": "2025-01-01T00:00:00.000Z"
             }
           },
           "meta": {

@@ -14,6 +14,8 @@ import {
 function custodyWallet(walletId: string, publicKey: string, label: string): CustodyWalletSummary {
   return {
     id: `custody_${walletId}`,
+    custodyConfigId: "custody-config-1",
+    isRuntimeExecutionAllowed: true,
     walletId,
     publicKey,
     label,

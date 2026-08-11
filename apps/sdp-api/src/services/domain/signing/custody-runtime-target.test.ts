@@ -150,6 +150,34 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toMatchObject({ kind: "config", config: { id: config.id } });
   });
 
+  it("resolves an exact unselected Connection without falling back to Config", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const connection = await seedConnection();
+    await setProjectDefault(config.id, null);
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.resolve({
+        kind: "connection",
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        connectionId: connection.id,
+      })
+    ).resolves.toMatchObject({
+      kind: "connection",
+      connectionId: connection.id,
+      isRuntimeAvailable: true,
+    });
+    await expect(
+      targets.resolve({
+        kind: "connection",
+        organizationId: ORGANIZATION_ID,
+        projectId: "prj_foreign",
+        connectionId: connection.id,
+      })
+    ).resolves.toBeNull();
+  });
+
   it("keeps an effective same-provider Config ahead of an unselected Connection", async () => {
     const config = await seedConfig({ provider: "privy" });
     await seedConnection();

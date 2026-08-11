@@ -423,6 +423,97 @@ describe("Custody wallet scope routes", () => {
     });
   });
 
+  it("keeps balances distinct when two Connections share a Provider wallet ID", async () => {
+    const sharedWalletId = "privy_shared_provider_wallet";
+    for (const [suffix, publicKey] of [
+      ["a", TEST_SOLANA_ADDRESSES.wallet2],
+      ["b", TEST_SOLANA_ADDRESSES.wallet3],
+    ] as const) {
+      const credentialId = `pcred_scope_shared_${suffix}`;
+      const connectionId = `cconn_scope_shared_${suffix}`;
+      const walletRecordId = `cwlt_scope_shared_${suffix}`;
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            `INSERT INTO provider_credentials (
+               id, organization_id, project_id, provider, label, scope, source,
+               storage_backend, encrypted_secret_payload, status, created_by
+             ) VALUES (?, ?, ?, 'privy', ?, 'project', 'stored',
+                       'encrypted_db', 'not-read', 'active', ?)`
+          )
+          .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, suffix, TEST_USER.id),
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_connections (
+               id, organization_id, project_id, provider, scope,
+               provider_credential_id, provider_credential_scope_key, status, created_by
+             ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+          )
+          .bind(
+            connectionId,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            credentialId,
+            TEST_PROJECT.id,
+            TEST_USER.id
+          ),
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets (
+               id, custody_connection_id, wallet_id, public_key, status
+             ) VALUES (?, ?, ?, ?, 'active')`
+          )
+          .bind(walletRecordId, connectionId, sharedWalletId, publicKey),
+        getDb(env)
+          .prepare(
+            `UPDATE custody_connections
+             SET default_custody_wallet_id = ?, status = 'active',
+                 last_check_status = 'success', last_check_at = sdp_iso_now(),
+                 provider_account_fingerprint = ?,
+                 activated_at = sdp_iso_now()
+             WHERE id = ?`
+          )
+          .bind(walletRecordId, `sha256:${suffix}`, connectionId),
+      ]);
+    }
+    getSplTokenBalancesMock.mockResolvedValue([]);
+    getAccountInfoMock.mockImplementation(
+      async (_rpc, publicKey) =>
+        ({
+          lamports:
+            publicKey === TEST_SOLANA_ADDRESSES.wallet2
+              ? 1_000_000_000n
+              : publicKey === TEST_SOLANA_ADDRESSES.wallet3
+                ? 2_000_000_000n
+                : 0n,
+          owner: "11111111111111111111111111111111",
+        }) as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>
+    );
+
+    const response = await app.request(
+      "/v1/wallets/aggregate?includeAllProviders=true",
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        aggregate: {
+          walletCount: number;
+          balances: Array<{ token: string; uiAmount: string }>;
+        };
+      };
+    };
+    expect(body.data.aggregate.walletCount).toBe(5);
+    expect(body.data.aggregate.balances.find((balance) => balance.token === "SOL")).toMatchObject({
+      uiAmount: "3",
+    });
+  });
+
   it("returns the requested public key when the wallet is authorized", async () => {
     await seedCachedKey({
       walletBindings: [{ walletId: "para_wallet_a", permissions: ["wallets:read"] }],
