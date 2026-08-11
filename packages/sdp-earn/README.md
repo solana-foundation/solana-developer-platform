@@ -309,9 +309,13 @@ Two things write `earn_strategies`, and only one of them is a production path.
   `listStrategies` per environment (sandbox + production), validates each row
   against the provider's declared support, and upserts on
   `(provider, provider_reference, environment)`.
-- **When it runs:** hourly (`EARN_CATALOGUE_SYNC_CRON = "0 * * * *"`), and it is
-  **registered only when the Markets/Earn flag gate passes** (`isEarnEnabled` in
-  `cron/runner.ts`) — so it is completely inert in a flag-off environment.
+- **When it runs:** hourly (`EARN_CATALOGUE_SYNC_CRON = "0 * * * *"`), on two
+  schedulers behind the same flag gate (`isEarnEnabled`): in-process node-cron
+  (`cron/runner.ts` — self-hosted and explicitly opted-in services) and the
+  managed Cloud Run Job (`apps/sdp-api/src/job.ts`), where each five-minute
+  tick claims an hourly Redis slot first (`runEarnCatalogueSyncIfDue`) so the
+  effective cadence stays hourly. Completely inert in a flag-off environment
+  either way.
 - **Failure behaviour:** per-provider isolation. `NOT_IMPLEMENTED` and
   `PROVIDER_NOT_CONFIGURED` are info-level skips (that is the normal state for
   the stub providers); any other error is logged for that provider and never

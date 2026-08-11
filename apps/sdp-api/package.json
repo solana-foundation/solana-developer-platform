@@ -78,7 +78,7 @@
     "@solana/token-acl-gate-sdk": "0.2.0",
     "@solana/transactions": "catalog:",
     "hono": "^4.12.34",
-    "ioredis": "^5.11.1",
+    "ioredis": "^6.0.0",
     "jose": "^6.2.7",
     "nanoid": "^5.1.16",
     "node-cron": "^4.6.0",
