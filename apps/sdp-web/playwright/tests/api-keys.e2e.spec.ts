@@ -20,7 +20,7 @@ test.describe
       const keyName = `Playwright Selected Wallet Key ${Date.now()}`;
 
       await page.goto("/dashboard/api-keys");
-      await page.getByRole("link", { name: "New API key", exact: true }).click();
+      await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
 
       await page.getByLabel("Name").fill(keyName);
       await page.getByRole("button", { name: "Continue" }).click();
@@ -80,7 +80,7 @@ test.describe
       const keyName = `Playwright Restricted Key ${Date.now()}`;
 
       await page.goto("/dashboard/api-keys");
-      await page.getByRole("link", { name: "New API key", exact: true }).click();
+      await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
       await page.getByLabel("Name").fill(keyName);
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
