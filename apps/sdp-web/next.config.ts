@@ -11,18 +11,6 @@ const docsProxyOrigin = (
 
 const nextConfig: NextConfig = {
   distDir: process.env.PLAYWRIGHT_NEXT_DIST_DIR?.trim() || ".next",
-  experimental: {
-    // Router-cache TTL for dynamic pages (Next defaults to 0, so every navigation
-    // re-runs the server component and flashes loading.tsx). Within the TTL a
-    // revisited page renders instantly from cache and SWR revalidates the data
-    // client-side.
-    //
-    // Tenant safety: this TTL never spans a tenant switch. Project and org changes
-    // both run a Server Action that mutates the project cookie (or fall back to
-    // router.refresh()), and either operation purges the entire client Router Cache.
-    // Any future tenant-switch path must keep doing one of those two things.
-    staleTimes: { dynamic: 300 },
-  },
   async rewrites() {
     return [
       {
