@@ -1,5 +1,6 @@
 /** Environment variables consumed by the Node API runtime. */
 
+import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
@@ -194,9 +195,6 @@ export interface Env {
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
 
-  // AlphaLedger Vulcan Forge tokenization engine
-  ALPHALEDGER_API_KEY?: string;
-
   // MagicBlock private payments configuration
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
   MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
@@ -303,7 +301,7 @@ declare module "hono" {
     approvedWalletOperationId?: string;
     approvedWalletOperationAttemptId?: string;
     // Set by policyGate middleware for gated routes
-    policyGate?: PolicyGateContext;
+    policyGate?: PolicyGateContext<unknown, unknown, WalletOperationPolicyEnforcement | null>;
     apiKey?: {
       id: string;
       organizationId: string;

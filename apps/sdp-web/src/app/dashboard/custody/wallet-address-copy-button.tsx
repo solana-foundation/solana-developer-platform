@@ -54,9 +54,16 @@ export function WalletMetadataCopyButton({ value, label, tooltip }: WalletMetada
 
 interface WalletAddressCopyButtonProps {
   address: string;
+  tooltip?: string;
 }
 
-export function WalletAddressCopyButton({ address }: WalletAddressCopyButtonProps) {
+export function WalletAddressCopyButton({ address, tooltip }: WalletAddressCopyButtonProps) {
   const t = useTranslations();
-  return <WalletMetadataCopyButton value={address} label={t("DashboardCustody.walletAddress")} />;
+  return (
+    <WalletMetadataCopyButton
+      value={address}
+      label={t("DashboardCustody.walletAddress")}
+      tooltip={tooltip}
+    />
+  );
 }

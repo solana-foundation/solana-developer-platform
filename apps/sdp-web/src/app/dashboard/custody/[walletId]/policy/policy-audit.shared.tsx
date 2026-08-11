@@ -5,7 +5,7 @@ import {
   type WalletPolicyEvaluationDetail,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import Link from "next/link";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";

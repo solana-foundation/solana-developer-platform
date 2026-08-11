@@ -12,10 +12,8 @@ vi.mock("@/i18n/provider", () => ({
   useLocale: () => "en",
 }));
 
-vi.mock("@/components/dashboard-navigation-link", () => ({
-  DashboardNavigationLink: ({ children, ...props }: ComponentProps<"a">) => (
-    <a {...props}>{children}</a>
-  ),
+vi.mock("next/link", () => ({
+  default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,
 }));
 
 // The workspace reads live data exclusively through these hooks, so the tests

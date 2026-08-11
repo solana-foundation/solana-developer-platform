@@ -1,8 +1,8 @@
 "use client";
 
 import { ArrowUpRightIcon } from "lucide-react";
+import Link from "next/link";
 import type { MouseEventHandler, ReactNode } from "react";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { cn } from "@/lib/utils";
 
 /**
@@ -27,7 +27,7 @@ export function EntityLink({
   className?: string;
 }) {
   return (
-    <DashboardNavigationLink
+    <Link
       href={href}
       onClick={onClick}
       className={cn(
@@ -37,6 +37,6 @@ export function EntityLink({
     >
       <span className="min-w-0 truncate">{children}</span>
       <ArrowUpRightIcon aria-hidden="true" className="size-3.5 shrink-0 text-tertiary" />
-    </DashboardNavigationLink>
+    </Link>
   );
 }

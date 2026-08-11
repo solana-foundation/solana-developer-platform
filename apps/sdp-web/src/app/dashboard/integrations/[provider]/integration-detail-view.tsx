@@ -1,10 +1,10 @@
 import type { OrganizationRpcProvider } from "@sdp/types";
 import Image from "next/image";
+import Link from "next/link";
 import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { RpcProviderMark } from "@/app/dashboard/onboarding/rpc-provider-mark";
 import { docsHref } from "@/components/dashboard-nav";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
@@ -81,18 +81,16 @@ function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
   if (detail.family === "custody" && detail.status === "active") {
     return (
       <Button asChild>
-        <DashboardNavigationLink href="/dashboard/wallets">
-          {t("Shared.integrations.ctaManage")}
-        </DashboardNavigationLink>
+        <Link href="/dashboard/wallets">{t("Shared.integrations.ctaManage")}</Link>
       </Button>
     );
   }
   if (detail.family === "custody" && detail.status === "available") {
     return (
       <Button asChild>
-        <DashboardNavigationLink href={`/dashboard/wallets/setup?provider=${detail.provider}`}>
+        <Link href={`/dashboard/wallets/setup?provider=${detail.provider}`}>
           {t("Shared.integrations.ctaConfigure")}
-        </DashboardNavigationLink>
+        </Link>
       </Button>
     );
   }
@@ -108,9 +106,7 @@ function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
   if (detail.family === "rpc") {
     return (
       <Button asChild variant="secondary">
-        <DashboardNavigationLink href="/dashboard/settings">
-          {t("Shared.integrations.rpcSectionAction")}
-        </DashboardNavigationLink>
+        <Link href="/dashboard/settings">{t("Shared.integrations.rpcSectionAction")}</Link>
       </Button>
     );
   }

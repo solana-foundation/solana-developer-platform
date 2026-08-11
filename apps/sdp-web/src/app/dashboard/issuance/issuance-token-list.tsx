@@ -22,6 +22,7 @@ import {
   Terminal,
   UsersRound,
 } from "lucide-react";
+import Link from "next/link";
 import {
   type ReactNode,
   useCallback,
@@ -32,7 +33,6 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

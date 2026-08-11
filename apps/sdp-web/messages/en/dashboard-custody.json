@@ -9,6 +9,7 @@
     "existingApiKeys": "Existing API keys",
     "apiKeysDescription": "Active and historical keys for this workspace.",
     "newApiKey": "New API key",
+    "createNewApiKey": "Create new API key",
     "noApiKeysFound": "No API keys found.",
     "name": "Name",
     "prefix": "Prefix",

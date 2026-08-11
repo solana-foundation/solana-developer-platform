@@ -8,8 +8,8 @@ import type {
   EarnStrategy,
 } from "@sdp/types";
 import { CheckIcon, CopyIcon } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
@@ -304,9 +304,9 @@ function ProgramSection() {
               {t("DashboardEarn.overview.withdraw")}
             </Button>
             <Button asChild className="flex-1 sm:flex-none">
-              <DashboardNavigationLink data-earn-withdraw-focus-fallback href={DEPOSIT_PATH}>
+              <Link data-earn-withdraw-focus-fallback href={DEPOSIT_PATH}>
                 {t("DashboardEarn.overview.changeStrategy")}
-              </DashboardNavigationLink>
+              </Link>
             </Button>
           </div>
         ) : null}
@@ -486,9 +486,7 @@ function StartSection() {
 
       <div className="mt-6">
         <Button asChild>
-          <DashboardNavigationLink href={DEPOSIT_PATH}>
-            {t("DashboardEarn.overview.startAction")}
-          </DashboardNavigationLink>
+          <Link href={DEPOSIT_PATH}>{t("DashboardEarn.overview.startAction")}</Link>
         </Button>
       </div>
 
