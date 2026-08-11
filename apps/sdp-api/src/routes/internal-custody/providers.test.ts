@@ -156,13 +156,20 @@ async function seedCredential(): Promise<void> {
     .run();
 }
 
-async function seedConnection(id: string, status: string): Promise<void> {
-  await getDb(env)
+async function seedConnection(
+  id: string,
+  status: "pending" | "checking" | "active" | "failed" | "deactivated"
+): Promise<void> {
+  const db = getDb(env);
+  const insertedStatus = status === "active" ? "pending" : status;
+  const lastCheckStatus = status === "checking" ? "running" : status === "failed" ? "failed" : null;
+  await db
     .prepare(
       `INSERT INTO custody_connections
          (id, organization_id, project_id, provider, scope, provider_credential_id,
-          provider_credential_scope_key, status, activated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          provider_credential_scope_key, status, last_check_status, last_check_at,
+          deactivated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -172,11 +179,32 @@ async function seedConnection(id: string, status: string): Promise<void> {
       "project",
       CREDENTIAL_ID,
       TEST_PROJECT.id,
-      status,
-      // The schema requires an activation timestamp on an active connection.
-      status === "active" ? "2026-08-05T00:00:00.000Z" : null
+      insertedStatus,
+      lastCheckStatus,
+      lastCheckStatus ? "2026-08-05T00:00:00.000Z" : null,
+      status === "deactivated" ? "2026-08-05T00:00:00.000Z" : null
     )
     .run();
+
+  if (status !== "active") return;
+  const walletId = `cwlt_${id}`;
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_connection_id, wallet_id, public_key, status)
+         VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(walletId, id, `provider_${id}`, `public_${id}`),
+    db
+      .prepare(
+        `UPDATE custody_connections
+         SET status = 'active', default_custody_wallet_id = ?,
+             last_check_status = 'success', last_check_at = ?, activated_at = ?
+         WHERE id = ?`
+      )
+      .bind(walletId, "2026-08-05T00:00:00.000Z", "2026-08-05T00:00:00.000Z", id),
+  ]);
 }
 
 async function fetchSetupStatus(): Promise<CustodySetupStatusResponse> {

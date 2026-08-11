@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.57.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.56.0...v0.57.0) (2026-08-10)
+
+### Features
+
+* **sdp-api:** shared policyGate middleware with zero-write dry-run, piloted on transfers (PRO-1657) ([#1186](https://github.com/solana-foundation/solana-developer-platform/pull/1186)) ([8ca8d7a](https://github.com/solana-foundation/solana-developer-platform/commit/8ca8d7a61ced1efd0d9e180f12f8e75c583157bb))
+* **payments:** resolve issued-token images and record mints on transfer rows ([#1139](https://github.com/solana-foundation/solana-developer-platform/pull/1139)) ([696adf8](https://github.com/solana-foundation/solana-developer-platform/commit/696adf882cb9e303cea6725017285ef860e1cf35))
+* **earn:** inventory Ground catalogue coverage vs the V1 RWA promise ([#1137](https://github.com/solana-foundation/solana-developer-platform/pull/1137)) ([5d55290](https://github.com/solana-foundation/solana-developer-platform/commit/5d55290a89832c1dc1a58d4fb01c71d12b79b5f2))
+
+### Bug Fixes
+
+* **release:** ignore misclassified breaking footer ([aaf99ab](https://github.com/solana-foundation/solana-developer-platform/commit/aaf99ab41e86b10d82191d30adaef237a20a57bc))
+* **api:** enforce recurring settlement integrity ([#1084](https://github.com/solana-foundation/solana-developer-platform/pull/1084)) ([c3485d8](https://github.com/solana-foundation/solana-developer-platform/commit/c3485d8c035d57cbd58c4058e2f4203369441459))
+* **sdp-api:** bootstrap audit-ledger checkpoint when the external key is absent ([#1183](https://github.com/solana-foundation/solana-developer-platform/pull/1183)) ([dbbf525](https://github.com/solana-foundation/solana-developer-platform/commit/dbbf5257fa3389d172188cf0ef696c81c5abed22))
+* **sdp-api:** normalize API-key wallet-policy bindings onto custody_wallet_id (PRO-1658) ([#1181](https://github.com/solana-foundation/solana-developer-platform/pull/1181)) ([e464e4f](https://github.com/solana-foundation/solana-developer-platform/commit/e464e4fbe06027bc330160f9cc980d44692b4677))
+
+### Maintenance
+
+* **sdp-api:** split payments route tests and parallelize the unit suite ([#1201](https://github.com/solana-foundation/solana-developer-platform/pull/1201)) ([4d972c7](https://github.com/solana-foundation/solana-developer-platform/commit/4d972c7b117aa20a8adee116bf02bed14b3a7d6e))
+* **deps-dev:** bump @asteasolutions/zod-to-openapi from 8.5.0 to 9.1.0 ([17d7210](https://github.com/solana-foundation/solana-developer-platform/commit/17d72101589d75fe2877af1cda8e796aa6c59e93))
+* **deps:** bump nanoid from 5.1.11 to 5.1.16 ([2798a80](https://github.com/solana-foundation/solana-developer-platform/commit/2798a8036181aec7eca56da3a994fbabefa2a3ce))
+* **deps:** bump the minor-patch group with 47 updates ([611bd60](https://github.com/solana-foundation/solana-developer-platform/commit/611bd604e32b0c2d54eb4e00bd2db41279bc2445))
+
 ## [0.56.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.55.0...v0.56.0) (2026-08-07)
 
 ### Features
