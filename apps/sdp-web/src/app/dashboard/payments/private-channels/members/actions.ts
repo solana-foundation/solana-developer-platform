@@ -9,6 +9,7 @@ import {
   removeChannelMembership as removeChannelMembershipCall,
 } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
+import { requirePrivateChannelsAccess } from "../private-channels-access";
 
 const MEMBERS_PATH = "/dashboard/payments/private-channels/members";
 
@@ -17,6 +18,7 @@ export type ActionResult<T = void> = { ok: true; value: T } | { ok: false; messa
 export async function inviteMemberAction(
   userId: string
 ): Promise<ActionResult<{ user: PrivateChannelUserDto; inviteUrl: string }>> {
+  await requirePrivateChannelsAccess("project-members:write");
   try {
     const client = await createSdpApiClient();
     const value = await inviteCall(client, { userId });
@@ -28,6 +30,7 @@ export async function inviteMemberAction(
 }
 
 export async function deleteMemberAction(id: string): Promise<ActionResult> {
+  await requirePrivateChannelsAccess("project-members:write");
   try {
     const client = await createSdpApiClient();
     await deletePrivateChannelUserCall(client, id);
@@ -42,6 +45,7 @@ export async function addToChannelAction(
   channelId: string,
   privateChannelUserId: string
 ): Promise<ActionResult> {
+  await requirePrivateChannelsAccess("project-members:write");
   try {
     const client = await createSdpApiClient();
     await addChannelMembershipCall(client, channelId, privateChannelUserId);
@@ -56,6 +60,7 @@ export async function removeFromChannelAction(
   channelId: string,
   privateChannelUserId: string
 ): Promise<ActionResult> {
+  await requirePrivateChannelsAccess("project-members:write");
   try {
     const client = await createSdpApiClient();
     await removeChannelMembershipCall(client, channelId, privateChannelUserId);
