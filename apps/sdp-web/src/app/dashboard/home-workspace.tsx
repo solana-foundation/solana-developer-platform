@@ -710,7 +710,7 @@ export function HomeWorkspace({
                               </span>
                             </TableCell>
                             <TableCell className="hidden text-right text-secondary tabular-nums md:table-cell">
-                              <TruncatedTableText value={amountLabel} className="truncate" />
+                              <div className="truncate">{amountLabel}</div>
                             </TableCell>
                             <TableCell className="hidden pr-6 font-mono text-xs text-secondary md:table-cell">
                               <ActivityAddress row={row} cluster={cluster} className="truncate" />
