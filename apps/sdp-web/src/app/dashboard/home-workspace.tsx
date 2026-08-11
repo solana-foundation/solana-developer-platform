@@ -3,7 +3,7 @@
 import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { TokenMark } from "@/components/token-mark";
@@ -54,11 +54,23 @@ interface HomeWorkspaceProps {
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
 const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
 
+/** Table text that ellipsizes, with a full-value tooltip only while it actually overflows. */
 function TruncatedTableText({ value, className }: { value: string; className?: string }) {
+  const textRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+
   return (
-    <Tooltip>
+    <Tooltip
+      open={open}
+      onOpenChange={(next) => {
+        const node = textRef.current;
+        setOpen(next && node !== null && node.scrollWidth > node.clientWidth);
+      }}
+    >
       <TooltipTrigger asChild>
-        <div className={className ?? "truncate"}>{value}</div>
+        <div ref={textRef} className={className ?? "truncate"}>
+          {value}
+        </div>
       </TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[32rem] break-all text-xs">
         {value}
