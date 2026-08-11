@@ -16,15 +16,8 @@ export type ActionSupportResult = { ok: true } | { ok: false; reason: ActionUnsu
 
 export interface ValidateActionInput {
   action: WorkflowActionType;
-  /** The asset's enabled advanced settings (as persisted under issuance_metadata.settings). */
   selectedSettings: Record<string, SelectedSetting>;
-  /** Whether the token has an allowlist (ablListAddress present). */
   hasAllowlist: boolean;
-  /**
-   * Whether the token still has a live mint authority. Optional so callers
-   * that only gate non-supply actions don't have to load it; when omitted
-   * the mint check is skipped rather than assumed false.
-   */
   isMintable?: boolean;
 }
 
@@ -61,13 +54,10 @@ function selectedSettingsUnlock(
 
 /**
  * Workflow capability gate: whether an asset can actually perform a given
- * action. Pure and mosaic-free so it can be reused at save time (reject bad
- * rules) and execution time (revalidate before running); mirrors
- * `capabilities/index.ts`'s validation style. Single gate used both
- * save-time and execution-time: side-effect actions (`kind: "none"`) need no
- * asset capability; base ops carry no advanced-setting gate, but minting
- * still requires a live mint authority — without this check the two most
- * destructive actions would get the weakest gate.
+ * action. Pure and mosaic-free, used at save time (reject bad rules) and
+ * execution time (revalidate before running). `isMintable` is optional so
+ * callers that only gate non-supply actions don't have to load it; when
+ * omitted the mint check is skipped rather than assumed false.
  *
  * @param input - The action to validate plus the asset's capability state.
  * @returns Whether the action is supported, or the reason it is not.

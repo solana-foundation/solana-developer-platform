@@ -1,17 +1,9 @@
 import type { WorkflowAction, WorkflowActionType } from "@sdp/types";
 
-/**
- * Builds the i18n label key for an action type.
- * @param type - Action type identifier.
- * @returns The dashboard-issuance.json message key for the action's label.
- */
+/** Builds the i18n label key for an action type. */
 const action = (type: string): string => `DashboardIssuance.workflows.actionLabels.${type}`;
 
-/**
- * Builds the i18n description key for an action type.
- * @param type - Action type identifier.
- * @returns The dashboard-issuance.json message key for the action's description.
- */
+/** Builds the i18n description key for an action type. */
 const desc = (type: string): string => `DashboardIssuance.workflows.actionDescriptions.${type}`;
 
 /**

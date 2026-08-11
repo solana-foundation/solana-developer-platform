@@ -1,10 +1,5 @@
 import type { TokenTransactionType } from "./tokens";
 
-/**
- * Trigger type identifiers ("WHEN"). v1 sources are all internal events SDP emits
- * after processing provider webhooks / cron; `external_webhook` is the documented
- * future source.
- */
 export const WORKFLOW_TRIGGER_TYPES = [
   "kyc_approved",
   "kyc_rejected",
@@ -15,10 +10,6 @@ export const WORKFLOW_TRIGGER_TYPES = [
 ] as const;
 export type WorkflowTriggerType = (typeof WORKFLOW_TRIGGER_TYPES)[number];
 
-/**
- * Action type identifiers ("THEN"). On-chain ops are gated by capability;
- * side-effects are always available.
- */
 export const WORKFLOW_ACTION_TYPES = [
   "allowlist_add",
   "allowlist_remove",
@@ -37,68 +28,42 @@ export const WORKFLOW_ACTION_TYPES = [
 export type WorkflowActionType = (typeof WORKFLOW_ACTION_TYPES)[number];
 
 /**
- * Execution tier, driving UI badge + auto/manual policy:
- * - `automated` — runs unattended (green "Automated")
- * - `sensitive` — reversible but disruptive; defaults to manual review, issuer may opt into auto (amber "Sensitive")
- * - `requires_approval` — destructive/irreversible; always manual, can never be auto (red "Requires approval")
+ * `automated` runs unattended; `sensitive` defaults to manual review but the
+ * issuer may opt into auto; `requires_approval` is always manual and can never
+ * be configured to auto-run.
  */
 export type WorkflowExecutionTier = "automated" | "sensitive" | "requires_approval";
 
-/**
- * Auto-apply vs hold for a human. Enrollments and rules share this shape.
- */
 export type ReviewMode = "auto" | "manual";
 
 /**
- * Shape of a trigger catalog entry. This package defines the shape only — the
- * trigger/action catalog and validation logic live in `@sdp/issuance/workflows`
- * (mirrors the advanced-settings ↔ capabilities split) to avoid a circular import
- * between `@sdp/types` and `@sdp/issuance`.
+ * Shapes only — catalog data and validation live in `@sdp/issuance/workflows`
+ * to avoid a circular import between `@sdp/types` and `@sdp/issuance`.
  */
 export interface WorkflowTrigger {
   labelKey: string;
   descriptionKey: string;
-  /** Where the trigger event originates. v1 = internal_event. */
   source: "internal_event" | "external_webhook";
-  /**
-   * Fields the UI can offer GUARD conditions over (operational filters only —
-   * never legally load-bearing eligibility, which gates emission upstream).
-   */
+  /** Fields guards may filter on — operational only, never eligibility. */
   conditionFields: readonly string[];
 }
 
-/**
- * How an action is authorized against the asset's capabilities.
- */
 export type WorkflowActionRequirement =
-  /** Maps to a Token-2022 op unlocked by an enabled AdvancedSetting (`ADVANCED_SETTINGS[key].actions`). */
+  /** Token-2022 op unlocked by an enabled AdvancedSetting. */
   | { kind: "token_transaction"; action: TokenTransactionType }
-  /** Requires the token to have an allowlist (ablListAddress set). */
   | { kind: "allowlist" }
-  /**
-   * Base on-chain op available on any deployed token (e.g. mint/burn) — no
-   * advanced-setting gate; finer runtime checks (deployed, authority still held)
-   * happen at execution time.
-   */
+  /** Base op on any deployed token; finer checks happen at execution time. */
   | { kind: "base"; action: TokenTransactionType }
-  /** Pure side-effect (webhook, notify, record, approval task) — no capability gate. */
   | { kind: "none" };
 
-/**
- * Shape of an action catalog entry (catalog data lives in `@sdp/issuance/workflows`).
- */
 export interface WorkflowAction {
   labelKey: string;
   descriptionKey: string;
   requires: WorkflowActionRequirement;
   execution: WorkflowExecutionTier;
-  /** Whether re-running the action on the same target is a safe no-op (drives safe manual retries). */
   idempotent: boolean;
 }
 
-/**
- * GUARD: a flat AND of simple field comparisons over the trigger payload.
- */
 export interface WorkflowCondition {
   all: ReadonlyArray<{
     field: string;
@@ -114,7 +79,6 @@ export interface WorkflowRetryPolicy {
 
 export interface WorkflowRuleAction {
   type: WorkflowActionType;
-  /** Static params (e.g. label to stamp on an allowlist entry, webhook URL). */
   params: Record<string, string | number>;
 }
 

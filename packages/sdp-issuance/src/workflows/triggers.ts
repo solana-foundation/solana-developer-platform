@@ -1,17 +1,9 @@
 import type { WorkflowTrigger, WorkflowTriggerType } from "@sdp/types";
 
-/**
- * Builds the i18n label key for a trigger type.
- * @param type - Trigger type identifier.
- * @returns The dashboard-issuance.json message key for the trigger's label.
- */
+/** Builds the i18n label key for a trigger type. */
 const trigger = (type: string): string => `DashboardIssuance.workflows.triggerLabels.${type}`;
 
-/**
- * Builds the i18n description key for a trigger type.
- * @param type - Trigger type identifier.
- * @returns The dashboard-issuance.json message key for the trigger's description.
- */
+/** Builds the i18n description key for a trigger type. */
 const desc = (type: string): string => `DashboardIssuance.workflows.triggerDescriptions.${type}`;
 
 /**
