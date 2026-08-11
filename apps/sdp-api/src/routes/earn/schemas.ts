@@ -48,7 +48,11 @@ const allocationSchema = z.object({
 const allocationGroupSchema = z
   .array(allocationSchema)
   .min(1)
-  .max(20)
+  // Earn V1 is single-vault (PRO-1667): exactly one entry per token group, so
+  // the sum rule below forces it to pct: 100. The weighted multi-entry surface
+  // is dormant, not removed — everything downstream still handles N entries,
+  // and re-enabling weights post-V1 means relaxing this bound and nothing else.
+  .max(1, { message: "Earn V1 accepts exactly one allocation entry per token group" })
   .superRefine((entries, ctx) => {
     if (new Set(entries.map((entry) => entry.yieldSourceId)).size !== entries.length) {
       ctx.addIssue({ code: "custom", message: "Duplicate yieldSourceId in allocation group" });
