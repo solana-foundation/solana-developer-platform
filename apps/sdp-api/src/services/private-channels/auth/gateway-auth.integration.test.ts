@@ -27,7 +27,7 @@ import {
 } from "@/services/private-channels/auth/gateway-auth";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env as baseEnv } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
 const PROJECT_ID = "prj_spc_cache_it";
@@ -66,7 +66,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await clearTestDatabase(baseEnv as Parameters<typeof clearTestDatabase>[0]);
+  await seedTestDatabase(baseEnv as Parameters<typeof seedTestDatabase>[0]);
 });
 
 beforeEach(async () => {

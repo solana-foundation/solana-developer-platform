@@ -13,8 +13,9 @@ import {
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
 import app from "@/index";
+import { deriveProviderRequestId } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
@@ -49,8 +50,15 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
+const TEST_PRODUCTION_PROJECT = {
+  id: "prj_test_earn_program_prod",
+  slug: "test-earn-program-project-prod",
+};
+const TEST_SESSION_ID = "ses_earn_program";
+
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const GROUND_SANDBOX_KEY = "ground-sandbox-test-api-key";
+const GROUND_PRODUCTION_KEY = "ground-production-test-api-key";
 const GROUND_SOURCE = "morpho-gauntlet-usdc";
 const WALLET_REF = "8f14e45f-ceea-467f-9b6b-3c1a5c7f9d21";
 const SOLANA_DESTINATION = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
@@ -94,6 +102,7 @@ const WITHDRAWAL: EarnPortfolioWithdrawal = {
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
 let originalGroundSandboxApiKey: string | undefined;
+let originalGroundApiKey: string | undefined;
 
 /**
  * Earn provider entitlement defaults to OFF for every organization, so the
@@ -153,6 +162,51 @@ async function seedAuth({ entitleGround = true }: { entitleGround?: boolean } = 
   ]);
 }
 
+/**
+ * Dashboard (session) callers resolve their environment from the membership-
+ * verified x-project-id project, so the session fixture carries both the
+ * sandbox project seedAuth created and a production sibling. Call after
+ * seedAuth().
+ */
+async function seedSessionAuth(): Promise<void> {
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES (?, ?, ?, 'member', 'active')`
+      )
+      .bind("om_earn_program_session", TEST_ORG.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, 'production', 'active', ?)`
+      )
+      .bind(
+        TEST_PRODUCTION_PROJECT.id,
+        TEST_ORG.id,
+        "Production Project",
+        TEST_PRODUCTION_PROJECT.slug,
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
+      )
+      .bind("pm_earn_program_sandbox", TEST_PROJECT.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
+      )
+      .bind("pm_earn_program_production", TEST_PRODUCTION_PROJECT.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+         VALUES (?, ?, ?, 'session', ?)`
+      )
+      .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+  ]);
+}
+
 async function seedGroundStrategy(overrides: Partial<UpsertEarnStrategyInput> = {}): Promise<void> {
   const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
     provider: "ground",
@@ -192,7 +246,12 @@ async function seedProgramWallet(): Promise<EarnProviderWalletRow> {
   return row;
 }
 
-function requestEarn(method: string, path: string, body?: Record<string, unknown>) {
+function requestEarn(
+  method: string,
+  path: string,
+  body?: Record<string, unknown>,
+  headers: Record<string, string> = {}
+) {
   return app.request(
     path,
     {
@@ -200,6 +259,28 @@ function requestEarn(method: string, path: string, body?: Record<string, unknown
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        ...headers,
+      },
+      ...(body !== undefined && { body: JSON.stringify(body) }),
+    },
+    env
+  );
+}
+
+function requestEarnAsSession(
+  method: string,
+  path: string,
+  projectId: string,
+  body?: Record<string, unknown>
+) {
+  return app.request(
+    path,
+    {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `sdp_session=${TEST_SESSION_ID}`,
+        "x-project-id": projectId,
       },
       ...(body !== undefined && { body: JSON.stringify(body) }),
     },
@@ -211,12 +292,15 @@ beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
   originalGroundSandboxApiKey = env.GROUND_SANDBOX_API_KEY;
+  originalGroundApiKey = env.GROUND_API_KEY;
   // Earn is a Markets sub-module, so both gates have to be on to reach a route.
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   // Sandbox credentials so the provider-configured gates pass; provider HTTP
-  // itself is stubbed per-test via EARN_PROVIDER_CLIENTS spies.
+  // itself is stubbed per-test via EARN_PROVIDER_CLIENTS spies. The production
+  // credential stays absent unless a test opts in.
   env.GROUND_SANDBOX_API_KEY = GROUND_SANDBOX_KEY;
+  env.GROUND_API_KEY = undefined;
   await seedTestDatabase(env);
 });
 
@@ -225,7 +309,7 @@ afterEach(async () => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
   env.GROUND_SANDBOX_API_KEY = originalGroundSandboxApiKey;
-  await clearTestDatabase(env);
+  env.GROUND_API_KEY = originalGroundApiKey;
   await clearKVStores(env);
 });
 
@@ -398,7 +482,7 @@ describe("Earn program — PUT create-or-update", () => {
 
     // Entitlement present but the sandbox credential missing also fails closed.
     await clearKVStores(env);
-    await clearTestDatabase(env);
+    await seedTestDatabase(env);
     await seedAuth();
     await seedGroundStrategy();
     env.GROUND_SANDBOX_API_KEY = undefined;
@@ -422,6 +506,80 @@ describe("Earn program — PUT create-or-update", () => {
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+});
+
+describe("Earn program — session callers and environment isolation", () => {
+  it("creates a production program from a production-project dashboard session", async () => {
+    await seedAuth();
+    await seedSessionAuth();
+    env.GROUND_API_KEY = GROUND_PRODUCTION_KEY;
+    await seedGroundStrategy({ environment: "production" });
+    const createWallet = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWallet").mockResolvedValue(WALLET_SNAPSHOT);
+
+    const res = await requestEarnAsSession("PUT", "/v1/earn/program", TEST_PRODUCTION_PROJECT.id, {
+      provider: "ground",
+      allocations: VALID_ALLOCATIONS,
+    });
+
+    expect(res.status).toBe(201);
+    expect(createWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "production" }),
+      expect.objectContaining({ allocations: VALID_ALLOCATIONS })
+    );
+
+    // The ONE-wallet row lands under production with no sandbox sibling…
+    const repo = createPostgresEarnRepository(getDb(env));
+    const productionRow = await repo.getProviderWallet({
+      organizationId: TEST_ORG.id,
+      environment: "production",
+      provider: "ground",
+    });
+    expect(productionRow?.provider_wallet_ref).toBe(WALLET_REF);
+    expect(productionRow?.environment).toBe("production");
+    expect(
+      await repo.getProviderWallet({
+        organizationId: TEST_ORG.id,
+        environment: "sandbox",
+        provider: "ground",
+      })
+    ).toBeNull();
+
+    // …so the org's sandbox API key cannot see the production program.
+    const sandboxView = await requestEarn("GET", "/v1/earn/program?provider=ground");
+    expect(sandboxView.status).toBe(404);
+  });
+
+  it("never serves the sandbox program to a production-project session", async () => {
+    await seedAuth();
+    await seedSessionAuth();
+    await seedProgramWallet();
+    const getWallet = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWallet")
+      .mockResolvedValue(WALLET_SNAPSHOT);
+
+    // requireProgramWallet keys on (org, environment, provider), so the
+    // production-project session finds nothing — 404, no cross-read.
+    const production = await requestEarnAsSession(
+      "GET",
+      "/v1/earn/program?provider=ground",
+      TEST_PRODUCTION_PROJECT.id
+    );
+    expect(production.status).toBe(404);
+
+    // The sandbox-project session still reads the org's program, unchanged.
+    const sandbox = await requestEarnAsSession(
+      "GET",
+      "/v1/earn/program?provider=ground",
+      TEST_PROJECT.id
+    );
+    expect(sandbox.status).toBe(200);
+    expect(getWallet).toHaveBeenCalledWith(expect.objectContaining({ environment: "sandbox" }), {
+      providerWalletRef: WALLET_REF,
+    });
   });
 });
 
@@ -526,6 +684,9 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
     const withdrawalRes = await requestEarn("POST", "/v1/earn/program/withdrawals", {
       provider: "ground",
+      // Money-out still gates on credentials alone; the key is a retry-safety
+      // requirement every caller carries, not an entitlement check.
+      requestId: "5b0e0c9a-7f3d-4a21-9c46-2f8ab1d5e740",
       amountUsd: "25.50",
       token: "usdc",
       destinationAddress: SOLANA_DESTINATION,
@@ -546,32 +707,163 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     expect(statusBody.data.withdrawal.status).toBe("processing");
   });
 
-  it("mints a UUIDv4 requestId when absent and passes a caller-owned key verbatim", async () => {
-    await seedAuth();
-    await seedProgramWallet();
-    const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
-      .mockResolvedValue(WITHDRAWAL);
-
-    const minted = await requestEarn("POST", "/v1/earn/program/withdrawals", {
+  // The provider dedupes a withdrawal on its request id and SDP stores no row
+  // for one, so that id is the ONLY thing between a retry and a second payout.
+  // Every case here exists to keep it stable across attempts.
+  describe("withdrawal idempotency", () => {
+    const withdrawalBody = (extra: Record<string, unknown> = {}) => ({
       provider: "ground",
       amountUsd: "10.00",
       token: "usdc",
       destinationAddress: SOLANA_DESTINATION,
+      ...extra,
     });
-    expect(minted.status).toBe(201);
-    expect(createWithdrawal.mock.calls[0]?.[1]?.requestId).toMatch(UUID_V4_PATTERN);
 
-    const callerKey = "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d";
-    const verbatim = await requestEarn("POST", "/v1/earn/program/withdrawals", {
-      provider: "ground",
-      requestId: callerKey,
-      amountUsd: "10.00",
-      token: "usdc",
-      destinationAddress: SOLANA_DESTINATION,
+    it("keeps a caller-owned requestId stable across retries without forwarding it raw", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      // Every org shares one provider account, so a key that reached the
+      // provider verbatim would let two tenants collide on the same pasted
+      // UUID — one of them getting the other's withdrawal replayed back.
+      const callerKey = "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d";
+      const first = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody({ requestId: callerKey })
+      );
+      const retry = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody({ requestId: callerKey })
+      );
+
+      expect(first.status).toBe(201);
+      expect(retry.status).toBe(201);
+      const sent = createWithdrawal.mock.calls[0]?.[1]?.requestId;
+      expect(sent).not.toBe(callerKey);
+      expect(sent).toMatch(UUID_V4_PATTERN);
+      // The property the caller actually depends on survives the derivation.
+      expect(createWithdrawal.mock.calls[1]?.[1]?.requestId).toBe(sent);
     });
-    expect(verbatim.status).toBe(201);
-    expect(createWithdrawal.mock.calls[1]?.[1]?.requestId).toBe(callerKey);
+
+    it("sends a key no other organization could produce from the same input", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      // The boilerplate case: every tenant pastes the same placeholder UUID.
+      // One provider account serves them all, so an unscoped key would make
+      // the second tenant's withdrawal collide with the first's. (A v4-shaped
+      // placeholder — the RFC's own 123e4567… example is v1 and the schema
+      // rejects it outright.)
+      const shared = "00000000-0000-4000-8000-000000000000";
+      const res = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody({ requestId: shared })
+      );
+
+      expect(res.status).toBe(201);
+      const sent = createWithdrawal.mock.calls[0]?.[1]?.requestId;
+      expect(sent).toBe(deriveProviderRequestId(["earn_program_withdrawal", WALLET_REF], shared));
+      // A different program wallet — i.e. any other org — cannot reach it.
+      expect(sent).not.toBe(
+        deriveProviderRequestId(["earn_program_withdrawal", "another-org-wallet"], shared)
+      );
+    });
+
+    it("derives the same provider key every time from one Idempotency-Key", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      // The retry a client's own loop would send: identical request, twice.
+      const headers = { "Idempotency-Key": "checkout-9f2b" };
+      const first = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody(),
+        headers
+      );
+      const retry = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody(),
+        headers
+      );
+
+      expect(first.status).toBe(201);
+      expect(retry.status).toBe(201);
+      const [firstCall, retryCall] = createWithdrawal.mock.calls;
+      // Must be v4-SHAPED even though it is derived: Ground rejects any other
+      // version outright (`400 requestId must be a valid UUID v4`).
+      expect(firstCall?.[1]?.requestId).toMatch(UUID_V4_PATTERN);
+      // The whole point: the provider sees ONE withdrawal, not two.
+      expect(retryCall?.[1]?.requestId).toBe(firstCall?.[1]?.requestId);
+    });
+
+    it("keeps two different Idempotency-Keys apart", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      await requestEarn("POST", "/v1/earn/program/withdrawals", withdrawalBody(), {
+        "Idempotency-Key": "payout-a",
+      });
+      await requestEarn("POST", "/v1/earn/program/withdrawals", withdrawalBody(), {
+        "Idempotency-Key": "payout-b",
+      });
+
+      const [a, b] = createWithdrawal.mock.calls;
+      expect(a?.[1]?.requestId).not.toBe(b?.[1]?.requestId);
+    });
+
+    it("refuses a withdrawal carrying both key sources", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      // The trap this guards: a retry layer that preserves headers while the
+      // request layer mints a fresh body id per attempt keeps Idempotency-Key
+      // stable and varies requestId. Any precedence rule would follow the
+      // varying one and book a SECOND withdrawal, so refuse the ambiguity.
+      const res = await requestEarn(
+        "POST",
+        "/v1/earn/program/withdrawals",
+        withdrawalBody({ requestId: "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d" }),
+        { "Idempotency-Key": "checkout-9f2b" }
+      );
+
+      expect(res.status).toBe(400);
+      expect(createWithdrawal).not.toHaveBeenCalled();
+    });
+
+    it("refuses a withdrawal carrying no idempotency key at all", async () => {
+      await seedAuth();
+      await seedProgramWallet();
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
+
+      const res = await requestEarn("POST", "/v1/earn/program/withdrawals", withdrawalBody());
+
+      // Refusing beats accepting: a server-minted random id is fresh per
+      // attempt, so it would turn a retry into a second payout.
+      expect(res.status).toBe(400);
+      expect(createWithdrawal).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects destinations that are not base58 Solana addresses", async () => {

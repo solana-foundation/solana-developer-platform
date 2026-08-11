@@ -16,7 +16,9 @@ import type { EarnProviderWalletRow } from "@/db/repositories";
 import { getAuth } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { deriveProviderRequestId } from "@/lib/idempotency";
 import { success } from "@/lib/response";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getLogger } from "@/runtime/logger";
 import {
   assertEarnProviderConfigured,
@@ -317,6 +319,65 @@ export const previewEarnProgramWithdrawal = async (c: AppContext) => {
   return success(c, response);
 };
 
+/**
+ * The key the provider dedupes this withdrawal on.
+ *
+ * It must be STABLE across retries of the same intent, because that key is the
+ * only thing standing between a retried request and a second payout: the
+ * provider replays the original response for a key it has seen and refuses a
+ * mismatched payload under it, while a key it has never seen is, correctly, a
+ * new withdrawal. SDP stores no row for a withdrawal, so there is no second
+ * place to catch a duplicate — this value is the whole mechanism.
+ *
+ * A server-minted random id therefore cannot be the fallback: it is fresh per
+ * HTTP attempt, so it guarantees exactly the double-send it appears to guard
+ * against. Callers get two ways to supply a stable key — an explicit
+ * `requestId`, or the platform-wide `Idempotency-Key` header — and a request
+ * carrying neither is refused rather than silently made unsafe.
+ *
+ * Whichever way it arrives, the caller's key is DERIVED against the program
+ * wallet rather than forwarded as given. Every SDP organization shares one
+ * provider account, so a key is only unique to a tenant once something tenant-
+ * specific is mixed in: two organizations pasting the same placeholder UUID
+ * would otherwise land on one provider request, and the second would either be
+ * refused or answered with a replay of the first organization's withdrawal.
+ * The wallet ref is unique per (organization, environment, provider) by DB
+ * constraint, so it separates them and names the thing the money leaves.
+ *
+ * Deriving costs the caller nothing: the same key still reproduces the same
+ * provider request on a retry, which is the only property they rely on. The
+ * value SDP returns for tracking is the provider's own withdrawal ref, never
+ * this id.
+ *
+ * Exactly ONE source is accepted, and sending both is refused rather than
+ * resolved by precedence. Two sources cannot be ranked safely: a client whose
+ * retry layer preserves headers while its request layer mints a fresh body id
+ * per attempt would keep `Idempotency-Key` stable and vary `requestId`, and
+ * any precedence rule silently follows the varying one — a second withdrawal,
+ * not a replay. That is the exact failure this function exists to prevent, so
+ * ambiguity fails loud at integration time instead of paying out twice in
+ * production. Neither source is likewise refused, for the same reason.
+ */
+function resolveWithdrawalRequestId(
+  c: AppContext,
+  requestId: string | undefined,
+  providerWalletRef: string
+): string {
+  const headerKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
+  if (requestId && headerKey) {
+    throw badRequest(
+      `Send requestId or the ${IDEMPOTENCY_KEY_HEADER} header, not both: SDP cannot tell which one your retry keeps stable, and following the wrong one would pay out twice.`
+    );
+  }
+  const callerKey = requestId ?? headerKey;
+  if (!callerKey) {
+    throw badRequest(
+      `A withdrawal needs an idempotency key that is stable across retries: send requestId (UUIDv4) or the ${IDEMPOTENCY_KEY_HEADER} header. Without one, a retried request would pay out twice.`
+    );
+  }
+  return deriveProviderRequestId(["earn_program_withdrawal", providerWalletRef], callerKey);
+}
+
 export const createEarnProgramWithdrawal = async (c: AppContext) => {
   const body = await parseBody(c, earnProgramWithdrawalCreateSchema);
   const client = requirePortfolioClient(body.provider);
@@ -327,9 +388,7 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
 
   const withdrawal = await client.createPortfolioWithdrawal(earnRuntime(c), {
     providerWalletRef: row.provider_wallet_ref,
-    // Caller-owned keys pass through verbatim (provider dedupes on them);
-    // server-minted keys make bare requests safe without extra client work.
-    requestId: body.requestId ?? crypto.randomUUID(),
+    requestId: resolveWithdrawalRequestId(c, body.requestId, row.provider_wallet_ref),
     amountUsd: body.amountUsd,
     token: body.token,
     destinationAddress: body.destinationAddress,

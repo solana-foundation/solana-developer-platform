@@ -54,6 +54,7 @@ import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, counterpartyNotProvisioned, internalError } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
+import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import {
   type AppContext,
   getPaymentsRepository,
@@ -84,7 +85,7 @@ export async function createPendingBvnkOfframpTransfer(
     counterpartyId: input.counterpartyId,
     sourceAddress: input.walletAddress,
     destinationAddress: null,
-    token: input.cryptoToken,
+    token: rampTransferTokenMint(input.cryptoToken, c.env),
     amount: input.cryptoAmount,
     memo: null,
     type: "offramp",

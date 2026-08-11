@@ -1,11 +1,11 @@
 import type { CachedSession } from "@sdp/types";
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { projectContextMiddleware } from "./project-context";
 
@@ -95,10 +95,6 @@ describe("projectContextMiddleware", () => {
       )
       .bind(MEMBER_PROJECT_ID, USER_ID)
       .run();
-  });
-
-  afterEach(async () => {
-    await clearTestDatabase(env);
   });
 
   it("resolves projectId from the x-project-id header for a project the session user belongs to", async () => {

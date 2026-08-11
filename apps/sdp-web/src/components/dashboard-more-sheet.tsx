@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BlocksIcon,
   CircleCheckBigIcon,
   KeyRoundIcon,
   LibraryIcon,
@@ -10,9 +11,9 @@ import {
   TrendingUpIcon,
   XIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect } from "react";
 import { docsHref } from "@/components/dashboard-nav";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -64,6 +65,11 @@ function getMoreGroups(
           label: t("Shared.dashboardShell.policies"),
           href: DASHBOARD_SIDE_NAV_HREFS.policies,
           icon: ShieldCheckIcon,
+        },
+        {
+          label: t("Shared.dashboardShell.integrations"),
+          href: DASHBOARD_SIDE_NAV_HREFS.integrations,
+          icon: BlocksIcon,
         },
         ...(options.canReadApprovals
           ? [
@@ -122,9 +128,9 @@ function TileLink({
     );
   }
   return (
-    <DashboardNavigationLink href={href} onClick={onClick} className={className} {...rest}>
+    <Link href={href} onClick={onClick} className={className} {...rest}>
       {children}
-    </DashboardNavigationLink>
+    </Link>
   );
 }
 
@@ -135,8 +141,7 @@ function TileLink({
  * bar's drawer trigger is hidden below `xl`, because two entry points to the same
  * destinations is worse than one. The workspace switcher rides along at the top,
  * since project switching was the one thing the drawer offered that a tab bar
- * cannot express. Internal tiles use `DashboardNavigationLink` so they keep the
- * same pre-commit loading feedback as every other managed link.
+ * cannot express.
  */
 export function DashboardMoreSheet({
   pathname,

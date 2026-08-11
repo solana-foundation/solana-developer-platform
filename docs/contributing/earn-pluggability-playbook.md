@@ -148,6 +148,7 @@ copyable precedent (`ground` id, `GroundEarnClient`, `GROUND_API_KEY` /
 | 5. Availability | `apps/sdp-api/src/services/provider-availability.service.ts` | One line: `<id>: keyPairCredentialDefinition("<Label>", "<ID>")`. |
 | 6. Credential keys | `apps/sdp-api/src/types/env.d.ts` | `<ID>_API_KEY` + `<ID>_SANDBOX_API_KEY`. `keyPairCredentialDefinition` binds its derived keys to `keyof Env`, so skipping this is a compile error. |
 | 7. Key projections | `turbo.json` `globalEnv` + `scripts/secret-keys.mjs` | Both keys in both files (+ the secret manager for deployed environments). |
+| 8. Managed deployments | sdp-infra `terraform/envs/<env>/terraform.tfvars` | Append the credential key(s) to `app_secret_keys` (the Doppler → Secret Manager mirror; also add the value to that env's Doppler config). Dev carries sandbox keys only — production keys are a launch-gated decision (PRO-1647). Nothing else: the Cloud Run service and Job read the same secret set, and the hourly catalogue sync picks the provider up from `EARN_PROVIDER_CLIENTS` with zero job changes (`src/job.ts` never names providers; an un-credentialed provider skips fail-closed with `PROVIDER_NOT_CONFIGURED`). |
 
 Tests that enforce the checklist (run them; they fail on the exact step you
 missed):
@@ -175,13 +176,18 @@ provider actually offers it.
 
 1. **Implement the full interface, or none of it.**
    `EarnPortfolioWalletProvider` (`packages/sdp-earn/src/types.ts`) extends
-   `EarnVaultProvider` with eight methods: `createPortfolioWallet`,
-   `getPortfolioWallet`, `updatePortfolioStrategy`, `listPortfolioDeposits`,
-   `previewPortfolioWithdrawal`, `createPortfolioWithdrawal`,
-   `getPortfolioWithdrawal`, `createPortfolioAddressBookEntry`. Callers
-   detect the capability with `supportsPortfolioWallets`
-   (`@sdp/earn/capabilities`) — an all-or-nothing method-presence guard, so a
-   partial implementation is treated as unsupported.
+   `EarnVaultProvider` with nine methods: `createPortfolioWallet`,
+   `getPortfolioWallet`, `updatePortfolioStrategy`, `getPortfolioYield`,
+   `listPortfolioDeposits`, `previewPortfolioWithdrawal`,
+   `createPortfolioWithdrawal`, `getPortfolioWithdrawal`,
+   `createPortfolioAddressBookEntry`. (`getPortfolioYield` is its own method
+   because providers serve yield metrics from a distinct endpoint — callers
+   that only need balances must not pay for it — which also makes it the easy
+   one to forget.) Callers detect the capability with
+   `supportsPortfolioWallets` (`@sdp/earn/capabilities`), which checks that
+   whole list (`PORTFOLIO_WALLET_METHODS`) — an all-or-nothing
+   method-presence guard, so a partial implementation is treated as
+   unsupported.
 2. **Speak the shared DTOs.** Wire shapes live in `@sdp/types/earn`
    (`EarnPortfolioWalletSnapshot`, `EarnPortfolioDeposit(sPage)`,
    `EarnPortfolioWithdrawal(Preview)`, statuses, tokens). Map provider
@@ -193,11 +199,16 @@ provider actually offers it.
    for the environment (devnet rail in sandbox, mainnet in production) and
    pin withdrawal/preview destination chains the same way, even if the
    provider is multi-chain internally.
-4. **Idempotency.** Withdrawal `requestId` is caller-owned and passed
-   verbatim; create/update may generate a UUIDv4 when omitted. A provider
+4. **Idempotency.** A withdrawal requires EXACTLY one caller-supplied key —
+   `requestId` (UUIDv4) or the `Idempotency-Key` header — and 400s on both or
+   neither, because no precedence rule can tell which one a caller's retry
+   holds stable. The key is not forwarded as given: `deriveProviderRequestId`
+   hashes it against the program wallet, so two organizations sharing one
+   provider account cannot collide on the same pasted value. Create/update is
+   looser and may generate a UUIDv4 when omitted. A provider
    requestId-conflict error surfaces as `CONFLICT`.
 5. **Persistence.** One shared wallet per org+environment+provider:
-   `earn_provider_wallets` (migration `0035`), via
+   `earn_provider_wallets` (migration `0049_earn_provider_wallets.sql`), via
    `EarnRepository.getProviderWallet` / `insertProviderWallet` — the unique
    constraint makes double-provisioning a first-writer-wins race, not a
    duplicate.
@@ -207,10 +218,18 @@ provider actually offers it.
    error taxonomy, requestId behavior, and the capability guard —
    `capabilities.test.ts` is the guard's own suite.
 
-**Live sandbox runs need a key:** `GROUND_SANDBOX_API_KEY` must exist in
-Doppler before anything can talk to Ground's sandbox — until it does, the
-provider is `configured: false` and every call fails closed with
-`PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't care).
+**Live sandbox runs need a key:** `GROUND_SANDBOX_API_KEY` has to reach the
+process before anything can talk to Ground's sandbox. Locally that means
+`apps/sdp-api/.env.local` (gitignored): the Doppler wrapper
+(`scripts/doppler/run-with-config.sh`) overlays `apps/*/.env.local` on top of
+the Doppler-injected values, so the file wins with no `DOPPLER_PRESERVE_ENV`
+opt-in — a plain shell export, by contrast, is dropped. Deployed environments
+take the key from Doppler/Secret Manager instead — reaching a *managed* runtime
+additionally requires the key in sdp-infra's `app_secret_keys` (step 8 of the
+§4 checklist), which feeds both the Cloud Run service and the cron Job. Until
+it resolves, the provider is `configured: false` and every call fails closed
+with `PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't
+care).
 
 **Reaching Earn at all needs both module flags:** `MARKETS_ENABLED` (parent)
 and `EARN_ENABLED` (child) are off by default in *every* environment, local dev

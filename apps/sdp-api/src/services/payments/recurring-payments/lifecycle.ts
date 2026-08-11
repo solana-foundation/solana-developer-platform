@@ -27,7 +27,11 @@ import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
-import { confirmSubscriptionSignature, sendSubscriptionInstructions } from "./shared";
+import {
+  assertRecurringPaymentTokenMint,
+  confirmSubscriptionSignature,
+  sendSubscriptionInstructions,
+} from "./shared";
 
 function tenantScope(input: { organizationId: string; projectId: string }) {
   return createTenantScope({
@@ -378,6 +382,23 @@ async function runRecurringPaymentLifecycle(input: {
     if (!subscription) {
       throw new AppError("NOT_FOUND", "Subscription not found");
     }
+    const plan = await subscriptionsRepo.getPlanById({
+      planId: subscription.plan_id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    if (!plan) {
+      throw new AppError("NOT_FOUND", "Subscription plan not found");
+    }
+    const tokenMint = assertValidAddress(
+      await assertRecurringPaymentTokenMint(
+        plan.token,
+        input.organizationId,
+        input.projectId,
+        input.env
+      ),
+      "tokenMint"
+    );
 
     const expectedSubscriptionStatus = input.operation === "cancel" ? "active" : "canceled";
     const finalSubscriptionStatus = input.operation === "cancel" ? "canceled" : "active";
@@ -425,6 +446,7 @@ async function runRecurringPaymentLifecycle(input: {
               planPda,
               subscriber: sourceSigner,
               subscriptionPda,
+              tokenMint,
             });
 
       signature = await sendSubscriptionInstructions({

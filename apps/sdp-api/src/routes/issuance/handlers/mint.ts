@@ -1,11 +1,14 @@
+import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenTransaction } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
@@ -13,8 +16,8 @@ import {
   approvedWalletOperationId,
   beginApprovedWalletOperationEffect,
   reserveMintSupplyAtApprovedEffectBoundary,
-  walletOperationExecutionRequest,
 } from "@/services/policy/approved-operation-replay";
+import { resolvePolicyCustodyWallet } from "@/services/policy/enforcement.service";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
@@ -30,13 +33,29 @@ import {
   getOnChainAllowlistMutationForMint,
 } from "./access-control";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { enforceIssuanceWalletOperationPolicy } from "./policy";
+import { buildIssuancePolicyCandidate } from "./policy";
 import {
   persistSettledTransaction,
   persistSettledTransactionThenOutcome,
 } from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+type MintBody = z.output<typeof mintSchema>;
+
+type MintOperationAmount = ReturnType<typeof resolveMintOperationAmount>;
+
+interface MintPolicyResolved {
+  tokenId: string;
+  auth: ApiKeyContext;
+  tokenService: TokenService;
+  mintAddress: ReturnType<typeof assertValidAddress>;
+  destination: ReturnType<typeof assertValidAddress>;
+  mosaicAmount: MintOperationAmount["mosaicAmount"];
+  amountBaseUnits: MintOperationAmount["amountBaseUnits"];
+  ablListAddress: string | null;
+  signingWalletId: string | null;
+}
 
 interface SettledMintEvidence {
   signature: string;
@@ -450,26 +469,29 @@ async function recordPreSubmissionMintFailure(options: {
   }
 }
 
-export const executeMint = async (c: AppContext) => {
+/**
+ * Parse and resolve an execute-mint request into its wallet-operation policy candidate.
+ *
+ * @param c - Request context.
+ * @returns The candidate or ungoverned marker, validated body, resources, and raw payload.
+ */
+export async function extractMintPolicyCandidate(c: AppContext): Promise<PolicyGateExtraction> {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-
-  const body = await c.req.json();
-  const parsed = mintSchema.safeParse(body);
-
+  const parsed = mintSchema.safeParse(await c.req.json());
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
+  const input = parsed.data;
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
     projectId,
   });
-
   if (!token) {
     throw notFound("Token");
   }
@@ -478,44 +500,84 @@ export const executeMint = async (c: AppContext) => {
     mintAddress: mintAddressRaw,
     mosaicAmount,
     amountBaseUnits,
-  } = resolveMintOperationAmount(token, parsed.data.mint.amount);
-
+  } = resolveMintOperationAmount(token, input.mint.amount);
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
-    const isOnControlList = await tokenService.isAddressAllowed(
-      tokenId,
-      parsed.data.mint.destination
-    );
+    const isOnControlList = await tokenService.isAddressAllowed(tokenId, input.mint.destination);
     assertDestinationAllowedByControlList({
       token,
-      destination: parsed.data.mint.destination,
+      destination: input.mint.destination,
       isOnControlList,
     });
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
-    auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
+  const requestedSigningWalletId =
+    input.signingWalletId === undefined || input.signingWalletId === null
+      ? token.signingWalletId
+      : input.signingWalletId;
+  const signingWalletId = resolveApiKeySigningWalletId(auth, requestedSigningWalletId, [
+    "tokens:write",
+  ]);
   const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
-  const destination = assertValidAddress(parsed.data.mint.destination, "destination");
+  const destination = assertValidAddress(input.mint.destination, "destination");
+  const policyWallet =
+    signingWalletId === null
+      ? null
+      : await resolvePolicyCustodyWallet(c.env, auth, signingWalletId);
 
-  await enforceIssuanceWalletOperationPolicy(c, {
-    auth,
-    token,
-    walletId: signingWalletId,
-    operationType: "issuance_mint_execute",
-    amount: parsed.data.mint.amount,
-    destination: parsed.data.mint.destination,
-    rawPayload: {
-      action: "mint",
-      destination: parsed.data.mint.destination,
-      amount: parsed.data.mint.amount,
-      memo: parsed.data.mint.memo ?? null,
-      executionRequest: walletOperationExecutionRequest(c, parsed.data),
+  return {
+    candidate:
+      signingWalletId === null
+        ? null
+        : buildIssuancePolicyCandidate({
+            auth,
+            token,
+            custodyWalletId: policyWallet === null ? null : policyWallet.id,
+            walletId: signingWalletId,
+            operationType: "issuance_mint_execute",
+            amount: input.mint.amount,
+            destination: input.mint.destination,
+          }),
+    body: input,
+    resolved: {
+      tokenId,
+      auth,
+      tokenService,
+      mintAddress,
+      destination,
+      mosaicAmount,
+      amountBaseUnits,
+      ablListAddress,
+      signingWalletId,
     },
-  });
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: "mint",
+      destination: input.mint.destination,
+      amount: input.mint.amount,
+      memo: input.mint.memo === undefined ? null : input.mint.memo,
+    },
+  };
+}
+
+export const executeMint = async (c: AppContext) => {
+  const {
+    body: input,
+    resolved: {
+      tokenId,
+      auth,
+      tokenService,
+      mintAddress,
+      destination,
+      mosaicAmount,
+      amountBaseUnits,
+      ablListAddress,
+      signingWalletId,
+    },
+  } = getPolicyGateContext<MintBody, MintPolicyResolved, WalletOperationPolicyEnforcement | null>(
+    c
+  );
 
   // Resolve signer + sync the destination on-chain BEFORE createTransaction.
   // If sync (or its inner revoke check) throws inside the try block below,
@@ -535,7 +597,7 @@ export const executeMint = async (c: AppContext) => {
         mosaic,
         tokenId,
         ablListAddress,
-        destinationRaw: parsed.data.mint.destination,
+        destinationRaw: input.mint.destination,
         destination,
         addedBy: auth.id,
       })
@@ -545,7 +607,7 @@ export const executeMint = async (c: AppContext) => {
     tokenId,
     operation: "mint",
     mode: "execute",
-    params: parsed.data,
+    params: input,
   });
 
   // Create transaction record after sync so a sync-time error does not poison
@@ -555,9 +617,9 @@ export const executeMint = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "mint",
     params: {
-      destination: parsed.data.mint.destination,
-      amount: parsed.data.mint.amount,
-      memo: parsed.data.mint.memo,
+      destination: input.mint.destination,
+      amount: input.mint.amount,
+      memo: input.mint.memo,
     },
     initiatedByKeyId: auth.id,
     idempotencyKey: idempotencyMetadata.idempotencyKey,
@@ -573,7 +635,7 @@ export const executeMint = async (c: AppContext) => {
         : undefined;
     return success(c, {
       transaction: replayedTransaction,
-      tokenAccount: txTokenAccount ?? parsed.data.mint.destination,
+      tokenAccount: txTokenAccount === undefined ? input.mint.destination : txTokenAccount,
     });
   }
 
@@ -583,8 +645,8 @@ export const executeMint = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: {
       tokenId,
-      destination: parsed.data.mint.destination,
-      amount: parsed.data.mint.amount,
+      destination: input.mint.destination,
+      amount: input.mint.amount,
       mode: "execute",
     },
   });
@@ -620,7 +682,8 @@ export const executeMint = async (c: AppContext) => {
       }
     );
 
-    const settledTokenAccount = result.tokenAccount ?? parsed.data.mint.destination;
+    const settledTokenAccount =
+      result.tokenAccount === undefined ? input.mint.destination : result.tokenAccount;
     const settledEvidence: SettledMintEvidence = {
       signature: result.signature,
       slot: Number(result.slot),

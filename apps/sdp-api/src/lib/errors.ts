@@ -208,8 +208,8 @@ export function walletNotFound(): AppError {
   );
 }
 
-export function conflict(message?: string): AppError {
-  return new AppError("CONFLICT", message);
+export function conflict(message?: string, details?: Record<string, unknown>): AppError {
+  return new AppError("CONFLICT", message, details);
 }
 
 export function rateLimited(message?: string): AppError {

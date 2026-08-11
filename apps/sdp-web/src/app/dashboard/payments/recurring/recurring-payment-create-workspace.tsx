@@ -3,16 +3,17 @@
 import { decimalScale, isDecimalString } from "@sdp/solana/amount";
 import type { Counterparty, CounterpartyAccount, PaymentsDashboardWallet } from "@sdp/types";
 import { PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
 import { TokenMark } from "@/components/token-mark";
+import type { BadgeVariant } from "@/components/ui/badge";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { DateTimePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
 import {
   amountInputPlaceholder,
@@ -270,7 +271,7 @@ export function RecurringPaymentCreateWorkspace({
       description: t("DashboardPayments.recurring.customScheduleDescription"),
     },
   ] as const satisfies readonly { value: SchedulePreset; label: string; description: string }[];
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [stepIndex, setStepIndex] = useState(0);
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
   const [destinationAccountDialogOpen, setDestinationAccountDialogOpen] = useState(false);
@@ -346,6 +347,15 @@ export function RecurringPaymentCreateWorkspace({
     () =>
       assetOptions.map((asset) => {
         const token = resolveTokenByMint(asset.value, issuedTokensByMint, asset.label);
+        const sdpMinted = token.tokenId !== null;
+        let badge: string | undefined;
+        let badgeVariant: BadgeVariant | undefined;
+        if (sdpMinted) {
+          badge = t("Shared.SharedComponents.sdpMintedToken");
+          badgeVariant = "outline";
+        } else if (!token.isWellKnown) {
+          badge = t("Shared.SharedComponents.unknownToken");
+        }
         return {
           value: asset.value,
           label: token.tokenName,
@@ -357,7 +367,8 @@ export function RecurringPaymentCreateWorkspace({
               size="xs"
             />
           ),
-          badge: token.isWellKnown ? undefined : t("Shared.SharedComponents.customToken"),
+          badge,
+          badgeVariant,
         };
       }),
     [assetOptions, issuedTokensByMint, t]

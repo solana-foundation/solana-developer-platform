@@ -1,8 +1,8 @@
 import type { WalletControlProfileRevisionHistory, WalletPolicyEvaluationDetail } from "@sdp/types";
 import { ChevronRight, ScrollText } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";

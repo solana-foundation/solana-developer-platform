@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
@@ -9,7 +10,11 @@ import {
   removeAllowlistEntry,
 } from "./handlers/allowlist";
 import { getAssetAuditHistory } from "./handlers/audit";
-import { executeUpdateAuthority, prepareUpdateAuthority } from "./handlers/authority";
+import {
+  executeUpdateAuthority,
+  extractUpdateAuthorityPolicyCandidate,
+  prepareUpdateAuthority,
+} from "./handlers/authority";
 import { executeBurn, prepareBurn } from "./handlers/burn";
 import {
   confirmDeploy,
@@ -20,7 +25,7 @@ import {
 import { executeForceBurn, prepareForceBurn } from "./handlers/force-burn";
 import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
 import { serveTokenMetadata } from "./handlers/metadata";
-import { executeMint, prepareMint } from "./handlers/mint";
+import { executeMint, extractMintPolicyCandidate, prepareMint } from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
 import { executeSeize, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
@@ -82,7 +87,12 @@ issuance.post(
 
 // Mint
 issuance.post("/tokens/:tokenId/mint/prepare", requirePermissions("tokens:write"), prepareMint);
-issuance.post("/tokens/:tokenId/mint", requirePermissions("tokens:write"), executeMint);
+issuance.post(
+  "/tokens/:tokenId/mint",
+  requirePermissions("tokens:write"),
+  policyGate({ extract: extractMintPolicyCandidate }),
+  executeMint
+);
 
 // Burn
 issuance.post("/tokens/:tokenId/burn/prepare", requirePermissions("tokens:write"), prepareBurn);
@@ -109,6 +119,7 @@ issuance.post(
 issuance.post(
   "/tokens/:tokenId/authority",
   requirePermissions("tokens:admin"),
+  policyGate({ extract: extractUpdateAuthorityPolicyCandidate }),
   executeUpdateAuthority
 );
 

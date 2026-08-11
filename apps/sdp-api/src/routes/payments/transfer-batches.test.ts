@@ -17,7 +17,7 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
@@ -341,7 +341,6 @@ describe("payment transfer batches", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
@@ -663,6 +662,102 @@ describe("payment transfer batches", () => {
     expect(listBody.data.map((batch) => batch.id)).toContain(body.data.batch.id);
   });
 
+  it("dry-runs a transfer batch with zero writes", async () => {
+    const counterpartyId = await seedCounterparty("batch_dry_run_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const response = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { decision: "allow", criteria: [] },
+    });
+    expect(createOrgSignerMock).not.toHaveBeenCalled();
+
+    const batchCount = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM payment_transfer_batches")
+      .first<{ count: number }>();
+    const operationCount = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+      .first<{ count: number }>();
+    expect(batchCount).toEqual({ count: 0 });
+    expect(operationCount).toEqual({ count: 0 });
+  });
+
+  it("stops a denied transfer batch before signer and batch side effects", async () => {
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+      .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
+      .run();
+    const policyResponse = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationAllowlist: [],
+          defaultAction: "allow",
+          rules: [{ id: "deny-transfer-batches", kind: "always", action: "deny" }],
+        }),
+      },
+      env
+    );
+    expect(policyResponse.status).toBe(200);
+    const counterpartyId = await seedCounterparty("batch_policy_denial_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const response = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(createOrgSignerMock).not.toHaveBeenCalled();
+    const batchCount = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM payment_transfer_batches")
+      .first<{ count: number }>();
+    expect(batchCount).toEqual({ count: 0 });
+  });
+
   it("replays the original transfer batch for the same idempotency key and payload", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
@@ -698,17 +793,27 @@ describe("payment transfer batches", () => {
       { method: "POST", headers, body: requestBody },
       env
     );
+    const operationsAfterFirst = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ count: number }>();
     const second = await app.request(
       "/v1/payments/transfer-batches",
       { method: "POST", headers, body: requestBody },
       env
     );
+    const operationsAfterSecond = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ count: number }>();
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     const firstBody = (await first.json()) as { data: unknown };
     const secondBody = (await second.json()) as { data: unknown };
     expect(secondBody.data).toEqual(firstBody.data);
+    expect(operationsAfterFirst).toEqual({ count: 1 });
+    expect(operationsAfterSecond).toEqual(operationsAfterFirst);
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
     expect(createOrgSignerMock).toHaveBeenCalledTimes(1);
 
@@ -948,111 +1053,109 @@ describe("payment transfer batches", () => {
       requestToken: "USDC",
       expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
     },
-  ])("creates a $label transfer batch", async ({
-    label,
-    tokenProgram,
-    requestToken,
-    expectedMint,
-  }) => {
-    const sourceSigner = await generateKeyPairSigner();
-    await updateSeededWalletPublicKey(sourceSigner.address);
-    createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
-    getAccountInfoMock.mockResolvedValueOnce({
-      lamports: 4200000000n,
-      owner: tokenProgram,
-    } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
-    mockSourceTokenAccountRpc({
-      mint: expectedMint,
-      tokenAccount: TEST_TOKEN_ACCOUNT,
-      decimals: 6,
-    });
+  ])(
+    "creates a $label transfer batch",
+    async ({ label, tokenProgram, requestToken, expectedMint }) => {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+      getAccountInfoMock.mockResolvedValueOnce({
+        lamports: 4200000000n,
+        owner: tokenProgram,
+      } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+      mockSourceTokenAccountRpc({
+        mint: expectedMint,
+        tokenAccount: TEST_TOKEN_ACCOUNT,
+        decimals: 6,
+      });
 
-    const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValueOnce({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
-      signAsFeePayer: vi.fn(),
-      signAndSend: signAndSendMock,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+      const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
-    const counterpartyId = await seedCounterparty(`batch_token_counterparty_${label}`);
-    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
-      counterpartyId,
-      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
-    });
+      const counterpartyId = await seedCounterparty(`batch_token_counterparty_${label}`);
+      const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
 
-    const res = await app.request(
-      "/v1/payments/transfer-batches",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          source: TEST_WALLET_ID,
-          token: requestToken,
-          recipients: [
-            {
-              counterpartyId,
-              counterpartyAccountId,
-              amount: "1.25",
-            },
-          ],
-          options: {
-            preflight: false,
+      const res = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
-        }),
-      },
-      env
-    );
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            token: requestToken,
+            recipients: [
+              {
+                counterpartyId,
+                counterpartyAccountId,
+                amount: "1.25",
+              },
+            ],
+            options: {
+              preflight: false,
+            },
+          }),
+        },
+        env
+      );
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        batch: { status: string; token: string; totalAmount: string | null };
-        recipients: Array<{ status: string; destination: string }>;
-        transfers: Array<{ type: string; status: string; signature: string | null }>;
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          batch: { status: string; token: string; totalAmount: string | null };
+          recipients: Array<{ status: string; destination: string }>;
+          transfers: Array<{ type: string; status: string; signature: string | null }>;
+        };
       };
-    };
-    expect(body.data.batch).toMatchObject({
-      status: "processing",
-      token: expectedMint,
-      totalAmount: "1.25",
-    });
-    expect(body.data.recipients).toMatchObject([
-      {
+      expect(body.data.batch).toMatchObject({
         status: "processing",
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-      },
-    ]);
-    expect(body.data.transfers).toMatchObject([
-      {
-        type: "transfer_batch",
-        status: "processing",
-        signature: FIRST_SIGNATURE,
-      },
-    ]);
-    expect(signAndSendMock).toHaveBeenCalledTimes(1);
-    getSignatureStatusesMock.mockResolvedValueOnce([
-      {
-        slot: 103n,
-        confirmations: 1n,
-        confirmationStatus: "confirmed",
-        err: null,
-      },
-    ]);
-    await trackPendingTransfers(env);
-    const settledBatch = await getDb(env)
-      .prepare(
-        `SELECT status
+        token: expectedMint,
+        totalAmount: "1.25",
+      });
+      expect(body.data.recipients).toMatchObject([
+        {
+          status: "processing",
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+        },
+      ]);
+      expect(body.data.transfers).toMatchObject([
+        {
+          type: "transfer_batch",
+          status: "processing",
+          signature: FIRST_SIGNATURE,
+        },
+      ]);
+      expect(signAndSendMock).toHaveBeenCalledTimes(1);
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        {
+          slot: 103n,
+          confirmations: 1n,
+          confirmationStatus: "confirmed",
+          err: null,
+        },
+      ]);
+      await trackPendingTransfers(env);
+      const settledBatch = await getDb(env)
+        .prepare(
+          `SELECT status
            FROM payment_transfer_batches
           ORDER BY created_at DESC
           LIMIT 1`
-      )
-      .first<{ status: string }>();
-    expect(settledBatch?.status).toBe("confirmed");
-  });
+        )
+        .first<{ status: string }>();
+      expect(settledBatch?.status).toBe("confirmed");
+    }
+  );
 
   it("returns a submitted chunk as processing without confirming in-request", async () => {
     const sourceSigner = await generateKeyPairSigner();

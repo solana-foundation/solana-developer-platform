@@ -185,7 +185,11 @@ export interface ResolvedTokenPresentation {
  * id, and metadata image when it was issued on SDP, and the caller's fallback
  * name otherwise. Rendering stays with the caller.
  *
- * @param mint - The mint address to resolve.
+ * The literal "SOL" is accepted as the native alias: rows written by the
+ * native send path record it in place of the wrapped SOL mint, and only the
+ * API writes that value, so it can never be a self-reported symbol.
+ *
+ * @param mint - The mint address to resolve, or the native "SOL" alias.
  * @param issuedTokensByMint - The org's issued tokens keyed by mint address.
  * @param fallbackName - Name used when the mint is neither well known nor issued.
  * @returns The resolved token identity.
@@ -196,13 +200,14 @@ export function resolveTokenByMint(
   fallbackName?: string
 ): ResolvedTokenPresentation {
   const trimmed = mint.trim();
-  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(trimmed);
-  const issued = issuedTokensByMint[trimmed];
+  const normalized = trimmed.toUpperCase() === "SOL" ? SOL_MINT : trimmed;
+  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(normalized);
+  const issued = issuedTokensByMint[normalized];
   return {
     tokenId: issued ? issued.id : null,
-    tokenName: wellKnown?.symbol ?? issued?.symbol ?? fallbackName ?? shortenAddress(trimmed),
+    tokenName: wellKnown?.symbol ?? issued?.symbol ?? fallbackName ?? shortenAddress(normalized),
     metadataImageUrl: issued ? issued.imageUrl : null,
-    mint: trimmed,
+    mint: normalized,
     isWellKnown: wellKnown !== undefined,
   };
 }

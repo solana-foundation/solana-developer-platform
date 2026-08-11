@@ -4,12 +4,9 @@ import type { AssetProfile, Token } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { Loader2, Play, WalletIcon } from "lucide-react";
 import { motion } from "motion/react";
-import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ToggleSwitch } from "@/components/ui/toggle-switch";
-import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
@@ -71,147 +68,6 @@ function resolveTab(value: string | null): AssetManagementTab {
   return "overview";
 }
 
-/**
- * The deploy modal's card, stepped when the AlphaLedger engine flag is on:
- * step 1 is a tokenization-engine chooser with Vulcan Forge (coming soon,
- * disabled) and SDP with Mosaic, step 2 is the signer/fee deploy panel passed
- * as children, with wizard step pills and a Back affordance between them.
- * When the flag is off the card renders the deploy panel directly with no
- * step chrome. Mounted only while the deploy modal is open, so closing the
- * modal discards the choice and a reopen starts back at the chooser.
- *
- * @param enabled - Whether the chooser step and step chrome are shown.
- * @param children - Renders the signer/fee deploy panel content below the deploy title; receives a go-back handler for returning to the engine step, or null when the flow is not stepped.
- * @returns The stepped deploy modal card.
- */
-function TokenizationEngineGate({
-  enabled,
-  children,
-}: {
-  enabled: boolean;
-  children: (goBack: (() => void) | null) => ReactNode;
-}) {
-  const t = useTranslations();
-  const [engineChosen, setEngineChosen] = useState(!enabled);
-
-  const deployStepContent = (
-    <>
-      <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
-        {t("DashboardIssuance.workspace.deployToken")}
-      </p>
-      <p className="mt-2 text-[14px] leading-[1.45] text-secondary">
-        {t("DashboardIssuance.workspace.deployHint")}
-      </p>
-      {children(enabled ? () => setEngineChosen(false) : null)}
-    </>
-  );
-
-  const engineStepContent = (
-    <div className="flex h-full flex-col">
-      <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
-        {t("DashboardIssuance.management.tokenizationEngineTitle")}
-      </p>
-      <p className="mt-2 text-[14px] leading-[1.45] text-secondary">
-        {t("DashboardIssuance.management.tokenizationEngineHint")}
-      </p>
-      <div className="mt-5 grid flex-1 gap-3 sm:grid-cols-2">
-        <div className="flex cursor-not-allowed flex-col rounded-xl border border-border-default bg-fill-subtle p-5">
-          <div className="flex flex-1 items-center justify-center py-10 opacity-50">
-            <span className="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white]">
-              <Image
-                src="/provider-logos/alphaledger.svg"
-                alt=""
-                width={32}
-                height={32}
-                className="object-contain grayscale"
-              />
-            </span>
-          </div>
-          <div className="-mx-5 border-t border-border-default" />
-          <div className="pt-4 text-left opacity-50">
-            <p className="flex items-center gap-2 text-base font-medium text-primary">
-              {t("DashboardIssuance.management.engineVulcanForgeName")}
-              <span className="rounded-full border border-border-default bg-surface-raised px-2 py-0.5 text-[11px] font-medium text-secondary">
-                {t("DashboardIssuance.management.comingSoon")}
-              </span>
-            </p>
-            <p className="mt-1 text-sm text-secondary">
-              {t("DashboardIssuance.management.engineVulcanForgeDescription")}
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setEngineChosen(true)}
-          className="group flex flex-col rounded-xl border border-border-default bg-surface-raised p-5 transition-colors hover:bg-fill-subtle focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
-        >
-          <span className="flex w-full flex-1 items-center justify-center py-10">
-            <span className="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-border-subtle bg-[white] transition-transform duration-500 group-hover:scale-105 motion-reduce:transition-none">
-              <Image
-                src="/landing/solana-logo.svg"
-                alt=""
-                width={32}
-                height={32}
-                className="object-contain"
-              />
-            </span>
-          </span>
-          <span className="-mx-5 block border-t border-border-default" />
-          <span className="block w-full pt-4 text-left">
-            <span className="block text-base font-medium text-primary">
-              {t("DashboardIssuance.management.engineMosaicName")}
-            </span>
-            <span className="mt-1 block text-sm text-secondary">
-              {t("DashboardIssuance.management.engineMosaicDescription")}
-            </span>
-          </span>
-        </button>
-      </div>
-    </div>
-  );
-
-  if (!enabled) {
-    return (
-      <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
-        {deployStepContent}
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
-      <div className="mb-4 pr-12">
-        <WizardStepProgress
-          currentStep={engineChosen ? 1 : 0}
-          progressLabel={t("DashboardIssuance.management.stepProgress", {
-            current: engineChosen ? 2 : 1,
-            total: 2,
-          })}
-          steps={[
-            t("DashboardIssuance.management.engineStepLabel"),
-            t("DashboardIssuance.management.deployStepLabel"),
-          ]}
-        />
-      </div>
-      {/* Both steps stay mounted in the same grid cell so the card keeps the
-          taller step's height across transitions — no layout shift. */}
-      <div className="grid">
-        <motion.div
-          key={engineChosen ? "deploy" : "engine"}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="col-start-1 row-start-1"
-        >
-          {engineChosen ? deployStepContent : engineStepContent}
-        </motion.div>
-        <div aria-hidden="true" className="invisible col-start-1 row-start-1">
-          {engineChosen ? engineStepContent : deployStepContent}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function shouldOpenPendingFundManagementModal({
   activeTab,
   pendingFundManagementModalAction,
@@ -226,12 +82,10 @@ export function AssetManagementWorkspace({
   token,
   assetProfile,
   tokenError,
-  alphaledgerEngineEnabled,
 }: {
   token: Token;
   assetProfile: AssetProfile;
   tokenError: string | null;
-  alphaledgerEngineEnabled: boolean;
 }) {
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
@@ -253,7 +107,6 @@ export function AssetManagementWorkspace({
   const [pendingFundManagementModalAction, setPendingFundManagementModalAction] = useState<
     "deploy" | "mint" | "burn" | null
   >(null);
-  const [onboardToVulcanForge, setOnboardToVulcanForge] = useState(false);
 
   const ops = useTokenOperations({
     token,
@@ -478,67 +331,42 @@ export function AssetManagementWorkspace({
         onClose={ops.closeFundManagementModal}
       >
         {ops.fundManagementModalAction === "deploy" ? (
-          <TokenizationEngineGate enabled={alphaledgerEngineEnabled}>
-            {(goBack) => (
-              <div className="mt-5 space-y-5">
-                <TokenSignerSelect
-                  signerWallets={ops.deploySignerSelection.wallets}
-                  signerWalletId={ops.deploySignerWalletId}
-                  signerUnavailableReason={ops.deploySignerSelection.unavailableReason}
-                  onSignerWalletIdChange={ops.setDeploySignerWalletId}
-                  helperText={t("DashboardIssuance.management.deploySignerHint")}
-                />
-                {alphaledgerEngineEnabled ? (
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-border-default bg-fill-subtle p-4">
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border-subtle bg-[white]">
-                        <Image
-                          src="/provider-logos/alphaledger.svg"
-                          alt=""
-                          width={22}
-                          height={22}
-                          className="object-contain"
-                        />
-                      </span>
-                      <div>
-                        <p className="text-sm font-medium text-primary">
-                          {t("DashboardIssuance.management.vulcanForgeOnboardTitle")}
-                        </p>
-                        <p className="mt-0.5 text-[12px] leading-5 text-secondary">
-                          {t("DashboardIssuance.management.vulcanForgeOnboardDescription")}
-                        </p>
-                      </div>
-                    </div>
-                    <ToggleSwitch
-                      checked={onboardToVulcanForge}
-                      onChange={setOnboardToVulcanForge}
-                    />
-                  </div>
-                ) : null}
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={goBack ? goBack : ops.closeFundManagementModal}
-                    disabled={ops.isPending}
-                    className="inline-flex h-10 items-center rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    {goBack
-                      ? t("DashboardIssuance.create.back")
-                      : t("DashboardIssuance.workspace.cancel")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => ops.deployToken("wallet")}
-                    disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
-                    className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    <WalletIcon className="size-4" />
-                    {t("DashboardIssuance.management.deployWithWallet")}
-                  </button>
-                </div>
+          <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
+            <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
+              {t("DashboardIssuance.workspace.deployToken")}
+            </p>
+            <p className="mt-2 text-[14px] leading-[1.45] text-secondary">
+              {t("DashboardIssuance.workspace.deployHint")}
+            </p>
+            <div className="mt-5 space-y-5">
+              <TokenSignerSelect
+                signerWallets={ops.deploySignerSelection.wallets}
+                signerWalletId={ops.deploySignerWalletId}
+                signerUnavailableReason={ops.deploySignerSelection.unavailableReason}
+                onSignerWalletIdChange={ops.setDeploySignerWalletId}
+                helperText={t("DashboardIssuance.management.deploySignerHint")}
+              />
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={ops.closeFundManagementModal}
+                  disabled={ops.isPending}
+                  className="inline-flex h-10 items-center rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {t("DashboardIssuance.workspace.cancel")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => ops.deployToken("wallet")}
+                  disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
+                  className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <WalletIcon className="size-4" />
+                  {t("DashboardIssuance.management.deployWithWallet")}
+                </button>
               </div>
-            )}
-          </TokenizationEngineGate>
+            </div>
+          </div>
         ) : ops.fundManagementModalAction ? (
           <OpsActionForms
             ops={ops}

@@ -16,9 +16,9 @@ import {
   XIcon,
 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,

@@ -1,7 +1,8 @@
 # 0002. Earn provider & curator pluggability
 
 Date: 2026-07-20
-Status: Proposed (scaffold branch `earn-initial`)
+Status: Accepted — implemented on `main` (`earn-initial` merged as
+`bdb63491`, #831; subsequent amendments are recorded as addenda below)
 
 ## Context
 

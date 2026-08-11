@@ -2,11 +2,12 @@
 
 import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
 import { ExternalLink } from "lucide-react";
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { TokenMark } from "@/components/token-mark";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -26,14 +27,19 @@ import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "./activity-format-utils";
 import { buildHomeBalanceBreakdown, countHeldTokens } from "./home-balance-breakdown";
+import { resolveHomeHeroState } from "./home-first-run";
 import type { HomeActivityExplorerRef, HomeActivityRow } from "./home-page.data";
+import { HomeQuickActions } from "./home-quick-actions";
+import { seriesColorForMint } from "./home-series-color";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { fetchHomeActivity } from "./home-workspace.data";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
+  resolveTokenByMint,
   resolveTransferTokenLabel,
 } from "./payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
 import { tokenActivityHref } from "./tokens/holdings-links";
 
 interface HomeWorkspaceProps {
@@ -42,17 +48,42 @@ interface HomeWorkspaceProps {
   wallets: PaymentsDashboardWallet[];
   balances: CustodyWalletTokenBalance[];
   walletCount: number;
+  issuedTokens: PaymentsIssuedTokenSymbol[];
 }
 
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
 const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
 
+/** Table text that ellipsizes, with a full-value tooltip only while it actually overflows. */
 function TruncatedTableText({ value, className }: { value: string; className?: string }) {
+  const textRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: flipping isOverflowing swaps the div between plain and tooltip-trigger positions (a remount), so the observer must re-attach to the new node; a value change alters scrollWidth without any resize event.
+  useEffect(() => {
+    const node = textRef.current;
+    if (!node) return;
+
+    const measure = () => setIsOverflowing(node.scrollWidth > node.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [value, isOverflowing]);
+
+  const text = (
+    <div ref={textRef} className={className ?? "truncate"}>
+      {value}
+    </div>
+  );
+
+  if (!isOverflowing) {
+    return text;
+  }
+
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <div className={className ?? "truncate"}>{value}</div>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{text}</TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[32rem] break-all text-xs">
         {value}
       </TooltipContent>
@@ -93,22 +124,10 @@ function ActivityAddress({
 }
 
 /**
- * Descending emphasis for descending share. The design system ships no categorical
- * chart palette, and a stacked allocation bar is a magnitude encoding rather than an
- * identity one, so a single neutral ramp is the right job — and it re-steps itself
- * per theme instead of needing a hand-picked dark variant.
+ * "Other" is a residual bucket, not a token, so it stays neutral rather than
+ * taking a categorical hue that would imply an identity it does not have.
  */
-const ALLOCATION_FILLS = [
-  "bg-primary",
-  "bg-secondary",
-  "bg-tertiary",
-  "bg-muted",
-  "bg-fill-strong",
-] as const;
-
-function allocationFill(index: number): string {
-  return ALLOCATION_FILLS[Math.min(index, ALLOCATION_FILLS.length - 1)];
-}
+const OTHER_SEGMENT_COLOR = "bg-fill-strong";
 
 /**
  * Holdings by token. The aggregate already returns the per-token rows the total is
@@ -122,9 +141,11 @@ function allocationFill(index: number): string {
  */
 function BalanceAllocation({
   balances,
+  issuedTokensByMint,
   locale,
 }: {
   balances: CustodyWalletTokenBalance[];
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   locale: string;
 }) {
   const t = useTranslations();
@@ -141,15 +162,17 @@ function BalanceAllocation({
   );
   const symbolFor = (slice: { mint: string; token: string }) =>
     resolveTransferTokenLabel(slice.mint, symbolsByMint) ?? slice.token;
+  const resolvedFor = (mint: string, symbol: string) =>
+    resolveTokenByMint(mint, issuedTokensByMint, symbol);
 
   const segments = [
-    ...breakdown.priced.map((slice, index) => ({
+    ...breakdown.priced.map((slice) => ({
       key: slice.mint,
       mint: slice.mint,
       label: symbolFor(slice),
       percent: slice.sharePercent,
       value: slice.usdValue ?? 0,
-      fill: allocationFill(index),
+      fill: seriesColorForMint(slice.mint),
       href: tokenActivityHref(slice.mint),
     })),
     ...(breakdown.otherPricedCount > 0
@@ -165,7 +188,7 @@ function BalanceAllocation({
                   }),
             percent: breakdown.otherPricedSharePercent,
             value: breakdown.otherPricedUsd,
-            fill: allocationFill(breakdown.priced.length),
+            fill: OTHER_SEGMENT_COLOR,
             href: "/dashboard/tokens",
           },
         ]
@@ -209,40 +232,54 @@ function BalanceAllocation({
           </div>
 
           <ul className="space-y-1">
-            {segments.map((segment) => (
-              <li key={segment.key}>
-                {/* Row highlight is pure CSS. Driving it from mouse handlers on a
+            {segments.map((segment) => {
+              const resolved = segment.mint ? resolvedFor(segment.mint, segment.label) : null;
+              return (
+                <li key={segment.key}>
+                  {/* Row highlight is pure CSS. Driving it from mouse handlers on a
                     plain element is a keyboard trap — the segment button above owns
                     the interaction, and this only mirrors it. */}
-                <Link
-                  href={segment.href}
-                  onMouseEnter={() => setHovered(segment.key)}
-                  onMouseLeave={() => setHovered(null)}
-                  className={cn(
-                    "flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none",
-                    hovered === segment.key ? "bg-fill-subtle" : "bg-transparent"
-                  )}
-                >
-                  {segment.mint ? (
-                    <TokenMark mint={segment.mint} symbol={segment.label} size="sm" />
-                  ) : (
-                    <span
-                      aria-hidden="true"
-                      className={cn("size-6 shrink-0 rounded-full", segment.fill)}
-                    />
-                  )}
-                  <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-primary">
-                    {segment.label}
-                  </span>
-                  <span className="shrink-0 text-[15px] text-tertiary tabular-nums">
-                    {Math.round(segment.percent)}%
-                  </span>
-                  <span className="w-28 shrink-0 text-right text-[15px] font-medium text-primary tabular-nums">
-                    {formatCurrencyAmount(segment.value, locale)}
-                  </span>
-                </Link>
-              </li>
-            ))}
+                  <Link
+                    href={segment.href}
+                    onMouseEnter={() => setHovered(segment.key)}
+                    onMouseLeave={() => setHovered(null)}
+                    className={cn(
+                      "flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none",
+                      hovered === segment.key ? "bg-fill-subtle" : "bg-transparent"
+                    )}
+                  >
+                    {segment.mint ? (
+                      <TokenMark
+                        mint={segment.mint}
+                        symbol={segment.label}
+                        logoUrl={resolved?.metadataImageUrl}
+                        size="sm"
+                      />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className={cn("size-6 shrink-0 rounded-full", segment.fill)}
+                      />
+                    )}
+                    <span className="min-w-0 truncate text-[15px] font-medium text-primary">
+                      {segment.label}
+                    </span>
+                    {resolved?.tokenId ? (
+                      <Badge variant="outline" className="shrink-0">
+                        {t("Shared.SharedComponents.sdpMintedToken")}
+                      </Badge>
+                    ) : null}
+                    <span className="min-w-0 flex-1" />
+                    <span className="shrink-0 text-[15px] text-tertiary tabular-nums">
+                      {Math.round(segment.percent)}%
+                    </span>
+                    <span className="w-28 shrink-0 text-right text-[15px] font-medium text-primary tabular-nums">
+                      {formatCurrencyAmount(segment.value, locale)}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </>
       ) : null}
@@ -252,16 +289,28 @@ function BalanceAllocation({
           <p className="px-2 pb-1 text-xs text-tertiary">{t("Shared.homeWorkspace.notPriced")}</p>
           {breakdown.unpriced.map((slice) => {
             const symbol = symbolFor(slice);
+            const resolved = resolvedFor(slice.mint, symbol);
             return (
               <Link
                 key={slice.mint}
                 href={tokenActivityHref(slice.mint)}
                 className="flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-fill-subtle motion-reduce:transition-none"
               >
-                <TokenMark mint={slice.mint} symbol={symbol} size="sm" />
-                <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-primary">
+                <TokenMark
+                  mint={slice.mint}
+                  symbol={symbol}
+                  logoUrl={resolved.metadataImageUrl}
+                  size="sm"
+                />
+                <span className="min-w-0 truncate text-[15px] font-medium text-primary">
                   {symbol}
                 </span>
+                {resolved.tokenId ? (
+                  <Badge variant="outline" className="shrink-0">
+                    {t("Shared.SharedComponents.sdpMintedToken")}
+                  </Badge>
+                ) : null}
+                <span className="min-w-0 flex-1" />
                 <span className="shrink-0 text-[15px] text-secondary tabular-nums">
                   {formatDisplayAmount(slice.uiAmount, symbol)}
                 </span>
@@ -324,11 +373,13 @@ function BalanceHero({
   totalBalance,
   totalBalanceError,
   totalBalanceHint,
+  hasPricedValue,
   todaysVolume,
   todaysVolumeError,
   walletCount,
   heldTokenCount,
   balances,
+  issuedTokensByMint,
   locale,
   canManageApiKeys,
   canManageCustody,
@@ -336,11 +387,13 @@ function BalanceHero({
   totalBalance: number | null;
   totalBalanceError: string | null;
   totalBalanceHint: string | null;
+  hasPricedValue: boolean;
   todaysVolume: number | null;
   todaysVolumeError: string | null;
   walletCount: number;
   heldTokenCount: number;
   balances: CustodyWalletTokenBalance[];
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   locale: string;
   canManageApiKeys: boolean;
   canManageCustody: boolean;
@@ -352,14 +405,31 @@ function BalanceHero({
         <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
           <div className="min-w-0 space-y-2">
             <p className="text-[15px] text-tertiary">{t("Shared.homeWorkspace.totalBalance")}</p>
-            <p className="text-[38px] leading-none font-medium tracking-[-0.03em] text-primary tabular-nums sm:text-[46px]">
-              {totalBalanceError
-                ? t("Shared.homeWorkspace.unavailable")
-                : formatCurrencyAmount(totalBalance, locale)}
-            </p>
+            {/* An organization holding only its own issued tokens has no price feed
+                for anything it owns. Formatting that as currency printed $0.00 next
+                to real holdings, which reads as a broken number rather than an
+                absent one. */}
+            {totalBalanceError ? (
+              <p className="text-[38px] leading-none font-medium tracking-[-0.03em] text-primary tabular-nums sm:text-[46px]">
+                {t("Shared.homeWorkspace.unavailable")}
+              </p>
+            ) : hasPricedValue ? (
+              <p className="text-[38px] leading-none font-medium tracking-[-0.03em] text-primary tabular-nums sm:text-[46px]">
+                {formatCurrencyAmount(totalBalance, locale)}
+              </p>
+            ) : (
+              <>
+                <p className="text-[22px] leading-tight font-medium tracking-[-0.02em] text-primary">
+                  {t("Shared.homeWorkspace.heroUnpricedTitle")}
+                </p>
+                <p className="text-sm text-tertiary">
+                  {t("Shared.homeWorkspace.heroUnpricedBody")}
+                </p>
+              </>
+            )}
             {totalBalanceError ? (
               <p className="text-sm text-destructive-strong">{totalBalanceError}</p>
-            ) : totalBalanceHint ? (
+            ) : totalBalanceHint && hasPricedValue ? (
               <p className="text-sm text-tertiary">{totalBalanceHint}</p>
             ) : null}
           </div>
@@ -372,10 +442,11 @@ function BalanceHero({
               />
             ) : null}
             {canManageCustody ? (
-              <Button
-                asChild
-                className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
-              >
+              // Secondary, not primary. An organization with balances has already
+              // created its wallets; leading this screen with "Create Wallet" gave
+              // a setup action top billing over the numbers the page exists to
+              // show. It stays reachable, it just stops competing with them.
+              <Button asChild variant="secondary">
                 <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
               </Button>
             ) : null}
@@ -403,7 +474,11 @@ function BalanceHero({
 
         {balances.length > 0 ? (
           <div className="border-t border-border-default pt-5">
-            <BalanceAllocation balances={balances} locale={locale} />
+            <BalanceAllocation
+              balances={balances}
+              issuedTokensByMint={issuedTokensByMint}
+              locale={locale}
+            />
           </div>
         ) : null}
       </CardContent>
@@ -448,6 +523,7 @@ export function HomeWorkspace({
   wallets,
   balances,
   walletCount,
+  issuedTokens,
 }: HomeWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -467,6 +543,21 @@ export function HomeWorkspace({
   );
   const isWalletEmptyState = wallets.length === 0;
   const heldTokenCount = countHeldTokens(balances);
+  // Not `wallets.length === 0`: onboarding provisions a wallet before it completes,
+  // so a freshly onboarded organization already has one and fell through to the
+  // populated hero holding nothing.
+  // `totalBalanceError` is set only when the aggregate request itself failed
+  // on an organization that has wallets. That is the only failure the response
+  // exposes today: the API converts per-wallet read failures into zero rows on
+  // a 200, so an RPC blip that zeroes an established organization is not
+  // distinguishable here from genuine emptiness. Closing that requires the
+  // aggregate to report partial reads (HOO-1040).
+  const heroState = resolveHomeHeroState({
+    walletCount,
+    balances,
+    totalBalance,
+    balancesUnavailable: totalBalanceError !== null,
+  });
   const totalBalanceHint = isWalletEmptyState
     ? t("Shared.homeWorkspace.createFirstWalletBalances")
     : totalBalance === null
@@ -480,6 +571,9 @@ export function HomeWorkspace({
     : (activitySnapshot?.activityError ?? null);
   const activityRows = activitySnapshot?.activityRows ?? [];
   const symbolsByMint = buildTokenSymbolsByMint(activityRows, balances);
+  const issuedTokensByMint = Object.fromEntries(
+    issuedTokens.map((token) => [token.mintAddress, token])
+  );
   const activityError = activityRequestError
     ? activityRequestError instanceof Error
       ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
@@ -495,18 +589,22 @@ export function HomeWorkspace({
   return (
     <div className="w-full space-y-8 py-2">
       <SectionEntry>
-        {isWalletEmptyState ? (
+        {heroState.kind === "first_run" ? (
           <FirstRunPanel canCreateWallet={dashboardAccess.capabilities.canManageCustody} />
+        ) : heroState.kind === "provisioned_empty" ? (
+          <HomeQuickActions capabilities={dashboardAccess.capabilities} />
         ) : (
           <BalanceHero
             totalBalance={totalBalance}
             totalBalanceError={totalBalanceError}
             totalBalanceHint={totalBalanceHint}
+            hasPricedValue={heroState.hasPricedValue}
             todaysVolume={todaysVolume}
             todaysVolumeError={todaysVolumeError}
             walletCount={walletCount}
             heldTokenCount={heldTokenCount}
             balances={balances}
+            issuedTokensByMint={issuedTokensByMint}
             locale={locale}
             canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
             canManageCustody={dashboardAccess.capabilities.canManageCustody}
@@ -540,16 +638,16 @@ export function HomeWorkspace({
                   <Table className="min-w-0 [&_table]:table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[7rem] pl-6">
+                        <TableHead className="w-[8rem] pl-6">
                           {t("Shared.homeWorkspace.time")}
                         </TableHead>
-                        <TableHead className="w-[calc(100%-7rem)] md:hidden">
+                        <TableHead className="w-[calc(100%-8rem)] md:hidden">
                           {t("Shared.homeWorkspace.activity")}
                         </TableHead>
-                        <TableHead className="hidden w-[6.5rem] md:table-cell">
+                        <TableHead className="hidden w-[9.5rem] md:table-cell">
                           {t("Shared.homeWorkspace.type")}
                         </TableHead>
-                        <TableHead className="hidden w-[8rem] md:table-cell">
+                        <TableHead className="hidden w-[12rem] md:table-cell">
                           {t("Shared.homeWorkspace.token")}
                         </TableHead>
                         <TableHead className="hidden w-[9rem] text-right md:table-cell">
@@ -563,11 +661,21 @@ export function HomeWorkspace({
                     <TableBody>
                       {activityRows.map((row) => {
                         const timeLabel = formatRelativeTime(row.createdAt, locale);
+                        const createdAtDate = new Date(row.createdAt);
+                        const timeTooltip = Number.isNaN(createdAtDate.getTime())
+                          ? null
+                          : new Intl.DateTimeFormat(locale, {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            }).format(createdAtDate);
                         // `row.token` is already resolved, but only against issued
                         // tokens — anything else arrives as a shortened mint. Re-resolve
                         // from the mint using the balance symbols before falling back.
                         const tokenSymbol =
                           resolveTransferTokenLabel(row.tokenMint, symbolsByMint) ?? row.token;
+                        const resolvedToken = row.tokenMint
+                          ? resolveTokenByMint(row.tokenMint, issuedTokensByMint, tokenSymbol)
+                          : null;
                         const amountLabel =
                           row.amount === "—"
                             ? "—"
@@ -579,7 +687,20 @@ export function HomeWorkspace({
 
                         return (
                           <TableRow key={row.id}>
-                            <TableCell className="pl-6 text-secondary">{timeLabel}</TableCell>
+                            <TableCell className="pl-6 text-secondary">
+                              {timeTooltip ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="capitalize">{timeLabel}</span>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="text-xs">
+                                    {timeTooltip}
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : (
+                                timeLabel
+                              )}
+                            </TableCell>
                             <TableCell className="min-w-0 md:hidden">
                               <div className="min-w-0">
                                 <div className="truncate font-medium">{row.type}</div>
@@ -598,12 +719,22 @@ export function HomeWorkspace({
                             </TableCell>
                             <TableCell className="hidden text-secondary md:table-cell">
                               <span className="flex min-w-0 items-center gap-2">
-                                <TokenMark mint={row.tokenMint} symbol={tokenSymbol} size="xs" />
+                                <TokenMark
+                                  mint={resolvedToken ? resolvedToken.mint : null}
+                                  symbol={tokenSymbol}
+                                  logoUrl={resolvedToken?.metadataImageUrl}
+                                  size="xs"
+                                />
                                 <TruncatedTableText value={tokenSymbol} className="truncate" />
+                                {resolvedToken?.tokenId ? (
+                                  <Badge variant="outline" className="shrink-0">
+                                    {t("Shared.SharedComponents.sdpMintedToken")}
+                                  </Badge>
+                                ) : null}
                               </span>
                             </TableCell>
                             <TableCell className="hidden text-right text-secondary tabular-nums md:table-cell">
-                              <TruncatedTableText value={amountLabel} className="truncate" />
+                              <div className="truncate">{amountLabel}</div>
                             </TableCell>
                             <TableCell className="hidden pr-6 font-mono text-xs text-secondary md:table-cell">
                               <ActivityAddress row={row} cluster={cluster} className="truncate" />

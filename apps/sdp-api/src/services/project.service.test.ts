@@ -8,7 +8,7 @@ import { getDb } from "@/db";
 import { ProjectService } from "@/services/project.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 /**
  * Inserts a project row plus a creator admin membership, mirroring what
@@ -53,7 +53,7 @@ describe("ProjectService", () => {
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {

@@ -10,10 +10,11 @@ import type {
   WalletOperationEnvelope,
   WalletOperationProviderExtensions,
 } from "@sdp/types";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
 import {
   type ApprovalRequestRow,
   createPolicyRepository,
+  createPostgresPolicyRepository,
   type PolicyRepository,
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
@@ -45,7 +46,7 @@ export async function enforceWalletOperationPolicy(
   approvedOperationAttemptId?: string
 ): Promise<WalletOperationPolicyEnforcement> {
   assertTenantClaim(scope, input, "enforceWalletOperationPolicy");
-  const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope));
+  const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope), scope);
   if (approvedOperationId) {
     if (!approvedOperationAttemptId) {
       throw new AppError("FORBIDDEN", "Approved wallet operation attempt is unavailable");
@@ -57,7 +58,10 @@ export async function enforceWalletOperationPolicy(
 
 /** Policy enforcement plus approval-request lifecycle transitions for wallet operations. */
 export class WalletPolicyEnforcementService {
-  constructor(private readonly repository: PolicyRepository) {}
+  constructor(
+    private readonly repository: PolicyRepository,
+    private readonly scope: TenantScope
+  ) {}
 
   /**
    * Enforce policy on a wallet operation, throwing the route-contract error
@@ -67,7 +71,7 @@ export class WalletPolicyEnforcementService {
    * @returns The recorded operation and its evaluation when allowed.
    */
   async enforce(input: CreateWalletOperationInput): Promise<WalletOperationPolicyEnforcement> {
-    const store = new PostgresPolicyEnforcementStore(this.repository);
+    const store = new PostgresPolicyEnforcementStore(this.repository, this.scope);
     const enforcement = await runPolicyEnforcement(store, input);
 
     if (enforcement.evaluation.decision === "allow") {
@@ -265,6 +269,9 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
  * Record a legacy wallet-policy denial against an operation the new engine
  * already allowed, so the legacy decision stays visible in the audit trail.
  *
+ * The legacy wallet-policy checks and every call site of this recorder are
+ * deleted when the legacy system is cut over (PRO-1617) — don't build on it.
+ *
  * @param env - The runtime environment.
  * @param enforcement - The enforcement the legacy check overruled.
  * @param error - The legacy denial.
@@ -274,34 +281,34 @@ export async function recordLegacyWalletPolicyDenial(
   enforcement: WalletOperationPolicyEnforcement,
   error: unknown
 ): Promise<void> {
-  const repository = createPolicyRepository(
-    env,
-    createTenantScope({
-      organizationId: enforcement.operation.organizationId,
-      projectId: enforcement.operation.projectId,
-    })
-  );
+  const scope = createTenantScope({
+    organizationId: enforcement.operation.organizationId,
+    projectId: enforcement.operation.projectId,
+  });
   const reason =
     error instanceof Error && error.message
       ? error.message
       : "Legacy wallet policy denied wallet operation";
 
   try {
-    if (enforcement.evaluation.evaluationContext) {
-      await repository.createPolicyEvaluation({
-        walletOperationId: enforcement.operation.id,
-        walletPolicyRevisionId: null,
-        apiKeyPolicyRevisionId: null,
-        decision: "deny",
-        reasonCode: "legacy_wallet_policy_denied",
-        reason,
-        matchedRules: [],
-        evaluationContext: enforcement.evaluation.evaluationContext,
-        requiresApproval: false,
-      });
-    }
+    await getDb(env).transaction(async (tx) => {
+      const repository = createPostgresPolicyRepository(asTransactionalClient(tx), scope);
+      if (enforcement.evaluation.evaluationContext) {
+        await repository.createPolicyEvaluation({
+          walletOperationId: enforcement.operation.id,
+          walletPolicyRevisionId: null,
+          apiKeyPolicyRevisionId: null,
+          decision: "deny",
+          reasonCode: "legacy_wallet_policy_denied",
+          reason,
+          matchedRules: [],
+          evaluationContext: enforcement.evaluation.evaluationContext,
+          requiresApproval: false,
+        });
+      }
 
-    await repository.updateWalletOperationStatus(enforcement.operation.id, "failed");
+      await repository.updateWalletOperationStatus(enforcement.operation.id, "failed");
+    });
   } catch (auditError) {
     getLogger().error(
       {

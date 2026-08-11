@@ -9,7 +9,6 @@ import {
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
-  createSubscriptionCollectionAttemptSchema as createSubscriptionCollectionAttemptSchemaBase,
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   createSubscriptionSchema as createSubscriptionSchemaBase,
   createTransferBatchSchema as createTransferBatchSchemaBase,
@@ -44,8 +43,7 @@ import {
   transferStatusSchema as transferStatusSchemaBase,
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
   updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
-  updateSubscriptionSchema as updateSubscriptionSchemaBase,
-  updateWalletPolicySchema as updateWalletPolicySchemaBase,
+  updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
 } from "../../routes/payments/schemas";
 import {
@@ -97,6 +95,9 @@ const walletControlProfileSummarySchema = z
     revisionId: z.string().nullable().openapi({ description: "Returned revision ID." }),
     revisionNumber: z.number().int().nullable().openapi({
       description: "Returned immutable revision number.",
+    }),
+    commitMessage: z.string().nullable().openapi({
+      description: "Message describing the returned revision's changes, when provided.",
     }),
     defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
       description: "Decision used when no rule matches.",
@@ -221,6 +222,10 @@ const walletControlProfileRevisionSchema = z
     }),
     rules: z.array(policyRuleSchema).openapi({ description: "Rules stored in this revision." }),
     defaultAction: z.enum(["allow", "deny", "approval_required", "review"]),
+    commitMessage: updateWalletPolicySchemaBase.shape.commitMessage
+      .unwrap()
+      .nullable()
+      .openapi({ description: "Message describing the revision changes, when provided." }),
     createdBy: z.string().nullable(),
     createdAt: isoDateTimeSchema,
     activatedAt: isoDateTimeSchema.nullable(),
@@ -427,6 +432,10 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
       description:
         "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
       example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
+    }),
+    commitMessage: withOpenApi(updateWalletPolicySchemaBase.shape.commitMessage, {
+      description: "Optional message describing the wallet policy revision changes.",
+      example: "Require approval for transfers above 10,000 USDC.",
     }),
     maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
       description: "Maximum amount allowed per transfer.",
@@ -1436,34 +1445,11 @@ export const createSubscriptionRequestSchema = createSubscriptionSchemaBase
       description: "Customer wallet address that authorizes the subscription.",
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
-    subscriberTokenAccount: withOpenApi(createSubscriptionSchemaBase.shape.subscriberTokenAccount, {
-      description: "Optional subscriber token account address.",
-    }),
-    subscriptionPda: withOpenApi(createSubscriptionSchemaBase.shape.subscriptionPda, {
-      description: "On-chain subscription PDA once created.",
-    }),
-    subscriptionAuthorityAddress: withOpenApi(
-      createSubscriptionSchemaBase.shape.subscriptionAuthorityAddress,
-      {
-        description: "Subscription authority PDA/address once initialized.",
-      }
-    ),
-    authorizationSignature: withOpenApi(createSubscriptionSchemaBase.shape.authorizationSignature, {
-      description: "Signature for the customer authorization transaction.",
-      example: "sig_example",
-    }),
-    status: paymentSubscriptionStatusSchema.optional(),
   })
   .openapi({
     description:
-      "Creates an SDP subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization flow.",
+      "Creates a pending SDP subscription record tied to a counterparty. Lifecycle, schedule, on-chain addresses, and authorization proof are server-owned and populated only by verified flows.",
   });
-
-export const updateSubscriptionRequestSchema = updateSubscriptionSchemaBase
-  .safeExtend({
-    status: paymentSubscriptionStatusSchema.optional(),
-  })
-  .openapi({ description: "Updates mutable subscription state and on-chain identifiers." });
 
 export const paymentListSubscriptionsQuerySchema = listSubscriptionsQuerySchemaBase
   .extend({
@@ -1578,16 +1564,6 @@ export const paymentSubscriptionListResponseSchema = z
   })
   .openapi({ description: "Subscription list response payload." });
 
-export const createSubscriptionCollectionAttemptRequestSchema =
-  createSubscriptionCollectionAttemptSchemaBase
-    .extend({
-      status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),
-    })
-    .openapi({
-      description:
-        "Creates a collection-attempt record for a due subscription. This endpoint records backend state; the collection worker/Solana transaction submitter owns actual settlement.",
-    });
-
 export const paymentListSubscriptionCollectionAttemptsQuerySchema =
   listSubscriptionCollectionAttemptsQuerySchemaBase
     .extend({
@@ -1627,11 +1603,6 @@ export const paymentSubscriptionCollectionAttemptResponseSchema = z
 
 export const prepareSubscriptionCollectionRequestSchema = prepareSubscriptionCollectionSchemaBase
   .extend({
-    amount: withOpenApi(prepareSubscriptionCollectionSchemaBase.shape.amount, {
-      description:
-        "Optional override amount in UI units. Defaults to the subscription plan amount.",
-      example: "25.00",
-    }),
     receiverTokenAccount: withOpenApi(
       prepareSubscriptionCollectionSchemaBase.shape.receiverTokenAccount,
       {
@@ -1643,7 +1614,7 @@ export const prepareSubscriptionCollectionRequestSchema = prepareSubscriptionCol
   })
   .openapi({
     description:
-      "Inputs for preparing the collector-signed Solana subscriptions transfer transaction.",
+      "Inputs for preparing the collector-signed Solana subscriptions transfer transaction. The amount is always derived from the stored plan.",
   });
 
 export const preparePaymentSubscriptionCollectionResponseSchema = z

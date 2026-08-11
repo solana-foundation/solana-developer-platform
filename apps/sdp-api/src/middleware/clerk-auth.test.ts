@@ -7,7 +7,7 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
@@ -87,7 +87,6 @@ describe("Clerk auth request cache", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    await clearTestDatabase(env);
     await clearKVStores(env);
     env.CLERK_ISSUER = undefined;
     env.CLERK_JWKS_URL = undefined;

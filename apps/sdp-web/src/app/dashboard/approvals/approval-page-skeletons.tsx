@@ -27,30 +27,6 @@ const APPROVAL_DETAIL_SECTION_IDS = [
   "approval-section-timeline",
 ];
 
-const APPROVAL_TABLE_COLUMN_IDS = [
-  "approval-column-status",
-  "approval-column-wallet",
-  "approval-column-operation",
-  "approval-column-amount",
-  "approval-column-destination",
-  "approval-column-requester",
-  "approval-column-reason",
-];
-
-const APPROVAL_DETAIL_METADATA_IDS = [
-  "approval-detail-metadata-wallet",
-  "approval-detail-metadata-address",
-  "approval-detail-metadata-requester",
-  "approval-detail-metadata-api-key",
-  "approval-detail-metadata-wallet-revision",
-  "approval-detail-metadata-api-key-revision",
-  "approval-detail-metadata-provider",
-  "approval-detail-metadata-provider-status",
-  "approval-detail-metadata-request-id",
-  "approval-detail-metadata-submitted",
-  "approval-detail-metadata-status",
-];
-
 export function ApprovalInboxSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel
@@ -61,57 +37,27 @@ export function ApprovalInboxSkeleton() {
       <DashboardWorkspaceCard>
         <div className="flex flex-wrap items-end gap-3 border-b border-border-default p-3">
           {APPROVAL_FILTER_IDS.map((id) => (
-            <div key={id} className="min-w-44 flex-1 space-y-1.5">
-              <SkeletonBlock className="h-3 w-20" />
-              <SkeletonBlock className="h-12 w-full rounded-lg" />
-            </div>
+            <SkeletonBlock key={id} className="h-16 min-w-44 flex-1 rounded-lg" />
           ))}
         </div>
 
         <div className="flex-1">
           <div className="divide-y divide-border-default 2xl:hidden" data-loading-mobile-rows>
             {APPROVAL_ROW_IDS.map((id) => (
-              <article key={id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 p-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <SkeletonBlock className="h-5 w-16 rounded-full" />
-                    <SkeletonBlock className="h-3 w-20" />
-                  </div>
-                  <SkeletonBlock className="mt-3 h-4 w-32" />
-                  <SkeletonBlock className="mt-2 h-4 w-full max-w-md" />
-                  <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
-                    <SkeletonBlock className="h-7 w-full" />
-                    <SkeletonBlock className="h-7 w-full" />
-                  </div>
-                </div>
-                <SkeletonBlock className="mt-1 size-8 rounded-[10px]" />
-              </article>
+              <div key={id} className="p-4">
+                <SkeletonBlock className="h-28 w-full" />
+              </div>
             ))}
           </div>
 
           <div className="hidden overflow-hidden 2xl:block" data-loading-desktop-table>
-            <div className="grid grid-cols-[88px_145px_145px_120px_120px_145px_minmax(160px,1fr)_115px_48px] gap-3 border-b border-border-default px-4 py-3">
-              {APPROVAL_TABLE_COLUMN_IDS.map((id) => (
-                <SkeletonBlock key={id} className="h-3 w-16" />
-              ))}
-              <SkeletonBlock className="h-3 w-16" />
-              <SkeletonBlock className="h-3 w-6" />
+            <div className="border-b border-border-default px-4 py-3">
+              <SkeletonBlock className="h-3 w-64" />
             </div>
             <div className="divide-y divide-border-default">
               {APPROVAL_ROW_IDS.map((id) => (
-                <div
-                  key={id}
-                  className="grid min-h-16 grid-cols-[88px_145px_145px_120px_120px_145px_minmax(160px,1fr)_115px_48px] items-center gap-3 px-4 py-3"
-                >
-                  <SkeletonBlock className="h-5 w-16 rounded-full" />
-                  <SkeletonBlock className="h-4 w-28" />
-                  <SkeletonBlock className="h-4 w-28" />
-                  <SkeletonBlock className="h-4 w-20" />
-                  <SkeletonBlock className="h-4 w-20" />
-                  <SkeletonBlock className="h-4 w-28" />
-                  <SkeletonBlock className="h-4 w-full" />
-                  <SkeletonBlock className="h-4 w-20" />
-                  <SkeletonBlock className="size-8 rounded-[10px]" />
+                <div key={id} className="flex min-h-16 items-center px-4 py-3">
+                  <SkeletonBlock className="h-6 w-full" />
                 </div>
               ))}
             </div>
@@ -119,15 +65,8 @@ export function ApprovalInboxSkeleton() {
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-border-default p-4">
-          <div className="flex items-center gap-2">
-            <SkeletonBlock className="h-3 w-36" />
-            <SkeletonBlock className="size-8 rounded-[10px]" />
-          </div>
-          <div className="flex gap-2">
-            <SkeletonBlock className="size-8 rounded-[10px]" />
-            <SkeletonBlock className="h-8 w-20" />
-            <SkeletonBlock className="size-8 rounded-[10px]" />
-          </div>
+          <SkeletonBlock className="h-8 w-44" />
+          <SkeletonBlock className="h-8 w-36" />
         </div>
       </DashboardWorkspaceCard>
     </DashboardWorkspaceOverviewPanel>
@@ -144,18 +83,10 @@ export function ApprovalDetailSkeleton() {
       <div className="mx-auto w-full max-w-[1500px] py-6">
         <header className="flex flex-wrap items-start justify-between gap-5 border-b border-border-default pb-6">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-3">
-              <SkeletonBlock className="h-5 w-16 rounded-full" />
-              <SkeletonBlock className="h-3 w-20" />
-            </div>
-            <SkeletonBlock className="mt-4 h-8 w-full max-w-sm" />
-            <SkeletonBlock className="mt-2 h-4 w-full max-w-2xl" />
+            <SkeletonBlock className="h-8 w-full max-w-sm" />
+            <SkeletonBlock className="mt-3 h-4 w-full max-w-2xl" />
           </div>
-          <div className="flex flex-wrap gap-2">
-            <SkeletonBlock className="h-10 w-20 rounded-[10px]" />
-            <SkeletonBlock className="h-10 w-20 rounded-[10px]" />
-            <SkeletonBlock className="h-10 w-24 rounded-[10px]" />
-          </div>
+          <SkeletonBlock className="h-10 w-64 rounded-[10px]" />
         </header>
 
         <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -169,17 +100,7 @@ export function ApprovalDetailSkeleton() {
                     : "border-b border-border-default py-8"
                 }
               >
-                <SkeletonBlock className="h-5 w-44" />
-                <div className="mt-5 grid gap-x-8 gap-y-5 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <SkeletonBlock className="h-3 w-24" />
-                    <SkeletonBlock className="h-4 w-40 max-w-full" />
-                  </div>
-                  <div className="space-y-2">
-                    <SkeletonBlock className="h-3 w-20" />
-                    <SkeletonBlock className="h-4 w-36 max-w-full" />
-                  </div>
-                </div>
+                <SkeletonBlock className="h-20 w-full" />
               </section>
             ))}
           </main>
@@ -189,15 +110,7 @@ export function ApprovalDetailSkeleton() {
             data-loading-metadata-rail
           >
             <div className="lg:sticky lg:top-6">
-              <SkeletonBlock className="h-5 w-24" />
-              <div className="mt-4 divide-y divide-border-default border-y border-border-default">
-                {APPROVAL_DETAIL_METADATA_IDS.map((id) => (
-                  <div key={id} className="flex items-center justify-between gap-4 py-3">
-                    <SkeletonBlock className="h-3 w-24" />
-                    <SkeletonBlock className="h-4 w-28" />
-                  </div>
-                ))}
-              </div>
+              <SkeletonBlock className="h-96 w-full" />
             </div>
           </aside>
         </div>
