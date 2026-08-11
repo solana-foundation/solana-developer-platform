@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.59.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.58.0...v0.59.0) (2026-08-11)
+
+### Features
+
+* **earn:** withdrawal ledger + live-only positions — ledger vs live decided (PRO-1628) ([#1239](https://github.com/solana-foundation/solana-developer-platform/pull/1239)) ([025c7ac](https://github.com/solana-foundation/solana-developer-platform/commit/025c7acf4e44a8e6a12bcf13b495fce80ea04112))
+* **helius:** add helius rings feature entry ([#1234](https://github.com/solana-foundation/solana-developer-platform/pull/1234)) ([9b287d3](https://github.com/solana-foundation/solana-developer-platform/commit/9b287d3bb1ac082d3c1c464ecbc075e47c237e9c))
+
 ## [0.58.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.57.0...v0.58.0) (2026-08-11)
 
 ### Features
