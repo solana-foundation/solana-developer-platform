@@ -6,6 +6,7 @@ import {
   assertProviderAvailable,
   getProviderAvailability,
   isDeploymentCredentialCustodySetupEnabled,
+  isPersistedCustodyCompletionEnabled,
   isStoredCustodySetupEnabled,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
@@ -424,6 +425,64 @@ describe("provider-availability.service", () => {
     await expect(isStoredCustodySetupEnabled(env, getDb(env), TEST_ORG_ID, "privy")).resolves.toBe(
       true
     );
+  });
+
+  it("keeps persisted Privy sources eligible when the fresh setup preference changes", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "true";
+
+    for (const storedSetupEnabled of ["false", "true"]) {
+      env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = storedSetupEnabled;
+
+      await expect(
+        isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+      ).resolves.toBe(true);
+      await expect(
+        isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+      ).resolves.toBe(true);
+    }
+  });
+
+  it("requires a configured runtime binding but not deployment credentials for a persisted stored source", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "true";
+    env.PRIVY_APP_ID = undefined;
+    env.PRIVY_APP_SECRET = undefined;
+
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+    ).resolves.toBe(true);
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+    ).resolves.toBe(false);
+  });
+
+  it("requires BYOK enablement for both persisted Credential sources", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "false";
+
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+    ).resolves.toBe(false);
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+    ).resolves.toBe(false);
+  });
+
+  it("requires custody entitlement for both persisted Credential sources", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "true";
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { custody: { privy: false } } }), TEST_ORG_ID)
+      .run();
+
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+    ).resolves.toBe(false);
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+    ).resolves.toBe(false);
   });
 
   it("respects providerOverrides[id] === false in self-hosted mode", async () => {

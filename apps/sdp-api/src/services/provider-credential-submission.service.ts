@@ -6,12 +6,14 @@ import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-ut
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
+  badRequest,
   conflict,
   forbidden,
   internalError,
   notFound,
   providerUnavailable,
 } from "@/lib/errors";
+import { resolveNewCustodySetupMethod } from "@/lib/feature-flags";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
@@ -21,7 +23,11 @@ import {
   CredentialSecretStoreError,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
-import { isStoredCustodySetupEnabled } from "@/services/provider-availability.service";
+import {
+  isDeploymentCredentialCustodySetupEnabled,
+  isPersistedCustodyCompletionEnabled,
+  isStoredCustodySetupEnabled,
+} from "@/services/provider-availability.service";
 import {
   decideInstallation,
   type InstallationConflictReason,
@@ -37,20 +43,25 @@ import type { Env } from "@/types/env";
 const UNFINISHED_INSTALLATION_MESSAGE =
   "A Privy custody installation is already in progress for this project";
 const REPLACEMENT_CONFLICT_MESSAGE = "Custody Connection cannot accept replacement credentials";
-const PROVISIONING_DISABLED_MESSAGE =
-  "Stored credential provisioning is disabled for this provider";
+const PROVISIONING_DISABLED_MESSAGE = "Custody Connection setup is disabled for this provider";
+const RUNTIME_CREDENTIAL_LABEL = "Privy runtime credentials";
+
+interface PrivyCredentialFields {
+  credentialLabel: string;
+  scope: "project";
+  appId: string;
+  appSecret: string;
+}
 
 interface SubmitPrivyCredentialInput {
   provider: "privy";
   requestDelayMs?: number;
   walletLabel?: string;
-  fields: {
-    credentialLabel: string;
-    scope: "project";
-    appId: string;
-    appSecret: string;
-  };
+  fields?: PrivyCredentialFields;
 }
+
+type StoredPrivyCredentialInput = SubmitPrivyCredentialInput & { fields: PrivyCredentialFields };
+type SubmissionSource = "stored" | "runtime";
 
 export interface SafeProviderCredential {
   id: string;
@@ -106,12 +117,13 @@ interface SubmissionContext {
 interface PreparedSubmission extends SubmissionContext {
   fingerprint: string;
   preflightPlan: SetupPlan;
+  credentialSource: SubmissionSource;
 }
 
-interface StoredSubmission extends PreparedSubmission {
+interface PersistedSubmission extends PreparedSubmission {
   providerCredentialId: string;
   connectionId: string;
-  secretStore: CredentialSecretStore;
+  secretStore?: CredentialSecretStore;
   stored: StoredCredentialSecret;
 }
 
@@ -145,7 +157,7 @@ export async function submitProviderCredential(
 export async function replaceProviderCredential(
   c: Context<{ Bindings: Env }>,
   connectionId: string,
-  input: SubmitPrivyCredentialInput,
+  input: StoredPrivyCredentialInput,
   idempotencyKey: string
 ): Promise<ProviderCredentialSubmissionResult> {
   return submitProviderCredentialIntent(c, input, idempotencyKey, connectionId);
@@ -158,16 +170,18 @@ async function submitProviderCredentialIntent(
   replacementConnectionId: string | null
 ): Promise<ProviderCredentialSubmissionResult> {
   const context = createSubmissionContext(c, input, idempotencyKey, replacementConnectionId);
-  const fingerprint = await computeSubmissionFingerprint(context);
   const replay = await loadReplay(context);
   if (replay) {
+    const fingerprint = await computeSubmissionFingerprint(context);
     return resolveReplayWithAudit(context, replay, fingerprint);
   }
 
-  const gateReplay = await enforceProvisioningGate(context, fingerprint);
-  if (gateReplay) {
-    return gateReplay;
+  const admission = await resolveSubmissionSource(context);
+  if (admission.kind === "replay") {
+    return admission.result;
   }
+  const credentialSource = admission.source;
+  const fingerprint = await computeSubmissionFingerprint(context);
 
   const setup = await prepareSetup(context, fingerprint);
   if (setup.kind === "replay") {
@@ -178,6 +192,7 @@ async function submitProviderCredentialIntent(
     ...context,
     fingerprint,
     preflightPlan: setup.plan,
+    credentialSource,
   });
 }
 
@@ -202,7 +217,7 @@ function createSubmissionContext(
     organizationId,
     userId,
     provider: input.provider,
-    scope: input.fields.scope,
+    scope: "project",
   } satisfies SubmissionAuditBase;
 
   return {
@@ -263,23 +278,64 @@ async function loadReplay(context: SubmissionContext): Promise<ProviderCredentia
   }
 }
 
-async function enforceProvisioningGate(
-  context: SubmissionContext,
-  fingerprint: string
-): Promise<ProviderCredentialSubmissionResult | null> {
-  if (
-    !(await isStoredCustodySetupEnabled(context.c.env, context.db, context.organizationId, "privy"))
-  ) {
-    const lateReplay = await resolveLateReplay({
-      ...context,
-      fingerprint,
-    });
+async function resolveSubmissionSource(context: SubmissionContext): Promise<
+  | { kind: "source"; source: SubmissionSource }
+  | { kind: "replay"; result: ProviderCredentialSubmissionResult }
+> {
+  const setupMethod = resolveNewCustodySetupMethod(context.c.env, context.input.provider);
+  const source = context.replacementConnectionId
+    ? "stored"
+    : setupMethod === "deployment_credentials"
+      ? "runtime"
+      : setupMethod === "stored_credentials"
+        ? "stored"
+        : null;
+
+  if (!source) {
+    const lateReplay = await resolveLateReplayBeforeFingerprint(context);
     if (lateReplay) {
-      return lateReplay;
+      return { kind: "replay", result: lateReplay };
     }
     throw forbidden(PROVISIONING_DISABLED_MESSAGE);
   }
-  return null;
+
+  if (source === "stored" && !context.input.fields) {
+    throw badRequest("Credential fields are required for stored setup");
+  }
+  if (source === "runtime" && context.input.fields) {
+    throw badRequest("Credential fields are not accepted for runtime setup");
+  }
+
+  const enabled = context.replacementConnectionId
+    ? await isPersistedCustodyCompletionEnabled(
+        context.c.env,
+        context.db,
+        context.organizationId,
+        "privy",
+        "stored"
+      )
+    : source === "stored"
+      ? await isStoredCustodySetupEnabled(
+          context.c.env,
+          context.db,
+          context.organizationId,
+          "privy"
+        )
+      : await isDeploymentCredentialCustodySetupEnabled(
+          context.c.env,
+          context.db,
+          context.organizationId,
+          "privy"
+        );
+  if (enabled) {
+    return { kind: "source", source };
+  }
+
+  const lateReplay = await resolveLateReplayBeforeFingerprint(context);
+  if (lateReplay) {
+    return { kind: "replay", result: lateReplay };
+  }
+  throw forbidden(PROVISIONING_DISABLED_MESSAGE);
 }
 
 async function prepareSetup(
@@ -335,28 +391,31 @@ async function persistPreparedSubmission(
     metadata: {
       event: "provider_credential_submission_started",
       provider: prepared.input.provider,
-      scope: prepared.input.fields.scope,
+      scope: "project",
       connectionId,
     },
   });
 
   try {
-    const secretStore = await createSubmissionSecretStore(
-      prepared,
-      providerCredentialId,
-      connectionId
-    );
-    const stored = await writeSubmissionSecret(
-      prepared,
-      providerCredentialId,
-      connectionId,
-      secretStore
-    );
-    const transaction = await commitStoredSubmission({
+    let secretStore: CredentialSecretStore | undefined;
+    let stored: StoredCredentialSecret;
+    if (prepared.credentialSource === "stored") {
+      secretStore = await createSubmissionSecretStore(prepared, providerCredentialId, connectionId);
+      stored = await writeSubmissionSecret(
+        prepared,
+        providerCredentialId,
+        connectionId,
+        secretStore
+      );
+    } else {
+      stored = { storageBackend: "runtime_env" };
+    }
+
+    const transaction = await commitSubmission({
       ...prepared,
       providerCredentialId,
       connectionId,
-      secretStore,
+      ...(secretStore ? { secretStore } : {}),
       stored,
     });
 
@@ -440,14 +499,15 @@ async function writeSubmissionSecret(
   connectionId: string,
   secretStore: CredentialSecretStore
 ): Promise<StoredCredentialSecret> {
+  const fields = requireStoredFields(context.input);
   try {
     return await secretStore.write({
       orgId: context.organizationId,
       provider: context.input.provider,
       providerCredentialId,
       payload: {
-        appId: context.input.fields.appId,
-        appSecret: context.input.fields.appSecret,
+        appId: fields.appId,
+        appSecret: fields.appSecret,
       },
     });
   } catch (error) {
@@ -475,7 +535,7 @@ async function writeSubmissionSecret(
   }
 }
 
-async function commitStoredSubmission(submission: StoredSubmission): Promise<TransactionResult> {
+async function commitSubmission(submission: PersistedSubmission): Promise<TransactionResult> {
   let transactionResult: TransactionResult;
   try {
     transactionResult = await runSubmissionTransaction(submission);
@@ -483,7 +543,7 @@ async function commitStoredSubmission(submission: StoredSubmission): Promise<Tra
     return recoverTransactionFailure(submission, error);
   }
 
-  if (transactionResult.kind === "replay") {
+  if (transactionResult.kind === "replay" && submission.secretStore) {
     await compensateSecretWrite(
       submission.c,
       submission.secretStore,
@@ -495,7 +555,9 @@ async function commitStoredSubmission(submission: StoredSubmission): Promise<Tra
   return transactionResult;
 }
 
-async function runSubmissionTransaction(submission: StoredSubmission): Promise<TransactionResult> {
+async function runSubmissionTransaction(
+  submission: PersistedSubmission
+): Promise<TransactionResult> {
   return submission.db.transaction(async (tx) => {
     const txStore = new ProviderCredentialStore(tx);
     if (!(await txStore.lockProject(submission.organizationId, submission.projectId))) {
@@ -520,24 +582,25 @@ async function runSubmissionTransaction(submission: StoredSubmission): Promise<T
     const lockedPlan = await classifySetup({ ...submission, store: txStore }, true);
     assertSameSetupPlan(submission.preflightPlan, lockedPlan);
 
+    if (submission.credentialSource === "runtime" && lockedPlan.kind === "replacement") {
+      throw new SetupConflict(undefined, lockedPlan.connection.id);
+    }
+    const fields =
+      submission.credentialSource === "stored" ? requireStoredFields(submission.input) : null;
     const version =
       lockedPlan.kind === "replacement" ? lockedPlan.currentCredential.credential_version + 1 : 1;
     const rotatedFromId =
       lockedPlan.kind === "replacement" ? lockedPlan.currentCredential.id : null;
-    const credentialProjectId =
-      submission.input.fields.scope === "project" ? submission.projectId : null;
     const displayMetadata: Record<string, string> =
-      submission.input.fields.appId.length > 4
-        ? { appIdSuffix: submission.input.fields.appId.slice(-4) }
-        : {};
+      fields && fields.appId.length > 4 ? { appIdSuffix: fields.appId.slice(-4) } : {};
 
     const providerCredential = await txStore.insertCredential({
       id: submission.providerCredentialId,
       organizationId: submission.organizationId,
-      projectId: credentialProjectId,
-      label: submission.input.fields.credentialLabel,
-      scope: submission.input.fields.scope,
-      source: "stored",
+      projectId: submission.projectId,
+      label: fields?.credentialLabel ?? RUNTIME_CREDENTIAL_LABEL,
+      scope: "project",
+      source: submission.credentialSource,
       stored: submission.stored,
       displayMetadata,
       version,
@@ -557,7 +620,7 @@ async function runSubmissionTransaction(submission: StoredSubmission): Promise<T
 
 async function persistConnection(
   store: ProviderCredentialStore,
-  submission: StoredSubmission,
+  submission: PersistedSubmission,
   lockedPlan: SetupPlan,
   providerCredential: ProviderCredentialRow
 ): Promise<void> {
@@ -589,7 +652,7 @@ async function persistConnection(
 }
 
 async function recoverTransactionFailure(
-  submission: StoredSubmission,
+  submission: PersistedSubmission,
   error: unknown
 ): Promise<TransactionResult> {
   const reconciliation = await reconcileTransactionOutcome(submission);
@@ -607,12 +670,7 @@ async function recoverTransactionFailure(
       }
     }
 
-    const compensationOutcome = await compensateSecretWrite(
-      submission.c,
-      submission.secretStore,
-      submission.stored,
-      submission.providerCredentialId
-    );
+    const compensationOutcome = await compensateSubmissionSecret(submission);
     return {
       kind: "replay",
       result: await resolveReplayWithAudit(
@@ -632,12 +690,7 @@ async function recoverTransactionFailure(
     throw new SubmissionOutcomeUnknown(internalError());
   }
 
-  const compensationOutcome = await compensateSecretWrite(
-    submission.c,
-    submission.secretStore,
-    submission.stored,
-    submission.providerCredentialId
-  );
+  const compensationOutcome = await compensateSubmissionSecret(submission);
 
   if (error instanceof SetupConflict) {
     await auditFailure(submission.c, submission.audit, submission.auditBase, {
@@ -694,7 +747,7 @@ function isUnfinishedInstallationUniqueViolation(error: unknown): boolean {
 }
 
 async function reconcileTransactionOutcome(
-  submission: StoredSubmission
+  submission: PersistedSubmission
 ): Promise<
   { kind: "found"; replay: ProviderCredentialRow } | { kind: "absent" } | { kind: "unknown" }
 > {
@@ -709,7 +762,7 @@ async function reconcileTransactionOutcome(
   }
 }
 
-function reportManualSecretCleanupRequired(submission: StoredSubmission): void {
+function reportManualSecretCleanupRequired(submission: PersistedSubmission): void {
   if (submission.stored.storageBackend !== "gcp_secret_manager") {
     return;
   }
@@ -723,6 +776,19 @@ function reportManualSecretCleanupRequired(submission: StoredSubmission): void {
     requestId: submission.c.get("requestId"),
     reason: "secret_cleanup_failed",
   });
+}
+
+async function compensateSubmissionSecret(
+  submission: PersistedSubmission
+): Promise<CompensationOutcome> {
+  return submission.secretStore
+    ? compensateSecretWrite(
+        submission.c,
+        submission.secretStore,
+        submission.stored,
+        submission.providerCredentialId
+      )
+    : "not_required";
 }
 
 async function buildProviderCredentialSubmissionFingerprint(params: {
@@ -750,6 +816,13 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
     })
   );
   return hashString(canonical, params.pepper);
+}
+
+function requireStoredFields(input: SubmitPrivyCredentialInput): PrivyCredentialFields {
+  if (!input.fields) {
+    throw internalError();
+  }
+  return input.fields;
 }
 
 async function resolveReplay(
@@ -823,6 +896,20 @@ async function resolveLateReplay(params: {
     return null;
   }
   return resolveReplayWithAudit(params, replay, params.fingerprint);
+}
+
+async function resolveLateReplayBeforeFingerprint(
+  context: SubmissionContext
+): Promise<ProviderCredentialSubmissionResult | null> {
+  const replay = await loadReplay(context);
+  if (!replay) {
+    return null;
+  }
+  return resolveReplayWithAudit(
+    context,
+    replay,
+    await computeSubmissionFingerprint(context)
+  );
 }
 
 async function classifySetup(

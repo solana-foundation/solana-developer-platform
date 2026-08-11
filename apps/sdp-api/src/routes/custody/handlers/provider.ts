@@ -25,7 +25,6 @@ import {
   getEnabledProviders,
   getProviderAvailability,
 } from "@/services/provider-availability.service";
-import { tryInitializePrivyFromDeploymentCredentials } from "@/services/runtime-custody-initialization.service";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
 import {
   type InitializeSigningRequest,
@@ -91,17 +90,6 @@ export const initializeSigning = async (c: AppContext) => {
   const signingService = createSigningService(c.env, getRequestTenantScope(c));
 
   try {
-    if (parsed.data.provider === "privy") {
-      const deploymentCredentialResult = await tryInitializePrivyFromDeploymentCredentials(
-        c,
-        parsed.data
-      );
-      if (deploymentCredentialResult) {
-        clearWalletCaches();
-        return created(c, deploymentCredentialResult);
-      }
-    }
-
     const result = await initializeProviderConnection(
       c,
       signingService,

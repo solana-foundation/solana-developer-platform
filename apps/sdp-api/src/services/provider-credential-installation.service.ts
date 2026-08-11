@@ -32,10 +32,7 @@ import {
   type ProvisionPrivyResult,
   provisionPrivyWallet,
 } from "@/services/custody/provisioning";
-import {
-  isDeploymentCredentialCustodySetupEnabled,
-  isStoredCustodySetupEnabled,
-} from "@/services/provider-availability.service";
+import { isPersistedCustodyCompletionEnabled } from "@/services/provider-availability.service";
 import {
   decideInstallation,
   type InstallationConflictReason,
@@ -93,7 +90,6 @@ interface InstallationContext {
   organizationId: string;
   projectId: string;
   userId?: string;
-  credentialSource: "stored" | "runtime";
 }
 
 interface LoadedInstallation {
@@ -126,13 +122,6 @@ export async function completeProviderCredentialInstallation(
   return completeInstallation(createInstallationContext(c), connectionId);
 }
 
-export async function completeRuntimeProviderCredentialInstallation(
-  c: Context<{ Bindings: Env }>,
-  connectionId: string
-): Promise<ProviderCredentialCompletionResult> {
-  return completeInstallation(createInstallationContext(c, "runtime"), connectionId);
-}
-
 async function completeInstallation(
   context: InstallationContext,
   connectionId: string
@@ -154,7 +143,7 @@ async function completeInstallation(
   );
   const credential = await readPrivyCredential(secretStore, context.organizationId, loaded.target);
   if (
-    context.credentialSource === "runtime" &&
+    loaded.target.credential_source === "runtime" &&
     loaded.target.provider_account_fingerprint &&
     (await getPrivyProviderAccountFingerprint(credential.appId)) !==
       loaded.target.provider_account_fingerprint
@@ -176,14 +165,7 @@ async function completeInstallation(
   let canRecordFailureOutcome = true;
 
   try {
-    const leaseToken = await context.store.acquireInstallationLease({
-      connectionId,
-      providerCredentialId: loaded.target.provider_credential_id,
-      credentialSource: context.credentialSource,
-      expectedStatus: loaded.target.status as "pending" | "checking",
-      expectedLastCheckStatus: loaded.target.last_check_status,
-      expectedLastCheckAt: loaded.target.last_check_at,
-    });
+    const leaseToken = await acquireCompletionLease(context, loaded.target);
     if (!leaseToken) {
       canRecordFailureOutcome = false;
       await completeInstallationCriticalNoop(
@@ -214,13 +196,7 @@ async function completeInstallation(
     }
     const replay =
       outcome.kind === "success"
-        ? await persistSuccess(
-            context,
-            loaded.target,
-            leaseToken,
-            outcome.wallet,
-            context.credentialSource === "runtime" && loaded.decisions.complete.mode === "full"
-          )
+        ? await persistSuccess(context, loaded.target, leaseToken, outcome.wallet)
         : outcome.kind === "retry_unknown"
           ? await persistRetryUnknown(context, loaded.target, leaseToken)
           : await persistFailure(context, loaded.target, leaseToken, outcome.code, secretStore);
@@ -299,6 +275,7 @@ export async function cancelProviderCredentialInstallation(
         return new ProviderCredentialStore(tx).cancelInstallation({
           connectionId,
           providerCredentialId: loaded.target.provider_credential_id,
+          credentialSource: loaded.target.credential_source,
           expectedStatus: loaded.target.status as "pending" | "checking",
           expectedLastCheckStatus: loaded.target.last_check_status,
           expectedLastCheckAt: loaded.target.last_check_at,
@@ -365,13 +342,10 @@ export async function cancelProviderCredentialInstallation(
   }
 }
 
-function createInstallationContext(
-  c: Context<{ Bindings: Env }>,
-  credentialSource: "stored" | "runtime" = "stored"
-): InstallationContext {
+function createInstallationContext(c: Context<{ Bindings: Env }>): InstallationContext {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  if (credentialSource === "stored" && (auth.authType === "api_key" || !auth.userId)) {
+  if (auth.authType === "api_key" || !auth.userId) {
     throw internalError();
   }
   const db = getDb(c.env);
@@ -383,7 +357,6 @@ function createInstallationContext(
     organizationId: auth.organizationId,
     projectId,
     ...(auth.userId ? { userId: auth.userId } : {}),
-    credentialSource,
   };
 }
 
@@ -392,34 +365,28 @@ async function loadInstallation(
   connectionId: string
 ): Promise<LoadedInstallation> {
   try {
-    const [target, nowMs, fullCompletionEnabled] = await Promise.all([
+    const [target, nowMs] = await Promise.all([
       context.store.findInstallationConnection(
         context.organizationId,
         context.projectId,
         connectionId
       ),
       context.store.getDatabaseNowMs(),
-      context.credentialSource === "stored"
-        ? isStoredCustodySetupEnabled(context.c.env, context.db, context.organizationId, "privy")
-        : isDeploymentCredentialCustodySetupEnabled(
-            context.c.env,
-            context.db,
-            context.organizationId,
-            "privy"
-          ),
     ]);
     if (!target) {
       throw notFound("Custody Connection");
     }
+    const fullCompletionEnabled = await isPersistedCustodyCompletionEnabled(
+      context.c.env,
+      context.db,
+      context.organizationId,
+      target.provider,
+      target.credential_source
+    );
     return {
       target,
       decisions: decideInstallation(
-        installationFactsFromConnection(
-          target,
-          nowMs,
-          fullCompletionEnabled,
-          context.credentialSource
-        )
+        installationFactsFromConnection(target, nowMs, fullCompletionEnabled)
       ),
     };
   } catch (error) {
@@ -640,6 +607,45 @@ function providerErrorOutcome(error: unknown): ProviderOutcome {
   return { kind: "retry_unknown" };
 }
 
+async function acquireCompletionLease(
+  context: InstallationContext,
+  target: InstallationConnectionState
+): Promise<string | null> {
+  if (target.status === "failed") {
+    const failureCode = target.last_check_failure_code;
+    const expectedLastCheckAt = target.last_check_at;
+    if (
+      target.credential_source !== "runtime" ||
+      !expectedLastCheckAt ||
+      (failureCode !== "invalid_credentials" &&
+        failureCode !== "provider_account_already_connected")
+    ) {
+      return null;
+    }
+    return context.db.transaction(async (tx) => {
+      const store = new ProviderCredentialStore(tx);
+      if (!(await store.lockProject(context.organizationId, context.projectId))) {
+        return null;
+      }
+      return store.acquireRuntimeFailureRetryLease({
+        connectionId: target.id,
+        providerCredentialId: target.provider_credential_id,
+        expectedLastCheckAt,
+        expectedFailureCode: failureCode,
+      });
+    });
+  }
+
+  return context.store.acquireInstallationLease({
+    connectionId: target.id,
+    providerCredentialId: target.provider_credential_id,
+    credentialSource: target.credential_source,
+    expectedStatus: target.status as "pending" | "checking",
+    expectedLastCheckStatus: target.last_check_status,
+    expectedLastCheckAt: target.last_check_at,
+  });
+}
+
 async function validatePrivyCredential(
   env: Env,
   credential: PrivyCredentialAuthentication
@@ -676,8 +682,7 @@ async function persistSuccess(
   context: InstallationContext,
   target: InstallationConnectionState,
   leaseToken: string,
-  wallet: ProvisionPrivyResult,
-  selectIfUnassigned: boolean
+  wallet: ProvisionPrivyResult
 ): Promise<LoadedInstallation | null> {
   try {
     await context.db.transaction(async (tx) => {
@@ -692,7 +697,6 @@ async function persistSuccess(
         providerWalletId: wallet.walletId,
         publicKey: wallet.address,
         label: getPendingWalletLabel(target.setup_metadata),
-        selectIfUnassigned,
       });
       if (!updated) throw new Error("Installation Credential changed during success persistence");
     });

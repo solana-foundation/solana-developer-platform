@@ -366,6 +366,88 @@ export class ProviderCredentialStore {
     return row?.last_check_at ?? null;
   }
 
+  async acquireRuntimeFailureRetryLease(params: {
+    connectionId: string;
+    providerCredentialId: string;
+    expectedLastCheckAt: string;
+    expectedFailureCode: "invalid_credentials" | "provider_account_already_connected";
+  }): Promise<string | null> {
+    const row = await this.db.queryOne<{ last_check_at: string }>(
+      `UPDATE custody_connections c
+       SET status = 'checking',
+           last_check_status = 'running',
+           last_check_at = GREATEST(
+             sdp_iso_now(),
+             to_char(
+               timezone('UTC', c.last_check_at::timestamptz + interval '1 millisecond'),
+               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+             )
+           ),
+           last_check_failure_code = NULL,
+           updated_at = sdp_iso_now()
+       WHERE c.id = ?
+         AND c.provider_credential_id = ?
+         AND c.status = 'failed'
+         AND c.last_check_status = 'failed'
+         AND c.last_check_at = ?
+         AND c.last_check_failure_code = ?
+         AND c.provider_account_fingerprint IS NULL
+         AND c.default_custody_wallet_id IS NULL
+         AND c.activated_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM custody_wallets owned
+           WHERE owned.custody_connection_id = c.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM custody_connections sibling
+           WHERE sibling.organization_id = c.organization_id
+             AND sibling.project_id = c.project_id
+             AND sibling.provider = c.provider
+             AND sibling.id <> c.id
+             AND sibling.status IN ('pending', 'checking')
+         )
+         AND EXISTS (
+           SELECT 1 FROM provider_credentials pc
+           WHERE pc.id = c.provider_credential_id
+             AND pc.status = 'failed_validation'
+             AND pc.last_failure_code = ?
+             AND pc.source = 'runtime'
+             AND pc.storage_backend = 'runtime_env'
+             AND pc.scope = 'project'
+             AND pc.project_id = c.project_id
+         )
+       RETURNING c.last_check_at`,
+      [
+        params.connectionId,
+        params.providerCredentialId,
+        params.expectedLastCheckAt,
+        params.expectedFailureCode,
+        params.expectedFailureCode,
+      ]
+    );
+    if (!row) {
+      return null;
+    }
+
+    const resetCredential = await this.db.execute(
+      `UPDATE provider_credentials
+       SET status = 'pending',
+           last_failure_code = NULL,
+           updated_at = sdp_iso_now()
+       WHERE id = ?
+         AND status = 'failed_validation'
+         AND last_failure_code = ?
+         AND source = 'runtime'
+         AND storage_backend = 'runtime_env'
+         AND scope = 'project'`,
+      [params.providerCredentialId, params.expectedFailureCode]
+    );
+    if (resetCredential !== 1) {
+      throw new Error("Runtime installation Credential changed during retry admission");
+    }
+    return row.last_check_at;
+  }
+
   async reserveProviderAccountFingerprint(params: {
     connectionId: string;
     providerCredentialId: string;
@@ -398,7 +480,6 @@ export class ProviderCredentialStore {
     providerWalletId: string;
     publicKey: string;
     label?: string;
-    selectIfUnassigned?: boolean;
   }): Promise<ProviderCredentialRow | null> {
     const custodyWalletId = `cwlt_${crypto.randomUUID()}`;
     await this.db.execute(
@@ -449,45 +530,6 @@ export class ProviderCredentialStore {
                  idempotency_fingerprint, created_at`,
       [params.providerCredentialId]
     );
-    if (credential && params.selectIfUnassigned) {
-      await this.db.execute(
-        `UPDATE custody_scope_defaults
-         SET default_custody_connection_id = ?, updated_at = sdp_iso_now()
-         WHERE default_custody_connection_id IS NULL
-           AND organization_id = ?
-           AND project_id = ?
-           AND EXISTS (
-             SELECT 1
-             FROM custody_configs config
-             WHERE config.id = custody_scope_defaults.default_custody_config_id
-               AND config.organization_id = ?
-               AND config.provider = ?
-               AND config.status = 'inactive'
-           )`,
-        [
-          params.connectionId,
-          credential.organization_id,
-          credential.project_id,
-          credential.organization_id,
-          credential.provider,
-        ]
-      );
-      await this.db.execute(
-        `INSERT INTO custody_scope_defaults (
-           id, organization_id, project_id, default_custody_connection_id
-         )
-         SELECT ?, organization_id, project_id, id
-         FROM custody_connections connection
-         WHERE connection.id = ?
-           AND NOT EXISTS (
-             SELECT 1 FROM custody_scope_defaults existing
-             WHERE existing.organization_id = connection.organization_id
-               AND existing.project_id = connection.project_id
-           )
-         ON CONFLICT DO NOTHING`,
-        [`csd_${crypto.randomUUID()}`, params.connectionId]
-      );
-    }
     return credential;
   }
 
@@ -573,6 +615,7 @@ export class ProviderCredentialStore {
   async cancelInstallation(params: {
     connectionId: string;
     providerCredentialId: string;
+    credentialSource: "stored" | "runtime";
     expectedStatus: "pending" | "checking";
     expectedLastCheckStatus: string | null;
     expectedLastCheckAt: string | null;
@@ -625,9 +668,9 @@ export class ProviderCredentialStore {
            updated_at = sdp_iso_now()
        WHERE id = ?
          AND status = 'pending'
-         AND source = 'stored'
+         AND source = ?
          AND scope = 'project'`,
-      [params.providerCredentialId]
+      [params.providerCredentialId, params.credentialSource]
     );
     if (updatedCredential !== 1) {
       throw new Error("Installation Credential changed during cancellation");

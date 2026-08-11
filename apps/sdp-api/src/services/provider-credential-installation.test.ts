@@ -7,6 +7,7 @@ function facts(overrides: Partial<InstallationFacts> = {}): InstallationFacts {
   return {
     connectionStatus: "pending",
     credentialStatus: "pending",
+    credentialSource: "stored",
     isExpectedProjectCredential: true,
     hasDefaultWallet: false,
     hasOwnedWallet: false,
@@ -14,6 +15,7 @@ function facts(overrides: Partial<InstallationFacts> = {}): InstallationFacts {
     activatedAt: null,
     lastCheckStatus: null,
     lastCheckAt: null,
+    lastCheckFailureCode: null,
     hasSiblingUnfinished: false,
     fullCompletionEnabled: true,
     nowMs: NOW,
@@ -83,6 +85,43 @@ describe("provider credential installation decisions", () => {
       kind: "conflict",
       reason: "unfinished_installation_exists",
     });
+
+    expect(decideInstallation({ ...failed, credentialSource: "runtime" }).replace).toEqual({
+      kind: "conflict",
+    });
+  });
+
+  it("revalidates only safe runtime failures", () => {
+    const retryable = facts({
+      connectionStatus: "failed",
+      credentialStatus: "failed_validation",
+      credentialSource: "runtime",
+      lastCheckStatus: "failed",
+      lastCheckAt: "2026-08-06T11:58:00.000Z",
+      lastCheckFailureCode: "invalid_credentials",
+    });
+
+    expect(decideInstallation(retryable).complete).toEqual({ kind: "execute", mode: "full" });
+    expect(
+      decideInstallation({
+        ...retryable,
+        lastCheckFailureCode: "provider_account_already_connected",
+      }).complete
+    ).toEqual({ kind: "execute", mode: "full" });
+    expect(decideInstallation({ ...retryable, fullCompletionEnabled: false }).complete).toEqual({
+      kind: "replay",
+    });
+    expect(decideInstallation({ ...retryable, hasSiblingUnfinished: true }).complete).toEqual({
+      kind: "conflict",
+      reason: "unfinished_installation_exists",
+    });
+    expect(
+      decideInstallation({
+        ...retryable,
+        providerAccountFingerprint: "sha256:app",
+        lastCheckFailureCode: "wallet_conflict",
+      }).complete
+    ).toEqual({ kind: "replay" });
   });
 
   it("fails closed on inconsistent persisted lifecycle facts", () => {

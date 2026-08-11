@@ -21,7 +21,10 @@ import {
 } from "@sdp/types";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
-import { resolveNewCustodySetupMethod } from "@/lib/feature-flags";
+import {
+  isCustodyConnectionRuntimeEnabled,
+  resolveNewCustodySetupMethod,
+} from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 
@@ -527,15 +530,11 @@ export async function isStoredCustodySetupEnabled(
   organizationId: string,
   provider: CustodyProvider
 ): Promise<boolean> {
-  if (
-    resolveNewCustodySetupMethod(env, provider) !== "stored_credentials" ||
-    CUSTODY_PROVIDER_CATALOG_BY_ID[provider].storedCredentialSetup.mode !== "self_service"
-  ) {
+  if (resolveNewCustodySetupMethod(env, provider) !== "stored_credentials") {
     return false;
   }
 
-  const availability = await getProviderAvailability(env, db, organizationId);
-  return availability.providers.custody[provider]?.entitled === true;
+  return isPersistedCustodyCompletionEnabled(env, db, organizationId, provider, "stored");
 }
 
 export async function isDeploymentCredentialCustodySetupEnabled(
@@ -547,8 +546,33 @@ export async function isDeploymentCredentialCustodySetupEnabled(
   if (resolveNewCustodySetupMethod(env, provider) !== "deployment_credentials") {
     return false;
   }
+
+  return isPersistedCustodyCompletionEnabled(env, db, organizationId, provider, "runtime");
+}
+
+export async function isPersistedCustodyCompletionEnabled(
+  env: Env,
+  db: DatabaseClient,
+  organizationId: string,
+  provider: CustodyProvider,
+  source: "stored" | "runtime"
+): Promise<boolean> {
+  if (!isCustodyConnectionRuntimeEnabled(env, provider)) {
+    return false;
+  }
+
+  if (
+    source === "stored" &&
+    CUSTODY_PROVIDER_CATALOG_BY_ID[provider].storedCredentialSetup.mode !== "self_service"
+  ) {
+    return false;
+  }
+
   const availability = await getProviderAvailability(env, db, organizationId);
-  return availability.providers.custody[provider]?.enabled === true;
+  const providerAvailability = availability.providers.custody[provider];
+  return source === "runtime"
+    ? providerAvailability?.enabled === true
+    : providerAvailability?.entitled === true;
 }
 
 function getAvailabilityMessage(

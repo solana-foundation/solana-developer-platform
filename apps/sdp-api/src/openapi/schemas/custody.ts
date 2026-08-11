@@ -106,10 +106,10 @@ export const updateCustodyWalletRequestSchema = updateWalletSchemaBase
   })
   .openapi({ description: "Update wallet request body." });
 
-const configSigningInitializationResultSchema = z
+export const initializeSigningResponseSchema = z
   .object({
     configId: z.string().openapi({
-      description: "Wallet signing Config ID.",
+      description: "Created wallet signing config ID.",
       example: "cfg_example",
     }),
     publicKey: solanaAddressSchema.openapi({
@@ -120,51 +120,11 @@ const configSigningInitializationResultSchema = z
       example: "privy_wallet_123",
     }),
   })
-  .strict();
-
-const connectionSigningInitializationResultSchema = z
-  .object({
-    connectionId: z.string().openapi({
-      description: "Custody Connection ID.",
-      example: "cconn_example",
-    }),
-    publicKey: solanaAddressSchema.openapi({
-      description: "Public key of the Connection's first wallet.",
-    }),
-    walletId: walletIdParamSchema.openapi({
-      description: "Provider wallet ID of the Connection's first wallet.",
-      example: "privy_wallet_123",
-    }),
-  })
-  .strict();
-
-export const initializeSigningResponseSchema = z
-  .union([configSigningInitializationResultSchema, connectionSigningInitializationResultSchema])
-  .openapi({
-    description:
-      "Wallet signing initialization result. Exactly one owner ID, configId or connectionId, is returned.",
-    example: {
-      configId: "cfg_example",
-      publicKey: "So11111111111111111111111111111111111111112",
-      walletId: "privy_wallet_123",
-    },
-  });
+  .openapi({ description: "Wallet signing initialization result." });
 
 export const switchSigningResponseSchema = z
   .union([
-    z.object({
-      configId: z.string().openapi({
-        description: "Created wallet signing config ID.",
-        example: "cfg_example",
-      }),
-      publicKey: solanaAddressSchema.openapi({
-        description: "Public key of the provisioned root wallet.",
-      }),
-      walletId: walletIdParamSchema.openapi({
-        description: "Provider wallet ID of the provisioned root wallet.",
-        example: "privy_wallet_123",
-      }),
-    }),
+    initializeSigningResponseSchema,
     z.object({
       connectionId: z.string().openapi({
         description: "Selected Custody Connection ID.",

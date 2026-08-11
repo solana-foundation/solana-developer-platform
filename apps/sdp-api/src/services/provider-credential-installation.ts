@@ -25,6 +25,7 @@ export type InstallationDecision<Mode extends string = never> =
 export interface InstallationFacts {
   connectionStatus: CustodyConnectionStatus;
   credentialStatus: ProviderCredentialStatus;
+  credentialSource: "stored" | "runtime";
   isExpectedProjectCredential: boolean;
   hasDefaultWallet: boolean;
   hasOwnedWallet: boolean;
@@ -32,6 +33,7 @@ export interface InstallationFacts {
   activatedAt: string | null;
   lastCheckStatus: string | null;
   lastCheckAt: string | null;
+  lastCheckFailureCode: string | null;
   hasSiblingUnfinished: boolean;
   fullCompletionEnabled: boolean;
   nowMs: number;
@@ -48,14 +50,13 @@ export interface InstallationDecisions {
 export function installationFactsFromConnection(
   connection: InstallationConnectionState,
   nowMs: number,
-  fullCompletionEnabled: boolean,
-  expectedCredentialSource: "stored" | "runtime" = "stored"
+  fullCompletionEnabled: boolean
 ): InstallationFacts {
   return {
     connectionStatus: connection.status,
     credentialStatus: connection.credential_status,
+    credentialSource: connection.credential_source,
     isExpectedProjectCredential:
-      connection.credential_source === expectedCredentialSource &&
       connection.credential_scope === "project" &&
       connection.credential_project_id === connection.project_id &&
       connection.provider_credential_scope_key === connection.project_id,
@@ -65,6 +66,7 @@ export function installationFactsFromConnection(
     activatedAt: connection.activated_at,
     lastCheckStatus: connection.last_check_status,
     lastCheckAt: connection.last_check_at,
+    lastCheckFailureCode: connection.last_check_failure_code,
     hasSiblingUnfinished: connection.has_sibling_unfinished,
     fullCompletionEnabled,
     nowMs,
@@ -97,11 +99,16 @@ function decideComplete(
   facts: InstallationFacts,
   leaseCurrent: boolean
 ): InstallationDecision<"full" | "reconcile_only"> {
-  if (
-    (facts.connectionStatus === "active" && facts.lastCheckStatus === "success") ||
-    (facts.connectionStatus === "failed" && facts.lastCheckStatus === "failed")
-  ) {
+  if (facts.connectionStatus === "active" && facts.lastCheckStatus === "success") {
     return { kind: "replay" };
+  }
+  if (facts.connectionStatus === "failed" && facts.lastCheckStatus === "failed") {
+    if (!isRetryableRuntimeFailure(facts) || !facts.fullCompletionEnabled) {
+      return { kind: "replay" };
+    }
+    return facts.hasSiblingUnfinished
+      ? { kind: "conflict", reason: "unfinished_installation_exists" }
+      : { kind: "execute", mode: "full" };
   }
   if (facts.connectionStatus !== "pending" && facts.connectionStatus !== "checking") {
     return { kind: "conflict" };
@@ -138,6 +145,9 @@ function decideCancel(facts: InstallationFacts, leaseCurrent: boolean): Installa
 }
 
 function decideReplace(facts: InstallationFacts): InstallationDecision {
+  if (facts.credentialSource !== "stored") {
+    return { kind: "conflict" };
+  }
   if (!facts.fullCompletionEnabled) {
     return { kind: "disabled" };
   }
@@ -152,6 +162,19 @@ function decideReplace(facts: InstallationFacts): InstallationDecision {
     !facts.activatedAt
     ? { kind: "execute" }
     : { kind: "conflict" };
+}
+
+function isRetryableRuntimeFailure(facts: InstallationFacts): boolean {
+  return (
+    facts.credentialSource === "runtime" &&
+    facts.credentialStatus === "failed_validation" &&
+    (facts.lastCheckFailureCode === "invalid_credentials" ||
+      facts.lastCheckFailureCode === "provider_account_already_connected") &&
+    facts.providerAccountFingerprint === null &&
+    !facts.hasOwnedWallet &&
+    !facts.hasDefaultWallet &&
+    facts.activatedAt === null
+  );
 }
 
 function isCompletionLeaseCurrent(facts: InstallationFacts): boolean {
