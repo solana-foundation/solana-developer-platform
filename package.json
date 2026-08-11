@@ -50,6 +50,7 @@
     "check:env-contract": "node scripts/check-env-contract.mjs",
     "check:env-configurator-drift": "node scripts/check-env-configurator-drift.mjs",
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
+    "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
     "check:well-known-mints": "pnpm --filter @sdp/api exec tsx ../../scripts/check-well-known-mints.mjs",
     "check:api-playground": "pnpm -C apps/sdp-api playground:check",
     "generate:api-playground": "pnpm -C apps/sdp-api playground:generate",

@@ -16,7 +16,7 @@ importers:
         version: 0.24.4(ai@7.0.28(zod@4.4.3))
     devDependencies:
       '@types/node':
-        specifier: 24.x
+        specifier: 24.13.3
         version: 24.13.3
       typescript:
         specifier: 7.0.2

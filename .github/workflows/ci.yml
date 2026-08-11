@@ -13,6 +13,16 @@ env:
   CI_IS_FORK_PULL_REQUEST: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
 
 jobs:
+  pinned_dependency_policy:
+    name: Pinned Dependency Policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Require exact direct dependency versions
+        run: node scripts/check-pinned-dependency-versions.mjs
+
   translation_catalog_policy:
     name: Translation Catalog Policy
     if: github.event_name == 'pull_request'
