@@ -296,6 +296,42 @@ describe("BudgetedFeePayment", () => {
     expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
   });
 
+  it("does not open the breaker when reconciliation already committed a slow submission", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    repository.markSubmitted.mockResolvedValue(false);
+    repository.getReservation.mockResolvedValueOnce(null).mockResolvedValue({
+      id: "reservation_1",
+      status: "committed",
+      signature: "signature_1",
+      signedTransaction: null,
+      reservedLamports: 5_000,
+      actualLamports: 5_000,
+      attempt: 1,
+    });
+    await expect(feePayment.signAndSend(buildTransaction())).resolves.toBe("signature_1");
+    expect(provider.signAndSend).toHaveBeenCalledOnce();
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+    expect(budgetRedis.cancel).not.toHaveBeenCalled();
+  });
+
+  it("still opens the breaker when a lost submission did not advance on-chain", async () => {
+    const { feePayment, repository } = harness();
+    repository.markSubmitted.mockResolvedValue(false);
+    repository.getReservation.mockResolvedValueOnce(null).mockResolvedValue({
+      id: "reservation_1",
+      status: "released",
+      signature: null,
+      signedTransaction: null,
+      reservedLamports: 5_000,
+      actualLamports: 0,
+      attempt: 1,
+    });
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(repository.tripGlobalBreaker).toHaveBeenCalled();
+  });
+
   it("hashes compiled message bytes so added signatures cannot double-reserve", async () => {
     const { feePayment, repository } = harness();
     const first = buildTransaction();

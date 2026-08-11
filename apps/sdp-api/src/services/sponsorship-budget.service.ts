@@ -19,6 +19,7 @@ import {
   SponsorshipBudgetRepository,
   type SponsorshipNetwork,
   type SponsorshipReservation,
+  type SponsorshipReservationStatus,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import type { Env } from "@/types/env";
@@ -207,7 +208,10 @@ export class BudgetedFeePayment implements FeePaymentPort {
         error
       );
     }
-    if (!persisted) {
+    if (
+      !persisted &&
+      !(await this.durablyAdvanced(reservation, ["signed", "submitted", "committed"]))
+    ) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
         "Signed sponsorship outcome could not be persisted",
@@ -246,7 +250,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
         error
       );
     }
-    if (!persisted) {
+    if (!persisted && !(await this.durablyAdvanced(reservation, ["submitted", "committed"]))) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
         "Submitted sponsorship outcome could not be persisted",
@@ -591,6 +595,21 @@ export class BudgetedFeePayment implements FeePaymentPort {
   private async tripBreaker(network: SponsorshipNetwork, reason: string): Promise<void> {
     const policy = await this.repository.tripGlobalBreaker(network, reason);
     if (policy) await this.budgetRedis.syncPolicy(policy);
+  }
+
+  private async durablyAdvanced(
+    reservation: AdmissionResult,
+    forwardStatuses: SponsorshipReservationStatus[]
+  ): Promise<boolean> {
+    let current: SponsorshipReservation | null;
+    try {
+      current = await this.repository.getReservation(reservation.id);
+    } catch {
+      return false;
+    }
+    return Boolean(
+      current && current.attempt === reservation.attempt && forwardStatuses.includes(current.status)
+    );
   }
 
   private async accountingUnavailable(
