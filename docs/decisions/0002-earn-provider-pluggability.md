@@ -61,8 +61,8 @@ funds in a strategy whose provider was switched off.
 Independent switches, all runtime-safe:
 
 - **Environment kill switch:** a provider with no credentials configured is
-  `configured: false` — hidden from availability and blocked at quote time
-  with a clean 503. Removing a key disables the provider for that deployment;
+  `configured: false` — hidden from availability and refused at money-in with
+  a clean 503. Removing a key disables the provider for that deployment;
   no code change.
 - **Org-level entitlement:** earn providers are override-only — the general
   defaults enable none (`createBooleanRecord(EARN_PROVIDERS, [])`), so every
@@ -250,8 +250,14 @@ per surface:
   `earn_ledger_write_failed`). Heal semantics are narrow and honest: the
   detail poll heals only rows that already carry `provider_reference`; a
   ref-less row heals via a same-key create retry or the ledger sweep — never
-  fuzzy matching. The ledger LIST carries no provider gate at all: the audit
-  trail outlives credential removal and entitlement disablement.
+  fuzzy matching. **Hard requirement on the sweep ticket:** a ref-less
+  `requested` row can also be a definitively-rejected intent the caller was
+  synchronously told failed (a provider 4xx rethrows and leaves the row
+  untouched); before the sweep re-drives such a row it must discriminate
+  transport failures from definitive rejections — or verify with the
+  provider — so it can never execute an intent the caller abandoned and
+  re-issued under a new key. The ledger LIST carries no provider gate at all:
+  the audit trail outlives credential removal and entitlement disablement.
 - **`partially_completed` is terminal by convention** (shared
   `EARN_TERMINAL_WITHDRAWAL_STATUSES` in `@sdp/types`, one declaration for API
   and dashboard). If a provider ever advances it, the live GET keeps serving

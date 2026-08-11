@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories";
 import app from "@/index";
+import { applyEarnWithdrawalObservationToRow } from "@/services/earn-withdrawal-ledger.service";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -160,6 +161,10 @@ describe("Earn withdrawal ledger — post-acceptance bookkeeping failure", () =>
     expect(res.status).toBe(201);
     const body = (await res.json()) as { data: { withdrawal: { withdrawalRef: string } } };
     expect(body.data.withdrawal.withdrawalRef).toBe(WITHDRAWAL.withdrawalRef);
+
+    // The bookkeeping contract, not just the outcome: three attempts before
+    // giving up with the alertable earn_ledger_write_failed log.
+    expect(vi.mocked(applyEarnWithdrawalObservationToRow)).toHaveBeenCalledTimes(3);
 
     // The intent row survives, ref-less: healed by a same-key retry or the
     // ledger sweep — never silently lost, never a failed response.

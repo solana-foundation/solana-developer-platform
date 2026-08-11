@@ -373,9 +373,39 @@ async function deleteSeeded(db: AppDb): Promise<number> {
   );
 }
 
+/**
+ * Withdrawal history PINS a wallet link: earn_program_withdrawals FKs the link
+ * row with no cascade (history is undeletable by design — migration 0055 /
+ * PRO-1628), so a seeded link that has been withdrawn against can be neither
+ * cleaned nor moved. Skipping beats crashing on the FK, and keeping the link
+ * where its history lives is the correct outcome anyway.
+ */
+async function countHistoryPinnedSeededWallets(db: AppDb): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*)::int AS pinned FROM earn_provider_wallets w
+        WHERE w.environment = ? AND w.provider = ? AND w.label = ?
+          AND EXISTS (SELECT 1 FROM earn_program_withdrawals x WHERE x.wallet_id = w.id)`
+    )
+    .bind(SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL)
+    .first<{ pinned: number }>();
+  return row?.pinned ?? 0;
+}
+
 async function deleteSeededWallets(db: AppDb): Promise<number> {
+  const pinned = await countHistoryPinnedSeededWallets(db);
+  if (pinned > 0) {
+    console.log(
+      `  keeping ${pinned} seeded link(s) with withdrawal history — history is undeletable by design (PRO-1628).`
+    );
+  }
   return db.execute(
-    "DELETE FROM earn_provider_wallets WHERE environment = ? AND provider = ? AND label = ?",
+    `DELETE FROM earn_provider_wallets
+      WHERE environment = ? AND provider = ? AND label = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM earn_program_withdrawals x
+           WHERE x.wallet_id = earn_provider_wallets.id
+        )`,
     [SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL]
   );
 }
@@ -462,6 +492,16 @@ async function seedProviderWallets(
     return { linked: 0, kept: 1, moved: false, skipped: false };
   }
 
+  // A seeded link with withdrawal history cannot move: its row is the FK
+  // target of that history (undeletable by design), and the history belongs
+  // to the org that withdrew. Leave it and say so, rather than crash mid-move.
+  if ((await countHistoryPinnedSeededWallets(db)) > 0) {
+    console.log(
+      `  ${organization.slug}: NOT moved — the seeded link has withdrawal history and stays with the org that withdrew (PRO-1628).`
+    );
+    return { linked: 0, kept: 1, moved: false, skipped: false };
+  }
+
   // The move is one transaction: the delete and the insert must land together or
   // not at all. Committing the delete on its own would leave no program link if
   // the insert then failed, putting the dashboard back on the empty onboarding
@@ -471,7 +511,12 @@ async function seedProviderWallets(
     // Only ever removes rows this seed created; a wizard-made link carries a
     // different label and is left alone.
     const removed = await tx.execute(
-      "DELETE FROM earn_provider_wallets WHERE environment = ? AND provider = ? AND label = ?",
+      `DELETE FROM earn_provider_wallets
+        WHERE environment = ? AND provider = ? AND label = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM earn_program_withdrawals x
+             WHERE x.wallet_id = earn_provider_wallets.id
+          )`,
       [SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL]
     );
     await txRepo.insertProviderWallet({

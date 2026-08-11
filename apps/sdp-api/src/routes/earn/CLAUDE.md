@@ -50,7 +50,11 @@ them; that is an ADR 0002 addendum acceptance criterion, not a style choice.
   never fails the response (money moved): it retries, then logs
   `earn_ledger_write_failed`. Heal semantics are narrow: the detail poll heals
   only rows that already carry `provider_reference`; a ref-less row heals via
-  a same-key retry or the ledger sweep — never fuzzy matching.
+  a same-key retry or the ledger sweep — never fuzzy matching. NOTE for the
+  sweep (hard requirement, from review): a ref-less `requested` row can also
+  be a definitively-rejected intent (provider 4xx rethrows and leaves the row
+  untouched) — the sweep must discriminate or verify with the provider before
+  re-driving, or it could execute an intent the caller abandoned.
 - `GET /program/withdrawals/:ref` — **live provider**, and persist-on-
   observation: the response is always the provider's live object; the matching
   ledger row (found via the global (provider, provider_reference) unique) is

@@ -259,13 +259,16 @@ describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
     // ledger-vs-live decision (ADR 0002 addendum). If any of these come back,
     // it must be a deliberate re-introduction, not a leftover registration.
     await seedAuth();
+    // The NAV probe rides a REAL strategy id: a resurrected /nav route would
+    // 200 here, whereas a made-up id would 404 either way (vacuous).
+    const strategy = await seedStrategy();
 
     for (const path of [
       "/v1/earn/positions",
       "/v1/earn/positions/pos_1",
       "/v1/earn/movements",
       "/v1/earn/movements/mov_1",
-      "/v1/earn/strategies/strat_1/nav",
+      `/v1/earn/strategies/${strategy.id}/nav`,
     ]) {
       const res = await getEarn(path);
       expect(res.status, path).toBe(404);

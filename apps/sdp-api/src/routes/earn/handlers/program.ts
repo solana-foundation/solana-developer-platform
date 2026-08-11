@@ -473,19 +473,23 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
   // different payload 409s here (the provider enforces the identical rule —
   // an idempotency key names one intent); a matching payload resolves to the
   // existing intent row.
+  // True replay of an accepted withdrawal: answer with the provider's live
+  // state and let the observation refresh the ledger. 200, not 201 — nothing
+  // was created by this request.
+  const serveReplay = async (intent: EarnProgramWithdrawalRow, providerReference: string) => {
+    const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
+      providerWalletRef: row.provider_wallet_ref,
+      withdrawalRef: providerReference,
+    });
+    await persistWithdrawalObservation(repo, intent, withdrawal);
+    const response: EarnProgramWithdrawalResponse = { withdrawal };
+    return success(c, response, 200);
+  };
+
   let intentRow = await resolveIdempotencyReplay(findIntentRow, fingerprint);
 
   if (intentRow?.provider_reference) {
-    // True replay of an accepted withdrawal: answer with the provider's live
-    // state and let the observation refresh the ledger. 200, not 201 —
-    // nothing was created by this request.
-    const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
-      providerWalletRef: row.provider_wallet_ref,
-      withdrawalRef: intentRow.provider_reference,
-    });
-    await persistWithdrawalObservation(repo, intentRow, withdrawal);
-    const response: EarnProgramWithdrawalResponse = { withdrawal };
-    return success(c, response, 200);
+    return serveReplay(intentRow, intentRow.provider_reference);
   }
 
   if (!intentRow) {
@@ -522,12 +526,18 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
     if (!intentRow) {
       throw internalError("Failed to persist earn withdrawal intent");
     }
+    // Lost-race edge: the concurrent same-key winner may have already driven
+    // the provider and stamped the ref while we waited on the re-resolve —
+    // that is a replay too, not a second create.
+    if (intentRow.provider_reference) {
+      return serveReplay(intentRow, intentRow.provider_reference);
+    }
   }
 
-  // The row is ref-less here (fresh intent, or a crash-window replay whose
-  // provider call never landed): drive the provider with the SAME derived id —
-  // it replays a seen key and first-sends an unseen one, so this can never
-  // double-pay.
+  // The row is ref-less in every remaining path (fresh intent, or a
+  // crash-window replay whose provider call never landed): drive the provider
+  // with the SAME derived id — it replays a seen key and first-sends an unseen
+  // one, so this can never double-pay.
   const withdrawal = await client.createPortfolioWithdrawal(earnRuntime(c), {
     providerWalletRef: row.provider_wallet_ref,
     requestId,

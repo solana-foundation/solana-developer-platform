@@ -1101,6 +1101,24 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       // Ledger records never leak the derivation internals.
       expect(record).not.toHaveProperty("requestId");
       expect(record).not.toHaveProperty("idempotencyFingerprint");
+
+      // Pagination is DB-windowed, not in-memory: a 1-per-page second page
+      // still reports the full total and exactly one row.
+      const page2 = await requestEarn(
+        "GET",
+        "/v1/earn/program/withdrawals?provider=ground&page=2&pageSize=1"
+      );
+      expect(page2.status).toBe(200);
+      const page2Body = (await page2.json()) as {
+        data: {
+          withdrawals: Array<Record<string, unknown>>;
+          total: number;
+          page: number;
+          pageSize: number;
+        };
+      };
+      expect(page2Body.data).toMatchObject({ total: 2, page: 2, pageSize: 1 });
+      expect(page2Body.data.withdrawals).toHaveLength(1);
     });
 
     it("serves the audit trail even with provider credentials absent (exit-safety-adjacent)", async () => {
