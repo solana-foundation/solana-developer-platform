@@ -1,6 +1,6 @@
 import type { SponsorshipProviderConfiguration } from "@sdp/payments/fee-payment";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { Blockhash, Signature } from "@solana/kit";
+import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
 import { getDb } from "@/db";
 import {
   SponsorshipBudgetRepository,
@@ -146,7 +146,8 @@ async function reconcileReservation(input: {
     return;
   }
 
-  const transaction = await input.getTransaction(reservation.signature as Signature);
+  assertIsSignature(reservation.signature);
+  const transaction = await input.getTransaction(reservation.signature);
   if (transaction) {
     const actualLamports = feePayerSpendLamports(transaction.preBalances, transaction.postBalances);
     if (actualLamports > reservation.reservedLamports) {
@@ -161,7 +162,8 @@ async function reconcileReservation(input: {
     return;
   }
 
-  if (await input.isBlockhashValid(reservation.recentBlockhash as Blockhash)) return;
+  assertIsBlockhash(reservation.recentBlockhash);
+  if (await input.isBlockhashValid(reservation.recentBlockhash)) return;
   if (reservation.missCount === 0) {
     await repository.recordReconciliationMiss(reservation.id, reservation.attempt, 0);
     return;

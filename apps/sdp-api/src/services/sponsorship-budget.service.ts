@@ -7,6 +7,9 @@ import {
 import { createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
 import {
   type Address,
+  assertIsSignature,
+  getBase64Decoder,
+  getBase64Encoder,
   getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
@@ -78,11 +81,11 @@ function resolveNetwork(env: Pick<Env, "SOLANA_NETWORK">): SponsorshipNetwork {
 }
 
 function encodeBase64(value: Uint8Array): string {
-  return Buffer.from(value).toString("base64");
+  return getBase64Decoder().decode(value);
 }
 
 function decodeBase64(value: string): Uint8Array {
-  return new Uint8Array(Buffer.from(value, "base64"));
+  return new Uint8Array(getBase64Encoder().encode(value));
 }
 
 function getRecentBlockhash(transaction: Uint8Array): string {
@@ -222,7 +225,10 @@ export class BudgetedFeePayment implements FeePaymentPort {
 
   async signAndSend(transaction: Uint8Array): Promise<Signature> {
     const reservation = await this.admit(transaction, "send");
-    if (reservation.replay?.signature) return reservation.replay.signature as Signature;
+    if (reservation.replay?.signature) {
+      assertIsSignature(reservation.replay.signature);
+      return reservation.replay.signature;
+    }
     let signature: Signature;
     try {
       signature = await this.provider.signAndSend(transaction);

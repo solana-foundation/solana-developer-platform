@@ -14,6 +14,7 @@ import {
   type createSolanaRpc,
   createSolanaRpcFromTransport,
   createSolanaRpcSubscriptions,
+  getBase64Decoder,
   getTransactionDecoder,
   type RpcTransport,
   type Signature,
@@ -245,9 +246,7 @@ export async function getTransactionNetworkFee(
   commitment: Commitment = "confirmed"
 ): Promise<bigint> {
   const { messageBytes } = getTransactionDecoder().decode(transaction);
-  const message = Buffer.from(new Uint8Array(messageBytes)).toString(
-    "base64"
-  ) as TransactionMessageBytesBase64;
+  const message = getBase64Decoder().decode(messageBytes) as TransactionMessageBytesBase64;
   const response = await rpc.getFeeForMessage(message, { commitment }).send();
   if (response.value === null) {
     throw solanaRpcError("Solana RPC could not price the transaction message");
