@@ -5,17 +5,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnProgramState } from "./earn-program-data";
 
 // Values-aware identity translations, so assertions can pin interpolations
-// (e.g. the trimmed share "programShare(80)").
+// (e.g. a delayed liquidity label rendering its settlement-day count).
 vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string, values?: Record<string, string | number>) =>
     values ? `${key}(${Object.values(values).join(",")})` : key,
   useLocale: () => "en",
 }));
 
-vi.mock("@/components/dashboard-navigation-link", () => ({
-  DashboardNavigationLink: ({ children, ...props }: ComponentProps<"a">) => (
-    <a {...props}>{children}</a>
-  ),
+vi.mock("next/link", () => ({
+  default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,
 }));
 
 // The workspace reads live data exclusively through these hooks, so the tests
@@ -37,6 +35,13 @@ const data = vi.hoisted(() => ({
 vi.mock("./earn-program-data", () => ({
   useEarnProgram: () => data.program,
   useEarnStrategies: () => data.strategies,
+  // Completion toasts are behaviour of their own; earn-wallet-activity covers
+  // them against provider state transitions, so the workspace only has to
+  // mount the hook.
+  useEarnWalletActivityToasts: () => {},
+  // Withdrawal outcomes are announced from the withdrawal's own status;
+  // earn-wallet-activity covers that hook against each terminal status.
+  useEarnWithdrawalOutcomeToast: () => {},
   // The workspace also reads the provider pin, so the hero counts exactly what
   // the deposit flow will offer rather than every synced row.
   EARN_PORTFOLIO_PROVIDER: "ground",
@@ -174,24 +179,19 @@ describe("EarnWorkspace with an active program", () => {
             reservedUsd: "5000.50",
             earnedUsd: "1250.75",
           },
+          // The V1 shape: one vault per token lane. Freshly funded, so most
+          // value still sits as cash awaiting the provider's deploy — and the
+          // provider still reports `pct` on the wire; the workspace ignores it.
           positions: [
             {
               kind: "yield_source",
               label: "Morpho Gauntlet USDC",
-              valueUsd: "100000.00",
-              pct: 80,
+              valueUsd: "20000.50",
+              pct: 16,
               yieldSourceId: "morpho-gauntlet-usdc",
               token: "usdc",
             },
-            {
-              kind: "yield_source",
-              label: "Morpho Steakhouse USDC",
-              valueUsd: "20000.50",
-              pct: 16,
-              yieldSourceId: "morpho-steakhouse-usdc",
-              token: "usdc",
-            },
-            { kind: "cash", label: "Cash (USDC)", valueUsd: "5000.00", pct: 4, token: "usdc" },
+            { kind: "cash", label: "Cash (USDC)", valueUsd: "105000.00", pct: 84, token: "usdc" },
           ],
           allocations: {
             usdc: [{ yieldSourceId: "morpho-gauntlet-usdc", weightBps: 10_000 }],
@@ -215,17 +215,77 @@ describe("EarnWorkspace with an active program", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("DashboardEarn.overview.holdingsTitle");
     const gauntlet = html.indexOf("Morpho Gauntlet USDC");
-    const steakhouse = html.indexOf("Morpho Steakhouse USDC");
     const cash = html.indexOf("Cash (USDC)");
     expect(gauntlet).toBeGreaterThan(-1);
-    expect(steakhouse).toBeGreaterThan(gauntlet);
-    // Cash is not deployed, so it sorts last regardless of value.
-    expect(cash).toBeGreaterThan(steakhouse);
+    // Cash is not deployed, so it sorts last even though it holds 5x the value.
+    expect(cash).toBeGreaterThan(gauntlet);
   });
 
   it("renders the provider's position label verbatim so no chain name is rebuilt", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("Cash (USDC)");
+  });
+
+  // The status chip relays what the PROVIDER says is happening. It reads the
+  // neutral `activity` the provider client derived — never a raw provider
+  // status string, which would put a second copy of that vocabulary here.
+  describe("wallet status chip", () => {
+    const withWallet = (patch: Record<string, unknown>) => {
+      const state = data.program.state;
+      if (state?.kind !== "active") throw new Error("expected an active program");
+      Object.assign(state.program.wallet, patch);
+      return renderToStaticMarkup(<EarnWorkspace />);
+    };
+
+    it("shows no chip while the wallet is ready", () => {
+      const html = withWallet({ status: "ready", activity: undefined });
+      expect(html).not.toContain("DashboardEarn.overview.walletStatus");
+    });
+
+    it("names the operation when the provider reports one", () => {
+      expect(withWallet({ status: "busy", activity: "withdrawing" })).toContain(
+        "DashboardEarn.overview.walletStatusWithdrawing"
+      );
+      expect(withWallet({ status: "busy", activity: "rebalancing" })).toContain(
+        "DashboardEarn.overview.walletStatusRebalancing"
+      );
+    });
+
+    it("falls back to the generic label when busy carries no named activity", () => {
+      // The provider client reports an unrecognized provider state as busy with
+      // no activity; the chip must not invent one.
+      const html = withWallet({ status: "busy", activity: undefined });
+      expect(html).toContain("DashboardEarn.overview.walletStatusBusy");
+      expect(html).not.toContain("DashboardEarn.overview.walletStatusWithdrawing");
+    });
+
+    it("keeps both money verbs reachable while the provider is busy", () => {
+      // ADR 0002, money out beats money off: a withdrawal in flight must never
+      // lock the exit. Ground already moves reserved funds out of
+      // withdrawableUsd, so that figure — not a status — is the only gate.
+      // Matches the rendered attribute, NOT Tailwind's `disabled:` utilities.
+      const html = withWallet({ status: "busy", activity: "withdrawing" });
+      expect(html).toContain("DashboardEarn.overview.withdraw");
+      expect(html).toContain("DashboardEarn.overview.changeStrategy");
+      expect(html).not.toContain('disabled=""');
+    });
+
+    it("gates withdraw on the balance alone, so the assertion above has teeth", () => {
+      // Ground reserves the amount the instant it accepts a withdrawal, so a
+      // program with nothing left to withdraw disables the button — proving
+      // the previous test observes a real absence, not a broken matcher.
+      const html = withWallet({
+        status: "busy",
+        activity: "withdrawing",
+        balance: {
+          totalUsd: "125000.50",
+          withdrawableUsd: "0.00",
+          reservedUsd: "125000.50",
+          earnedUsd: "1250.75",
+        },
+      });
+      expect(html).toContain('disabled=""');
+    });
   });
 
   it("explains what each cash slice is waiting for, from the target allocations", () => {
@@ -259,10 +319,11 @@ describe("EarnWorkspace with an active program", () => {
     expect(html).toContain("Cash (USDC)");
   });
 
-  it("shows a trimmed share only where value sits behind it", () => {
+  it("never renders a share percent beside holdings — V1 is single-vault", () => {
+    // The fixture's positions carry `pct` (the provider keeps reporting it);
+    // the workspace must not surface it as portfolio framing.
     const html = renderToStaticMarkup(<EarnWorkspace />);
-    expect(html).toContain("DashboardEarn.overview.programShare(80)");
-    expect(html).not.toContain("programShare(80.0)");
+    expect(html).not.toContain("programShare");
   });
 
   it("keeps the deposit address one copy away on the dashboard", () => {

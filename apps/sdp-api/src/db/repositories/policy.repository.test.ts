@@ -16,7 +16,7 @@ import { TEST_CUSTODY_CONFIG, TEST_CUSTODY_WALLET } from "@/test/fixtures/custod
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   ApiKeyControlProfileRevisionRow,
   ApiKeyControlProfileRow,
@@ -35,7 +35,10 @@ import { createPostgresPolicyRepository } from "./policy.repository.postgres";
 function policyStores(repo: PolicyRepository) {
   const wallet = new WalletPolicyStore(repo);
   const apiKey = new ApiKeyPolicyStore(repo);
-  const enforcement = new PostgresPolicyEnforcementStore(repo);
+  const enforcement = new PostgresPolicyEnforcementStore(
+    repo,
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: null })
+  );
   return {
     resolveEffectiveWalletPolicy: wallet.resolveEffectiveWalletPolicy.bind(wallet),
     resolveEffectiveApiKeyPolicy: apiKey.resolveEffectiveApiKeyPolicy.bind(apiKey),
@@ -50,6 +53,15 @@ const SECOND_CUSTODY_WALLET = {
   walletId: "wallet_policy_second",
   publicKey: "SecondPolicyWallet1111111111111111111111111",
   label: "Second policy wallet",
+  purpose: "payments",
+};
+
+const DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID = "ccfg_policy_duplicate_provider_wallet";
+const DUPLICATE_PROVIDER_CUSTODY_WALLET = {
+  id: "cw_policy_duplicate_provider_wallet",
+  walletId: TEST_CUSTODY_WALLET.walletId,
+  publicKey: "DuplicateProviderPolicyWallet11111111111111111",
+  label: "Duplicate provider policy wallet",
   purpose: "payments",
 };
 
@@ -81,11 +93,11 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
     await seedPolicyFoundationFixtures();
     repo = createPostgresPolicyRepository(getDb(env), TEST_SCOPE);
   });
@@ -189,7 +201,7 @@ describe("PolicyRepository (postgres)", () => {
     await expect(
       repo.createWalletControlProfileRevision({
         profileId: "wcp_missing",
-        rules: [{ kind: "amount", max: "10" }],
+        rules: [{ kind: "amount", asset: "USDC", max: "10" }],
       })
     ).resolves.toBeNull();
 
@@ -211,7 +223,7 @@ describe("PolicyRepository (postgres)", () => {
     });
     const walletRevision = await repo.createWalletControlProfileRevision({
       profileId: walletProfile?.id ?? "",
-      rules: [{ kind: "amount", max: "100" }],
+      rules: [{ kind: "amount", asset: "USDC", max: "100" }],
     });
     await repo.activateWalletControlProfileRevision({
       profileId: walletProfile?.id ?? "",
@@ -805,6 +817,7 @@ describe("PolicyRepository (postgres)", () => {
       actor: null,
       operationFamily: "program",
       operationType: "program_call",
+      legs: [],
       rawPayload: { programId: "program_1" },
     });
 
@@ -853,6 +866,43 @@ describe("PolicyRepository (postgres)", () => {
     });
   });
 
+  it("keeps selected policy bindings distinct when provider wallet IDs collide", async () => {
+    await seedDuplicateProviderCustodyWallet();
+
+    await repo.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "selected",
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+    });
+    await repo.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "selected",
+      walletId: DUPLICATE_PROVIDER_CUSTODY_WALLET.walletId,
+      custodyWalletId: DUPLICATE_PROVIDER_CUSTODY_WALLET.id,
+    });
+
+    const bindings = await repo.listApiKeyWalletPolicyBindings(TEST_API_KEY.id);
+    expect(bindings).toHaveLength(2);
+    expect(bindings.map((binding) => binding.custody_wallet_id).sort()).toEqual(
+      [TEST_CUSTODY_WALLET.id, DUPLICATE_PROVIDER_CUSTODY_WALLET.id].sort()
+    );
+
+    await expect(
+      repo.getApiKeyWalletPolicyBindingResolution(TEST_API_KEY.id, TEST_CUSTODY_WALLET.id)
+    ).resolves.toMatchObject({
+      binding: { custody_wallet_id: TEST_CUSTODY_WALLET.id },
+    });
+    await expect(
+      repo.getApiKeyWalletPolicyBindingResolution(
+        TEST_API_KEY.id,
+        DUPLICATE_PROVIDER_CUSTODY_WALLET.id
+      )
+    ).resolves.toMatchObject({
+      binding: { custody_wallet_id: DUPLICATE_PROVIDER_CUSTODY_WALLET.id },
+    });
+  });
+
   it("resolves an all-wallet API key policy binding for every in-scope wallet", async () => {
     const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
@@ -872,7 +922,7 @@ describe("PolicyRepository (postgres)", () => {
     await expect(
       service.resolveApiKeyWalletPolicyScope({
         apiKeyId: TEST_API_KEY.id,
-        walletId: TEST_CUSTODY_WALLET.walletId,
+        custodyWalletId: TEST_CUSTODY_WALLET.id,
       })
     ).resolves.toMatchObject({
       binding: { bindingScope: "all", apiKeyControlProfileId: profile.id },
@@ -882,7 +932,7 @@ describe("PolicyRepository (postgres)", () => {
     await expect(
       service.resolveApiKeyWalletPolicyScope({
         apiKeyId: TEST_API_KEY.id,
-        walletId: SECOND_CUSTODY_WALLET.walletId,
+        custodyWalletId: SECOND_CUSTODY_WALLET.id,
       })
     ).resolves.toMatchObject({
       binding: { bindingScope: "all", apiKeyControlProfileId: profile.id },
@@ -907,22 +957,24 @@ describe("PolicyRepository (postgres)", () => {
       apiKeyId: TEST_API_KEY.id,
       bindingScope: "selected",
       walletId: TEST_CUSTODY_WALLET.walletId,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
       apiKeyControlProfileId: profile.id,
     });
     await service.upsertApiKeyWalletPolicyBinding({
       apiKeyId: TEST_API_KEY.id,
       bindingScope: "selected",
       walletId: SECOND_CUSTODY_WALLET.walletId,
+      custodyWalletId: SECOND_CUSTODY_WALLET.id,
       apiKeyControlProfileId: profile.id,
     });
 
     const primary = await service.resolveApiKeyWalletPolicyScope({
       apiKeyId: TEST_API_KEY.id,
-      walletId: TEST_CUSTODY_WALLET.walletId,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
     });
     const second = await service.resolveApiKeyWalletPolicyScope({
       apiKeyId: TEST_API_KEY.id,
-      walletId: SECOND_CUSTODY_WALLET.walletId,
+      custodyWalletId: SECOND_CUSTODY_WALLET.id,
     });
 
     expect(primary).toMatchObject({
@@ -956,13 +1008,14 @@ describe("PolicyRepository (postgres)", () => {
       apiKeyId: TEST_API_KEY.id,
       bindingScope: "selected",
       walletId: SECOND_CUSTODY_WALLET.walletId,
+      custodyWalletId: SECOND_CUSTODY_WALLET.id,
       apiKeyControlProfileId: override.profile.id,
     });
 
     await expect(
       service.resolveApiKeyWalletPolicyScope({
         apiKeyId: TEST_API_KEY.id,
-        walletId: TEST_CUSTODY_WALLET.walletId,
+        custodyWalletId: TEST_CUSTODY_WALLET.id,
       })
     ).resolves.toMatchObject({
       binding: { bindingScope: "all" },
@@ -972,7 +1025,7 @@ describe("PolicyRepository (postgres)", () => {
     await expect(
       service.resolveApiKeyWalletPolicyScope({
         apiKeyId: TEST_API_KEY.id,
-        walletId: SECOND_CUSTODY_WALLET.walletId,
+        custodyWalletId: SECOND_CUSTODY_WALLET.id,
       })
     ).resolves.toMatchObject({
       binding: { bindingScope: "selected", walletId: SECOND_CUSTODY_WALLET.walletId },
@@ -992,13 +1045,14 @@ describe("PolicyRepository (postgres)", () => {
       apiKeyId: TEST_API_KEY.id,
       bindingScope: "selected",
       walletId: TEST_CUSTODY_WALLET.walletId,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
       apiKeyControlProfileId: profile.id,
     });
 
     await expect(
       service.resolveApiKeyWalletPolicyScope({
         apiKeyId: TEST_API_KEY.id,
-        walletId: SECOND_CUSTODY_WALLET.walletId,
+        custodyWalletId: SECOND_CUSTODY_WALLET.id,
       })
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
@@ -1024,7 +1078,7 @@ describe("PolicyRepository (postgres)", () => {
     await expect(
       service.resolveApiKeyWalletPolicyScope({
         apiKeyId: TEST_API_KEY.id,
-        walletId: SECOND_CUSTODY_WALLET.walletId,
+        custodyWalletId: SECOND_CUSTODY_WALLET.id,
       })
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
@@ -1049,7 +1103,7 @@ describe("PolicyRepository (postgres)", () => {
     await expect(
       service.resolveApiKeyWalletPolicyScope({
         apiKeyId: TEST_API_KEY.id,
-        walletId: OTHER_PROJECT_CUSTODY_WALLET.walletId,
+        custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
       })
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
@@ -1205,6 +1259,7 @@ describe("PolicyRepository (postgres)", () => {
       custody_wallet_id: null,
     });
     expect(clonedSelectedBinding?.wallet_id).toBe(TEST_CUSTODY_WALLET.walletId);
+    expect(clonedSelectedBinding?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET.id);
     expect(clonedAllBinding?.api_key_control_profile_id).not.toBe(apiKeyProfile?.id);
     expect(clonedSelectedBinding?.api_key_control_profile_id).not.toBe(apiKeyProfile?.id);
 
@@ -1335,6 +1390,56 @@ async function seedAdditionalCustodyWallet(): Promise<void> {
       SECOND_CUSTODY_WALLET.publicKey,
       SECOND_CUSTODY_WALLET.label,
       SECOND_CUSTODY_WALLET.purpose
+    )
+    .run();
+}
+
+/**
+ * Seed a second custody row that shares the primary wallet's provider identifier.
+ *
+ * @returns A promise that resolves when the duplicate provider wallet is stored.
+ */
+async function seedDuplicateProviderCustodyWallet(): Promise<void> {
+  const db = getDb(env);
+  await db
+    .prepare(
+      `INSERT INTO custody_configs (
+         id,
+         organization_id,
+         project_id,
+         provider,
+         config_encrypted,
+         default_wallet_id,
+         status
+       ) VALUES (?, ?, ?, 'privy', 'encrypted', ?, 'active')`
+    )
+    .bind(
+      DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      DUPLICATE_PROVIDER_CUSTODY_WALLET.walletId
+    )
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO custody_wallets (
+         id,
+         custody_config_id,
+         wallet_id,
+         public_key,
+         label,
+         purpose,
+         status
+       ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
+    )
+    .bind(
+      DUPLICATE_PROVIDER_CUSTODY_WALLET.id,
+      DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID,
+      DUPLICATE_PROVIDER_CUSTODY_WALLET.walletId,
+      DUPLICATE_PROVIDER_CUSTODY_WALLET.publicKey,
+      DUPLICATE_PROVIDER_CUSTODY_WALLET.label,
+      DUPLICATE_PROVIDER_CUSTODY_WALLET.purpose
     )
     .run();
 }

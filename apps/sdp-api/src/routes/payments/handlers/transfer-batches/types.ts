@@ -13,7 +13,8 @@ export type RecentBlockhash = Awaited<ReturnType<typeof solanaRpc.getRecentBlock
 export type TokenContext =
   | {
       kind: "sol";
-      token: "SOL";
+      /** Canonical native token value: the wrapped SOL mint. */
+      token: string;
       decimals: 9;
     }
   | {

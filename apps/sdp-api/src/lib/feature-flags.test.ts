@@ -6,52 +6,47 @@ import {
   isMarketsEnabled,
   isPrivateChannelsEnabled,
   isPrivyByokEnabled,
+  resolveNewCustodySetupMethod,
 } from "./feature-flags";
 
 describe("isAssetProfilesEnabled", () => {
-  it.each([
-    undefined,
-    "managed",
-  ] as const)("keeps the managed API capability available when deployment mode is %s", (deploymentMode) => {
-    expect(
-      isAssetProfilesEnabled({
-        ENVIRONMENT: "production",
-        SDP_DEPLOYMENT_MODE: deploymentMode,
-      })
-    ).toBe(true);
-  });
+  it.each([undefined, "managed"] as const)(
+    "keeps the managed API capability available when deployment mode is %s",
+    (deploymentMode) => {
+      expect(
+        isAssetProfilesEnabled({
+          ENVIRONMENT: "production",
+          SDP_DEPLOYMENT_MODE: deploymentMode,
+        })
+      ).toBe(true);
+    }
+  );
 
-  it.each([
-    undefined,
-    "",
-    "false",
-    "0",
-    "off",
-  ])("enables Asset Profiles in development when the flag is %s", (flag) => {
-    expect(
-      isAssetProfilesEnabled({
-        ENVIRONMENT: "development",
-        SDP_FLAG_ASSET_PROFILES: flag,
-        SDP_DEPLOYMENT_MODE: "self_hosted",
-      })
-    ).toBe(true);
-  });
+  it.each([undefined, "", "false", "0", "off"])(
+    "enables Asset Profiles in development when the flag is %s",
+    (flag) => {
+      expect(
+        isAssetProfilesEnabled({
+          ENVIRONMENT: "development",
+          SDP_FLAG_ASSET_PROFILES: flag,
+          SDP_DEPLOYMENT_MODE: "self_hosted",
+        })
+      ).toBe(true);
+    }
+  );
 
-  it.each([
-    undefined,
-    "",
-    "false",
-    "0",
-    "off",
-  ])("keeps Asset Profiles disabled in production when the flag is %s", (flag) => {
-    expect(
-      isAssetProfilesEnabled({
-        ENVIRONMENT: "production",
-        SDP_FLAG_ASSET_PROFILES: flag,
-        SDP_DEPLOYMENT_MODE: "self_hosted",
-      })
-    ).toBe(false);
-  });
+  it.each([undefined, "", "false", "0", "off"])(
+    "keeps Asset Profiles disabled in production when the flag is %s",
+    (flag) => {
+      expect(
+        isAssetProfilesEnabled({
+          ENVIRONMENT: "production",
+          SDP_FLAG_ASSET_PROFILES: flag,
+          SDP_DEPLOYMENT_MODE: "self_hosted",
+        })
+      ).toBe(false);
+    }
+  );
 
   it.each(["1", "true", " TRUE ", "yes", "on"])("honors the production opt-in value %s", (flag) => {
     expect(
@@ -102,6 +97,34 @@ describe("isCustodyConnectionRuntimeEnabled", () => {
   });
 });
 
+describe("resolveNewCustodySetupMethod", () => {
+  it.each([
+    [{ PRIVY_BYOK_ENABLED: "false" }, "privy", "legacy_config"],
+    [{ PRIVY_BYOK_ENABLED: "true" }, "turnkey", "legacy_config"],
+    [{ PRIVY_BYOK_ENABLED: "true", SDP_DEPLOYMENT_MODE: "managed" }, "privy", "stored_credentials"],
+    [
+      {
+        PRIVY_BYOK_ENABLED: "true",
+        SDP_DEPLOYMENT_MODE: "self_hosted",
+        SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED: "true",
+      },
+      "privy",
+      "stored_credentials",
+    ],
+    [
+      {
+        PRIVY_BYOK_ENABLED: "true",
+        SDP_DEPLOYMENT_MODE: "self_hosted",
+        SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED: "false",
+      },
+      "privy",
+      "deployment_credentials",
+    ],
+  ] as const)("resolves %j for %s to %s", (env, provider, expected) => {
+    expect(resolveNewCustodySetupMethod(env, provider)).toBe(expected);
+  });
+});
+
 describe("isMarketsEnabled", () => {
   it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
     expect(isMarketsEnabled({ MARKETS_ENABLED: flag })).toBe(false);
@@ -123,23 +146,17 @@ describe("isEarnEnabled", () => {
 
   // The parent gate has to win: Earn is a Markets sub-module, so disabling
   // Markets must dark-launch Earn even with its own flag still turned on.
-  it.each([
-    undefined,
-    "",
-    "false",
-    "0",
-    "off",
-  ])("stays disabled when Earn is on but Markets is %s", (markets) => {
-    expect(isEarnEnabled({ MARKETS_ENABLED: markets, EARN_ENABLED: "true" })).toBe(false);
-  });
+  it.each([undefined, "", "false", "0", "off"])(
+    "stays disabled when Earn is on but Markets is %s",
+    (markets) => {
+      expect(isEarnEnabled({ MARKETS_ENABLED: markets, EARN_ENABLED: "true" })).toBe(false);
+    }
+  );
 
-  it.each([
-    "1",
-    "true",
-    " TRUE ",
-    "yes",
-    "on",
-  ])("honors the opt-in value %s on both flags", (flag) => {
-    expect(isEarnEnabled({ MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(true);
-  });
+  it.each(["1", "true", " TRUE ", "yes", "on"])(
+    "honors the opt-in value %s on both flags",
+    (flag) => {
+      expect(isEarnEnabled({ MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(true);
+    }
+  );
 });

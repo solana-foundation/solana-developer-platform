@@ -6,10 +6,8 @@ vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("@/components/dashboard-navigation-link", () => ({
-  DashboardNavigationLink: ({ children, ...props }: ComponentProps<"a">) => (
-    <a {...props}>{children}</a>
-  ),
+vi.mock("next/link", () => ({
+  default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,
 }));
 
 vi.mock("@/components/workspace-switcher", () => ({
@@ -25,6 +23,7 @@ const t = ((key: string) => key) as Translate;
 function navOptions(flags: { marketsEnabled: boolean; earnEnabled: boolean }) {
   return {
     canReadApprovals: false,
+    heliusRingsEnabled: false,
     pendingApprovalCount: null,
     privateChannelsEnabled: false,
     ...flags,
@@ -76,6 +75,7 @@ describe("Earn dashboard navigation", () => {
             pathname="/dashboard"
             canReadApprovals={false}
             canManageOrgSettings={false}
+            heliusRingsEnabled={false}
             onClose={() => {}}
             {...flags}
           />
@@ -91,6 +91,7 @@ describe("Earn dashboard navigation", () => {
         canReadApprovals={false}
         canManageOrgSettings={false}
         earnEnabled
+        heliusRingsEnabled={false}
         marketsEnabled
         onClose={() => {}}
       />

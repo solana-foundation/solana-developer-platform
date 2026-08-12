@@ -109,6 +109,12 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/solana", "@sdp/types"],
   },
   {
+    name: "@sdp/helius-rings",
+    directory: "packages/sdp-helius-rings",
+    purpose: "Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet).",
+    allowedDependencies: [],
+  },
+  {
     name: "@sdp/private-channels",
     directory: "packages/sdp-private-channels",
     purpose: "Solana Private Channels gateway, auth, and instance clients.",

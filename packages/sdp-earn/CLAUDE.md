@@ -11,7 +11,12 @@ ADR 0002 (`docs/decisions/`) for the invariants.
 
 **Absolute rule: local resources only.** Never point any of this at a shared or
 production database, and never exercise a provider's production API from a
-laptop — sandbox base URL + `*_SANDBOX_API_KEY` only.
+laptop — sandbox base URL + `*_SANDBOX_API_KEY` only. Note that dashboard
+sessions resolve their environment from the `x-project-id` project
+(`@/lib/sdp-environment`), so selecting an org's **production** project —
+possible via curl even while the dashboard's switcher stays locked — drives the
+provider's production API. Locally, only ever use sandbox projects and never
+set a production `*_API_KEY`.
 
 ### 1. Infrastructure
 
@@ -112,11 +117,19 @@ Practical notes:
 - **The API-key path has no program.** `db:seed:local`'s dev key belongs to the
   test org, so `curl /v1/earn/program?provider=ground` with it returns 404 by
   design. Use the dashboard, or mint a key for your own org.
-- **The seeded program reads $0, on purpose.** It carries a live three-source
-  Kamino USDC allocation, so the overview shows a real forward APY (blended from
-  target weights) with no balance yet. Fund it yourself by sending devnet USDC to
-  the wallet's Solana deposit address — that exercises the real two-phase deposit
-  (arrives as `cash`, deploys on a later Ground rebalance).
+- **The seeded program starts at whatever the shared wallet currently holds.**
+  It carries a live single-strategy allocation (one strategy at 100% — the
+  only shape the V1 API accepts, PRO-1667), so the overview shows a real
+  forward APY.
+  The wallet is shared with teammates and IS funded from time to time for
+  exit-path testing, so do not treat any particular balance as the baseline —
+  read it from the dashboard. Fund it by sending devnet USDC to the wallet's
+  Solana deposit address, which exercises the real two-phase deposit (arrives
+  as `cash`, deploys on a later Ground rebalance).
+- **Getting devnet USDC: Circle's faucet — <https://faucet.circle.com/>**
+  (select **USDC** + **Solana Devnet**, paste the address). It mints the
+  official devnet USDC mint (`4zMMC…`, the one pinned in well-known-tokens),
+  so faucet funds credit deposits directly. Rate-limited per address.
 - **Don't "fix" the $0 by pointing the seed at a funded sandbox wallet.** The
   funded ones hold USDT cash on a non-Solana rail, and Ground enforces the lane
   split at the API: USDC→Solana returns `409 insufficient_funds` (lane
@@ -149,10 +162,14 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 | A key you minted yourself returns `strategies: []` **and** program 404 | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox program, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive Ground's **production** API from a laptop. |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows your org's one wallet (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
+| Need devnet USDC to fund a program | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b) |
 
 ## Contracts
 
-- `EarnVaultProvider` (src/types.ts) is the base contract; the portfolio-wallet
+- `EarnVaultProvider` (src/types.ts) is the base contract — slimmed by
+  PRO-1628 to `provider` + `declaredSupport` + `listStrategies`, every member
+  real and called (the per-strategy quote/execution seams live in git history
+  until PRO-1634 gives them a consumer); the portfolio-wallet
   surface (`EarnPortfolioWalletProvider`) is an **optional capability** detected
   via `supportsPortfolioWallets()` (src/capabilities.ts, all-or-nothing method
   presence). New optional surfaces follow the same pattern: interface extension
@@ -200,6 +217,11 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 - Ground specifics (base URLs, endpoint shapes, apyBps/liquidity/curator
   mapping decisions) are documented in providers/ground/client.ts doc comments
   and README.md — update both when the mapping changes.
+- Catalogue coverage questions (what Ground offers vs what distillation
+  drops, and why): `pnpm --filter @sdp/api earn:inventory` pulls the raw
+  catalogue and regenerates `docs/earn/ground-catalogue-inventory.md` using
+  the same `distillGroundYieldSource` the sync uses. Sandbox only from a
+  laptop; the production variant is gated behind `--confirm-production`.
 
 ## Cross-package coupling
 

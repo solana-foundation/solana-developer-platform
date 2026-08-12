@@ -2,10 +2,9 @@ import type { EarnPortfolioAllocationInput } from "@sdp/types";
 
 /**
  * Request snippets for the Earn API, built only from routes that actually
- * exist today under `/v1/earn` (index.ts registers 14). Nothing here is
- * aspirational: there is no partner deposit-signing handshake in V1 — funding
- * is "send stablecoins to the program's Solana address" — so no snippet implies
- * one.
+ * exist today under `/v1/earn`. Nothing here is aspirational: there is no
+ * partner deposit-signing handshake in V1 — funding is "send stablecoins to
+ * the program's Solana address" — so no snippet implies one.
  *
  * Shape follows the API playground's `buildFetchSnippet`: a `const API_KEY`
  * placeholder plus a bearer header, so a developer can paste either into the
@@ -113,10 +112,15 @@ export function earnApiSnippets({
       request: "POST /v1/earn/program/withdrawals",
       code: requestSnippet({
         baseUrl,
-        // amountUsd is a USD decimal STRING (max 6 dp) on this family — never a
-        // number, and not the base-unit integers the per-strategy quotes take.
+        // amountUsd is a USD decimal STRING (max 6 dp) on this family — never
+        // a number and never base units.
         body: {
           provider,
+          // Required on this route, and the only thing that makes a retry
+          // safe: the same value replays the original withdrawal instead of
+          // paying out twice. Send the Idempotency-Key header instead if you
+          // prefer — exactly one of the two, never both and never neither.
+          requestId: "<uuid_v4>",
           amountUsd: "1000.00",
           token: withdrawalToken,
           destinationAddress: "<your_solana_address>",

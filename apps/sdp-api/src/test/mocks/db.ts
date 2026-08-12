@@ -11,10 +11,8 @@ import { AUDIT_LEDGER_CHECKPOINT_KEY } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 const POSTGRES_TEST_TABLES = [
+  "earn_program_withdrawals",
   "earn_provider_wallets",
-  "earn_nav_snapshots",
-  "earn_movements",
-  "earn_positions",
   "earn_strategies",
   "policy_provider_sync_status",
   "policy_evaluations",
@@ -46,7 +44,6 @@ const POSTGRES_TEST_TABLES = [
   "payment_transfer_recipients",
   "payment_transfer_batches",
   "payment_transfers",
-  "payment_wallet_policies",
   "frozen_accounts",
   "token_allowlist_statuses",
   "token_allowlists",
@@ -80,7 +77,15 @@ const POSTGRES_TEST_TABLES = [
   "allowlist",
 ] as const;
 
-async function truncateAllTables(env: Env): Promise<void> {
+/**
+ * Resets this worker's database to empty by truncating every test table.
+ * Call from beforeEach; there is deliberately no afterEach counterpart —
+ * the next test's reset makes trailing cleanup a redundant round trip.
+ *
+ * @param env - Test environment bindings for this worker's database.
+ * @returns Resolves once every table is truncated.
+ */
+export async function seedTestDatabase(env: Env): Promise<void> {
   const db = getDb(env);
 
   try {
@@ -96,12 +101,4 @@ async function truncateAllTables(env: Env): Promise<void> {
       }
     );
   }
-}
-
-export async function seedTestDatabase(env: Env): Promise<void> {
-  await truncateAllTables(env);
-}
-
-export async function clearTestDatabase(env: Env): Promise<void> {
-  await truncateAllTables(env);
 }

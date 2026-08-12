@@ -6,7 +6,11 @@ import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { HomeWorkspace } from "./home-workspace";
 import { resolveTotalBalance } from "./payments/payments-overview.utils";
-import { fetchPaymentsAggregate, fetchPaymentsWallets } from "./payments/payments-page.data";
+import {
+  fetchPaymentsAggregate,
+  fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentsWallets,
+} from "./payments/payments-page.data";
 
 export default async function DashboardPage() {
   const t = await getTranslations();
@@ -23,10 +27,13 @@ export default async function DashboardPage() {
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.home.api"))
     );
-    const [aggregateResult, walletsResult] = await Promise.all([
+    const [aggregateResult, walletsResult, issuedTokensResult] = await Promise.all([
       trace.step("fetch_payments_aggregate", () => fetchPaymentsAggregate(apiClient.request)),
       trace.step("fetch_wallet_summaries", () =>
         fetchPaymentsWallets(apiClient.request, { view: "summary" })
+      ),
+      trace.step("fetch_issued_token_symbols", () =>
+        fetchPaymentsIssuedTokenSymbols(apiClient.request)
       ),
     ]);
 
@@ -55,6 +62,7 @@ export default async function DashboardPage() {
         // per-token rows and the wallet count that came back with it.
         balances={balances}
         walletCount={aggregateResult.data?.walletCount ?? wallets.length}
+        issuedTokens={issuedTokensResult.data ?? []}
       />
     );
   } catch (error) {

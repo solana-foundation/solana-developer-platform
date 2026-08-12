@@ -3,6 +3,7 @@ import type {
   EffectiveApiKeyPolicy,
   EffectiveWalletPolicy,
   MatchedPolicyRule,
+  PolicyCandidate,
   PolicyDecision,
   PolicyEvaluation,
   PolicyEvaluationContext,
@@ -27,6 +28,8 @@ export interface CreateWalletOperationInput {
   asset?: string | null;
   amount?: string | null;
   destination?: string | null;
+  /** Per-leg evaluation views of a multi-leg operation (batch recipients); empty otherwise. */
+  legs: PolicyCandidate[];
   context?: WalletOperationContext;
   providerExtensions?: WalletOperationProviderExtensions;
   rawPayload?: Record<string, unknown>;
@@ -74,7 +77,12 @@ export interface RecordPolicyEvaluationInput {
  */
 export interface PolicyEnforcementStore {
   createWalletOperation(input: CreateWalletOperationInput): Promise<WalletOperationEnvelope>;
-  loadEffectivePolicies(operation: WalletOperationEnvelope): Promise<EffectiveOperationPolicies>;
+  loadEffectivePolicies(
+    candidate: Pick<
+      PolicyCandidate,
+      "organizationId" | "projectId" | "apiKeyId" | "custodyWalletId"
+    >
+  ): Promise<EffectiveOperationPolicies>;
   createApprovalRequest(
     input: CreateApprovalRequestInput
   ): Promise<{ id: string; status: ApprovalRequestStatus }>;

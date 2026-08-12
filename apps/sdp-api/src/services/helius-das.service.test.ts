@@ -6,7 +6,7 @@ import {
   getTrackedWalletBalancesByOwner,
 } from "@/services/helius-das.service";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_ORG_ID = "org_helius_das";
 const TEST_USER_ID = "usr_helius_das";
@@ -71,7 +71,6 @@ describe("helius-das service", () => {
     vi.restoreAllMocks();
     env.SOLANA_RPC_HELIUS_URL = originalHeliusUrl;
     env.SOLANA_RPC_HELIUS_API_KEY = originalHeliusApiKey;
-    await clearTestDatabase(env);
   });
 
   it("prices issued stablecoins at one USD each", async () => {

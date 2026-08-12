@@ -1,6 +1,7 @@
 import {
   COMPLIANCE_PROVIDERS,
   type ComplianceProviderId,
+  CUSTODY_PROVIDER_CATALOG_BY_ID,
   CUSTODY_PROVIDERS,
   type CustodyProvider,
   EARN_PROVIDERS,
@@ -20,6 +21,7 @@ import {
 } from "@sdp/types";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 
@@ -517,6 +519,31 @@ export async function getProviderAvailability(
       earn: buildAvailabilityEntries(entitled.earn, configured.earn),
     },
   };
+}
+
+export async function isPersistedCustodyCompletionEnabled(
+  env: Env,
+  db: DatabaseClient,
+  organizationId: string,
+  provider: CustodyProvider,
+  source: "stored" | "runtime"
+): Promise<boolean> {
+  if (!isCustodyConnectionRuntimeEnabled(env, provider)) {
+    return false;
+  }
+
+  if (
+    source === "stored" &&
+    CUSTODY_PROVIDER_CATALOG_BY_ID[provider].storedCredentialSetup.mode !== "self_service"
+  ) {
+    return false;
+  }
+
+  const availability = await getProviderAvailability(env, db, organizationId);
+  const providerAvailability = availability.providers.custody[provider];
+  return source === "runtime"
+    ? providerAvailability?.enabled === true
+    : providerAvailability?.entitled === true;
 }
 
 function getAvailabilityMessage(

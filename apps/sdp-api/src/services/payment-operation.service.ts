@@ -90,19 +90,46 @@ export function isNativePaymentToken(token: string): boolean {
 }
 
 /**
- * Maps native SOL aliases to "SOL" and well-known token symbols to the
- * configured cluster's mint; anything else passes through as a mint address.
+ * Maps native SOL aliases and well-known token symbols (case-insensitive) to
+ * the configured cluster's mint; anything else passes through as a mint
+ * address, byte-exact since base58 is case-sensitive. Native SOL canonicalizes
+ * to the wrapped SOL mint so `token` values compare uniformly — dispatch
+ * between native and SPL paths goes through {@link isNativePaymentToken},
+ * never string equality against the mint.
  */
 export function normalizePaymentToken(token: string, env: RpcEnv): string {
   if (isNativePaymentToken(token)) {
-    return "SOL";
+    return SOL_MINT;
   }
 
-  const symbol = token.trim();
+  const symbol = token.trim().toUpperCase();
   if (!isWellKnownTokenSymbol(symbol)) {
     return token;
   }
 
+  const cluster = getSolanaConfig(env).network;
+  const mint = wellKnownMint(symbol, cluster);
+  if (!mint) {
+    throw badRequest(`${symbol} is not available on ${cluster}`);
+  }
+  return mint;
+}
+
+/**
+ * Resolves a quoted ramp crypto symbol to the mint recorded on the transfer
+ * row, keeping ramp rows on the same token-is-a-mint contract as every other
+ * transfer. Ramp rails only quote well-known symbols, so an unresolvable
+ * symbol is a corridor bug and fails loudly.
+ *
+ * @param cryptoToken - The quoted crypto currency symbol, e.g. "USDC".
+ * @param env - Worker env used to resolve the active cluster.
+ * @returns The mint address for the active cluster.
+ */
+export function rampTransferTokenMint(cryptoToken: string, env: RpcEnv): string {
+  const symbol = cryptoToken.trim().toUpperCase();
+  if (!isWellKnownTokenSymbol(symbol)) {
+    throw badRequest(`Unsupported ramp crypto token: ${cryptoToken}`);
+  }
   const cluster = getSolanaConfig(env).network;
   const mint = wellKnownMint(symbol, cluster);
   if (!mint) {

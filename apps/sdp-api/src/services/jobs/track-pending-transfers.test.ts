@@ -1,9 +1,9 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { trackPendingTransfers } from "./track-pending-transfers";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
@@ -70,16 +70,12 @@ function minutesAgo(n: number): string {
 
 describe("trackPendingTransfers", () => {
   beforeEach(async () => {
-    await clearTestDatabase(env);
+    await seedTestDatabase(env);
     await seedTestDatabase(env);
     await seedOrg();
     vi.clearAllMocks();
     createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     getSignatureStatusesMock.mockResolvedValue([]);
-  });
-
-  afterEach(async () => {
-    await clearTestDatabase(env);
   });
 
   describe("recoverStuckProcessingTransfers", () => {

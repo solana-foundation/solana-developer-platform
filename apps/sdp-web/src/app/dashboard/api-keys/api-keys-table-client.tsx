@@ -9,10 +9,10 @@ import type {
   ApiKeyWalletScope,
   PaymentsDashboardWallet,
 } from "@sdp/types";
-import { KeyRoundIcon } from "lucide-react";
+import { KeyRoundIcon, PlusIcon } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import {
@@ -227,8 +227,11 @@ export function ApiKeysTableClient({
         message={t("DashboardCustody.noApiKeysFound")}
         action={
           canManageApiKeys ? (
-            <Button asChild>
-              <Link href="/dashboard/api-keys/new">{t("DashboardCustody.newApiKey")}</Link>
+            <Button asChild size="sm">
+              <Link href="/dashboard/api-keys/new">
+                <PlusIcon className="size-4" />
+                {t("DashboardCustody.createNewApiKey")}
+              </Link>
             </Button>
           ) : null
         }

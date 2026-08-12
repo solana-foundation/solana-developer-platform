@@ -18,8 +18,7 @@ import {
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, conflict } from "@/lib/errors";
-import { assertTenantClaim, createTenantScope, type TenantScope } from "@/lib/tenant-scope";
-import { getLogger } from "@/runtime/logger";
+import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import {
   CustodyConfigStore,
   type CustodyWalletLookup,
@@ -45,7 +44,7 @@ export async function enforceWalletOperationPolicy(
   approvedOperationAttemptId?: string
 ): Promise<WalletOperationPolicyEnforcement> {
   assertTenantClaim(scope, input, "enforceWalletOperationPolicy");
-  const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope));
+  const service = new WalletPolicyEnforcementService(createPolicyRepository(env, scope), scope);
   if (approvedOperationId) {
     if (!approvedOperationAttemptId) {
       throw new AppError("FORBIDDEN", "Approved wallet operation attempt is unavailable");
@@ -57,7 +56,10 @@ export async function enforceWalletOperationPolicy(
 
 /** Policy enforcement plus approval-request lifecycle transitions for wallet operations. */
 export class WalletPolicyEnforcementService {
-  constructor(private readonly repository: PolicyRepository) {}
+  constructor(
+    private readonly repository: PolicyRepository,
+    private readonly scope: TenantScope
+  ) {}
 
   /**
    * Enforce policy on a wallet operation, throwing the route-contract error
@@ -67,7 +69,7 @@ export class WalletPolicyEnforcementService {
    * @returns The recorded operation and its evaluation when allowed.
    */
   async enforce(input: CreateWalletOperationInput): Promise<WalletOperationPolicyEnforcement> {
-    const store = new PostgresPolicyEnforcementStore(this.repository);
+    const store = new PostgresPolicyEnforcementStore(this.repository, this.scope);
     const enforcement = await runPolicyEnforcement(store, input);
 
     if (enforcement.evaluation.decision === "allow") {
@@ -259,58 +261,6 @@ function stableJson(value: unknown): string | undefined {
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Record a legacy wallet-policy denial against an operation the new engine
- * already allowed, so the legacy decision stays visible in the audit trail.
- *
- * @param env - The runtime environment.
- * @param enforcement - The enforcement the legacy check overruled.
- * @param error - The legacy denial.
- */
-export async function recordLegacyWalletPolicyDenial(
-  env: Env,
-  enforcement: WalletOperationPolicyEnforcement,
-  error: unknown
-): Promise<void> {
-  const repository = createPolicyRepository(
-    env,
-    createTenantScope({
-      organizationId: enforcement.operation.organizationId,
-      projectId: enforcement.operation.projectId,
-    })
-  );
-  const reason =
-    error instanceof Error && error.message
-      ? error.message
-      : "Legacy wallet policy denied wallet operation";
-
-  try {
-    if (enforcement.evaluation.evaluationContext) {
-      await repository.createPolicyEvaluation({
-        walletOperationId: enforcement.operation.id,
-        walletPolicyRevisionId: null,
-        apiKeyPolicyRevisionId: null,
-        decision: "deny",
-        reasonCode: "legacy_wallet_policy_denied",
-        reason,
-        matchedRules: [],
-        evaluationContext: enforcement.evaluation.evaluationContext,
-        requiresApproval: false,
-      });
-    }
-
-    await repository.updateWalletOperationStatus(enforcement.operation.id, "failed");
-  } catch (auditError) {
-    getLogger().error(
-      {
-        walletOperationId: enforcement.operation.id,
-        error: auditError instanceof Error ? auditError.message : String(auditError),
-      },
-      "Failed to record legacy wallet policy denial"
-    );
-  }
 }
 
 /**

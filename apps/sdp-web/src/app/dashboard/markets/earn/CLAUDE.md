@@ -20,12 +20,33 @@ reintroduce fixture modules. Data flows: BFF proxies
   stablecoins). Zero-value NON-strategy slices never render — Ground keeps
   reporting a drained lane's residual cash bucket at $0 (provider plumbing,
   not a holding) — while nonzero value always renders whatever rail it sits
-  on, so the list still sums to the wallet total. A share percent renders only
-  when value sits behind it.
+  on, so the list still sums to the wallet total. No share percents render —
+  V1 is single-vault (PRO-1667) — and the provider-reported `pct` is ignored.
   Deliberately **not** grouped by curator — see "One strategy, no curator step"
   below.
 - `earn-program-data.ts` — THE data seam. `useEarnProgram()` discriminates
   `404 → none`, `503 → unconfigured` (no provider key), `200 → active`;
+  **polls while the provider is mid-operation** — cadence is a property of the
+  WALLET (`earnProgramRefreshInterval`: `creating` 4s, `busy` 10s, everything
+  else 0), never a caller flag, so a status can never sit frozen while money
+  moves. It sets `EARN_PROGRAM_DEDUPING_MS` (2s) because the dashboard-wide
+  `dedupingInterval` is 10s — equal to the busy cadence — and a poll landing
+  inside its own dedupe window is dropped. `useEarnWalletActivityToasts()`
+  announces a `busy → settled` transition ONCE, from observed provider state
+  (never from what the user submitted), and only the workspace mounts it: the
+  program read runs in several components and a toast per consumer would
+  announce one completion several times. **It never announces a withdrawal**:
+  the wallet only reports that the provider stopped, and a failed, cancelled or
+  partial payout leaves it exactly as idle as a settled one — so
+  `useEarnWithdrawalOutcomeToast(ref)` follows the WITHDRAWAL's own status
+  instead (terminal = the shared `EARN_TERMINAL_WITHDRAWAL_STATUSES` from
+  `@sdp/types` — completed / partially_completed / failed / cancelled — the
+  same set the API's withdrawal ledger uses; `pending_approval` keeps waiting,
+  since it still resolves). Only `completed`
+  is a success toast — partial is a problem, not a win. Sourcing a settlement
+  claim from a wallet transition is the bug to never reintroduce. SWR suspends
+  polling for a hidden tab and revalidates on focus — which is why the cadence
+  is unit-tested rather than checked in a browser;
   `useEarnStrategies()`, program upsert, deposits, withdrawal fetchers.
   `EARN_PORTFOLIO_PROVIDER` is the single deliberate Ground pin — widening to
   multi-provider selection happens HERE, not by scattering provider ids.
@@ -100,10 +121,11 @@ sentence about timing must trace to one of those.
 ### One strategy, no curator step
 
 The flow selects exactly ONE strategy and sends `pct: 100` for that strategy's
-stablecoin lane. Curator-first selection and manual weight editing were removed
-on purpose; curator is metadata rendered beside a strategy, never a gate. Do not
-reintroduce a curator step, a weight editor, or curator grouping without
-changing this note.
+stablecoin lane — since PRO-1667 that is also the only shape the API accepts
+(one allocation entry per token group). Curator-first selection and manual
+weight editing were removed on purpose; curator is metadata rendered beside a
+strategy, never a gate. Do not reintroduce a curator step, a weight editor, or
+curator grouping without changing this note.
 
 Omitting a token lane **preserves** it server-side (Ground: "the omitted group
 is not changed"), which is why the review copy promises only the selected lane.
@@ -165,7 +187,9 @@ funding instructions and nothing else — never imply a transfer happens.
   helper, a `process.env` read, or a `NEXT_PUBLIC_*` twin is wrong (the deleted
   `lib/earn-feature.ts` was all three).
 - **i18n: English only.** Edit `messages/en/dashboard-earn.json`; NEVER touch
-  `messages/fr/*` (CI Translation Catalog Policy fails the branch).
+  `messages/{es,fr,pt}` — or any future non-`en` locale — in the same PR. CI's
+  Translation Catalog Policy fails a branch that edits English and localized
+  catalogs together, because translations land on the automated release PR.
 - **Solana-only surface**: only Solana deposit addresses/destinations render.
   Position **labels arrive display-ready** — the provider client synthesizes them
   from kind + token precisely because a provider names a position after the chain
@@ -189,6 +213,19 @@ funding instructions and nothing else — never imply a transfer happens.
   Note the asymmetry: `PUT /program` answers 403 even for *missing credentials*,
   so read `error.code`, not just the status, before labelling a failure.
 - Missing numbers render "—", never `0` and never a fabricated rate.
+- **The provider is the source of truth for what is happening to the money.**
+  The status chip names the operation from `wallet.activity` — the
+  provider-neutral field the provider client derives in ONE place (Ground:
+  `WALLET_STATE_BY_GROUND_STATUS`) — never from a raw provider status string,
+  and never inferred from what the user just submitted. A busy state the client
+  does not recognize arrives with no activity and falls back to the generic
+  label rather than being guessed at. Adding a second copy of a provider's
+  vocabulary to this module is the mistake to avoid.
+- **Never disable a money verb on status.** Withdraw gates on
+  `withdrawableUsd` alone (ADR 0002, money out beats money off): the provider
+  already reserves an in-flight amount out of that figure, so the balance
+  expresses the constraint without a status lock that could trap an exit —
+  including when an unrecognized status normalizes to `busy` indefinitely.
 - Tests: vitest, `environment: "node"` by default — a test that touches
   `document` needs a `// @vitest-environment jsdom` docblock. Mock the data-hook
   seam (`./earn-program-data`), not fetch. Run:

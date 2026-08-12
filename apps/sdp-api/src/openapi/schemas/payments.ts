@@ -9,7 +9,6 @@ import {
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
-  createSubscriptionCollectionAttemptSchema as createSubscriptionCollectionAttemptSchemaBase,
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   createSubscriptionSchema as createSubscriptionSchemaBase,
   createTransferBatchSchema as createTransferBatchSchemaBase,
@@ -44,7 +43,6 @@ import {
   transferStatusSchema as transferStatusSchemaBase,
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
   updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
-  updateSubscriptionSchema as updateSubscriptionSchemaBase,
   updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
 } from "../../routes/payments/schemas";
@@ -71,19 +69,16 @@ export const tokenAmountSchema = z.string().openapi({
   example: "100.00",
 });
 
-export const policyRuleSchema = withOpenApi(
-  updateWalletPolicySchemaBase.shape.rules.unwrap().element,
-  {
-    description:
-      "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
-    example: {
-      id: "deny-raw-signing",
-      kind: "operation_family",
-      family: "raw_sign",
-      action: "deny",
-    },
-  }
-);
+export const policyRuleSchema = withOpenApi(updateWalletPolicySchemaBase.shape.rules.element, {
+  description:
+    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
+  example: {
+    id: "deny-raw-signing",
+    kind: "operation_family",
+    family: "raw_sign",
+    action: "deny",
+  },
+});
 
 const walletControlProfileSummarySchema = z
   .object({
@@ -340,45 +335,23 @@ export const walletPolicyEvaluationResponseSchema = z.object({
 export const walletPolicySchema = z
   .object({
     walletId: walletIdParamSchema,
-    destinationAllowlist: z
-      .array(solanaAddressSchema)
-      .max(500)
-      .openapi({
-        description:
-          "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
-        example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
-      }),
-    maxTransferAmount: tokenAmountSchema
-      .optional()
-      .openapi({ description: "Maximum amount allowed per transfer." }),
-    maxDailyAmount: tokenAmountSchema
-      .optional()
-      .openapi({ description: "Maximum total amount allowed per day." }),
-    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional().openapi({
-      description: "Active wallet control profile default action when no rule matches.",
+    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
+      description:
+        "Wallet control profile default action when no rule matches. A wallet without an active profile is implicitly allow.",
     }),
     rules: z
       .array(policyRuleSchema)
-      .optional()
-      .openapi({ description: "Active wallet control profile rules." }),
-    controlProfile: walletControlProfileSummarySchema.optional().openapi({
-      description: "Active wallet control profile metadata.",
+      .openapi({ description: "Active wallet control profile rules; empty without a profile." }),
+    controlProfile: walletControlProfileSummarySchema.nullable().openapi({
+      description: "Active wallet control profile metadata, or null when none is active.",
     }),
     audit: walletPolicyAuditSchema.optional().openapi({
       description: "Recent wallet operation policy decisions for customer/support audit review.",
     }),
-    createdAt: isoDateTimeSchema.openapi({
-      description: "Timestamp when the policy was created.",
-      example: "2025-01-01T00:00:00.000Z",
-    }),
-    updatedAt: isoDateTimeSchema.openapi({
-      description: "Timestamp when the policy was last updated.",
-      example: "2025-01-02T00:00:00.000Z",
-    }),
   })
   .openapi({
     description:
-      "Payment policy configuration for a custody-managed wallet. Wallet lifecycle belongs to /v1/wallets, while payment controls are internally stored as typed policy records.",
+      "Policy configuration for a custody-managed wallet: the active control profile's rules and default action.",
   });
 
 export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
@@ -430,22 +403,9 @@ export const paymentTransferBatchIdParamsSchema = transferBatchIdParamsSchemaBas
 
 export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
   .extend({
-    destinationAllowlist: withOpenApi(updateWalletPolicySchemaBase.shape.destinationAllowlist, {
-      description:
-        "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
-      example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
-    }),
     commitMessage: withOpenApi(updateWalletPolicySchemaBase.shape.commitMessage, {
       description: "Optional message describing the wallet policy revision changes.",
       example: "Require approval for transfers above 10,000 USDC.",
-    }),
-    maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
-      description: "Maximum amount allowed per transfer.",
-      example: "100.00",
-    }),
-    maxDailyAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxDailyAmount, {
-      description: "Maximum total amount allowed per day.",
-      example: "1000.00",
     }),
     defaultAction: withOpenApi(updateWalletPolicySchemaBase.shape.defaultAction, {
       description: "Default action for the activated wallet control profile revision.",
@@ -453,7 +413,7 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
     }),
     rules: withOpenApi(updateWalletPolicySchemaBase.shape.rules, {
       description:
-        "Rules for a new immutable wallet control profile revision. When provided, the revision is activated after validation.",
+        "Rules for the new immutable wallet control profile revision, activated after validation.",
       example: [
         {
           id: "deny-raw-signing",
@@ -466,7 +426,7 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
   })
   .openapi({
     description:
-      "Update wallet policy request payload. Controls map to typed internal policy records for provider-specific extensibility.",
+      "Update wallet policy request payload: the full rule set and default action of the revision to activate.",
   });
 
 export const tokenBalanceSchema = z
@@ -1447,34 +1407,11 @@ export const createSubscriptionRequestSchema = createSubscriptionSchemaBase
       description: "Customer wallet address that authorizes the subscription.",
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
-    subscriberTokenAccount: withOpenApi(createSubscriptionSchemaBase.shape.subscriberTokenAccount, {
-      description: "Optional subscriber token account address.",
-    }),
-    subscriptionPda: withOpenApi(createSubscriptionSchemaBase.shape.subscriptionPda, {
-      description: "On-chain subscription PDA once created.",
-    }),
-    subscriptionAuthorityAddress: withOpenApi(
-      createSubscriptionSchemaBase.shape.subscriptionAuthorityAddress,
-      {
-        description: "Subscription authority PDA/address once initialized.",
-      }
-    ),
-    authorizationSignature: withOpenApi(createSubscriptionSchemaBase.shape.authorizationSignature, {
-      description: "Signature for the customer authorization transaction.",
-      example: "sig_example",
-    }),
-    status: paymentSubscriptionStatusSchema.optional(),
   })
   .openapi({
     description:
-      "Creates an SDP subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization flow.",
+      "Creates a pending SDP subscription record tied to a counterparty. Lifecycle, schedule, on-chain addresses, and authorization proof are server-owned and populated only by verified flows.",
   });
-
-export const updateSubscriptionRequestSchema = updateSubscriptionSchemaBase
-  .safeExtend({
-    status: paymentSubscriptionStatusSchema.optional(),
-  })
-  .openapi({ description: "Updates mutable subscription state and on-chain identifiers." });
 
 export const paymentListSubscriptionsQuerySchema = listSubscriptionsQuerySchemaBase
   .extend({
@@ -1589,16 +1526,6 @@ export const paymentSubscriptionListResponseSchema = z
   })
   .openapi({ description: "Subscription list response payload." });
 
-export const createSubscriptionCollectionAttemptRequestSchema =
-  createSubscriptionCollectionAttemptSchemaBase
-    .extend({
-      status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),
-    })
-    .openapi({
-      description:
-        "Creates a collection-attempt record for a due subscription. This endpoint records backend state; the collection worker/Solana transaction submitter owns actual settlement.",
-    });
-
 export const paymentListSubscriptionCollectionAttemptsQuerySchema =
   listSubscriptionCollectionAttemptsQuerySchemaBase
     .extend({
@@ -1638,11 +1565,6 @@ export const paymentSubscriptionCollectionAttemptResponseSchema = z
 
 export const prepareSubscriptionCollectionRequestSchema = prepareSubscriptionCollectionSchemaBase
   .extend({
-    amount: withOpenApi(prepareSubscriptionCollectionSchemaBase.shape.amount, {
-      description:
-        "Optional override amount in UI units. Defaults to the subscription plan amount.",
-      example: "25.00",
-    }),
     receiverTokenAccount: withOpenApi(
       prepareSubscriptionCollectionSchemaBase.shape.receiverTokenAccount,
       {
@@ -1654,7 +1576,7 @@ export const prepareSubscriptionCollectionRequestSchema = prepareSubscriptionCol
   })
   .openapi({
     description:
-      "Inputs for preparing the collector-signed Solana subscriptions transfer transaction.",
+      "Inputs for preparing the collector-signed Solana subscriptions transfer transaction. The amount is always derived from the stored plan.",
   });
 
 export const preparePaymentSubscriptionCollectionResponseSchema = z

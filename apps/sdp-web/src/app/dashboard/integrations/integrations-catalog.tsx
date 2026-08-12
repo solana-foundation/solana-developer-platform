@@ -3,11 +3,11 @@
 import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
 import { ChevronRight, Search } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
 import type { CustodyProviderAvailability } from "@/app/dashboard/custody/provider-display-status";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { RpcProviderMark } from "@/app/dashboard/onboarding/rpc-provider-mark";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
@@ -119,12 +119,12 @@ function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate })
         <div className="flex items-start justify-between gap-3">
           {/* Stretched link: the title anchors it and the overlay makes the
               whole card the click target. */}
-          <DashboardNavigationLink
+          <Link
             href={`/dashboard/integrations/${row.provider}`}
             className="truncate pt-2 text-base font-medium text-primary after:absolute after:inset-0 after:content-['']"
           >
             {row.label}
-          </DashboardNavigationLink>
+          </Link>
           <StatusBadge status={row.status} t={t} />
         </div>
         {row.description ? (
@@ -330,9 +330,9 @@ export function IntegrationsCatalog({
               </div>
               {family === "rpc" ? (
                 <Button asChild variant="ghost" size="sm">
-                  <DashboardNavigationLink href="/dashboard/settings">
+                  <Link href="/dashboard/settings">
                     {t("Shared.integrations.rpcSectionAction")}
-                  </DashboardNavigationLink>
+                  </Link>
                 </Button>
               ) : null}
             </div>

@@ -6,6 +6,7 @@ import {
   ArrowUpRightIcon,
   BlocksIcon,
   CircleCheckBigIcon,
+  CircleDotDashedIcon,
   CoinsIcon,
   FileTextIcon,
   KeyRoundIcon,
@@ -137,6 +138,7 @@ export function getNavSections(
   options: {
     canReadApprovals: boolean;
     earnEnabled: boolean;
+    heliusRingsEnabled: boolean;
     marketsEnabled: boolean;
     pendingApprovalCount: number | null;
     privateChannelsEnabled: boolean;
@@ -186,6 +188,15 @@ export function getNavSections(
                 icon: TrendingUpIcon,
                 children: marketsActions,
                 subnavKey: "markets" as const,
+              },
+            ]
+          : []),
+        ...(options.heliusRingsEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.heliusRings"),
+                href: DASHBOARD_SIDE_NAV_HREFS.heliusRings,
+                icon: CircleDotDashedIcon,
               },
             ]
           : []),

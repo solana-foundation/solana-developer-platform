@@ -140,16 +140,16 @@ describe("createPiiCipher", () => {
     ).toBeInstanceOf(LocalPiiCipher);
   });
 
-  it.each([
-    { K_SERVICE: "sdp-api" },
-    { CLOUD_RUN_JOB: "sdp-dev-counterparty-pii-migrate" },
-  ])("requires KMS for a managed Cloud Run runtime", (runtime) => {
-    expect(() =>
-      createPiiCipher({
-        ...baseEnv,
-        ...runtime,
-        COUNTERPARTY_PII_ENCRYPTION_KEY: localKey,
-      })
-    ).toThrow(/COUNTERPARTY_PII_KMS_KEY_NAME/);
-  });
+  it.each([{ K_SERVICE: "sdp-api" }, { CLOUD_RUN_JOB: "sdp-dev-counterparty-pii-migrate" }])(
+    "requires KMS for a managed Cloud Run runtime",
+    (runtime) => {
+      expect(() =>
+        createPiiCipher({
+          ...baseEnv,
+          ...runtime,
+          COUNTERPARTY_PII_ENCRYPTION_KEY: localKey,
+        })
+      ).toThrow(/COUNTERPARTY_PII_KMS_KEY_NAME/);
+    }
+  );
 });
