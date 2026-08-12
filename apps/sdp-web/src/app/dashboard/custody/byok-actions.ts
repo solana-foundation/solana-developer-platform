@@ -45,6 +45,10 @@ export type PrivyByokSubmitResult =
   | { status: "success" }
   | { status: "failed"; message: string; connectionId?: string }
   | { status: "refused"; message: string; connectionId: string }
+  // No self-service action converges: the connection's provider-account
+  // fingerprint is pinned, so the server rejects replacement credentials and
+  // blocks cancellation alike. Offering the replacement flow would loop.
+  | { status: "unrecoverable"; message: string }
   | { status: "retry_unknown"; connectionId: string }
   // The action rejected the input before sending anything, so nothing can
   // have committed and the frozen-replay recovery path must not engage —
@@ -122,6 +126,12 @@ async function runCompletion(connectionId: string): Promise<PrivyByokSubmitResul
     return { status: "success" };
   }
   if (result.completion.status === "failed") {
+    if (result.completion.code === "wallet_conflict") {
+      // The connection is pinned to a provider account whose wallet state
+      // cannot be reconciled; the server rejects replacement credentials for
+      // this state, so routing the retry at replacement would 409 forever.
+      return { status: "unrecoverable", message: t("DashboardCustody.byokWalletConflict") };
+    }
     // The completion conclusively rejected the credential. The failed
     // connection survives and blocks fresh submissions, but accepts
     // replacement credentials — keep its id so the retry can replace.
@@ -187,11 +197,11 @@ export async function submitPrivyCredentialAction(
     });
   } catch (error) {
     const { status, message } = extractApiMessage(error);
-    if (status !== null) {
-      // The server answered, so the submission definitively did not commit.
-      // Conflicts and validation rejections are terminal for this attempt;
-      // routing them into the frozen-replay state would trap the user
-      // replaying a request that can only fail the same way. A rejected
+    if (status !== null && status < 500 && status !== 408 && status !== 429) {
+      // A definitive rejection: the server answered and the submission did
+      // not commit. Conflicts and validation rejections are terminal for this
+      // attempt; routing them into the frozen-replay state would trap the
+      // user replaying a request that can only fail the same way. A rejected
       // REPLACEMENT leaves the failed connection standing and still blocking
       // fresh submissions, so its id rides along or the next correction
       // would be routed into exactly that blocked fresh path — unless the
@@ -203,8 +213,11 @@ export async function submitPrivyCredentialAction(
         ...(replaceConnectionId && status !== 404 ? { connectionId: replaceConnectionId } : {}),
       };
     }
-    // No response at all: the POST may have committed server-side, which is
-    // the only case the frozen verbatim replay exists for.
+    // No response, or an ambiguous answer (5xx/408/429) that does not
+    // guarantee nothing was committed: the POST may have created the
+    // connection server-side, so the exact payload and idempotency key are
+    // kept for the frozen verbatim replay. Minting a new key here could
+    // strand a committed pending connection forever.
     return {
       status: "error",
       message: message || t("DashboardCustody.byokSubmitFailed"),

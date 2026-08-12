@@ -95,6 +95,17 @@ describe("recheckPrivyCredentialAction", () => {
     });
   });
 
+  it("reports a wallet conflict as unrecoverable without a replacement target", async () => {
+    client.fetch.mockResolvedValue(completionResult("failed", "wallet_conflict"));
+
+    // The pinned provider account makes the server reject replacement
+    // credentials, so offering the replacement flow would 409 forever.
+    await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
+      status: "unrecoverable",
+      message: "DashboardCustody.byokWalletConflict",
+    });
+  });
+
   it.each([["retry_unknown"], ["running"]])("keeps a %s completion re-runnable", async (status) => {
     client.fetch.mockResolvedValue(completionResult(status));
 
@@ -237,7 +248,7 @@ describe("submitPrivyCredentialAction outcome classification", () => {
     });
   });
 
-  it("treats any answered HTTP error as terminal, never as replayable", async () => {
+  it("treats an answered rejection as terminal, never as replayable", async () => {
     client.fetch.mockRejectedValueOnce(
       apiError(409, "A Privy custody installation is already in progress for this project")
     );
@@ -248,6 +259,18 @@ describe("submitPrivyCredentialAction outcome classification", () => {
       message: "A Privy custody installation is already in progress for this project",
     });
   });
+
+  it.each([[500], [502], [408], [429]])(
+    "keeps a %i response replayable because it does not prove nothing committed",
+    async (status) => {
+      client.fetch.mockRejectedValueOnce(apiError(status, "try later"));
+
+      // The submission may have committed server-side; the frozen replay
+      // under the same idempotency key is the only path that converges.
+      const result = await submitPrivyCredentialAction(submitForm());
+      expect(result.status).toBe("error");
+    }
+  );
 
   it("keeps a response-less failure in the unknown, replayable state", async () => {
     client.fetch.mockRejectedValueOnce(new Error("fetch failed: socket hang up"));

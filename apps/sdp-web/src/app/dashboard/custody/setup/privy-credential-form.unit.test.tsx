@@ -209,6 +209,30 @@ describe("PrivyCredentialForm", () => {
     await waitFor(() => expect(onLock).toHaveBeenLastCalledWith(false));
   });
 
+  it("dead-ends an unrecoverable wallet conflict without any retry or replacement action", async () => {
+    const onLock = vi.fn();
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
+      status: "unrecoverable",
+      message: "This connection is tied to a Privy wallet that cannot be reconciled.",
+    });
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <PrivyCredentialForm formId="byok-unrecoverable-test" onRecoveryLockChange={onLock} />
+      </I18nProvider>
+    );
+
+    await fillAndSubmit(user);
+    // The server rejects replacement credentials while the provider account
+    // stays pinned, so no button here can converge: the reason is shown, the
+    // form is gone, and the lock releases so the user can leave.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("cannot be reconciled");
+    expect(screen.queryByLabelText("Privy app secret")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(onLock).toHaveBeenLastCalledWith(false);
+  });
+
   it("routes the corrected resubmit through replacement when the failed connection survives", async () => {
     vi.mocked(submitPrivyCredentialAction)
       .mockResolvedValueOnce({

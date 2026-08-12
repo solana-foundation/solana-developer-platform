@@ -23,6 +23,11 @@ type CheckState =
   // connection, so a fresh submission would be rejected as an existing setup;
   // re-running the same completion is the only path that can still converge.
   | { kind: "refused"; message: string; connectionId: string }
+  // The connection's provider account is pinned server-side, so replacement
+  // credentials are rejected and cancel is blocked: no submit from this form
+  // can converge. A dead-end message, deliberately without a retry or
+  // replacement action.
+  | { kind: "unrecoverable"; message: string }
   | { kind: "retry_unknown"; connectionId: string }
   // The POST may have committed server-side. The exact payload is frozen so a
   // retry replays it verbatim under the same key; editing anything would make
@@ -91,6 +96,13 @@ export function PrivyCredentialForm({
         message: result.message,
         connectionId: result.connectionId,
       });
+      return;
+    }
+    if (result.status === "unrecoverable") {
+      // Nothing submitted from here can converge, so there is no recovery
+      // state to strand by leaving; release the lock and show the dead end.
+      onRecoveryLockChange?.(false);
+      setCheck({ kind: "unrecoverable", message: result.message });
       return;
     }
     if (result.status === "failed") {
@@ -198,6 +210,19 @@ export function PrivyCredentialForm({
             {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokRetrySubmit")}
           </Button>
         </div>
+      </div>
+    );
+  }
+
+  if (check.kind === "unrecoverable") {
+    return (
+      <div className="grid gap-4" data-privy-byok-unrecoverable="true">
+        <p
+          role="alert"
+          className="rounded-2xl border border-error-border bg-error-bg px-5 py-4 text-sm leading-6 text-error"
+        >
+          {check.message}
+        </p>
       </div>
     );
   }
