@@ -1,5 +1,10 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
-import type { PaymentsDashboardWallet, Token, TokenTransaction } from "@sdp/types";
+import {
+  type PaymentsDashboardWallet,
+  SOL_MINT,
+  type Token,
+  type TokenTransaction,
+} from "@sdp/types";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
@@ -167,8 +172,17 @@ async function bootstrapWalletRouteFixture(
     if (input.withPolicy) {
       const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
       await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
-        destinationAllowlist: [],
-        maxTransferAmount: "25",
+        defaultAction: "allow",
+        rules: [
+          {
+            id: "per-transaction-limit",
+            kind: "amount",
+            max: "25",
+            assets: [SOL_MINT],
+            action: "allow",
+            name: "Per transaction limit",
+          },
+        ],
       });
     }
 

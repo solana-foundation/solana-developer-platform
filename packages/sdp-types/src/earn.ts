@@ -1,4 +1,3 @@
-import type { EarnProviderId } from "./provider-access";
 import type { WellKnownTokenSymbol } from "./well-known-tokens";
 
 /**
@@ -6,8 +5,11 @@ import type { WellKnownTokenSymbol } from "./well-known-tokens";
  *
  * Earn is a stablecoin deposit facility: organizations browse a catalogue of
  * yield strategies (DeFi protocols or tokenized RWAs, fronted by vault-infra
- * providers), deposit supported stablecoins into them, and track positions
- * and NAV over time.
+ * providers), fund a shared portfolio wallet, and withdraw to addresses they
+ * control. Positions and balances are always read live from the provider
+ * (never persisted); SDP-initiated withdrawals are recorded in a ledger —
+ * "Record"-suffixed types are ledger rows, `EarnPortfolio*` types are live
+ * provider reads (PRO-1628 / ADR 0002 addendum).
  *
  * Registries follow ADR 0001 (asset profiles): closed unions defined in code,
  * open TEXT columns in Postgres, Zod validation at the app layer — adding a
@@ -33,42 +35,6 @@ export type EarnLiquidityTerm = (typeof EARN_LIQUIDITY_TERMS)[number];
 
 export const EARN_STRATEGY_STATUSES = ["active", "paused", "deprecated"] as const;
 export type EarnStrategyStatus = (typeof EARN_STRATEGY_STATUSES)[number];
-
-export const EARN_POSITION_STATUSES = ["active", "closed"] as const;
-export type EarnPositionStatus = (typeof EARN_POSITION_STATUSES)[number];
-
-export const EARN_MOVEMENT_DIRECTIONS = ["deposit", "withdrawal"] as const;
-export type EarnMovementDirection = (typeof EARN_MOVEMENT_DIRECTIONS)[number];
-
-export const EARN_MOVEMENT_STATUSES = [
-  "pending",
-  "submitted",
-  "settled",
-  "failed",
-  "cancelled",
-] as const;
-export type EarnMovementStatus = (typeof EARN_MOVEMENT_STATUSES)[number];
-
-/**
- * Yield sources the catalogue knows how to label. Non-exhaustive on purpose:
- * `EarnStrategy.underlyingSource` stays an open string so onboarding a new
- * RWA or protocol is a catalogue change, not a type migration.
- */
-export const EARN_KNOWN_UNDERLYING_SOURCES = [
-  "kamino",
-  "jup-lend",
-  "buidl",
-  "benji",
-  "ousg",
-  "usdy",
-  "sweep",
-  "syrup-usdc",
-  "figure-prime",
-  "bagey",
-  "usde",
-  "aaa-clo",
-] as const;
-export type EarnKnownUnderlyingSource = (typeof EARN_KNOWN_UNDERLYING_SOURCES)[number];
 
 /**
  * Curators (Gauntlet, Steakhouse, Sentora, ...) publish strategy/risk
@@ -128,14 +94,14 @@ export interface EarnStrategy {
    * Vault-infra provider id. Open string on the read model: catalogue rows
    * persist as open TEXT and may reference a provider this deployment no
    * longer (or does not yet) register, so dispatch always resolves fail-closed
-   * server-side. Quotes narrow to EarnProviderId — see EarnQuoteBreakdown.
+   * server-side.
    */
   provider: string;
   /** Provider-side identifier for the vault/strategy. */
   providerReference: string;
   name: string;
   sourceKind: EarnStrategySourceKind;
-  /** Open registry — see EARN_KNOWN_UNDERLYING_SOURCES. */
+  /** Open string — onboarding a new RWA or protocol is a catalogue change, not a type migration. */
   underlyingSource?: string;
   /** Stablecoin mint addresses accepted for deposit. */
   depositMints: string[];
@@ -151,65 +117,6 @@ export interface EarnStrategy {
   status: EarnStrategyStatus;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface EarnPosition {
-  id: string;
-  strategyId: string;
-  walletId: string;
-  /** Share balance in base units of the share mint. */
-  shareAmount: string;
-  /** Net stablecoin deposited in base units (deposits minus withdrawals). */
-  costBasis?: string;
-  status: EarnPositionStatus;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** A single deposit or withdrawal against a position. */
-export interface EarnMovement {
-  id: string;
-  positionId: string;
-  strategyId: string;
-  direction: EarnMovementDirection;
-  tokenMint: string;
-  /** Stablecoin amount in base units. */
-  amount: string;
-  /** Shares minted/burned in base units, once known. */
-  shareAmount?: string;
-  status: EarnMovementStatus;
-  transactionSignature?: string;
-  /** For delayed redemptions: ISO timestamp when funds become claimable. */
-  redemptionAvailableAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** One point of the NAV time series snapshotted per strategy. */
-export interface EarnNavPoint {
-  strategyId: string;
-  /** Price of one share in deposit-asset base units, as a decimal string. */
-  sharePrice: string;
-  apy?: string;
-  /** Total value locked in deposit-asset display units. */
-  tvl?: string;
-  asOf: string;
-}
-
-/** Rate preview for a deposit or withdrawal, shared by both directions. */
-export interface EarnQuoteBreakdown {
-  /** Closed union: a quote only exists once the registry resolved the provider. */
-  provider: EarnProviderId;
-  strategyId: string;
-  tokenMint: string;
-  /** Stablecoin amount in base units (requested for deposits, expected for withdrawals). */
-  amount?: string;
-  /** Shares expected/redeemed in base units of the share mint. */
-  shareAmount?: string;
-  sharePrice?: string;
-  /** For delayed-liquidity strategies: when the redemption is expected to settle. */
-  redemptionAvailableAt?: string;
-  expiresAt?: string;
 }
 
 /**
@@ -365,7 +272,32 @@ export const EARN_PORTFOLIO_WITHDRAWAL_STATUSES = [
 ] as const;
 export type EarnPortfolioWithdrawalStatus = (typeof EARN_PORTFOLIO_WITHDRAWAL_STATUSES)[number];
 
-/** A portfolio-level withdrawal to a Solana destination address. */
+/**
+ * Statuses a withdrawal never moves on from. One declaration for every
+ * consumer (API ledger CAS + dashboard outcome polling) — `partially_completed`
+ * is terminal by convention; if a provider ever advances it, the live GET keeps
+ * serving provider truth while the ledger row stays put.
+ */
+export const EARN_TERMINAL_WITHDRAWAL_STATUSES = [
+  "completed",
+  "partially_completed",
+  "failed",
+  "cancelled",
+] as const satisfies readonly EarnPortfolioWithdrawalStatus[];
+
+/**
+ * Ledger-row status vocabulary: `requested` is SDP-only pre-provider intent
+ * state (the row exists, the provider call has not been accepted yet); every
+ * other value is the canonical provider-observed status.
+ */
+export const EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES = [
+  "requested",
+  ...EARN_PORTFOLIO_WITHDRAWAL_STATUSES,
+] as const;
+export type EarnProgramWithdrawalRecordStatus =
+  (typeof EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES)[number];
+
+/** A portfolio-level withdrawal to a Solana destination address — the LIVE provider read. */
 export interface EarnPortfolioWithdrawal {
   withdrawalRef: string;
   status: EarnPortfolioWithdrawalStatus;
@@ -377,6 +309,31 @@ export interface EarnPortfolioWithdrawal {
   destinationAddress: string;
   failureReason?: string;
   createdAt: string;
+  completedAt?: string;
+}
+
+/**
+ * One row of the SDP withdrawal ledger — the durable record of what SDP
+ * initiated ("Record" always means ledger; `EarnPortfolioWithdrawal` is the
+ * live provider read). Written at intent and on every observation; the
+ * provider stays authoritative for live status and final amounts.
+ */
+export interface EarnProgramWithdrawalRecord {
+  id: string;
+  /** Open string on the read model — a row can outlive its provider's registry entry. */
+  provider: string;
+  status: EarnProgramWithdrawalRecordStatus;
+  /** USD decimal strings. */
+  amountRequestedUsd: string;
+  amountPaidUsd?: string;
+  feeUsd?: string;
+  token: EarnPortfolioToken;
+  destinationAddress: string;
+  failureReason?: string;
+  /** Provider-side withdrawal reference; absent while the row is still `requested`. */
+  withdrawalRef?: string;
+  createdAt: string;
+  updatedAt: string;
   completedAt?: string;
 }
 
@@ -436,33 +393,9 @@ export interface ListEarnStrategiesResponse {
   pageSize: number;
 }
 
-export interface EarnNavHistoryResponse {
-  strategyId: string;
-  navPoints: EarnNavPoint[];
-}
-
-export interface EarnPositionResponse {
-  position: EarnPosition;
-}
-
-export interface ListEarnPositionsResponse {
-  positions: EarnPosition[];
+export interface ListEarnProgramWithdrawalsResponse {
+  withdrawals: EarnProgramWithdrawalRecord[];
   total: number;
   page: number;
   pageSize: number;
-}
-
-export interface EarnMovementResponse {
-  movement: EarnMovement;
-}
-
-export interface ListEarnMovementsResponse {
-  movements: EarnMovement[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export interface EarnQuoteResponse {
-  quote: EarnQuoteBreakdown;
 }

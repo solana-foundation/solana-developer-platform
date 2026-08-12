@@ -1,17 +1,18 @@
 "use client";
 
-import type {
-  EarnPortfolioAllocationInput,
-  EarnPortfolioDepositsPage,
-  EarnPortfolioToken,
-  EarnPortfolioWalletSnapshot,
-  EarnPortfolioWalletStatus,
-  EarnPortfolioWithdrawal,
-  EarnPortfolioWithdrawalPreview,
-  EarnPortfolioYield,
-  EarnProviderId,
-  EarnStrategy,
-  ListEarnStrategiesResponse,
+import {
+  EARN_TERMINAL_WITHDRAWAL_STATUSES,
+  type EarnPortfolioAllocationInput,
+  type EarnPortfolioDepositsPage,
+  type EarnPortfolioToken,
+  type EarnPortfolioWalletSnapshot,
+  type EarnPortfolioWalletStatus,
+  type EarnPortfolioWithdrawal,
+  type EarnPortfolioWithdrawalPreview,
+  type EarnPortfolioYield,
+  type EarnProviderId,
+  type EarnStrategy,
+  type ListEarnStrategiesResponse,
 } from "@sdp/types";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -313,16 +314,15 @@ export function fetchEarnWithdrawal(
 }
 
 /**
- * Statuses a withdrawal never moves on from. `pending_approval` is absent
- * deliberately: it is a WAIT, not an outcome — the payout is parked on a
- * customer signature and still resolves later — so watching continues.
+ * Statuses a withdrawal never moves on from — the shared canonical set (also
+ * the API ledger's terminal set, one declaration in @sdp/types). Note what is
+ * NOT here: `pending_approval` is a WAIT, not an outcome — the payout is
+ * parked on a customer signature and still resolves later — so watching
+ * continues.
  */
-const SETTLED_WITHDRAWAL_STATUSES: ReadonlySet<EarnPortfolioWithdrawal["status"]> = new Set([
-  "completed",
-  "partially_completed",
-  "failed",
-  "cancelled",
-]);
+const SETTLED_WITHDRAWAL_STATUSES: ReadonlySet<EarnPortfolioWithdrawal["status"]> = new Set(
+  EARN_TERMINAL_WITHDRAWAL_STATUSES
+);
 
 const WITHDRAWAL_OUTCOME_KEYS: Record<EarnPortfolioWithdrawal["status"], MessageKey> = {
   completed: "DashboardEarn.overview.withdrawalCompleted",
