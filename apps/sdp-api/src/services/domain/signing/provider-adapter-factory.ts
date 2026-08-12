@@ -54,6 +54,7 @@ export interface PrivyCredentialAdapterInput {
   appId: string;
   appSecret: string;
   defaultWalletId: string;
+  requestDelayMs?: number;
 }
 
 class LifecycleOnlyAdapter implements SigningPort {
@@ -321,8 +322,10 @@ export function createPrivyAdapterFromCredential(
     appSecret: input.appSecret,
     defaultWalletId: input.defaultWalletId,
     apiBaseUrl: env.PRIVY_API_BASE_URL,
-    requestDelayMs: parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS, {
-      envVarName: "PRIVY_REQUEST_DELAY_MS",
-    }),
+    requestDelayMs:
+      input.requestDelayMs ??
+      parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS, {
+        envVarName: "PRIVY_REQUEST_DELAY_MS",
+      }),
   });
 }

@@ -18,6 +18,10 @@ export const isPublicRoute = createRouteMatcher([
   "/pay/:token",
   "/",
   "/docs(.*)",
+  // Social-card images are fetched by unauthenticated link unfurlers, and the
+  // extensionless metadata routes are not excluded by the proxy matcher.
+  "/opengraph-image",
+  "/twitter-image",
 ]);
 
 const needsSelectedProject = createRouteMatcher([

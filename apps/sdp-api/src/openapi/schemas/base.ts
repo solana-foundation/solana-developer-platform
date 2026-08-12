@@ -171,6 +171,7 @@ export const errorCodeSchema = z
     "NOT_FOUND",
     "CONFLICT",
     "RATE_LIMITED",
+    "SERVICE_UNAVAILABLE",
     "INTERNAL_ERROR",
     "NOT_ALLOWLISTED",
     "INVALID_API_KEY",

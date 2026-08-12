@@ -4,6 +4,10 @@ import * as Sentry from "@sentry/node";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
+import {
+  WORKFLOW_SECRET_RETIREMENTS_CRON,
+  WORKFLOW_SECRET_RETIREMENTS_MONITOR,
+} from "@/cron/workflow-secret-retirements";
 import { closeDatabasePools } from "@/db/client";
 import { isAssetProfilesEnabled, isEarnEnabled } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
@@ -11,6 +15,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
+import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
@@ -49,6 +54,21 @@ export async function runCronJob(): Promise<void> {
         runDueWorkflowExecutions(env)
       );
     }
+    // Behind no flag, for the same reason its in-process registration is (cron/runner.ts):
+    // the queue holds credentials that are ALREADY orphaned, so its cleanup has to outlive
+    // the feature that filled it. And it has to be HERE as well — this job is the only tick
+    // a Cloud Run deployment gets, which is also where GCP Secret Manager is the default
+    // backend, so it is precisely where retirements are queued. Non-fatal: the sweep
+    // reports to its own monitor, and a failing one must not fail the reconciliation this
+    // job exists for (a queued row is never abandoned — the next run picks it up).
+    await monitored(WORKFLOW_SECRET_RETIREMENTS_MONITOR, WORKFLOW_SECRET_RETIREMENTS_CRON, () =>
+      retireOrphanedActionSecrets(env)
+    ).catch((error: unknown) => {
+      getLogger().error(
+        { error: error instanceof Error ? error.message : String(error) },
+        "reconciliation job: secret retirement sweep failed"
+      );
+    });
     // The Earn catalogue sync rides this job behind the same gate as its
     // in-process registration (cron/runner.ts): both Earn feature flags on.
     // Its hourly cadence comes from the Redis slot inside

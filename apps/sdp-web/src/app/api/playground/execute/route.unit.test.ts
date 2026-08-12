@@ -122,15 +122,100 @@ describe("POST /api/playground/execute", () => {
     ["null", null],
     ["empty string", ""],
     ["whitespace", "   "],
-  ])("rejects requests with a %s apiKey instead of falling back to the session (Hacktron audit regression)", async (_label, apiKey) => {
+  ])(
+    "rejects requests with a %s apiKey instead of falling back to the session (Hacktron audit regression)",
+    async (_label, apiKey) => {
+      const request = vi.fn();
+      mocks.createSdpApiClient.mockResolvedValue({ request });
+
+      const response = await POST(executeRequest(apiKey));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: "API key is required" });
+      // No downstream call happened — no session-authed request escaped.
+      expect(request).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["an internal mount", "/internal/playground/api-key/verify"],
+    ["an admin mount", "/admin/allowlist"],
+    ["a non-versioned path", "/health"],
+  ])("refuses to replay against %s", async (_label, path) => {
     const request = vi.fn();
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
-    const response = await POST(executeRequest(apiKey));
+    const response = await POST(
+      new Request("https://dashboard.example.com/api/playground/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: "POST", path, apiKey: OWNED_API_KEY }),
+      })
+    );
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "API key is required" });
-    // No downstream call happened — no session-authed request escaped.
+    await expect(response.json()).resolves.toEqual({ error: "Path must start with '/v1/'" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["literal parent segments", "/v1/../internal/playground/api-key/verify"],
+    ["nested parent segments", "/v1/payments/../../admin/allowlist"],
+    ["percent-encoded parent segments", "/v1/%2e%2e/admin/allowlist"],
+    ["backslash parent segments", "/v1/..\\internal/playground/api-key/verify"],
+  ])("refuses to replay a path containing %s", async (_label, path) => {
+    const request = vi.fn();
+    mocks.createSdpApiClient.mockResolvedValue({ request });
+
+    const response = await POST(
+      new Request("https://dashboard.example.com/api/playground/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: "POST", path, apiKey: OWNED_API_KEY }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Path must start with '/v1/'" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized request envelope before parsing it", async () => {
+    const request = vi.fn();
+    mocks.createSdpApiClient.mockResolvedValue({ request });
+
+    const response = await POST(
+      new Request("https://dashboard.example.com/api/playground/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          method: "POST",
+          path: "/v1/payments/transfers",
+          body: { memo: "x".repeat(256 * 1024) },
+          apiKey: OWNED_API_KEY,
+        }),
+      })
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ error: "Request body too large" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-JSON body with a 400 instead of a 500", async () => {
+    const request = vi.fn();
+    mocks.createSdpApiClient.mockResolvedValue({ request });
+
+    const response = await POST(
+      new Request("https://dashboard.example.com/api/playground/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "not-json{",
+      })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid JSON body" });
     expect(request).not.toHaveBeenCalled();
   });
 

@@ -6,6 +6,7 @@ import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { isSentryEnabled } from "@/runtime/observability";
 import { nodeObservability } from "@/runtime/observability-node";
+import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
@@ -30,6 +31,11 @@ vi.mock("@/cron/pending-transfers", () => ({
 vi.mock("@/cron/workflow-executions", () => ({
   WORKFLOW_EXECUTIONS_CRON: "* * * * *",
   WORKFLOW_EXECUTIONS_MONITOR: "sdp-api-run-workflow-executions",
+}));
+
+vi.mock("@/cron/workflow-secret-retirements", () => ({
+  WORKFLOW_SECRET_RETIREMENTS_CRON: "*/5 * * * *",
+  WORKFLOW_SECRET_RETIREMENTS_MONITOR: "sdp-api-retire-workflow-secrets",
 }));
 
 vi.mock("@/db/client", () => ({
@@ -59,6 +65,10 @@ vi.mock("@/runtime/observability-node", () => ({
     withScope: vi.fn(),
     withMonitor: vi.fn((_slug: string, fn: () => Promise<unknown>) => fn()),
   },
+}));
+
+vi.mock("@/services/jobs/retire-workflow-secrets", () => ({
+  retireOrphanedActionSecrets: vi.fn(async () => ({ retired: 0, failed: 0 })),
 }));
 
 vi.mock("@/services/jobs/run-workflow-executions", () => ({
@@ -95,6 +105,7 @@ describe("runCronJob", () => {
     vi.mocked(runDueWorkflowExecutions)
       .mockReset()
       .mockResolvedValue(undefined as never);
+    vi.mocked(retireOrphanedActionSecrets).mockReset().mockResolvedValue({ retired: 0, failed: 0 });
     vi.mocked(nodeObservability.withMonitor)
       .mockReset()
       .mockImplementation((_slug, fn) => fn());
@@ -135,6 +146,44 @@ describe("runCronJob", () => {
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
   });
 
+  // This job is the ONLY tick a Cloud Run deployment gets — the in-process scheduler
+  // returns null under K_SERVICE — and Cloud Run is also where GCP Secret Manager is the
+  // default backend, so it is exactly where retirements are queued. Omitting the sweep
+  // here left every queued version orphaned in managed production, readable forever.
+  it("sweeps secret retirements, and does so behind no flag", async () => {
+    const env = makeEnv();
+    vi.mocked(getProcessEnv).mockReturnValue(env);
+
+    await runCronJob();
+
+    expect(retireOrphanedActionSecrets).toHaveBeenCalledExactlyOnceWith(env);
+
+    // …and still when the feature that fills the queue is off: the rows outlive it.
+    const selfHosted = makeEnv({ SDP_DEPLOYMENT_MODE: "self_hosted" });
+    vi.mocked(getProcessEnv).mockReturnValue(selfHosted);
+    vi.mocked(retireOrphanedActionSecrets).mockClear();
+    // Cleared too, or the managed run above would still count against the assertion that
+    // the gated tick stays off.
+    vi.mocked(runDueWorkflowExecutions).mockClear();
+
+    await runCronJob();
+
+    expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
+    expect(retireOrphanedActionSecrets).toHaveBeenCalledExactlyOnceWith(selfHosted);
+  });
+
+  // The sweep is cleanup, not the reconciliation this job exists for. A queued row is
+  // never abandoned, so the next run retries it — failing the whole job instead would
+  // strand the transfer reconciliation that already succeeded.
+  it("does not fail the job when the retirement sweep throws", async () => {
+    vi.mocked(retireOrphanedActionSecrets).mockRejectedValue(new Error("secret store down"));
+
+    await expect(runCronJob()).resolves.toBeUndefined();
+
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+  });
+
   it("requires both flags — the parent flag alone never runs the earn tick", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ MARKETS_ENABLED: "true" }));
     await runCronJob();
@@ -165,8 +214,14 @@ describe("runCronJob", () => {
 
     await runCronJob();
 
-    // The pair keeps the transfers monitor; the workflow tick reports to its own.
-    expect(nodeObservability.withMonitor).toHaveBeenCalledTimes(2);
+    // The pair keeps the transfers monitor; the workflow tick and the retirement sweep
+    // each report to their own, so neither masquerades as a reconciliation failure.
+    expect(nodeObservability.withMonitor).toHaveBeenCalledTimes(3);
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
+      "sdp-api-retire-workflow-secrets",
+      expect.any(Function),
+      { schedule: { type: "crontab", value: "*/5 * * * *" } }
+    );
     expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       "sdp-api-track-pending-transfers",
       expect.any(Function),
