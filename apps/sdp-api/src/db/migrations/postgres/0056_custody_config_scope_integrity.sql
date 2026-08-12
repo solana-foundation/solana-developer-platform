@@ -119,8 +119,31 @@ BEGIN
 END;
 $$;
 
--- The selected-binding unique index is on (api_key_id, wallet_id), and the
--- duplicate shares the survivor's wallet_id, so repointing cannot collide.
+-- The selected-binding unique index is on (api_key_id, custody_wallet_id)
+-- since 0053, so one key can legally bind both a duplicate wallet row and
+-- the surviving row of the same provider wallet. Merge to one binding per
+-- (key, surviving wallet): drop the redundant ones, then repoint the
+-- winners. Leaving a loser in place is not an option either — the FK's
+-- ON DELETE SET NULL would break the selected-binding CHECK when the
+-- duplicate wallet cascades away.
+DELETE FROM api_key_wallet_policy_bindings b
+USING custody_wallet_duplicates wdup
+WHERE b.custody_wallet_id = wdup.id
+  AND (
+      EXISTS (
+          SELECT 1
+          FROM api_key_wallet_policy_bindings kept_b
+          WHERE kept_b.api_key_id = b.api_key_id
+            AND kept_b.custody_wallet_id = wdup.keep_id
+      )
+      OR b.id NOT IN (
+          SELECT DISTINCT ON (inner_b.api_key_id, wd.keep_id) inner_b.id
+          FROM api_key_wallet_policy_bindings inner_b
+          JOIN custody_wallet_duplicates wd ON inner_b.custody_wallet_id = wd.id
+          ORDER BY inner_b.api_key_id, wd.keep_id, inner_b.created_at, inner_b.id
+      )
+  );
+
 UPDATE api_key_wallet_policy_bindings b
 SET custody_wallet_id = wdup.keep_id
 FROM custody_wallet_duplicates wdup

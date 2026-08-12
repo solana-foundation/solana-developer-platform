@@ -63,9 +63,18 @@ it("deduplicates org-level custody configs and repoints references", async () =>
     await client.query(`CREATE TEMP TABLE api_key_wallet_policy_bindings (
       id TEXT PRIMARY KEY,
       api_key_id TEXT NOT NULL,
+      binding_scope TEXT NOT NULL DEFAULT 'selected',
       wallet_id TEXT,
-      custody_wallet_id TEXT REFERENCES custody_wallets(id) ON DELETE SET NULL
+      custody_wallet_id TEXT REFERENCES custody_wallets(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z',
+      CONSTRAINT api_key_wallet_policy_bindings_wallet_check_shadow CHECK (
+        binding_scope <> 'selected'
+        OR (wallet_id IS NOT NULL AND custody_wallet_id IS NOT NULL)
+      )
     )`);
+    await client.query(`CREATE UNIQUE INDEX idx_api_key_wallet_policy_bindings_selected_shadow
+      ON api_key_wallet_policy_bindings(api_key_id, custody_wallet_id)
+      WHERE binding_scope = 'selected'`);
     await client.query(`CREATE TEMP TABLE wallet_operations (
       id TEXT PRIMARY KEY,
       custody_wallet_id TEXT REFERENCES custody_wallets(id) ON DELETE SET NULL
@@ -88,7 +97,8 @@ it("deduplicates org-level custody configs and repoints references", async () =>
          ('cwlt_mid_extra', 'cfg_mid', 'wallet_extra'),
          ('cwlt_old_only', 'cfg_old', 'wallet_old'),
          ('cwlt_new_shared2', 'cfg_new', 'wallet_shared2'),
-         ('cwlt_old_shared2', 'cfg_old', 'wallet_shared2')`
+         ('cwlt_old_shared2', 'cfg_old', 'wallet_shared2'),
+         ('cwlt_old_shared', 'cfg_old', 'wallet_shared')`
     );
     await client.query(
       `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
@@ -111,8 +121,12 @@ it("deduplicates org-level custody configs and repoints references", async () =>
          ('wcp_dup_conflict_active', 'cwlt_old_shared2', 'active')`
     );
     await client.query(
-      `INSERT INTO api_key_wallet_policy_bindings (id, api_key_id, wallet_id, custody_wallet_id)
-       VALUES ('akb_dup', 'key_dup', 'wallet_shared', 'cwlt_mid_shared')`
+      `INSERT INTO api_key_wallet_policy_bindings (id, api_key_id, wallet_id, custody_wallet_id, created_at) VALUES
+         ('akb_dup', 'key_dup', 'wallet_shared', 'cwlt_mid_shared', '2026-01-01T00:00:00.000Z'),
+         ('akb_kept', 'key_merge', 'wallet_shared2', 'cwlt_new_shared2', '2026-01-01T00:00:00.000Z'),
+         ('akb_redundant', 'key_merge', 'wallet_shared2', 'cwlt_old_shared2', '2026-01-02T00:00:00.000Z'),
+         ('akb_race_a', 'key_race', 'wallet_shared', 'cwlt_mid_shared', '2026-01-01T00:00:00.000Z'),
+         ('akb_race_b', 'key_race', 'wallet_shared', 'cwlt_old_shared', '2026-01-02T00:00:00.000Z')`
     );
     await client.query(
       `INSERT INTO wallet_operations (id, custody_wallet_id)
@@ -185,6 +199,26 @@ it("deduplicates org-level custody configs and repoints references", async () =>
       `SELECT custody_wallet_id FROM api_key_wallet_policy_bindings WHERE id = 'akb_dup'`
     );
     expect(binding.rows[0]?.custody_wallet_id).toBe("cwlt_new_shared");
+
+    // A key bound to both the duplicate and the surviving row keeps exactly
+    // one binding — the survivor-pointing one.
+    const mergedBindings = await client.query(
+      `SELECT id, custody_wallet_id FROM api_key_wallet_policy_bindings
+       WHERE api_key_id = 'key_merge'`
+    );
+    expect(mergedBindings.rows).toEqual([
+      { id: "akb_kept", custody_wallet_id: "cwlt_new_shared2" },
+    ]);
+
+    // A key bound to two duplicate rows of the same surviving wallet keeps
+    // exactly one binding, repointed at the survivor.
+    const racedBindings = await client.query(
+      `SELECT id, custody_wallet_id FROM api_key_wallet_policy_bindings
+       WHERE api_key_id = 'key_race'`
+    );
+    expect(racedBindings.rows).toEqual([
+      { id: "akb_race_a", custody_wallet_id: "cwlt_new_shared" },
+    ]);
 
     const operation = await client.query(
       `SELECT custody_wallet_id FROM wallet_operations WHERE id = 'wop_dup'`
