@@ -29,6 +29,10 @@ const forceBurn = vi.hoisted(() => vi.fn());
 const forceTransfer = vi.hoisted(() => vi.fn());
 const reserveMintSupply = vi.hoisted(() => vi.fn());
 const updateSupply = vi.hoisted(() => vi.fn());
+// The DB control list. Its answer must reach the mint decision.
+const isAddressAllowed = vi.hoisted(() => vi.fn());
+// Swapped per test so a token can be put into allowlist mode with an on-chain list.
+const tokenOverrides = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 const logWarn = vi.hoisted(() => vi.fn());
 const preflightWalletPolicy = vi.hoisted(() => vi.fn());
 
@@ -40,6 +44,7 @@ vi.mock("@/services/token.service", () => ({
   TokenService: class {
     reserveMintSupply = reserveMintSupply;
     updateSupply = updateSupply;
+    isAddressAllowed = isAddressAllowed;
   },
 }));
 vi.mock("@/services/solana", () => ({
@@ -50,9 +55,12 @@ vi.mock("./record-transaction", () => ({ recordWorkflowTransaction: async () => 
 // The advisory preflights pass by default. For the supply check that is the point: it is
 // the stale in-process snapshot both racers read, and it must not be what admits a mint.
 // The wallet policy is a controllable mock so tests can deny it per custody action.
-vi.mock("./preflight", () => ({
+//
+// `preflightDestinationAllowed` is deliberately left REAL: whether a mint consults the
+// control list at all is a property of how runMint calls it, which a stub would hide.
+vi.mock("./preflight", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./preflight")>()),
   preflightMintAmount: () => ({ ok: true, mosaicAmount: 10 }),
-  preflightDestinationAllowed: async () => ({ ok: true }),
   preflightWalletPolicy,
 }));
 
@@ -63,7 +71,7 @@ vi.mock("./onchain", async (importOriginal) => {
     prepareOnchain: async () => ({
       ok: true,
       ctx: {
-        token: { id: "tok_1", symbol: "TKN" },
+        token: { id: "tok_1", symbol: "TKN", ...tokenOverrides.value },
         decimals: 2,
         mintAddress: MINT,
         signer: { address: DEST },
@@ -128,6 +136,10 @@ beforeEach(() => {
   });
   updateSupply.mockResolvedValue(undefined);
   preflightWalletPolicy.mockResolvedValue({ ok: true });
+  // Control list off by default (`requiresAllowlist` unset → mode "disabled"), so the
+  // supply and policy tests above are unaffected by it.
+  tokenOverrides.value = {};
+  isAddressAllowed.mockResolvedValue(true);
 });
 
 describe("workflow mint counts against the cap atomically at the effect boundary", () => {
@@ -196,6 +208,47 @@ describe("workflow mint counts against the cap atomically at the effect boundary
     expect(result.status).toBe("succeeded");
     expect(updateSupply).toHaveBeenCalledWith("tok_1", "10", "burn");
     expect(reserveMintSupply).not.toHaveBeenCalled();
+  });
+});
+
+// The HTTP mint route skips the generic control-list check for an allowlist-mode token,
+// but only because it then hands the destination to syncDestinationToOnChainAllowlist,
+// which refuses a revoked entry outright. The engine never mutates on-chain compliance
+// state, so it never reaches that check — mirroring only the skip let a rule mint to an
+// address revoked in the database but still present on the on-chain list, which the same
+// mint over HTTP refuses with DESTINATION_REVOKED.
+describe("workflow mint consults the token's control list", () => {
+  // An allowlist-mode token whose on-chain list is live — exactly the shape that used to
+  // take the skip.
+  const allowlistToken = {
+    requiresAllowlist: true,
+    ablListAddress: MINT,
+    template: "stablecoin",
+  };
+
+  it("refuses a destination the control list does not allow", async () => {
+    tokenOverrides.value = allowlistToken;
+    isAddressAllowed.mockResolvedValue(false);
+
+    const result = await runMint(env, executionFixture(), action);
+
+    expect(isAddressAllowed).toHaveBeenCalledWith("tok_1", DEST);
+    expect(events).not.toContain("submit");
+    expect(reserveMintSupply).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    // A compliance decision, not a hiccup: retrying asks the same question.
+    expect(result.retryable).toBe(false);
+    expect(result.error).toMatch(/allowlist/i);
+  });
+
+  it("mints to a destination the control list still allows", async () => {
+    tokenOverrides.value = allowlistToken;
+    isAddressAllowed.mockResolvedValue(true);
+
+    const result = await runMint(env, executionFixture(), action);
+
+    expect(result.status).toBe("succeeded");
+    expect(events).toEqual(["reserve", "submit"]);
   });
 });
 
