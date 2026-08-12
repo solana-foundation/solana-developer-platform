@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { WalletOperationFamily } from "@sdp/types";
 import { createPolicyEvaluationInput } from "./enforce";
-import { evaluateWalletOperationPolicies, IMPLICIT_DEFAULT_ALLOW_POLICY } from "./evaluate";
-import { apiKeyPolicy, operation, walletPolicy } from "./test-support";
+import {
+  describeCandidateRuleCriteria,
+  evaluateWalletOperationPolicies,
+  IMPLICIT_DEFAULT_ALLOW_POLICY,
+} from "./evaluate";
+import { apiKeyPolicy, leg, operation, walletPolicy } from "./test-support";
 
 const representativeFamilies: Array<[WalletOperationFamily, string]> = [
   ["transfer", "token_transfer"],
@@ -19,6 +23,7 @@ describe("evaluateWalletOperationPolicies", () => {
   it("preserves implicit default allow when no active policies exist", () => {
     const result = evaluateWalletOperationPolicies({
       operation: { ...operation, apiKeyId: null },
+      legs: [],
       walletPolicy: IMPLICIT_DEFAULT_ALLOW_POLICY,
       apiKeyPolicy: null,
     });
@@ -51,6 +56,7 @@ describe("evaluateWalletOperationPolicies", () => {
   it("evaluates the API-key scope as implicit allow when the operation used a key", () => {
     const result = evaluateWalletOperationPolicies({
       operation,
+      legs: [],
       walletPolicy: walletPolicy([
         { id: "destinations", kind: "destination", allowlist: ["recipient_allowed"] },
       ]),
@@ -86,6 +92,7 @@ describe("evaluateWalletOperationPolicies", () => {
       };
       const result = evaluateWalletOperationPolicies({
         operation: familyOperation,
+        legs: [],
         walletPolicy: walletPolicy(
           [
             {
@@ -124,11 +131,13 @@ describe("evaluateWalletOperationPolicies", () => {
     const usdcPolicy = walletPolicy([{ kind: "amount", asset: "USDC", max: "100" }]);
     const denied = evaluateWalletOperationPolicies({
       operation,
+      legs: [],
       walletPolicy: usdcPolicy,
       apiKeyPolicy: null,
     });
     const skipped = evaluateWalletOperationPolicies({
       operation: { ...operation, asset: "SOL" },
+      legs: [],
       walletPolicy: usdcPolicy,
       apiKeyPolicy: null,
     });
@@ -154,7 +163,8 @@ describe("evaluateWalletOperationPolicies", () => {
         operationType: "program_call",
         amount: null,
       },
-      walletPolicy: walletPolicy([{ kind: "amount", max: "100" }]),
+      legs: [],
+      walletPolicy: walletPolicy([{ kind: "amount", asset: "USDC", max: "100" }]),
       apiKeyPolicy: null,
     });
 
@@ -169,6 +179,7 @@ describe("evaluateWalletOperationPolicies", () => {
   it("requires approval when an approval rule matches", () => {
     const result = evaluateWalletOperationPolicies({
       operation,
+      legs: [],
       walletPolicy: walletPolicy([
         { id: "payment-approval", kind: "approval", families: ["payment"] },
       ]),
@@ -189,6 +200,7 @@ describe("evaluateWalletOperationPolicies", () => {
   it("represents provider approval separately from SDP approval", () => {
     const result = evaluateWalletOperationPolicies({
       operation,
+      legs: [],
       walletPolicy: walletPolicy([
         {
           id: "provider-approval",
@@ -214,6 +226,7 @@ describe("evaluateWalletOperationPolicies", () => {
   it("does not apply predicate rule actions when the predicate does not match", () => {
     const result = evaluateWalletOperationPolicies({
       operation,
+      legs: [],
       walletPolicy: walletPolicy(
         [{ id: "issuance-only", kind: "operation_family", families: ["issuance"], action: "deny" }],
         "allow"
@@ -228,6 +241,7 @@ describe("evaluateWalletOperationPolicies", () => {
   it("lets the strictest wallet or API key policy decision win", () => {
     const result = evaluateWalletOperationPolicies({
       operation,
+      legs: [],
       walletPolicy: walletPolicy([{ kind: "approval", families: ["payment"] }]),
       apiKeyPolicy: apiKeyPolicy([
         {
@@ -254,6 +268,7 @@ describe("evaluateWalletOperationPolicies", () => {
   it("preserves SDP approval when it ties with provider approval", () => {
     const result = evaluateWalletOperationPolicies({
       operation,
+      legs: [],
       walletPolicy: walletPolicy([
         {
           id: "provider-approval",
@@ -286,6 +301,7 @@ describe("evaluateWalletOperationPolicies", () => {
   it("falls back to the revision default action when no rules match", () => {
     const result = evaluateWalletOperationPolicies({
       operation,
+      legs: [],
       walletPolicy: walletPolicy([{ kind: "approval", families: ["issuance"] }], "deny"),
       apiKeyPolicy: null,
     });
@@ -301,7 +317,8 @@ describe("evaluateWalletOperationPolicies", () => {
   it("sends malformed active policy rules to review instead of silently allowing", () => {
     const result = evaluateWalletOperationPolicies({
       operation,
-      walletPolicy: walletPolicy([{ kind: "amount", max: "not-a-decimal" }]),
+      legs: [],
+      walletPolicy: walletPolicy([{ kind: "amount", asset: "USDC", max: "not-a-decimal" }]),
       apiKeyPolicy: null,
     });
 
@@ -315,5 +332,159 @@ describe("evaluateWalletOperationPolicies", () => {
       kind: "amount",
       decision: "review",
     });
+  });
+
+  it("denies a multi-leg operation when a destination rule rejects one leg", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation,
+      legs: [leg({ destination: "recipient_allowed" }), leg({ destination: "recipient_blocked" })],
+      walletPolicy: walletPolicy([
+        { id: "destinations", kind: "destination", allowlist: ["recipient_allowed"] },
+      ]),
+      apiKeyPolicy: null,
+    });
+
+    assert.partialDeepStrictEqual(result, {
+      decision: "deny",
+      reasonCode: "wallet_policy_match",
+    });
+    assert.match(
+      result.wallet.reason,
+      /^Leg 2: Destination recipient_blocked is not allowed by policy\./
+    );
+    assert.partialDeepStrictEqual(result.matchedRules, [
+      { scope: "wallet", ruleId: "destinations", kind: "destination", decision: "allow", leg: 0 },
+      { scope: "wallet", ruleId: "destinations", kind: "destination", decision: "deny", leg: 1 },
+    ]);
+  });
+
+  it("allows a multi-leg operation when every leg satisfies the destination allowlist", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation: { ...operation, destination: null },
+      legs: [
+        leg({ destination: "recipient_allowed" }),
+        leg({ destination: "recipient_allowed_2" }),
+      ],
+      walletPolicy: walletPolicy([
+        {
+          id: "destinations",
+          kind: "destination",
+          allowlist: ["recipient_allowed", "recipient_allowed_2"],
+        },
+      ]),
+      apiKeyPolicy: null,
+    });
+
+    assert.partialDeepStrictEqual(result, {
+      decision: "allow",
+      reasonCode: "wallet_policy_match",
+      requiresApproval: false,
+    });
+    assert.partialDeepStrictEqual(result.matchedRules, [
+      { scope: "wallet", ruleId: "destinations", decision: "allow", leg: 0 },
+      { scope: "wallet", ruleId: "destinations", decision: "allow", leg: 1 },
+    ]);
+  });
+
+  it("denies on the aggregate view when the total exceeds an amount maximum", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation,
+      legs: [leg({ amount: "60" }), leg({ amount: "65.50" })],
+      walletPolicy: walletPolicy([{ id: "cap", kind: "amount", asset: "USDC", max: "100" }]),
+      apiKeyPolicy: null,
+    });
+
+    assert.partialDeepStrictEqual(result, {
+      decision: "deny",
+      reasonCode: "wallet_policy_match",
+    });
+    assert.match(result.wallet.reason, /^Operation amount 125\.50 exceeds policy maximum 100\./);
+    assert.partialDeepStrictEqual(result.matchedRules, [
+      { scope: "wallet", ruleId: "cap", decision: "deny", leg: null },
+      { scope: "wallet", ruleId: "cap", decision: "allow", leg: 0 },
+      { scope: "wallet", ruleId: "cap", decision: "allow", leg: 1 },
+    ]);
+  });
+
+  it("denies with a leg prefix when only one leg violates an amount bound", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation,
+      legs: [leg({ amount: "120" }), leg({ amount: "5.50" })],
+      walletPolicy: walletPolicy([
+        { id: "bounds", kind: "amount", asset: "USDC", min: "10", max: "200" },
+      ]),
+      apiKeyPolicy: null,
+    });
+
+    assert.partialDeepStrictEqual(result, {
+      decision: "deny",
+      reasonCode: "wallet_policy_match",
+    });
+    assert.match(
+      result.wallet.reason,
+      /^Leg 2: Operation amount 5\.50 is below policy minimum 10\./
+    );
+    assert.partialDeepStrictEqual(result.matchedRules, [
+      { scope: "wallet", ruleId: "bounds", decision: "allow", leg: null },
+      { scope: "wallet", ruleId: "bounds", decision: "allow", leg: 0 },
+      { scope: "wallet", ruleId: "bounds", decision: "deny", leg: 1 },
+    ]);
+  });
+
+  it("fails closed on a missing destination when the operation has no legs", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation: { ...operation, destination: null },
+      legs: [],
+      walletPolicy: walletPolicy([
+        { id: "destinations", kind: "destination", allowlist: ["recipient_allowed"] },
+      ]),
+      apiKeyPolicy: null,
+    });
+
+    assert.partialDeepStrictEqual(result, {
+      decision: "deny",
+      reasonCode: "wallet_policy_match",
+    });
+    assert.match(
+      result.wallet.reason,
+      /^Operation has no destination for destination policy evaluation\./
+    );
+    assert.partialDeepStrictEqual(result.matchedRules, [
+      { scope: "wallet", ruleId: "destinations", kind: "destination", decision: "deny", leg: null },
+    ]);
+  });
+});
+
+describe("describeCandidateRuleCriteria", () => {
+  it("describes every rule per view and omits destination rules from the aggregate", () => {
+    const criteria = describeCandidateRuleCriteria(
+      "wallet",
+      walletPolicy([
+        { id: "destinations", kind: "destination", allowlist: ["recipient_allowed"] },
+        { id: "cap", kind: "amount", asset: "USDC", max: "100" },
+      ]),
+      operation,
+      [leg({ destination: "recipient_allowed", amount: "60" }), leg({ amount: "65.50" })]
+    );
+
+    assert.equal(criteria.length, 5);
+    assert.partialDeepStrictEqual(criteria, [
+      { ruleId: "cap", kind: "amount", matched: true, action: "deny", leg: null },
+      { ruleId: "destinations", kind: "destination", matched: true, action: "allow", leg: 0 },
+      { ruleId: "cap", kind: "amount", matched: true, action: "allow", leg: 0 },
+      { ruleId: "destinations", kind: "destination", matched: true, action: "deny", leg: 1 },
+      { ruleId: "cap", kind: "amount", matched: true, action: "allow", leg: 1 },
+    ]);
+  });
+
+  it("returns no criteria for a scope without an active revision", () => {
+    const criteria = describeCandidateRuleCriteria(
+      "wallet",
+      IMPLICIT_DEFAULT_ALLOW_POLICY,
+      operation,
+      []
+    );
+
+    assert.deepEqual(criteria, []);
   });
 });

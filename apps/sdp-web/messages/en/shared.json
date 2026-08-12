@@ -360,5 +360,28 @@
     "connectYouWillNeed": "You will need",
     "connectByArrangement": "Available by arrangement. The SDP team grants access and sets up the connection with your organization.",
     "connectManaged": "Provisioned per deployment. This provider is configured by your SDP operator rather than self-serve."
+  },
+  "notifications": {
+    "ariaLabel": "Notifications",
+    "ariaLabelUnread": "Notifications, {count} unread",
+    "title": "Notifications",
+    "markAllRead": "Mark all read",
+    "loading": "Loading…",
+    "empty": "You're all caught up.",
+    "error": "Couldn't load notifications.",
+    "retry": "Try again",
+    "showMore": "Show more",
+    "emailUnavailable": "Email delivery is unavailable at the moment.",
+    "types": {
+      "workflow_execution": "Automation ran: {trigger}"
+    },
+    "triggerLabels": {
+      "kyc_approved": "KYC approved",
+      "kyc_rejected": "KYC rejected",
+      "onramp_settled": "On-ramp settled",
+      "offramp_settled": "Off-ramp settled",
+      "recurring_payment_failed": "Recurring payment failed",
+      "token_operation_completed": "Token operation completed"
+    }
   }
 }

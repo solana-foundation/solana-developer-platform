@@ -5,6 +5,7 @@ import {
   assertEarnProviderConfigured,
   assertProviderAvailable,
   getProviderAvailability,
+  isPersistedCustodyCompletionEnabled,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { env } from "@/test/helpers/env";
@@ -112,10 +113,14 @@ async function setOrganizationTier(tier: "individual" | "enterprise"): Promise<v
 describe("provider-availability.service", () => {
   let originalProviderEnv: ProviderEnvSnapshot;
   let originalDeploymentMode: "managed" | "self_hosted" | undefined;
+  let originalPrivyByokEnabled: string | undefined;
+  let originalSelfHostedStoredSetupEnabled: string | undefined;
 
   beforeEach(async () => {
     originalProviderEnv = readProviderEnv();
     originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
+    originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
+    originalSelfHostedStoredSetupEnabled = env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED;
 
     writeProviderEnv({});
     setBaseProviderEnv();
@@ -138,6 +143,8 @@ describe("provider-availability.service", () => {
   afterEach(async () => {
     writeProviderEnv(originalProviderEnv);
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
+    env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = originalSelfHostedStoredSetupEnabled;
   });
 
   it("resolves general defaults independently of the legacy tier value", () => {
@@ -394,6 +401,64 @@ describe("provider-availability.service", () => {
     expect(availability.providers.compliance.range.entitled).toBe(true);
     expect(availability.providers.ramps.lightspark.entitled).toBe(true);
     expect(availability.providers.ramps.bvnk.entitled).toBe(true);
+  });
+
+  it("keeps persisted Privy sources eligible when the fresh setup preference changes", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "true";
+
+    for (const storedSetupEnabled of ["false", "true"]) {
+      env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = storedSetupEnabled;
+
+      await expect(
+        isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+      ).resolves.toBe(true);
+      await expect(
+        isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+      ).resolves.toBe(true);
+    }
+  });
+
+  it("requires a configured runtime binding but not deployment credentials for a persisted stored source", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "true";
+    env.PRIVY_APP_ID = undefined;
+    env.PRIVY_APP_SECRET = undefined;
+
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+    ).resolves.toBe(true);
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+    ).resolves.toBe(false);
+  });
+
+  it("requires BYOK enablement for both persisted Credential sources", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "false";
+
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+    ).resolves.toBe(false);
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+    ).resolves.toBe(false);
+  });
+
+  it("requires custody entitlement for both persisted Credential sources", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "true";
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { custody: { privy: false } } }), TEST_ORG_ID)
+      .run();
+
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+    ).resolves.toBe(false);
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+    ).resolves.toBe(false);
   });
 
   it("respects providerOverrides[id] === false in self-hosted mode", async () => {
