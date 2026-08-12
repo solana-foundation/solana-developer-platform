@@ -2,6 +2,7 @@ import type { RampSettlementEvent } from "@sdp/payments/ramps";
 import type { Context } from "hono";
 import type { PaymentTransferStatus } from "@/db/repositories";
 import { createSystemPaymentsRepository, isRampTransferType } from "@/db/repositories";
+import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -88,4 +89,20 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
   }
 
   await repo.updateTransferStatusGuarded(update);
+
+  // Workflow trigger seam: a settled ramp fires onramp_settled / offramp_settled.
+  // Rules are project-scoped, so a transfer without a project has nothing to match.
+  if (event.kind === "settled" && transfer.project_id) {
+    emitRampSettled(c, {
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      direction: transfer.type === "offramp" ? "offramp" : "onramp",
+      transferId: transfer.id,
+      provider: transfer.provider,
+      counterpartyId: transfer.counterparty_id,
+      amount: event.receivedAmount ?? null,
+      fiatCurrency: transfer.fiat_currency,
+      cryptoToken: transfer.token,
+    });
+  }
 }

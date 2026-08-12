@@ -1273,6 +1273,150 @@
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/allowlist/{{entryId}}",
             "description": "Removes an allowlist entry from a token."
           }
+        },
+        {
+          "name": "List the workflow catalog for an asset",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/workflows/catalog",
+            "description": "Returns the available triggers and the actions this asset supports (with a capability-gated support verdict per action)."
+          }
+        },
+        {
+          "name": "List workflow rules",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/workflows",
+            "description": "Returns the workflow automation rules configured for an asset."
+          }
+        },
+        {
+          "name": "Create a workflow rule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/workflows",
+            "description": "Creates a WHEN → THEN automation rule. The action is capability-gated at save time; an unsupported action returns 400 with a typed reason.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"triggerType\": \"kyc_approved\",\n  \"actionType\": \"allowlist_add\",\n  \"condition\": {\n    \"all\": [\n      {\n        \"field\": \"\",\n        \"op\": \"eq\",\n        \"value\": \"\"\n      }\n    ]\n  },\n  \"actionParams\": {},\n  \"reviewMode\": \"auto\",\n  \"retryPolicy\": {\n    \"maxAttempts\": 0,\n    \"retryAfterMinutes\": 0\n  },\n  \"enabled\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update a workflow rule",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/workflows/{{workflowId}}",
+            "description": "Updates a rule's condition, action params, review mode, retry policy, or enabled flag.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"condition\": {\n    \"all\": [\n      {\n        \"field\": \"\",\n        \"op\": \"eq\",\n        \"value\": \"\"\n      }\n    ]\n  },\n  \"actionParams\": {},\n  \"reviewMode\": \"auto\",\n  \"retryPolicy\": {\n    \"maxAttempts\": 0,\n    \"retryAfterMinutes\": 0\n  },\n  \"enabled\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete a workflow rule",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/workflows/{{workflowId}}",
+            "description": "Soft-deletes a rule: it stops matching and disappears from lists, while its execution history is retained."
+          }
+        },
+        {
+          "name": "List workflow executions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/workflows/executions",
+            "description": "Execution log for an asset's workflows — recent runs with status and retry state."
+          }
+        },
+        {
+          "name": "Approve a held execution",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/workflows/executions/{{executionId}}/approve",
+            "description": "Authorizes an awaiting-review execution: status becomes pending and the engine runs it once. Requires the permission implied by the rule's action tier — tokens:admin for sensitive and irreversible actions. Records the approver on the execution and in the audit log."
+          }
+        },
+        {
+          "name": "Retry a failed execution",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/workflows/executions/{{executionId}}/retry",
+            "description": "Re-attempts a failed execution: status becomes pending and the attempt counter resets. Approving a held execution is a separate endpoint."
+          }
+        },
+        {
+          "name": "Reject a held execution",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/workflows/executions/{{executionId}}/reject",
+            "description": "Cancels an awaiting-review execution; the action never runs."
+          }
+        },
+        {
+          "name": "List verified holders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/holders",
+            "description": "Returns the wallets enrolled for this asset (KYC identity + enrollment state)."
+          }
+        },
+        {
+          "name": "Enroll a verified holder",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/holders",
+            "description": "Registers a wallet for this asset (upserts its KYC identity + an active enrollment). When the wallet's KYC is approved, matching workflows fire.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"\",\n  \"counterpartyId\": \"\",\n  \"reviewMode\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
         }
       ]
     },
