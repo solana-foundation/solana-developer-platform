@@ -62,6 +62,7 @@ describe("API-key authoring", () => {
       operationTypes: "payment_transfer_execute, token_mint",
       assets: "USDC\nSOL",
       maximumAmount: "2500",
+      maximumAmountAssets: "USDC, SOL",
       destinations: "address_a,address_b",
       approvalRequired: true,
     };
@@ -75,10 +76,26 @@ describe("API-key authoring", () => {
       "approval",
     ]);
     expect(buildApiKeyPolicyRules(draft)[0]).toMatchObject({ action: "deny" });
+    expect(buildApiKeyPolicyRules(draft)[3]).toMatchObject({
+      action: "allow",
+      max: "2500",
+      assets: ["USDC", "SOL"],
+    });
     expect(buildApiKeyPolicyRules(draft)[4]).toMatchObject({
       action: "allow",
       allowlist: ["address_a", "address_b"],
     });
+  });
+
+  it("emits no amount rule when the maximum names no assets", () => {
+    const draft = {
+      ...createApiKeyAuthoringDraft(),
+      restrictionsEnabled: true,
+      restrictionsEdited: true,
+      maximumAmount: "2500",
+    };
+
+    expect(buildApiKeyPolicyRules(draft)).toEqual([]);
   });
 
   it("builds bindings for selected-wallet and all-wallet restrictions", () => {

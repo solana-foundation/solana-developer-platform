@@ -152,9 +152,11 @@ capability slots in without burdening providers that lack it.
   `(organization, environment, provider)` — DB-enforced by the unique
   constraint in migration `0049_earn_provider_wallets.sql` and read/written
   through `EarnRepository.getProviderWallet`/`insertProviderWallet`.
-  Choosing a curator applies preset weights to the shared wallet's strategy
+  Selecting a strategy re-targets the shared wallet at that single vault
   (create on first use, `updatePortfolioStrategy` afterwards); positions are
-  read live from the provider and grouped by curator for display.
+  read live from the provider and rendered as a flat holdings list. (The
+  curator-first step and curator grouping were removed; V1 caps each token
+  group at one allocation entry — see the 2026-08-11 single-vault addendum.)
 - **Solana-only surface.** The snapshot exposes only the wallet's Solana
   deposit address (`solana_devnet` sandbox / `solana` production);
   withdrawals and previews pin `destinationChain` to the environment's Solana
@@ -286,3 +288,31 @@ per surface:
   names positions/movements/NAV (their read surfaces are replaced by the
   program snapshot + the withdrawals ledger), and the disabling consequence now
   includes ledger history.
+
+## Addendum — 2026-08-11 Single-vault V1: one allocation entry per token group (PRO-1667)
+
+**Decision.** Earn V1 sells deposit and withdraw into a single vault per
+deposit token. `PUT /v1/earn/program` caps each token group at ONE allocation
+entry (the group cap in `apps/sdp-api/src/routes/earn/schemas.ts`); the
+sum-to-100 rule then pins that entry to `pct: 100`. The dashboard workspace
+stopped rendering per-holding share percentages. The audit surface now matches
+what V1 ships.
+
+**What is deliberately kept, dormant.** The weighted wire shape (arrays of
+`{yieldSourceId, pct}` per token group), the provider contract
+(`updatePortfolioStrategy`, the `weightBps` types), and Ground's
+strategy-update client are untouched — the API and provider side of
+re-enabling weighted portfolios post-V1 is a validation-only relaxation of
+the group cap, never a wire or provider-contract change. That is the server
+half only: the dashboard ships no weight authoring (the weight editor was
+removed before V1) and no share display (removed by this change), so weights
+returning as a product carries that dashboard work with it — relaxing the
+cap alone would recreate the exact API/dashboard mismatch this decision
+removes. The update branch's in-place full re-target
+(switching vaults at 100%) also stays; whether it survives once program
+multiplicity exists is PRO-1670's design decision.
+
+**Multiplicity is not cut.** Concurrent exposure to several strategies
+arrives as separate single-vault programs — one per strategy (PRO-1670, which
+relaxes the 0049 one-per-org constraint). This addendum caps allocations
+*within* a program; multiplicity lives between programs.

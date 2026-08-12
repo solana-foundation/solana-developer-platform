@@ -99,9 +99,9 @@ const contracts: ValueMovingContract[] = [
       evidence: "createProjectSponsorshipFeePayment(input.env",
     },
     authorization: {
-      file: "apps/sdp-api/src/services/payments/recurring-payments/activation.ts",
-      section: "export async function activateRecurringPayment",
-      before: "claimRecurringPaymentActivation({",
+      file: "apps/sdp-api/src/services/payments/recurring-payments/collection.ts",
+      section: "export async function collectRecurringPayment",
+      before: "await enforceRecurringPaymentPolicy({",
       after: "solanaServices.createOrgSigner(",
     },
     replay: [

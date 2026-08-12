@@ -54,7 +54,7 @@ PRO-1634 owns whatever returns.
 | Surface | Serving read | Fed by | Freshness |
 |---|---|---|---|
 | Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) |
-| APY (headline + blended) | `earn_strategies.current_apy` (latest observed, overwritten by sync) + live `getPortfolioYield` | Catalogue sync; live provider read | Hourly / real-time |
+| APY (headline + program-level) | `earn_strategies.current_apy` (latest observed, overwritten by sync) + live `getPortfolioYield` | Catalogue sync; live provider read | Hourly / real-time |
 | Positions & balances | **Live provider snapshot** (`GET /v1/earn/program` ← `getPortfolioWallet`) — never persisted | Provider | Real-time |
 | Deposits | **Live provider** (`GET /program/deposits` ← provider-observed on-chain deposits) — customer-initiated, so SDP has no intent moment to ledger | Provider | Real-time |
 | Withdrawals (detail) | **Live provider** (`GET /program/withdrawals/:ref`); the matching ledger row advances as a side effect | Provider | Real-time |
@@ -173,8 +173,14 @@ flowchart LR
   wallet (`POST /v2/wallets`, idempotent via UUIDv4 requestId, polled from
   `creating` to `ready`); later selections replace the strategy
   (`PATCH /v2/wallets/{id}/strategy`). A selection is exactly ONE strategy at
-  `pct: 100` of that strategy's stablecoin lane (`singleStrategyAllocation`);
-  the curator-first step and the weight editor were removed on purpose —
+  `pct: 100` of that strategy's stablecoin lane (`singleStrategyAllocation`) —
+  a shape the API enforces, not just a wizard convention: PRO-1667 caps each
+  token group at one allocation entry per program, leaving the weighted wire
+  shape dormant — the API side of post-V1 re-enablement is just relaxing that
+  cap, while the dashboard would separately need weight authoring and share
+  display back (concurrent strategies arrive as separate single-vault
+  programs, PRO-1670).
+  The curator-first step and the weight editor were removed on purpose —
   curator is metadata rendered beside a strategy, never a gate — and an
   omitted lane keeps its current allocation server-side. Positions and
   balances are read live from the wallet snapshot and rendered as a flat

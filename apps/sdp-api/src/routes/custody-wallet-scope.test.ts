@@ -288,7 +288,6 @@ describe("Custody wallet scope routes", () => {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
-          destinationAllowlist: [],
           defaultAction: "allow",
           rules: [{ id: "deny-signer-check", kind: "always", action: "deny" }],
         }),

@@ -25,9 +25,20 @@ interface BuildPaymentsPlaygroundConfigOptions {
 const fiatCurrencyOptions: ApiPlaygroundFieldOption[] = [{ label: "USD", value: "USD" }];
 const exampleWalletAddressFallback = "1".repeat(32);
 const exampleMintAddress = ["USDCMint", "1".repeat(30)].join("");
-const destinationAllowlistFieldKey = ["destination", "Allowlist"].join("");
-const maxTransferAmountFieldKey = ["max", "Transfer", "Amount"].join("");
-const maxDailyAmountFieldKey = ["max", "Daily", "Amount"].join("");
+const policyDefaultActionOptions: ApiPlaygroundFieldOption[] = [
+  { label: "allow", value: "allow" },
+  { label: "deny", value: "deny" },
+  { label: "approval_required", value: "approval_required" },
+  { label: "review", value: "review" },
+];
+const examplePolicyRules = [
+  {
+    id: "deny-raw-signing",
+    kind: "operation_family",
+    family: "raw_sign",
+    action: "deny",
+  },
+];
 
 function buildWalletOptions(wallets: PaymentsPlaygroundWalletView[]): ApiPlaygroundFieldOption[] {
   return wallets.map((wallet) => ({
@@ -160,9 +171,16 @@ export function buildPaymentsPlaygroundEndpointConfigs(
         data: {
           policy: {
             walletId: exampleWalletId,
-            destinationAllowlist: [exampleWalletAddress],
-            maxTransferAmount: "2500",
-            maxDailyAmount: "25000",
+            defaultAction: "allow",
+            rules: [
+              {
+                id: "allowlist-destinations",
+                kind: "destination",
+                allowlist: [exampleWalletAddress],
+                action: "allow",
+              },
+            ],
+            controlProfile: null,
           },
         },
       },
@@ -175,31 +193,31 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       pathFields: [walletIdField],
       bodyFields: [
         {
-          key: destinationAllowlistFieldKey,
-          label: destinationAllowlistFieldKey,
-          placeholder: t("DashboardPayments.playground.destinationAllowlistPlaceholder"),
-          defaultValue: exampleWalletAddress,
-          valueType: "string_array",
+          key: "defaultAction",
+          label: "defaultAction",
+          placeholder: "allow",
+          kind: "select",
+          options: policyDefaultActionOptions,
+          defaultValue: "allow",
           required: true,
         },
         {
-          key: maxTransferAmountFieldKey,
-          label: maxTransferAmountFieldKey,
-          placeholder: "2500",
-        },
-        {
-          key: maxDailyAmountFieldKey,
-          label: maxDailyAmountFieldKey,
-          placeholder: "25000",
+          key: "rules",
+          label: "rules",
+          placeholder: t("DashboardPayments.playground.policyRulesPlaceholder"),
+          kind: "textarea",
+          valueType: "json",
+          defaultValue: JSON.stringify(examplePolicyRules, null, 2),
+          required: true,
         },
       ],
       expectedResponse: {
         data: {
           policy: {
             walletId: exampleWalletId,
-            destinationAllowlist: [exampleWalletAddress],
-            maxTransferAmount: "2500",
-            maxDailyAmount: "25000",
+            defaultAction: "allow",
+            rules: examplePolicyRules,
+            controlProfile: null,
           },
         },
       },
