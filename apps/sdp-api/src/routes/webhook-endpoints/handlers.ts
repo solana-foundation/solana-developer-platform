@@ -16,6 +16,7 @@ import { AuditService } from "@/services/audit.service";
 import {
   destroyEndpointSecretVersion,
   generateWebhookSecret,
+  queuePendingEndpointSecret,
   resolveLiveEndpointSecrets,
   storeEndpointSecret,
 } from "@/services/workflows/endpoint-secret";
@@ -100,6 +101,11 @@ export const createWebhookEndpoint = async (c: AppContext) => {
     throw badRequest(STORE_UNAVAILABLE_MESSAGE);
   }
 
+  // The version now exists in the backend and nothing references it, so its destruction is
+  // queued NOW and cancelled by the insert below if that commits. Queued after a failed
+  // insert instead, the record would be lost precisely when the database is what failed.
+  await queuePendingEndpointSecret(c.env, { orgId, endpointId, stored: stored.stored });
+
   const endpoint = await createWebhookEndpointsRepository(c.env).createEndpoint({
     id: endpointId,
     organizationId: orgId,
@@ -109,6 +115,9 @@ export const createWebhookEndpoint = async (c: AppContext) => {
     description: parsed.data.description ?? null,
     secretStorage: stored.stored,
     createdBy: auth.id,
+    // Committing the row makes the credential referenced, which discharges the obligation
+    // queued just above — in that transaction, so a rollback keeps it.
+    clearRetirementFor: stored.stored,
   });
   if (!endpoint) {
     throw internalError("Failed to create webhook endpoint");
@@ -199,13 +208,20 @@ export const deleteWebhookEndpoint = async (c: AppContext) => {
   const { projectId, orgId } = requireProjectScope(c);
   const { endpointId } = c.req.param();
 
-  const deleted = await createWebhookEndpointsRepository(c.env).softDeleteEndpoint({
+  // The soft delete records the retirement of both signing keys in its own transaction, so
+  // the destroys below are the fast path rather than the only chance to reclaim them.
+  const { deleted, retired } = await createWebhookEndpointsRepository(c.env).softDeleteEndpoint({
     endpointId,
     organizationId: orgId,
     projectId,
   });
   if (!deleted) {
+    // Already deleted, or never existed. Anything the locked read did find is queued, so a
+    // retry that 404s still leaves the sweeper holding the obligation.
     throw notFound("Webhook endpoint");
+  }
+  for (const stored of retired) {
+    await destroyEndpointSecretVersion(c.env, stored, { orgId, endpointId });
   }
 
   const referencingWorkflows = await createAssetWorkflowsRepository(
@@ -246,7 +262,9 @@ export const rotateWebhookEndpointSecret = async (c: AppContext) => {
 
   const secret = generateWebhookSecret();
   // `existingSecretRef` makes GCP SM store the new value as a version of the endpoint's
-  // existing secret rather than minting a new one per rotation.
+  // existing secret rather than minting a new one per rotation. Safe to take from the
+  // unlocked read: it names the secret, which is stable for the endpoint's whole life —
+  // a concurrent rotation adds another version to that same secret.
   const stored = await storeEndpointSecret(c.env, {
     orgId,
     endpointId,
@@ -257,27 +275,31 @@ export const rotateWebhookEndpointSecret = async (c: AppContext) => {
     throw badRequest(STORE_UNAVAILABLE_MESSAGE);
   }
 
-  // Whatever occupied the previous slot is displaced for good by this rotation.
-  await destroyEndpointSecretVersion(c.env, existing.previous_secret_storage, {
-    orgId,
-    endpointId,
-  });
+  // As in create: the version just written has no reader until the rotation commits, so its
+  // destruction is queued first and cancelled by that commit.
+  await queuePendingEndpointSecret(c.env, { orgId, endpointId, stored: stored.stored });
 
   const graceMs = gracePeriodHours * 3_600_000;
-  const endpoint = await repo.rotateSecret({
+  const rotated = await repo.rotateSecret({
     endpointId,
     organizationId: orgId,
     projectId,
     secretStorage: stored.stored,
-    previousSecretStorage: graceMs > 0 ? existing.secret_storage : null,
+    // What this displaces is resolved from the row under lock inside the transaction;
+    // `existing` above predates it and a concurrent rotation would make it name a version
+    // that is already gone.
     previousSecretExpiresAt: graceMs > 0 ? new Date(Date.now() + graceMs).toISOString() : null,
   });
-  if (!endpoint) {
+  if (!rotated) {
     throw notFound("Webhook endpoint");
   }
-  if (graceMs <= 0) {
-    // No grace: the old current key dies immediately.
-    await destroyEndpointSecretVersion(c.env, existing.secret_storage, { orgId, endpointId });
+  const endpoint = rotated.row;
+  // Only after the row committed. Destroying first meant a failed rotation left the
+  // endpoint still naming a grace key that no longer existed — and because an unreadable
+  // live previous key correctly fails closed, every delivery would then fail until the
+  // grace expired.
+  for (const displaced of rotated.retired) {
+    await destroyEndpointSecretVersion(c.env, displaced, { orgId, endpointId });
   }
 
   await new AuditService(getDb(c.env)).log(c, {

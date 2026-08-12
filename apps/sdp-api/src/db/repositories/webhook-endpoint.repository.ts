@@ -35,6 +35,21 @@ export interface CreateWebhookEndpointInput {
   description?: string | null;
   secretStorage: StoredCredentialSecret;
   createdBy?: string | null;
+  // The version this request wrote to the secret store, provisionally queued for
+  // destruction before the insert was attempted — the only ordering in which a rejected
+  // insert cannot strand a live credential nobody references. Committing the row makes the
+  // version referenced, so the obligation is cancelled by this same transaction and a
+  // rollback keeps it. Normally identical to `secretStorage`.
+  clearRetirementFor?: StoredCredentialSecret | null;
+}
+
+// A write that drops a secret version out of the row returns the displaced handles, read
+// under the same lock that performed the write. The caller attempts the backend destroy
+// once the transaction has committed; each handle is already queued for retirement, so a
+// failed or never-attempted destroy degrades to the sweeper rather than to a leak.
+export interface WebhookEndpointSecretWriteResult {
+  row: WebhookEndpointRow;
+  retired: StoredCredentialSecret[];
 }
 
 export interface WebhookEndpointsRepository {
@@ -61,19 +76,28 @@ export interface WebhookEndpointsRepository {
     status?: WebhookEndpointStatus;
   }): Promise<WebhookEndpointRow | null>;
   // Soft delete (keeps the delivery log; hard DELETE would cascade it away).
+  // Both of the endpoint's signing keys are orphaned the moment this commits, so their
+  // retirement is recorded by the same transaction, from the row read under lock.
+  // `deleted` is false when the endpoint does not exist or was already deleted; the retry
+  // of a delete whose cleanup died still reports the keys it left behind.
   softDeleteEndpoint(params: {
     endpointId: string;
     organizationId: string;
     projectId: string;
-  }): Promise<boolean>;
+  }): Promise<{ deleted: boolean; retired: StoredCredentialSecret[] }>;
   // Rotation in place: the endpoint id is stable because workflow rules reference it.
   // Shifts current → previous (with a grace expiry) and installs the new handle.
+  //
+  // What becomes `previous` is resolved from the row under lock rather than passed in: the
+  // caller's view predates this transaction, so a rotation that committed in between would
+  // have it write back a version that is already retired, leaving the live endpoint signing
+  // with a destroyed key. A null `previousSecretExpiresAt` means no grace — the displaced
+  // current key is retired immediately instead of being kept live.
   rotateSecret(params: {
     endpointId: string;
     organizationId: string;
     projectId: string;
     secretStorage: StoredCredentialSecret;
-    previousSecretStorage: StoredCredentialSecret | null;
     previousSecretExpiresAt: string | null;
-  }): Promise<WebhookEndpointRow | null>;
+  }): Promise<WebhookEndpointSecretWriteResult | null>;
 }

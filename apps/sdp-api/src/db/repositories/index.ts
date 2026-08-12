@@ -388,6 +388,7 @@ export { createPostgresWebhookDeliveriesRepository } from "./webhook-delivery.re
 export type {
   CreateWebhookEndpointInput,
   WebhookEndpointRow,
+  WebhookEndpointSecretWriteResult,
   WebhookEndpointStatus,
   WebhookEndpointsRepository,
 } from "./webhook-endpoint.repository";
