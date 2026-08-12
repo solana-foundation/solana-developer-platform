@@ -213,9 +213,9 @@ it("deduplicates org-level custody configs and repoints references", async () =>
     // A key bound to both the duplicate and the surviving row keeps exactly
     // one binding — the survivor-pointing one — and inherits the deleted
     // binding's policy assignments. The inherited wallet-profile reference
-    // resolves to the surviving wallet's active profile (the referenced
-    // profile was demoted, and a binding to an inactive profile is rejected
-    // at policy resolution).
+    // is mapped through the demotion to the surviving wallet's active
+    // profile, so the merged binding stays operable (this key already held
+    // the survivor route, so this is not a downgrade).
     const mergedBindings = await client.query(
       `SELECT id, custody_wallet_id, wallet_control_profile_id, api_key_control_profile_id
        FROM api_key_wallet_policy_bindings
@@ -264,15 +264,27 @@ it("deduplicates org-level custody configs and repoints references", async () =>
       { id: "akb_race_a", custody_wallet_id: "cwlt_new_shared" },
     ]);
 
-    // A binding that referenced the now-demoted profile is repointed at the
-    // surviving wallet's active profile instead of being locked out.
-    const repairedBinding = await client.query(
+    // A binding whose only route ran through the duplicate wallet row keeps
+    // its reference to the demoted (now-disabled) profile: policy resolution
+    // fails closed, so the key is blocked until an operator re-assigns it —
+    // never silently re-governed by the survivor's possibly weaker active
+    // profile.
+    const lockedBinding = await client.query(
       `SELECT custody_wallet_id, wallet_control_profile_id
        FROM api_key_wallet_policy_bindings
        WHERE id = 'akb_locked'`
     );
-    expect(repairedBinding.rows).toEqual([
-      { custody_wallet_id: "cwlt_new_shared2", wallet_control_profile_id: "wcp_kept_active" },
+    expect(lockedBinding.rows).toEqual([
+      {
+        custody_wallet_id: "cwlt_new_shared2",
+        wallet_control_profile_id: "wcp_dup_conflict_active",
+      },
+    ]);
+    // …and the lockout is reported for operator action.
+    expect(notices.filter((n) => n.includes("fail closed"))).toEqual([
+      expect.stringContaining(
+        "1 API-key wallet binding(s) referencing a now-disabled control profile"
+      ),
     ]);
 
     const operation = await client.query(

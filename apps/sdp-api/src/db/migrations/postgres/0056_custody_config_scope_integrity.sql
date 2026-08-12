@@ -99,8 +99,9 @@ WHERE wcp.custody_wallet_id = wdup.id
 -- 'disabled' so the policy and its revisions survive for operator review
 -- instead of silently cascade-deleting with the duplicate wallet (which
 -- would leave repointed API-key bindings governed by a weaker profile with
--- no trace of the stricter one). Captured first so bindings referencing a
--- demoted profile can be repaired below.
+-- no trace of the stricter one). Captured first so the binding merge below
+-- can map inherited references through the demotion, and so bindings left
+-- referencing a disabled profile can be reported.
 CREATE TEMP TABLE custody_demoted_profiles ON COMMIT DROP AS
 SELECT wcp.id, wdup.keep_id
 FROM wallet_control_profiles wcp
@@ -174,41 +175,70 @@ WHERE b.custody_wallet_id = wdup.id;
 -- policy it already held; which of the two profiles was "stricter" is not
 -- machine-decidable, so the NOTICE flags the affected keys for the operator
 -- to make that call.
+-- An inherited wallet-profile reference is mapped through the demotion to
+-- the surviving wallet's active profile so the merged binding stays
+-- operable. This is safe only because a merged key already held the
+-- survivor-side binding — the survivor's policy was already reachable to
+-- it. Bindings that did NOT merge get no such mapping (see below).
 UPDATE api_key_wallet_policy_bindings b
 SET wallet_control_profile_id = COALESCE(b.wallet_control_profile_id, l.wallet_control_profile_id),
     api_key_control_profile_id = COALESCE(b.api_key_control_profile_id, l.api_key_control_profile_id)
 FROM (
-    SELECT api_key_id, keep_id,
-           (array_remove(array_agg(wallet_control_profile_id ORDER BY created_at, id), NULL))[1]
-               AS wallet_control_profile_id,
-           (array_remove(array_agg(api_key_control_profile_id ORDER BY created_at, id), NULL))[1]
-               AS api_key_control_profile_id
-    FROM custody_binding_losers
-    GROUP BY api_key_id, keep_id
+    SELECT raw.api_key_id, raw.keep_id,
+           COALESCE(
+               (
+                   SELECT active_wcp.id
+                   FROM custody_demoted_profiles dp
+                   JOIN wallet_control_profiles active_wcp
+                     ON active_wcp.custody_wallet_id = dp.keep_id
+                    AND active_wcp.status = 'active'
+                   WHERE dp.id = raw.wallet_control_profile_id
+               ),
+               raw.wallet_control_profile_id
+           ) AS wallet_control_profile_id,
+           raw.api_key_control_profile_id
+    FROM (
+        SELECT api_key_id, keep_id,
+               (array_remove(array_agg(wallet_control_profile_id ORDER BY created_at, id), NULL))[1]
+                   AS wallet_control_profile_id,
+               (array_remove(array_agg(api_key_control_profile_id ORDER BY created_at, id), NULL))[1]
+                   AS api_key_control_profile_id
+        FROM custody_binding_losers
+        GROUP BY api_key_id, keep_id
+    ) raw
 ) l
 WHERE b.api_key_id = l.api_key_id
   AND b.custody_wallet_id = l.keep_id
   AND (b.wallet_control_profile_id IS NULL OR b.api_key_control_profile_id IS NULL)
   AND (l.wallet_control_profile_id IS NOT NULL OR l.api_key_control_profile_id IS NOT NULL);
 
--- Policy resolution rejects a binding whose referenced profile is not
--- active, so bindings referencing a demoted profile would lock their key
--- out. Repoint them at the surviving wallet's active profile — the policy
--- that actually governs the wallet (it exists whenever a demotion
--- happened: demotion requires the survivor to hold an active profile).
-UPDATE api_key_wallet_policy_bindings b
-SET wallet_control_profile_id = active_wcp.id
-FROM custody_demoted_profiles dp
-JOIN wallet_control_profiles active_wcp
-  ON active_wcp.custody_wallet_id = dp.keep_id
- AND active_wcp.status = 'active'
-WHERE b.wallet_control_profile_id = dp.id;
+-- Bindings still referencing a demoted (now-disabled) profile belong to
+-- keys whose only route ran through the duplicate wallet row under the
+-- policy that lost the active slot. Policy resolution fails closed on an
+-- inactive profile, so these keys cannot operate until an operator
+-- re-assigns their policy — deliberately: silently repointing them at the
+-- survivor's active profile would re-govern them under a possibly weaker
+-- policy, an escalation an attacker holding the key could exploit. Fail
+-- closed and report instead.
+DO $$
+DECLARE
+    locked_binding_count BIGINT;
+BEGIN
+    SELECT COUNT(*) INTO locked_binding_count
+    FROM api_key_wallet_policy_bindings b
+    JOIN custody_demoted_profiles dp ON b.wallet_control_profile_id = dp.id;
+
+    IF locked_binding_count > 0 THEN
+        RAISE WARNING 'custody config dedup left % API-key wallet binding(s) referencing a now-disabled control profile; these keys fail closed until an operator re-assigns their policy', locked_binding_count;
+    END IF;
+END;
+$$;
 
 -- Report merged bindings whose conflicting non-null assignments were
 -- discarded by the survivor-wins rule, so the governance change is visible
 -- to operators. A loser's reference to a demoted profile is compared
--- through its repair target (the survivor's active profile): an assignment
--- that would have been repaired to the survivor's own value was not lost.
+-- through the demotion mapping (the survivor's active profile): an
+-- assignment that maps to the survivor's own value was not lost.
 DO $$
 DECLARE
     discarded_assignment_count BIGINT;
