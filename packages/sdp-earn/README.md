@@ -13,7 +13,7 @@ Companion docs:
   (the invariants; includes dated addenda for the backend hardening, the
   Ground portfolio-wallet integration, and the Markets/Earn flag hierarchy)
 - [Earn V1 data flow](../../docs/architecture/earn-v1-data-flow.md) (sequence
-  diagrams for catalogue sync, program upsert, funding, withdrawal)
+  diagrams for catalogue sync, program create/re-target, funding, withdrawal)
 - [Earn pluggability playbook](../../docs/contributing/earn-pluggability-playbook.md)
   (step-by-step: add a provider / vault / category / custodian)
 
@@ -26,19 +26,26 @@ Companion docs:
   but still **open-string data** derived from provider catalogue metadata, so
   onboarding a curator is a data change, zero code (see
   `EARN_KNOWN_CURATOR_LABELS` in `@sdp/types`).
-- **One shared portfolio wallet per (organization, environment, provider).**
-  Selecting a strategy points that wallet's stablecoin lane at a *single*
-  vault — `pct: 100` for the selected strategy's lane
+- **A program is one portfolio wallet pinned to one vault; an org may hold
+  many.** Selecting a strategy points that wallet's stablecoin lane at a
+  *single* vault — `pct: 100` for the selected strategy's lane
   (`singleStrategyAllocation`, `earn-deposit-model.ts`), which is the only
   shape the V1 API accepts: PRO-1667 caps each token group at one allocation
   entry per program. An omitted token lane keeps its current allocation, so a
-  USDC pick never disturbs an existing USDT one. One wallet per org is enforced by a DB unique constraint
-  (`earn_provider_wallets`, migration 0049). This is SDP's product model, not a
-  provider constraint: Ground has no concept of an SDP organization, one Ground
-  account holds many portfolio wallets, and every SDP org shares a single account
-  per environment. A provider account's other wallets therefore belong to other
-  orgs — which is why a provider console's account-wide total will exceed what any
-  one org sees in SDP.
+  USDC pick never disturbs an existing USDT one. Concurrent exposure to several
+  strategies arrives as several programs (PRO-1670): `POST /v1/earn/programs`
+  creates one, `PUT /v1/earn/programs/:programId` re-targets that one in place,
+  and nothing rebalances between them — moving money between programs is an
+  explicit withdraw-then-deposit. Uniqueness is at the *provider wallet*:
+  `earn_provider_wallets` carries a GLOBAL `UNIQUE (provider,
+  provider_wallet_ref)` (migration 0056), so one provider-side wallet is claimed
+  by exactly one link row platform-wide — two orgs pointing at one wallet would
+  each read the other's balance. That is the only cap; the
+  `(organization, environment, provider)` one that made a program singular is
+  dropped. Ground has no concept of an SDP organization, one Ground account
+  holds many portfolio wallets, and every SDP org shares a single account per
+  environment — which is why a provider console's account-wide total will exceed
+  what any one org sees in SDP.
 - **Solana-only surface, and USDC-only on it.** Deposits are funded by sending
   **USDC** on Solana to the wallet's deposit address (`solana_devnet` in
   sandbox, `solana` in production); withdrawals settle to a Solana address the
@@ -65,10 +72,10 @@ Ground's [Portfolio Wallets API](https://docs.groundtech.co/docs/portfolio-walle
 | Yield-source id / name / protocol | `risk_metadata.curator` (known ids → `morpho-<curator>-<token>` convention → protocol fallback) |
 | `allocations[].type` (observed: `market`, `liquidity`, `loan`, `reserve`, `rwa`, `treasury`) | `source_kind`: `rwa` / `defi` (dominant allocation; `rwa` + `treasury` are the RWA side) |
 | `mode` | only `active` sources are listed; `buy_only` is excluded (would trap funds — ADR 0002 exit-safety) |
-| Portfolio wallet (`POST /v2/wallets`, `GET /v2/wallets/{id}`) | The org's shared program: `earn_provider_wallets.provider_wallet_ref` |
-| Strategy weights | `PUT /v1/earn/program` allocations → Ground target weights. **V1 is single-vault (PRO-1667): exactly one entry per token group, which the sum rule pins to `pct: 100`.** The weighted wire shape (percent, 0.1 grid, sum = 100 per group) is unchanged and the multi-entry surface is dormant — the API side of re-enabling weights is relaxing the route-schema cap (wire shape and provider contract untouched), but the dashboard separately needs weight authoring + share display back (removed by design) before the cap can safely relax. Takes an idempotent `requestId` forwarded on BOTH branches (`POST /v2/wallets` on create, `PATCH /v2/wallets/{id}/strategy` on update) — Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
+| Portfolio wallet (`POST /v2/wallets`, `GET /v2/wallets/{id}`) | One SDP program: `earn_provider_wallets.provider_wallet_ref` (globally unique per provider) |
+| Strategy weights | `POST /v1/earn/programs` (create) / `PUT /v1/earn/programs/:programId` (re-target) allocations → Ground target weights. **V1 is single-vault (PRO-1667): exactly one entry per token group, which the sum rule pins to `pct: 100`.** The weighted wire shape (percent, 0.1 grid, sum = 100 per group) is unchanged and the multi-entry surface is dormant — the API side of re-enabling weights is relaxing the route-schema cap (wire shape and provider contract untouched), but the dashboard separately needs weight authoring + share display back (removed by design) before the cap can safely relax. Both branches send a `requestId` — **required on create** (`EarnPortfolioWalletCreateInput.requestId`, no client-side fallback since PRO-1670: an unkeyed retry would provision a second wallet), optional on update, where the client still mints one per call. Either way SDP derives it rather than forwarding the caller's key. Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
 | `depositAddresses.solana{,_devnet}` | The program's funding address (only Solana is surfaced) |
-| Deposits / withdrawals / previews | `GET /v1/earn/program/deposits`, `POST /v1/earn/program/withdrawal-preview`, `POST /v1/earn/program/withdrawals` (idempotent `requestId`) |
+| Deposits / withdrawals / previews | `GET /v1/earn/programs/:programId/deposits`, `POST …/withdrawal-preview`, `POST …/withdrawals` (idempotent `requestId`) |
 
 Credentials: `GROUND_SANDBOX_API_KEY` (sandbox) / `GROUND_API_KEY`
 (production), injected via env (Doppler in deployed environments). With no key
@@ -82,9 +89,10 @@ This is the part to understand before touching deposits or withdrawals.
 
 ### What a portfolio wallet is
 
-One Ground portfolio wallet = one org's shared Earn program (SDP stores the
-handle in `earn_provider_wallets`). It is an **on-chain custodial address** that
-holds both idle stablecoins and the yield-bearing positions bought with them.
+One Ground portfolio wallet = one SDP Earn program (SDP stores the handle in
+`earn_provider_wallets`, one link row per wallet). It is an **on-chain
+custodial address** that holds both idle stablecoins and the yield-bearing
+positions bought with them.
 Its **private keys live in Turnkey**, and Ground signs against the wallet's
 configured Turnkey policies — Ground states it never holds raw signing keys.
 Ground provisions **per-chain deposit addresses**; SDP surfaces only the Solana
@@ -273,15 +281,18 @@ packages/sdp-earn/src/
 
 apps/sdp-api/src/
   routes/earn/                     /v1/earn HTTP surface. handlers/program.ts is
-                                   the shared-wallet family (live provider
-                                   reads + the withdrawal ledger); strategies
-                                   is the catalogue family.
-  db/migrations/postgres/0048–0055 earn_strategies (0048);
-                                   earn_provider_wallets (0049, shared-wallet
+                                   the programs family (list/create/re-target,
+                                   live provider reads + the withdrawal
+                                   ledger); strategies is the catalogue family.
+  db/migrations/postgres/0048–0056 earn_strategies (0048);
+                                   earn_provider_wallets (0049, the program
                                    link); earn_program_withdrawals (0055, the
                                    withdrawal ledger — 0055 also dropped the
                                    never-written positions/movements/NAV
-                                   tables, PRO-1628).
+                                   tables, PRO-1628); 0056 lifted the
+                                   one-program-per-org cap and moved uniqueness
+                                   onto (provider, provider_wallet_ref),
+                                   PRO-1670.
   services/earn-withdrawal-ledger.service.ts
                                    Withdrawal-ledger status machine + appliers
                                    (Hono-free; poll path today, sweep/webhooks
@@ -360,10 +371,14 @@ Two things write `earn_strategies`, and only one of them is a production path.
   your primary local org at one of the team's real Ground *sandbox* portfolio
   wallets, so the dashboard opens onto live provider state (real allocation, real
   forward APY, a real Solana deposit address) rather than an empty onboarding
-  screen. One org, one program — the same unique constraint production enforces,
-  so the seed never hands an org a second wallet, and other local orgs stay
-  unlinked. The wallet is shared with teammates: funding it, changing its
-  strategy through the wizard, or withdrawing from it changes what they see. Re-run the
+  screen. It links exactly ONE program — a seed choice, not a cap (the API takes
+  N per org since PRO-1670): the wallet it points at can be claimed by only one
+  link row platform-wide, so other local orgs stay unlinked rather than being
+  handed a sibling wallet that stands in for another org. If a developer has
+  already attached that wallet by hand, the seed says so and stops instead of
+  colliding on the global unique. The wallet is shared with teammates: funding
+  it, changing its strategy through the wizard, or withdrawing from it changes
+  what they see. Re-run the
   seed after your first Clerk sign-in and it moves its own link onto your real
   org; a program you created through the wizard is never moved. `--clean` removes
   the link, never the Ground wallet.
@@ -373,8 +388,8 @@ Two things write `earn_strategies`, and only one of them is a production path.
   funded sandbox wallets instead would surface a withdrawable balance SDP cannot
   withdraw, because those balances sit off the Solana rail while
   `balance.withdrawableUsd` reports a wallet-level total.
-  Full local-dev detail: `CLAUDE.md` → "Get a program — one org, one portfolio
-  wallet".
+  Full local-dev detail: `CLAUDE.md` → "Get a program — the seed links one, the
+  API allows many".
 - **Commands**
 
   ```bash
@@ -390,8 +405,9 @@ Two things write `earn_strategies`, and only one of them is a production path.
 
 ## Invariants (do not break)
 
-1. **Money out beats money off.** The deposit-side operation (`PUT /program`)
-   gates on full provider *availability* (entitlement + enablement +
+1. **Money out beats money off.** The deposit-side operations (`POST /programs`
+   and `PUT /programs/:programId`) gate on full provider *availability*
+   (entitlement + enablement +
    credentials). Withdrawal and live-read paths gate only on *configured
    credentials*, and the withdrawal-ledger list takes no provider gate at all
    — disabling a provider must never trap funds or hide their history.

@@ -3,16 +3,19 @@
 import type { EarnPortfolioAllocationInput, EarnStrategy } from "@sdp/types";
 import { ArrowLeftIcon, ArrowRightIcon, Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { formatApy } from "../earn-format";
 import {
+  createEarnProgram,
   EARN_PORTFOLIO_PROVIDER,
-  upsertEarnProgram,
-  useEarnProgram,
+  type EarnProgramWriteInput,
+  findProgram,
+  retargetEarnProgram,
+  useEarnPrograms,
   useEarnStrategies,
 } from "../earn-program-data";
 import { strategyToken, useLiquidityLabel } from "../earn-program-presentation";
@@ -108,7 +111,7 @@ function DepositOutcome({
         apiBaseUrl={apiBaseUrl}
         apiKeys={apiKeys}
         onDone={onIntegrationDone}
-        provider={EARN_PORTFOLIO_PROVIDER}
+        programId={outcome.programId}
         withdrawalToken={strategyToken(strategy) ?? "usdc"}
       />
     );
@@ -119,19 +122,111 @@ function DepositOutcome({
       created={outcome.created}
       fundingWalletLabel={fundingWalletLabel}
       onDone={onDone}
+      programId={outcome.programId}
       strategy={strategy}
     />
   );
 }
 
+/**
+ * Which verb this run performs. Decided by the URL, never inferred from the
+ * response — an explicit create that reported "not created" would be a
+ * contradiction.
+ */
+function writeProgram(retargetProgramId: string | undefined, input: EarnProgramWriteInput) {
+  return retargetProgramId
+    ? retargetEarnProgram(retargetProgramId, input)
+    : createEarnProgram(input);
+}
+
+/**
+ * Idempotency key for the confirm, minted lazily and held per selected
+ * strategy: a retry after a failed confirm replays the SAME key so the provider
+ * cannot apply the change twice, while switching strategy mints a fresh one —
+ * reusing a key with a different payload is a provider conflict.
+ *
+ * A ref, not state: re-rendering must never mint a new key for an unchanged
+ * selection, which is exactly the double-submit this guards against.
+ */
+function useStrategyRequestId() {
+  const requestIdRef = useRef<{ strategyId: string; requestId: string } | null>(null);
+  return (strategyId: string): string => {
+    if (requestIdRef.current?.strategyId !== strategyId) {
+      requestIdRef.current = { strategyId, requestId: crypto.randomUUID() };
+    }
+    return requestIdRef.current.requestId;
+  };
+}
+
+/**
+ * Land every step and outcome transition already scrolled to the top with its
+ * heading focused, so a screen-reader user hears the new screen and a sighted
+ * one never sees the previous screen's scroll offset.
+ */
+function useWizardStepFocus(step: DepositStep, outcome: Outcome | null) {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Every step and outcome transition must land already scrolled to the top with its heading announced.
+  useLayoutEffect(() => {
+    // Pre-paint so the new screen's first frame is already at the top — no
+    // visible jump or smooth-scroll drift after the content appears.
+    const scrollRegion = document.querySelector<HTMLElement>(
+      outcome ? "[data-earn-outcome-scroll]" : "[data-wizard-scroll-region]"
+    );
+    if (!scrollRegion) return;
+
+    scrollRegion.scrollTo({ top: 0, behavior: "instant" });
+    const heading = scrollRegion.querySelector<HTMLHeadingElement>("h2");
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+    }
+  }, [step, outcome]);
+}
+
+/**
+ * Choosing a profile reseeds the browse filters and DROPS a selection the new
+ * filters would hide, so the review step can never confirm a strategy the user
+ * can no longer see.
+ */
+function applyProfile(
+  next: EarnDepositProfile,
+  strategyId: string | null,
+  liveStrategies: readonly EarnStrategy[]
+): { filters: EarnStrategyFilters; strategyId: string | null } {
+  const filters = profileFilters(next);
+  const stillVisible =
+    strategyId !== null &&
+    visibleStrategies(liveStrategies, filters).some((strategy) => strategy.id === strategyId);
+  return { filters, strategyId: stillVisible ? strategyId : null };
+}
+
+/** Full-screen stop state: one message, one action. */
+function WizardNotice({
+  actionLabel,
+  message,
+  onAction,
+}: {
+  actionLabel: string;
+  message: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="mx-auto mt-16 flex max-w-md flex-col items-center gap-4 rounded-xl border border-border-default bg-surface-raised p-8 text-center">
+      <p className="text-sm leading-6 text-secondary">{message}</p>
+      <Button onClick={onAction} type="button" variant="secondary">
+        {actionLabel}
+      </Button>
+    </div>
+  );
+}
+
 function primaryActionLabel({
-  programExists,
+  retargeting,
   step,
   stepReady,
   submitting,
   t,
 }: {
-  programExists: boolean;
+  retargeting: boolean;
   step: DepositStep;
   stepReady: Record<DepositStep, boolean>;
   submitting: boolean;
@@ -140,16 +235,26 @@ function primaryActionLabel({
   if (submitting) return t("DashboardEarn.deposit.confirming");
   if (step === "review") {
     return t(
-      programExists ? "DashboardEarn.deposit.confirmUpdate" : "DashboardEarn.deposit.confirmCreate"
+      retargeting ? "DashboardEarn.deposit.confirmUpdate" : "DashboardEarn.deposit.confirmCreate"
     );
   }
   return stepReady[step] ? t("DashboardEarn.deposit.continueAction") : t(STEP_PENDING_LABEL[step]);
 }
 
-/** What the flow shows once the program is written. */
+/**
+ * What the flow shows once the program is written. `programId` names the exact
+ * program that was just created or re-targeted — the live screen reads its
+ * deposit feed by it, and the API snippets print it, so neither may fall back to
+ * "whichever program is first".
+ */
 type Outcome =
-  | { screen: "integration"; created: boolean; allocations: EarnPortfolioAllocationInput }
-  | { screen: "live"; created: boolean };
+  | {
+      screen: "integration";
+      created: boolean;
+      allocations: EarnPortfolioAllocationInput;
+      programId: string;
+    }
+  | { screen: "live"; created: boolean; programId: string };
 
 export interface EarnDepositWizardProps {
   /**
@@ -164,9 +269,15 @@ export interface EarnDepositWizardProps {
   fireblocksEnabled: boolean;
   /**
    * Preselects a strategy from `?strategy=`, so a link can drop the reader
-   * straight onto one. Kept deliberately: it is the flow's only deep-link entry.
+   * straight onto one.
    */
   initialStrategyId?: string;
+  /**
+   * Which existing program this run re-targets, from `?program=`; absent means
+   * "add a new one". Resolved by the server shell like `strategy` — search
+   * params belong to page.tsx, the wizard receives props.
+   */
+  retargetProgramId?: string;
 }
 
 export function EarnDepositWizard({
@@ -174,6 +285,7 @@ export function EarnDepositWizard({
   apiKeys,
   fireblocksEnabled,
   initialStrategyId,
+  retargetProgramId,
 }: EarnDepositWizardProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -185,7 +297,7 @@ export function EarnDepositWizard({
     isLoading: catalogueLoading,
   } = useEarnStrategies();
   const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
-  const { state: programState, refresh: refreshProgram } = useEarnProgram();
+  const { state: programState, error: programsError, refresh: refreshProgram } = useEarnPrograms();
 
   // The PUT validates yield sources against the pinned provider's active
   // catalogue, so the flow only ever offers those rows.
@@ -223,27 +335,29 @@ export function EarnDepositWizard({
     (strategy) => strategy.id === strategyId
   );
 
-  const programExists = programState?.kind === "active";
+  /**
+   * The run's shape comes from the URL, not from whether the organization
+   * happens to hold a program.
+   *
+   * With several programs legal, "a program exists" no longer tells this flow
+   * what the user asked for: adding a second strategy and re-targeting the
+   * first are different intents that look identical from that boolean. A
+   * `?program=<id>` on the deposit route says which one, and its absence means
+   * "add a new one" — so the choice is addressable, shareable, and survives a
+   * reload. An id that does NOT resolve is an error screen, never a fallback:
+   * silently downgrading "change this program's strategy" to "create a new
+   * program" would provision a second funded wallet the user did not ask for.
+   */
+  const retargetProgram = findProgram(programState, retargetProgramId);
+  const retargeting = retargetProgram !== undefined;
   const providerUnconfigured = programState?.kind === "unconfigured";
 
-  // The run's shape. `rawStep` starts at "wallet" before the program read
-  // resolves; on an update run that maps onto the first real step instead.
-  const stepOrder: readonly DepositStep[] = programExists ? UPDATE_STEPS : CREATE_STEPS;
-  const step: DepositStep = programExists && rawStep === "wallet" ? "profile" : rawStep;
+  // `rawStep` starts at "wallet" before the program read resolves; on a
+  // re-target run that maps onto the first real step instead.
+  const stepOrder: readonly DepositStep[] = retargeting ? UPDATE_STEPS : CREATE_STEPS;
+  const step: DepositStep = retargeting && rawStep === "wallet" ? "profile" : rawStep;
 
-  /**
-   * Idempotency key for the confirm, minted lazily and held per selected
-   * strategy: a retry after a failed confirm replays the SAME key so the
-   * provider cannot apply the change twice, while switching strategy mints a
-   * fresh one — reusing a key with a different payload is a provider conflict.
-   */
-  const requestIdRef = useRef<{ strategyId: string; requestId: string } | null>(null);
-  const requestIdFor = (id: string): string => {
-    if (requestIdRef.current?.strategyId !== id) {
-      requestIdRef.current = { strategyId: id, requestId: crypto.randomUUID() };
-    }
-    return requestIdRef.current.requestId;
-  };
+  const requestIdFor = useStrategyRequestId();
 
   const stepReady: Record<DepositStep, boolean> = {
     wallet: walletId !== null,
@@ -252,38 +366,17 @@ export function EarnDepositWizard({
     review: selectedStrategy !== undefined && !providerUnconfigured && !submitting,
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Every step and outcome transition must land already scrolled to the top with its heading announced.
-  useLayoutEffect(() => {
-    // Pre-paint so the new screen's first frame is already at the top — no
-    // visible jump or smooth-scroll drift after the content appears.
-    const scrollRegion = document.querySelector<HTMLElement>(
-      outcome ? "[data-earn-outcome-scroll]" : "[data-wizard-scroll-region]"
-    );
-    if (!scrollRegion) return;
+  useWizardStepFocus(step, outcome);
 
-    scrollRegion.scrollTo({ top: 0, behavior: "instant" });
-    const heading = scrollRegion.querySelector<HTMLHeadingElement>("h2");
-    if (heading) {
-      heading.tabIndex = -1;
-      heading.focus({ preventScroll: true });
-    }
-  }, [step, outcome]);
-
-  /**
-   * Choosing a profile reseeds the browse filters and drops a selection the new
-   * filters would hide, so the review step can never confirm a strategy the
-   * user can no longer see.
-   */
   const chooseProfile = (next: EarnDepositProfile) => {
+    const { filters: nextFilters, strategyId: nextStrategyId } = applyProfile(
+      next,
+      strategyId,
+      liveStrategies
+    );
     setProfile(next);
-    const nextFilters = profileFilters(next);
     setFilters(nextFilters);
-    if (
-      strategyId !== null &&
-      !visibleStrategies(liveStrategies, nextFilters).some((strategy) => strategy.id === strategyId)
-    ) {
-      setStrategyId(null);
-    }
+    setStrategyId(nextStrategyId);
   };
 
   const confirm = async () => {
@@ -293,7 +386,7 @@ export function EarnDepositWizard({
 
     setSubmitting(true);
     setSubmitError(null);
-    const result = await upsertEarnProgram({
+    const result = await writeProgram(retargetProgram?.id, {
       allocations,
       requestId: requestIdFor(selectedStrategy.id),
     });
@@ -304,13 +397,14 @@ export function EarnDepositWizard({
     }
 
     refreshProgram();
-    const created = result.data.data.created;
+    const created = retargetProgram === undefined;
+    const programId = result.data.data.program.id;
     // API integrators get the integration screen first; everyone else goes
     // straight to the live program.
     setOutcome(
       apiKeys.length > 0 && apiBaseUrl
-        ? { screen: "integration", created, allocations }
-        : { screen: "live", created }
+        ? { screen: "integration", created, allocations, programId }
+        : { screen: "live", created, programId }
     );
   };
 
@@ -333,8 +427,34 @@ export function EarnDepositWizard({
     setStep(stepOrder[index - 1] ?? stepOrder[0]);
   };
 
+  // A failed programs read must not strand the reader on an endless skeleton:
+  // state stays undefined on error, and unlike the workspace this route had no
+  // error surface at all. Same copy, same retry verb.
+  if (programsError) {
+    return (
+      <WizardNotice
+        actionLabel={t("Shared.SharedComponents.retry")}
+        message={t("DashboardEarn.overview.programLoadError")}
+        onAction={refreshProgram}
+      />
+    );
+  }
+
   if (programState === undefined) {
     return <EarnDepositSkeleton />;
+  }
+
+  // The link asked to re-target a specific program and the resolved list does
+  // not contain it (stale id, or another session removed it). Refusing beats
+  // the silent downgrade to a create run — see the run-shape comment above.
+  if (retargetProgramId !== undefined && retargetProgram === undefined) {
+    return (
+      <WizardNotice
+        actionLabel={t("DashboardEarn.deposit.programMissingAction")}
+        message={t("DashboardEarn.deposit.programMissing")}
+        onAction={() => router.push(EARN_DASHBOARD_PATH)}
+      />
+    );
   }
 
   if (outcome && selectedStrategy) {
@@ -348,7 +468,9 @@ export function EarnDepositWizard({
             : undefined
         }
         onDone={() => router.push(EARN_DASHBOARD_PATH)}
-        onIntegrationDone={() => setOutcome({ screen: "live", created: outcome.created })}
+        onIntegrationDone={() =>
+          setOutcome({ screen: "live", created: outcome.created, programId: outcome.programId })
+        }
         outcome={outcome}
         strategy={selectedStrategy}
       />
@@ -356,7 +478,58 @@ export function EarnDepositWizard({
   }
 
   const currentStep = stepOrder.indexOf(step);
-  const primaryLabel = primaryActionLabel({ programExists, step, stepReady, submitting, t });
+  const primaryLabel = primaryActionLabel({ retargeting, step, stepReady, submitting, t });
+
+  /**
+   * One element per step, looked up rather than branched through in the render.
+   * Building all four is free — they are plain elements, and only the looked-up
+   * one is ever mounted.
+   */
+  const stepBody: Record<DepositStep, ReactNode> = {
+    wallet: (
+      <WalletStep
+        fireblocksEnabled={fireblocksEnabled}
+        hasError={Boolean(walletsError)}
+        isLoading={walletsLoading}
+        onSelect={setWalletId}
+        selectedWalletId={walletId}
+        wallets={wallets ?? []}
+      />
+    ),
+    profile: (
+      <ProfileStep
+        hasError={Boolean(catalogueError)}
+        isLoading={catalogueLoading}
+        onSelect={chooseProfile}
+        selectedProfile={profile}
+        summaries={summaries}
+      />
+    ),
+    strategy: (
+      <StrategyStep
+        filters={activeFilters}
+        hasError={Boolean(catalogueError)}
+        isLoading={catalogueLoading}
+        onFiltersChange={setFilters}
+        onReset={() => setFilters(profileFilters(profile ?? "balanced"))}
+        onSelect={setStrategyId}
+        selectedStrategyId={strategyId}
+        strategies={browsable}
+        tokens={tokens}
+      />
+    ),
+    review: selectedStrategy ? (
+      <ReviewStep
+        onEditStrategy={() => setStep("strategy")}
+        onEditWallet={() => setStep("wallet")}
+        programExists={retargeting}
+        providerUnconfigured={providerUnconfigured}
+        strategy={selectedStrategy}
+        submitError={submitError}
+        wallet={selectedWallet}
+      />
+    ) : null,
+  };
 
   return (
     <WizardFrame
@@ -406,7 +579,7 @@ export function EarnDepositWizard({
           <h3 className="mb-2 text-sm font-medium text-primary">
             {t("DashboardEarn.deposit.summaryTitle")}
           </h3>
-          {programExists ? null : (
+          {retargeting ? null : (
             <SummaryRow
               label={t("DashboardEarn.deposit.reviewWallet")}
               value={
@@ -441,54 +614,7 @@ export function EarnDepositWizard({
     >
       {/* Steps swap instantly: each must land pre-scrolled to the top with no
           transition (see the useLayoutEffect scroll reset above). */}
-      <div className="min-h-[24rem]">
-        {step === "wallet" ? (
-          <WalletStep
-            fireblocksEnabled={fireblocksEnabled}
-            hasError={Boolean(walletsError)}
-            isLoading={walletsLoading}
-            onSelect={setWalletId}
-            selectedWalletId={walletId}
-            wallets={wallets ?? []}
-          />
-        ) : null}
-
-        {step === "profile" ? (
-          <ProfileStep
-            hasError={Boolean(catalogueError)}
-            isLoading={catalogueLoading}
-            onSelect={chooseProfile}
-            selectedProfile={profile}
-            summaries={summaries}
-          />
-        ) : null}
-
-        {step === "strategy" ? (
-          <StrategyStep
-            filters={activeFilters}
-            hasError={Boolean(catalogueError)}
-            isLoading={catalogueLoading}
-            onFiltersChange={setFilters}
-            onReset={() => setFilters(profileFilters(profile ?? "balanced"))}
-            onSelect={setStrategyId}
-            selectedStrategyId={strategyId}
-            strategies={browsable}
-            tokens={tokens}
-          />
-        ) : null}
-
-        {step === "review" && selectedStrategy ? (
-          <ReviewStep
-            onEditStrategy={() => setStep("strategy")}
-            onEditWallet={() => setStep("wallet")}
-            programExists={programExists}
-            providerUnconfigured={providerUnconfigured}
-            strategy={selectedStrategy}
-            submitError={submitError}
-            wallet={selectedWallet}
-          />
-        ) : null}
-      </div>
+      <div className="min-h-[24rem]">{stepBody[step]}</div>
     </WizardFrame>
   );
 }

@@ -1,9 +1,12 @@
 {
   "DashboardEarn": {
     "overview": {
-      "programTitle": "Your program",
-      "programDescription": "One provider-managed wallet running one strategy at a time. Balances are read live from the provider.",
-      "programEmpty": "No program yet.",
+      "programTitle": "Your strategies",
+      "programDescription": "Each strategy runs in its own provider-managed wallet, funded and withdrawn separately. Balances are read live from the provider.",
+      "programEmpty": "No strategies yet.",
+      "programUntitled": "Unnamed strategy",
+      "addStrategy": "Add strategy",
+      "blendedApy": "Blended APY",
       "withdraw": "Withdraw",
       "totalBalance": "Total balance",
       "totalEarned": "Earned to date",
@@ -225,7 +228,9 @@
       "profileBalancedAccess": "instant to T+3",
       "profileYieldAccess": "any redemption speed",
       "poolMeta": "Pool {value}",
-      "timingDisclosure": "Confirming saves the target immediately, but money moves on the provider's later rebalances — not instantly. Slower strategies can take hours to converge, and small balances may stay as cash where deploying them isn't economical."
+      "timingDisclosure": "Confirming saves the target immediately, but money moves on the provider's later rebalances — not instantly. Slower strategies can take hours to converge, and small balances may stay as cash where deploying them isn't economical.",
+      "programMissing": "That strategy could not be found — it may have been changed or removed since this link was made. Head back to Earn to see your current strategies.",
+      "programMissingAction": "Back to Earn"
     }
   }
 }

@@ -42,15 +42,20 @@
  * program — real allocation, real forward APY, a real Solana deposit address —
  * instead of the empty onboarding state a fresh install shows. Consequences
  * worth knowing:
- *   - one org gets one program, mirroring the UNIQUE (organization_id,
- *     environment, provider) product model; other local orgs are left unlinked
- *     rather than handed a sibling wallet that stands in for another org;
+ *   - it links exactly ONE program, and that is a seed choice, not a cap: an
+ *     org may hold N programs since PRO-1670, and the only uniqueness left is
+ *     GLOBAL on (provider, provider_wallet_ref) (migration 0056). One live
+ *     program is all local dev needs, and the wallet it points at can be
+ *     claimed by one link row platform-wide, so other local orgs are left
+ *     unlinked rather than handed a sibling wallet that stands in for another
+ *     org;
  *   - that wallet is SHARED with teammates, so funding it, updating its
  *     allocation through the wizard, or withdrawing from it changes what they
  *     see;
  *   - the seed only records the local link — it never calls Ground;
- *   - an organization that already has a program keeps it (the seed never
- *     repoints a wallet a developer created through the wizard);
+ *   - an organization that already holds THIS wallet keeps it, and a wallet a
+ *     developer attached by hand is never repointed — the seed says so and
+ *     stops rather than colliding on the global wallet-ref unique;
  *   - but a link THIS SEED made follows the primary org on a re-run, so seeding
  *     before your first Clerk sign-in is recoverable — see seedProviderWallets;
  *   - `--clean` removes only links labelled SEED_WALLET_LABEL and leaves the
@@ -114,16 +119,18 @@ const SEED_WALLET_LABEL = "Seeded sandbox wallet (local dev)";
  * its true balance, positions, allocations, and Solana deposit address straight
  * from Ground. Sandbox only — never put a production wallet ref here.
  *
- * ONE wallet, linked to ONE organization — the local mirror of the product
- * model. SDP maps each organization to exactly one Ground portfolio wallet
- * (`earn_provider_wallets` UNIQUE (organization_id, environment, provider),
- * migration 0049): choosing a curator re-weights that wallet, it never
- * provisions a second one. Note this is SDP's model, NOT a Ground limit —
- * Ground has no concept of an SDP organization, and one Ground account can hold
+ * ONE wallet, linked to ONE organization — a seed choice, not the product cap.
+ * Since PRO-1670 an organization may hold N programs per (environment,
+ * provider); what the seed must respect is the GLOBAL uniqueness that replaced
+ * the old per-org one (`earn_provider_wallets` UNIQUE (provider,
+ * provider_wallet_ref), migration 0056): a provider wallet holds real funds, so
+ * exactly one link row anywhere in the platform may claim it. Ground has no
+ * concept of an SDP organization, and one Ground account can hold
  * many portfolio wallets (all SDP orgs share a single account per environment;
  * `readGroundConfig` resolves one API key, never a per-org credential). Sibling
  * wallets in the team's sandbox account therefore stand in for OTHER
- * organizations, so the seed must not hand them to yours.
+ * organizations, so the seed must not hand them to yours — and re-pointing
+ * SEED_PROVIDER_WALLET moves the one seeded link rather than adding a second.
  *
  * It is linked so local dev opens onto a live program instead of an empty
  * onboarding screen. Live provider resource, not a fixture:
@@ -392,6 +399,15 @@ async function countHistoryPinnedSeededWallets(db: AppDb): Promise<number> {
   return row?.pinned ?? 0;
 }
 
+/** Whether ONE wallet row is pinned by withdrawal history (undeletable FK). */
+async function walletHasWithdrawalHistory(db: AppDb, walletId: string): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 AS hit FROM earn_program_withdrawals WHERE wallet_id = ? LIMIT 1`)
+    .bind(walletId)
+    .first<{ hit: number }>();
+  return row !== null;
+}
+
 async function deleteSeededWallets(db: AppDb): Promise<number> {
   const pinned = await countHistoryPinnedSeededWallets(db);
   if (pinned > 0) {
@@ -456,9 +472,16 @@ async function findPrimaryLocalOrganization(db: AppDb): Promise<LocalOrganizatio
 }
 
 /**
- * Links the shared sandbox wallet to the primary local organization — one org,
- * one program, mirroring the UNIQUE (organization_id, environment, provider)
- * product model.
+ * Links the shared sandbox wallet to the primary local organization.
+ *
+ * The seed still creates exactly ONE program, but that is now a choice about
+ * how much local state to fabricate rather than a limit: since PRO-1670 an
+ * organization may hold N programs, so the question this function asks changed.
+ * It used to ask "does this org already have a program?" — which after PRO-1670
+ * would refuse to seed for anyone who had made one through the wizard. It now
+ * asks "is the shared sandbox wallet already linked, and to whom?", which the
+ * global UNIQUE (provider, provider_wallet_ref) (migration 0056) makes a
+ * single-row question.
  *
  * Never repoints a program a developer created through the wizard: that link is
  * theirs and silently swapping its provider wallet would strand it. A link this
@@ -482,20 +505,33 @@ async function seedProviderWallets(
     return { linked: 0, kept: 0, moved: false, skipped: true };
   }
 
-  const existing = await repo.getProviderWallet({
-    organizationId: organization.organizationId,
-    environment: SEED_ENVIRONMENT,
+  const linked = await repo.getProviderWalletByRef({
     provider: SEED_PROVIDER,
+    providerWalletRef: SEED_PROVIDER_WALLET.ref,
   });
-  if (existing) {
-    console.log(`  ${organization.slug}: kept existing program (${existing.provider_wallet_ref})`);
+  if (linked?.organization_id === organization.organizationId) {
+    console.log(`  ${organization.slug}: kept existing program (${linked.provider_wallet_ref})`);
     return { linked: 0, kept: 1, moved: false, skipped: false };
+  }
+
+  // Linked to another org by something other than this seed — a wallet a
+  // developer attached through the wizard. The move below only ever deletes
+  // SEED_WALLET_LABEL rows, so the insert would hit 0056's global unique and
+  // fail with a raw Postgres error. Say what happened instead.
+  if (linked && linked.label !== SEED_WALLET_LABEL) {
+    console.log(
+      `  ${organization.slug}: NOT linked — ${SEED_PROVIDER_WALLET.ref} is already attached to another local organization by hand. Unlink it there first, or point SEED_PROVIDER_WALLET at your own sandbox wallet.`
+    );
+    return { linked: 0, kept: 0, moved: false, skipped: true };
   }
 
   // A seeded link with withdrawal history cannot move: its row is the FK
   // target of that history (undeletable by design), and the history belongs
-  // to the org that withdrew. Leave it and say so, rather than crash mid-move.
-  if ((await countHistoryPinnedSeededWallets(db)) > 0) {
+  // to the org that withdrew. Scoped to THE ROW HOLDING THIS REF — a stale
+  // seeded link from an earlier SEED_PROVIDER_WALLET rotation may also be
+  // pinned, but it holds a different ref, so it collides with nothing under
+  // 0056's global unique and must not block linking the current one.
+  if (linked && (await walletHasWithdrawalHistory(db, linked.id))) {
     console.log(
       `  ${organization.slug}: NOT moved — the seeded link has withdrawal history and stays with the org that withdrew (PRO-1628).`
     );
@@ -671,7 +707,9 @@ async function main(): Promise<void> {
     if (wallets.skipped) {
       console.log("  no local organization found — run db:seed:local first, or sign in once.");
     } else {
-      console.log("  one organization, one program — other local orgs stay unlinked by design.");
+      console.log(
+        "  one seeded program on one organization — a seed choice, not a cap (the API takes many); other local orgs stay unlinked by design."
+      );
       if (wallets.moved) {
         console.log(
           "  (moved the seeded link off a previous org to follow the one you sign into.)"

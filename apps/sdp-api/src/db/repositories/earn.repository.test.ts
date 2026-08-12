@@ -16,6 +16,8 @@ import type {
   EarnRepository,
   EarnStrategyRow,
   InsertEarnProviderWalletInput,
+  ListEarnProviderWalletsInput,
+  ListEarnProviderWalletsResult,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
@@ -106,16 +108,18 @@ describe("EarnRepository (postgres)", () => {
     return row;
   }
 
-  async function freezeCreatedAt(
-    table: "earn_strategies" | "earn_program_withdrawals",
-    ids: readonly string[]
-  ): Promise<void> {
-    const db = getDb(env);
+  type OrderedTable = "earn_strategies" | "earn_program_withdrawals" | "earn_provider_wallets";
+
+  async function setCreatedAt(table: OrderedTable, id: string, createdAt: string): Promise<void> {
+    await getDb(env)
+      .prepare(`UPDATE ${table} SET created_at = ? WHERE id = ?`)
+      .bind(createdAt, id)
+      .run();
+  }
+
+  async function freezeCreatedAt(table: OrderedTable, ids: readonly string[]): Promise<void> {
     for (const id of ids) {
-      await db
-        .prepare(`UPDATE ${table} SET created_at = ? WHERE id = ?`)
-        .bind(SHARED_CREATED_AT, id)
-        .run();
+      await setCreatedAt(table, id, SHARED_CREATED_AT);
     }
   }
 
@@ -274,7 +278,11 @@ describe("EarnRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
         environment: "sandbox",
         provider: "ground",
-        providerWalletRef: GROUND_WALLET_REF,
+        // A FRESH ref per call by default. (provider, provider_wallet_ref) is
+        // globally unique since migration 0056, so a shared default would make
+        // every test that seeds a second program fail on the unique instead of
+        // on its own assertion. Tests that care about the ref pass one.
+        providerWalletRef: crypto.randomUUID(),
         label: null,
         createdBy: TEST_USER.id,
         ...overrides,
@@ -302,85 +310,281 @@ describe("EarnRepository (postgres)", () => {
         .run();
     }
 
-    it("round-trips the shared wallet link through getProviderWallet", async () => {
-      const inserted = await seedProviderWallet({ label: "Shared Ground portfolio" });
-      expect(inserted.id).toMatch(/^earn_provider_wallet_/);
-
-      const fetched = await repo.getProviderWallet({
+    function listPrograms(
+      overrides: Partial<ListEarnProviderWalletsInput> = {}
+    ): Promise<ListEarnProviderWalletsResult> {
+      return repo.listProviderWallets({
         organizationId: TEST_ORG.id,
         environment: "sandbox",
-        provider: "ground",
+        limit: 20,
+        offset: 0,
+        ...overrides,
       });
+    }
 
-      expect(fetched).toEqual(inserted);
-      expect(fetched?.provider_wallet_ref).toBe(GROUND_WALLET_REF);
-      expect(fetched?.label).toBe("Shared Ground portfolio");
-      expect(fetched?.project_id).toBe(TEST_PROJECT_ID);
-      expect(fetched?.created_by).toBe(TEST_USER.id);
-    });
+    describe("getProviderWalletById", () => {
+      it("round-trips a program by its own id, scoped to (organization, environment)", async () => {
+        const inserted = await seedProviderWallet({
+          providerWalletRef: GROUND_WALLET_REF,
+          label: "Shared Ground portfolio",
+        });
+        expect(inserted.id).toMatch(/^earn_provider_wallet_/);
 
-    it("returns null when the org has no wallet for that provider+environment", async () => {
-      await seedProviderWallet();
-
-      await expect(
-        repo.getProviderWallet({
-          organizationId: TEST_ORG.id,
-          environment: "production",
-          provider: "ground",
-        })
-      ).resolves.toBeNull();
-      await expect(
-        repo.getProviderWallet({
+        const fetched = await repo.getProviderWalletById({
           organizationId: TEST_ORG.id,
           environment: "sandbox",
-          provider: "veda",
-        })
-      ).resolves.toBeNull();
+          walletId: inserted.id,
+        });
+
+        expect(fetched).toEqual(inserted);
+        expect(fetched?.provider_wallet_ref).toBe(GROUND_WALLET_REF);
+        expect(fetched?.label).toBe("Shared Ground portfolio");
+        expect(fetched?.project_id).toBe(TEST_PROJECT_ID);
+        expect(fetched?.created_by).toBe(TEST_USER.id);
+      });
+
+      it("misses a sibling organization's program id", async () => {
+        await seedSiblingOrg();
+        const ours = await seedProviderWallet();
+        const theirs = await seedProviderWallet({
+          organizationId: OTHER_ORG.id,
+          projectId: OTHER_ORG_PROJECT_ID,
+        });
+        expect(theirs.id).not.toBe(ours.id);
+
+        await expect(
+          repo.getProviderWalletById({
+            organizationId: TEST_ORG.id,
+            environment: "sandbox",
+            walletId: theirs.id,
+          })
+        ).resolves.toBeNull();
+
+        // …and resolves for its owner, so the miss above is the organization
+        // clause doing its job rather than an id that never existed.
+        await expect(
+          repo.getProviderWalletById({
+            organizationId: OTHER_ORG.id,
+            environment: "sandbox",
+            walletId: theirs.id,
+          })
+        ).resolves.toMatchObject({ id: theirs.id });
+      });
+
+      it("misses the right id in the WRONG environment", async () => {
+        // A real security property, not a formality. Before PRO-1670 the lookup
+        // was keyed on (organization, environment, provider), so environment
+        // scoping was structural and a sandbox row could not be reached from a
+        // production session by construction. Addressing a program by its own id
+        // removes that guarantee, so the clause is now explicit — and a
+        // production dashboard session must never resolve a sandbox program.
+        const sandboxProgram = await seedProviderWallet();
+
+        await expect(
+          repo.getProviderWalletById({
+            organizationId: TEST_ORG.id,
+            environment: "production",
+            walletId: sandboxProgram.id,
+          })
+        ).resolves.toBeNull();
+
+        await expect(
+          repo.getProviderWalletById({
+            organizationId: TEST_ORG.id,
+            environment: "sandbox",
+            walletId: sandboxProgram.id,
+          })
+        ).resolves.toMatchObject({ id: sandboxProgram.id });
+      });
+
+      it("returns null for an unknown id", async () => {
+        await seedProviderWallet();
+
+        await expect(
+          repo.getProviderWalletById({
+            organizationId: TEST_ORG.id,
+            environment: "sandbox",
+            walletId: "earn_provider_wallet_missing",
+          })
+        ).resolves.toBeNull();
+      });
     });
 
-    it("enforces ONE shared wallet per org+environment+provider", async () => {
-      await seedProviderWallet();
+    describe("listProviderWallets", () => {
+      it("returns every program for the (organization, environment), OLDEST first", async () => {
+        // Oldest-first is a stability requirement, not a preference (migration
+        // 0056's header): consumers that track "the first program" across polls
+        // must not be silently re-pointed at a different wallet — and therefore
+        // at a different balance — the moment another program is created.
+        const first = await seedProviderWallet({ label: "first" });
+        const second = await seedProviderWallet({ label: "second" });
+        const third = await seedProviderWallet({ label: "third" });
+        await setCreatedAt("earn_provider_wallets", first.id, "2026-01-01T00:00:00.000Z");
+        await setCreatedAt("earn_provider_wallets", second.id, "2026-02-01T00:00:00.000Z");
+        await setCreatedAt("earn_provider_wallets", third.id, "2026-03-01T00:00:00.000Z");
 
-      // Rejected even from a different project with a different provider-side
-      // ref: the wallet is org-scoped, project_id is provisioning context only.
-      await expect(
-        seedProviderWallet({
-          projectId: OTHER_PROJECT_ID,
-          providerWalletRef: "2c7e6b2f-9a5d-4d2b-8f3c-4e8a7b9d0f12",
-        })
-      ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
+        const { rows, total } = await listPrograms();
 
-      // The sibling environment and sibling providers stay open.
+        expect(total).toBe(3);
+        expect(rows.map((row) => row.id)).toEqual([first.id, second.id, third.id]);
+      });
+
+      it("breaks a created_at tie by id ASC so windows tile the collection exactly", async () => {
+        // Programs created in one burst share sdp_iso_now() exactly as bulk
+        // catalogue rows do, so created_at alone leaves the order (and therefore
+        // the head of the list) undefined. Five programs for ONE
+        // org+environment+provider is itself only legal since PRO-1670.
+        const ids: string[] = [];
+        for (let i = 0; i < 5; i += 1) {
+          ids.push((await seedProviderWallet()).id);
+        }
+        await freezeCreatedAt("earn_provider_wallets", ids);
+        // ASC — the mirror of the DESC history lists above.
+        const expected = [...ids].sort();
+
+        const seen: string[] = [];
+        for (let offset = 0; offset < expected.length; offset += 2) {
+          const { rows, total } = await listPrograms({ limit: 2, offset });
+          expect(total).toBe(expected.length);
+          seen.push(...rows.map((row) => row.id));
+        }
+        expect(seen).toEqual(expected);
+      });
+
+      it("filters by provider and excludes sibling orgs and the sibling environment", async () => {
+        await seedSiblingOrg();
+        const groundA = await seedProviderWallet();
+        const groundB = await seedProviderWallet();
+        const veda = await seedProviderWallet({ provider: "veda" });
+        const production = await seedProviderWallet({ environment: "production" });
+        const sibling = await seedProviderWallet({
+          organizationId: OTHER_ORG.id,
+          projectId: OTHER_ORG_PROJECT_ID,
+        });
+
+        // Unfiltered: every provider's programs for this (org, environment).
+        const all = await listPrograms();
+        expect(all.total).toBe(3);
+        expect(new Set(all.rows.map((row) => row.id))).toEqual(
+          new Set([groundA.id, groundB.id, veda.id])
+        );
+        expect(all.rows.map((row) => row.id)).not.toContain(production.id);
+        expect(all.rows.map((row) => row.id)).not.toContain(sibling.id);
+
+        // The optional filter narrows rows AND total together.
+        const ground = await listPrograms({ provider: "ground" });
+        expect(ground.total).toBe(2);
+        expect(new Set(ground.rows.map((row) => row.id))).toEqual(
+          new Set([groundA.id, groundB.id])
+        );
+
+        // The sibling environment and the sibling org each see only their own.
+        await expect(listPrograms({ environment: "production" })).resolves.toMatchObject({
+          total: 1,
+        });
+        const theirs = await listPrograms({ organizationId: OTHER_ORG.id });
+        expect(theirs.rows.map((row) => row.id)).toEqual([sibling.id]);
+      });
+
+      it("answers an organization with no programs with an empty envelope", async () => {
+        // A collection cannot 404 for emptiness — the handler leans on this to
+        // tell "no programs" apart from "provider not configured".
+        await expect(listPrograms()).resolves.toEqual({ rows: [], total: 0 });
+      });
+    });
+
+    describe("getProviderWalletByRef", () => {
+      it("finds the claiming row across organizations — the lookup is GLOBAL", async () => {
+        await seedSiblingOrg();
+        const theirs = await seedProviderWallet({
+          organizationId: OTHER_ORG.id,
+          projectId: OTHER_ORG_PROJECT_ID,
+          providerWalletRef: GROUND_WALLET_REF,
+        });
+
+        // No organization to scope by: the create path resolves a provider
+        // replay before it knows whose row the insert collided with, and asserts
+        // ownership afterwards (which is what turns THIS case into a 409).
+        await expect(
+          repo.getProviderWalletByRef({ provider: "ground", providerWalletRef: GROUND_WALLET_REF })
+        ).resolves.toMatchObject({ id: theirs.id, organization_id: OTHER_ORG.id });
+      });
+
+      it("returns null for an unknown ref and for the same ref under another provider", async () => {
+        await seedProviderWallet({ providerWalletRef: GROUND_WALLET_REF });
+
+        await expect(
+          repo.getProviderWalletByRef({
+            provider: "ground",
+            providerWalletRef: "44f0f6a1-0000-4000-8000-000000000000",
+          })
+        ).resolves.toBeNull();
+        // Keyed on the PAIR: provider ids namespace refs, so one provider's
+        // wallet id can never resolve another provider's program.
+        await expect(
+          repo.getProviderWalletByRef({ provider: "veda", providerWalletRef: GROUND_WALLET_REF })
+        ).resolves.toBeNull();
+      });
+    });
+
+    it("allows N programs per org+environment+provider (PRO-1670)", async () => {
+      // The inverse of the pre-PRO-1670 rule. 0049's UNIQUE
+      // (organization_id, environment, provider) capped an org at ONE program
+      // per provider; 0056 drops it, so a second program with its own
+      // provider-side ref is now a legitimate second strategy.
+      const first = await seedProviderWallet();
+      const second = await seedProviderWallet();
+      expect(second.id).not.toBe(first.id);
+
+      // Sibling environments and providers were always open and stay open.
       await expect(seedProviderWallet({ environment: "production" })).resolves.toMatchObject({
         environment: "production",
       });
       await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
         provider: "veda",
       });
+      // project_id is still provisioning context only — a program created from a
+      // sibling project joins the same org+environment collection.
+      await expect(seedProviderWallet({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
+        project_id: OTHER_PROJECT_ID,
+      });
+
+      const { total } = await listPrograms();
+      expect(total).toBe(4);
     });
 
-    it("scopes lookups to the organization", async () => {
+    it("still allows ONE link row per provider wallet — globally (migration 0056)", async () => {
+      // The uniqueness did not disappear, it MOVED: a provider-side wallet holds
+      // real funds, so exactly one link row may claim it platform-wide. Two rows
+      // pointing at one Ground wallet would each read the other's balance.
       await seedSiblingOrg();
-      const ours = await seedProviderWallet();
-      const theirs = await seedProviderWallet({
-        organizationId: OTHER_ORG.id,
-        projectId: OTHER_ORG_PROJECT_ID,
-        providerWalletRef: "3d8f7c30-ab6e-4e3c-9a4d-5f9b8c0e1a23",
-      });
-      expect(theirs.id).not.toBe(ours.id);
+      await seedProviderWallet({ providerWalletRef: GROUND_WALLET_REF });
 
-      for (const [organizationId, expected] of [
-        [TEST_ORG.id, ours],
-        [OTHER_ORG.id, theirs],
-      ] as const) {
-        const fetched = await repo.getProviderWallet({
-          organizationId,
-          environment: "sandbox",
-          provider: "ground",
-        });
-        expect(fetched?.id).toBe(expected.id);
-        expect(fetched?.provider_wallet_ref).toBe(expected.provider_wallet_ref);
-      }
+      await expect(seedProviderWallet({ providerWalletRef: GROUND_WALLET_REF })).rejects.toSatisfy(
+        (err: unknown) => isPostgresUniqueViolation(err)
+      );
+
+      // Across ORGANIZATIONS — the constraint is not tenant-scoped, which is the
+      // whole point (provider-side identifiers never are).
+      await expect(
+        seedProviderWallet({
+          organizationId: OTHER_ORG.id,
+          projectId: OTHER_ORG_PROJECT_ID,
+          providerWalletRef: GROUND_WALLET_REF,
+        })
+      ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
+
+      // …and across ENVIRONMENTS, for the same reason: the provider wallet is
+      // one object, whatever SDP environment reached for it.
+      await expect(
+        seedProviderWallet({ environment: "production", providerWalletRef: GROUND_WALLET_REF })
+      ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
+
+      // The pair is (provider, ref): the same string under a DIFFERENT provider
+      // names a different provider's wallet and stays insertable.
+      await expect(
+        seedProviderWallet({ provider: "veda", providerWalletRef: GROUND_WALLET_REF })
+      ).resolves.toMatchObject({ provider: "veda", provider_wallet_ref: GROUND_WALLET_REF });
     });
   });
 
@@ -795,17 +999,23 @@ describe("EarnRepository (postgres)", () => {
         await freezeCreatedAt("earn_program_withdrawals", ids);
         const expected = [...ids].sort().reverse();
 
-        // A sibling wallet's history must never leak into the window or total.
-        const otherWallet = await repo.insertProviderWallet({
+        // A sibling PROGRAM's history must never leak into the window or total —
+        // and since PRO-1670 the sibling is the hard case: same organization,
+        // same environment, same provider, differing only by wallet_id. Before
+        // 0056 this row could not exist, so wallet scoping was never tested
+        // against anything a weaker (org, environment, provider) scope would
+        // have merged.
+        const siblingProgram = await repo.insertProviderWallet({
           organizationId: TEST_ORG.id,
           projectId: TEST_PROJECT_ID,
           environment: "sandbox",
-          provider: "ground",
+          provider: "veda",
           providerWalletRef: "cc9f7c30-ab6e-4e3c-9a4d-5f9b8c0e1a24",
           label: null,
           createdBy: TEST_USER.id,
         });
-        await seedWithdrawal({ walletId: otherWallet?.id, provider: "ground" });
+        expect(siblingProgram?.id).not.toBe(wallet.id);
+        await seedWithdrawal({ walletId: siblingProgram?.id });
 
         const seen: string[] = [];
         for (let offset = 0; offset < expected.length; offset += 2) {

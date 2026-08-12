@@ -463,6 +463,7 @@ describe("Solana-only boundary — every request pins the environment's chain", 
         client.createPortfolioWallet(ctx, {
           label: "boundary",
           allocations: { usdc: [{ yieldSourceId: "morpho-gauntlet-usdc", pct: 100 }] },
+          requestId: "55555555-5555-4555-8555-555555555555",
         }),
       carriesChain: false,
     },
@@ -571,12 +572,29 @@ describe("GroundEarnClient.createPortfolioWallet", () => {
     assert.deepEqual(result, { providerWalletRef: "wal_1", status: "creating" });
   });
 
-  it("generates a UUIDv4 requestId when the caller omits one", async () => {
+  /**
+   * The create path deliberately has NO mint-when-absent fallback (PRO-1670):
+   * a server-minted id is fresh per attempt, so it would guarantee the
+   * double-provision it appears to guard against. `requestId` is required by
+   * `EarnPortfolioWalletCreateInput`, so the omission is a type error rather
+   * than a silent downgrade — this test pins that whatever the caller sends is
+   * exactly what reaches the wire, including a value the type system cannot
+   * catch at a JS boundary.
+   *
+   * The UPDATE path keeps its fallback (see updatePortfolioStrategy below):
+   * re-applying the same allocations is a provider no-op, so an absent key
+   * costs a duplicate mutation rather than a duplicate wallet.
+   */
+  it("never mints a requestId of its own on create", async () => {
     const fetchMock = stubGroundFetch({ body: groundWallet({ status: "creating" }) });
 
-    await client.createPortfolioWallet(sandboxCtx, { label: "SDP Earn", allocations: {} });
+    await client.createPortfolioWallet(sandboxCtx, {
+      label: "SDP Earn",
+      allocations: {},
+      requestId: undefined as unknown as string,
+    });
 
-    assert.match(String(requestBody(fetchMock).requestId), UUID_V4_PATTERN);
+    assert.equal(requestBody(fetchMock).requestId, undefined);
   });
 });
 

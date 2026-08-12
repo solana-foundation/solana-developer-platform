@@ -78,8 +78,15 @@ export interface EarnVaultProvider {
 export interface EarnPortfolioWalletCreateInput {
   label: string;
   allocations: EarnPortfolioAllocationInput;
-  /** Idempotency key (UUIDv4) forwarded to the provider; generated when omitted. */
-  requestId?: string;
+  /**
+   * Idempotency key (UUIDv4), REQUIRED since PRO-1670 — the same reason the
+   * withdrawal input requires one. Until then an organization held at most one
+   * program per (environment, provider) and a DB unique constraint caught a
+   * retried create; with N programs legal, nothing downstream can tell a retry
+   * from a genuine second program, so the key is the ONLY defence against
+   * provisioning a duplicate wallet the customer may then fund.
+   */
+  requestId: string;
 }
 
 export interface EarnPortfolioWalletCreateResult {

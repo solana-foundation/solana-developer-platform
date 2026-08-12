@@ -124,11 +124,13 @@ export interface EarnStrategy {
  *
  * Some vault-infra providers front a managed multi-source portfolio (one
  * omnibus wallet whose funds are spread across yield sources by a target
- * strategy) instead of per-strategy vault positions. SDP keeps ONE shared
- * portfolio wallet per (organization, environment); choosing a curator
- * rewrites that wallet's strategy weights. All USD figures are decimal
- * strings; allocation weights are percent on the way in (what strategies are
- * authored in) and basis points on the way out (what providers report back).
+ * strategy) instead of per-strategy vault positions. Each such wallet is one
+ * SDP "program"; an organization may hold several per environment (PRO-1670),
+ * each pinned to a single vault, with nothing rebalancing across them.
+ * Selecting a strategy re-targets one program's weights. All USD figures are
+ * decimal strings; allocation weights are percent on the way in (what
+ * strategies are authored in) and basis points on the way out (what providers
+ * report back).
  */
 
 /** Deposit tokens a portfolio strategy is keyed by (provider-neutral lowercase). */

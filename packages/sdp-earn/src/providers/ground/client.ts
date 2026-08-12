@@ -804,7 +804,11 @@ export class GroundEarnClient
       method: "POST",
       headers: config.headers,
       body: {
-        requestId: input.requestId ?? crypto.randomUUID(),
+        // No mint-when-absent fallback: a server-minted id is fresh per attempt,
+        // so it guarantees the double-provision it appears to guard against. The
+        // key is required by the input type (PRO-1670) precisely so this cannot
+        // silently degrade.
+        requestId: input.requestId,
         label: input.label,
         strategy: { allocations: input.allocations },
       },

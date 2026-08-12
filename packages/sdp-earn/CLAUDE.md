@@ -88,35 +88,46 @@ reference prefix); `--clean` removes only the fixtures.
 See README.md → "Catalogue data: the sync cron vs the dev seed" for cadence,
 failure behaviour, and when to prefer each.
 
-### 4b. Get a program — one org, one portfolio wallet
+### 4b. Get a program — the seed links one, the API allows many
 
 `db:seed:earn` also links your org to a real Ground sandbox portfolio wallet, so
 the dashboard opens onto a live program instead of an empty onboarding screen.
 
-**One org gets exactly one program.** That is SDP's product model — the UNIQUE
-`(organization_id, environment, provider)` constraint on `earn_provider_wallets`
-(migration 0049) — *not* a Ground limit. Ground has no concept of an SDP org and
-one Ground account holds many portfolio wallets; every SDP org shares a single
-account per environment (`readGroundConfig` resolves one API key, never a per-org
-credential). So the sibling wallets you see in Ground's dashboard stand in for
-*other* orgs — the seed deliberately does not hand them to yours, and there is no
-way to attach several to one org.
+**The seed links exactly one program; that is a seed choice, not a cap.** Since
+PRO-1670 an org may hold N programs per (environment, provider) — each pinned to
+one vault, created explicitly through `POST /v1/earn/programs` — and the
+`(organization_id, environment, provider)` unique that used to cap it at one is
+dropped (migration 0056). What replaces it is GLOBAL: `UNIQUE (provider,
+provider_wallet_ref)`, so one provider wallet is claimable by exactly one link
+row platform-wide. That is the constraint the seed actually has to respect —
+Ground has no concept of an SDP org and one Ground account holds many portfolio
+wallets; every SDP org shares a single account per environment
+(`readGroundConfig` resolves one API key, never a per-org credential). So the
+sibling wallets you see in Ground's dashboard stand in for *other* orgs, and the
+seed deliberately does not hand them to yours.
 
 This is also why **your local total won't match Ground's dashboard**: Ground's
-console sums every wallet in the shared sandbox account, SDP shows only your
-org's one wallet. Both numbers are right.
+console sums every wallet in the shared sandbox account, SDP shows only the
+wallets your org holds. Both numbers are right.
 
 Practical notes:
 
 - **Which org gets it:** the org you sign into (the Clerk-backed one), ahead of
-  the `db:seed:local` test fixture. Other local orgs stay unlinked on purpose.
+  the `db:seed:local` test fixture. Other local orgs stay unlinked on purpose —
+  the shared wallet can only be claimed once, and handing it around is worse
+  than leaving them empty.
 - **Re-run the seed after your first Clerk sign-in.** On a fresh machine the only
   org is the test fixture, so an early seed lands the program there. The seed
   *moves* its own link to follow your real org — but only when you re-run it. A
-  program you created through the wizard is never moved.
+  program you created through the wizard is never moved; the seed says so and
+  stops rather than colliding on the global wallet-ref unique.
+- **Want a second program locally?** Create it through the dashboard (Add
+  strategy) against a *different* Ground sandbox wallet — the seed only ever
+  manages its own one link, and re-pointing `SEED_PROVIDER_WALLET` moves that
+  link rather than adding to it.
 - **The API-key path has no program.** `db:seed:local`'s dev key belongs to the
-  test org, so `curl /v1/earn/program?provider=ground` with it returns 404 by
-  design. Use the dashboard, or mint a key for your own org.
+  test org, so `curl /v1/earn/programs?provider=ground` with it returns an empty
+  list by design. Use the dashboard, or mint a key for your own org.
 - **The seeded program starts at whatever the shared wallet currently holds.**
   It carries a live single-strategy allocation (one strategy at 100% — the
   only shape the V1 API accepts, PRO-1667), so the overview shows a real
@@ -158,9 +169,10 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 | API waits then dies on boot | `DATABASE_URL` not preserved → Doppler's Cloud SQL URL won |
 | Web typecheck fails in `.next/dev/types` | stale generated cache: `rm -rf apps/sdp-web/.next/dev/types` |
 | Dashboard shows empty onboarding, but a program exists in the DB | it is linked to another local org — re-run `db:seed:earn` to move it to the org you sign into |
-| `GET /v1/earn/program` → 404 with the dev API key | that key is the test org's, which has no program by design (§4b) |
-| A key you minted yourself returns `strategies: []` **and** program 404 | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox program, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive Ground's **production** API from a laptop. |
-| Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows your org's one wallet (§4b) |
+| `GET /v1/earn/programs` → `programs: []` with the dev API key | that key is the test org's, which has no program by design (§4b) |
+| A key you minted yourself returns `strategies: []` **and** `programs: []` | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox programs, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive Ground's **production** API from a laptop. |
+| `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
+| Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows only the wallets your org holds (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
 | Need devnet USDC to fund a program | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b) |
 
