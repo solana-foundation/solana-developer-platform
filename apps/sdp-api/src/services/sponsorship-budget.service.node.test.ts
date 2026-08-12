@@ -128,6 +128,14 @@ describe("BudgetedFeePayment", () => {
     }
   );
 
+  it("commits the durable reservation before touching the Redis budget gate", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    await expect(feePayment.signAndSend(buildTransaction())).resolves.toBe("signature_1");
+    const created = repository.createReservation.mock.invocationCallOrder[0];
+    const reserved = budgetRedis.reserve.mock.invocationCallOrder[0];
+    expect(created).toBeLessThan(reserved);
+  });
+
   it("denies the tiny-limit Surfpool/Kora canary before Kora or KMS execution", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     repository.resolvePolicies.mockResolvedValueOnce([
@@ -142,7 +150,12 @@ describe("BudgetedFeePayment", () => {
     });
     expect(budgetRedis.reserve).toHaveBeenCalledWith(expect.objectContaining({ amount: 5_000 }));
     expect(provider.signAndSend).not.toHaveBeenCalled();
-    expect(repository.createReservation).not.toHaveBeenCalled();
+    expect(repository.createReservation).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "budget exceeded during admission"
+    );
   });
 
   it("reserves network fee plus Kora outflow ceiling and denies before provider execution", async () => {
@@ -171,7 +184,33 @@ describe("BudgetedFeePayment", () => {
       expect.objectContaining({ amount: 1_005_000 })
     );
     expect(provider.signAndSend).not.toHaveBeenCalled();
-    expect(repository.createReservation).not.toHaveBeenCalled();
+    expect(repository.createReservation).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "budget exceeded during admission"
+    );
+  });
+
+  it("retries the Redis gate under a refreshed policy without recreating the durable row", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    budgetRedis.reserve.mockResolvedValueOnce("stale_policy");
+    await expect(feePayment.signAndSend(buildTransaction())).resolves.toBe("signature_1");
+    expect(budgetRedis.reserve).toHaveBeenCalledTimes(2);
+    expect(repository.createReservation).toHaveBeenCalledOnce();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+  });
+
+  it("fails closed and releases once when the policy stays stale across both attempts", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    budgetRedis.reserve.mockResolvedValue("stale_policy");
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(budgetRedis.reserve).toHaveBeenCalledTimes(2);
+    expect(repository.createReservation).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(provider.signAndSend).not.toHaveBeenCalled();
   });
 
   it("releases deterministic pre-send rejections", async () => {
@@ -259,7 +298,7 @@ describe("BudgetedFeePayment", () => {
 
   it("never lets a duplicate in-progress caller execute Kora", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
-    budgetRedis.reserve.mockResolvedValueOnce("duplicate");
+    repository.createReservation.mockResolvedValueOnce(false);
     repository.getReservation.mockResolvedValueOnce(null).mockResolvedValueOnce({
       id: "reservation_1",
       status: "reserved",
@@ -273,8 +312,8 @@ describe("BudgetedFeePayment", () => {
       code: "PROVIDER_NOT_AVAILABLE",
     });
     expect(provider.signAndSend).not.toHaveBeenCalled();
+    expect(budgetRedis.reserve).not.toHaveBeenCalled();
     expect(repository.markReleased).not.toHaveBeenCalled();
-    expect(budgetRedis.cancel).not.toHaveBeenCalled();
   });
 
   it("does not refund or open the breaker when a persisted reservation already owns the budget", async () => {
@@ -419,13 +458,14 @@ describe("BudgetedFeePayment", () => {
     expect(provider.signAndSend).not.toHaveBeenCalled();
   });
 
-  it("compensates Redis and returns 503 when durable reservation persistence fails", async () => {
+  it("fails closed without touching Redis when durable reservation persistence fails", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     repository.createReservation.mockRejectedValueOnce(new Error("postgres unavailable"));
     await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",
     });
-    expect(budgetRedis.cancel).toHaveBeenCalledOnce();
+    expect(budgetRedis.reserve).not.toHaveBeenCalled();
+    expect(budgetRedis.cancel).not.toHaveBeenCalled();
     expect(repository.tripGlobalBreaker).toHaveBeenCalled();
     expect(provider.signAndSend).not.toHaveBeenCalled();
   });
