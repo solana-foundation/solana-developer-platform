@@ -229,8 +229,33 @@ export async function refreshApiKeyCache(
   const cacheKey = apiKeyCacheKey(keyHash);
 
   if (!fresh) {
-    // Row is gone entirely (hard delete); nothing authoritative to cache.
-    await kv.delete(cacheKey);
+    // Row is gone entirely (hard delete). Deleting the slot would leave it
+    // empty for an in-flight fill from a pre-delete DB read to repopulate
+    // with the stale active snapshot for the full TTL — the same race the
+    // rest of this module exists to prevent. Occupy the slot with a revoked
+    // tombstone instead: fills lose their write-if-absent race against it,
+    // adopt it, and the middleware rejects on its terminal status before
+    // reading any other field.
+    const tombstone: CachedApiKey = {
+      id: "",
+      organizationId: "",
+      projectId: "",
+      role: "api_readonly",
+      permissions: [],
+      environment: "sandbox",
+      rateLimitTier: "standard",
+      allowedIps: null,
+      signingWalletId: null,
+      signingWalletIds: [],
+      walletBindings: [],
+      status: "revoked",
+      expiresAt: null,
+      rotationDeadline: null,
+      organizationStatus: "deleted",
+    };
+    await kv.put(cacheKey, JSON.stringify(tombstone), {
+      expirationTtl: API_KEY_CACHE_TTL_SECONDS,
+    });
     return;
   }
 

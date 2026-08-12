@@ -6,6 +6,7 @@ import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { isSentryEnabled } from "@/runtime/observability";
 import { nodeObservability } from "@/runtime/observability-node";
+import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
@@ -52,6 +53,10 @@ vi.mock("@/runtime/observability-node", () => ({
   },
 }));
 
+vi.mock("@/services/jobs/reconcile-revoked-api-key-cache", () => ({
+  reconcileRevokedApiKeyCache: vi.fn(async () => ({ scanned: 0, repaired: 0 })),
+}));
+
 vi.mock("@/services/jobs/track-pending-transfers", () => ({
   trackPendingTransfers: vi.fn(async () => {}),
 }));
@@ -72,6 +77,9 @@ describe("runCronJob", () => {
   beforeEach(() => {
     vi.mocked(getProcessEnv).mockReset().mockReturnValue(makeEnv());
     vi.mocked(isSentryEnabled).mockReset().mockReturnValue(false);
+    vi.mocked(reconcileRevokedApiKeyCache)
+      .mockReset()
+      .mockResolvedValue({ scanned: 0, repaired: 0 });
     vi.mocked(trackPendingTransfers)
       .mockReset()
       .mockResolvedValue(undefined as never);
@@ -100,6 +108,8 @@ describe("runCronJob", () => {
   it("runs only the ungated pair when the Earn flags are off", async () => {
     await runCronJob();
 
+    // The revoked-key cache sweep is ungated and leads the chain.
+    expect(reconcileRevokedApiKeyCache).toHaveBeenCalledTimes(1);
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
     expect(recoverApprovedWalletOperations).toHaveBeenCalledTimes(1);
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();

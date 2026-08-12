@@ -13,7 +13,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { apiKeyCacheKey, fillApiKeyCache } from "@/lib/api-key-cache";
+import { apiKeyCacheKey, fillApiKeyCache, refreshApiKeyCache } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -198,6 +198,23 @@ describe("API key revocation cache invalidation", () => {
     expect(adopted.status).toBe("deactivated");
     expect(await readCachedStatus(targetHash)).toBe("deactivated");
     expect(await requestWithKey(TARGET_KEY.raw)).toBe(401);
+  });
+
+  it("does not let a stale fill resurrect a hard-deleted key", async () => {
+    // Ops-level hard delete (or an FK cascade): the row disappears entirely,
+    // so the refresh has no authoritative state to write back.
+    await getDb(env).prepare("DELETE FROM api_keys WHERE id = ?").bind(TARGET_KEY.id).run();
+
+    const kv = createKVStoreSet(env);
+    await refreshApiKeyCache(getDb(env), kv.apiKeys, targetHash);
+
+    // A stale fill from a pre-delete DB read lands after the refresh. It
+    // must not repopulate the slot with the active snapshot.
+    const adopted = await fillApiKeyCache(kv.apiKeys, targetHash, cachedEntry(TARGET_KEY));
+    expect(adopted.status).not.toBe("active");
+
+    expect(await requestWithKey(TARGET_KEY.raw)).toBe(401);
+    expect(await readCachedStatus(targetHash)).toBe("revoked");
   });
 
   it("re-asserts the cache when revoking an already-revoked key", async () => {
