@@ -136,6 +136,15 @@ describe("BudgetedFeePayment", () => {
     expect(created).toBeLessThan(reserved);
   });
 
+  it("excludes the current reservation from the reconstruction snapshot", async () => {
+    const { feePayment, repository } = harness();
+    await expect(feePayment.signAndSend(buildTransaction())).resolves.toBe("signature_1");
+    const createdId = repository.createReservation.mock.calls[0]?.[0].id;
+    expect(repository.loadWindowAdmissionSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ excludeReservationId: createdId })
+    );
+  });
+
   it("denies the tiny-limit Surfpool/Kora canary before Kora or KMS execution", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     repository.resolvePolicies.mockResolvedValueOnce([

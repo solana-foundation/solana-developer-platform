@@ -479,6 +479,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
         projectId: this.scope.projectId,
         hourBucket: context.hourBucket,
         dayBucket: context.dayBucket,
+        excludeReservationId: context.id,
       });
       return await this.budgetRedis.reserve({
         network: context.network,

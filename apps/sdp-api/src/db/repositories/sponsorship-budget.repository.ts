@@ -375,8 +375,27 @@ export class SponsorshipBudgetRepository {
       hourBucket: string;
       dayBucket: string;
     },
-    executor: DatabaseExecutor = this.db
+    executor: DatabaseExecutor = this.db,
+    excludeReservationId?: string
   ): Promise<{ hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage }> {
+    const params: Array<string | null> = [
+      input.hourBucket,
+      input.hourBucket,
+      input.organizationId,
+      input.hourBucket,
+      input.organizationId,
+      input.projectId,
+      input.dayBucket,
+      input.dayBucket,
+      input.organizationId,
+      input.dayBucket,
+      input.organizationId,
+      input.projectId,
+      input.network,
+      input.hourBucket,
+      input.dayBucket,
+    ];
+    if (excludeReservationId) params.push(excludeReservationId);
     const row = await executor.queryOne<Record<string, number>>(
       `SELECT
          COALESCE(SUM(CASE WHEN hour_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS global_hour,
@@ -386,24 +405,10 @@ export class SponsorshipBudgetRepository {
          COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS organization_day,
          COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS project_day
        FROM sponsorship_budget_reservations
-       WHERE network = ? AND status <> 'released' AND (hour_bucket = ? OR day_bucket = ?)`,
-      [
-        input.hourBucket,
-        input.hourBucket,
-        input.organizationId,
-        input.hourBucket,
-        input.organizationId,
-        input.projectId,
-        input.dayBucket,
-        input.dayBucket,
-        input.organizationId,
-        input.dayBucket,
-        input.organizationId,
-        input.projectId,
-        input.network,
-        input.hourBucket,
-        input.dayBucket,
-      ]
+       WHERE network = ? AND status <> 'released' AND (hour_bucket = ? OR day_bucket = ?)${
+         excludeReservationId ? " AND id <> ?" : ""
+}`,
+      params
     );
     return {
       hour: {
@@ -425,11 +430,14 @@ export class SponsorshipBudgetRepository {
       hourBucket: string;
       dayBucket: string;
     },
-    executor: DatabaseExecutor = this.db
+    executor: DatabaseExecutor = this.db,
+    excludeReservationId?: string
   ): Promise<{
     hour: SponsorshipLiveWindowReservation[];
     day: SponsorshipLiveWindowReservation[];
   }> {
+    const params: Array<string | null> = [input.network, input.hourBucket, input.dayBucket];
+    if (excludeReservationId) params.push(excludeReservationId);
     const rows = await executor.queryMany<{
       id: string;
       attempt: number;
@@ -440,8 +448,8 @@ export class SponsorshipBudgetRepository {
       `SELECT id, attempt, reserved_lamports, hour_bucket, day_bucket
        FROM sponsorship_budget_reservations
        WHERE network = ? AND status IN ('reserved', 'signed', 'submitted')
-         AND (hour_bucket = ? OR day_bucket = ?)`,
-      [input.network, input.hourBucket, input.dayBucket]
+         AND (hour_bucket = ? OR day_bucket = ?)${excludeReservationId ? " AND id <> ?" : ""}`,
+      params
     );
     const hour: SponsorshipLiveWindowReservation[] = [];
     const day: SponsorshipLiveWindowReservation[] = [];
@@ -467,6 +475,7 @@ export class SponsorshipBudgetRepository {
     projectId: string | null;
     hourBucket: string;
     dayBucket: string;
+    excludeReservationId?: string;
   }): Promise<{
     usage: { hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage };
     liveReservations: {
@@ -476,10 +485,11 @@ export class SponsorshipBudgetRepository {
   }> {
     return this.db.transaction(async (tx) => {
       await tx.queryMany("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
-      const usage = await this.getWindowUsage(input, tx);
+      const usage = await this.getWindowUsage(input, tx, input.excludeReservationId);
       const liveReservations = await this.listLiveWindowReservations(
         { network: input.network, hourBucket: input.hourBucket, dayBucket: input.dayBucket },
-        tx
+        tx,
+        input.excludeReservationId
       );
       return { usage, liveReservations };
     });

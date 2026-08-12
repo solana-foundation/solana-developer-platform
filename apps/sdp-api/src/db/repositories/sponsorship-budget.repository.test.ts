@@ -164,6 +164,34 @@ describe("SponsorshipBudgetRepository", () => {
     });
   });
 
+  it("excludes the named reservation from window usage and live reservations", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const self = reservationInput("reservation_self");
+    const other = reservationInput("reservation_other");
+    await expect(repository.createReservation(self)).resolves.toBe(true);
+    await expect(repository.createReservation(other)).resolves.toBe(true);
+
+    const snapshot = await repository.loadWindowAdmissionSnapshot({
+      network: self.network,
+      organizationId: self.organizationId,
+      projectId: self.projectId,
+      hourBucket: self.hourBucket,
+      dayBucket: self.dayBucket,
+      excludeReservationId: self.id,
+    });
+
+    expect(snapshot.usage).toEqual({
+      hour: { global: 5, organization: 5, project: 5 },
+      day: { global: 5, organization: 5, project: 5 },
+    });
+    expect(snapshot.liveReservations.hour.map((reservation) => reservation.id)).toEqual([
+      "reservation_other",
+    ]);
+    expect(snapshot.liveReservations.day.map((reservation) => reservation.id)).toEqual([
+      "reservation_other",
+    ]);
+  });
+
   it("reopens a released reservation exactly once and only after Redis settlement", async () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
     const input = reservationInput("reservation_retry");
