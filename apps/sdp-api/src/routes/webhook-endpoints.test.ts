@@ -231,6 +231,37 @@ describe("webhook endpoint registry (routes)", () => {
     expect(detailText).not.toContain("encryptedSecretPayload");
   });
 
+  // The credential backend authorizes a read or a destroy by reference, not by tenant, so
+  // the input side is what keeps one org away from another's key: a caller must never be
+  // able to choose the reference an endpoint carries, or supply the key itself. Both
+  // schemas are strict, and this pins that — a passthrough here would let an attacker's
+  // endpoint sign with a victim's key, and rotating it destroy the victim's credential.
+  it("refuses to let a caller choose the signing secret or its reference", async () => {
+    for (const injected of [
+      { secret: "whsec_attacker_chosen_value" },
+      { secretStorage: { storageBackend: "gcp_secret_manager", secretVersionRef: "victim/ref" } },
+      { secretRef: "projects/p/secrets/victim" },
+      { secretVersion: 99 },
+    ]) {
+      const res = await request(WRITE_KEY, "POST", "/v1/webhook-endpoints", {
+        url: "https://example.com/hooks/sdp",
+        label: "injection attempt",
+        ...injected,
+      });
+      expect(res.status).toBe(400);
+    }
+
+    // Rotation derives `existingSecretRef` from the stored row, never the request.
+    const { data } = await createEndpoint();
+    const rotated = await request(
+      WRITE_KEY,
+      "POST",
+      `/v1/webhook-endpoints/${data.endpoint.id}/rotate-secret`,
+      { existingSecretRef: "projects/p/secrets/victim" }
+    );
+    expect(rotated.status).toBe(400);
+  });
+
   it("rejects an insecure or private endpoint URL at create", async () => {
     for (const url of ["http://example.com/hook", "https://10.1.2.3/hook", "not-a-url"]) {
       const res = await request(WRITE_KEY, "POST", "/v1/webhook-endpoints", {
