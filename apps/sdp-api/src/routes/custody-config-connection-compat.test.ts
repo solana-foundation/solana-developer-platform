@@ -123,6 +123,22 @@ describe("custody Config compatibility with an effective Connection", () => {
       isDefault: true,
     });
   });
+
+  it("keeps implicit public-key resolution aligned with the effective target", async () => {
+    const connectionPublicKey = await request("/v1/wallets/public-key");
+    expect(connectionPublicKey.status).toBe(200);
+    expect(await connectionPublicKey.json()).toMatchObject({
+      data: { publicKey: "Vote111111111111111111111111111111111111111" },
+    });
+
+    env.PRIVY_BYOK_ENABLED = "false";
+
+    const configPublicKey = await request("/v1/wallets/public-key");
+    expect(configPublicKey.status).toBe(200);
+    expect(await configPublicKey.json()).toMatchObject({
+      data: { publicKey: "11111111111111111111111111111111" },
+    });
+  });
 });
 
 async function request(path: string): Promise<Response> {
