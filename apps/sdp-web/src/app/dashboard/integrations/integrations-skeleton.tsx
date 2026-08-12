@@ -5,15 +5,13 @@ export function IntegrationsSkeleton() {
         <div className="mx-auto h-4 w-full rounded bg-fill-subtle" />
         <div className="mx-auto h-4 w-1/2 rounded bg-fill-subtle" />
       </div>
-      <div className="space-y-3">
-        <div className="h-11 w-full max-w-md rounded-2xl bg-fill-subtle" />
-        {/* One row, matching the six status pills the loaded catalog renders;
-            the family axis lives in the header tabs. */}
-        <div className="flex flex-wrap gap-2">
-          {[104, 96, 132, 84, 148, 120].map((width) => (
-            <div key={width} className="h-8 rounded-full bg-fill-subtle" style={{ width }} />
-          ))}
-        </div>
+      {/* One toolbar row, matching the loaded catalog: six status pills
+          leading, the search field trailing at toolbar width. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {[104, 96, 132, 84, 148, 120].map((width) => (
+          <div key={width} className="h-8 rounded-full bg-fill-subtle" style={{ width }} />
+        ))}
+        <div className="h-10 w-full rounded-[10px] bg-fill-subtle sm:ms-auto sm:w-64" />
       </div>
       {[0, 1].map((section) => (
         <div key={section} className="space-y-4">

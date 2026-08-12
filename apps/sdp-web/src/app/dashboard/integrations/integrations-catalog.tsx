@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
-import { ChevronRight, Search } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
@@ -9,7 +9,7 @@ import type { CustodyProviderAvailability } from "@/app/dashboard/custody/provid
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { RpcProviderMark } from "@/app/dashboard/onboarding/rpc-provider-mark";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
@@ -253,33 +253,28 @@ export function IntegrationsCatalog({
         {t("Shared.integrations.pageDescription")}
       </p>
 
-      <div className="space-y-3" data-integrations-filters="true">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="w-full max-w-md">
-            <Input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              placeholder={t("Shared.integrations.searchPlaceholder")}
-              aria-label={t("Shared.integrations.searchPlaceholder")}
-              iconLeft={<Search />}
-              // The DS input paints its border on an inner span via
-              // --input-border-*, so border-* classes are inert here.
-              className="h-10 rounded-[10px] bg-surface-raised [--input-border-hover:var(--color-border-strong)] [--input-border-idle:var(--color-border-default)] [--input-border-width:1px]"
-            />
-          </div>
-          {filtered ? (
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              {t("Shared.integrations.clearFilters")}
-            </Button>
-          ) : null}
-        </div>
+      {/* One toolbar row: status pills lead, search trails at toolbar width.
+          The family axis already moved to the header tabs, so stacking a
+          second full-width row here would reopen the clash it removed. */}
+      <div className="flex flex-wrap items-center gap-2" data-integrations-filters="true">
         <div className="flex flex-wrap items-center gap-2" data-integrations-status-pills="true">
           {STATUS_FILTERS.map((option) => (
             <FilterPill key={option} active={status === option} onClick={() => setStatus(option)}>
               {statusLabel(option, t)}
             </FilterPill>
           ))}
+        </div>
+        {filtered ? (
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
+            {t("Shared.integrations.clearFilters")}
+          </Button>
+        ) : null}
+        <div className="w-full sm:ms-auto sm:w-64">
+          <SearchInput
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder={t("Shared.integrations.searchPlaceholder")}
+          />
         </div>
       </div>
 
