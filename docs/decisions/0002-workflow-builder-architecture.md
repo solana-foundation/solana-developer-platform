@@ -4,7 +4,7 @@
 - **Date:** 2026-07-30
 - **Deciders:** Issuance team
 - **PRD:** [Issuance Asset PRD [Draft]](https://app.notion.com/p/solanafoundation/Issuance-Asset-PRD-Draft-379d36dad52d81e684ffd3634ba81486) — Phase 5, Workflow Builder
-- **Related:** [ADR 0001](0001-asset-profile-data-model.md); migrations `0048_asset_workflows.sql`, `0049_workflow_executions.sql`, `0050_notifications.sql`; catalog in `packages/sdp-issuance/src/workflows/`; engine in `apps/sdp-api/src/services/workflows/`
+- **Related:** [ADR 0001](0001-asset-profile-data-model.md); migrations `0048_asset_workflows.sql`, `0049_workflow_executions.sql`, `0050_notifications.sql`, `0055_kyc_wallet_status_changed_at.sql`, `0056_workflow_action_secret_retirements.sql`; catalog in `packages/sdp-issuance/src/workflows/`; engine in `apps/sdp-api/src/services/workflows/`
 - **Diagrams:** [system map](0002-workflow-builder-architecture.svg) — components + data flow (for readers who know the codebase) · [walkthrough](0002-workflow-builder-walkthrough.svg) — plain-language, step-by-step tour with a running example (for newcomers to this area)
 
 ## Context
@@ -186,7 +186,10 @@ source of truth for how dangerous it is:
 
 - **Review:** `requires_approval` rules are forced to `awaiting_review` at enqueue
   regardless of the stored review mode; a human approves via a deliberate **hold-to-confirm**
-  control, and `decided_by` / `decided_at` record who.
+  control, and `decided_by` / `decided_at` record who. The API also **refuses to store**
+  `reviewMode: "auto"` for the tier, on create and on edit, so the stored row cannot claim a
+  destructive rule fires unattended — the builder renders `review_mode`, so a row that
+  disagreed with the engine was a lie told to an operator.
 - **Retry:** an approval-gated action that fails is *single-shot* — each run was explicitly
   authorized by a person, so a failure must return to a person, never re-enter the
   automatic retry loop.
@@ -213,6 +216,23 @@ engine is a new *caller* of existing, already-audited token operations — not a
 code path that could drift from their safety rules. On-chain outcomes flip to a permanent,
 human-reviewable failure rather than blind-retrying a possibly-already-applied transaction.
 
+Two of those gates need to hold under concurrency, so preflight alone does not decide them:
+
+- **The supply cap is enforced by an atomic reservation, not by the preflight.** The
+  preflight reads the supply snapshot loaded when the action was prepared, so two mints
+  running at once (rule + rule, or rule + HTTP) both pass it and both land above
+  `maxSupply`. The binding check is `reserveMintSupply` — a conditional `UPDATE`
+  contending on the token row — run from `mintTo`'s pre-submit hook exactly as the HTTP
+  execute route runs it. The preflight remains as an early, cheap rejection. The
+  reservation **is** the count: nothing is added when the mint settles, and nothing is
+  handed back on an ambiguous post-submit failure, because a transaction that may still
+  land must not release headroom a second mint could take.
+- **Wallet-operation policy binds the wallet that actually signs**, which is not always the
+  token's nominal `signingWalletId` — an authority fallback can settle on a different
+  custody wallet, and a token naming no wallet still signs with the org default signer's.
+  All four destructive actions (mint, burn, force_burn, seize) submit their operation for
+  enforcement; a denial is a deliberate "no" and therefore permanent.
+
 ### 12. Secrets are handled out-of-band, never in the rule JSONB
 
 A `send_webhook` rule can carry an HMAC signing secret. It is stored via the existing
@@ -221,6 +241,26 @@ every read response** — the engine resolves the real value only at dispatch. O
 webhook URLs are validated at save time and re-checked at run time against SSRF
 (`webhook-url.ts`: https-only, private/link-local/metadata hosts rejected, redirects not
 followed).
+
+A secret's **retirement is as much a part of the contract as its storage**: a rotation
+supersedes a version, a delete orphans one, and a rejected insert leaves one referenced by
+nothing. Each of those destroys the version so it does not stay readable in the backend.
+Two properties make that safe:
+
+- **The write is atomic with respect to its own failure path.** A rule write is a single
+  statement (`UPDATE … RETURNING *`), so a rejection genuinely means nothing committed and
+  the version the edit installed can be retired. A write followed by a separate read could
+  fail *after* committing, and retiring then would destroy the credential the live rule now
+  points at — signing every later delivery with a dead key.
+- **A failed destroy becomes durable work, not a log line.** Retirement always runs after a
+  write that already committed, so it can never fail the request. A backend error is queued
+  in `workflow_action_secret_retirements` (`0056`) keyed on the version ref, and the
+  workflow tick drains it with capped exponential backoff, never abandoning a row. Deleting
+  a rule is likewise idempotent over its own partial failure — the delete handler reads
+  soft-deleted rows, so a retry finishes cleanup a first attempt died in the middle of.
+  The table carries **no foreign keys on purpose**: the work must outlive the rule, project
+  and organization it came from, since the point of a retirement is that nothing references
+  the credential any more.
 
 ### 13. Notifications are a durable, per-user store the `notify` action writes into
 
