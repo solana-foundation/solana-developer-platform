@@ -202,7 +202,7 @@ function createSubmissionContext(
   const organizationId = auth.organizationId;
   const projectId = requireProjectId(c);
   const userId = auth.userId;
-  if (!userId || auth.authType === "api_key") {
+  if (!userId) {
     throw internalError();
   }
 
