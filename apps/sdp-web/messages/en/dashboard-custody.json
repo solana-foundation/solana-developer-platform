@@ -788,11 +788,23 @@
     "policyAssetsInWallet": "In this wallet",
     "policyAssetsCommon": "Common tokens",
     "policyAssetsIssued": "Your tokens",
+    "byokProviderDetails": "Provider details",
+    "byokConnect": "Connect and verify",
+    "byokChecking": "Verifying credentials…",
+    "byokInvalidCredentials": "Privy rejected these credentials. Check the app ID and secret, then connect again.",
+    "byokAccountAlreadyConnected": "This Privy app is already connected to a custody setup. Use a different app, then connect again.",
+    "byokWalletConflict": "This connection is tied to a Privy wallet that cannot be reconciled. Replacing the credentials will not fix it; contact support to resolve the connection.",
+    "byokCheckFailed": "Verification did not complete. Connect again to retry.",
+    "byokRetryUnknown": "We could not confirm whether verification finished. Your credentials are stored; checking again is safe and will not create a duplicate.",
+    "byokCheckAgain": "Check again",
+    "byokMissingFields": "Fill in every required credential field.",
+    "byokSubmitFailed": "Storing the credential failed. Try again.",
     "onboardingDoneTitle": "Your workspace is ready",
     "onboardingDoneBody": "{provider} is connected and your first wallet is live.",
     "onboardingDoneWalletHeading": "Your first wallet",
     "onboardingDoneGoToDashboard": "Go to dashboard",
     "onboardingDoneViewWallets": "View wallets",
-    "providerRequestAccess": "Request access"
+    "providerRequestAccess": "Request access",
+    "byokRetrySubmit": "Retry submission"
   }
 }

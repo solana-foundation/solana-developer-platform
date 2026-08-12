@@ -80,6 +80,19 @@ export const organizationOnboarding = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
+export const privyByok = flag<boolean, DashboardFlagEntities>({
+  key: "privy-byok",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("SDP_FLAG_PRIVY_BYOK", false),
+  description:
+    "Install Privy from stored project credentials instead of the legacy env-backed initialize path. Requires PRIVY_BYOK_ENABLED on the API.",
+  options: [
+    { value: false, label: "Legacy initialize" },
+    { value: true, label: "Stored credentials" },
+  ],
+});
+
 export const assetProfiles = flag<boolean, DashboardFlagEntities>({
   key: "asset-profiles",
   adapter: vercelAdapter(),
