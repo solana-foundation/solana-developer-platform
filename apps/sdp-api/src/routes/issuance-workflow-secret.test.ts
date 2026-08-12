@@ -559,4 +559,81 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       expect(res.status).toBe(404);
     });
   });
+
+  // The secret backend authorizes a read or a destroy by reference, not by tenant: the
+  // GCP store checks only that the ref sits in the managed project under the managed
+  // prefix. So the one thing that keeps a rule from reaching another org's credential is
+  // that a caller can never choose the reference a rule carries — put a victim's version
+  // ref on an attacker's rule and the engine would sign the attacker's webhook with the
+  // victim's key, and deleting that rule would destroy the victim's credential.
+  //
+  // A ref only ever enters `definition.actionSecret` as the store's answer to a write of
+  // the caller's own plaintext, under a rule id the server mints. These pin that: neither
+  // request schema has an actionSecret field, and a secret param must be a value.
+  describe("caller-supplied secret references", () => {
+    const VICTIM = {
+      storageBackend: "gcp_secret_manager",
+      secretRef: "projects/p/secrets/sdp-provider-credentials-victim",
+      secretVersionRef: "projects/p/secrets/sdp-provider-credentials-victim/versions/1",
+    };
+
+    async function createWithInjectedRef() {
+      return request("POST", base, {
+        triggerType: "kyc_approved",
+        actionType: "send_webhook",
+        actionParams: { url: WEBHOOK_URL },
+        actionSecret: VICTIM,
+        definition: { actionSecret: VICTIM },
+      });
+    }
+
+    it("does not let the create body put a reference on the rule", async () => {
+      const res = await createWithInjectedRef();
+
+      expect(res.status).toBe(201);
+      const [row] = await storedRules();
+      // No secret was supplied, so the rule carries none — not the one that was sent.
+      expect(row.definition.actionSecret ?? null).toBeNull();
+      expect(JSON.stringify(row.definition)).not.toContain("victim");
+    });
+
+    // The other shape the report assumes: smuggling the reference through the params bag,
+    // which only accepts strings and numbers.
+    it("rejects a secret param that is a reference rather than a value", async () => {
+      const res = await request("POST", base, {
+        triggerType: "kyc_approved",
+        actionType: "send_webhook",
+        actionParams: { url: WEBHOOK_URL, secret: VICTIM },
+      });
+
+      expect(res.status).toBe(400);
+      expect(secretStore.write).not.toHaveBeenCalled();
+      expect(await storedRules()).toHaveLength(0);
+    });
+
+    it("does not let an edit repoint a rule at a reference of the caller's choosing", async () => {
+      const workflowId = await createRuleWithSecret();
+
+      const res = await request("PATCH", `${base}/${workflowId}`, {
+        actionParams: { url: WEBHOOK_URL },
+        actionSecret: VICTIM,
+      });
+
+      expect(res.status).toBe(200);
+      const [row] = await storedRules();
+      expect(row.definition.actionSecret?.secretVersionRef).toBe(versionRef(1));
+    });
+
+    // The destroy half of the report: a delete retires the reference the rule actually
+    // carries, so a rule that carries none retires nothing.
+    it("destroys nothing when deleting a rule that was sent a reference", async () => {
+      const create = await createWithInjectedRef();
+      const { data } = (await create.json()) as { data: { workflow: { id: string } } };
+
+      const res = await request("DELETE", `${base}/${data.workflow.id}`);
+
+      expect(res.status).toBe(200);
+      expect(secretStore.destroyVersion).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -123,9 +123,7 @@ export async function runMint(
   if (!supplyCheck.ok) {
     return supplyCheck.result;
   }
-  const allowed = await preflightDestinationAllowed(env, prep.ctx, destination, {
-    skipWhenListSynced: true,
-  });
+  const allowed = await preflightDestinationAllowed(env, prep.ctx, destination);
   if (!allowed.ok) {
     return allowed.result;
   }

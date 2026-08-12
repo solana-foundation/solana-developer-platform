@@ -14,10 +14,7 @@
 import type { Token } from "@sdp/types";
 import { getDb } from "@/db";
 import { createTenantScope } from "@/lib/tenant-scope";
-import {
-  assertDestinationAllowedByControlList,
-  getOnChainAllowlistMutationForMint,
-} from "@/routes/issuance/handlers/access-control";
+import { assertDestinationAllowedByControlList } from "@/routes/issuance/handlers/access-control";
 import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
@@ -52,19 +49,23 @@ export function preflightMintAmount(
   }
 }
 
-// The token's allowlist/blocklist. `skipWhenListSynced` mirrors the HTTP mint route,
-// which lets the mint flow add a fresh destination to the on-chain list itself; the
-// seize route checks unconditionally, and so do we.
+// The token's allowlist/blocklist, checked for every action, unconditionally.
+//
+// The HTTP mint route skips this check for an allowlist-mode token, but it is not simply
+// skipping: it hands the destination to `syncDestinationToOnChainAllowlist`, which
+// refuses a `revoked` entry with DESTINATION_REVOKED and drives the address onto the
+// on-chain list. The skip is safe there because those checks replace it.
+//
+// The engine has no equivalent — it never mutates on-chain compliance state, so it never
+// reaches a revoked check. Mirroring only the skip meant a destination revoked in the
+// database but still present on the on-chain list could be minted to by a rule while the
+// same mint over HTTP was refused. Checking here is the compensating control.
 export async function preflightDestinationAllowed(
   env: Env,
   ctx: OnchainContext,
-  destination: string,
-  options: { skipWhenListSynced?: boolean } = {}
+  destination: string
 ): Promise<PreflightOutcome> {
   const token = ctx.token as Token;
-  if (options.skipWhenListSynced && getOnChainAllowlistMutationForMint(token)) {
-    return { ok: true };
-  }
   try {
     const isOnControlList = await new TokenService(getDb(env)).isAddressAllowed(
       token.id,
