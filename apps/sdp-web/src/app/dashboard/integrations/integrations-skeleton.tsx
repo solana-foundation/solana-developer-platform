@@ -1,26 +1,11 @@
 export function IntegrationsSkeleton() {
   return (
-    <div className="w-full animate-pulse space-y-8 px-4 py-6 md:px-6">
-      <div className="mx-auto max-w-2xl space-y-2">
-        <div className="mx-auto h-4 w-full rounded bg-fill-subtle" />
-        <div className="mx-auto h-4 w-1/2 rounded bg-fill-subtle" />
-      </div>
-      <div className="space-y-3">
-        <div className="h-11 w-full max-w-md rounded-2xl bg-fill-subtle" />
-        {/* Two rows, matching the family and status pill rows the loaded
-            catalog renders: five family pills, six status pills. */}
-        <div className="flex flex-col gap-2">
-          {[
-            [48, 104, 84, 92, 116],
-            [104, 96, 132, 84, 148, 120],
-          ].map((row) => (
-            <div key={row.join()} className="flex flex-wrap gap-2">
-              {row.map((width) => (
-                <div key={width} className="h-8 rounded-full bg-fill-subtle" style={{ width }} />
-              ))}
-            </div>
-          ))}
-        </div>
+    <div className="w-full animate-pulse space-y-6 px-4 py-5 md:px-6">
+      {/* Matches the loaded toolbar: one segmented status control leading,
+          the search slot on the right from xl up, stacked below. */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="h-9 w-full max-w-[560px] rounded-full bg-fill-subtle" />
+        <div className="h-10 w-full max-w-xs rounded-[10px] bg-fill-subtle xl:w-64 xl:shrink-0" />
       </div>
       {[0, 1].map((section) => (
         <div key={section} className="space-y-4">
