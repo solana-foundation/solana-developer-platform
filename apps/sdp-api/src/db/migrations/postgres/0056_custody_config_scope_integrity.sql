@@ -162,8 +162,10 @@ FROM custody_wallet_duplicates wdup
 WHERE b.custody_wallet_id = wdup.id;
 
 -- Carry the deleted bindings' explicit policy assignments onto the
--- surviving binding where it has none (oldest assignment wins per column),
--- so merging never silently drops a policy-profile assignment.
+-- surviving binding where it has none (oldest assignment wins per column).
+-- When both sides carry an assignment the survivor's wins — it is the one
+-- that already governed the surviving wallet, and the loser's route ceases
+-- to exist — and the discard is reported below, never silent.
 UPDATE api_key_wallet_policy_bindings b
 SET wallet_control_profile_id = COALESCE(b.wallet_control_profile_id, l.wallet_control_profile_id),
     api_key_control_profile_id = COALESCE(b.api_key_control_profile_id, l.api_key_control_profile_id)
@@ -193,6 +195,45 @@ JOIN wallet_control_profiles active_wcp
   ON active_wcp.custody_wallet_id = dp.keep_id
  AND active_wcp.status = 'active'
 WHERE b.wallet_control_profile_id = dp.id;
+
+-- Report merged bindings whose conflicting non-null assignments were
+-- discarded by the survivor-wins rule, so the governance change is visible
+-- to operators. A loser's reference to a demoted profile is compared
+-- through its repair target (the survivor's active profile): an assignment
+-- that would have been repaired to the survivor's own value was not lost.
+DO $$
+DECLARE
+    discarded_assignment_count BIGINT;
+BEGIN
+    SELECT COUNT(*) INTO discarded_assignment_count
+    FROM custody_binding_losers l
+    JOIN api_key_wallet_policy_bindings b
+      ON b.api_key_id = l.api_key_id
+     AND b.custody_wallet_id = l.keep_id
+    WHERE (
+        l.api_key_control_profile_id IS NOT NULL
+        AND l.api_key_control_profile_id IS DISTINCT FROM b.api_key_control_profile_id
+    )
+    OR (
+        l.wallet_control_profile_id IS NOT NULL
+        AND COALESCE(
+            (
+                SELECT active_wcp.id
+                FROM custody_demoted_profiles dp
+                JOIN wallet_control_profiles active_wcp
+                  ON active_wcp.custody_wallet_id = dp.keep_id
+                 AND active_wcp.status = 'active'
+                WHERE dp.id = l.wallet_control_profile_id
+            ),
+            l.wallet_control_profile_id
+        ) IS DISTINCT FROM b.wallet_control_profile_id
+    );
+
+    IF discarded_assignment_count > 0 THEN
+        RAISE NOTICE 'Discarded % conflicting policy assignment(s) while merging duplicate API-key wallet bindings during custody config dedup; the surviving binding assignments win — review the affected API keys manually', discarded_assignment_count;
+    END IF;
+END;
+$$;
 
 UPDATE wallet_operations op
 SET custody_wallet_id = wdup.keep_id

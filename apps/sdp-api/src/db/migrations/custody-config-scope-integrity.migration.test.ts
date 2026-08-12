@@ -13,6 +13,10 @@ it("deduplicates org-level custody configs and repoints references", async () =>
   const sql = readFileSync(migrationPath, "utf8");
   const client = new Client({ connectionString: env.DATABASE_URL });
   await client.connect();
+  const notices: string[] = [];
+  client.on("notice", (notice) => {
+    if (notice.message) notices.push(notice.message);
+  });
 
   try {
     await client.query("BEGIN");
@@ -130,7 +134,9 @@ it("deduplicates org-level custody configs and repoints references", async () =>
          ('akb_redundant', 'key_merge', 'wallet_shared2', 'cwlt_old_shared2', 'wcp_dup_conflict_active', 'akcp_loser', '2026-01-02T00:00:00.000Z'),
          ('akb_race_a', 'key_race', 'wallet_shared', 'cwlt_mid_shared', NULL, NULL, '2026-01-01T00:00:00.000Z'),
          ('akb_race_b', 'key_race', 'wallet_shared', 'cwlt_old_shared', NULL, NULL, '2026-01-02T00:00:00.000Z'),
-         ('akb_locked', 'key_lock', 'wallet_shared2', 'cwlt_old_shared2', 'wcp_dup_conflict_active', NULL, '2026-01-03T00:00:00.000Z')`
+         ('akb_locked', 'key_lock', 'wallet_shared2', 'cwlt_old_shared2', 'wcp_dup_conflict_active', NULL, '2026-01-03T00:00:00.000Z'),
+         ('akb_conflict_kept', 'key_conflict', 'wallet_shared2', 'cwlt_new_shared2', 'wcp_kept_active', 'akcp_winner', '2026-01-01T00:00:00.000Z'),
+         ('akb_conflict_loser', 'key_conflict', 'wallet_shared2', 'cwlt_old_shared2', 'wcp_dup_conflict_active', 'akcp_conflict_loser', '2026-01-02T00:00:00.000Z')`
     );
     await client.query(
       `INSERT INTO wallet_operations (id, custody_wallet_id)
@@ -222,6 +228,30 @@ it("deduplicates org-level custody configs and repoints references", async () =>
         wallet_control_profile_id: "wcp_kept_active",
         api_key_control_profile_id: "akcp_loser",
       },
+    ]);
+
+    // When both bindings carry explicit assignments, the surviving binding's
+    // own assignments win deterministically…
+    const conflictBindings = await client.query(
+      `SELECT id, custody_wallet_id, wallet_control_profile_id, api_key_control_profile_id
+       FROM api_key_wallet_policy_bindings
+       WHERE api_key_id = 'key_conflict'`
+    );
+    expect(conflictBindings.rows).toEqual([
+      {
+        id: "akb_conflict_kept",
+        custody_wallet_id: "cwlt_new_shared2",
+        wallet_control_profile_id: "wcp_kept_active",
+        api_key_control_profile_id: "akcp_winner",
+      },
+    ]);
+    // …and the discarded conflicting assignment is reported, never silent.
+    // Exactly one: akb_conflict_loser's api-key control profile differs from
+    // the survivor's. akb_redundant does not count — one assignment was
+    // inherited, and its wallet-profile reference resolves to the survivor's
+    // active profile after the demotion repair.
+    expect(notices.filter((n) => n.includes("conflicting policy assignment"))).toEqual([
+      expect.stringContaining("Discarded 1 conflicting policy assignment(s)"),
     ]);
 
     // A key bound to two duplicate rows of the same surviving wallet keeps
