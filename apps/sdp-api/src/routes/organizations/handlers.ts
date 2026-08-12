@@ -249,15 +249,32 @@ export const deleteOrganization = async (c: AppContext) => {
 
   // Push the revoked state into the auth cache for every one of the org's
   // keys before reporting success — otherwise cached entries keep
-  // authenticating for the remainder of the cache TTL. allSettled so a
-  // failed refresh cannot skip session revocation or the audit write below;
-  // any failure still becomes a 500 at the end (the deletion is idempotent,
-  // so the client retries).
-  const cacheRefreshes = await Promise.allSettled(
-    (orgKeyHashes.results ?? []).map((row) =>
-      refreshApiKeyCache(db, c.var.kv.apiKeys, row.key_hash)
-    )
-  );
+  // authenticating for the remainder of the cache TTL. The batch above is
+  // already committed and memberships removed, so a transient cache error
+  // must not abort the request into a state the caller cannot retry: failed
+  // hashes are retried with backoff before this handler answers, and only
+  // keys that never succeed become the 500 below (which the per-minute
+  // reconciliation sweep then repairs from the revoked rows).
+  let pendingHashes = (orgKeyHashes.results ?? []).map((row) => row.key_hash);
+  let refreshFailures: unknown[] = [];
+  for (let attempt = 0; attempt < 3 && pendingHashes.length > 0; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+    const results = await Promise.allSettled(
+      pendingHashes.map((hash) => refreshApiKeyCache(db, c.var.kv.apiKeys, hash))
+    );
+    const stillPending: string[] = [];
+    refreshFailures = [];
+    results.forEach((result, index) => {
+      const hash = pendingHashes[index];
+      if (result.status === "rejected" && hash !== undefined) {
+        stillPending.push(hash);
+        refreshFailures.push(result.reason);
+      }
+    });
+    pendingHashes = stillPending;
+  }
 
   const sessionService = new SessionService(db);
   await sessionService
@@ -274,12 +291,9 @@ export const deleteOrganization = async (c: AppContext) => {
     resourceId: orgId,
   });
 
-  const failedRefreshes = cacheRefreshes.filter(
-    (result): result is PromiseRejectedResult => result.status === "rejected"
-  );
-  if (failedRefreshes.length > 0) {
+  if (pendingHashes.length > 0) {
     getLogger().error(
-      { errors: failedRefreshes.map((result) => result.reason) },
+      { errors: refreshFailures },
       "Failed to invalidate cached API keys after organization deletion"
     );
     throw new AppError(

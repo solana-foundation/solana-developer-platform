@@ -1,23 +1,28 @@
 /**
- * Regression test for the Hacktron finding: when the post-commit cache
- * refresh fails during organization deletion (transient Redis outage), the
- * deletion has already committed — the organization's keys are revoked in
- * Postgres and the admin's credentials are gone — yet the keys keep
- * authenticating from their cached "active" entries for the rest of the
- * cache TTL, with no client-side way to repair the divergence.
+ * Regression tests for the Hacktron findings around organization deletion:
+ * the DB batch commits first (org deleted, members removed, keys revoked),
+ * and only then is the auth cache refreshed. A cache failure at that point
+ * must not leave the org's keys authenticating from their cached "active"
+ * entries with no way to repair the divergence.
+ *
+ * Two failure grades, two guarantees:
+ * - A transient blip (a failed write that would succeed moments later) must
+ *   be absorbed by the handler's own retries — the deletion still returns
+ *   success only after every cached key is invalidated.
+ * - A persistent outage cannot be invalidated synchronously (the cache is
+ *   unreachable); the handler reports the failure and the credential-less
+ *   reconciliation sweep repairs the divergence from the committed revoked
+ *   rows once Redis recovers.
  *
  * The Redis outage is simulated by mocking createKVStoreSet so writes to
- * `key:*` entries reject while armed. The test first reproduces the
- * vulnerable window (a DB-revoked key still gets 200 after the failed
- * deletion), then proves the reconciliation sweep repairs it without any
- * request credentials. On unpatched code this file fails: the reconciler
- * module does not exist, and nothing else ever flips the 200 to a 401.
+ * `key:*` entries reject while armed — persistently, or for a set number of
+ * writes.
  */
 
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const kvFailure = vi.hoisted(() => ({ failApiKeyWrites: false }));
+const kvFailure = vi.hoisted(() => ({ failApiKeyWrites: false, failWritesRemaining: 0 }));
 
 vi.mock("@/runtime/kv-redis", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/runtime/kv-redis")>();
@@ -29,12 +34,14 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
       get(target, prop, receiver) {
         if (prop === "put" || prop === "compareAndSet") {
           return async (...args: unknown[]) => {
-            if (
-              kvFailure.failApiKeyWrites &&
-              typeof args[0] === "string" &&
-              args[0].startsWith("key:")
-            ) {
-              throw new Error("simulated redis outage");
+            if (typeof args[0] === "string" && args[0].startsWith("key:")) {
+              if (kvFailure.failApiKeyWrites) {
+                throw new Error("simulated redis outage");
+              }
+              if (kvFailure.failWritesRemaining > 0) {
+                kvFailure.failWritesRemaining -= 1;
+                throw new Error("simulated transient redis failure");
+              }
             }
             return (target[prop] as (...inner: unknown[]) => Promise<unknown>).apply(target, args);
           };
@@ -131,7 +138,34 @@ describe("organization deletion with failing cache invalidation", () => {
 
   afterEach(async () => {
     kvFailure.failApiKeyWrites = false;
+    kvFailure.failWritesRemaining = 0;
     await clearKVStores(env);
+  });
+
+  it("absorbs a transient cache failure and still invalidates before returning", async () => {
+    // One failed write: the first refresh attempt loses, exactly the
+    // "transient Redis connection issue or timeout" from the finding. The
+    // handler must retry to completion instead of aborting into a committed
+    // deletion whose keys keep authenticating.
+    kvFailure.failWritesRemaining = 1;
+
+    const res = await app.request(
+      `/v1/organizations/${TEST_ORG.id}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${ADMIN_KEY.raw}` },
+      },
+      env
+    );
+    expect(res.status).toBe(204);
+
+    // The revoked state reached the cache before the handler answered.
+    const afterDeletion = await app.request(
+      "/v1/api-keys",
+      { headers: { Authorization: `Bearer ${ADMIN_KEY.raw}` } },
+      env
+    );
+    expect(afterDeletion.status).toBe(401);
   });
 
   it("repairs revoked keys left cached active by a failed deletion refresh", async () => {

@@ -154,9 +154,12 @@ function tryParseAuthoritativeEntry(raw: string): CachedApiKey | null {
  * revocation), so the current request adopts that newer state instead of
  * proceeding on its stale snapshot. Legacy pre-rotation-deadline payloads are
  * the exception — readers treat them as misses, so they are upgraded to the
- * fresh DB state rather than adopted.
+ * fresh DB state rather than adopted. If every attempt loses without an
+ * authoritative entry ever being observed, the key is re-read from Postgres
+ * rather than authenticated from this fill's own pre-race snapshot.
  */
 export async function fillApiKeyCache(
+  db: DatabaseClient,
   kv: KVStore,
   keyHash: string,
   entry: CachedApiKey
@@ -201,9 +204,20 @@ export async function fillApiKeyCache(
     }
   }
 
-  // Slot empty or legacy even now; use this fill's own DB read. Revocation
-  // paths write unconditionally, so authoritative state still lands.
-  return entry;
+  // Slot empty or legacy even now. The CAS losses prove competing writes
+  // landed after this fill's DB read, and the slot's current emptiness (TTL
+  // expiry, cache eviction) says nothing about what they contained — this
+  // fill's own snapshot is too old to trust. Re-read Postgres so the state
+  // this request authenticates against postdates every lost race. No cache
+  // write: a plain put could clobber a revocation landing right after this
+  // read; the next miss re-fills through the write-if-absent path above.
+  const authoritative = await loadCachedApiKeyFromDb(db, keyHash);
+  if (authoritative) {
+    return authoritative;
+  }
+
+  // The row is gone (hard-deleted mid-flight): reject as terminal.
+  return { ...entry, status: "revoked", organizationStatus: "deleted" };
 }
 
 function tryParseStatus(raw: string): ApiKeyStatus | null {

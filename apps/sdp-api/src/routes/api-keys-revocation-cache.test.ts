@@ -191,7 +191,12 @@ describe("API key revocation cache invalidation", () => {
     // Simulate an in-flight auth fill whose DB read happened before the
     // revocation and whose cache write lands after it.
     const kv = createKVStoreSet(env);
-    const adopted = await fillApiKeyCache(kv.apiKeys, targetHash, cachedEntry(TARGET_KEY));
+    const adopted = await fillApiKeyCache(
+      getDb(env),
+      kv.apiKeys,
+      targetHash,
+      cachedEntry(TARGET_KEY)
+    );
 
     // The losing fill must adopt the newer cached state for its own request
     // instead of proceeding on the stale active snapshot it read.
@@ -210,7 +215,12 @@ describe("API key revocation cache invalidation", () => {
 
     // A stale fill from a pre-delete DB read lands after the refresh. It
     // must not repopulate the slot with the active snapshot.
-    const adopted = await fillApiKeyCache(kv.apiKeys, targetHash, cachedEntry(TARGET_KEY));
+    const adopted = await fillApiKeyCache(
+      getDb(env),
+      kv.apiKeys,
+      targetHash,
+      cachedEntry(TARGET_KEY)
+    );
     expect(adopted.status).not.toBe("active");
 
     expect(await requestWithKey(TARGET_KEY.raw)).toBe(401);

@@ -121,7 +121,7 @@ async function getFromDatabaseAndCache(
   // concurrent revocation wrote after this function's DB read — and if that
   // happened, this request must authenticate against the newer state, not
   // the snapshot it read.
-  return await fillApiKeyCache(kv, keyHash, cached);
+  return await fillApiKeyCache(db, kv, keyHash, cached);
 }
 
 function writeLastUsed(db: DatabaseClient, keyId: string): Promise<void> {
