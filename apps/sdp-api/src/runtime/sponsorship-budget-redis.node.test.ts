@@ -671,6 +671,122 @@ describe("SponsorshipBudgetRedis", () => {
     expect(await raw.get("sdp:sponsorship:{devnet}:reservation:reservation_b:1")).toBe("8");
   });
 
+  it("fills the missing counter when only one window was seeded during adoption", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    await raw.hset(
+      dayKey,
+      "global",
+      "0",
+      "__initialized:global",
+      "1",
+      "organization:org_1",
+      "0",
+      "__initialized:organization:org_1",
+      "1"
+    );
+
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_a",
+        attempt: 1,
+        amount: 4,
+        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+        usage: {
+          hour: { global: 4, organization: 4, project: 0 },
+          day: { global: 4, organization: 4, project: 0 },
+        },
+        liveReservations: {
+          hour: [
+            {
+              id: "res_a",
+              attempt: 1,
+              reservedLamports: 4,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "res_a",
+              attempt: 1,
+              reservedLamports: 4,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+        },
+      })
+    ).resolves.toBe("admitted");
+
+    expect(await raw.hget(hourKey, "global")).toBe("4");
+    expect(await raw.hget(dayKey, "global")).toBe("4");
+    expect(await raw.hget(dayKey, "__reservation:res_a:1")).toBe("4");
+    expect(await raw.hget(hourKey, "__reservation:res_a:1")).toBe("4");
+  });
+
+  it("enforces the daily limit on the window it must fill during adoption", async () => {
+    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    await raw.hset(
+      dayKey,
+      "global",
+      "98",
+      "__initialized:global",
+      "1",
+      "organization:org_1",
+      "98",
+      "__initialized:organization:org_1",
+      "1"
+    );
+
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_a",
+        attempt: 1,
+        amount: 4,
+        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+        usage: {
+          hour: { global: 4, organization: 4, project: 0 },
+          day: { global: 98, organization: 98, project: 0 },
+        },
+        liveReservations: {
+          hour: [
+            {
+              id: "res_a",
+              attempt: 1,
+              reservedLamports: 4,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "res_a",
+              attempt: 1,
+              reservedLamports: 4,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+        },
+      })
+    ).resolves.toBe("denied");
+
+    expect(await raw.hget(dayKey, "global")).toBe("98");
+    expect(await raw.hget(dayKey, "__reservation:res_a:1")).toBeNull();
+    expect(await raw.get("sdp:sponsorship:{devnet}:reservation:res_a:1")).toBeNull();
+  });
+
   it("corrects a reservation that settled between the snapshot and reconstruction", async () => {
     const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
     const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";

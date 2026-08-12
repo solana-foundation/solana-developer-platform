@@ -85,31 +85,36 @@ for i = 1, count do
 end
 if existing or redis.call('GET', KEYS[5]) then return {2, tonumber(existing or '0')} end
 local ownership_field = ARGV[4 + count * 6]
-local seeded = redis.call('HGET', KEYS[1], ownership_field)
-if seeded then
-  redis.call('SET', KEYS[3], seeded, 'PX', ARGV[3 + count * 6])
-  return {1, tonumber(seeded)}
-end
+local counted_hour = redis.call('HGET', KEYS[1], ownership_field)
+local counted_day = redis.call('HGET', KEYS[2], ownership_field)
 for i = 1, count do
   local offset = 2 + ((i - 1) * 6)
   local field = ARGV[offset + 1]
   local per_tx = tonumber(ARGV[offset + 2])
   local hour_limit = tonumber(ARGV[offset + 3])
   local day_limit = tonumber(ARGV[offset + 4])
-  local hour_used = tonumber(redis.call('HGET', KEYS[1], field) or '0')
-  local day_used = tonumber(redis.call('HGET', KEYS[2], field) or '0')
-  if amount > per_tx or hour_used + amount > hour_limit or day_used + amount > day_limit then
-    return {0, i}
+  if (not counted_hour or not counted_day) and amount > per_tx then return {0, i} end
+  if not counted_hour then
+    local hour_used = tonumber(redis.call('HGET', KEYS[1], field) or '0')
+    if hour_used + amount > hour_limit then return {0, i} end
+  end
+  if not counted_day then
+    local day_used = tonumber(redis.call('HGET', KEYS[2], field) or '0')
+    if day_used + amount > day_limit then return {0, i} end
   end
 end
-for i = 1, count do
-  local offset = 2 + ((i - 1) * 6)
-  local field = ARGV[offset + 1]
-  redis.call('HINCRBY', KEYS[1], field, amount)
-  redis.call('HINCRBY', KEYS[2], field, amount)
+if not counted_hour then
+  for i = 1, count do
+    redis.call('HINCRBY', KEYS[1], ARGV[2 + ((i - 1) * 6) + 1], amount)
+  end
+  redis.call('HSET', KEYS[1], ownership_field, amount)
 end
-redis.call('HSET', KEYS[1], ARGV[4 + count * 6], amount)
-redis.call('HSET', KEYS[2], ARGV[4 + count * 6], amount)
+if not counted_day then
+  for i = 1, count do
+    redis.call('HINCRBY', KEYS[2], ARGV[2 + ((i - 1) * 6) + 1], amount)
+  end
+  redis.call('HSET', KEYS[2], ownership_field, amount)
+end
 redis.call('SET', KEYS[3], amount, 'PX', ARGV[3 + count * 6])
 return {1, amount}
 `;
