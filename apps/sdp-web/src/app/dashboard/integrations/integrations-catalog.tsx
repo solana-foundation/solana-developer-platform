@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
+import { SegmentedControl } from "@solana/design-system/segmented-control";
 import { ChevronRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -39,7 +40,7 @@ const STATUS_FILTERS: StatusFilter[] = [
 function statusLabel(status: IntegrationStatus | "all", t: Translate): string {
   switch (status) {
     case "all":
-      return t("Shared.integrations.filterAllStatuses");
+      return t("Shared.integrations.filterAll");
     case "active":
       return t("Shared.integrations.statusActive");
     case "available":
@@ -67,30 +68,6 @@ function StatusBadge({ status, t }: { status: IntegrationStatus; t: Translate })
     >
       {statusLabel(status, t)}
     </span>
-  );
-}
-
-function FilterPill({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean;
-  children: ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors motion-reduce:transition-none",
-        active ? "bg-primary text-on-primary" : "bg-fill-subtle text-secondary hover:bg-fill-strong"
-      )}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -239,45 +216,39 @@ export function IntegrationsCatalog({
   }, [custody, rpc, ramps, compliance, t]);
 
   const visible = rows.filter((row) => matchesFilters(row, { family, status, query }));
-  // The header tab is navigation, not a filter: "Clear filters" only resets
-  // what this page owns, so it never shows for a tab choice alone.
-  const filtered = status !== "all" || query.trim().length > 0;
   const clearFilters = () => {
     setStatus("all");
     setQuery("");
   };
 
   return (
-    <div className="w-full space-y-6 px-4 py-6 md:px-6">
-      {/* Left-aligned lead-in: with the family tabs in the header above, a
-          centered slogan floats in dead space instead of leading the page. */}
-      <p className="max-w-2xl text-sm leading-6 text-tertiary">
-        {t("Shared.integrations.pageDescription")}
-      </p>
-
-      {/* One toolbar: status pills lead and wrap within their own cluster,
-          search holds a fixed slot on the right from lg up. Below lg the two
-          stack, with the search full-width first — never a lonely field
-          floating right on its own wrap line. */}
+    <div className="w-full space-y-6 px-4 py-5 md:px-6">
+      {/* No lead-in paragraph: each section explains itself, and the header
+          tabs already frame the page — content starts at the toolbar. The
+          status group is one contained segmented control (the secondary pill
+          tabs), so it can never shed an orphaned pill onto its own wrap line;
+          on narrow viewports it scrolls within its strip instead. */}
       <div
-        className="flex flex-col-reverse gap-3 lg:flex-row lg:items-center"
+        className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between"
         data-integrations-filters="true"
       >
-        <div className="flex flex-1 flex-wrap items-center gap-2">
-          <div className="contents" data-integrations-status-pills="true">
-            {STATUS_FILTERS.map((option) => (
-              <FilterPill key={option} active={status === option} onClick={() => setStatus(option)}>
-                {statusLabel(option, t)}
-              </FilterPill>
-            ))}
-          </div>
-          {filtered ? (
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              {t("Shared.integrations.clearFilters")}
-            </Button>
-          ) : null}
+        <div
+          className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] md:-mx-6 md:px-6 xl:mx-0 xl:px-0"
+          data-integrations-status-pills="true"
+        >
+          <SegmentedControl
+            aria-label={t("Shared.integrations.filterByStatus")}
+            items={STATUS_FILTERS.map((option) => ({
+              value: option,
+              label: statusLabel(option, t),
+            }))}
+            value={status}
+            // Re-clicking the active segment can emit an empty value from the
+            // underlying toggle group; a status filter always has a selection.
+            onValueChange={(value) => value && setStatus(value as StatusFilter)}
+          />
         </div>
-        <div className="w-full lg:w-64 lg:shrink-0">
+        <div className="w-full max-w-xs xl:w-64 xl:shrink-0">
           <SearchInput
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}

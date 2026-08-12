@@ -97,9 +97,9 @@ describe("IntegrationsCatalog filtering", () => {
     await user.click(screen.getByRole("button", { name: "Connected" }));
     expect(visibleRowLabels()).toEqual(["Helius"]);
 
-    // Clear filters owns only what this page controls; the header tab is
-    // navigation and stays put.
-    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    // The status control owns only what this page controls; the header tab
+    // is navigation and stays put.
+    await user.click(screen.getByRole("button", { name: "All" }));
     expect(visibleRowLabels()).toEqual(["Helius", "Alchemy"]);
   });
 
@@ -173,7 +173,7 @@ describe("IntegrationsCatalog filtering", () => {
     await user.type(screen.getByRole("searchbox"), "moon");
     expect(visibleRowLabels()).toEqual(["MoonPay"]);
 
-    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    await user.clear(screen.getByRole("searchbox"));
     expect(visibleRowLabels().length).toBeGreaterThan(5);
   });
 
