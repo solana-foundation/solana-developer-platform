@@ -1,4 +1,6 @@
-import { Hono } from "hono";
+import { Hono, type Next } from "hono";
+import { AppError } from "@/lib/errors";
+import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
@@ -24,6 +26,7 @@ import {
 } from "./handlers/deploy";
 import { executeForceBurn, prepareForceBurn } from "./handlers/force-burn";
 import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
+import { enrollHolder, listHolders } from "./handlers/holders";
 import { serveTokenMetadata } from "./handlers/metadata";
 import { executeMint, extractMintPolicyCandidate, prepareMint } from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
@@ -32,6 +35,20 @@ import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
 import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
+import {
+  approveWorkflowExecution,
+  cancelWorkflowExecution,
+  listWorkflowExecutions,
+  retryWorkflowExecution,
+} from "./handlers/workflow-executions";
+import {
+  createWorkflow,
+  deleteWorkflow,
+  listWorkflowCatalog,
+  listWorkflows,
+  updateWorkflow,
+} from "./handlers/workflows";
+import type { AppContext } from "./helpers";
 
 const issuance = new Hono<{ Bindings: Env }>();
 
@@ -146,6 +163,77 @@ issuance.delete(
   "/tokens/:tokenId/allowlist/:entryId",
   requirePermissions("tokens:write"),
   removeAllowlistEntry
+);
+
+// Holders + workflows are the asset-profiles feature surface, and the cron that drains
+// workflow executions is itself flag-gated. Leaving the enqueue side open while the
+// drain side is off would let a flag-off deployment silently accumulate a backlog that
+// detonates against weeks-old payloads the moment the flag flips.
+async function requireAssetProfilesFeature(c: AppContext, next: Next) {
+  if (!isAssetProfilesEnabled(c.env)) {
+    throw new AppError("FORBIDDEN", "Asset Profiles are not enabled for this environment");
+  }
+  await next();
+}
+
+// Holders (KYC-wallet enrollment for an asset)
+issuance.get(
+  "/tokens/:tokenId/holders",
+  requireAssetProfilesFeature,
+  requirePermissions("tokens:read"),
+  listHolders
+);
+issuance.post(
+  "/tokens/:tokenId/holders",
+  requireAssetProfilesFeature,
+  requirePermissions("tokens:write"),
+  enrollHolder
+);
+
+issuance.use("/tokens/:tokenId/workflows", requireAssetProfilesFeature);
+issuance.use("/tokens/:tokenId/workflows/*", requireAssetProfilesFeature);
+
+// Workflow builder — catalog + rules (register static paths before :workflowId)
+issuance.get(
+  "/tokens/:tokenId/workflows/catalog",
+  requirePermissions("tokens:read"),
+  listWorkflowCatalog
+);
+issuance.get(
+  "/tokens/:tokenId/workflows/executions",
+  requirePermissions("tokens:read"),
+  listWorkflowExecutions
+);
+// Decisions and rule writes carry `tokens:write` as the floor; the handler then raises
+// the bar to `tokens:admin` for any rule whose action tier is sensitive or irreversible
+// (see workflow-authz.ts). Without that second check, workflows would be a way around
+// the `tokens:admin` the direct seize/freeze/pause routes require.
+issuance.post(
+  "/tokens/:tokenId/workflows/executions/:executionId/approve",
+  requirePermissions("tokens:write"),
+  approveWorkflowExecution
+);
+issuance.post(
+  "/tokens/:tokenId/workflows/executions/:executionId/retry",
+  requirePermissions("tokens:write"),
+  retryWorkflowExecution
+);
+issuance.post(
+  "/tokens/:tokenId/workflows/executions/:executionId/reject",
+  requirePermissions("tokens:write"),
+  cancelWorkflowExecution
+);
+issuance.get("/tokens/:tokenId/workflows", requirePermissions("tokens:read"), listWorkflows);
+issuance.post("/tokens/:tokenId/workflows", requirePermissions("tokens:write"), createWorkflow);
+issuance.patch(
+  "/tokens/:tokenId/workflows/:workflowId",
+  requirePermissions("tokens:write"),
+  updateWorkflow
+);
+issuance.delete(
+  "/tokens/:tokenId/workflows/:workflowId",
+  requirePermissions("tokens:write"),
+  deleteWorkflow
 );
 
 export default issuance;
