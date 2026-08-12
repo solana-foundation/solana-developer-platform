@@ -168,25 +168,14 @@ async function reconcileReservation(input: {
     await repository.recordReconciliationMiss(reservation.id, reservation.attempt, 0);
     return;
   }
-  if (reservation.status === "submitted") {
-    await persistAmbiguousCharge({
-      reservation,
-      repository,
-      budgetRedis,
-      reason: "Submitted signature absent after blockhash expiry on two reconciliation passes",
-      breakerReason: "Ambiguous submitted reservation lost its durable transition",
-      lostTransitionError: "Failed to retain ambiguous submitted sponsorship charge",
-    });
-    return;
-  }
-  await settleDurably(
+  await persistAmbiguousCharge({
+    reservation,
     repository,
     budgetRedis,
-    reservation,
-    "released",
-    0,
-    "Signature absent after blockhash expiry on two reconciliation passes"
-  );
+    reason: "Signature absent after blockhash expiry on two reconciliation passes",
+    breakerReason: "Ambiguous unconfirmed reservation lost its durable transition",
+    lostTransitionError: "Failed to retain ambiguous unconfirmed sponsorship charge",
+  });
 }
 
 function feePayerSpendLamports(
