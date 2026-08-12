@@ -492,9 +492,25 @@ replaced:
   so no column makes them collide. The applier resolves by provider reference,
   then by signature, and that ordering works in both directions: an indexer
   adopts and advances a row the poller wrote, and a poller stamps
-  `provider_reference` onto a row the indexer wrote. Skip rather than guess when
-  a signature probe is ambiguous — a double-counted movement breaks
-  reconciliation silently.
+  `provider_reference` onto a row the indexer wrote.
+  **A signature match may only adopt a row the observation cannot be PROVEN to
+  differ from** — rejected only when a discriminator BOTH sides carry actually
+  disagrees. Written that way round on purpose: two observers of one movement
+  rarely hold the same identifiers (a poll knows the provider's deposit id and no
+  instruction index, an indexer the reverse), so demanding agreement on an
+  identifier only one side has would duplicate the movement — while accepting a
+  bare signature match would merge two of them. The load-bearing case is a
+  batching payer landing two transfers to one funding address in one transaction:
+  the provider reports two deposits sharing one hash, their references differ, and
+  neither may overwrite or swallow the other. Skip rather than guess when several
+  candidates remain indistinguishable — a merged movement loses money from the
+  ledger as silently as a double-counted one breaks reconciliation.
+  Residual, and deliberately deferred to the indexer's own ticket: an indexer
+  observing the second transfer of a batched transaction whose first transfer
+  alone has been polled cannot yet be told apart, because a poll-written row
+  carries no instruction index to disagree with. No V1 observer can reach it —
+  nothing today writes an instruction index — and the answer there is a sweep-time
+  merge, not a constraint.
 - **`occurred_at` is when the money moved; `created_at` is when SDP wrote the
   row.** For an initiated movement they are the same instant, which is why the
   migration backfills one from the other. For an observed one they are
