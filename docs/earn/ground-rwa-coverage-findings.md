@@ -4,7 +4,8 @@ Investigation record for [PRO-1638](https://linear.app/solana-fndn/issue/PRO-163
 Companion data: [ground-catalogue-inventory.md](./ground-catalogue-inventory.md)
 (auto-generated; refresh with `pnpm --filter @sdp/api earn:inventory`).
 
-**Status: sandbox inventoried 2026-08-05. Production inventory pending** — it
+**Status: Solana-only gate shipped 2026-08-12 (see "Where these sources live"
+below). Sandbox re-inventoried 2026-08-12. Production inventory pending** — it
 requires `GROUND_API_KEY` from an approved environment (never a laptop;
 `packages/sdp-earn/CLAUDE.md`: provider sandbox only), or Ground answering the
 questions below directly. Sandbox is the best proxy observable today, and
@@ -46,23 +47,41 @@ that comparison possible from now on. What can be said today is the level: a
 shelf of treasuries plus one CLO fund and one carry fund, and none of the
 marquee issuer names the doc leads with.
 
-## Where these sources actually live (and why it is not a filter)
+## Where these sources live — and why it IS now a filter
 
-Of the 15 catalogued sources, **only 5 are hosted on Solana — all Kamino, all
-DeFi. Every one of the 4 RWA sources sits on Ethereum**, as do Morpho, Aave and
-Syrup. That is not a bug in the catalogue: SDP's Solana-only mandate governs the
-rails the **customer** touches — they send USDC to a Solana address and are paid
-out to one — while Ground routes the capital onward internally, which is exactly
-what the `bridge` position kind represents. A source hosted off Solana but
-funded by Solana USDC is therefore catalogued on purpose.
+**Resolved 2026-08-12: SDP lists and stores Solana-HOSTED vaults only.** Of the
+15 sources this shelf used to carry, only 5 are hosted on Solana — all Kamino,
+all DeFi — and every one of the 4 RWA sources sat on Ethereum, as did Morpho,
+Aave and Syrup.
 
-It is worth stating plainly because it is easy to assume otherwise, and because
-it sets the price of a decision nobody has been asked to make yet: **narrowing
-V1 to Solana-hosted sources would take RWA coverage to zero** and leave a
-five-source, all-Kamino, all-DeFi shelf — the precise outcome the product doc
-says to avoid. If "Solana Earn" is ever meant to imply Solana-hosted yield
-rather than Solana-rail access, that is a V1-scope question for the epic, not a
-catalogue-mapping fix.
+The earlier reading (recorded below for provenance) was that SDP's Solana-only
+mandate governed the rails the **customer** touches — they send USDC to a Solana
+address and are paid out to one — while Ground routes capital onward internally
+(the `bridge` position kind), so a source hosted off Solana but funded by Solana
+USDC was catalogued on purpose. That is no longer the platform's behaviour:
+"Solana Earn" means Solana-hosted yield, not Solana-rail access to yield hosted
+elsewhere, and the `not_solana_hosted` gate in `distillGroundYieldSource`
+enforces it for both listing and storage.
+
+The price is the one this document priced in advance, and it has been paid
+deliberately: **RWA coverage is now zero** and the shelf is five sources,
+all Kamino, all DeFi. The catalogue sync additionally DELETES rows that stop
+qualifying, so the 10 Ethereum-hosted rows already stored in every environment
+are removed on the next pass rather than lingering as depositable strategies.
+
+Two consequences worth carrying forward:
+
+- **The product doc's RWA story has no day-one shelf.** JAAA, JTRSY, USTB and
+  USCC are all Ethereum-hosted and now dropped. The nearest Solana-native
+  RWA-adjacent exposure is `kamino-rockawayx-rwa-usdc` (OnRe, Huma, Obligate and
+  Figure sleeves) and `kamino-superstate-usdc`, both of which classify `defi`
+  because Ground types their sleeves as Kamino `reserve`s. Whether Ground counts
+  those as RWA is question 5 below and now decides whether V1 has any RWA claim
+  at all.
+- **Production is unmeasured.** Everything here is sandbox. The gate is keyed on
+  the environment's Solana chain (`solana` in production, `solana_devnet` in
+  sandbox), so it applies identically — but *how much* of Ground's production
+  shelf is Solana-hosted is unknown until the production inventory runs.
 
 ## Delta against the doc's named RWA list
 

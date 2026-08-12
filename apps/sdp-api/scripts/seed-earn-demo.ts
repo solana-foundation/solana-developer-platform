@@ -10,9 +10,15 @@
  *
  * Every row is a FIXTURE that imitates Ground's sandbox yield-source catalogue —
  * ids, names, APYs, source kinds, redemption delays, curators and TVLs copied
- * from a sandbox sync on 2026-08-04 — because a catalogue of invented products
- * teaches local dev the wrong thing. The numbers are frozen snapshots, not live
- * truth; only the sync tracks the real ones.
+ * from the committed inventory snapshot (2026-08-05) — because a catalogue of
+ * invented products teaches local dev the wrong thing. The numbers are frozen
+ * snapshots, not live truth; only the sync tracks the real ones.
+ *
+ * SOLANA-HOSTED ONLY, exactly like the catalogue sync's `not_solana_hosted`
+ * gate. Ground's shelf is majority Ethereum-hosted (Aave, four Morpho vaults,
+ * Syrup and every RWA source) and SDP lists and stores none of it, so no fixture
+ * may reference one either — a seeded EVM row would be a vault the dashboard
+ * offers and the sync would then delist.
  *
  * Fixtures stay distinguishable from synced rows, and that is what the
  * `seed-demo-` provider_reference prefix buys (earn_strategies has no
@@ -23,7 +29,11 @@
  *     `--clean` can never delete one;
  *   - it keeps the deliberately paused fixture paused: every sync pass
  *     re-asserts `active` for the references the provider lists, and Ground
- *     never lists a `seed-demo-` one.
+ *     never lists a `seed-demo-` one;
+ *   - it keeps fixtures out of the sync's DELIST pass, which deprecates rows the
+ *     provider no longer lists. Ground lists no prefixed reference, so without
+ *     the partition every fixture would be deprecated on the next sync — the
+ *     repository excludes the prefix for exactly this reason.
  * Run both and the fixtures show up as twins beside the synced rows — the
  * prefix, and `riskMetadata.seedFixture`, are how you tell them apart.
  *
@@ -86,10 +96,14 @@ import {
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { type AppDb, asTransactionalClient, closeDatabasePools, createDatabaseClient } from "@/db";
 import type { EarnRepository } from "@/db/repositories";
-import { createPostgresEarnRepository } from "@/db/repositories";
+import { createPostgresEarnRepository, EARN_SEED_REFERENCE_PREFIX } from "@/db/repositories";
 
-/** Ownership marker for seeded rows — see the header for what it protects. */
-const SEED_REFERENCE_PREFIX = "seed-demo-";
+/**
+ * Ownership marker for seeded rows — see the header for what it protects.
+ * Imported, not redeclared: the delist pass excludes this exact prefix, so a
+ * local copy drifting from it would silently expose fixtures to deprecation.
+ */
+const SEED_REFERENCE_PREFIX = EARN_SEED_REFERENCE_PREFIX;
 // Ground is the only provider with an HTTP integration; the other registered
 // ids are stubs, and a fixture under one of them would advertise a strategy
 // nothing can quote, deposit into, or withdraw from.
@@ -174,9 +188,22 @@ const SEED_PROVIDER_WALLET: { ref: string; note: string } = {
 };
 
 // ── Fixture catalogue ───────────────────────────────────────────────────────
-// Ten of Ground's sandbox yield sources, trimmed to a spread the dashboard
-// exercises well: several curators holding more than one opportunity, instant
-// and delayed liquidity, DeFi and tokenized RWA, and a high-APY outlier.
+// Ground's Solana-hosted sandbox shelf — ALL FIVE of it, values from the
+// committed inventory snapshot (docs/earn/ground-catalogue-inventory.md,
+// 2026-08-05). Not a curated spread any more: SDP lists and stores Solana-hosted
+// vaults only (`not_solana_hosted`), so the fixtures ARE the shelf, and seeding
+// anything else would advertise a vault the catalogue sync would refuse.
+//
+// What that costs local dev, so nobody hunts for these:
+//   - every Solana source is `instant`, so DELAYED liquidity is unexercised —
+//     the "defi ⇒ instant" assumption has no fixture to catch it here;
+//   - none classifies `rwa`, so the rwa/defi split is unexercised (the one
+//     Solana source named RWA classifies `defi`; see the RockawayX note below);
+//   - the top rate is 5.85%, so there is no high-APY outlier in the 8% band.
+// All three were previously supplied by Ethereum-hosted fixtures (Syrup, JAAA,
+// JTRSY, Morpho August). Ground's Solana shelf genuinely has no delayed or RWA
+// source, so inventing one here would teach local dev something false; cover
+// those paths in unit tests instead.
 
 interface SeedStrategy {
   /** Ground's real sandbox yield-source id; the seeded reference prefixes it. */
@@ -199,17 +226,6 @@ interface SeedStrategy {
 
 const SEED_STRATEGIES: readonly SeedStrategy[] = [
   {
-    groundYieldSourceId: "kamino-superstate-usdc",
-    name: "Kamino Superstate USDC",
-    sourceKind: "defi",
-    underlyingSource: "kamino",
-    apy: "0.0154",
-    liquidityTerm: "instant",
-    redemptionDelayDays: null,
-    curator: "kamino",
-    tvlUsd: 8_400_000,
-  },
-  {
     groundYieldSourceId: "kamino-allez-usdc",
     name: "Kamino Allez USDC",
     sourceKind: "defi",
@@ -217,105 +233,62 @@ const SEED_STRATEGIES: readonly SeedStrategy[] = [
     apy: "0.0506",
     liquidityTerm: "instant",
     redemptionDelayDays: null,
-    curator: "kamino",
-    tvlUsd: 15_600_000,
+    curator: "allez",
+    tvlUsd: 15_421_377,
   },
   {
-    groundYieldSourceId: "kamino-steakhouse-usdc",
-    name: "Kamino Steakhouse USDC",
+    // Ground's top Solana rate, and the naming trap worth having locally: it is
+    // *called* RWA (RockawayX's sleeves are OnRe, Huma, Obligate and Figure) but
+    // Ground types every sleeve as a Kamino `reserve`, so distillation classifies
+    // it `defi`. The fixture mirrors the classifier, not the name.
+    groundYieldSourceId: "kamino-rockawayx-rwa-usdc",
+    name: "Kamino RockawayX RWA USDC",
     sourceKind: "defi",
     underlyingSource: "kamino",
-    apy: "0.0392",
+    apy: "0.0585",
     liquidityTerm: "instant",
     redemptionDelayDays: null,
-    curator: "steakhouse",
-    tvlUsd: 20_000_000,
-  },
-  {
-    groundYieldSourceId: "morpho-steakhouse-usdc",
-    name: "Morpho Steakhouse USDC Prime",
-    sourceKind: "defi",
-    underlyingSource: "morpho",
-    apy: "0.0352",
-    liquidityTerm: "instant",
-    redemptionDelayDays: null,
-    curator: "steakhouse",
-    tvlUsd: 76_900_000,
-  },
-  {
-    groundYieldSourceId: "morpho-gauntlet-usdc",
-    name: "Morpho Gauntlet USDC Prime",
-    sourceKind: "defi",
-    underlyingSource: "morpho",
-    apy: "0.037",
-    liquidityTerm: "instant",
-    redemptionDelayDays: null,
-    curator: "gauntlet",
-    tvlUsd: 28_400_000,
+    curator: "rockawayx",
+    tvlUsd: 27_292_892,
   },
   {
     groundYieldSourceId: "kamino-gauntlet-frontier-usdc",
     name: "Kamino Gauntlet USDC Frontier",
     sourceKind: "defi",
     underlyingSource: "kamino",
-    apy: "0.0478",
+    apy: "0.0479",
     liquidityTerm: "instant",
     redemptionDelayDays: null,
     curator: "gauntlet",
-    tvlUsd: 390_000,
+    tvlUsd: 391_667,
   },
   {
-    // The catalogue's high-APY outlier: exercises sorting, the enhanced risk
-    // tier, and the copy that has to sit next to a rate like this.
-    groundYieldSourceId: "morpho-august-usdc-v2",
-    name: "Morpho August USDC V2",
+    groundYieldSourceId: "kamino-steakhouse-usdc",
+    name: "Kamino Steakhouse USDC",
     sourceKind: "defi",
-    underlyingSource: "morpho",
-    apy: "0.0815",
+    underlyingSource: "kamino",
+    apy: "0.0393",
     liquidityTerm: "instant",
     redemptionDelayDays: null,
-    curator: "morpho",
-    tvlUsd: 1_600_000,
+    curator: "steakhouse",
+    tvlUsd: 19_924_793,
   },
   {
-    // DeFi with a redemption delay — the combination that catches code assuming
-    // "defi ⇒ instant".
-    groundYieldSourceId: "syrup-usdc",
-    name: "Syrup USDC",
+    // Paused on purpose — the ADR 0002 exit-safety split (deposits blocked,
+    // withdrawals still quoted) and the `includeInactive` listing path both need
+    // a non-active row. Fixtures can hold a pause because the sync never lists
+    // their prefixed references, so it never re-asserts `active` over them and
+    // the delist pass skips the seed's key space entirely.
+    // Lowest rate on the shelf, so it is the least missed as a deposit target.
+    groundYieldSourceId: "kamino-superstate-usdc",
+    name: "Kamino Superstate USDC",
     sourceKind: "defi",
-    underlyingSource: "maple",
-    apy: "0.0492",
-    liquidityTerm: "delayed",
-    redemptionDelayDays: 1,
-    curator: "maple",
-    tvlUsd: 1_090_000_000,
-  },
-  {
-    groundYieldSourceId: "ground-jaaa-usdc-vault",
-    name: "Janus Henderson JAAA (USDC)",
-    sourceKind: "rwa",
-    underlyingSource: "centrifuge",
-    apy: "0.037",
-    liquidityTerm: "delayed",
-    redemptionDelayDays: 2,
-    curator: "centrifuge",
-    tvlUsd: 685_000_000,
-  },
-  {
-    // Paused on purpose: a delayed tokenized-treasury vault is the sharpest
-    // exit-safety case, so this row exercises the ADR 0002 split (deposits
-    // blocked, T+2 withdrawals still quoted) and the includeInactive listing
-    // path. Fixtures can hold a pause because the sync never lists their
-    // references and so never re-asserts `active` over them.
-    groundYieldSourceId: "ground-jtrsy-usdc-vault",
-    name: "Janus Henderson JTRSY tokenized by Centrifuge",
-    sourceKind: "rwa",
-    underlyingSource: "centrifuge",
-    apy: "0.0328",
-    liquidityTerm: "delayed",
-    redemptionDelayDays: 2,
-    curator: "centrifuge",
-    tvlUsd: 881_000_000,
+    underlyingSource: "kamino",
+    apy: "0.0151",
+    liquidityTerm: "instant",
+    redemptionDelayDays: null,
+    curator: "superstate",
+    tvlUsd: 8_388_125,
     status: "paused",
   },
 ];
@@ -378,6 +351,36 @@ async function deleteSeeded(db: AppDb): Promise<number> {
     "DELETE FROM earn_strategies WHERE environment = ? AND provider_reference LIKE ?",
     [SEED_ENVIRONMENT, `${SEED_REFERENCE_PREFIX}%`]
   );
+}
+
+/**
+ * Delete fixtures this script wrote that it no longer defines — the pruning an
+ * upsert-only seed cannot do. Without it, a developer who seeded before the
+ * fixture set changed and then re-runs `db:seed:earn` (no `--clean`) keeps the
+ * dropped rows forever: upsert touches only the five references in
+ * SEED_STRATEGIES and nothing else ever revisits the rest.
+ *
+ * That is what turned the Solana-only change into a trap: the six Ethereum-hosted
+ * fixtures (Morpho ×3, Syrup, JAAA, JTRSY) would survive a re-seed as `active`
+ * rows and keep rendering, and the catalogue sync's delist pass deliberately
+ * skips the seed's key space, so nothing else would ever remove them.
+ *
+ * Scoped to the seed prefix, so it can no more touch a synced row than
+ * `--clean` can.
+ */
+async function pruneStaleSeeded(db: AppDb): Promise<string[]> {
+  const current = SEED_STRATEGIES.map(seededReference);
+  const rows = await db
+    .prepare(
+      `DELETE FROM earn_strategies
+        WHERE environment = ?
+          AND provider_reference LIKE ?
+          AND NOT (provider_reference = ANY(?))
+        RETURNING provider_reference`
+    )
+    .bind(SEED_ENVIRONMENT, `${SEED_REFERENCE_PREFIX}%`, current)
+    .all<{ provider_reference: string }>();
+  return (rows.results ?? []).map((row) => row.provider_reference);
 }
 
 /**
@@ -685,6 +688,13 @@ async function main(): Promise<void> {
         `Done — removed ${removed} seeded ${SEED_ENVIRONMENT} strategies and ${removedWallets} seeded program link(s). The Ground sandbox wallets themselves are untouched.`
       );
       return;
+    }
+
+    const pruned = await pruneStaleSeeded(db);
+    if (pruned.length > 0) {
+      console.log(
+        `Pruned ${pruned.length} fixture(s) this seed no longer defines: ${pruned.join(", ")}`
+      );
     }
 
     const depositMints = resolveDepositMints();

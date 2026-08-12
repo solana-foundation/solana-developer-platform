@@ -20,7 +20,7 @@ import {
   type EarnPortfolioYield,
   type EarnStrategySourceKind,
   isWellKnownTokenSymbol,
-  type SolanaCluster,
+  type SdpEnvironment,
   wellKnownMint,
 } from "@sdp/types";
 import { badRequest, providerNotConfigured } from "../../errors";
@@ -166,14 +166,21 @@ export interface GroundYieldSource {
   /** Documented: active | buy_only | sell_only | emergency_freeze — kept open. */
   mode: string;
   /**
-   * Where the yield source ITSELF sits — provider plumbing, deliberately NOT a
-   * catalogue gate. SDP's Solana-only mandate is about the rails the customer
-   * touches (deposit address, payout address, `depositToken`), not about where
-   * Ground routes the capital afterwards: it bridges internally, which is what
-   * the `bridge` position kind represents. So an Ethereum-hosted source funded
-   * by USDC on Solana is catalogued on purpose. Surfaced for the inventory
-   * script, which reports it because "how much of this shelf actually lives on
-   * Solana" is a product question the gates alone do not answer.
+   * Where the yield source ITSELF is hosted — and THE catalogue gate for it
+   * (`not_solana_hosted`). SDP lists and stores Solana-hosted vaults only: a
+   * "Solana Earn" shelf means Solana-hosted yield, not merely Solana-rail
+   * access to yield hosted elsewhere.
+   *
+   * This reversed an earlier reading, which gated only the rails the customer
+   * touches (deposit address, payout address, `depositToken`) and catalogued
+   * off-Solana sources on purpose because Ground bridges internally — the
+   * `bridge` position kind. That admitted Aave, four Morpho vaults, Syrup and
+   * every RWA source (all Ethereum-hosted) into the catalogue; see
+   * docs/earn/ground-catalogue-inventory.md for the census that measured it.
+   *
+   * Ground does not document this field as required, so the gate is
+   * FAIL-CLOSED: an absent or unrecognised chain cannot be shown to be Solana,
+   * and an unlabelled source is exactly the drift this gate exists to catch.
    */
   chain?: string | null;
   apyBps?: number | null;
@@ -458,6 +465,12 @@ const GROUND_CURATOR_HOUSES = [
  * string — an unlisted curator still resolves), then the hosting protocol.
  * Exported for the catalogue-inventory script, which attributes sources
  * distillation drops.
+ *
+ * The `morpho` branch is deliberately KEPT even though no Morpho vault can be
+ * catalogued any more (`not_solana_hosted`): this parses Ground's RAW response,
+ * which still carries all 18 sources, and the inventory's dropped-source table
+ * attributes them. Understanding what we refuse is not the same as listing it —
+ * do not "clean up" EVM vocabulary from this layer.
  */
 export function deriveCurator(source: GroundYieldSource): string | undefined {
   const id = source.id.toLowerCase();
@@ -479,6 +492,7 @@ export function deriveCurator(source: GroundYieldSource): string | undefined {
 export type GroundCatalogueDropReason =
   | "inactive_mode"
   | "not_solana_routable"
+  | "not_solana_hosted"
   | "unknown_token_symbol"
   | "no_cluster_mint";
 
@@ -496,8 +510,12 @@ export type GroundYieldSourceDistillation =
  */
 export function distillGroundYieldSource(
   source: GroundYieldSource,
-  cluster: SolanaCluster
+  environment: SdpEnvironment
 ): GroundYieldSourceDistillation {
+  // Keyed by environment, not cluster, so the host-chain gate below can read
+  // the ONE pinned chain constant (GROUND_SOLANA_CHAINS) rather than a second
+  // cluster-keyed copy of the same fact drifting beside it.
+  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
   // Only fully tradable sources enter the catalogue. buy_only would let
   // deposits into an exit-frozen source — trapped funds, which the Earn
   // pluggability constraint forbids; sell_only/emergency_freeze cannot
@@ -512,6 +530,14 @@ export function distillGroundYieldSource(
   // cluster/mint question like the check below).
   if (!GROUND_SOLANA_ROUTED_TOKENS.has(source.depositToken.toLowerCase())) {
     return { outcome: "dropped", reason: "not_solana_routable" };
+  }
+  // Solana-HOSTED only: where the vault itself lives, not just the rail the
+  // customer funds it over. Ordered after the token gate so a USDT source on
+  // another chain keeps reporting the rail constraint that binds it first
+  // (Ground cannot route USDT on Solana even if the vault were Solana-hosted).
+  // Fail-closed on an absent/unknown chain — see GroundYieldSource.chain.
+  if (source.chain?.trim().toLowerCase() !== GROUND_SOLANA_CHAINS[environment]) {
+    return { outcome: "dropped", reason: "not_solana_hosted" };
   }
   const symbol = source.depositToken.toUpperCase();
   if (!isWellKnownTokenSymbol(symbol)) {
@@ -781,10 +807,9 @@ export class GroundEarnClient
   }
 
   override async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
-    const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
     const snapshots: ProviderStrategySnapshot[] = [];
     for await (const source of this._iterateYieldSources(ctx)) {
-      const distilled = distillGroundYieldSource(source, cluster);
+      const distilled = distillGroundYieldSource(source, ctx.environment);
       if (distilled.outcome === "catalogued") {
         snapshots.push(distilled.snapshot);
       }

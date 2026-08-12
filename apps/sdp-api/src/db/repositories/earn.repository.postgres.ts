@@ -11,6 +11,7 @@ import type {
 import type { AppDb } from "@/db";
 import type {
   CreateEarnProgramWithdrawalInput,
+  DeleteUnlistedEarnStrategiesInput,
   EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
@@ -26,6 +27,7 @@ import type {
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 import {
+  EARN_SEED_REFERENCE_PREFIX,
   generateEarnProgramWithdrawalId,
   generateEarnProviderWalletId,
   generateEarnStrategyId,
@@ -207,6 +209,48 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         .bind(strategyId)
         .first<Record<string, unknown>>();
       return row ? mapStrategyRow(row) : null;
+    },
+
+    async deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput) {
+      // Only `active` rows are deleted. An operator `paused`/`deprecated` is a
+      // deliberate human record, and it is load-bearing: upsertStrategy refuses
+      // to overwrite it precisely so a vault stopped for an exploit or depeg
+      // cannot be silently reactivated by a sync. Deleting such a row would
+      // discard that guard — the next time the provider listed the reference, it
+      // would be inserted fresh as `active`. So an operator-stopped row is the
+      // one thing this pass leaves behind; it is invisible to every read anyway
+      // (the catalogue and program-creation paths both filter `status = 'active'`).
+      //
+      // Dev-seed fixtures are outside every provider's key space (providers list
+      // bare ids, fixtures carry the prefix), so "the provider did not list it"
+      // says nothing about them — the seed relies on exactly that to keep its
+      // deliberately-paused fixture paused, and prunes its own stale rows.
+      //
+      // An empty keep set would match EVERY active row (`= ANY('{}')` is false,
+      // so `NOT` admits everything) and delete the provider's whole shelf.
+      // "The provider listed nothing" is indistinguishable from a misconfigured
+      // account or a silently-empty response, so it can never trigger a
+      // catalogue-wide teardown.
+      if (input.listedProviderReferences.length === 0) {
+        return [];
+      }
+
+      const rows = await db
+        .prepare(
+          `DELETE FROM earn_strategies
+            WHERE provider = ?
+              AND environment = ?
+              AND status = 'active'
+              AND provider_reference NOT LIKE ?
+              AND NOT (provider_reference = ANY(?))
+            RETURNING provider_reference`
+        )
+        .bind(input.provider, input.environment, `${EARN_SEED_REFERENCE_PREFIX}%`, [
+          ...input.listedProviderReferences,
+        ])
+        .all<{ provider_reference: string }>();
+
+      return (rows.results ?? []).map((row) => row.provider_reference);
     },
 
     async listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult> {

@@ -79,8 +79,13 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
   Ground's real yield sources. It fires on the hour, so a freshly started API
   shows nothing until then — seed if you don't want to wait.
 - **Offline (no key needed):** `DATABASE_URL=… pnpm -C apps/sdp-api db:seed:earn`
-  writes 10 Ground-shaped fixtures (prefixed `seed-demo-`, removable with
-  `--clean`, never confusable with synced rows).
+  writes Ground's 5 Solana-hosted sandbox sources as fixtures (prefixed
+  `seed-demo-`, removable with `--clean`, never confusable with synced rows).
+  Solana-only like the sync, so no fixture references an EVM vault. Every run
+  also PRUNES prefixed rows the fixture set no longer defines — an upsert-only
+  seed would leave dropped fixtures behind forever. The seed's key space is
+  excluded from the sync's delete pass (providers never list a prefixed ref), so
+  fixtures and the paused fixture survive a sync.
 
 Running both is fine but leaves near-twin rows (same vault names, different
 reference prefix); `--clean` removes only the fixtures.
@@ -198,6 +203,15 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
   depend on availability/enablement — only on configured credentials.
 - Catalogue mapping must exclude anything that would trap funds (Ground:
   `mode === "buy_only"` sources are skipped, only `active` is listed).
+- **Solana-HOSTED only, listed AND stored.** `distillGroundYieldSource` gates on
+  the source's own `chain` matching `GROUND_SOLANA_CHAINS[environment]`
+  (`not_solana_hosted`, fail-closed on an absent/unknown chain), and the
+  catalogue sync DELETES `earn_strategies` rows the provider no longer lists, so
+  a tightened gate reaches rows already stored. Ground's shelf is majority
+  Ethereum-hosted (Aave, four Morpho vaults, Syrup and all four RWA sources) —
+  none of it may be listed or stored in ANY environment, sandbox included.
+  This deliberately takes RWA coverage to zero; see
+  docs/earn/ground-rwa-coverage-findings.md.
 - Missing API key ⇒ throw `PROVIDER_NOT_CONFIGURED` **before** any network call.
 
 ## Conventions
@@ -234,6 +248,14 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
   catalogue and regenerates `docs/earn/ground-catalogue-inventory.md` using
   the same `distillGroundYieldSource` the sync uses. Sandbox only from a
   laptop; the production variant is gated behind `--confirm-production`.
+  `earn:inventory:render` only re-formats the committed JSON (outcomes are baked
+  into the snapshot) — after changing a distillation gate you must re-`fetch`, not
+  re-render. If `doppler run` fails for want of a project scope, the fetch also
+  works from `apps/sdp-api/.env.local`:
+  `cd apps/sdp-api && set -a && . ./.env.local && set +a && npx tsx scripts/inventory-ground-catalogue.ts fetch`.
+  NOTE: `deriveCurator` and `GROUND_CURATOR_HOUSES` still carry EVM vocabulary
+  (e.g. `morpho`) on purpose — they parse Ground's RAW 18-source response so the
+  inventory can attribute what we DROP. Do not "clean" those.
 
 ## Cross-package coupling
 

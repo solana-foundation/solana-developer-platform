@@ -125,6 +125,31 @@ export interface UpsertEarnStrategyInput {
   environment: SdpEnvironment;
 }
 
+/**
+ * Provider-reference prefix the dev seed stamps on every fixture row it writes
+ * (apps/sdp-api/scripts/seed-earn-demo.ts). Canonical HERE, not in the script,
+ * because it partitions this table's key space and the delist pass has to honour
+ * that partition: providers only ever list their own bare ids, so a prefixed row
+ * is by construction not a row any provider can confirm or deny.
+ */
+export const EARN_SEED_REFERENCE_PREFIX = "seed-demo-";
+
+/**
+ * Delist pass input: everything the provider still lists for (provider,
+ * environment). Anything else the table holds is stale — a vault the provider
+ * delisted, or one a tightened catalogue gate now refuses (the
+ * `not_solana_hosted` case) — and is deleted.
+ *
+ * `listedProviderReferences` is the KEEP set, never the delete set, so the
+ * caller cannot enumerate stale rows it does not know about: the provider's
+ * live list is the only input, and the DB decides what that leaves behind.
+ */
+export interface DeleteUnlistedEarnStrategiesInput {
+  provider: EarnProviderId;
+  environment: SdpEnvironment;
+  listedProviderReferences: readonly string[];
+}
+
 export interface ListEarnStrategiesInput {
   environment: SdpEnvironment;
   sourceKind?: EarnStrategySourceKind;
@@ -223,6 +248,19 @@ export interface EarnRepository {
   upsertStrategy(input: UpsertEarnStrategyInput): Promise<EarnStrategyRow | null>;
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
   listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult>;
+  /**
+   * DELETE every `active` strategy for (provider, environment) that the provider
+   * no longer lists. Returns the deleted provider references so the caller can
+   * log exactly what left the catalogue. Idempotent: a second pass over the same
+   * keep set matches nothing.
+   *
+   * Deleted, not flagged: this table is a cache of the provider catalogue (the
+   * sync is its only writer besides the dev seed) and nothing references a
+   * strategy id — no foreign key, and a program's allocations carry the
+   * PROVIDER's reference, resolved against Ground's live response. A status flag
+   * would leave rows SDP must not carry sitting in the table indefinitely.
+   */
+  deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput): Promise<string[]>;
 
   /**
    * One program by its own id, scoped to (organization, environment). The
