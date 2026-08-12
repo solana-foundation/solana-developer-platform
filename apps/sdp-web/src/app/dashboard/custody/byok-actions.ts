@@ -191,8 +191,15 @@ export async function submitPrivyCredentialAction(
       // The server answered, so the submission definitively did not commit.
       // Conflicts and validation rejections are terminal for this attempt;
       // routing them into the frozen-replay state would trap the user
-      // replaying a request that can only fail the same way.
-      return { status: "failed", message: message || t("DashboardCustody.byokSubmitFailed") };
+      // replaying a request that can only fail the same way. A rejected
+      // REPLACEMENT leaves the failed connection standing and still blocking
+      // fresh submissions, so its id rides along or the next correction
+      // would be routed into exactly that blocked fresh path.
+      return {
+        status: "failed",
+        message: message || t("DashboardCustody.byokSubmitFailed"),
+        ...(replaceConnectionId ? { connectionId: replaceConnectionId } : {}),
+      };
     }
     // No response at all: the POST may have committed server-side, which is
     // the only case the frozen verbatim replay exists for.

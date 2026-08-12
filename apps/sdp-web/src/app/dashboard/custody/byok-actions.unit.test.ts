@@ -208,6 +208,22 @@ describe("submitPrivyCredentialAction outcome classification", () => {
     );
   });
 
+  it("keeps the replacement target when a replacement submission is rejected", async () => {
+    client.fetch.mockRejectedValueOnce(
+      apiError(409, "Custody Connection cannot accept replacement credentials")
+    );
+    const form = submitForm();
+    form.set("connectionId", "conn_test");
+
+    // The failed connection survives the rejection and still blocks fresh
+    // submissions, so the next correction must stay routed at it.
+    await expect(submitPrivyCredentialAction(form)).resolves.toEqual({
+      status: "failed",
+      message: "Custody Connection cannot accept replacement credentials",
+      connectionId: "conn_test",
+    });
+  });
+
   it("treats any answered HTTP error as terminal, never as replayable", async () => {
     client.fetch.mockRejectedValueOnce(
       apiError(409, "A Privy custody installation is already in progress for this project")
