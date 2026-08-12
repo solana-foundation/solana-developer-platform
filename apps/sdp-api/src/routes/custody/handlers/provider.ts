@@ -3,11 +3,13 @@ import { normalizePem } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
+import { assertApiKeyNotWalletScoped } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
 import {
@@ -77,6 +79,10 @@ export const initializeSigning = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
 
+  // Connecting a provider changes which wallet signs for the whole scope —
+  // outside any wallet-scoped key's bindings by definition.
+  assertApiKeyNotWalletScoped(getAuth(c), "initialize custody providers");
+
   const body = await c.req.json();
   assertNoExistingProviderObjectSelector(body);
   const parsed = initializeSigningSchema.safeParse(body);
@@ -122,6 +128,10 @@ export const initializeSigning = async (c: AppContext) => {
 
 export const switchSigning = async (c: AppContext) => {
   const actor = resolveActor(c);
+
+  // Switching the default provider re-points the scope's default signer —
+  // outside any wallet-scoped key's bindings by definition.
+  assertApiKeyNotWalletScoped(getAuth(c), "switch custody providers");
 
   const body = await c.req.json();
   assertNoExistingProviderObjectSelector(body);

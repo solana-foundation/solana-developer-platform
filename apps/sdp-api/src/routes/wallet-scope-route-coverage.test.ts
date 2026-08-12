@@ -14,18 +14,12 @@ function extractRoutes(router: unknown): string[] {
 describe("wallet-scoped route coverage inventory", () => {
   it("tracks every wallet-scoped custody route", () => {
     const allRoutes = extractRoutes(custodyRoutes);
-    const nonWalletScopedRoutes = new Set([
-      "DELETE /",
-      "GET /config",
-      "GET /configs",
-      "GET /switch-options",
-      "POST /",
-      "POST /default-wallet",
-      "POST /initialize",
-      "POST /switch",
-    ]);
+    const nonWalletScopedRoutes = new Set(["GET /config", "GET /configs", "GET /switch-options"]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
+      // Wallet lifecycle mutations enforce bindings (or reject wallet-scoped
+      // keys outright): see custody-wallet-scope.test.ts.
+      "DELETE /",
       "GET /",
       "GET /:walletId",
       "GET /aggregate",
@@ -33,10 +27,14 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /approval-requests/:approvalRequestId",
       "GET /public-key",
       "PATCH /:walletId",
+      "POST /",
       "POST /approval-requests/:approvalRequestId/approve",
       "POST /approval-requests/:approvalRequestId/cancel",
       "POST /approval-requests/:approvalRequestId/reject",
+      "POST /default-wallet",
+      "POST /initialize",
       "POST /signer-check",
+      "POST /switch",
     ]);
   });
 

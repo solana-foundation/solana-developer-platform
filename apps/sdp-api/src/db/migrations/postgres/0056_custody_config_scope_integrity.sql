@@ -1,0 +1,93 @@
+-- Custody scoped-configuration integrity (HOO-1004).
+--
+-- 1. Org-level custody_configs (project_id IS NULL) were exempt from the
+--    per-scope UNIQUE constraint because NULLs compare distinct, so
+--    concurrent writers could create duplicate scope rows. Deduplicate and
+--    re-create the constraint NULLS NOT DISTINCT.
+-- 2. default_wallet_id was a free-text pointer with no referential
+--    integrity; pin it to a wallet owned by the same config.
+
+-- Deduplicate org-level configs per (organization_id, provider): keep the
+-- most recently updated active row, repoint references, and move the
+-- duplicates' wallets to the survivor.
+CREATE TEMP TABLE custody_config_duplicates ON COMMIT DROP AS
+SELECT id, keep_id
+FROM (
+    SELECT
+        id,
+        FIRST_VALUE(id) OVER (
+            PARTITION BY organization_id, provider
+            ORDER BY (status = 'active') DESC, updated_at DESC, id
+        ) AS keep_id
+    FROM custody_configs
+    WHERE project_id IS NULL
+) ranked
+WHERE id <> keep_id;
+
+UPDATE custody_scope_defaults sd
+SET default_custody_config_id = dup.keep_id
+FROM custody_config_duplicates dup
+WHERE sd.default_custody_config_id = dup.id;
+
+UPDATE signing_requests sr
+SET custody_config_id = dup.keep_id
+FROM custody_config_duplicates dup
+WHERE sr.custody_config_id = dup.id;
+
+-- Move each duplicate's wallets to the survivor unless the survivor already
+-- holds the same provider wallet id (one candidate per wallet id).
+UPDATE custody_wallets w
+SET custody_config_id = dup.keep_id
+FROM custody_config_duplicates dup
+WHERE w.custody_config_id = dup.id
+  AND w.id IN (
+      SELECT DISTINCT ON (inner_dup.keep_id, inner_w.wallet_id) inner_w.id
+      FROM custody_wallets inner_w
+      JOIN custody_config_duplicates inner_dup
+        ON inner_dup.id = inner_w.custody_config_id
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM custody_wallets kept
+          WHERE kept.custody_config_id = inner_dup.keep_id
+            AND kept.wallet_id = inner_w.wallet_id
+      )
+      ORDER BY
+          inner_dup.keep_id,
+          inner_w.wallet_id,
+          (inner_w.status = 'active') DESC,
+          inner_w.created_at,
+          inner_w.id
+  );
+
+DELETE FROM custody_configs c
+USING custody_config_duplicates dup
+WHERE c.id = dup.id;
+
+-- One config per (organization, project, provider), org-level rows included.
+ALTER TABLE custody_configs
+    DROP CONSTRAINT custody_configs_organization_id_project_id_provider_key;
+
+ALTER TABLE custody_configs
+    ADD CONSTRAINT custody_configs_org_project_provider_key
+        UNIQUE NULLS NOT DISTINCT (organization_id, project_id, provider);
+
+-- Repair defaults pointing at wallets the config does not own, then enforce
+-- ownership going forward. DEFERRABLE INITIALLY DEFERRED so a cascade delete
+-- of a config together with its wallets validates at commit, and so a config
+-- upsert and its wallet insert can land in either order within one
+-- transaction.
+UPDATE custody_configs c
+SET default_wallet_id = NULL
+WHERE c.default_wallet_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM custody_wallets w
+      WHERE w.custody_config_id = c.id
+        AND w.wallet_id = c.default_wallet_id
+  );
+
+ALTER TABLE custody_configs
+    ADD CONSTRAINT custody_configs_default_wallet_fkey
+        FOREIGN KEY (id, default_wallet_id)
+        REFERENCES custody_wallets(custody_config_id, wallet_id)
+        DEFERRABLE INITIALLY DEFERRED;
