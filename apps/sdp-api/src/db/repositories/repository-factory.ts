@@ -57,6 +57,8 @@ import type { WalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment
 import { createPostgresWalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository.postgres";
 import type { WorkflowExecutionsRepository } from "./workflow-execution.repository";
 import { createPostgresWorkflowExecutionsRepository } from "./workflow-execution.repository.postgres";
+import type { WorkflowSecretRetirementsRepository } from "./workflow-secret-retirement.repository";
+import { createPostgresWorkflowSecretRetirementsRepository } from "./workflow-secret-retirement.repository.postgres";
 
 export function createPaymentsRepository(env: Env, scope: TenantScope): PaymentsRepository {
   return bindRepositoryToTenant(
@@ -200,6 +202,12 @@ export function createAssetWorkflowsRepository(env: Env): AssetWorkflowsReposito
 
 export function createWorkflowExecutionsRepository(env: Env): WorkflowExecutionsRepository {
   return createPostgresWorkflowExecutionsRepository(getDb(env));
+}
+
+export function createWorkflowSecretRetirementsRepository(
+  env: Env
+): WorkflowSecretRetirementsRepository {
+  return createPostgresWorkflowSecretRetirementsRepository(getDb(env));
 }
 
 export function createNotificationsRepository(env: Env): NotificationsRepository {
