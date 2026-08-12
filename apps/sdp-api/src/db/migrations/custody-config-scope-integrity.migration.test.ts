@@ -86,7 +86,9 @@ it("deduplicates org-level custody configs and repoints references", async () =>
          ('cwlt_new_shared', 'cfg_new', 'wallet_shared'),
          ('cwlt_mid_shared', 'cfg_mid', 'wallet_shared'),
          ('cwlt_mid_extra', 'cfg_mid', 'wallet_extra'),
-         ('cwlt_old_only', 'cfg_old', 'wallet_old')`
+         ('cwlt_old_only', 'cfg_old', 'wallet_old'),
+         ('cwlt_new_shared2', 'cfg_new', 'wallet_shared2'),
+         ('cwlt_old_shared2', 'cfg_old', 'wallet_shared2')`
     );
     await client.query(
       `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
@@ -104,7 +106,9 @@ it("deduplicates org-level custody configs and repoints references", async () =>
     await client.query(
       `INSERT INTO wallet_control_profiles (id, custody_wallet_id, status) VALUES
          ('wcp_dup_active', 'cwlt_mid_shared', 'active'),
-         ('wcp_dup_draft', 'cwlt_mid_shared', 'draft')`
+         ('wcp_dup_draft', 'cwlt_mid_shared', 'draft'),
+         ('wcp_kept_active', 'cwlt_new_shared2', 'active'),
+         ('wcp_dup_conflict_active', 'cwlt_old_shared2', 'active')`
     );
     await client.query(
       `INSERT INTO api_key_wallet_policy_bindings (id, api_key_id, wallet_id, custody_wallet_id)
@@ -142,8 +146,9 @@ it("deduplicates org-level custody configs and repoints references", async () =>
       // Moved from the duplicates…
       { id: "cwlt_mid_extra", wallet_id: "wallet_extra" },
       { id: "cwlt_old_only", wallet_id: "wallet_old" },
-      // …while the survivor keeps its own copy of the shared wallet id.
+      // …while the survivor keeps its own copies of the shared wallet ids.
       { id: "cwlt_new_shared", wallet_id: "wallet_shared" },
+      { id: "cwlt_new_shared2", wallet_id: "wallet_shared2" },
     ]);
 
     // The duplicate's unmovable shared wallet cascades away with its config…
@@ -161,6 +166,19 @@ it("deduplicates org-level custody configs and repoints references", async () =>
     expect(profiles.rows).toEqual([
       { id: "wcp_dup_active", status: "active" },
       { id: "wcp_dup_draft", status: "draft" },
+    ]);
+
+    // When the survivor's wallet already has an active profile, the
+    // duplicate's active profile is preserved on the survivor as disabled —
+    // never silently cascade-deleted.
+    const conflictProfiles = await client.query(
+      `SELECT id, status FROM wallet_control_profiles
+       WHERE custody_wallet_id = 'cwlt_new_shared2'
+       ORDER BY id`
+    );
+    expect(conflictProfiles.rows).toEqual([
+      { id: "wcp_dup_conflict_active", status: "disabled" },
+      { id: "wcp_kept_active", status: "active" },
     ]);
 
     const binding = await client.query(

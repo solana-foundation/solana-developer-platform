@@ -72,8 +72,8 @@ JOIN custody_wallets kept
  AND kept.wallet_id = dup_w.wallet_id;
 
 -- One active control profile per wallet: non-active profiles always move;
--- an active profile moves only if the survivor's wallet has none (one
--- candidate per survivor).
+-- an active profile keeps its active status only if the survivor's wallet
+-- has none (one candidate per survivor).
 UPDATE wallet_control_profiles wcp
 SET custody_wallet_id = wdup.keep_id
 FROM custody_wallet_duplicates wdup
@@ -94,6 +94,30 @@ WHERE wcp.custody_wallet_id = wdup.id
           ORDER BY wd.keep_id, inner_wcp.updated_at DESC, inner_wcp.id
       )
   );
+
+-- Active profiles that lost the active slot still move — demoted to
+-- 'disabled' so the policy and its revisions survive for operator review
+-- instead of silently cascade-deleting with the duplicate wallet (which
+-- would leave repointed API-key bindings governed by a weaker profile with
+-- no trace of the stricter one).
+DO $$
+DECLARE
+    demoted_profile_count BIGINT;
+BEGIN
+    UPDATE wallet_control_profiles wcp
+    SET custody_wallet_id = wdup.keep_id,
+        status = 'disabled',
+        updated_at = sdp_iso_now()
+    FROM custody_wallet_duplicates wdup
+    WHERE wcp.custody_wallet_id = wdup.id
+      AND wcp.status = 'active';
+
+    GET DIAGNOSTICS demoted_profile_count = ROW_COUNT;
+    IF demoted_profile_count > 0 THEN
+        RAISE NOTICE 'Demoted % active wallet control profile(s) to disabled during custody config dedup; the surviving wallet already had an active profile — review and merge manually', demoted_profile_count;
+    END IF;
+END;
+$$;
 
 -- The selected-binding unique index is on (api_key_id, wallet_id), and the
 -- duplicate shares the survivor's wallet_id, so repointing cannot collide.
