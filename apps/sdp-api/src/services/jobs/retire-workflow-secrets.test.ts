@@ -10,7 +10,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import type { StoredCredentialSecret } from "@/services/credential-secret-store";
+import {
+  CredentialSecretStoreError,
+  type StoredCredentialSecret,
+} from "@/services/credential-secret-store";
 import { destroyActionSecret } from "@/services/workflows/action-secret";
 import { env } from "@/test/helpers/env";
 import { retireOrphanedActionSecrets } from "./retire-workflow-secrets";
@@ -145,6 +148,42 @@ describe("orphaned workflow secret retirement", () => {
     await destroyActionSecret(env, storedSecret(), { orgId: "org_1", workflowId: "wf_1" });
 
     expect(await queuedRetirements()).toHaveLength(1);
+  });
+
+  // A queued row names the backend its version actually lives in. The sweeper built one
+  // store from the deployment's CURRENT backend and used it for every row, so migrating
+  // (gcp_secret_manager → encrypted_db) handed every queued GCP version to a store with
+  // no external versions at all: UNSUPPORTED_OPERATION on every sweep, backed off and
+  // retried forever, with the credential still readable in Secret Manager.
+  it("destroys through the backend the row names, not the deployment's current one", async () => {
+    // Queued while GCP is still the active backend.
+    secretStore.destroyVersion.mockRejectedValueOnce(new Error("upstream unavailable"));
+    await destroyActionSecret(env, storedSecret(), { orgId: "org_1", workflowId: "wf_1" });
+    expect(await queuedRetirements()).toHaveLength(1);
+
+    // The deployment migrates. `encrypted_db` keeps its ciphertext inline, so it has no
+    // version to destroy and refuses outright.
+    const encryptedDbStore = {
+      storageBackend: "encrypted_db" as const,
+      write: vi.fn(),
+      read: vi.fn(),
+      destroyVersion: vi
+        .fn()
+        .mockRejectedValue(
+          new CredentialSecretStoreError("no external versions", "UNSUPPORTED_OPERATION")
+        ),
+    };
+    secretStore.destroyVersion.mockResolvedValue(undefined);
+    createCredentialSecretStore.mockImplementation((_env: unknown, backend?: string) =>
+      backend === "gcp_secret_manager" ? secretStore : encryptedDbStore
+    );
+
+    const result = await retireOrphanedActionSecrets(env, new Date(Date.now() + 1_000));
+
+    expect(result).toEqual({ retired: 1, failed: 0 });
+    expect(secretStore.destroyVersion).toHaveBeenLastCalledWith({ secretVersionRef: VERSION_REF });
+    expect(encryptedDbStore.destroyVersion).not.toHaveBeenCalled();
+    expect(await queuedRetirements()).toHaveLength(0);
   });
 
   // Backends that store the ciphertext inline have no external version to destroy; it
