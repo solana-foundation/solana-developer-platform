@@ -72,6 +72,8 @@ export interface SponsorshipLiveWindowReservation {
   id: string;
   attempt: number;
   reservedLamports: number;
+  organizationId: string;
+  projectId: string | null;
 }
 
 export interface SponsorshipReconciliationReservation extends SponsorshipReservation {
@@ -485,10 +487,12 @@ export class SponsorshipBudgetRepository {
       id: string;
       attempt: number;
       reserved_lamports: number;
+      organization_id: string;
+      project_id: string | null;
       hour_bucket: string;
       day_bucket: string;
     }>(
-      `SELECT id, attempt, reserved_lamports, hour_bucket, day_bucket
+      `SELECT id, attempt, reserved_lamports, organization_id, project_id, hour_bucket, day_bucket
        FROM sponsorship_budget_reservations
        WHERE network = ? AND status IN ('reserved', 'signed', 'submitted')
          AND (hour_bucket = ? OR day_bucket = ?)${excludeReservationId ? " AND id <> ?" : ""}`,
@@ -501,6 +505,8 @@ export class SponsorshipBudgetRepository {
         id: row.id,
         attempt: row.attempt,
         reservedLamports: row.reserved_lamports,
+        organizationId: row.organization_id,
+        projectId: row.project_id,
       };
       if (row.hour_bucket === input.hourBucket) {
         hour.push(reservation);

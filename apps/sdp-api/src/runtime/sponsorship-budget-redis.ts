@@ -28,26 +28,39 @@ end
 redis.call('PEXPIRE', KEYS[1], ARGV[2 + count * 3])
 redis.call('PEXPIRE', KEYS[2], ARGV[3 + count * 3])
 local cursor = 3 + count * 3
-local hour_reservations = tonumber(ARGV[cursor + 1])
-cursor = cursor + 1
-for i = 1, hour_reservations do
-  local field = ARGV[cursor + 1]
-  local amount = ARGV[cursor + 2]
-  cursor = cursor + 2
-  if not hour_existed and not redis.call('HGET', KEYS[1], field) then
-    redis.call('HSET', KEYS[1], field, amount)
+local function reconstruct(hash_key, hash_existed)
+  local reservations = tonumber(ARGV[cursor + 1])
+  cursor = cursor + 1
+  for i = 1, reservations do
+    local ownership = ARGV[cursor + 1]
+    local reserved = tonumber(ARGV[cursor + 2])
+    local settlement_key = ARGV[cursor + 3]
+    local field_count = tonumber(ARGV[cursor + 4])
+    cursor = cursor + 4
+    local fields = {}
+    for f = 1, field_count do
+      fields[f] = ARGV[cursor + f]
+    end
+    cursor = cursor + field_count
+    if not hash_existed then
+      local settled = redis.call('GET', settlement_key)
+      if settled then
+        local delta = tonumber(settled) - reserved
+        if delta ~= 0 then
+          for f = 1, field_count do
+            if redis.call('HGET', hash_key, '__initialized:' .. fields[f]) then
+              redis.call('HINCRBY', hash_key, fields[f], delta)
+            end
+          end
+        end
+      elseif not redis.call('HGET', hash_key, ownership) then
+        redis.call('HSET', hash_key, ownership, reserved)
+      end
+    end
   end
 end
-local day_reservations = tonumber(ARGV[cursor + 1])
-cursor = cursor + 1
-for i = 1, day_reservations do
-  local field = ARGV[cursor + 1]
-  local amount = ARGV[cursor + 2]
-  cursor = cursor + 2
-  if not day_existed and not redis.call('HGET', KEYS[2], field) then
-    redis.call('HSET', KEYS[2], field, amount)
-  end
-end
+reconstruct(KEYS[1], hour_existed)
+reconstruct(KEYS[2], day_existed)
 return 1
 `;
 
@@ -242,11 +255,18 @@ export class SponsorshipBudgetRedis {
       dayUsage.push(input.usage.day.project);
     }
     const liveReservations = input.liveReservations ?? { hour: [], day: [] };
+    const prefix = `sdp:sponsorship:{${input.network}}`;
     const reservationMarkerArgs = (reservations: SponsorshipLiveWindowReservation[]) =>
-      reservations.flatMap((reservation) => [
-        this.ownershipField({ reservationId: reservation.id, attempt: reservation.attempt }),
-        reservation.reservedLamports,
-      ]);
+      reservations.flatMap((reservation) => {
+        const scopeFields = this.fields(reservation.organizationId, reservation.projectId);
+        return [
+          this.ownershipField({ reservationId: reservation.id, attempt: reservation.attempt }),
+          reservation.reservedLamports,
+          `${prefix}:settlement:${reservation.id}:${reservation.attempt}`,
+          scopeFields.length,
+          ...scopeFields,
+        ];
+      });
     await this.runScript(
       client,
       "initialize",

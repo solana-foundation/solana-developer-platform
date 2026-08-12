@@ -471,8 +471,24 @@ describe("SponsorshipBudgetRedis", () => {
           day: { global: 5, organization: 5, project: 0 },
         },
         liveReservations: {
-          hour: [{ id: "reservation_partial", attempt: 1, reservedLamports: 5 }],
-          day: [{ id: "reservation_partial", attempt: 1, reservedLamports: 5 }],
+          hour: [
+            {
+              id: "reservation_partial",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "reservation_partial",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
         },
       })
     ).resolves.toBe("admitted");
@@ -543,8 +559,24 @@ describe("SponsorshipBudgetRedis", () => {
           day: { global: 5, organization: 0, project: 0 },
         },
         liveReservations: {
-          hour: [{ id: "res_b", attempt: 1, reservedLamports: 5 }],
-          day: [{ id: "res_b", attempt: 1, reservedLamports: 5 }],
+          hour: [
+            {
+              id: "res_b",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_b",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "res_b",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_b",
+              projectId: null,
+            },
+          ],
         },
       })
     ).resolves.toBe("admitted");
@@ -595,8 +627,24 @@ describe("SponsorshipBudgetRedis", () => {
           day: { global: 8, organization: 8, project: 0 },
         },
         liveReservations: {
-          hour: [{ id: "reservation_b", attempt: 1, reservedLamports: 8 }],
-          day: [{ id: "reservation_b", attempt: 1, reservedLamports: 8 }],
+          hour: [
+            {
+              id: "reservation_b",
+              attempt: 1,
+              reservedLamports: 8,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "reservation_b",
+              attempt: 1,
+              reservedLamports: 8,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
         },
       })
     ).resolves.toBe("admitted");
@@ -621,6 +669,103 @@ describe("SponsorshipBudgetRedis", () => {
     expect(await raw.hget(hourKey, "global")).toBe("13");
     expect(await raw.hget(dayKey, "global")).toBe("13");
     expect(await raw.get("sdp:sponsorship:{devnet}:reservation:reservation_b:1")).toBe("8");
+  });
+
+  it("corrects a reservation that settled between the snapshot and reconstruction", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    await raw.set("sdp:sponsorship:{devnet}:settlement:res_c:1", "2");
+
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_a",
+        attempt: 1,
+        amount: 3,
+        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+        usage: {
+          hour: { global: 5, organization: 5, project: 0 },
+          day: { global: 5, organization: 5, project: 0 },
+        },
+        liveReservations: {
+          hour: [
+            {
+              id: "res_c",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "res_c",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+        },
+      })
+    ).resolves.toBe("admitted");
+
+    expect(await raw.hget(hourKey, "global")).toBe("5");
+    expect(await raw.hget(hourKey, "organization:org_1")).toBe("5");
+    expect(await raw.hget(dayKey, "global")).toBe("5");
+    expect(await raw.hget(hourKey, "__reservation:res_c:1")).toBeNull();
+  });
+
+  it("corrects a cross-tenant reservation that settled mid-snapshot without initializing its scope", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    await raw.set("sdp:sponsorship:{devnet}:settlement:res_b:1", "2");
+
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_a",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_a",
+        attempt: 1,
+        amount: 3,
+        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+        usage: {
+          hour: { global: 5, organization: 0, project: 0 },
+          day: { global: 5, organization: 0, project: 0 },
+        },
+        liveReservations: {
+          hour: [
+            {
+              id: "res_b",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_b",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "res_b",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_b",
+              projectId: null,
+            },
+          ],
+        },
+      })
+    ).resolves.toBe("admitted");
+
+    expect(await raw.hget(hourKey, "global")).toBe("5");
+    expect(await raw.hget(hourKey, "organization:org_a")).toBe("3");
+    expect(await raw.hget(hourKey, "__initialized:organization:org_b")).toBeNull();
+    expect(await raw.hget(hourKey, "__reservation:res_b:1")).toBeNull();
   });
 
   it("rejects settlement when an existing reservation has the wrong amount", async () => {
