@@ -1,35 +1,57 @@
 import type {
   EarnApyType,
   EarnLiquidityTerm,
+  EarnMovementDirection,
+  EarnMovementObservationSource,
   EarnPortfolioToken,
-  EarnProgramWithdrawalRecordStatus,
+  EarnProgramMovementRecordStatus,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnStrategyStatus,
   SdpEnvironment,
 } from "@sdp/types";
 import type { AppDb } from "@/db";
+import { toMovementTimestamp } from "@/db/movement-timestamp";
 import type {
   CreateEarnProgramWithdrawalInput,
+  EarnProgramDepositRow,
+  EarnProgramMovementRow,
   EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
+  InsertEarnProgramDepositInput,
   InsertEarnProviderWalletInput,
+  ListEarnProgramMovementsInput,
+  ListEarnProgramMovementsResult,
   ListEarnProgramWithdrawalsInput,
   ListEarnProgramWithdrawalsResult,
   ListEarnProviderWalletsInput,
   ListEarnProviderWalletsResult,
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
+  ScanEarnProviderWalletsInput,
+  SumEarnProgramMovementsInput,
+  UpdateEarnProgramDepositStatusGuardedInput,
   UpdateEarnProgramWithdrawalStatusGuardedInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 import {
+  generateEarnProgramDepositId,
   generateEarnProgramWithdrawalId,
   generateEarnProviderWalletId,
   generateEarnStrategyId,
 } from "./earn.repository";
+
+/**
+ * Movements that actually moved money, for period netting. `partially_completed`
+ * counts because a partial payout moved a real amount — which is exactly why the
+ * sum reads amount_paid_usd rather than the requested figure.
+ */
+const DEFAULT_SETTLED_MOVEMENT_STATUSES = [
+  "completed",
+  "partially_completed",
+] as const satisfies readonly EarnProgramMovementRecordStatus[];
 
 function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
   return {
@@ -68,30 +90,71 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
   };
 }
 
-function mapProgramWithdrawalRow(row: Record<string, unknown>): EarnProgramWithdrawalRow {
+/** Columns both movement arms share (migration 0057). */
+function mapMovementCommon(row: Record<string, unknown>) {
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
     wallet_id: row.wallet_id as string,
     provider: row.provider as string,
-    status: row.status as EarnProgramWithdrawalRecordStatus,
-    amount_requested_usd: row.amount_requested_usd as string,
+    status: row.status as EarnProgramMovementRecordStatus,
     amount_paid_usd: row.amount_paid_usd as string | null,
     fee_usd: row.fee_usd as string | null,
     token: row.token as EarnPortfolioToken,
-    destination_address: row.destination_address as string,
     failure_reason: row.failure_reason as string | null,
-    request_id: row.request_id as string,
-    idempotency_fingerprint: row.idempotency_fingerprint as string,
     provider_reference: row.provider_reference as string | null,
     provider_data: row.provider_data as Record<string, unknown>,
     created_by: row.created_by as string | null,
     initiated_by_key_id: row.initiated_by_key_id as string | null,
+    observed_via: row.observed_via as EarnMovementObservationSource,
+    occurred_at: row.occurred_at as string,
+    source_address: row.source_address as string | null,
+    transaction_signature: row.transaction_signature as string | null,
+    transaction_instruction_index: row.transaction_instruction_index as number | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
     completed_at: row.completed_at as string | null,
   };
+}
+
+function mapProgramWithdrawalRow(row: Record<string, unknown>): EarnProgramWithdrawalRow {
+  // Loud, not defensive: migration 0057's withdrawal_intent_complete CHECK makes
+  // this unreachable, and the withdrawal arm's non-nullable intent fields are what
+  // keep resolveIdempotencyReplay's "null fingerprint = unclaimed" branch
+  // unrepresentable. If the DB ever hands us one anyway, the schema drifted from
+  // the type and a 500 is the correct outcome — silently coercing would hand the
+  // replay path a row it must never see.
+  if (row.idempotency_fingerprint === null || row.request_id === null) {
+    throw new Error(
+      `earn movement ${String(row.id)} is a withdrawal with no intent columns; schema drift`
+    );
+  }
+  return {
+    ...mapMovementCommon(row),
+    direction: "withdrawal",
+    project_id: row.project_id as string,
+    amount_requested_usd: row.amount_requested_usd as string,
+    destination_address: row.destination_address as string,
+    request_id: row.request_id as string,
+    idempotency_fingerprint: row.idempotency_fingerprint as string,
+  };
+}
+
+function mapProgramDepositRow(row: Record<string, unknown>): EarnProgramDepositRow {
+  return {
+    ...mapMovementCommon(row),
+    direction: "deposit",
+    project_id: null,
+    amount_requested_usd: null,
+    destination_address: null,
+    request_id: null,
+    idempotency_fingerprint: null,
+  };
+}
+
+/** Direction-agnostic read: narrows on the discriminator the DB stores. */
+function mapProgramMovementRow(row: Record<string, unknown>): EarnProgramMovementRow {
+  return row.direction === "deposit" ? mapProgramDepositRow(row) : mapProgramWithdrawalRow(row);
 }
 
 /**
@@ -109,12 +172,17 @@ function mapProgramWithdrawalRow(row: Record<string, unknown>): EarnProgramWithd
  */
 async function selectPage<Row>(
   db: AppDb,
-  table: "earn_strategies" | "earn_program_withdrawals" | "earn_provider_wallets",
+  table: "earn_strategies" | "earn_program_movements" | "earn_provider_wallets",
   conditions: string[],
   bindings: unknown[],
   window: { limit: number; offset: number },
   mapRow: (row: Record<string, unknown>) => Row,
-  order: "ASC" | "DESC" = "DESC"
+  order: "ASC" | "DESC" = "DESC",
+  // The movement ledger sorts on when the MONEY MOVED, not when SDP wrote the
+  // row — an observed movement can be recorded long after it happened, and a
+  // created_at sort would put an indexer backfill at the head of the list. A
+  // closed union, never interpolated from caller input.
+  orderColumn: "created_at" | "occurred_at" = "created_at"
 ): Promise<{ rows: Row[]; total: number }> {
   const where = conditions.join(" AND ");
 
@@ -123,7 +191,7 @@ async function selectPage<Row>(
       .prepare(
         `SELECT * FROM ${table}
            WHERE ${where}
-           ORDER BY created_at ${order}, id ${order}
+           ORDER BY ${orderColumn} ${order}, id ${order}
            LIMIT ? OFFSET ?`
       )
       .bind(...bindings, window.limit, window.offset)
@@ -309,14 +377,23 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
 
       // Status comes from the DB default ('requested'): an intent row exists
       // before the provider call is accepted, never in any other state.
+      //
+      // direction/observed_via/occurred_at are literals rather than binds: this is
+      // the ONLY intent path, so it is the only writer that may claim
+      // 'sdp_intent'. occurred_at is stamped inline by the DB because for an
+      // initiated movement the intent IS the moment the movement began — the
+      // column has no DEFAULT precisely so an observed writer cannot get "now" by
+      // forgetting to supply the movement's real time (migration 0057).
       const row = await db
         .prepare(
-          `INSERT INTO earn_program_withdrawals (
+          `INSERT INTO earn_program_movements (
              id, organization_id, project_id, wallet_id, provider,
+             direction, observed_via, occurred_at,
              amount_requested_usd, token, destination_address,
              request_id, idempotency_fingerprint, provider_data,
              created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, 'withdrawal', 'sdp_intent', sdp_iso_now(),
+                     ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
            RETURNING *`
         )
         .bind(
@@ -340,10 +417,15 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
     },
 
     async getProgramWithdrawalByRequestId(params) {
+      // request_id is null for every observed movement (0057's CHECK), so this
+      // query cannot return a deposit — which is what lets the replay path keep a
+      // row type whose fingerprint is non-nullable. The direction predicate is
+      // belt to that braces, and it also keeps the partial intent index usable.
       const row = await db
         .prepare(
-          `SELECT * FROM earn_program_withdrawals
-             WHERE organization_id = ? AND wallet_id = ? AND request_id = ?`
+          `SELECT * FROM earn_program_movements
+             WHERE organization_id = ? AND wallet_id = ? AND request_id = ?
+               AND direction = 'withdrawal'`
         )
         .bind(params.organizationId, params.walletId, params.requestId)
         .first<Record<string, unknown>>();
@@ -351,10 +433,13 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
     },
 
     async getProgramWithdrawalByProviderReference(params) {
+      // direction is part of the unique index now (0057): a provider that reuses
+      // one id space across deposits and withdrawals would otherwise resolve the
+      // wrong movement here and let an observation advance it.
       const row = await db
         .prepare(
-          `SELECT * FROM earn_program_withdrawals
-             WHERE provider = ? AND provider_reference = ?`
+          `SELECT * FROM earn_program_movements
+             WHERE provider = ? AND direction = 'withdrawal' AND provider_reference = ?`
         )
         .bind(params.provider, params.providerReference)
         .first<Record<string, unknown>>();
@@ -394,10 +479,11 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         assignmentValues.push(JSON.stringify(input.providerData));
       }
 
-      // The CAS guard and the org scope live in the same WHERE as the selector,
-      // so the whole transition is one atomic statement: the loser of a
-      // concurrent race simply matches zero rows.
-      const conditions = ["organization_id = ?", "status = ANY(?)"];
+      // The CAS guard, the org scope and the direction pin live in the same WHERE
+      // as the selector, so the whole transition is one atomic statement: the
+      // loser of a concurrent race simply matches zero rows. `direction` is what
+      // stops a withdrawal observation from ever advancing a deposit row.
+      const conditions = ["organization_id = ?", "direction = 'withdrawal'", "status = ANY(?)"];
       const conditionValues: unknown[] = [input.organizationId, [...input.fromStatuses]];
       if ("withdrawalId" in input.selector) {
         conditions.push("id = ?");
@@ -409,7 +495,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
 
       const row = await db
         .prepare(
-          `UPDATE earn_program_withdrawals
+          `UPDATE earn_program_movements
              SET ${assignments.join(", ")}
            WHERE ${conditions.join(" AND ")}
            RETURNING *`
@@ -427,17 +513,297 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // reaches the same programs, and since PRO-1670 an organization may hold
       // several — so the wallet id is what both joins sibling projects' history
       // and keeps a sibling PROGRAM's payouts out. One program = one history.
-      const conditions = ["organization_id = ?", "wallet_id = ?"];
+      //
+      // Ordered on occurred_at rather than created_at: for an initiated movement
+      // the two are the same instant, so the page order is unchanged from 0055 —
+      // but occurred_at is the column 0057 indexes, and it is what keeps this list
+      // consistent with the cross-direction one.
+      const conditions = ["organization_id = ?", "wallet_id = ?", "direction = 'withdrawal'"];
       const bindings: unknown[] = [input.organizationId, input.walletId];
 
       return selectPage(
         db,
-        "earn_program_withdrawals",
+        "earn_program_movements",
         conditions,
         bindings,
         input,
-        mapProgramWithdrawalRow
+        mapProgramWithdrawalRow,
+        "DESC",
+        "occurred_at"
       );
+    },
+
+    async insertProgramDeposit(input: InsertEarnProgramDepositInput) {
+      const id = generateEarnProgramDepositId();
+
+      // No ON CONFLICT: a conflict here means "another observer already recorded
+      // this movement", which the applier answers by re-reading and advancing the
+      // existing row (services/earn-deposit-ledger.service.ts). Swallowing it with
+      // DO NOTHING would hide the case where the two observations DISAGREE, and
+      // DO UPDATE would let a stale re-observation overwrite a settled row without
+      // passing the status guard. The unique violation is the signal.
+      //
+      // The amount lands in amount_paid_usd — the money that actually moved.
+      // Nobody requested a deposit, so amount_requested_usd stays NULL (0057).
+      const row = await db
+        .prepare(
+          `INSERT INTO earn_program_movements (
+             id, organization_id, wallet_id, provider,
+             direction, status, observed_via, occurred_at,
+             amount_paid_usd, token,
+             provider_reference, source_address,
+             transaction_signature, transaction_instruction_index,
+             completed_at, provider_data
+           ) VALUES (?, ?, ?, ?, 'deposit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+           RETURNING *`
+        )
+        .bind(
+          id,
+          input.organizationId,
+          input.walletId,
+          input.provider,
+          input.status,
+          input.observedVia,
+          input.occurredAt,
+          input.amountUsd,
+          input.token,
+          input.providerReference,
+          input.sourceAddress,
+          input.transactionSignature,
+          input.transactionInstructionIndex,
+          input.completedAt,
+          JSON.stringify(input.providerData ?? {})
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapProgramDepositRow(row) : null;
+    },
+
+    async getProgramDepositByProviderReference(params) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_program_movements
+             WHERE provider = ? AND direction = 'deposit' AND provider_reference = ?`
+        )
+        .bind(params.provider, params.providerReference)
+        .first<Record<string, unknown>>();
+      return row ? mapProgramDepositRow(row) : null;
+    },
+
+    async listProgramDepositsBySignature(params) {
+      // Returns a LIST, not a row, and that is the honest shape: one transaction
+      // may legally carry several transfers to one funding address, so the
+      // signature index cannot be unique (0057) and a probe can be ambiguous. The
+      // caller decides — and must skip rather than guess.
+      const page = await db
+        .prepare(
+          `SELECT * FROM earn_program_movements
+             WHERE wallet_id = ? AND direction = 'deposit' AND transaction_signature = ?
+             ORDER BY occurred_at ASC, id ASC`
+        )
+        .bind(params.walletId, params.transactionSignature)
+        .all<Record<string, unknown>>();
+      return (page.results ?? []).map(mapProgramDepositRow);
+    },
+
+    async updateProgramDepositStatusGuarded(input: UpdateEarnProgramDepositStatusGuardedInput) {
+      // Same contract as the withdrawal CAS: `undefined` untouched, `null`
+      // written, provider_data shallow-merged, updated_at DB-stamped. occurred_at
+      // is absent by design — it is write-once (0057).
+      const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
+      const assignmentValues: unknown[] = [input.toStatus];
+      if (input.amountUsd !== undefined) {
+        assignments.push("amount_paid_usd = ?");
+        assignmentValues.push(input.amountUsd);
+      }
+      if (input.providerReference !== undefined) {
+        assignments.push("provider_reference = ?");
+        assignmentValues.push(input.providerReference);
+      }
+      if (input.sourceAddress !== undefined) {
+        assignments.push("source_address = ?");
+        assignmentValues.push(input.sourceAddress);
+      }
+      if (input.transactionSignature !== undefined) {
+        assignments.push("transaction_signature = ?");
+        assignmentValues.push(input.transactionSignature);
+      }
+      if (input.transactionInstructionIndex !== undefined) {
+        assignments.push("transaction_instruction_index = ?");
+        assignmentValues.push(input.transactionInstructionIndex);
+      }
+      if (input.observedVia !== undefined) {
+        assignments.push("observed_via = ?");
+        assignmentValues.push(input.observedVia);
+      }
+      if (input.completedAt !== undefined) {
+        assignments.push("completed_at = ?");
+        assignmentValues.push(input.completedAt);
+      }
+      if (input.providerData !== undefined) {
+        assignments.push("provider_data = provider_data || ?::jsonb");
+        assignmentValues.push(JSON.stringify(input.providerData));
+      }
+
+      const conditions = ["organization_id = ?", "direction = 'deposit'", "status = ANY(?)"];
+      const conditionValues: unknown[] = [input.organizationId, [...input.fromStatuses]];
+      if ("depositId" in input.selector) {
+        conditions.push("id = ?");
+        conditionValues.push(input.selector.depositId);
+      } else if ("providerReference" in input.selector) {
+        conditions.push("provider = ?", "provider_reference = ?");
+        conditionValues.push(input.selector.provider, input.selector.providerReference);
+      } else {
+        // Chain selector. The instruction index may legitimately be null (a
+        // provider-observed row the indexer is adopting), and `IS NOT DISTINCT
+        // FROM` is what makes null match null — `= NULL` never would, so the
+        // adoption write would silently match zero rows.
+        conditions.push(
+          "wallet_id = ?",
+          "transaction_signature = ?",
+          "transaction_instruction_index IS NOT DISTINCT FROM ?"
+        );
+        conditionValues.push(
+          input.selector.walletId,
+          input.selector.transactionSignature,
+          input.selector.transactionInstructionIndex
+        );
+      }
+
+      const row = await db
+        .prepare(
+          `UPDATE earn_program_movements
+             SET ${assignments.join(", ")}
+           WHERE ${conditions.join(" AND ")}
+           RETURNING *`
+        )
+        .bind(...assignmentValues, ...conditionValues)
+        .first<Record<string, unknown>>();
+
+      return row ? mapProgramDepositRow(row) : null;
+    },
+
+    async listProgramMovements(
+      input: ListEarnProgramMovementsInput
+    ): Promise<ListEarnProgramMovementsResult> {
+      const conditions = ["organization_id = ?", "wallet_id = ?"];
+      const bindings: unknown[] = [input.organizationId, input.walletId];
+
+      // "all" is spelled out by the caller, never defaulted — see the input type.
+      if (input.direction !== "all") {
+        conditions.push("direction = ?");
+        bindings.push(input.direction);
+      }
+      if (input.statuses !== undefined && input.statuses.length > 0) {
+        conditions.push("status = ANY(?)");
+        bindings.push([...input.statuses]);
+      }
+      if (input.token !== undefined) {
+        conditions.push("token = ?");
+        bindings.push(input.token);
+      }
+      // Half-open [from, to): a closed upper bound double-counts a movement that
+      // lands exactly on a period boundary.
+      //
+      // Both bounds are normalized to the column's fixed-width shape first — see
+      // toMovementTimestamp. occurred_at is TEXT compared lexicographically, so an
+      // otherwise-legal bound like "2026-09-01T00:00:00Z" would put the boundary
+      // movement in the WRONG period rather than merely near the edge.
+      if (input.occurredFrom !== undefined) {
+        conditions.push("occurred_at >= ?");
+        bindings.push(toMovementTimestamp(input.occurredFrom) ?? input.occurredFrom);
+      }
+      if (input.occurredTo !== undefined) {
+        conditions.push("occurred_at < ?");
+        bindings.push(toMovementTimestamp(input.occurredTo) ?? input.occurredTo);
+      }
+
+      return selectPage(
+        db,
+        "earn_program_movements",
+        conditions,
+        bindings,
+        input,
+        mapProgramMovementRow,
+        "DESC",
+        "occurred_at"
+      );
+    },
+
+    async sumProgramMovementsByDirection(input: SumEarnProgramMovementsInput) {
+      // Settled money only by default: failed and cancelled movements moved
+      // nothing, and requested/processing have not moved yet.
+      const statuses = input.statuses ?? DEFAULT_SETTLED_MOVEMENT_STATUSES;
+
+      // COALESCE(paid, requested) is the money that actually moved for either
+      // direction: a deposit only ever has the paid figure, and a withdrawal's
+      // paid figure is authoritative once the provider settles.
+      //
+      // ::numeric inside the aggregate is a READ-time cast and does not weaken the
+      // "money is TEXT decimal strings" storage rule — it preserves exact provider
+      // strings on disk while summing them exactly here, and it throws loudly on
+      // malformed text, which is the correct outcome when the only writers are our
+      // own mappers.
+      const page = await db
+        .prepare(
+          `SELECT direction,
+                  token,
+                  COUNT(*)::int AS movement_count,
+                  COALESCE(SUM(COALESCE(amount_paid_usd, amount_requested_usd)::numeric), 0)::text
+                    AS total_usd
+             FROM earn_program_movements
+            WHERE organization_id = ?
+              AND wallet_id = ?
+              AND occurred_at >= ?
+              AND occurred_at < ?
+              AND status = ANY(?)
+            GROUP BY direction, token
+            ORDER BY direction ASC, token ASC`
+        )
+        .bind(
+          input.organizationId,
+          input.walletId,
+          // Same normalization as the list read: an internal caller (PRO-1672's
+          // period statements) never passes through the route schema, so the guard
+          // has to live here rather than only at the edge.
+          toMovementTimestamp(input.occurredFrom) ?? input.occurredFrom,
+          toMovementTimestamp(input.occurredTo) ?? input.occurredTo,
+          [...statuses]
+        )
+        .all<Record<string, unknown>>();
+
+      return (page.results ?? []).map((row) => ({
+        direction: row.direction as EarnMovementDirection,
+        token: row.token as EarnPortfolioToken,
+        movementCount: row.movement_count as number,
+        totalUsd: row.total_usd as string,
+      }));
+    },
+
+    async scanProviderWallets(input: ScanEarnProviderWalletsInput) {
+      // Keyset, not OFFSET: migration 0056 fixed (created_at, id) ASC as stable for
+      // a program's life, so this cannot skip a program because a sibling was
+      // created mid-pass. created_at is fixed-width ISO from sdp_iso_now(), so
+      // lexicographic comparison is chronological. Spelled-out disjunction rather
+      // than a row-value comparison, matching the private-channel keyset reads.
+      const conditions = ["environment = ?"];
+      const bindings: unknown[] = [input.environment];
+      if (input.after !== undefined) {
+        conditions.push("(created_at > ? OR (created_at = ? AND id > ?))");
+        bindings.push(input.after.createdAt, input.after.createdAt, input.after.id);
+      }
+
+      const page = await db
+        .prepare(
+          `SELECT * FROM earn_provider_wallets
+             WHERE ${conditions.join(" AND ")}
+             ORDER BY created_at ASC, id ASC
+             LIMIT ?`
+        )
+        .bind(...bindings, input.limit)
+        .all<Record<string, unknown>>();
+
+      return (page.results ?? []).map(mapProviderWalletRow);
     },
   };
 }

@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import * as Sentry from "@sentry/node";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
+import { runEarnDepositSweepIfDue } from "@/cron/earn-deposit-sweep";
 import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import {
@@ -77,6 +78,23 @@ export async function runCronJob(): Promise<void> {
     // reconciliation failure (and vice versa).
     if (isEarnEnabled(env)) {
       await runEarnCatalogueSyncIfDue(env, sentryEnabled ? nodeObservability : undefined);
+      // The deposit-observation sweep (PRO-1669) runs LAST on purpose: managed
+      // Cloud Run caps a job execution at 120s, so the task most likely to spend
+      // real time on provider round trips must not starve anything after it. It is
+      // also NON-FATAL, following the secret-retirement precedent above — it
+      // reports to its own Sentry monitor, so a sweep failure must not masquerade
+      // as a reconciliation failure, and no observation is ever abandoned (the next
+      // tick re-walks each feed from the head). The cadence slot is released inside
+      // runEarnDepositSweepIfDue's own catch, BEFORE the rethrow this swallows, so
+      // a failed pass never holds the slot for its full TTL.
+      await runEarnDepositSweepIfDue(env, sentryEnabled ? nodeObservability : undefined).catch(
+        (error: unknown) => {
+          getLogger().error(
+            { error: error instanceof Error ? error.message : String(error) },
+            "reconciliation job: earn deposit sweep failed"
+          );
+        }
+      );
     }
   } finally {
     await Promise.allSettled([closeAllRedisClients(), closeDatabasePools()]);

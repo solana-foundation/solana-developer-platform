@@ -22,7 +22,7 @@ flowchart LR
     subgraph SDP["sdp-api  /v1/earn"]
         ROUTES["earn routes<br/>auth · project scope · earn:read/write"]
         SVC["@sdp/earn provider clients<br/>(Ground live; Veda/Upshift/Perena stubs)"]
-        DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_program_withdrawals")]
+        DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_program_movements")]
         CRON["cron: catalogue sync"]
     end
 
@@ -57,9 +57,9 @@ PRO-1634 owns whatever returns.
 | APY (headline + program-level) | `earn_strategies.current_apy` (latest observed, overwritten by sync) + live `getPortfolioYield` | Catalogue sync; live provider read | Hourly / real-time |
 | Program list | `earn_provider_wallets` (**DB**, oldest first) joined per row with a **live provider snapshot** — `GET /v1/earn/programs` | Rows written by create; snapshots fetched in parallel per listed program | Real-time |
 | Positions & balances | **Live provider snapshot** (`GET /v1/earn/programs/:programId` ← `getPortfolioWallet`) — never persisted | Provider | Real-time |
-| Deposits | **Live provider** (`GET /programs/:programId/deposits` ← provider-observed on-chain deposits) — customer-initiated, so SDP has no intent moment to ledger | Provider | Real-time |
+| Deposits (live feed) | **Live provider** (`GET /programs/:programId/deposits` ← provider-observed on-chain deposits, cursor passthrough) — the only surface that answers "did my transfer land" in seconds; the matching ledger row is written as a side effect | Provider | Real-time |
 | Withdrawals (detail) | **Live provider** (`GET /programs/:programId/withdrawals/:ref`); the matching ledger row advances as a side effect | Provider | Real-time |
-| Withdrawals (history/audit) | `earn_program_withdrawals` (**DB ledger** — `GET /programs/:programId/withdrawals`) | Written at intent by `POST /programs/:programId/withdrawals`; advanced by guarded CAS on every observation (`services/earn-withdrawal-ledger.service.ts`) | Intent = immediate; status = each observation (+ ledger sweep) |
+| **Money movements (history/audit)** | `earn_program_movements` (**DB ledger** — `GET /programs/:programId/movements`, both directions; `…/withdrawals` is the direction-pinned legacy view) | Withdrawals written at intent by `POST /programs/:programId/withdrawals`; deposits created by their FIRST observation — the sweep (`cron/earn-deposit-sweep.ts`) plus a best-effort write from the live deposits read. Both advanced by guarded CAS, each direction through its own applier (`services/earn-{withdrawal,deposit}-ledger.service.ts`) | Intent = immediate; observed = each observation (sweep every 15 min) |
 | Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
@@ -74,13 +74,34 @@ PRO-1634 owns whatever returns.
 > by guarded CAS on every observation, and listed as the audit surface. The
 > provider remains the authority for live status and final amounts; the
 > ledger relays provider truth, never replaces it.
+>
+> **Refined by PRO-1669 (ADR 0002 addendum 2026-08-12).** SDP ledgers **every**
+> money movement — what it initiates at intent, what it observes at observation
+> — and only positions and balances stay live-only. The deposits bullet above is
+> superseded: having no intent moment was never a reason to hold no record.
+> Withdrawals and deposits now share one table (`earn_program_movements`), each
+> row naming the *mechanism* that observed it, so the interim provider poll,
+> PRO-1631's webhooks, and an eventual SDP indexer are three writers of one row.
 
-**No new indexer.** V1 needs no event-sourced chain indexer: the catalogue
-comes from provider APIs and position truth is the live provider snapshot.
-That is now decided, not provisional (PRO-1628) — deposits stay unledgered in
-V1 precisely because observing customer-initiated transfers from chain is
-indexer-shaped work. If V2 needs richer on-chain history (per-block share
-price, protocol events), that's the point to evaluate an indexer — not V1.
+**An indexer is the end state; provider APIs are the interim observer.** V1
+ships no indexer, and that has not changed. What changed with PRO-1669 is the
+reasoning: the earlier version of this paragraph used "no indexer" to justify
+keeping deposits out of the ledger entirely, which conflated the **record** with
+the **mechanism that observes it**. SDP now records every money movement, and
+each row names its observer in `observed_via`. Three observers are planned, in
+order: provider-API polling today (`cron/earn-deposit-sweep.ts`, plus a
+best-effort write from the live deposits read), provider webhooks next
+(PRO-1631 — Ground signs HMAC events and they land on the same applier), and an
+SDP indexer reading Solana directly eventually. The indexer is the **desired**
+observer, not a hedge: it takes a third party out of the path of SDP's own audit
+trail, sees arrivals at chain finality rather than at the provider's detection
+latency, and is the only observer that can reconcile the ledger against the
+chain instead of against another API. Because the ledger's transition logic never
+branches on the observer and `observed_via` is open TEXT with no CHECK, adding it
+is a writer, not a migration. What V1 still does not need is an *event-sourced*
+indexer for catalogue or position data: the catalogue comes from provider APIs
+and position truth is the live provider snapshot. If V2 wants per-block share
+price or protocol events, that is a separate evaluation.
 
 ## Execution era (PRO-1634 — not V1, and no longer in the tree)
 
@@ -108,8 +129,8 @@ guarded-CAS shape is the pattern to extend.
 | RPC relay (org-selected providers) | `@sdp/rpc` (`packages/sdp-rpc/src/relay.ts`) | No V1 consumer — the NAV/reconcile designs that wanted it were unpublished (PRO-1628); returns if a real NAV consumer appears | ⏸ none in V1 |
 | Helius DAS | `services/helius-das.service.ts` | No V1 consumer — positions are live provider reads, nothing to reconcile | ⏸ none in V1 |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |
-| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts`; precedent `cron/pending-transfers.ts` | Catalogue sync + the withdrawal-ledger sweep (heals ref-less intent rows; launch-coupled follow-up ticket) | ✅ catalogue sync (`cron/earn-catalogue-sync.ts`, hourly, gated on `isEarnEnabled` — `MARKETS_ENABLED` **and** `EARN_ENABLED`) · 🔨 ledger sweep |
-| Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_program_withdrawals` (wallet, request_id) unique + `earn_provider_wallets` (provider, provider_wallet_ref) unique | Two-layer withdrawal retry safety: SDP intent row first, provider request-id dedupe as the crash-window backstop. Program **creation** is key-required too (PRO-1670) and derives against (org, environment, provider); the provider replays a retried create with the original wallet ref, so the global wallet-ref unique is what catches it — a violation there means "already created", answered 200, never 409 | ✅ wired (PRO-1628, PRO-1670) |
+| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts`; precedent `cron/pending-transfers.ts`; shared cadence-slot mechanics in `cron/slot.ts` | Catalogue sync + the deposit-observation sweep + the withdrawal-ledger sweep (heals ref-less intent rows; still a follow-up) | ✅ catalogue sync (`cron/earn-catalogue-sync.ts`, hourly) · ✅ deposit sweep (`cron/earn-deposit-sweep.ts`, every 15 min) — both gated on `isEarnEnabled` (`MARKETS_ENABLED` **and** `EARN_ENABLED`) · 🔨 withdrawal-ledger sweep |
+| Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_program_movements` (wallet, request_id) unique + `earn_provider_wallets` (provider, provider_wallet_ref) unique | Two-layer withdrawal retry safety: SDP intent row first, provider request-id dedupe as the crash-window backstop. Program **creation** is key-required too (PRO-1670) and derives against (org, environment, provider); the provider replays a retried create with the original wallet ref, so the global wallet-ref unique is what catches it — a violation there means "already created", answered 200, never 409 | ✅ wired (PRO-1628, PRO-1670) |
 | Compliance providers | `services/compliance/`, compliance family | RWA strategy KYC / depositor checks (open decision) | ⏸ decision pending |
 | Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Graft point for doc's risk tooling (whitelists, buffers, limits, timelocks, maker-checker) | ⏸ the audit's flagged gap — decide V1 vs later |
 | Audit log | `services/audit.service.ts` | Deposit/withdraw/config audit events | 🔨 execution phase |
@@ -124,10 +145,12 @@ portfolio-wallet capability (`EarnPortfolioWalletProvider` +
 `earn_provider_wallets` table (migration `0049`; migration `0056` lifted its
 one-per-org cap so an org may hold N programs per environment+provider, and
 moved uniqueness onto the provider wallet itself — one link row per
-`(provider, provider_wallet_ref)` platform-wide), the withdrawal ledger
-(`earn_program_withdrawals`, migration `0055`) with its status machine in
-`services/earn-withdrawal-ledger.service.ts`, and the catalogue-sync cron
-(`cron/earn-catalogue-sync.ts`) + dev seed (`db:seed:earn` →
+`(provider, provider_wallet_ref)` platform-wide), the money-movement ledger
+(`earn_program_movements`, migrations `0055` and `0057`) with a status machine per
+direction in `services/earn-withdrawal-ledger.service.ts` and
+`services/earn-deposit-ledger.service.ts`, the catalogue-sync and
+deposit-observation crons (`cron/earn-catalogue-sync.ts`,
+`cron/earn-deposit-sweep.ts`) + dev seed (`db:seed:earn` →
 `scripts/seed-earn-demo.ts`).
 
 ## Ground — the first live provider (portfolio-wallet flow)
@@ -202,7 +225,9 @@ flowchart LR
   (`GROUND_SOLANA_ROUTED_TOKENS`), with USDT riding Ethereum (mainnet in
   production, Sepolia in sandbox), so the funding lane and the payout lane
   (`assertSolanaRoutable`) agree on one stablecoin. Deposits are tracked via
-  Ground's cursor-paginated deposits API. No custody signing in V1.
+  Ground's cursor-paginated deposits API **and recorded in
+  `earn_program_movements`** by the observation sweep plus the live read's
+  best-effort write (PRO-1669). No custody signing in V1.
 - **Withdrawals.** Portfolio-level: preview
   (`POST .../withdrawal-preview`) then create
   (`POST .../withdrawals`, caller-owned requestId — a 409

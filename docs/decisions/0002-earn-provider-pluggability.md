@@ -89,9 +89,10 @@ Independent switches, all runtime-safe:
   undefined-lookup crash. Provider ids are never reused; retirement means
   deprecating strategies and draining positions, then removing the id.
 - **Reads never gate on availability.** The catalogue and the program surfaces
-  remain readable regardless of provider entitlement, and the withdrawal
-  ledger list carries no provider gate at all (2026-08-11 addendum), so
-  dashboards and partner integrations keep working while a provider is off.
+  remain readable regardless of provider entitlement, and the movement
+  ledger list carries no provider gate at all (2026-08-11 and 2026-08-12
+  addenda), so dashboards and partner integrations keep working while a provider
+  is off. Missing credentials stop new observations, never reads.
 
 ## Consequences
 
@@ -237,10 +238,16 @@ per surface:
   position-scoped with base-unit amounts, the wrong shape for portfolio-level
   USD withdrawals; PRO-1634 redesigns a movements ledger against real flows if
   the execution era arrives.
-- **Deposits stay live.** A deposit is a customer-initiated transfer SDP never
-  sees at intent time; observing it from chain is indexer-shaped work (a stated
-  non-goal). Deposits surface through the live program snapshot and enter a
-  ledger only when SDP initiates them (execution era).
+- **Deposits stay live.** *(Superseded — see the 2026-08-12 movement-ledger
+  addendum: deposits are now ledgered at observation. What this bullet got right
+  is that SDP has no intent moment for a customer-initiated transfer; what it got
+  wrong is concluding SDP can therefore hold no record of one. Those are separate
+  questions, and the answer to the second is the provider's own deposits API —
+  an observation SDP already makes on every dashboard poll and then discards.)* A
+  deposit is a customer-initiated transfer SDP never sees at intent time;
+  observing it from chain is indexer-shaped work (a stated non-goal). Deposits
+  surface through the live program snapshot and enter a ledger only when SDP
+  initiates them (execution era).
 - **Idempotency is now two-layer.** The derived withdrawal request id anchors
   an SDP intent row — unique per `(wallet_id, request_id)`, wallet-scoped
   because every project in an environment shares the program wallet — with a
@@ -393,3 +400,168 @@ promised had nowhere to live. It now lives between programs.
   preview/create/list/detail). The implicit create-or-update `PUT /program` is
   gone: it was keyed on the triple that stops being addressable the moment a
   second program exists.
+
+## Addendum — 2026-08-12 Every money movement is ledgered; the observer is pluggable (PRO-1669)
+
+The decision above stands. This supersedes the "Deposits stay live" bullet of the
+2026-08-11 addendum, which conflated two separate questions: whether SDP
+*initiates* a movement, and whether SDP can hold a *record* of one. It cannot
+initiate a customer's SPL transfer; it can perfectly well observe it, and the
+provider's own deposits API is an observation SDP already makes on every
+dashboard poll and then throws away. The governing principle is refined, not
+replaced:
+
+> **SDP ledgers every money movement: what it initiates, at intent; what it
+> observes, at observation. Positions and balances stay live, permanently.**
+
+- **Three categories, and every money movement sits in exactly one.**
+  *Initiated* — the row exists before the provider accepts the call, and
+  `requested` is a real state (withdrawals). *Observed* — the row is created by
+  the first observation, there is no intent state, and the record's status
+  vocabulary is the provider-observed one with nothing added (deposits).
+  *Live* — a derived aggregate with no event identity, never a movement
+  (positions, balances, yield).
+- **One table, two writers, two state machines.** `earn_program_withdrawals`
+  becomes `earn_program_movements` with a `direction` discriminator (migration
+  `0057`). This restores the shape 0048 chose and 0055 never disputed: 0055
+  dropped `earn_movements` for its *grain* — position-scoped, base-unit amounts,
+  no writer — not for unifying the directions, and its own header cites
+  `payment_transfers`, which is a single table carrying both legs. Deposit
+  statuses are a strict subset of withdrawal statuses, so one `status` column
+  serves both with no new CHECK value. The two *appliers* stay separate
+  (`earn-withdrawal-ledger.service.ts`, `earn-deposit-ledger.service.ts`):
+  initiated-with-intent and observed-upsert are genuinely different machines,
+  and merging them would put `if (direction === …)` inside transition logic.
+- **The intent columns became direction-conditional CHECKs, not casualties.**
+  `request_id`, `idempotency_fingerprint`, `destination_address` and
+  `project_id` are now nullable at the column level and immediately re-required
+  for `direction = 'withdrawal'`. That preserves 0055's stated reason exactly —
+  a null fingerprint must be unrepresentable, or `resolveIdempotencyReplay`'s
+  "null fingerprint = unclaimed" branch turns the unique-violation replay
+  backstop into an unrecoverable 500 — for the only direction that can reach
+  that code path, since the replay lookup queries by `request_id` and can only
+  ever return a withdrawal. Two invariants 0055 could express only by omission
+  are now written down: a deposit may not carry intent columns at all, and
+  `requested` is withdrawal-only. In TypeScript the row type is a discriminated
+  union, so the withdrawal arm keeps non-null intent fields where the guarantee
+  actually lived.
+- **The record is observation-source-agnostic; the observer is interchangeable.**
+  Rows carry `observed_via` — a *mechanism* (`sdp_intent`, `provider_poll`,
+  `provider_webhook`, `chain_indexer`), never a provider — and no transition
+  matrix branches on it. Three observers join over the product's life with no
+  schema change: provider-API polling now (a cron sweep, plus a best-effort
+  write from the live deposits read), provider webhooks next (PRO-1631, Ground
+  HMAC, which reuse the same applier through a different adapter), and an SDP
+  indexer reading Solana directly eventually. `observed_via` is deliberately
+  **not** CHECK-constrained: a check would make adding the third observer a
+  migration, which is precisely the coupling this decision removes. Per-source
+  differences belong in the adapter that *builds* an observation, never in the
+  machine that applies it; a source-grep test pins that.
+- **The indexer is the desired end state, named as such.** The superseded bullet
+  dismissed a deposit ledger because observing customer-initiated transfers from
+  chain is indexer-shaped work, a stated non-goal. The non-goal holds — V1 ships
+  no indexer, and the catalogue and position surfaces still need none. What was
+  wrong was treating the *record* as blocked on it. The interim observer is the
+  provider's own API; the end state is an SDP indexer, wanted because it takes a
+  third party out of the path of SDP's own audit trail and sees arrivals at chain
+  finality rather than at the provider's detection latency. This commits to the
+  record now and to the observer being swappable. It does not schedule the
+  indexer, and the poller is expected to become a backstop and then to be
+  deleted — nothing downstream may assume the poller is the writer.
+- **Identity is dual, and only the interim half is armed.** The provider's own
+  movement id anchors a global partial unique on
+  `(provider, direction, provider_reference)` — global for 0055's reason
+  (provider-side identifiers are not tenant-scoped) and direction-qualified
+  because only Ground *happens* to prefix its deposit and withdrawal ids; a
+  provider with one id space would otherwise collide a deposit against a
+  withdrawal. Chain identity is
+  `(wallet_id, transaction_signature, transaction_instruction_index)`, a second
+  partial unique no V1 observer can fill (the provider feed reports no
+  instruction index) which arms itself the day an indexer writes. **A unique on
+  `transaction_signature` alone would be a bug, not a simplification:** two SPL
+  transfers to one funding address inside one transaction are legal and the
+  provider reports them as two deposits sharing a hash, so that index would
+  reject the second and silently drop real money — the lesson
+  `private_channel_settlement_observations` already records with its
+  `(signature, instruction_index)` primary key. The signature column is also
+  nullable by necessity: a shared provider wallet is fundable on non-Solana
+  rails, and invariant 5 withholds a foreign rail's identifiers while the value
+  still surfaces.
+- **Cross-source dedupe is a service obligation, not a constraint.** A provider's
+  deposit id and an indexer's `(signature, index)` are not mutually computable,
+  so no column makes them collide. The applier resolves by provider reference,
+  then by signature, and that ordering works in both directions: an indexer
+  adopts and advances a row the poller wrote, and a poller stamps
+  `provider_reference` onto a row the indexer wrote. Skip rather than guess when
+  a signature probe is ambiguous — a double-counted movement breaks
+  reconciliation silently.
+- **`occurred_at` is when the money moved; `created_at` is when SDP wrote the
+  row.** For an initiated movement they are the same instant, which is why the
+  migration backfills one from the other. For an observed one they are
+  structurally different, and conflating them would make the ledger's sort key
+  depend on cron health, put an indexer backfill of January deposits at the top
+  of a list, and mis-attribute a period by exactly the observation lag.
+  `occurred_at` is write-once and is both the ordering key and the aggregation
+  key; the gap between the two is the only honest measure of observation lag.
+- **The canonical movement read is `GET /v1/earn/programs/:programId/movements`,
+  and it carries no provider gate at all** — the audit trail outlives credential
+  removal, entitlement disablement, and a provider losing its registry entry.
+  Missing credentials stop new observations, never reads. This is not a
+  resurrection of the top-level `/v1/earn/movements` that 0055 pruned: that route
+  was position-scoped with base-unit amounts and never had a writer, it stays
+  404, and a paired test pins the 404 alongside the new route serving.
+  `GET …/withdrawals` is retained, direction-pinned, and soft-deprecated in its
+  favour. `GET …/deposits` stays a **live** provider passthrough — the only
+  surface that answers "did my transfer land" in seconds — and advances the
+  ledger best-effort as a side effect, the shape the withdrawal detail read
+  already carries. One attempt, not the create path's retry loop: a missed
+  observation is re-offered by the feed on the next poll. Every route still
+  reports exactly one source of state.
+- **The sweep never gates money and never fails on a missing key.** It resolves
+  each wallet's client through the fail-closed registry, checks
+  `supportsPortfolioWallets`, and treats `NOT_IMPLEMENTED` and
+  `PROVIDER_NOT_CONFIGURED` as steady states — an environment without
+  credentials is the normal pre-launch condition, not an incident. Per-wallet and
+  per-row failures are logged and swallowed so one bad program cannot sink the
+  platform's pass, and work is capped per run rather than drained. It walks each
+  feed from the head every pass on purpose: the feed has no `since` filter and an
+  opaque cursor of undocumented order, so every cheap termination rule is
+  order-dependent and wrong in one direction. It is not a request path and never
+  decides whether money may move.
+- **Forensics rule restated.** The 2026-08-11 rule — money-movement tables carry
+  write-only `project_id`, `created_by`, `initiated_by_key_id` — was written for
+  movements SDP initiates. An observed deposit has no SDP-side actor to name, and
+  inventing a project or a user writes a fiction a human later reads as fact
+  during an incident. Restated: *a money-movement row carries provisioning
+  attribution when an SDP actor initiated it, and the observing mechanism when
+  none did.* A deposit's attribution is the program wallet it landed in, which is
+  the row's scope anyway. Consequence worth knowing: `project_id`'s cascade means
+  deleting a project deletes withdrawal history but not deposit history.
+- **The ledger records arrival, never deployment.** A deposit reaching
+  `completed` means the funds landed as `cash` in the portfolio wallet. The later
+  provider-managed rebalance that deploys them is not a movement out of the
+  wallet and has no row. Never read a completed deposit as "earning".
+- **Unchanged on purpose.** The `earn_positions` / `earn_movements` /
+  `earn_nav_snapshots` drops stand, and this addendum adds no position ledger:
+  positions and balances remain live-only, permanently. PRO-1634's movements
+  question narrows to *initiated* per-strategy execution, which still has no
+  consumer.
+- **Open, and framed here so the next ticket does not discover it:** balance and
+  yield **history** (PRO-1672) cannot be satisfied by a live read, because
+  history is the one thing that cannot be backfilled — every day V1 runs without
+  capture is reporting data lost forever. With movements ledgered, yield per
+  period falls out of Δbalance − net movements, but the balance terms do not
+  exist anywhere. That sits against the live-only-permanently rule above, so
+  PRO-1672 needs a decision, not code. The only shape that keeps both true: a
+  periodic snapshot written for **reconciliation only**, never a serving read,
+  with no API route ever answering a balance question from it — the live provider
+  snapshot stays the single source for current balance. `earned_usd` inherits
+  whichever answer balances get. Deciding it belongs to PRO-1672's own dated
+  addendum.
+- **Amended above:** the "Reads never gate on availability" invariant now names
+  the movement ledger list rather than the withdrawal one, and the "Deposits stay
+  live" bullet of the 2026-08-11 addendum is marked superseded in place. Every
+  other bullet of that addendum stands — including the withdrawal ledger's
+  two-layer idempotency, its heal semantics, and the hard requirement that a
+  sweep discriminate definitive provider rejections from transport failures
+  before re-driving a ref-less `requested` row.

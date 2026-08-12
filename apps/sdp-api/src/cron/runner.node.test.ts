@@ -6,6 +6,8 @@ import {
   APPROVED_WALLET_OPERATIONS_CRON,
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
+import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSync } from "./earn-catalogue-sync";
+import { EARN_DEPOSIT_SWEEP_CRON, runEarnDepositSweep } from "./earn-deposit-sweep";
 import { runPendingDepositsReconciliation } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
 import { runPendingWithdrawalsReconciliation } from "./pending-withdrawals";
@@ -86,6 +88,20 @@ vi.mock("./workflow-secret-retirements", () => ({
   runWorkflowSecretRetirements: vi.fn(),
 }));
 
+// Both Earn tasks reach @sdp/earn and the repositories; mocked for the same
+// module-pool reason as the wrappers above. Distinct crontabs so the Earn
+// assertions below can tell them apart in scheduleMock's calls — every other task
+// here is mocked to "* * * * *" precisely because those tests don't need to.
+vi.mock("./earn-catalogue-sync", () => ({
+  EARN_CATALOGUE_SYNC_CRON: "0 * * * *",
+  runEarnCatalogueSync: vi.fn(),
+}));
+
+vi.mock("./earn-deposit-sweep", () => ({
+  EARN_DEPOSIT_SWEEP_CRON: "*/15 * * * *",
+  runEarnDepositSweep: vi.fn(),
+}));
+
 function makeBg(): BackgroundRunner {
   return { run: vi.fn(), awaitAll: vi.fn(async () => {}), draining: false };
 }
@@ -108,6 +124,71 @@ describe("startCron", () => {
     vi.mocked(runRecurringPaymentsCollection).mockReset();
     vi.mocked(runWorkflowExecutions).mockReset();
     vi.mocked(runWorkflowSecretRetirements).mockReset();
+    vi.mocked(runEarnCatalogueSync).mockReset();
+    vi.mocked(runEarnDepositSweep).mockReset();
+  });
+
+  // Earn is gated by BOTH flags (isEarnEnabled requires MARKETS_ENABLED too), and
+  // every count elsewhere in this file assumes it is off — which it is by default.
+  describe("earn tasks", () => {
+    const earnEnv = { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env;
+
+    function scheduledCrons(): string[] {
+      return scheduleMock.mock.calls.map((call) => call[0] as string);
+    }
+
+    it("registers BOTH earn tasks when the whole flag hierarchy is on", () => {
+      startCron({ env: earnEnv, bg: makeBg() });
+
+      expect(scheduledCrons()).toContain(EARN_CATALOGUE_SYNC_CRON);
+      expect(scheduledCrons()).toContain(EARN_DEPOSIT_SWEEP_CRON);
+    });
+
+    it("routes each earn tick to its own task", () => {
+      const bg = makeBg();
+      startCron({ env: earnEnv, bg });
+
+      for (const call of scheduleMock.mock.calls) {
+        (call[1] as () => void)();
+      }
+
+      expect(runEarnCatalogueSync).toHaveBeenCalledWith({
+        env: earnEnv,
+        bg,
+        observability: undefined,
+      });
+      expect(runEarnDepositSweep).toHaveBeenCalledWith({
+        env: earnEnv,
+        bg,
+        observability: undefined,
+      });
+    });
+
+    it("registers neither task when the parent Markets flag alone is on", () => {
+      startCron({ env: { MARKETS_ENABLED: "true" } as Env, bg: makeBg() });
+
+      expect(scheduledCrons()).not.toContain(EARN_CATALOGUE_SYNC_CRON);
+      expect(scheduledCrons()).not.toContain(EARN_DEPOSIT_SWEEP_CRON);
+    });
+
+    it("registers neither task when Earn alone is on without Markets", () => {
+      startCron({ env: { EARN_ENABLED: "true" } as Env, bg: makeBg() });
+
+      expect(scheduledCrons()).not.toContain(EARN_CATALOGUE_SYNC_CRON);
+      expect(scheduledCrons()).not.toContain(EARN_DEPOSIT_SWEEP_CRON);
+    });
+
+    it("does not start a sweep on a tick that fires after stop()", async () => {
+      const handle = startCron({ env: earnEnv, bg: makeBg() });
+      const sweepTick = scheduleMock.mock.calls.find(
+        (call) => call[0] === EARN_DEPOSIT_SWEEP_CRON
+      )?.[1] as (() => void) | undefined;
+
+      await handle?.stop();
+      sweepTick?.();
+
+      expect(runEarnDepositSweep).not.toHaveBeenCalled();
+    });
   });
 
   // Asset profiles is on unless a self-hosted operator opts out, so the workflow

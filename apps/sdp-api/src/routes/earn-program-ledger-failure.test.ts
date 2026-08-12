@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnRepository, type EarnProviderWalletRow } from "@/db/repositories";
 import app from "@/index";
+import { applyEarnDepositObservation } from "@/services/earn-deposit-ledger.service";
 import { applyEarnWithdrawalObservationToRow } from "@/services/earn-withdrawal-ledger.service";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -23,6 +24,21 @@ vi.mock("@/services/earn-withdrawal-ledger.service", async (importOriginal) => {
   return {
     ...original,
     applyEarnWithdrawalObservationToRow: vi.fn().mockRejectedValue(new Error("ledger db down")),
+  };
+});
+
+/**
+ * The same contract for the OBSERVED half (PRO-1669): the deposits route reports
+ * the provider's live page, and its best-effort ledger write must never reach the
+ * caller. Mocked here rather than in earn-program.test.ts for the same reason as
+ * above — a partial module mock must not leak into the suite that exercises the
+ * real applier.
+ */
+vi.mock("@/services/earn-deposit-ledger.service", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/services/earn-deposit-ledger.service")>();
+  return {
+    ...original,
+    applyEarnDepositObservation: vi.fn().mockRejectedValue(new Error("ledger db down")),
   };
 });
 
@@ -176,12 +192,61 @@ describe("Earn withdrawal ledger — post-acceptance bookkeeping failure", () =>
     // must be pinned to the program in the PATH, not merely to some program of
     // this organization's.
     const row = await getDb(env)
-      .prepare("SELECT status, provider_reference, wallet_id FROM earn_program_withdrawals")
+      .prepare("SELECT status, provider_reference, wallet_id FROM earn_program_movements")
       .first<{ status: string; provider_reference: string | null; wallet_id: string }>();
     expect(row).toEqual({
       status: "requested",
       provider_reference: null,
       wallet_id: program.id,
     });
+  });
+
+  it("serves the live deposits page even when every ledger write rejects", async () => {
+    const deposits = [
+      {
+        id: "dep_1",
+        amountUsd: "50.00",
+        token: "usdc" as const,
+        status: "completed" as const,
+        createdAt: "2026-08-10T00:00:00.000Z",
+      },
+      {
+        id: "dep_2",
+        amountUsd: "75.00",
+        token: "usdc" as const,
+        status: "processing" as const,
+        createdAt: "2026-08-11T00:00:00.000Z",
+      },
+    ];
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "listPortfolioDeposits").mockResolvedValue({
+      deposits,
+      nextCursor: "cursor-2",
+    });
+
+    const res = await app.request(
+      `/v1/earn/programs/${program.id}/deposits`,
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    // The read is the provider's, so a bookkeeping outage is invisible to it —
+    // including the cursor, which a partner is paging on.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { deposits: Array<{ id: string }>; nextCursor: string | null };
+    };
+    expect(body.data.deposits.map((d) => d.id)).toEqual(["dep_1", "dep_2"]);
+    expect(body.data.nextCursor).toBe("cursor-2");
+
+    // Every row on the page is attempted — one failure must not abandon the rest —
+    // and ONE attempt each, unlike the post-acceptance withdrawal write's three:
+    // the feed re-offers a missed deposit on the very next poll.
+    expect(vi.mocked(applyEarnDepositObservation)).toHaveBeenCalledTimes(2);
+
+    // Nothing was written, and nothing was invented.
+    const row = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS total FROM earn_program_movements")
+      .first<{ total: number }>();
+    expect(row?.total).toBe(0);
   });
 });

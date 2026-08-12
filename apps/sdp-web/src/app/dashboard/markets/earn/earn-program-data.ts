@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  EARN_TERMINAL_WITHDRAWAL_STATUSES,
+  EARN_TERMINAL_MOVEMENT_STATUSES,
   type EarnPortfolioAllocationInput,
   type EarnPortfolioDepositsPage,
   type EarnPortfolioToken,
@@ -447,7 +447,7 @@ export function fetchEarnWithdrawal(
  * continues.
  */
 const SETTLED_WITHDRAWAL_STATUSES: ReadonlySet<EarnPortfolioWithdrawal["status"]> = new Set(
-  EARN_TERMINAL_WITHDRAWAL_STATUSES
+  EARN_TERMINAL_MOVEMENT_STATUSES
 );
 
 const WITHDRAWAL_OUTCOME_KEYS: Record<EarnPortfolioWithdrawal["status"], MessageKey> = {

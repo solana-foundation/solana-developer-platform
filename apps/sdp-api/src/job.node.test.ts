@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/node";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
+import { runEarnDepositSweepIfDue } from "@/cron/earn-deposit-sweep";
 import { closeDatabasePools } from "@/db/client";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
@@ -15,6 +16,10 @@ import { runCronJob } from "./job";
 
 vi.mock("@sentry/node", () => ({
   close: vi.fn(async () => true),
+}));
+
+vi.mock("@/cron/earn-deposit-sweep", () => ({
+  runEarnDepositSweepIfDue: vi.fn(async () => "swept"),
 }));
 
 vi.mock("@/cron/earn-catalogue-sync", () => ({
@@ -102,6 +107,7 @@ describe("runCronJob", () => {
       .mockReset()
       .mockResolvedValue(undefined as never);
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
+    vi.mocked(runEarnDepositSweepIfDue).mockReset().mockResolvedValue("swept");
     vi.mocked(runDueWorkflowExecutions)
       .mockReset()
       .mockResolvedValue(undefined as never);
@@ -205,6 +211,54 @@ describe("runCronJob", () => {
     const pairOrder = vi.mocked(recoverApprovedWalletOperations).mock.invocationCallOrder[0];
     const earnOrder = vi.mocked(runEarnCatalogueSyncIfDue).mock.invocationCallOrder[0];
     expect(earnOrder).toBeGreaterThan(pairOrder);
+  });
+
+  it("runs the deposit sweep LAST of the earn ticks, so a slow pass starves nothing", async () => {
+    // Managed Cloud Run caps a job execution at 120s and the sweep is the task most
+    // likely to spend real time on provider round trips.
+    const env = makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" });
+    vi.mocked(getProcessEnv).mockReturnValue(env);
+
+    await runCronJob();
+
+    expect(runEarnDepositSweepIfDue).toHaveBeenCalledExactlyOnceWith(env, undefined);
+    const syncOrder = vi.mocked(runEarnCatalogueSyncIfDue).mock.invocationCallOrder[0] ?? 0;
+    const sweepOrder = vi.mocked(runEarnDepositSweepIfDue).mock.invocationCallOrder[0] ?? 0;
+    expect(sweepOrder).toBeGreaterThan(syncOrder);
+  });
+
+  it("never runs the deposit sweep with the earn flags off", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv());
+    await runCronJob();
+    expect(runEarnDepositSweepIfDue).not.toHaveBeenCalled();
+
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ MARKETS_ENABLED: "true" }));
+    await runCronJob();
+    expect(runEarnDepositSweepIfDue).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fail the job when the deposit sweep fails, and still releases pools", async () => {
+    // Non-fatal on purpose (the secret-retirement precedent): the sweep reports to
+    // its own monitor, and no observation is ever abandoned — the next tick re-walks
+    // each feed from the head.
+    vi.mocked(getProcessEnv).mockReturnValue(
+      makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
+    );
+    vi.mocked(runEarnDepositSweepIfDue).mockRejectedValue(new Error("sweep exploded"));
+
+    await expect(runCronJob()).resolves.toBeUndefined();
+    expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
+    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the sweep when the catalogue sync fails first — the coupling is sequential", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(
+      makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
+    );
+    vi.mocked(runEarnCatalogueSyncIfDue).mockRejectedValue(new Error("sync exploded"));
+
+    await expect(runCronJob()).rejects.toThrow("sync exploded");
+    expect(runEarnDepositSweepIfDue).not.toHaveBeenCalled();
   });
 
   it("hands the earn tick its own observability while the pair keeps the transfers monitor", async () => {

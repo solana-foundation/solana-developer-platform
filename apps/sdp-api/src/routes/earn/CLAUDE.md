@@ -14,6 +14,11 @@ record, not state: a route may resolve which provider wallet a program is and
 then read all of its money live — what it may never do is mix a persisted
 balance with a live one.
 
+A route may also **write** the ledger as a best-effort side effect of a live
+read — the withdrawal detail read and the deposits list both do. That is not
+blending: the response still reports exactly one source, and a failed write is
+logged under `earn_ledger_write_failed`, never surfaced.
+
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Written only
   by the sync cron + the local dev seed.
 
@@ -121,8 +126,16 @@ other's balance.
   foreign org's id, a sandbox id presented by a production session, and a typo
   are indistinguishable to the caller on purpose.
 - `GET /programs/:programId/deposits` — **live provider** (provider-observed
-  on-chain deposits; cursor passthrough). Deposits are customer-initiated, so SDP
-  never sees them at intent time — they are deliberately NOT ledgered in V1.
+  on-chain deposits; cursor passthrough), **and persist-on-observation**. Deposits
+  are customer-initiated, so SDP never sees them at intent time — but PRO-1669
+  ledgers them anyway: the page's rows are upserted into `earn_program_movements`
+  best-effort as a side effect, ONE attempt (no retry loop — the feed re-offers a
+  missed row on the next poll, and the dashboard polls this route every 15s), with
+  failures logged not surfaced. The response is always the provider's live page,
+  which stays the only surface that answers "did my transfer land" in seconds. The
+  durable record's observer is interchangeable by design — provider poll now,
+  PRO-1631 webhooks next, an SDP indexer eventually — see ADR 0002's 2026-08-12
+  addendum.
 - `POST /programs/:programId/withdrawal-preview` — **live provider**.
 - **`POST /programs/:programId/withdrawals` — live provider call + SDP ledger
   write.**
@@ -134,7 +147,7 @@ other's balance.
   the program wallet (two tenants sharing the provider account cannot collide;
   Ground validates the shape strictly — v4 only, verified 2026-08-05).
   Since PRO-1628 the defence is TWO-layer: the derived id anchors an SDP
-  intent row in `earn_program_withdrawals` — unique per (wallet, request_id),
+  intent row in `earn_program_movements` — unique per (wallet, request_id),
   wallet-scoped because sibling projects reach the same program and, since
   PRO-1670, because one caller key used against two of the org's own programs
   must not collapse into one payout — with a payload
@@ -145,7 +158,9 @@ other's balance.
   never fails the response (money moved): it retries, then logs
   `earn_ledger_write_failed`. Heal semantics are narrow: the detail poll heals
   only rows that already carry `provider_reference`; a ref-less row heals via
-  a same-key retry or the ledger sweep — never fuzzy matching. NOTE for the
+  a same-key retry or a WITHDRAWAL ledger sweep — which does not exist yet; the
+  sweep PRO-1669 shipped observes DEPOSITS only, so today the same-key retry is
+  the sole healing path — never fuzzy matching. NOTE for the
   sweep (hard requirement, from review): a ref-less `requested` row can also
   be a definitively-rejected intent (provider 4xx rethrows and leaves the row
   untouched) — the sweep must discriminate or verify with the provider before
@@ -164,7 +179,7 @@ other's balance.
   lets an unknown ref fall through. Cross-tenant scoping stays SDP's job, never
   delegated to the provider's own path scoping.
 - `GET /programs/:programId/withdrawals` — **DB ledger list**
-  (`earn_program_withdrawals`), the house `{withdrawals, total, page, pageSize}`
+  (`earn_program_movements`), the house `{withdrawals, total, page, pageSize}`
   envelope, newest first. Scoped to the path program's `wallet_id`: every project
   in the environment reaches the same programs, so one program = one history, and
   with several programs the wallet id is also what keeps a sibling program's
@@ -173,17 +188,44 @@ other's balance.
   check — because the audit trail must outlive credential removal, entitlement
   disablement, and a provider losing its registry entry entirely. There is no
   provider query param left to registry-gate; the provider comes from the row.
+  Since PRO-1669 this is the direction-pinned view of the movement ledger below —
+  kept for wire compatibility and **soft-deprecated** in favour of `/movements`.
+- `GET /programs/:programId/movements` — **DB ledger list**, THE canonical
+  money-movement history: every deposit and withdrawal on this program, both
+  directions, zero provider calls. `{movements, total, page, pageSize}`, newest
+  first on `occurred_at` (when the money MOVED, not when SDP recorded it — an
+  observed deposit written hours late must not sort to the head, and per-period
+  accounting must aggregate on it). Optional `direction`, `status`, `token`,
+  `occurredFrom`/`occurredTo` filters; the period range is **half-open
+  `[from, to)`** because a closed upper bound double-counts a movement landing on
+  a boundary into two adjacent periods. Same no-gate rule and same wallet scoping
+  as the withdrawal list. **This is what a partner should use for history**;
+  `/deposits` is a live "is it here yet" feed, not a history API.
 - The status machine + appliers live in
   `services/earn-withdrawal-ledger.service.ts` (Hono-free on purpose: the
   ledger sweep job and future webhooks consume it too). Terminal set is the
-  shared `EARN_TERMINAL_WITHDRAWAL_STATUSES` in `@sdp/types` — also consumed
-  by the dashboard's outcome polling; never redeclare it.
+  shared `EARN_TERMINAL_MOVEMENT_STATUSES` in `@sdp/types` (renamed from
+  `…_WITHDRAWAL_…` by PRO-1669 — terminality is direction-independent) — also
+  consumed by the dashboard's outcome polling; never redeclare it, and use the
+  shared `isTerminalEarnMovementStatus` helper rather than re-testing membership.
+- `services/earn-deposit-ledger.service.ts` owns the DEPOSIT matrix, Hono-free for
+  the same reason plus one more: its observers include a cron sweep today and a
+  chain indexer eventually. It is a separate module from the withdrawal service on
+  purpose — initiated-with-intent and observed-upsert are different machines, and
+  merging them would put `if (direction === …)` inside transition logic. Neither
+  module may branch on WHO observed a movement: per-source difference belongs in
+  the adapter that builds an observation. A source-grep test pins both rules.
 - Removed by PRO-1628 (do not resurrect without a new decision):
   `GET /positions|/movements` (empty ledgers nothing wrote),
   `POST /deposits/quote|/withdrawals/quote` (501 for every provider — no
   provider ever implemented per-strategy quoting), and
   `GET /strategies/:id/nav` (no writer, no reachable reader). A regression
   test in `../earn.test.ts` pins all of them at 404.
+  - PRO-1669's `GET /programs/:programId/movements` does **not** resurrect the
+    pruned `GET /movements`: that route was top-level and read the position-scoped,
+    base-unit `earn_movements` table nothing ever wrote. The new one is
+    program-scoped, USD decimal strings, and has two writers on day one. The
+    top-level paths stay 404 — pinned alongside the new route serving.
 
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
@@ -196,7 +238,13 @@ other's balance.
   live read, so a de-registered or vault-only provider fails the list with a
   clean 503/501 instead of mid-fan-out — and once more up front for a
   `provider` filter so an empty list still 503s (see route map).
-- **The ledger list**: no provider gate at all (see route map).
+- **The ledger lists** (`/movements`, `/withdrawals`): no provider gate at all
+  (see route map).
+- **The deposit-observation sweep takes no gate either** — it is not a request
+  path. It resolves each wallet's client through the fail-closed registry, skips
+  providers without the portfolio capability, and treats absent credentials as a
+  steady state (an un-credentialed environment is the normal pre-launch
+  condition). It never decides whether money may move.
 - Route tests in `../earn-program.test.ts` encode the asymmetry: the money-in
   half (create and re-target both refused when the organization is not entitled
   or credentials are missing) and the money-out half (the "withdrawals (ADR 0002
@@ -234,6 +282,11 @@ other's balance.
   `packages/sdp-earn/README.md` → "Withdrawals unwind in reverse").
 - Provider ids from DB rows are open strings — always dispatch via
   `resolveEarnProviderClient`.
+- Movement-ledger writes happen in exactly four places, and all of them go
+  through a ledger service — never a repository call straight from a handler: the
+  withdrawal create + detail poll, the live deposits read's side effect, the
+  deposit-observation sweep (`cron/earn-deposit-sweep.ts`), and later PRO-1631's
+  webhook handler.
 - Catalogue writes happen ONLY via the sync cron
   (`src/cron/earn-catalogue-sync.ts` — the production path) and the dev seed
   (`db:seed:earn` — local only, refuses non-local databases). Cadence, failure

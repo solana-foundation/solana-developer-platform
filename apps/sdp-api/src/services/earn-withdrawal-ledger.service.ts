@@ -1,11 +1,11 @@
 import type {
   EarnPortfolioWithdrawal,
   EarnPortfolioWithdrawalStatus,
-  EarnProgramWithdrawalRecordStatus,
+  EarnProgramMovementRecordStatus,
 } from "@sdp/types";
-import { EARN_TERMINAL_WITHDRAWAL_STATUSES } from "@sdp/types";
 import type { EarnProgramWithdrawalRow, EarnRepository } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
+import { isTerminalEarnMovementStatus } from "./earn-movement-status";
 
 /**
  * The withdrawal-ledger state machine (PRO-1628, ADR 0002 addendum).
@@ -40,12 +40,8 @@ const ALLOWED_EARN_WITHDRAWAL_SOURCE_STATUSES = {
   cancelled: ["requested", "processing", "pending_approval"],
 } as const satisfies Record<
   EarnPortfolioWithdrawalStatus,
-  readonly EarnProgramWithdrawalRecordStatus[]
+  readonly EarnProgramMovementRecordStatus[]
 >;
-
-export function isTerminalEarnWithdrawalStatus(status: EarnProgramWithdrawalRecordStatus): boolean {
-  return (EARN_TERMINAL_WITHDRAWAL_STATUSES as readonly string[]).includes(status);
-}
 
 /**
  * Field writes shared by both appliers. `undefined` leaves a column untouched;
@@ -80,7 +76,7 @@ export async function applyEarnWithdrawalObservationToRow(params: {
 }): Promise<EarnProgramWithdrawalRow | null> {
   const { repo, row, observed } = params;
 
-  if (isTerminalEarnWithdrawalStatus(row.status)) {
+  if (isTerminalEarnMovementStatus(row.status)) {
     return row;
   }
 
@@ -144,7 +140,7 @@ export async function applyEarnWithdrawalObservationByReference(params: {
     );
     return null;
   }
-  if (isTerminalEarnWithdrawalStatus(row.status)) {
+  if (isTerminalEarnMovementStatus(row.status)) {
     return row;
   }
 

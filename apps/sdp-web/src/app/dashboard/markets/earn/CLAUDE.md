@@ -88,9 +88,11 @@ the body `requestId` form, which is the only one that can get through.
   partial payout leaves it exactly as idle as a settled one — so
   `useEarnWithdrawalOutcomeToast(programId, withdrawalRef)` follows the
   WITHDRAWAL's own status
-  instead (terminal = the shared `EARN_TERMINAL_WITHDRAWAL_STATUSES` from
+  instead (terminal = the shared `EARN_TERMINAL_MOVEMENT_STATUSES` from
   `@sdp/types` — completed / partially_completed / failed / cancelled — the
-  same set the API's withdrawal ledger uses; `pending_approval` keeps waiting,
+  same set the API's movement ledger uses for BOTH directions since PRO-1669,
+  which is why it is no longer named `..._WITHDRAWAL_...`; a deposit simply never
+  holds the two withdrawal-only values. `pending_approval` keeps waiting,
   since it still resolves). Only `completed`
   is a success toast — partial is a problem, not a win. Sourcing a settlement
   claim from a wallet transition is the bug to never reintroduce. SWR suspends

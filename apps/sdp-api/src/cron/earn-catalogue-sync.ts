@@ -22,7 +22,6 @@
  * (`EARN_PROVIDER_CLIENTS`) — neither execution path names providers.
  */
 
-import { randomUUID } from "node:crypto";
 import { EARN_PROVIDER_CLIENTS, isStrategyWithinDeclaredSupport, SdpEarnError } from "@sdp/earn";
 import type {
   EarnRuntimeContext,
@@ -32,11 +31,11 @@ import type {
 import type { SdpEnvironment } from "@sdp/types";
 import { createEarnRepository, type EarnRepository } from "@/db/repositories";
 import type { BackgroundRunner } from "@/runtime/background";
-import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
+import { claimCronSlot, releaseCronSlot, withCronDeadline } from "./slot";
 
 export const EARN_CATALOGUE_SYNC_MONITOR = "sdp-api-sync-earn-catalogue";
 // Catalogue drift is slow (a provider onboarding or delisting a vault), so
@@ -223,7 +222,11 @@ export async function runEarnCatalogueSyncIfDue(
   observability?: Observability
 ): Promise<EarnCatalogueSyncTickOutcome> {
   const cache = createKVStoreSet(env).cache;
-  const claimToken = await claimEarnCatalogueSyncSlot(cache);
+  const claimToken = await claimCronSlot(
+    cache,
+    EARN_CATALOGUE_SYNC_SLOT_KEY,
+    EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS
+  );
   if (claimToken === null) {
     getLogger().info("syncEarnCatalogue: hourly slot already claimed, skipping this tick");
     return "skipped";
@@ -231,7 +234,12 @@ export async function runEarnCatalogueSyncIfDue(
 
   // The deadline sits inside the monitor wrapper so Sentry records an
   // exceeded run as a failed check-in rather than a forever-pending one.
-  const work = () => withSyncDeadline(syncEarnCatalogue(env));
+  const work = () =>
+    withCronDeadline(
+      syncEarnCatalogue(env),
+      EARN_CATALOGUE_SYNC_DEADLINE_SECONDS,
+      "earn catalogue sync"
+    );
   try {
     await (observability
       ? observability.withMonitor(EARN_CATALOGUE_SYNC_MONITOR, work, {
@@ -239,85 +247,8 @@ export async function runEarnCatalogueSyncIfDue(
         })
       : work());
   } catch (err) {
-    try {
-      // Atomic owner check and delete in one step: no-ops unless the slot
-      // still holds this execution's token, so a newer tick's takeover can
-      // never be cancelled from here.
-      await cache.compareAndDelete(EARN_CATALOGUE_SYNC_SLOT_KEY, claimToken);
-    } catch (releaseErr) {
-      // Log-and-continue: a release failure must never mask the sync error,
-      // and the token's embedded expiry bounds the damage to one skipped
-      // window.
-      getLogger().error(
-        { error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr) },
-        "syncEarnCatalogue: failed to release hourly slot after sync failure"
-      );
-    }
+    await releaseCronSlot(cache, EARN_CATALOGUE_SYNC_SLOT_KEY, claimToken, "syncEarnCatalogue");
     throw err;
   }
   return "synced";
-}
-
-// Rejects when the sync outlives its deadline, enforcing the lease-validity
-// invariant above. The losing promise is not cancelled — the tick's failure
-// exits the one-shot job process, which reaps any hung I/O — and the timer is
-// unref'd/cleared so a fast pass neither leaks it nor holds the process open.
-async function withSyncDeadline<T>(sync: Promise<T>): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(
-        new Error(
-          `earn catalogue sync exceeded its ${EARN_CATALOGUE_SYNC_DEADLINE_SECONDS}s deadline`
-        )
-      );
-    }, EARN_CATALOGUE_SYNC_DEADLINE_SECONDS * 1000);
-    timer.unref();
-  });
-  try {
-    return await Promise.race([sync, deadline]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Claim token wire format: `<expiresAtEpochMs>:<uuid>`. Wall-clock epoch is
-// deliberate — expiry must be comparable across job executions (a monotonic
-// reading is process-local); NTP keeps cross-instance skew far below the
-// minute granularity that matters here.
-function makeSlotToken(): string {
-  return `${Date.now() + EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS * 1000}:${randomUUID()}`;
-}
-
-// A value that doesn't parse (including the pre-token "1" a older build's
-// INCR-based claim may have left behind) reads as expired, so it is taken
-// over rather than wedging the slot.
-function slotExpiresAtMs(value: string): number {
-  const separator = value.indexOf(":");
-  if (separator === -1) {
-    return 0;
-  }
-  const expiresAt = Number(value.slice(0, separator));
-  return Number.isFinite(expiresAt) ? expiresAt : 0;
-}
-
-/**
- * Claim the hourly slot, returning this execution's token, or null when the
- * slot is held by a live claim (or a racer wins the same transition). Both
- * claim shapes are single compareAndSet transitions on the exact observed
- * value, so two ticks can never both win: null → token for an empty slot,
- * staleValue → token for an expired one.
- */
-async function claimEarnCatalogueSyncSlot(cache: KVStore): Promise<string | null> {
-  const token = makeSlotToken();
-  const existing = await cache.get(EARN_CATALOGUE_SYNC_SLOT_KEY);
-  if (existing === null) {
-    const won = await cache.compareAndSet(EARN_CATALOGUE_SYNC_SLOT_KEY, null, token);
-    return won ? token : null;
-  }
-  if (slotExpiresAtMs(existing) > Date.now()) {
-    return null;
-  }
-  const won = await cache.compareAndSet(EARN_CATALOGUE_SYNC_SLOT_KEY, existing, token);
-  return won ? token : null;
 }

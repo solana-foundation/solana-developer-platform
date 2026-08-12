@@ -3,18 +3,22 @@ import { notImplemented } from "@sdp/earn/errors";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import type {
   EarnPortfolioAllocationInput,
+  EarnPortfolioDeposit,
   EarnPortfolioDepositsPage,
   EarnPortfolioWalletSnapshot,
   EarnPortfolioWithdrawal,
   EarnPortfolioWithdrawalPreview,
   EarnPortfolioYield,
+  EarnProgramMovementRecord,
   EarnProgramWithdrawalRecord,
+  ListEarnProgramMovementsResponse,
   ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
+  EarnProgramMovementRow,
   EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
@@ -31,6 +35,10 @@ import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getLogger } from "@/runtime/logger";
 import {
+  applyEarnDepositObservation,
+  depositObservationFromProviderRead,
+} from "@/services/earn-deposit-ledger.service";
+import {
   applyEarnWithdrawalObservationByReference,
   applyEarnWithdrawalObservationToRow,
 } from "@/services/earn-withdrawal-ledger.service";
@@ -42,6 +50,7 @@ import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment 
 import {
   earnProgramCreateSchema,
   earnProgramDepositsQuerySchema,
+  earnProgramMovementsListQuerySchema,
   earnProgramParamsSchema,
   earnProgramRetargetSchema,
   earnProgramsListQuerySchema,
@@ -72,7 +81,7 @@ import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./
  * Source of truth per surface (PRO-1628): balances/positions/yield/deposits
  * are NEVER persisted — every read is a live provider fetch. Withdrawals are
  * the one money movement SDP initiates, so they get a ledger row
- * (earn_program_withdrawals): written at intent, advanced on every
+ * (earn_program_movements): written at intent, advanced on every
  * observation, listed from the DB. No endpoint ever blends the two sources —
  * create/get answer with the provider's live object and update the ledger as
  * a side effect; the list answers from the ledger alone.
@@ -590,6 +599,44 @@ export const getEarnProgram = async (c: AppContext) => {
   return success(c, response);
 };
 
+/**
+ * Persist the deposits this read just observed (PRO-1669). Best-effort by
+ * construction: the response is always the provider's live page, and a ledger
+ * failure is logged under the shared `earn_ledger_write_failed` marker, never
+ * surfaced.
+ *
+ * ONE attempt per row, deliberately unlike `persistWithdrawalObservation`'s
+ * LEDGER_WRITE_ATTEMPTS retry loop. That path is the only observer of an intent
+ * that has ALREADY moved money, so retrying is worth the latency; a missed deposit
+ * observation is re-offered by the provider feed on the very next poll (the
+ * dashboard polls this route every 15s) and by the sweep, so a retry loop here
+ * would only add tail latency to a hot read.
+ *
+ * Only the page the caller asked for is persisted — never paging on their behalf,
+ * which would turn a one-page read into a full-history walk.
+ */
+async function persistObservedDeposits(
+  repo: EarnRepository,
+  wallet: EarnProviderWalletRow,
+  deposits: readonly EarnPortfolioDeposit[]
+): Promise<void> {
+  const observedAt = new Date().toISOString();
+  for (const deposit of deposits) {
+    try {
+      await applyEarnDepositObservation({
+        repo,
+        wallet,
+        observation: depositObservationFromProviderRead(deposit, "provider_poll", observedAt),
+      });
+    } catch (error) {
+      getLogger().error(
+        { err: error, marker: "earn_ledger_write_failed", walletId: wallet.id },
+        "earn deposit ledger write failed on the live read; serving live state"
+      );
+    }
+  }
+}
+
 export const listEarnProgramDeposits = async (c: AppContext) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
   const query = parseQuery(c, earnProgramDepositsQuerySchema);
@@ -600,6 +647,12 @@ export const listEarnProgramDeposits = async (c: AppContext) => {
     providerWalletRef: row.provider_wallet_ref,
     ...(query.cursor !== undefined && { cursor: query.cursor }),
   });
+
+  // This route still reports exactly ONE source of state — the provider's live
+  // page. Writing the ledger as a side effect is not blending: it is the same
+  // shape the withdrawal detail read has carried since PRO-1628, and it is what
+  // makes the durable record non-empty for any program a human is watching.
+  await persistObservedDeposits(getEarnRepository(c), row, response.deposits);
 
   return success(c, response);
 };
@@ -855,8 +908,14 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
       observed: withdrawal,
     });
   } catch (error) {
-    getLogger().warn(
-      { err: error, withdrawalRef },
+    // Carries the shared alert marker at ERROR, like the other two ledger writers
+    // (the create path's post-acceptance write and the deposits read's side
+    // effect). This one matters at least as much: it is the ONLY path that advances
+    // an already-created withdrawal row toward terminal — there is no withdrawal
+    // sweep yet — so a persistent failure here silently freezes a row that money
+    // has already left, and a warn with no marker would never page anyone.
+    getLogger().error(
+      { err: error, marker: "earn_ledger_write_failed", withdrawalRef },
       "earn withdrawal observation persist failed; serving live state"
     );
   }
@@ -886,7 +945,7 @@ function mapToEarnProgramWithdrawalRecord(
 }
 
 /**
- * The withdrawal LEDGER list (source: earn_program_withdrawals, never the
+ * The withdrawal LEDGER list (source: earn_program_movements, never the
  * provider). Deliberately takes NO provider gate — not even the credential
  * check, and note it resolves the program WITHOUT requirePortfolioClient —
  * because the audit trail must survive credential removal, entitlement
@@ -907,6 +966,78 @@ export const listEarnProgramWithdrawals = async (c: AppContext) => {
 
   const response: ListEarnProgramWithdrawalsResponse = listResponse(query, total, {
     withdrawals: rows.map(mapToEarnProgramWithdrawalRecord),
+  });
+  return success(c, response);
+};
+
+/**
+ * One row of either direction onto the canonical wire shape. The direction-only
+ * fields are projected per arm rather than duplicated into two record types:
+ * `counterpartyAddress` is where money went for a withdrawal and where it came
+ * from for a deposit, and `amountUsd` is the money that actually moved — the paid
+ * figure when the provider has settled, the requested one until then.
+ */
+function mapToEarnProgramMovementRecord(row: EarnProgramMovementRow): EarnProgramMovementRecord {
+  const counterpartyAddress =
+    row.direction === "withdrawal" ? row.destination_address : row.source_address;
+
+  return {
+    id: row.id,
+    direction: row.direction,
+    provider: row.provider,
+    status: row.status,
+    amountUsd: row.amount_paid_usd ?? row.amount_requested_usd ?? "0",
+    ...(row.amount_requested_usd !== null && { amountRequestedUsd: row.amount_requested_usd }),
+    feeUsd: row.fee_usd ?? undefined,
+    token: row.token,
+    counterpartyAddress: counterpartyAddress ?? undefined,
+    transactionSignature: row.transaction_signature ?? undefined,
+    providerReference: row.provider_reference ?? undefined,
+    failureReason: row.failure_reason ?? undefined,
+    observedVia: row.observed_via,
+    occurredAt: row.occurred_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at ?? undefined,
+  };
+}
+
+/**
+ * The CANONICAL movement ledger list (PRO-1669) — every deposit and withdrawal on
+ * this program, from SDP's own DB, with zero provider calls. This is the surface a
+ * partner should use for history.
+ *
+ * Same no-gate rule as the withdrawal list, for the same reason: resolved with
+ * `requireProgram` (no `requirePortfolioClient`), no credential assert, so the
+ * audit trail outlives credential removal, entitlement disablement and a provider
+ * losing its registry entry. Missing credentials stop new observations, never
+ * reads.
+ *
+ * NOT a resurrection of the top-level `/v1/earn/movements` that PRO-1628 pruned:
+ * that route read the position-scoped, base-unit `earn_movements` table nothing
+ * ever wrote. This is program-scoped, USD decimal strings, and has writers.
+ * `../earn.test.ts` pins the old paths at 404 alongside this one serving.
+ */
+export const listEarnProgramMovements = async (c: AppContext) => {
+  const { programId } = parseParams(c, earnProgramParamsSchema);
+  const query = parseQuery(c, earnProgramMovementsListQuerySchema);
+  const row = await requireProgram(c, programId);
+
+  const { rows, total } = await getEarnRepository(c).listProgramMovements({
+    organizationId: getAuth(c).organizationId,
+    walletId: row.id,
+    // Absent on the wire means both directions; the repository makes that choice
+    // explicit so it can never be defaulted by omission.
+    direction: query.direction ?? "all",
+    ...(query.status !== undefined && { statuses: [query.status] }),
+    ...(query.token !== undefined && { token: query.token }),
+    ...(query.occurredFrom !== undefined && { occurredFrom: query.occurredFrom }),
+    ...(query.occurredTo !== undefined && { occurredTo: query.occurredTo }),
+    ...pageWindow(query),
+  });
+
+  const response: ListEarnProgramMovementsResponse = listResponse(query, total, {
+    movements: rows.map(mapToEarnProgramMovementRecord),
   });
   return success(c, response);
 };

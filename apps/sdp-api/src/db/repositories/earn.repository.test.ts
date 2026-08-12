@@ -1,7 +1,11 @@
-import type { EarnPortfolioWithdrawal } from "@sdp/types";
+import type { EarnPortfolioDeposit, EarnPortfolioWithdrawal } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import {
+  applyEarnDepositObservation,
+  depositObservationFromProviderRead,
+} from "@/services/earn-deposit-ledger.service";
 import {
   applyEarnWithdrawalObservationByReference,
   applyEarnWithdrawalObservationToRow,
@@ -11,10 +15,12 @@ import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   CreateEarnProgramWithdrawalInput,
+  EarnProgramDepositRow,
   EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
+  InsertEarnProgramDepositInput,
   InsertEarnProviderWalletInput,
   ListEarnProviderWalletsInput,
   ListEarnProviderWalletsResult,
@@ -44,7 +50,7 @@ describe("EarnRepository (postgres)", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
-    await db.prepare("DELETE FROM earn_program_withdrawals").run();
+    await db.prepare("DELETE FROM earn_program_movements").run();
     await db.prepare("DELETE FROM earn_strategies").run();
     await db.prepare("DELETE FROM earn_provider_wallets").run();
     await db.prepare("DELETE FROM projects").run();
@@ -108,12 +114,21 @@ describe("EarnRepository (postgres)", () => {
     return row;
   }
 
-  type OrderedTable = "earn_strategies" | "earn_program_withdrawals" | "earn_provider_wallets";
+  type OrderedTable = "earn_strategies" | "earn_program_movements" | "earn_provider_wallets";
 
   async function setCreatedAt(table: OrderedTable, id: string, createdAt: string): Promise<void> {
+    // The movement ledger sorts on occurred_at, not created_at (migration 0057), so
+    // freezing only created_at there would leave the real sort key varying and the
+    // id-tiebreaker assertions below would pass or fail by accident.
+    const assignments = ["created_at = ?"];
+    const values: unknown[] = [createdAt];
+    if (table === "earn_program_movements") {
+      assignments.push("occurred_at = ?");
+      values.push(createdAt);
+    }
     await getDb(env)
-      .prepare(`UPDATE ${table} SET created_at = ? WHERE id = ?`)
-      .bind(createdAt, id)
+      .prepare(`UPDATE ${table} SET ${assignments.join(", ")} WHERE id = ?`)
+      .bind(...values, id)
       .run();
   }
 
@@ -591,7 +606,7 @@ describe("EarnRepository (postgres)", () => {
   // The whole ledger suite runs against a NON-Ground stub provider on purpose:
   // the ledger consumes only the canonical contract, so any registered
   // provider id must exercise it identically (ADR 0002 pluggability).
-  describe("program withdrawals ledger (earn_program_withdrawals)", () => {
+  describe("program withdrawals ledger (earn_program_movements)", () => {
     const NON_TERMINAL = ["requested", "processing", "pending_approval"] as const;
 
     let wallet: EarnProviderWalletRow;
@@ -655,7 +670,7 @@ describe("EarnRepository (postgres)", () => {
 
     async function readRow(id: string): Promise<EarnProgramWithdrawalRow | null> {
       const raw = await getDb(env)
-        .prepare("SELECT * FROM earn_program_withdrawals WHERE id = ?")
+        .prepare("SELECT * FROM earn_program_movements WHERE id = ?")
         .bind(id)
         .first<Record<string, unknown>>();
       if (!raw) {
@@ -996,7 +1011,7 @@ describe("EarnRepository (postgres)", () => {
         for (let i = 0; i < 5; i += 1) {
           ids.push((await seedWithdrawal()).id);
         }
-        await freezeCreatedAt("earn_program_withdrawals", ids);
+        await freezeCreatedAt("earn_program_movements", ids);
         const expected = [...ids].sort().reverse();
 
         // A sibling PROGRAM's history must never leak into the window or total —
@@ -1029,6 +1044,888 @@ describe("EarnRepository (postgres)", () => {
           seen.push(...rows.map((row) => row.id));
         }
         expect(seen).toEqual(expected);
+      });
+    });
+  });
+
+  // Same non-Ground stub provider as the withdrawal suite above, for the same
+  // reason: the deposit ledger consumes only the canonical contract, so any
+  // registered provider id must exercise it identically (ADR 0002 pluggability).
+  describe("program deposits ledger (earn_program_movements)", () => {
+    const SOURCE_ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+    const SIGNATURE = "5h1mNqE8s8kQ7Yy3wV2bT1cR9dF4gH6jK8lM0nP2qS4tU6vW8xY0zA2bC4dE6fG8";
+
+    let wallet: EarnProviderWalletRow;
+
+    beforeEach(async () => {
+      const row = await repo.insertProviderWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        environment: "sandbox",
+        provider: "veda",
+        providerWalletRef: "bb8e6b2f-9a5d-4d2b-8f3c-4e8a7b9d0f13",
+        label: null,
+        createdBy: TEST_USER.id,
+      });
+      if (!row) {
+        throw new Error("failed to seed program wallet");
+      }
+      wallet = row;
+    });
+
+    function depositInput(
+      overrides: Partial<InsertEarnProgramDepositInput> = {}
+    ): InsertEarnProgramDepositInput {
+      return {
+        organizationId: TEST_ORG.id,
+        walletId: wallet.id,
+        provider: "veda",
+        status: "processing",
+        amountUsd: "250.00",
+        token: "usdc",
+        providerReference: `dep_${crypto.randomUUID()}`,
+        sourceAddress: SOURCE_ADDRESS,
+        transactionSignature: SIGNATURE,
+        transactionInstructionIndex: null,
+        observedVia: "provider_poll",
+        occurredAt: "2026-08-12T09:00:00.000Z",
+        completedAt: null,
+        providerData: { discoveredVia: "provider_poll" },
+        ...overrides,
+      };
+    }
+
+    async function seedDeposit(
+      overrides: Partial<InsertEarnProgramDepositInput> = {}
+    ): Promise<EarnProgramDepositRow> {
+      const row = await repo.insertProgramDeposit(depositInput(overrides));
+      if (!row) {
+        throw new Error("failed to seed deposit");
+      }
+      return row;
+    }
+
+    function observedDeposit(overrides: Partial<EarnPortfolioDeposit> = {}): EarnPortfolioDeposit {
+      return {
+        id: "dep_provider_ref_1",
+        amountUsd: "250.00",
+        token: "usdc",
+        status: "processing",
+        fromAddress: SOURCE_ADDRESS,
+        transactionSignature: SIGNATURE,
+        createdAt: "2026-08-12T09:00:00.000Z",
+        ...overrides,
+      };
+    }
+
+    // Raw read, same reasoning as the withdrawal suite: keeps assertions
+    // independent of the code under test.
+    async function readRawRow(id: string): Promise<Record<string, unknown> | null> {
+      return getDb(env)
+        .prepare("SELECT * FROM earn_program_movements WHERE id = ?")
+        .bind(id)
+        .first<Record<string, unknown>>();
+    }
+
+    it("inserts an observed row with no intent state and stamped provenance", async () => {
+      const row = await seedDeposit();
+
+      expect(row.id).toMatch(/^earn_program_deposit_/);
+      expect(row.direction).toBe("deposit");
+      expect(row.status).toBe("processing");
+      expect(row.observed_via).toBe("provider_poll");
+      expect(row.amount_paid_usd).toBe("250.00");
+      expect(row.occurred_at).toBe("2026-08-12T09:00:00.000Z");
+      expect(row.source_address).toBe(SOURCE_ADDRESS);
+      expect(row.transaction_signature).toBe(SIGNATURE);
+      expect(row.transaction_instruction_index).toBeNull();
+
+      // Every intent column is null — nobody at SDP requested this money, and the
+      // DB CHECK makes writing one unrepresentable.
+      expect(row.request_id).toBeNull();
+      expect(row.idempotency_fingerprint).toBeNull();
+      expect(row.project_id).toBeNull();
+      expect(row.amount_requested_usd).toBeNull();
+      expect(row.destination_address).toBeNull();
+    });
+
+    it("locks one row per (provider, direction, provider_reference)", async () => {
+      const first = await seedDeposit();
+
+      await expect(
+        repo.insertProgramDeposit(depositInput({ providerReference: first.provider_reference }))
+      ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
+    });
+
+    it("does not over-lock the same reference across DIRECTIONS", async () => {
+      // A provider with ONE id space across deposits and withdrawals must not have
+      // its second movement swallowed as a replay. Ground happens to prefix its
+      // ids, but the ledger may never depend on that.
+      const shared = "shared_provider_movement_id";
+      await seedDeposit({ providerReference: shared });
+
+      const withdrawal = await repo.createProgramWithdrawal({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        walletId: wallet.id,
+        provider: "veda",
+        amountRequestedUsd: "10.00",
+        token: "usdc",
+        destinationAddress: DESTINATION,
+        requestId: crypto.randomUUID(),
+        idempotencyFingerprint: '{"scope":"earn_program_withdrawal"}',
+        providerData: {},
+        createdBy: TEST_USER.id,
+        initiatedByKeyId: null,
+      });
+      const advanced = await repo.updateProgramWithdrawalStatusGuarded({
+        selector: { withdrawalId: withdrawal?.id ?? "" },
+        organizationId: TEST_ORG.id,
+        fromStatuses: ["requested"],
+        toStatus: "processing",
+        providerReference: shared,
+      });
+
+      expect(advanced?.provider_reference).toBe(shared);
+    });
+
+    it("does NOT constrain two deposits that share one transaction signature", async () => {
+      // Two SPL transfers to one funding address inside one transaction are legal,
+      // and the provider reports them as two deposits sharing a hash. A unique on
+      // the signature would reject the second and silently drop real money.
+      const first = await seedDeposit({ providerReference: "dep_batch_a" });
+      const second = await seedDeposit({ providerReference: "dep_batch_b" });
+
+      expect(first.transaction_signature).toBe(SIGNATURE);
+      expect(second.transaction_signature).toBe(SIGNATURE);
+
+      const both = await repo.listProgramDepositsBySignature({
+        walletId: wallet.id,
+        transactionSignature: SIGNATURE,
+      });
+      expect(both.map((row) => row.id).sort()).toEqual([first.id, second.id].sort());
+    });
+
+    it("locks chain identity only once an observer supplies an instruction index", async () => {
+      // The chain-identity unique is dormant in V1 (no provider reports a
+      // positional index) and arms itself the day an indexer writes.
+      await seedDeposit({
+        providerReference: null,
+        transactionInstructionIndex: 0,
+        observedVia: "chain_indexer",
+      });
+
+      await expect(
+        repo.insertProgramDeposit(
+          depositInput({
+            providerReference: null,
+            transactionInstructionIndex: 0,
+            observedVia: "chain_indexer",
+          })
+        )
+      ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
+
+      // A different transfer in the SAME transaction is a different movement.
+      await expect(
+        repo.insertProgramDeposit(
+          depositInput({
+            providerReference: null,
+            transactionInstructionIndex: 1,
+            observedVia: "chain_indexer",
+          })
+        )
+      ).resolves.toMatchObject({ transaction_instruction_index: 1 });
+    });
+
+    describe("observation applier", () => {
+      it("creates the row on first sight and is idempotent under re-sweep", async () => {
+        const observation = depositObservationFromProviderRead(
+          observedDeposit(),
+          "provider_poll",
+          "2026-08-12T09:05:00.000Z"
+        );
+
+        const created = await applyEarnDepositObservation({ repo, wallet, observation });
+        const again = await applyEarnDepositObservation({ repo, wallet, observation });
+
+        expect(created?.id).toBeDefined();
+        expect(again?.id).toBe(created?.id);
+
+        const { total } = await repo.listProgramMovements({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          direction: "deposit",
+          limit: 10,
+          offset: 0,
+        });
+        expect(total).toBe(1);
+      });
+
+      it("records two deposits that share one transaction signature as TWO rows", async () => {
+        // The applier-level twin of the schema test above, and the one that
+        // matters: proving the DB PERMITS two rows sharing a signature says
+        // nothing about whether the write path can ever produce them. A batching
+        // payer landing two transfers to one funding address in one transaction is
+        // reported by the provider as two deposits sharing one txHash, and both are
+        // real money that must appear separately in the ledger.
+        const shared = { transactionSignature: SIGNATURE, createdAt: "2026-08-12T09:00:00.000Z" };
+
+        const first = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({ id: "dep_batch_a", amountUsd: "100.00", ...shared }),
+            "provider_poll",
+            "2026-08-12T09:05:00.000Z"
+          ),
+        });
+        const second = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({ id: "dep_batch_b", amountUsd: "250.00", ...shared }),
+            "provider_poll",
+            "2026-08-12T09:05:00.000Z"
+          ),
+        });
+
+        expect(first?.id).toBeDefined();
+        expect(second?.id).toBeDefined();
+        expect(second?.id).not.toBe(first?.id);
+
+        const { rows, total } = await repo.listProgramMovements({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          direction: "deposit",
+          limit: 10,
+          offset: 0,
+        });
+        expect(total).toBe(2);
+        expect(rows.map((row) => row.provider_reference).sort()).toEqual([
+          "dep_batch_a",
+          "dep_batch_b",
+        ]);
+        // Neither row may have been overwritten by the other's amount.
+        expect(rows.map((row) => row.amount_paid_usd).sort()).toEqual(["100.00", "250.00"]);
+      });
+
+      it("still records the second of two batched deposits when the first has already settled", async () => {
+        // The silent-loss variant: a poll running after settlement sees the first
+        // deposit already terminal, so an adopt-then-early-return would drop the
+        // second movement entirely, with no error and nothing in the ledger.
+        const shared = { transactionSignature: SIGNATURE, createdAt: "2026-08-12T09:00:00.000Z" };
+
+        await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({
+              id: "dep_settled_a",
+              status: "completed",
+              amountUsd: "100.00",
+              completedAt: "2026-08-12T09:01:00.000Z",
+              ...shared,
+            }),
+            "provider_poll",
+            "2026-08-12T09:05:00.000Z"
+          ),
+        });
+
+        const second = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({
+              id: "dep_settled_b",
+              status: "completed",
+              amountUsd: "250.00",
+              completedAt: "2026-08-12T09:01:00.000Z",
+              ...shared,
+            }),
+            "provider_poll",
+            "2026-08-12T09:05:00.000Z"
+          ),
+        });
+
+        expect(second?.provider_reference).toBe("dep_settled_b");
+        const { total } = await repo.listProgramMovements({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          direction: "deposit",
+          limit: 10,
+          offset: 0,
+        });
+        expect(total).toBe(2);
+      });
+
+      it("still adopts an UNCLAIMED row on a signature match — the indexer handoff", async () => {
+        // The capability the signature branch exists for, and what the fix above
+        // must not break: a row written by an observer that had no provider
+        // reference (an indexer reading chain) is CLAIMED by the poller that later
+        // learns the provider's id, rather than duplicated.
+        const indexerRow = await seedDeposit({
+          providerReference: null,
+          transactionSignature: SIGNATURE,
+          transactionInstructionIndex: 0,
+          observedVia: "chain_indexer",
+          amountUsd: "100.00",
+        });
+
+        const claimed = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({
+              id: "dep_from_provider",
+              amountUsd: "100.00",
+              transactionSignature: SIGNATURE,
+            }),
+            "provider_poll",
+            "2026-08-12T09:05:00.000Z"
+          ),
+        });
+
+        expect(claimed?.id).toBe(indexerRow.id);
+        expect(claimed?.provider_reference).toBe("dep_from_provider");
+        expect(claimed?.observed_via).toBe("provider_poll");
+        // Claimed, not duplicated.
+        const { total } = await repo.listProgramMovements({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          direction: "deposit",
+          limit: 10,
+          offset: 0,
+        });
+        expect(total).toBe(1);
+      });
+
+      it("normalizes a provider timestamp to the DB's fixed-width shape", async () => {
+        // TEXT timestamps sort lexicographically, so a provider sending no
+        // milliseconds would sort wrongly against DB-stamped rows.
+        const row = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({ createdAt: "2026-08-12T09:00:00Z" }),
+            "provider_poll",
+            "2026-08-12T09:05:00.000Z"
+          ),
+        });
+
+        expect(row?.occurred_at).toBe("2026-08-12T09:00:00.000Z");
+      });
+
+      it("advances processing to completed and never regresses from terminal", async () => {
+        const first = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit(),
+            "provider_poll",
+            "2026-08-12T09:05:00.000Z"
+          ),
+        });
+        expect(first?.status).toBe("processing");
+
+        const settled = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({ status: "completed", completedAt: "2026-08-12T09:10:00.000Z" }),
+            "provider_poll",
+            "2026-08-12T09:10:00.000Z"
+          ),
+        });
+        expect(settled?.status).toBe("completed");
+        expect(settled?.completed_at).toBe("2026-08-12T09:10:00.000Z");
+
+        // A late or reordered page must not walk a settled row backwards.
+        const regressed = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({ status: "processing" }),
+            "provider_poll",
+            "2026-08-12T09:15:00.000Z"
+          ),
+        });
+        expect(regressed?.status).toBe("completed");
+      });
+
+      it("never turns a failed deposit into a completed one", async () => {
+        await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({ status: "failed" }),
+            "provider_poll",
+            "2026-08-12T09:05:00.000Z"
+          ),
+        });
+
+        const reversed = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({ status: "completed" }),
+            "provider_poll",
+            "2026-08-12T09:10:00.000Z"
+          ),
+        });
+
+        expect(reversed?.status).toBe("failed");
+      });
+
+      it("lets concurrent observers race without either throwing, landing one row", async () => {
+        // The applier's only concurrency defence: a unique violation means "it
+        // already happened", so the loser re-reads and advances the winner's row.
+        const observation = depositObservationFromProviderRead(
+          observedDeposit(),
+          "provider_poll",
+          "2026-08-12T09:05:00.000Z"
+        );
+
+        const [a, b] = await Promise.all([
+          applyEarnDepositObservation({ repo, wallet, observation }),
+          applyEarnDepositObservation({ repo, wallet, observation }),
+        ]);
+
+        expect(a?.id).toBeDefined();
+        expect(b?.id).toBe(a?.id);
+
+        const { total } = await repo.listProgramMovements({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          direction: "deposit",
+          limit: 10,
+          offset: 0,
+        });
+        expect(total).toBe(1);
+      });
+
+      it("lands ONE row when the same movement is observed by all three sources", async () => {
+        // The product direction this design exists to serve: the poller today,
+        // PRO-1631's webhooks next, and an SDP indexer eventually all write the
+        // SAME row. If any pair failed to converge, one real deposit would appear
+        // two or three times and every downstream total would over-count.
+        const base = observedDeposit({ id: "dep_multi", transactionSignature: SIGNATURE });
+
+        const fromPoll = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            base,
+            "provider_poll",
+            "2026-08-12T09:05:00.000Z"
+          ),
+        });
+        const fromWebhook = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            base,
+            "provider_webhook",
+            "2026-08-12T09:06:00.000Z"
+          ),
+        });
+        // The indexer has no provider id — only chain identity.
+        const fromIndexer = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: {
+            source: "chain_indexer",
+            transactionSignature: SIGNATURE,
+            status: "completed",
+            amountUsd: base.amountUsd,
+            token: "usdc",
+            occurredAt: "2026-08-12T09:00:00.000Z",
+            raw: { slot: 1234 },
+          },
+        });
+
+        expect(fromWebhook?.id).toBe(fromPoll?.id);
+        expect(fromIndexer?.id).toBe(fromPoll?.id);
+        // Latest observer wins the state; the DISCOVERING one survives the merge.
+        expect(fromIndexer?.observed_via).toBe("chain_indexer");
+        expect(fromIndexer?.status).toBe("completed");
+        expect(fromIndexer?.provider_data).toMatchObject({ discoveredVia: "provider_poll" });
+
+        const { total } = await repo.listProgramMovements({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          direction: "deposit",
+          limit: 10,
+          offset: 0,
+        });
+        expect(total).toBe(1);
+      });
+
+      it("refuses to write a sibling program's row", async () => {
+        const existing = await seedDeposit({ providerReference: "dep_provider_ref_1" });
+        const sibling = await repo.insertProviderWallet({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          environment: "sandbox",
+          provider: "veda",
+          providerWalletRef: "cc9f7c30-1b6e-4e3c-9a4d-5f9b8c0e1a24",
+          label: null,
+          createdBy: TEST_USER.id,
+        });
+        if (!sibling) {
+          throw new Error("failed to seed sibling program");
+        }
+
+        const applied = await applyEarnDepositObservation({
+          repo,
+          wallet: sibling,
+          observation: depositObservationFromProviderRead(
+            observedDeposit({ status: "completed" }),
+            "provider_poll",
+            "2026-08-12T09:10:00.000Z"
+          ),
+        });
+
+        expect(applied).toBeNull();
+        await expect(readRawRow(existing.id)).resolves.toMatchObject({ status: "processing" });
+      });
+
+      it("records an off-rail deposit's value with no signature or source address", async () => {
+        // ADR 0002 invariant 5: the VALUE always surfaces, another rail's
+        // identifiers never do — so a real deposit legitimately has neither.
+        const row = await applyEarnDepositObservation({
+          repo,
+          wallet,
+          observation: depositObservationFromProviderRead(
+            {
+              id: "dep_off_rail",
+              amountUsd: "77.00",
+              token: "usdt",
+              status: "completed",
+              createdAt: "2026-08-12T09:00:00.000Z",
+            },
+            "provider_poll",
+            "2026-08-12T09:05:00.000Z"
+          ),
+        });
+
+        expect(row?.amount_paid_usd).toBe("77.00");
+        expect(row?.transaction_signature).toBeNull();
+        expect(row?.source_address).toBeNull();
+      });
+    });
+
+    describe("listProgramMovements", () => {
+      it("returns both directions newest-first on occurred_at with an id tiebreaker", async () => {
+        const olderDeposit = await seedDeposit({
+          providerReference: "dep_older",
+          occurredAt: "2026-08-10T00:00:00.000Z",
+        });
+        const newerDeposit = await seedDeposit({
+          providerReference: "dep_newer",
+          occurredAt: "2026-08-14T00:00:00.000Z",
+        });
+
+        const { rows, total } = await repo.listProgramMovements({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          direction: "all",
+          limit: 10,
+          offset: 0,
+        });
+
+        expect(total).toBe(2);
+        expect(rows.map((row) => row.id)).toEqual([newerDeposit.id, olderDeposit.id]);
+      });
+
+      it("filters by direction, status, token and a HALF-OPEN period", async () => {
+        await seedDeposit({ providerReference: "dep_in", occurredAt: "2026-08-05T00:00:00.000Z" });
+        await seedDeposit({
+          providerReference: "dep_on_upper_bound",
+          occurredAt: "2026-08-10T00:00:00.000Z",
+        });
+
+        const { rows } = await repo.listProgramMovements({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          direction: "deposit",
+          statuses: ["processing"],
+          token: "usdc",
+          occurredFrom: "2026-08-01T00:00:00.000Z",
+          occurredTo: "2026-08-10T00:00:00.000Z",
+          limit: 10,
+          offset: 0,
+        });
+
+        // The row landing exactly on the upper bound is EXCLUDED — a closed bound
+        // would double-count it into the next period too.
+        expect(rows.map((row) => row.provider_reference)).toEqual(["dep_in"]);
+      });
+
+      it("keeps a sibling program's movements out", async () => {
+        await seedDeposit({ providerReference: "dep_mine" });
+        const sibling = await repo.insertProviderWallet({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          environment: "sandbox",
+          provider: "veda",
+          providerWalletRef: "dd0a8d41-2c7f-4f4d-ab5e-6a0c9d1f2b35",
+          label: null,
+          createdBy: TEST_USER.id,
+        });
+        await seedDeposit({ walletId: sibling?.id, providerReference: "dep_theirs" });
+
+        const { rows, total } = await repo.listProgramMovements({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          direction: "all",
+          limit: 10,
+          offset: 0,
+        });
+
+        expect(total).toBe(1);
+        expect(rows[0]?.provider_reference).toBe("dep_mine");
+      });
+    });
+
+    describe("sumProgramMovementsByDirection", () => {
+      it("nets BOTH directions per token, counting partially_completed and the requested fallback", async () => {
+        // The movement half of PRO-1672's identity (delta balance - net movements
+        // = earnings). Getting either direction or the settled-status set wrong
+        // silently mis-states customer earnings, so this pins all of it together.
+        await seedDeposit({
+          providerReference: "dep_usdc",
+          status: "completed",
+          amountUsd: "300.00",
+          occurredAt: "2026-08-05T00:00:00.000Z",
+        });
+        await seedDeposit({
+          providerReference: "dep_usdt",
+          status: "completed",
+          token: "usdt",
+          amountUsd: "50.00",
+          occurredAt: "2026-08-06T00:00:00.000Z",
+        });
+
+        // A fully settled withdrawal: the PAID figure is what actually moved.
+        const settled = await repo.createProgramWithdrawal({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          walletId: wallet.id,
+          provider: "veda",
+          amountRequestedUsd: "120.00",
+          token: "usdc",
+          destinationAddress: DESTINATION,
+          requestId: crypto.randomUUID(),
+          idempotencyFingerprint: "{}",
+          providerData: {},
+          createdBy: TEST_USER.id,
+          initiatedByKeyId: null,
+        });
+        await repo.updateProgramWithdrawalStatusGuarded({
+          selector: { withdrawalId: settled?.id ?? "" },
+          organizationId: TEST_ORG.id,
+          fromStatuses: ["requested"],
+          toStatus: "completed",
+          amountPaidUsd: "118.00",
+        });
+
+        // partially_completed moved REAL money and must be counted.
+        const partial = await repo.createProgramWithdrawal({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          walletId: wallet.id,
+          provider: "veda",
+          amountRequestedUsd: "80.00",
+          token: "usdc",
+          destinationAddress: DESTINATION,
+          requestId: crypto.randomUUID(),
+          idempotencyFingerprint: "{}",
+          providerData: {},
+          createdBy: TEST_USER.id,
+          initiatedByKeyId: null,
+        });
+        await repo.updateProgramWithdrawalStatusGuarded({
+          selector: { withdrawalId: partial?.id ?? "" },
+          organizationId: TEST_ORG.id,
+          fromStatuses: ["requested"],
+          toStatus: "partially_completed",
+          amountPaidUsd: "30.00",
+        });
+
+        // Terminal but moved NOTHING — must be excluded from the net.
+        const failed = await repo.createProgramWithdrawal({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          walletId: wallet.id,
+          provider: "veda",
+          amountRequestedUsd: "999.00",
+          token: "usdc",
+          destinationAddress: DESTINATION,
+          requestId: crypto.randomUUID(),
+          idempotencyFingerprint: "{}",
+          providerData: {},
+          createdBy: TEST_USER.id,
+          initiatedByKeyId: null,
+        });
+        await repo.updateProgramWithdrawalStatusGuarded({
+          selector: { withdrawalId: failed?.id ?? "" },
+          organizationId: TEST_ORG.id,
+          fromStatuses: ["requested"],
+          toStatus: "failed",
+        });
+
+        // Freeze every movement into the period: withdrawals stamp occurred_at at
+        // intent, which is "now".
+        await getDb(env)
+          .prepare(
+            "UPDATE earn_program_movements SET occurred_at = ? WHERE direction = 'withdrawal'"
+          )
+          .bind("2026-08-07T00:00:00.000Z")
+          .run();
+
+        const sums = await repo.sumProgramMovementsByDirection({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          occurredFrom: "2026-08-01T00:00:00.000Z",
+          occurredTo: "2026-09-01T00:00:00.000Z",
+        });
+
+        expect(sums).toEqual([
+          { direction: "deposit", token: "usdc", movementCount: 1, totalUsd: "300.00" },
+          { direction: "deposit", token: "usdt", movementCount: 1, totalUsd: "50.00" },
+          // 118.00 paid + 30.00 partially paid; the failed 999.00 is excluded, and
+          // the settled figures win over the requested ones.
+          { direction: "withdrawal", token: "usdc", movementCount: 2, totalUsd: "148.00" },
+        ]);
+      });
+
+      it("attributes a boundary movement to one period only, whatever shape the bound arrives in", async () => {
+        // occurred_at is TEXT compared lexicographically, so an un-normalized bound
+        // without milliseconds would book this movement into the WRONG month.
+        await seedDeposit({
+          providerReference: "dep_boundary",
+          status: "completed",
+          amountUsd: "10.00",
+          occurredAt: "2026-09-01T00:00:00.000Z",
+        });
+
+        const august = await repo.sumProgramMovementsByDirection({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          occurredFrom: "2026-08-01T00:00:00Z",
+          occurredTo: "2026-09-01T00:00:00Z",
+        });
+        const september = await repo.sumProgramMovementsByDirection({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          occurredFrom: "2026-09-01T00:00:00Z",
+          occurredTo: "2026-10-01T00:00:00Z",
+        });
+
+        expect(august).toEqual([]);
+        expect(september).toEqual([
+          { direction: "deposit", token: "usdc", movementCount: 1, totalUsd: "10.00" },
+        ]);
+      });
+
+      it("nets settled movements per direction on the movement's OWN time", async () => {
+        // In period, settled.
+        await seedDeposit({
+          providerReference: "dep_settled",
+          status: "completed",
+          amountUsd: "100.00",
+          occurredAt: "2026-08-05T00:00:00.000Z",
+        });
+        // In period, still processing — no money moved yet.
+        await seedDeposit({
+          providerReference: "dep_pending",
+          amountUsd: "999.00",
+          occurredAt: "2026-08-06T00:00:00.000Z",
+        });
+        // Settled but OUTSIDE the period.
+        await seedDeposit({
+          providerReference: "dep_next_month",
+          status: "completed",
+          amountUsd: "500.00",
+          occurredAt: "2026-09-02T00:00:00.000Z",
+        });
+
+        const sums = await repo.sumProgramMovementsByDirection({
+          organizationId: TEST_ORG.id,
+          walletId: wallet.id,
+          occurredFrom: "2026-08-01T00:00:00.000Z",
+          occurredTo: "2026-09-01T00:00:00.000Z",
+        });
+
+        expect(sums).toEqual([
+          { direction: "deposit", token: "usdc", movementCount: 1, totalUsd: "100.00" },
+        ]);
+      });
+    });
+
+    describe("scanProviderWallets", () => {
+      it("crosses organizations — the only Earn read with no tenant scope", async () => {
+        // A platform sweep has no tenant, so this must see every org's programs.
+        const before = await repo.scanProviderWallets({ environment: "sandbox", limit: 100 });
+        expect(before.some((row) => row.id === wallet.id)).toBe(true);
+        expect(before.every((row) => row.environment === "sandbox")).toBe(true);
+      });
+
+      it("resumes from a keyset cursor and skips nothing when a sibling is inserted mid-scan", async () => {
+        // Timestamps are pinned explicitly: bulk inserts share one sdp_iso_now()
+        // value, so leaving them to the clock makes the ORDER — and therefore this
+        // assertion — depend on which random uuid sorts first.
+        const second = await repo.insertProviderWallet({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          environment: "sandbox",
+          provider: "veda",
+          providerWalletRef: "ee1b9e52-3d8a-4a5e-bc6f-7b1d0e2a3c46",
+          label: null,
+          createdBy: TEST_USER.id,
+        });
+        if (!second) {
+          throw new Error("failed to seed the second program");
+        }
+        await setCreatedAt("earn_provider_wallets", wallet.id, "2026-08-01T00:00:00.000Z");
+        await setCreatedAt("earn_provider_wallets", second.id, "2026-08-03T00:00:00.000Z");
+
+        const firstPage = await repo.scanProviderWallets({ environment: "sandbox", limit: 1 });
+        expect(firstPage.map((row) => row.id)).toEqual([wallet.id]);
+
+        // A program created mid-pass lands BETWEEN the cursor and the row still to
+        // be visited. Offset paging would now skip that pending row entirely; a
+        // keyset resume cannot, which is the property 0056's stable ordering buys.
+        const insertedMidScan = await repo.insertProviderWallet({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          environment: "sandbox",
+          provider: "veda",
+          providerWalletRef: "ff2ca063-4e9b-4b6f-bd7a-8c2e1f3b4d57",
+          label: null,
+          createdBy: TEST_USER.id,
+        });
+        if (!insertedMidScan) {
+          throw new Error("failed to seed the mid-scan program");
+        }
+        await setCreatedAt("earn_provider_wallets", insertedMidScan.id, "2026-08-02T00:00:00.000Z");
+
+        const resumed = await repo.scanProviderWallets({
+          environment: "sandbox",
+          after: { createdAt: "2026-08-01T00:00:00.000Z", id: wallet.id },
+          limit: 100,
+        });
+
+        // Never re-visits the cursor row, and never loses the pending one.
+        expect(resumed.map((row) => row.id)).toEqual([insertedMidScan.id, second.id]);
+      });
+
+      it("excludes the other environment", async () => {
+        const production = await repo.scanProviderWallets({
+          environment: "production",
+          limit: 100,
+        });
+        expect(production.some((row) => row.id === wallet.id)).toBe(false);
       });
     });
   });

@@ -85,6 +85,14 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 Running both is fine but leaves near-twin rows (same vault names, different
 reference prefix); `--clean` removes only the fixtures.
 
+**`--clean` gets stickier once money has moved** (PRO-1669). `earn_program_movements`
+FKs the program link row with no cascade, so a seeded link money has moved through
+can be neither cleaned nor moved — the seed skips it and says so rather than
+crashing on the FK. This used to need a withdrawal; now the observation sweep
+records **deposits** too, without anyone asking, so funding the shared sandbox
+wallet once pins that link from the next sweep onward. That is the ledger working
+as designed, not a bug.
+
 See README.md → "Catalogue data: the sync cron vs the dev seed" for cadence,
 failure behaviour, and when to prefer each.
 

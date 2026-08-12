@@ -2,7 +2,9 @@ import { isAddress } from "@sdp/solana/address";
 import {
   EARN_APY_TYPES,
   EARN_LIQUIDITY_TERMS,
+  EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
+  EARN_PROGRAM_MOVEMENT_RECORD_STATUSES,
   EARN_STRATEGY_SOURCE_KINDS,
 } from "@sdp/types";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
@@ -187,3 +189,27 @@ export const earnProgramWithdrawalParamsSchema = earnProgramParamsSchema.extend(
  * trail outlives credential removal).
  */
 export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape);
+
+/**
+ * Movement-ledger list (DB read) — the canonical money-movement history for a
+ * program, both directions (PRO-1669). Same no-provider-gate reasoning as the
+ * withdrawal list above.
+ *
+ * `direction` is optional ON THE WIRE (absent means both) but the repository input
+ * requires it, so the handler passes `"all"` explicitly — a forgotten predicate
+ * over a two-direction table returns a plausible wrong number rather than an
+ * error, and that has to be a compile error somewhere.
+ *
+ * `occurredFrom`/`occurredTo` bound the movement's OWN time, not when SDP recorded
+ * it, and the range is half-open `[from, to)`: a closed upper bound double-counts a
+ * movement landing exactly on a boundary into two adjacent periods, which is
+ * precisely the error a period statement must not make.
+ */
+export const earnProgramMovementsListQuerySchema = z.object({
+  ...earnPageQueryShape,
+  direction: z.enum(EARN_MOVEMENT_DIRECTIONS).optional(),
+  status: z.enum(EARN_PROGRAM_MOVEMENT_RECORD_STATUSES).optional(),
+  token: z.enum(EARN_PORTFOLIO_TOKENS).optional(),
+  occurredFrom: z.iso.datetime().optional(),
+  occurredTo: z.iso.datetime().optional(),
+});

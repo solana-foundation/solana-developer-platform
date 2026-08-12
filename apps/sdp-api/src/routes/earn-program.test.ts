@@ -1043,7 +1043,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     expect(sentA).not.toBe(sentB);
 
     const count = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS total FROM earn_program_withdrawals")
+      .prepare("SELECT COUNT(*)::int AS total FROM earn_program_movements")
       .first<{ total: number }>();
     expect(count?.total).toBe(2);
   });
@@ -1406,7 +1406,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       // Exactly ONE intent row anchors both attempts.
       const count = await getDb(env)
-        .prepare("SELECT COUNT(*)::int AS total FROM earn_program_withdrawals")
+        .prepare("SELECT COUNT(*)::int AS total FROM earn_program_movements")
         .first<{ total: number }>();
       expect(count?.total).toBe(1);
     });
@@ -1461,7 +1461,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       // The intent row survives the failure, ref-less and re-drivable.
       const stranded = await getDb(env)
         .prepare(
-          "SELECT status, provider_reference FROM earn_program_withdrawals ORDER BY created_at DESC"
+          "SELECT status, provider_reference FROM earn_program_movements ORDER BY created_at DESC"
         )
         .first<{ status: string; provider_reference: string | null }>();
       expect(stranded).toEqual({ status: "requested", provider_reference: null });
@@ -1484,7 +1484,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       // And the re-drive healed the row.
       const healed = await getDb(env)
         .prepare(
-          "SELECT status, provider_reference FROM earn_program_withdrawals ORDER BY created_at DESC"
+          "SELECT status, provider_reference FROM earn_program_movements ORDER BY created_at DESC"
         )
         .first<{ status: string; provider_reference: string | null }>();
       expect(healed).toEqual({ status: "processing", provider_reference: "wd_test_1" });
@@ -1582,7 +1582,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
 
   async function readLedgerRows(): Promise<Array<Record<string, unknown>>> {
     const { results } = await getDb(env)
-      .prepare("SELECT * FROM earn_program_withdrawals ORDER BY created_at DESC, id DESC")
+      .prepare("SELECT * FROM earn_program_movements ORDER BY created_at DESC, id DESC")
       .all<Record<string, unknown>>();
     return results ?? [];
   }
@@ -1879,6 +1879,245 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       );
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  // PRO-1669: the canonical money-movement history. Both directions, from SDP's
+  // own DB, with zero provider calls.
+  describe("movement ledger (PRO-1669)", () => {
+    const DEPOSIT_PAGE = {
+      deposits: [
+        {
+          id: "dep_1",
+          amountUsd: "250.00",
+          token: "usdc" as const,
+          status: "completed" as const,
+          fromAddress: SOLANA_DESTINATION,
+          createdAt: "2026-08-10T00:00:00.000Z",
+          completedAt: "2026-08-10T00:05:00.000Z",
+        },
+        {
+          id: "dep_2",
+          amountUsd: "125.00",
+          token: "usdc" as const,
+          status: "processing" as const,
+          createdAt: "2026-08-11T00:00:00.000Z",
+        },
+      ],
+      nextCursor: null,
+    };
+
+    it("records the deposits a live read observed, without changing that response", async () => {
+      await seedAuth();
+      const program = await seedProgramWallet();
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "listPortfolioDeposits").mockResolvedValue(
+        DEPOSIT_PAGE
+      );
+
+      const live = await requestEarn("GET", programPath(program.id, "/deposits"));
+      expect(live.status).toBe(200);
+      // The live wire contract is untouched — cursor passthrough, no page envelope.
+      const liveBody = (await live.json()) as {
+        data: { deposits: Array<{ id: string }>; nextCursor: string | null };
+      };
+      expect(liveBody.data.deposits.map((d) => d.id)).toEqual(["dep_1", "dep_2"]);
+      expect(liveBody.data.nextCursor).toBeNull();
+
+      const movements = await requestEarn("GET", programPath(program.id, "/movements"));
+      expect(movements.status).toBe(200);
+      const body = (await movements.json()) as {
+        data: {
+          movements: Array<Record<string, unknown>>;
+          total: number;
+          page: number;
+          pageSize: number;
+        };
+      };
+      expect(body.data).toMatchObject({ total: 2, page: 1, pageSize: 20 });
+      expect(body.data.movements.every((m) => m.direction === "deposit")).toBe(true);
+      expect(body.data.movements.every((m) => m.observedVia === "provider_poll")).toBe(true);
+      // Newest first on the movement's OWN time, not on when SDP recorded it.
+      expect(body.data.movements.map((m) => m.providerReference)).toEqual(["dep_2", "dep_1"]);
+
+      const [newest] = body.data.movements;
+      expect(newest?.id).toMatch(/^earn_program_deposit_/);
+      expect(newest?.amountUsd).toBe("125.00");
+      expect(newest?.occurredAt).toBe("2026-08-11T00:00:00.000Z");
+      // A deposit nobody requested carries no intent amount.
+      expect(newest).not.toHaveProperty("amountRequestedUsd");
+    });
+
+    it("re-reading the same page never duplicates a movement", async () => {
+      await seedAuth();
+      const program = await seedProgramWallet();
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "listPortfolioDeposits").mockResolvedValue(
+        DEPOSIT_PAGE
+      );
+
+      await requestEarn("GET", programPath(program.id, "/deposits"));
+      await requestEarn("GET", programPath(program.id, "/deposits"));
+
+      const res = await requestEarn("GET", programPath(program.id, "/movements"));
+      const body = (await res.json()) as { data: { total: number } };
+      expect(body.data.total).toBe(2);
+    });
+
+    it("serves both directions, and narrows on the direction filter", async () => {
+      await seedAuth();
+      const program = await seedProgramWallet();
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "listPortfolioDeposits").mockResolvedValue(
+        DEPOSIT_PAGE
+      );
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
+        WITHDRAWAL
+      );
+
+      await requestEarn("GET", programPath(program.id, "/deposits"));
+      await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
+
+      const all = await requestEarn("GET", programPath(program.id, "/movements"));
+      const allBody = (await all.json()) as {
+        data: { movements: Array<{ direction: string }>; total: number };
+      };
+      expect(allBody.data.total).toBe(3);
+      expect(allBody.data.movements.filter((m) => m.direction === "withdrawal")).toHaveLength(1);
+
+      const onlyWithdrawals = await requestEarn(
+        "GET",
+        programPath(program.id, "/movements?direction=withdrawal")
+      );
+      const withdrawalsBody = (await onlyWithdrawals.json()) as {
+        data: { movements: Array<Record<string, unknown>>; total: number };
+      };
+      expect(withdrawalsBody.data.total).toBe(1);
+      const [withdrawal] = withdrawalsBody.data.movements;
+      expect(withdrawal?.direction).toBe("withdrawal");
+      expect(withdrawal?.observedVia).toBe("sdp_intent");
+      expect(withdrawal?.counterpartyAddress).toBe(SOLANA_DESTINATION);
+      // The intent columns still exist for a movement SDP initiated...
+      expect(withdrawal?.amountRequestedUsd).toBeDefined();
+      // ...but the derivation internals never reach the wire.
+      expect(withdrawal).not.toHaveProperty("requestId");
+      expect(withdrawal).not.toHaveProperty("idempotencyFingerprint");
+    });
+
+    it("serves history with the provider's credentials removed — the exit-safety rule", async () => {
+      await seedAuth();
+      const program = await seedProgramWallet();
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "listPortfolioDeposits").mockResolvedValue(
+        DEPOSIT_PAGE
+      );
+      await requestEarn("GET", programPath(program.id, "/deposits"));
+
+      // Credentials gone: the LIVE reads must fail...
+      env.GROUND_SANDBOX_API_KEY = undefined;
+      const liveProgram = await requestEarn("GET", programPath(program.id));
+      expect(liveProgram.status).toBe(503);
+      const liveDeposits = await requestEarn("GET", programPath(program.id, "/deposits"));
+      expect(liveDeposits.status).toBe(503);
+
+      // ...while the audit trail keeps answering. This is the acceptance criterion:
+      // history outlives credential removal, entitlement disablement, and a
+      // provider losing its registry entry entirely.
+      const movements = await requestEarn("GET", programPath(program.id, "/movements"));
+      expect(movements.status).toBe(200);
+      const body = (await movements.json()) as { data: { total: number } };
+      expect(body.data.total).toBe(2);
+    });
+
+    it("keeps a sibling program's movements out of this program's history", async () => {
+      await seedAuth();
+      const a = await seedProgramWallet();
+      const b = await seedProgramWallet({ providerWalletRef: WALLET_REF_B });
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "listPortfolioDeposits").mockImplementation(
+        async (_ctx, input) =>
+          input.providerWalletRef === WALLET_REF
+            ? DEPOSIT_PAGE
+            : { deposits: [{ ...DEPOSIT_PAGE.deposits[1], id: "dep_sibling" }], nextCursor: null }
+      );
+
+      await requestEarn("GET", programPath(a.id, "/deposits"));
+      await requestEarn("GET", programPath(b.id, "/deposits"));
+
+      const listA = await requestEarn("GET", programPath(a.id, "/movements"));
+      const bodyA = (await listA.json()) as {
+        data: { movements: Array<{ providerReference: string }>; total: number };
+      };
+      expect(bodyA.data.total).toBe(2);
+      expect(bodyA.data.movements.map((m) => m.providerReference).sort()).toEqual([
+        "dep_1",
+        "dep_2",
+      ]);
+    });
+
+    it("404s an unknown program and never serves a sandbox ledger to a production session", async () => {
+      await seedAuth();
+      await seedSessionAuth();
+      const program = await seedProgramWallet();
+
+      const unknown = await requestEarn(
+        "GET",
+        programPath("earn_provider_wallet_missing", "/movements")
+      );
+      expect(unknown.status).toBe(404);
+
+      const crossEnvironment = await requestEarnAsSession(
+        "GET",
+        programPath(program.id, "/movements"),
+        TEST_PRODUCTION_PROJECT.id
+      );
+      expect(crossEnvironment.status).toBe(404);
+    });
+
+    it("attributes a boundary movement to the same period whether or not the bound carries milliseconds", async () => {
+      // occurred_at is TEXT compared lexicographically, and '.' sorts below 'Z',
+      // so an unnormalized `2026-08-11T00:00:00Z` upper bound would pull the
+      // boundary movement into the earlier period AND lose it from the later one —
+      // a period misattribution in a money statement, served as a 200.
+      await seedAuth();
+      const program = await seedProgramWallet();
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "listPortfolioDeposits").mockResolvedValue(
+        DEPOSIT_PAGE
+      );
+      await requestEarn("GET", programPath(program.id, "/deposits"));
+
+      // dep_2 sits exactly on the boundary at 2026-08-11T00:00:00.000Z.
+      const withMillis = await requestEarn(
+        "GET",
+        programPath(program.id, "/movements?occurredTo=2026-08-11T00:00:00.000Z")
+      );
+      const withoutMillis = await requestEarn(
+        "GET",
+        programPath(program.id, "/movements?occurredTo=2026-08-11T00:00:00Z")
+      );
+
+      const read = async (res: Response) =>
+        (
+          (await res.json()) as { data: { movements: Array<{ providerReference: string }> } }
+        ).data.movements.map((m) => m.providerReference);
+
+      // Half-open, so the boundary movement is EXCLUDED by both forms.
+      expect(await read(withMillis)).toEqual(["dep_1"]);
+      expect(await read(withoutMillis)).toEqual(["dep_1"]);
+
+      // ...and it is present in the next period from either form of the lower bound.
+      const nextPeriod = await requestEarn(
+        "GET",
+        programPath(program.id, "/movements?occurredFrom=2026-08-11T00:00:00Z")
+      );
+      expect(await read(nextPeriod)).toEqual(["dep_2"]);
+    });
+
+    it("rejects a malformed period bound rather than silently ignoring it", async () => {
+      await seedAuth();
+      const program = await seedProgramWallet();
+
+      const res = await requestEarn(
+        "GET",
+        programPath(program.id, "/movements?occurredFrom=last-tuesday")
+      );
+
+      expect(res.status).toBe(400);
     });
   });
 });

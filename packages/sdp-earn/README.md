@@ -121,7 +121,13 @@ one (`solana_devnet` in sandbox, `solana` in production).
    or `→ Ground RWA Vault → RWA provider` for RWA sources.
 
 So a fresh deposit legitimately shows as **cash, not yet earning**, until the
-rebalance runs. Our `EarnPortfolioPositionKind` values map directly onto these
+rebalance runs.
+
+**The movement ledger records ARRIVAL, never deployment** (PRO-1669). A deposit
+row reaching `completed` means the funds landed as cash in the portfolio wallet;
+the later provider-managed rebalance that deploys them is not a movement out of
+the wallet and has no ledger row. Never read a completed deposit as "earning" —
+whether it is deployed is a *position* fact, and positions are live-only. Our `EarnPortfolioPositionKind` values map directly onto these
 real on-chain states:
 
 | Position kind | On-chain meaning |
@@ -282,14 +288,26 @@ packages/sdp-earn/src/
 apps/sdp-api/src/
   routes/earn/                     /v1/earn HTTP surface. handlers/program.ts is
                                    the programs family (list/create/re-target,
-                                   live provider reads + the withdrawal
-                                   ledger); strategies is the catalogue family.
-  db/migrations/postgres/0048–0056 earn_strategies (0048);
+                                   live provider reads + the money-movement
+                                   ledger and its canonical /movements read);
+                                   strategies is the catalogue family.
+  services/earn-withdrawal-ledger.service.ts   initiated-movement state machine.
+  services/earn-deposit-ledger.service.ts      observed-movement state machine
+                                   (PRO-1669); source-agnostic, so the poll,
+                                   PRO-1631's webhooks and an eventual SDP
+                                   indexer all write through it.
+  services/earn-movement-status.ts shared terminal-status predicate.
+  cron/earn-deposit-sweep.ts       deposit-observation sweep (interim observer).
+  cron/slot.ts                     shared cadence-slot mechanics for both crons.
+  db/migrations/postgres/0048–0057 earn_strategies (0048);
                                    earn_provider_wallets (0049, the program
                                    link); earn_program_withdrawals (0055, the
                                    withdrawal ledger — 0055 also dropped the
                                    never-written positions/movements/NAV
-                                   tables, PRO-1628); 0056 lifted the
+                                   tables, PRO-1628); 0057 renamed that table to
+                                   earn_program_movements and added the observed
+                                   (deposit) half, so ONE ledger now holds every
+                                   money movement (PRO-1669); 0056 lifted the
                                    one-program-per-org cap and moved uniqueness
                                    onto (provider, provider_wallet_ref),
                                    PRO-1670.
@@ -409,7 +427,7 @@ Two things write `earn_strategies`, and only one of them is a production path.
    and `PUT /programs/:programId`) gate on full provider *availability*
    (entitlement + enablement +
    credentials). Withdrawal and live-read paths gate only on *configured
-   credentials*, and the withdrawal-ledger list takes no provider gate at all
+   credentials*, and the movement-ledger lists take no provider gate at all
    — disabling a provider must never trap funds or hide their history.
 2. **Fail closed on drift.** Provider ids from the DB are open strings; all
    dispatch goes through `resolveEarnProviderClient`, which throws on unknown

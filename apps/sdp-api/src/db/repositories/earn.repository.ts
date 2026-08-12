@@ -1,8 +1,11 @@
 import type {
   EarnApyType,
   EarnLiquidityTerm,
+  EarnMovementDirection,
+  EarnMovementObservationSource,
+  EarnPortfolioDepositStatus,
   EarnPortfolioToken,
-  EarnProgramWithdrawalRecordStatus,
+  EarnProgramMovementRecordStatus,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnStrategyStatus,
@@ -20,6 +23,15 @@ export function generateEarnProviderWalletId(): string {
 
 export function generateEarnProgramWithdrawalId(): string {
   return `earn_program_withdrawal_${crypto.randomUUID()}`;
+}
+
+/**
+ * Distinct prefix from the withdrawal generator even though both live in one
+ * table. Ids stay globally distinguishable, which is what lets `id` act as the
+ * pagination tiebreaker across a mixed-direction page.
+ */
+export function generateEarnProgramDepositId(): string {
+  return `earn_program_deposit_${crypto.randomUUID()}`;
 }
 
 export interface EarnStrategyRow {
@@ -75,37 +87,84 @@ export interface EarnProviderWalletRow {
 }
 
 /**
- * One row of the withdrawal ledger (migration 0055): the durable record of the
- * one money movement SDP initiates. Written at intent (status 'requested') and
- * advanced by guarded CAS on every provider observation — see
- * services/earn-withdrawal-ledger.service.ts for the transition matrix.
+ * Columns every movement-ledger row carries, whichever direction it is
+ * (migration 0057). One table holds both because a movement is a movement; the
+ * two arms below split only where the DIRECTIONS genuinely differ.
  */
-export interface EarnProgramWithdrawalRow {
+interface EarnProgramMovementCommonRow {
   id: string;
   organization_id: string;
-  project_id: string;
   wallet_id: string;
   /** Open TEXT, same drift rule as EarnStrategyRow.provider. */
   provider: string;
-  status: EarnProgramWithdrawalRecordStatus;
-  amount_requested_usd: string;
+  status: EarnProgramMovementRecordStatus;
+  /** The money that actually moved. Set from the first observation onward. */
   amount_paid_usd: string | null;
   fee_usd: string | null;
   token: EarnPortfolioToken;
-  destination_address: string;
   failure_reason: string | null;
-  /** Derived provider request id — the idempotency anchor (wallet-scoped unique). */
-  request_id: string;
-  idempotency_fingerprint: string;
-  /** Provider withdrawalRef; null while the row is an unresolved intent. */
+  /** Provider withdrawalRef, or the provider's own deposit id. */
   provider_reference: string | null;
   provider_data: Record<string, unknown>;
   created_by: string | null;
   initiated_by_key_id: string | null;
+  /** WHICH MECHANISM reported this row's current state — never which provider. */
+  observed_via: EarnMovementObservationSource;
+  /** When the money MOVED (not when SDP wrote the row). Write-once, and the sort key. */
+  occurred_at: string;
+  /** Where a deposit came from; rail-gated, so null for an off-Solana arrival. */
+  source_address: string | null;
+  transaction_signature: string | null;
+  transaction_instruction_index: number | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
 }
+
+/**
+ * A movement SDP INITIATED (migrations 0055, 0057): written at intent (status
+ * 'requested') and advanced by guarded CAS on every provider observation — see
+ * services/earn-withdrawal-ledger.service.ts for the transition matrix.
+ *
+ * The four intent fields are non-nullable HERE, on the withdrawal arm, and that
+ * is load-bearing rather than cosmetic: `resolveIdempotencyReplay` is generic over
+ * `{ idempotency_fingerprint: string | null }` and reads the ROW type, so a flat
+ * nullable row would re-open the "null fingerprint = unclaimed" branch that
+ * migration 0055 closed by schema. The DB's direction-conditional CHECK and this
+ * union brace each other — the same two-layer shape as the CAS guard bracing the
+ * appliers' terminal early-return.
+ */
+export interface EarnProgramWithdrawalRow extends EarnProgramMovementCommonRow {
+  direction: "withdrawal";
+  project_id: string;
+  /** What the caller asked SDP to pay out. Intent, so withdrawal-only. */
+  amount_requested_usd: string;
+  destination_address: string;
+  /** Derived provider request id — the idempotency anchor (wallet-scoped unique). */
+  request_id: string;
+  idempotency_fingerprint: string;
+}
+
+/**
+ * A movement SDP OBSERVED (migration 0057): a customer-initiated SPL transfer to
+ * the program wallet's funding address. There is no intent moment, so the row is
+ * created by whichever mechanism observed it first and may even be born terminal;
+ * `services/earn-deposit-ledger.service.ts` owns its transition matrix.
+ *
+ * Every intent field is `null` by CHECK, not merely by convention: nobody at SDP
+ * requested this money, and inventing a project, a user or a requested amount for
+ * it would write a fiction a human later reads as fact during an incident.
+ */
+export interface EarnProgramDepositRow extends EarnProgramMovementCommonRow {
+  direction: "deposit";
+  project_id: null;
+  amount_requested_usd: null;
+  destination_address: null;
+  request_id: null;
+  idempotency_fingerprint: null;
+}
+
+export type EarnProgramMovementRow = EarnProgramWithdrawalRow | EarnProgramDepositRow;
 
 /** Catalogue sync upsert, keyed on (provider, provider_reference, environment). */
 export interface UpsertEarnStrategyInput {
@@ -197,8 +256,8 @@ export type UpdateEarnProgramWithdrawalSelector =
 export interface UpdateEarnProgramWithdrawalStatusGuardedInput {
   selector: UpdateEarnProgramWithdrawalSelector;
   organizationId: string;
-  fromStatuses: readonly EarnProgramWithdrawalRecordStatus[];
-  toStatus: EarnProgramWithdrawalRecordStatus;
+  fromStatuses: readonly EarnProgramMovementRecordStatus[];
+  toStatus: EarnProgramMovementRecordStatus;
   providerReference?: string;
   amountPaidUsd?: string | null;
   feeUsd?: string | null;
@@ -217,6 +276,132 @@ export interface ListEarnProgramWithdrawalsInput {
 export interface ListEarnProgramWithdrawalsResult {
   rows: EarnProgramWithdrawalRow[];
   total: number;
+}
+
+/**
+ * Insert-at-observation: the row is created BY an observation, so unlike the
+ * withdrawal insert every field here comes from the observer — including the
+ * status (a deposit may be first seen already settled) and `occurredAt` (the
+ * movement's own time, NOT now; there is deliberately no DB default for it).
+ *
+ * `occurredAt`/`completedAt` MUST already be normalized to the fixed-width ISO
+ * shape `sdp_iso_now()` emits — see migration 0057's column comment for what a
+ * raw provider timestamp corrupts.
+ */
+export interface InsertEarnProgramDepositInput {
+  organizationId: string;
+  walletId: string;
+  /**
+   * Open `string`, unlike every other earn WRITE input. Deliberate: this value is
+   * copied from the program's existing `earn_provider_wallets` row rather than
+   * chosen by a caller, so narrowing it to the registry union would assert
+   * something about a row that already exists — and would force a cast at the only
+   * call site. Dispatch still goes through the fail-closed registry before an
+   * observation is ever produced.
+   */
+  provider: string;
+  status: EarnPortfolioDepositStatus;
+  amountUsd: string;
+  token: EarnPortfolioToken;
+  providerReference: string | null;
+  sourceAddress: string | null;
+  transactionSignature: string | null;
+  transactionInstructionIndex: number | null;
+  observedVia: EarnMovementObservationSource;
+  occurredAt: string;
+  completedAt: string | null;
+  providerData: Record<string, unknown>;
+}
+
+/**
+ * Guarded CAS for an observed movement. Selector mirrors the identity the
+ * observer holds: a provider reference (poll, webhook) or a chain identity
+ * (indexer). Same `undefined` = untouched / `null` = written / shallow-JSONB-merge
+ * contract as the withdrawal CAS, and the same null-return meaning.
+ *
+ * `occurredAt` is absent on purpose — it is write-once (migration 0057).
+ */
+export type UpdateEarnProgramDepositSelector =
+  | { depositId: string }
+  | { provider: string; providerReference: string }
+  | { walletId: string; transactionSignature: string; transactionInstructionIndex: number | null };
+
+export interface UpdateEarnProgramDepositStatusGuardedInput {
+  selector: UpdateEarnProgramDepositSelector;
+  organizationId: string;
+  fromStatuses: readonly EarnProgramMovementRecordStatus[];
+  toStatus: EarnPortfolioDepositStatus;
+  amountUsd?: string;
+  providerReference?: string | null;
+  sourceAddress?: string | null;
+  transactionSignature?: string | null;
+  transactionInstructionIndex?: number | null;
+  observedVia?: EarnMovementObservationSource;
+  completedAt?: string | null;
+  providerData?: Record<string, unknown>;
+}
+
+/**
+ * The canonical movement read. `direction` is REQUIRED — with both directions in
+ * one table, a forgotten predicate returns a plausible wrong number instead of an
+ * error, so omitting it has to be a compile error. Pass `"all"` deliberately.
+ *
+ * Period bounds are half-open `[from, to)`: a closed upper bound double-counts a
+ * movement that lands exactly on a boundary into two adjacent periods.
+ */
+export interface ListEarnProgramMovementsInput {
+  organizationId: string;
+  walletId: string;
+  direction: EarnMovementDirection | "all";
+  statuses?: readonly EarnProgramMovementRecordStatus[];
+  token?: EarnPortfolioToken;
+  occurredFrom?: string;
+  occurredTo?: string;
+  limit: number;
+  offset: number;
+}
+
+export interface ListEarnProgramMovementsResult {
+  rows: EarnProgramMovementRow[];
+  total: number;
+}
+
+/**
+ * Per-direction netting for a period — the movement half of PRO-1672's
+ * "delta balance minus net movements = earnings" identity. Aggregated on
+ * `occurred_at`, so a movement observed late still nets into the period it
+ * happened in.
+ */
+export interface SumEarnProgramMovementsInput {
+  organizationId: string;
+  walletId: string;
+  occurredFrom: string;
+  occurredTo: string;
+  /** Only movements that actually moved money; defaults to the terminal settled set. */
+  statuses?: readonly EarnProgramMovementRecordStatus[];
+}
+
+export interface EarnProgramMovementSum {
+  direction: EarnMovementDirection;
+  token: EarnPortfolioToken;
+  movementCount: number;
+  /** USD decimal string, summed from the settled amount. */
+  totalUsd: string;
+}
+
+/**
+ * Platform-wide, ORGANIZATION-AGNOSTIC program scan for the observation sweep —
+ * the only Earn read with no tenant scope, because a platform sweep has no tenant.
+ *
+ * Keyset over (created_at, id) ASC rather than limit/offset: migration 0056 makes
+ * that order stable for a program's whole life, so a keyset scan cannot skip a
+ * program because a sibling was created mid-pass — which offset paging would.
+ */
+export interface ScanEarnProviderWalletsInput {
+  environment: SdpEnvironment;
+  /** Exclusive cursor: rows strictly after this (createdAt, id). */
+  after?: { createdAt: string; id: string };
+  limit: number;
 }
 
 export interface EarnRepository {
@@ -281,4 +466,45 @@ export interface EarnRepository {
   listProgramWithdrawals(
     input: ListEarnProgramWithdrawalsInput
   ): Promise<ListEarnProgramWithdrawalsResult>;
+
+  /**
+   * The observed half (PRO-1669). Deliberately a SEPARATE set of methods from the
+   * withdrawal five rather than direction-parameterised ones: every method below
+   * pins `direction = 'deposit'` internally, which makes "forgot the direction
+   * predicate" — the one real hazard of a unified table — structurally impossible
+   * on these paths. The single direction-agnostic read takes it as a required
+   * argument instead.
+   */
+  insertProgramDeposit(input: InsertEarnProgramDepositInput): Promise<EarnProgramDepositRow | null>;
+  /** Interim identity: the provider's own deposit id (global partial unique). */
+  getProgramDepositByProviderReference(params: {
+    provider: string;
+    providerReference: string;
+  }): Promise<EarnProgramDepositRow | null>;
+  /**
+   * Chain identity, and the cross-source resolution probe: how a future indexer
+   * writer finds the row a poller already wrote, and vice versa. The signature
+   * index is NOT unique (one transaction may carry two transfers to one address),
+   * so an ambiguous probe returns several rows and the caller must skip rather
+   * than guess — never write on a guess.
+   */
+  listProgramDepositsBySignature(params: {
+    walletId: string;
+    transactionSignature: string;
+  }): Promise<EarnProgramDepositRow[]>;
+  updateProgramDepositStatusGuarded(
+    input: UpdateEarnProgramDepositStatusGuardedInput
+  ): Promise<EarnProgramDepositRow | null>;
+
+  /** The canonical cross-direction movement read; `direction` is required. */
+  listProgramMovements(
+    input: ListEarnProgramMovementsInput
+  ): Promise<ListEarnProgramMovementsResult>;
+  /** Per-(direction, token) netting for a period — PRO-1672's movement half. */
+  sumProgramMovementsByDirection(
+    input: SumEarnProgramMovementsInput
+  ): Promise<EarnProgramMovementSum[]>;
+
+  /** Platform-wide program scan for the observation sweep — no tenant scope. */
+  scanProviderWallets(input: ScanEarnProviderWalletsInput): Promise<EarnProviderWalletRow[]>;
 }

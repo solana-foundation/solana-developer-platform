@@ -24,6 +24,7 @@ import {
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
 import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSync } from "./earn-catalogue-sync";
+import { EARN_DEPOSIT_SWEEP_CRON, runEarnDepositSweep } from "./earn-deposit-sweep";
 import { PENDING_DEPOSITS_CRON, runPendingDepositsReconciliation } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
 import {
@@ -175,6 +176,21 @@ export function startCron(deps: CronDeps): CronHandle | null {
           return;
         }
         runEarnCatalogueSync({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        });
+      })
+    );
+    // The deposit-observation sweep (PRO-1669) shares the Earn gate — no second
+    // Markets check, the hierarchy lives in isEarnEnabled. Its own cadence slot
+    // makes it safe to run alongside the catalogue sync.
+    tasks.push(
+      schedule(EARN_DEPOSIT_SWEEP_CRON, () => {
+        if (stopping) {
+          return;
+        }
+        runEarnDepositSweep({
           env: deps.env,
           bg: deps.bg,
           observability: deps.observability,

@@ -233,7 +233,16 @@ single-vault targets until weights are re-enabled post-V1.
    violation as a conflict would turn the required idempotency key into the
    double-provisioning it exists to prevent; a ref held by a *different* org or
    environment is the one case that really is a conflict.
-6. **Tests.** No-network fetch-stub harness, same pattern as
+6. **The money-movement ledger comes for free.** A portfolio provider inherits
+   `earn_program_movements`, the deposit-observation sweep, and the canonical
+   `GET /programs/:programId/movements` read with **zero** code beyond the
+   capability itself: the sweep is registry-driven and capability-gated, both
+   ledger services consume only the canonical DTOs, and a source-grep test keeps
+   every one of them from naming a provider. Implementing
+   `listPortfolioDeposits` is the whole integration — map your raw statuses into
+   `EARN_PORTFOLIO_DEPOSIT_STATUSES` and rail-gate the on-chain identifiers, and
+   the ledger, the sweep and the read all start working.
+7. **Tests.** No-network fetch-stub harness, same pattern as
    `packages/sdp-earn/src/fetch.test.ts`; Ground's
    `providers/ground/client.test.ts` covers mappings, filtering, pagination,
    error taxonomy, requestId behavior, and the capability guard —

@@ -381,28 +381,33 @@ async function deleteSeeded(db: AppDb): Promise<number> {
 }
 
 /**
- * Withdrawal history PINS a wallet link: earn_program_withdrawals FKs the link
- * row with no cascade (history is undeletable by design — migration 0055 /
- * PRO-1628), so a seeded link that has been withdrawn against can be neither
+ * Movement history PINS a wallet link: earn_program_movements FKs the link row
+ * with no cascade (history is undeletable by design — migrations 0055 and 0057 /
+ * PRO-1628, PRO-1669), so a seeded link money has moved through can be neither
  * cleaned nor moved. Skipping beats crashing on the FK, and keeping the link
  * where its history lives is the correct outcome anyway.
+ *
+ * Expect this to bite sooner than it used to: since PRO-1669 the ledger records
+ * DEPOSITS too, and the observation sweep writes them without anyone asking. Fund
+ * the seeded sandbox wallet once and it is pinned from the next sweep onward, so
+ * `db:seed:earn --clean` will start keeping links it used to delete.
  */
 async function countHistoryPinnedSeededWallets(db: AppDb): Promise<number> {
   const row = await db
     .prepare(
       `SELECT COUNT(*)::int AS pinned FROM earn_provider_wallets w
         WHERE w.environment = ? AND w.provider = ? AND w.label = ?
-          AND EXISTS (SELECT 1 FROM earn_program_withdrawals x WHERE x.wallet_id = w.id)`
+          AND EXISTS (SELECT 1 FROM earn_program_movements x WHERE x.wallet_id = w.id)`
     )
     .bind(SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL)
     .first<{ pinned: number }>();
   return row?.pinned ?? 0;
 }
 
-/** Whether ONE wallet row is pinned by withdrawal history (undeletable FK). */
-async function walletHasWithdrawalHistory(db: AppDb, walletId: string): Promise<boolean> {
+/** Whether ONE wallet row is pinned by movement history (undeletable FK). */
+async function walletHasMovementHistory(db: AppDb, walletId: string): Promise<boolean> {
   const row = await db
-    .prepare(`SELECT 1 AS hit FROM earn_program_withdrawals WHERE wallet_id = ? LIMIT 1`)
+    .prepare(`SELECT 1 AS hit FROM earn_program_movements WHERE wallet_id = ? LIMIT 1`)
     .bind(walletId)
     .first<{ hit: number }>();
   return row !== null;
@@ -412,14 +417,14 @@ async function deleteSeededWallets(db: AppDb): Promise<number> {
   const pinned = await countHistoryPinnedSeededWallets(db);
   if (pinned > 0) {
     console.log(
-      `  keeping ${pinned} seeded link(s) with withdrawal history — history is undeletable by design (PRO-1628).`
+      `  keeping ${pinned} seeded link(s) with movement history — history is undeletable by design (PRO-1628).`
     );
   }
   return db.execute(
     `DELETE FROM earn_provider_wallets
       WHERE environment = ? AND provider = ? AND label = ?
         AND NOT EXISTS (
-          SELECT 1 FROM earn_program_withdrawals x
+          SELECT 1 FROM earn_program_movements x
            WHERE x.wallet_id = earn_provider_wallets.id
         )`,
     [SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL]
@@ -525,15 +530,15 @@ async function seedProviderWallets(
     return { linked: 0, kept: 0, moved: false, skipped: true };
   }
 
-  // A seeded link with withdrawal history cannot move: its row is the FK
+  // A seeded link with movement history cannot move: its row is the FK
   // target of that history (undeletable by design), and the history belongs
-  // to the org that withdrew. Scoped to THE ROW HOLDING THIS REF — a stale
+  // to the org whose money moved. Scoped to THE ROW HOLDING THIS REF — a stale
   // seeded link from an earlier SEED_PROVIDER_WALLET rotation may also be
   // pinned, but it holds a different ref, so it collides with nothing under
   // 0056's global unique and must not block linking the current one.
-  if (linked && (await walletHasWithdrawalHistory(db, linked.id))) {
+  if (linked && (await walletHasMovementHistory(db, linked.id))) {
     console.log(
-      `  ${organization.slug}: NOT moved — the seeded link has withdrawal history and stays with the org that withdrew (PRO-1628).`
+      `  ${organization.slug}: NOT moved — the seeded link has movement history and stays with the org whose money moved (PRO-1628).`
     );
     return { linked: 0, kept: 1, moved: false, skipped: false };
   }
@@ -550,7 +555,7 @@ async function seedProviderWallets(
       `DELETE FROM earn_provider_wallets
         WHERE environment = ? AND provider = ? AND label = ?
           AND NOT EXISTS (
-            SELECT 1 FROM earn_program_withdrawals x
+            SELECT 1 FROM earn_program_movements x
              WHERE x.wallet_id = earn_provider_wallets.id
           )`,
       [SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL]

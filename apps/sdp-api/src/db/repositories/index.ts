@@ -43,19 +43,33 @@ export type {
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
   CreateEarnProgramWithdrawalInput,
+  EarnProgramDepositRow,
+  EarnProgramMovementRow,
+  EarnProgramMovementSum,
   EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
+  InsertEarnProgramDepositInput,
   InsertEarnProviderWalletInput,
+  ListEarnProgramMovementsInput,
+  ListEarnProgramMovementsResult,
   ListEarnProgramWithdrawalsInput,
   ListEarnProgramWithdrawalsResult,
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
+  ScanEarnProviderWalletsInput,
+  SumEarnProgramMovementsInput,
+  UpdateEarnProgramDepositSelector,
+  UpdateEarnProgramDepositStatusGuardedInput,
   UpdateEarnProgramWithdrawalStatusGuardedInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-export { generateEarnProgramWithdrawalId, generateEarnStrategyId } from "./earn.repository";
+export {
+  generateEarnProgramDepositId,
+  generateEarnProgramWithdrawalId,
+  generateEarnStrategyId,
+} from "./earn.repository";
 export { createPostgresEarnRepository } from "./earn.repository.postgres";
 export type {
   KycWalletRow,

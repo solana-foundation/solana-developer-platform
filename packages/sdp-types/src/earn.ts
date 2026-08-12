@@ -235,7 +235,21 @@ export interface EarnPortfolioWalletSnapshot {
   allocations: EarnPortfolioTargetAllocations;
 }
 
-export const EARN_PORTFOLIO_DEPOSIT_STATUSES = ["processing", "completed", "failed"] as const;
+/**
+ * The `satisfies` is load-bearing, not decoration: it proves at compile time
+ * that the deposit vocabulary is a strict SUBSET of the movement ledger's
+ * (`EARN_PROGRAM_MOVEMENT_RECORD_STATUSES` below), which is what lets ONE status
+ * column serve both directions with no new CHECK value. If a provider ever
+ * reports a deposit state the ledger union lacks, this stops compiling instead
+ * of failing a CHECK constraint in production. The forward reference is
+ * deliberate — types are order-independent, and the deposit statuses belong here
+ * beside the live deposit read they describe.
+ */
+export const EARN_PORTFOLIO_DEPOSIT_STATUSES = [
+  "processing",
+  "completed",
+  "failed",
+] as const satisfies readonly EarnProgramMovementRecordStatus[];
 export type EarnPortfolioDepositStatus = (typeof EARN_PORTFOLIO_DEPOSIT_STATUSES)[number];
 
 /** One on-chain deposit detected against the wallet's funding address. */
@@ -274,30 +288,79 @@ export const EARN_PORTFOLIO_WITHDRAWAL_STATUSES = [
 ] as const;
 export type EarnPortfolioWithdrawalStatus = (typeof EARN_PORTFOLIO_WITHDRAWAL_STATUSES)[number];
 
+export const EARN_MOVEMENT_DIRECTIONS = ["deposit", "withdrawal"] as const;
+export type EarnMovementDirection = (typeof EARN_MOVEMENT_DIRECTIONS)[number];
+
 /**
- * Statuses a withdrawal never moves on from. One declaration for every
- * consumer (API ledger CAS + dashboard outcome polling) — `partially_completed`
- * is terminal by convention; if a provider ever advances it, the live GET keeps
- * serving provider truth while the ledger row stays put.
+ * WHICH MECHANISM told SDP about a movement — never which provider.
+ *
+ * `sdp_intent` is the movement SDP initiated itself, recorded before any observer
+ * saw it. The other three are observers of movements SDP did not initiate, and
+ * all four are declared here even though only two have writers today: that is the
+ * point. Provider-API polling now (PRO-1669), provider webhooks next (PRO-1631),
+ * and an SDP indexer reading Solana directly eventually — the desired end state,
+ * because it takes a third party out of the path of SDP's own audit trail.
+ *
+ * The ledger record is source-agnostic and the DB column is open TEXT with NO
+ * CHECK, so adding an observer is a writer, never a migration. No transition
+ * matrix may branch on this value — per-source differences belong in the adapter
+ * that BUILDS an observation, not in the machine that applies it.
  */
-export const EARN_TERMINAL_WITHDRAWAL_STATUSES = [
+export const EARN_MOVEMENT_OBSERVATION_SOURCES = [
+  "sdp_intent",
+  "provider_poll",
+  "provider_webhook",
+  "chain_indexer",
+] as const;
+export type EarnMovementObservationSource = (typeof EARN_MOVEMENT_OBSERVATION_SOURCES)[number];
+
+/**
+ * Ledger-row status vocabulary for EVERY money movement, both directions
+ * (PRO-1669). `requested` is SDP-only pre-provider intent state — the row exists,
+ * the provider call has not been accepted yet — and is therefore reachable only
+ * for a movement SDP initiates; every other value is the canonical
+ * provider-observed status. Deposits add nothing: their vocabulary is a strict
+ * subset (see the `satisfies` on `EARN_PORTFOLIO_DEPOSIT_STATUSES`), which is why
+ * one column and one CHECK serve both directions.
+ */
+export const EARN_PROGRAM_MOVEMENT_RECORD_STATUSES = [
+  "requested",
+  ...EARN_PORTFOLIO_WITHDRAWAL_STATUSES,
+] as const;
+export type EarnProgramMovementRecordStatus =
+  (typeof EARN_PROGRAM_MOVEMENT_RECORD_STATUSES)[number];
+
+/**
+ * Statuses a movement never moves on from. One declaration for every consumer
+ * (API ledger CAS + dashboard outcome polling) — `partially_completed` is
+ * terminal by convention; if a provider ever advances it, the live GET keeps
+ * serving provider truth while the ledger row stays put. Terminality is
+ * direction-independent: a deposit simply never holds the two withdrawal-only
+ * values.
+ */
+export const EARN_TERMINAL_MOVEMENT_STATUSES = [
   "completed",
   "partially_completed",
   "failed",
   "cancelled",
-] as const satisfies readonly EarnPortfolioWithdrawalStatus[];
+] as const satisfies readonly EarnProgramMovementRecordStatus[];
 
 /**
- * Ledger-row status vocabulary: `requested` is SDP-only pre-provider intent
- * state (the row exists, the provider call has not been accepted yet); every
- * other value is the canonical provider-observed status.
+ * Which direction each ledger status can legally describe. A `Record` keyed by
+ * the status union rather than a flat array, because that catches drift in BOTH
+ * directions: a status added to the vocabulary is a missing key, and a value that
+ * is not a movement status is an excess one. Doubles as the wire documentation of
+ * what a caller can expect per direction.
  */
-export const EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES = [
-  "requested",
-  ...EARN_PORTFOLIO_WITHDRAWAL_STATUSES,
-] as const;
-export type EarnProgramWithdrawalRecordStatus =
-  (typeof EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES)[number];
+export const EARN_PROGRAM_MOVEMENT_STATUS_DIRECTIONS = {
+  requested: ["withdrawal"],
+  processing: ["deposit", "withdrawal"],
+  pending_approval: ["withdrawal"],
+  completed: ["deposit", "withdrawal"],
+  partially_completed: ["withdrawal"],
+  failed: ["deposit", "withdrawal"],
+  cancelled: ["withdrawal"],
+} as const satisfies Record<EarnProgramMovementRecordStatus, readonly EarnMovementDirection[]>;
 
 /** A portfolio-level withdrawal to a Solana destination address — the LIVE provider read. */
 export interface EarnPortfolioWithdrawal {
@@ -324,7 +387,7 @@ export interface EarnProgramWithdrawalRecord {
   id: string;
   /** Open string on the read model — a row can outlive its provider's registry entry. */
   provider: string;
-  status: EarnProgramWithdrawalRecordStatus;
+  status: EarnProgramMovementRecordStatus;
   /** USD decimal strings. */
   amountRequestedUsd: string;
   amountPaidUsd?: string;
@@ -334,6 +397,59 @@ export interface EarnProgramWithdrawalRecord {
   failureReason?: string;
   /** Provider-side withdrawal reference; absent while the row is still `requested`. */
   withdrawalRef?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+/**
+ * ONE canonical, provider-agnostic money-movement record — the durable answer to
+ * "every deposit and withdrawal on this program", served from SDP's own DB with
+ * zero provider calls (PRO-1669).
+ *
+ * Both directions live in one ledger table, but they arrive differently and the
+ * shape says so: a withdrawal is recorded at INTENT (SDP initiated it, so it has
+ * a requested amount, a fee, and a destination), a deposit is recorded at
+ * OBSERVATION (a customer-initiated SPL transfer, so it has a source address and
+ * a chain signature and no intent amount). Fields that belong to only one
+ * direction are optional rather than duplicated into two record types — the
+ * `EARN_PROGRAM_MOVEMENT_STATUS_DIRECTIONS` map documents which is which.
+ */
+export interface EarnProgramMovementRecord {
+  id: string;
+  direction: EarnMovementDirection;
+  /** Open string on the read model — a row can outlive its provider's registry entry. */
+  provider: string;
+  status: EarnProgramMovementRecordStatus;
+  /**
+   * The money that actually moved, USD decimal string. For a withdrawal that is
+   * the paid amount once the provider settles and the requested amount until
+   * then; a deposit has only ever had one figure.
+   */
+  amountUsd: string;
+  /** Intent amount — present only for a movement SDP initiated. */
+  amountRequestedUsd?: string;
+  feeUsd?: string;
+  token: EarnPortfolioToken;
+  /**
+   * Where the money went (withdrawal) or came from (deposit). Absent on a deposit
+   * that arrived on a non-Solana rail: SDP surfaces the Solana rail only, so
+   * another rail's identifiers are withheld while the value still surfaces.
+   */
+  counterpartyAddress?: string;
+  /** Solana signature, when the observer saw chain. Same rail gating as above. */
+  transactionSignature?: string;
+  /** Provider-side id: the withdrawal ref, or the provider's own deposit id. */
+  providerReference?: string;
+  failureReason?: string;
+  /** Which mechanism reported this row's current state. */
+  observedVia: EarnMovementObservationSource;
+  /**
+   * When the money moved — NOT when SDP recorded it. This is the ordering key and
+   * the key any per-period accounting must aggregate on: a deposit observed hours
+   * late still belongs to the period it happened in.
+   */
+  occurredAt: string;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -397,6 +513,13 @@ export interface ListEarnStrategiesResponse {
 
 export interface ListEarnProgramWithdrawalsResponse {
   withdrawals: EarnProgramWithdrawalRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ListEarnProgramMovementsResponse {
+  movements: EarnProgramMovementRecord[];
   total: number;
   page: number;
   pageSize: number;
