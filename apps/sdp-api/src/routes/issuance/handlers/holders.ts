@@ -1,7 +1,6 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
 import {
   createCounterpartiesRepository,
   createKycWalletsRepository,
@@ -10,10 +9,10 @@ import {
 import { badRequest, notFound } from "@/lib/errors";
 import { parsePagination } from "@/lib/query";
 import { created, success } from "@/lib/response";
-import { TokenService } from "@/services/token.service";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { emitKycApprovedForClearedEnrollments } from "@/services/workflows/clearance";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import { getTenantTokenService, requireProjectScope } from "../helpers";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -36,7 +35,7 @@ export const enrollHolder = async (c: AppContext) => {
   }
   assertValidAddress(parsed.data.walletAddress, "walletAddress");
 
-  const token = await new TokenService(getDb(c.env)).getToken({
+  const token = await getTenantTokenService(c).getToken({
     tokenId,
     organizationId: orgId,
     projectId,
@@ -51,7 +50,10 @@ export const enrollHolder = async (c: AppContext) => {
   // instead of an FK violation surfacing as a 500.
   const counterpartyId = parsed.data.counterpartyId ?? null;
   if (counterpartyId) {
-    const counterparty = await createCounterpartiesRepository(c.env).getCounterpartyById({
+    const counterparty = await createCounterpartiesRepository(
+      c.env,
+      getRequestTenantScope(c)
+    ).getCounterpartyById({
       counterpartyId,
       organizationId: orgId,
       projectId,

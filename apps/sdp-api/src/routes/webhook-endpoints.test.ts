@@ -10,14 +10,14 @@
 
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 // Create/rotate write the signing secret through the credential secret store; the
 // encrypted_db backend is the only one a test container can satisfy.
@@ -111,10 +111,6 @@ async function seedDelivery(
 describe("webhook endpoint registry (routes)", () => {
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
-
-  afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
   });
 
   afterEach(() => {

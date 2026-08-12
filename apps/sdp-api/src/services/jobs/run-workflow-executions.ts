@@ -9,6 +9,8 @@ import {
   type WorkflowExecutionRow,
   type WorkflowExecutionsRepository,
 } from "@/db/repositories";
+import { createKVStoreSet } from "@/runtime/kv-redis";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 import { dispatchWorkflowAction } from "@/services/workflows/actions";
@@ -51,12 +53,24 @@ interface TickCaches {
   gates: Map<string, AssetGateContext | null>;
 }
 
+// A batch spans every tenant, and both cached lookups are tenant-scoped — so the key has
+// to carry the tenant as well as the id. Keyed on the id alone, an execution whose
+// organization/project disagree with the owner of its workflow_id (or token_id) takes a
+// cache hit and never runs the predicate the loader applies, reading another tenant's
+// rule or gate. Nothing upstream makes that key collision impossible: the table's
+// organization_id and workflow_id foreign keys are independent, so no constraint ties an
+// execution to the owner of the rule it names.
+function tenantCacheKey(execution: WorkflowExecutionRow, id: string): string {
+  return `${execution.organization_id}:${execution.project_id}:${id}`;
+}
+
 async function loadRule(
   workflowsRepo: AssetWorkflowsRepository,
   caches: TickCaches,
   execution: WorkflowExecutionRow
 ): Promise<AssetWorkflowRow | null> {
-  const cached = caches.rules.get(execution.workflow_id);
+  const key = tenantCacheKey(execution, execution.workflow_id);
+  const cached = caches.rules.get(key);
   if (cached !== undefined) {
     return cached;
   }
@@ -65,7 +79,7 @@ async function loadRule(
     organizationId: execution.organization_id,
     projectId: execution.project_id,
   });
-  caches.rules.set(execution.workflow_id, rule);
+  caches.rules.set(key, rule);
   return rule;
 }
 
@@ -74,7 +88,8 @@ async function loadGate(
   caches: TickCaches,
   execution: WorkflowExecutionRow
 ): Promise<AssetGateContext | null> {
-  const cached = caches.gates.get(execution.token_id);
+  const key = tenantCacheKey(execution, execution.token_id);
+  const cached = caches.gates.get(key);
   if (cached !== undefined) {
     return cached;
   }
@@ -83,7 +98,7 @@ async function loadGate(
     organizationId: execution.organization_id,
     projectId: execution.project_id,
   });
-  caches.gates.set(execution.token_id, gate);
+  caches.gates.set(key, gate);
   return gate;
 }
 
@@ -150,14 +165,17 @@ export interface RunWorkflowExecutionsResult {
 }
 
 function logExecutionFailure(row: WorkflowExecutionRow, error: unknown): void {
-  console.error("runDueWorkflowExecutions: action threw", {
-    error: error instanceof Error ? error.message : String(error),
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-    workflowId: row.workflow_id,
-    executionId: row.id,
-    actionType: row.action_type,
-  });
+  getLogger().error(
+    {
+      error: error instanceof Error ? error.message : String(error),
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      workflowId: row.workflow_id,
+      executionId: row.id,
+      actionType: row.action_type,
+    },
+    "runDueWorkflowExecutions: action threw"
+  );
 }
 
 type AuditTerminal = (
@@ -256,28 +274,37 @@ export async function runDueWorkflowExecutions(
 ): Promise<RunWorkflowExecutionsResult> {
   const repo = createWorkflowExecutionsRepository(env);
   const workflowsRepo = createAssetWorkflowsRepository(env);
-  const audit = new AuditService(getDb(env));
+  // System audit writers require the external checkpoint store (fail-closed ledger).
+  const audit = new AuditService(getDb(env), createKVStoreSet(env).cache);
   const result: RunWorkflowExecutionsResult = { recovered: 0, succeeded: 0, failed: 0, retried: 0 };
   const caches: TickCaches = { rules: new Map(), gates: new Map() };
 
   // Durable audit row for a terminal execution outcome (system actor → "SDP"). Only
   // terminal states are audited — transient reschedules would be noise. metadata.tokenId
-  // surfaces the event in the per-asset audit feed. Never throws (logSystem swallows).
+  // surfaces the event in the per-asset audit feed. Never throws — an audit write
+  // failure must not break the tick, so persistence errors are logged and swallowed.
   const auditTerminal: AuditTerminal = (row, status, extra) =>
-    audit.logSystem({
-      organizationId: row.organization_id,
-      action: status === "success" ? "workflow_action_executed" : "workflow_action_failed",
-      resourceType: "workflow_execution",
-      resourceId: row.id,
-      status,
-      metadata: {
-        tokenId: row.token_id,
-        workflowId: row.workflow_id,
-        triggerType: row.trigger_type,
-        actionType: row.action_type,
-        ...extra,
-      },
-    });
+    audit
+      .logSystem({
+        organizationId: row.organization_id,
+        action: status === "success" ? "workflow_action_executed" : "workflow_action_failed",
+        resourceType: "workflow_execution",
+        resourceId: row.id,
+        status,
+        metadata: {
+          tokenId: row.token_id,
+          workflowId: row.workflow_id,
+          triggerType: row.trigger_type,
+          actionType: row.action_type,
+          ...extra,
+        },
+      })
+      .catch((error: unknown) => {
+        getLogger().error(
+          { error: error instanceof Error ? error.message : String(error) },
+          "workflow engine: system audit write failed"
+        );
+      });
 
   const nowIso = now.toISOString();
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS).toISOString();

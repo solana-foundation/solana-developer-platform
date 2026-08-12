@@ -3,8 +3,8 @@
 # Build from the monorepo root:
 #   docker build -f apps/sdp-docs/Dockerfile -t sdp-docs .
 
-# Bump with: docker pull node:22-slim && docker inspect --format='{{index .RepoDigests 0}}' node:22-slim
-FROM node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb AS base
+# Bump with: docker pull node:24-slim && docker inspect --format='{{index .RepoDigests 0}}' node:24-slim
+FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1
@@ -55,7 +55,7 @@ ENV NEXT_PUBLIC_SDP_WEB_URL=$NEXT_PUBLIC_SDP_WEB_URL \
 
 RUN pnpm --filter sdp-docs build
 
-FROM node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb AS runner
+FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
@@ -63,9 +63,14 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1
 
-# Apply OS-level security patches not yet in the pinned base image.
+# Update npm for patched node-tar (CVE-2026-59873) and apply OS-level fixes
+# not yet in the pinned base image.
 # This layer is cached — rebuild with --no-cache to pick up new fixes.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+RUN npm install --global npm@12.0.2 \
+ && npm cache clean --force \
+ && apt-get update \
+ && apt-get upgrade -y \
+ && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 1001 nodejs \
  && useradd --system --uid 1001 --gid nodejs nextjs

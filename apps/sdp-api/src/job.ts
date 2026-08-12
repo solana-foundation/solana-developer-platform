@@ -1,16 +1,19 @@
 import { pathToFileURL } from "node:url";
 
 import * as Sentry from "@sentry/node";
+import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import { closeDatabasePools } from "@/db/client";
-import { isAssetProfilesEnabled } from "@/lib/feature-flags";
+import { isAssetProfilesEnabled, isEarnEnabled } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
+import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 
 export async function runCronJob(): Promise<void> {
   const env = getProcessEnv();
@@ -32,9 +35,12 @@ export async function runCronJob(): Promise<void> {
       : work();
 
   try {
-    await monitored(PENDING_TRANSFERS_MONITOR, PENDING_TRANSFERS_CRON, () =>
-      trackPendingTransfers(env)
-    );
+    // Approved-wallet-operation replay rides the pending-transfers tick (same
+    // cadence/monitor), matching the in-process cron runner.
+    await monitored(PENDING_TRANSFERS_MONITOR, PENDING_TRANSFERS_CRON, async () => {
+      await trackPendingTransfers(env);
+      await recoverApprovedWalletOperations(env);
+    });
     // The workflow engine has no other tick in the Cloud Run deployment shape (the
     // in-process cron scheduler is skipped under K_SERVICE) — without this, enqueued
     // executions would sit 'pending' forever in production.
@@ -42,6 +48,15 @@ export async function runCronJob(): Promise<void> {
       await monitored(WORKFLOW_EXECUTIONS_MONITOR, WORKFLOW_EXECUTIONS_CRON, () =>
         runDueWorkflowExecutions(env)
       );
+    }
+    // The Earn catalogue sync rides this job behind the same gate as its
+    // in-process registration (cron/runner.ts): both Earn feature flags on.
+    // Its hourly cadence comes from the Redis slot inside
+    // runEarnCatalogueSyncIfDue — not this job's schedule — and it reports to
+    // its own Sentry monitor, so a sync failure never masquerades as a
+    // reconciliation failure (and vice versa).
+    if (isEarnEnabled(env)) {
+      await runEarnCatalogueSyncIfDue(env, sentryEnabled ? nodeObservability : undefined);
     }
   } finally {
     await Promise.allSettled([closeAllRedisClients(), closeDatabasePools()]);
@@ -54,7 +69,7 @@ if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
   runCronJob()
     .then(() => process.exit(0))
     .catch((err: unknown) => {
-      console.error("Reconciliation job failed:", err);
+      getLogger().error({ error: err }, "Reconciliation job failed");
       process.exit(1);
     });
 }

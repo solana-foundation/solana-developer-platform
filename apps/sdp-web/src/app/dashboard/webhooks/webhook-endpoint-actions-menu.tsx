@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -10,7 +11,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import type { WebhookEndpointView } from "./webhook-endpoints.data";
 
 export function WebhookEndpointActionsMenu({
@@ -29,7 +29,7 @@ export function WebhookEndpointActionsMenu({
   onDelete: (endpoint: WebhookEndpointView) => void;
 }) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
 
   return (
     <DropdownMenu modal={false}>

@@ -11,6 +11,7 @@ import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
 import { setNestedValue } from "@/lib/set-nested-value";
+import { HighlightedCode, type HighlightLanguage } from "@/lib/shiki-code";
 import { cn } from "@/lib/utils";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -26,10 +27,10 @@ export interface ApiPlaygroundFieldConfig {
   placeholder?: string;
   description?: string;
   defaultValue?: string;
-  kind?: "text" | "select";
+  kind?: "text" | "select" | "textarea";
   options?: ApiPlaygroundFieldOption[];
   required?: boolean;
-  valueType?: "string" | "boolean" | "number" | "string_array";
+  valueType?: "string" | "boolean" | "number" | "string_array" | "json";
 }
 
 export interface ApiPlaygroundEndpointConfig {
@@ -99,7 +100,7 @@ function buildInitialFieldValues(
 }
 
 function hasRequestBody(method: ApiPlaygroundMethod): boolean {
-  return method !== "GET" && method !== "DELETE";
+  return method !== "GET";
 }
 
 function serializeFieldValue(field: ApiPlaygroundFieldConfig, rawValue: string): unknown {
@@ -118,15 +119,24 @@ function serializeFieldValue(field: ApiPlaygroundFieldConfig, rawValue: string):
       .filter(Boolean);
   }
 
+  if (field.valueType === "json") {
+    return JSON.parse(rawValue) as unknown;
+  }
+
   return rawValue;
+}
+
+interface RequestBodyResult {
+  body: unknown | null;
+  invalidJsonField: string | null;
 }
 
 function buildRequestBody(
   fields: ApiPlaygroundFieldConfig[],
   values: Record<string, string>
-): Record<string, unknown> | null {
+): RequestBodyResult {
   if (fields.length === 0) {
-    return null;
+    return { body: null, invalidJsonField: null };
   }
 
   const payload: Record<string, unknown> = {};
@@ -137,20 +147,48 @@ function buildRequestBody(
       continue;
     }
 
-    setNestedValue(payload, field.key, serializeFieldValue(field, rawValue));
+    try {
+      const value = serializeFieldValue(field, rawValue);
+      if (field.key === "$body") {
+        return { body: value, invalidJsonField: null };
+      }
+      setNestedValue(payload, field.key, value);
+    } catch {
+      return { body: null, invalidJsonField: field.label };
+    }
   }
 
-  return Object.keys(payload).length > 0 ? payload : null;
+  return {
+    body: Object.keys(payload).length > 0 ? payload : null,
+    invalidJsonField: null,
+  };
 }
 
 function resolvePath(
   endpoint: ApiPlaygroundEndpointConfig,
   values: Record<string, string>
 ): string {
-  return endpoint.path.replace(/\{([^}]+)\}/g, (_, token) => {
+  const [pathname, query = ""] = endpoint.path.split("?", 2);
+  const fieldsByKey = new Map(endpoint.pathFields.map((field) => [field.key, field]));
+  const replaceToken = (_match: string, token: string) => {
     const value = values[token];
-    return value?.trim() ? value.trim() : `{${token}}`;
-  });
+    if (value?.trim()) {
+      return encodeURIComponent(value.trim());
+    }
+    return fieldsByKey.get(token)?.required ? `{${token}}` : "";
+  };
+  const resolvedPathname = pathname.replace(/\{([^}]+)\}/g, replaceToken);
+  const resolvedQuery = query
+    .split("&")
+    .filter(Boolean)
+    .map((part) => part.replace(/\{([^}]+)\}/g, replaceToken))
+    .filter((part) => {
+      const separatorIndex = part.indexOf("=");
+      return separatorIndex === -1 || part.slice(separatorIndex + 1) !== "";
+    })
+    .join("&");
+
+  return resolvedQuery ? `${resolvedPathname}?${resolvedQuery}` : resolvedPathname;
 }
 
 function getMissingRequiredFields(
@@ -188,7 +226,7 @@ function isValidSdpApiKey(rawValue: string): boolean {
 function buildFetchSnippet(
   endpoint: ApiPlaygroundEndpointConfig,
   resolvedPath: string,
-  requestBody: Record<string, unknown> | null,
+  requestBody: unknown | null,
   apiBaseUrl: string
 ): string {
   const lines = [
@@ -215,7 +253,7 @@ function buildFetchSnippet(
 function buildAiInstructions(
   endpoint: ApiPlaygroundEndpointConfig,
   fieldValues: Record<string, string>,
-  requestBody: Record<string, unknown> | null,
+  requestBody: unknown | null,
   productName: string,
   t: (key: MessageKey, values?: TranslationValues) => string
 ): string {
@@ -356,8 +394,6 @@ function MessageCard({ message }: { message: ApiPlaygroundMessage }) {
   );
 }
 
-type HighlightLanguage = "javascript" | "json";
-
 const MOBILE_SECTION_LABEL_KEYS = [
   { value: "request", labelKey: "Shared.SharedComponents.request" },
   { value: "output", labelKey: "Shared.SharedComponents.output" },
@@ -371,164 +407,6 @@ const OUTPUT_PANEL_LABEL_KEYS = [
   value: "code" | "response" | "example";
   labelKey: MessageKey;
 }[];
-
-// @solana/design-system/styles (imported by globals.css) owns the complete
-// light/dark --code-block-* and --shiki-token-* palette. Keep this Shiki theme
-// variable-based so the highlighted markup follows the root .dark class
-// without re-highlighting or duplicating the package palette here.
-const cssVariablesTheme = {
-  name: "css-variables",
-  type: "light" as const,
-  colors: {
-    "editor.background": "var(--shiki-background)",
-    "editor.foreground": "var(--shiki-foreground)",
-  },
-  settings: [
-    {
-      settings: {
-        foreground: "var(--shiki-foreground)",
-        background: "var(--shiki-background)",
-      },
-    },
-    {
-      scope: ["keyword", "keyword.control", "storage", "storage.type", "storage.modifier"],
-      settings: {
-        foreground: "var(--shiki-token-keyword)",
-        fontStyle: "italic",
-      },
-    },
-    {
-      scope: ["keyword.operator", "keyword.operator.assignment"],
-      settings: { foreground: "var(--shiki-token-keyword)" },
-    },
-    {
-      scope: ["string", "string.quoted", "string.template"],
-      settings: { foreground: "var(--shiki-token-string)" },
-    },
-    {
-      scope: ["comment", "comment.line", "comment.block", "punctuation.definition.comment"],
-      settings: {
-        foreground: "var(--shiki-token-comment)",
-        fontStyle: "italic",
-      },
-    },
-    {
-      scope: ["entity.name.function", "support.function", "meta.function-call"],
-      settings: { foreground: "var(--shiki-token-function)" },
-    },
-    {
-      scope: ["constant", "constant.numeric", "constant.language", "support.constant"],
-      settings: { foreground: "var(--shiki-token-constant)" },
-    },
-    {
-      scope: ["variable.parameter", "meta.parameter", "meta.object-literal.key"],
-      settings: { foreground: "var(--shiki-token-parameter)" },
-    },
-    {
-      scope: [
-        "punctuation",
-        "meta.brace",
-        "meta.delimiter",
-        "punctuation.separator",
-        "punctuation.terminator",
-      ],
-      settings: { foreground: "var(--shiki-token-punctuation)" },
-    },
-    {
-      scope: [
-        "entity.name.type",
-        "support.type",
-        "support.class",
-        "entity.other.inherited-class",
-        "meta.type.annotation",
-      ],
-      settings: { foreground: "var(--shiki-token-type)" },
-    },
-    {
-      scope: ["entity.other.attribute-name", "meta.attribute"],
-      settings: { foreground: "var(--shiki-token-attribute)" },
-    },
-    {
-      scope: ["constant.character.escape", "string.regexp"],
-      settings: { foreground: "var(--shiki-token-escape)" },
-    },
-    {
-      scope: ["variable.language"],
-      settings: {
-        foreground: "var(--shiki-token-variable-lang)",
-        fontStyle: "italic",
-      },
-    },
-    {
-      scope: ["variable", "variable.other", "support.variable"],
-      settings: { foreground: "var(--shiki-foreground)" },
-    },
-  ],
-};
-
-let shikiModulePromise: Promise<typeof import("shiki")> | null = null;
-
-function getShikiModule() {
-  if (!shikiModulePromise) {
-    shikiModulePromise = import("shiki");
-  }
-
-  return shikiModulePromise;
-}
-
-function CodeBlockContent({ content, language }: { content: string; language: HighlightLanguage }) {
-  const [renderedHtml, setRenderedHtml] = useState<string>("");
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function highlight() {
-      try {
-        const shiki = await getShikiModule();
-        const html = await shiki.codeToHtml(content, {
-          lang: language,
-          theme: cssVariablesTheme,
-        });
-
-        if (!cancelled) {
-          setRenderedHtml(html);
-        }
-      } catch {
-        if (!cancelled) {
-          setRenderedHtml("");
-        }
-      }
-    }
-
-    void highlight();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [content, language]);
-
-  return (
-    <div
-      className="h-full w-full overflow-auto text-sm"
-      style={{
-        tabSize: 2,
-        scrollbarColor: "var(--code-block-scrollbar-thumb) transparent",
-      }}
-    >
-      {renderedHtml ? (
-        <div
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki returns HTML for syntax-highlighted code blocks.
-          dangerouslySetInnerHTML={{ __html: renderedHtml }}
-          className="h-full [&_.shiki]:m-0 [&_.shiki]:h-full [&_.shiki]:min-h-full [&_.shiki]:w-full [&_.shiki]:overflow-visible [&_.shiki]:bg-transparent [&_.shiki]:p-0 [&_.shiki]:text-sm [&_.shiki]:leading-7 [&_.shiki]:[color:var(--shiki-foreground)] [&_.shiki_code]:block [&_.shiki_code]:min-h-full [&_.shiki_code]:min-w-full [&_.shiki_code]:whitespace-normal [&_.shiki_code_.line]:block [&_.shiki_code_.line]:whitespace-pre"
-        />
-      ) : (
-        <pre className="m-0 min-h-full p-0 leading-7 text-[var(--shiki-foreground)]">
-          <code>{content}</code>
-        </pre>
-      )}
-    </div>
-  );
-}
 
 export function ApiPlaygroundShell({
   apiBaseUrl,
@@ -614,10 +492,11 @@ export function ApiPlaygroundShell({
     setExecuteError(null);
   }, [activeEndpointId, preselectedFieldValues]);
 
-  const requestBody = useMemo(
+  const requestBodyResult = useMemo(
     () => (activeEndpoint ? buildRequestBody(activeEndpoint.bodyFields, fieldValues) : null),
     [activeEndpoint, fieldValues]
   );
+  const requestBody = requestBodyResult?.body ?? null;
   const resolvedPath = useMemo(
     () => (activeEndpoint ? resolvePath(activeEndpoint, fieldValues) : ""),
     [activeEndpoint, fieldValues]
@@ -688,6 +567,16 @@ export function ApiPlaygroundShell({
     if (missingFields.length > 0) {
       setExecuteError(
         t("Shared.SharedComponents.completeRequiredFields", { fields: missingFields.join(", ") })
+      );
+      setActivePanel("response");
+      return;
+    }
+
+    if (requestBodyResult?.invalidJsonField) {
+      setExecuteError(
+        t("Shared.SharedComponents.invalidJsonField", {
+          field: requestBodyResult.invalidJsonField,
+        })
       );
       setActivePanel("response");
       return;
@@ -774,12 +663,16 @@ export function ApiPlaygroundShell({
             </div>
             <select
               aria-label={t("Shared.SharedComponents.selectApiEndpoint")}
-              className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-xl opacity-0"
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-xl bg-surface-raised text-primary opacity-0"
               value={activeEndpoint.id}
               onChange={(event) => updateEndpointInUrl(event.currentTarget.value)}
             >
               {endpoints.map((endpoint) => (
-                <option key={endpoint.id} value={endpoint.id}>
+                <option
+                  key={endpoint.id}
+                  value={endpoint.id}
+                  className="bg-surface-raised text-primary"
+                >
                   {endpoint.method} {endpoint.title}
                 </option>
               ))}
@@ -873,6 +766,18 @@ export function ApiPlaygroundShell({
                               </option>
                             ))}
                           </select>
+                        ) : field.kind === "textarea" ? (
+                          <textarea
+                            id={getFieldId(field.key)}
+                            value={fieldValues[field.key] ?? ""}
+                            onChange={(event) =>
+                              updateFieldValue(field.key, event.currentTarget.value)
+                            }
+                            placeholder={field.placeholder}
+                            rows={8}
+                            spellCheck={false}
+                            className="w-full resize-y rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+                          />
                         ) : (
                           <Input
                             id={getFieldId(field.key)}
@@ -922,6 +827,18 @@ export function ApiPlaygroundShell({
                               </option>
                             ))}
                           </select>
+                        ) : field.kind === "textarea" ? (
+                          <textarea
+                            id={getFieldId(field.key)}
+                            value={fieldValues[field.key] ?? ""}
+                            onChange={(event) =>
+                              updateFieldValue(field.key, event.currentTarget.value)
+                            }
+                            placeholder={field.placeholder}
+                            rows={10}
+                            spellCheck={false}
+                            className="w-full resize-y rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+                          />
                         ) : (
                           <Input
                             id={getFieldId(field.key)}
@@ -995,7 +912,7 @@ export function ApiPlaygroundShell({
                     message={t("Shared.SharedComponents.runRequestToInspectOutput")}
                   />
                 ) : (
-                  <CodeBlockContent content={panelContent} language={panelLanguage} />
+                  <HighlightedCode content={panelContent} language={panelLanguage} />
                 )}
               </div>
               <div

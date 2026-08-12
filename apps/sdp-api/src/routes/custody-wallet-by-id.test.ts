@@ -7,7 +7,7 @@ import app from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
@@ -192,7 +192,6 @@ describe("Custody wallet by ID route", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

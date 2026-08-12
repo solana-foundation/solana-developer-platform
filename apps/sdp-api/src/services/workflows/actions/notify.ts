@@ -1,7 +1,9 @@
 import { getDb } from "@/db";
 import { createNotificationsRepository, type WorkflowExecutionRow } from "@/db/repositories";
+import { getLogger } from "@/runtime/logger";
 import { createTransactionalEmailService, isEmailConfigured } from "@/services/email";
 import type { Env } from "@/types/env";
+import { humanizeWorkflowKey } from "../labels";
 import { errorMessage, permanentFail, resolveParam, succeeded } from "./onchain";
 import type { ActionContext, ActionExecutionResult } from "./types";
 
@@ -91,10 +93,14 @@ export async function runNotify(
   execution: WorkflowExecutionRow,
   action: ActionContext
 ): Promise<ActionExecutionResult> {
-  const title = resolveParam(action, "title") ?? `Workflow: ${execution.trigger_type}`;
+  // Humanized for the server-composed defaults (email subject/body + the stored fallback).
+  // The dashboard re-localizes in-app rows from `params.triggerType`, so a raw key never
+  // reaches a reader on either channel.
+  const triggerLabel = humanizeWorkflowKey(execution.trigger_type);
+  const title = resolveParam(action, "title") ?? `Automation ran: ${triggerLabel}`;
   const body =
     resolveParam(action, "message") ??
-    `A "${execution.trigger_type}" event triggered an automation on this asset.`;
+    `A ${triggerLabel} event triggered an automation on this asset.`;
 
   // Targeting one specific mailbox (no in-app row — there's no user to attach it to).
   const specificEmail = resolveParam(action, "email");
@@ -168,9 +174,10 @@ export async function runNotify(
     emailed = sends.filter((s) => s.status === "fulfilled").length;
     for (const send of sends) {
       if (send.status === "rejected") {
-        console.error("workflow notify: email send failed", {
-          error: errorMessage(send.reason),
-        });
+        getLogger().error(
+          { error: errorMessage(send.reason) },
+          "workflow notify: email send failed"
+        );
       }
     }
   }

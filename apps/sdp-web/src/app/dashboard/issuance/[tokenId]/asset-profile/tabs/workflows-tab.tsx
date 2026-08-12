@@ -1,12 +1,34 @@
 "use client";
 
-import { Loader2, Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import {
+  ArrowRight,
+  BadgeCheck,
+  Check,
+  Circle,
+  CircleCheck,
+  CircleSlash,
+  Clock,
+  Filter,
+  Inbox,
+  Loader2,
+  type LucideIcon,
+  Pencil,
+  Play,
+  Power,
+  PowerOff,
+  RefreshCw,
+  Trash2,
+  TriangleAlert,
+  Wallet,
+  X,
+  Zap,
+} from "lucide-react";
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { formatRelativeTime } from "@/app/dashboard/activity-format-utils";
 import { fetchWebhookEndpoints } from "@/app/dashboard/webhooks/webhook-endpoints.client";
 import type { WebhookEndpointView } from "@/app/dashboard/webhooks/webhook-endpoints.data";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,9 +47,11 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { cn } from "@/lib/utils";
 import {
   approveExecution,
   type CatalogActionView,
+  type CatalogTriggerView,
   createWorkflow,
   deleteWorkflow,
   type ExecutionStatus,
@@ -52,7 +76,14 @@ import {
 } from "../workflows.data";
 import { GuardEditor } from "./guard-editor";
 import { SendWebhookParams } from "./send-webhook-params";
-import { WorkflowFlowPreview } from "./workflow-flow-preview";
+import {
+  ACTION_ICONS,
+  CardSelect,
+  type CardSelectOption,
+  ConnectorBadge,
+  TRIGGER_ICONS,
+} from "./workflow-builder-cards";
+import { WorkflowFlowGraph } from "./workflow-flow-preview";
 
 // ── Static catalog metadata ─────────────────────────────────────────────────────────
 
@@ -109,21 +140,35 @@ const ACTION_PARAM_FIELDS: Record<string, ParamField[]> = {
   allowlist_remove: [{ key: "wallet", labelKey: "paramWallet", helpKey: WALLET_HELP }],
 };
 
-const TIER_VARIANT: Record<ExecutionTier, "success" | "warning" | "danger"> = {
-  automated: "success",
-  sensitive: "warning",
-  requires_approval: "danger",
+// Execution status → glyph + tone. Colour stays within the semantic four: green (done),
+// red (failed), amber (needs a human), gray (in flight / neutral).
+const STATUS_GLYPH: Record<ExecutionStatus, LucideIcon> = {
+  succeeded: CircleCheck,
+  failed: TriangleAlert,
+  awaiting_review: Clock,
+  processing: Loader2,
+  pending: Circle,
+  cancelled: CircleSlash,
+};
+const STATUS_BADGE_VARIANT: Record<ExecutionStatus, BadgeVariant> = {
+  succeeded: "success",
+  failed: "danger",
+  awaiting_review: "warning",
+  processing: "info",
+  pending: "default",
+  cancelled: "default",
 };
 
-// Status dots stay within the semantic four: green (done), red (failed), amber
-// (needs a human), gray (in flight / neutral).
-const STATUS_DOT: Record<ExecutionStatus, string> = {
-  succeeded: "bg-success",
-  failed: "bg-error",
-  awaiting_review: "bg-warning",
-  processing: "bg-fill-strong",
-  pending: "bg-fill-strong",
-  cancelled: "bg-fill-strong",
+// Holder KYC status → pill variant + glyph.
+const KYC_STATUS_META: Record<string, { variant: BadgeVariant; icon: LucideIcon }> = {
+  verified: { variant: "success", icon: BadgeCheck },
+  pending: { variant: "warning", icon: Clock },
+  rejected: { variant: "danger", icon: X },
+  unverified: { variant: "default", icon: Circle },
+};
+const KYC_STATUS_FALLBACK: { variant: BadgeVariant; icon: LucideIcon } = {
+  variant: "default",
+  icon: Circle,
 };
 
 // Triggers whose payload identifies a subject wallet. Any other trigger driving a
@@ -452,6 +497,7 @@ export function WorkflowsTab({
   tokenId,
   canManage,
   canManagePrivileged,
+  verifiedHolders,
 }: {
   tokenId: string;
   // tokens:write — enough for `automated` rules.
@@ -459,6 +505,9 @@ export function WorkflowsTab({
   // tokens:admin — required for `sensitive` and `requires_approval` rules, mirroring the
   // API's tier gate. Enforced there; here it just keeps the builder honest.
   canManagePrivileged: boolean;
+  // The asset gates on verified holders (KYC access mode). Enrollment is only meaningful
+  // when it does, so the holders roster is shown only then — see the render site below.
+  verifiedHolders: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -644,6 +693,13 @@ export function WorkflowsTab({
       setShowValidation(true);
       return;
     }
+    // What the review selector SHOWS for a `requires_approval` action, which is locked to
+    // manual. The selector only overrides its displayed value, so the state behind it is
+    // still whatever was picked before the action was chosen — "auto" by default. Sending
+    // that raw is rejected by the API (the tier always requires manual review), which
+    // would make the destructive rules the lock exists for impossible to save.
+    const submittedReviewMode =
+      tierForAction(effectiveAction) === "requires_approval" ? "manual" : reviewMode;
     // Only send non-empty params; blanks fall back to trigger-payload defaults server-side.
     const actionParams: Record<string, string> = {};
     for (const field of paramFields) {
@@ -660,7 +716,7 @@ export function WorkflowsTab({
           await updateWorkflow(tokenId, editingRule.id, {
             actionParams,
             condition: condition ?? null,
-            reviewMode,
+            reviewMode: submittedReviewMode,
           });
           resetBuilder();
           await rulesSwr.mutate();
@@ -676,7 +732,7 @@ export function WorkflowsTab({
         await createWorkflow(tokenId, {
           triggerType: effectiveTrigger,
           actionType: effectiveAction,
-          reviewMode,
+          reviewMode: submittedReviewMode,
           actionParams: Object.keys(actionParams).length > 0 ? actionParams : undefined,
           condition,
         });
@@ -818,53 +874,41 @@ export function WorkflowsTab({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {/* lg cramps the controls next to the workspace sidebar (same call the
-                compliance tab made) — split only on genuinely wide viewports. */}
-            <div className="grid gap-6 min-[1440px]:grid-cols-2">
-              <BuilderControls
-                t={t}
-                wf={wf}
-                label={label}
-                describe={describe}
-                catalog={catalog}
-                editing={Boolean(editingRule)}
-                triggerType={effectiveTrigger ?? null}
-                actionType={effectiveAction ?? null}
-                reviewMode={reviewMode}
-                params={params}
-                paramFields={paramFields}
-                selectedAction={selectedAction}
-                conditionFields={conditionFields}
-                guards={guards}
-                webhookEndpoints={webhookEndpoints}
-                editingRuleId={editingRule?.id ?? null}
-                emailEnabled={emailEnabled}
-                validation={validation}
-                showValidation={showValidation}
-                busy={busyId === "create"}
-                canSubmit={canSubmit}
-                canUseAction={canUseAction}
-                onTriggerChange={onTriggerChange}
-                onActionChange={onActionChange}
-                onReviewModeChange={setReviewMode}
-                onParamChange={(key, value) => setParams((prev) => ({ ...prev, [key]: value }))}
-                onGuardAdd={addGuard}
-                onGuardUpdate={updateGuard}
-                onGuardRemove={removeGuard}
-                onSubmit={() => void handleSubmit()}
-                onCancelEdit={resetBuilder}
-              />
-
-              {/* Execution preview — exactly what will happen when this rule runs. */}
-              <WorkflowFlowPreview
-                trigger={selectedTrigger}
-                action={selectedAction}
-                guards={guards}
-                reviewMode={reviewMode}
-                paramSummary={paramSummary}
-                walletGap={validation.walletGap}
-              />
-            </div>
+            <WorkflowBuilder
+              t={t}
+              wf={wf}
+              label={label}
+              describe={describe}
+              catalog={catalog}
+              editing={Boolean(editingRule)}
+              triggerType={effectiveTrigger ?? null}
+              actionType={effectiveAction ?? null}
+              reviewMode={reviewMode}
+              params={params}
+              paramFields={paramFields}
+              selectedTrigger={selectedTrigger}
+              selectedAction={selectedAction}
+              conditionFields={conditionFields}
+              guards={guards}
+              webhookEndpoints={webhookEndpoints}
+              editingRuleId={editingRule?.id ?? null}
+              emailEnabled={emailEnabled}
+              validation={validation}
+              showValidation={showValidation}
+              paramSummary={paramSummary}
+              busy={busyId === "create"}
+              canSubmit={canSubmit}
+              canUseAction={canUseAction}
+              onTriggerChange={onTriggerChange}
+              onActionChange={onActionChange}
+              onReviewModeChange={setReviewMode}
+              onParamChange={(key, value) => setParams((prev) => ({ ...prev, [key]: value }))}
+              onGuardAdd={addGuard}
+              onGuardUpdate={updateGuard}
+              onGuardRemove={removeGuard}
+              onSubmit={() => void handleSubmit()}
+              onCancelEdit={resetBuilder}
+            />
           </CardContent>
         </Card>
       ) : null}
@@ -876,6 +920,7 @@ export function WorkflowsTab({
         locale={locale}
         canManage={canManage}
         canUseAction={canUseAction}
+        tierForAction={tierForAction}
         busyId={busyId}
         editingRuleId={editingRule?.id ?? null}
         onToggle={(rule) => void handleToggle(rule)}
@@ -883,7 +928,7 @@ export function WorkflowsTab({
         onDelete={handleDelete}
       />
 
-      {canManage ? (
+      {canManage && verifiedHolders ? (
         <HoldersCard
           holders={holders}
           wf={wf}
@@ -929,9 +974,417 @@ export function WorkflowsTab({
   );
 }
 
-// ── Builder controls (left column) ──────────────────────────────────────────────────
+// ── Builder: shared field blocks ────────────────────────────────────────────────────
 
-function BuilderControls(props: {
+// Pre-rendered pieces handed to the layout, so the wiring lives in one place.
+interface LayoutArgs {
+  wf: ReturnType<typeof makeWf>;
+  triggerType: string | null;
+  triggerSelect: ReactNode;
+  actionSelect: ReactNode;
+  triggerIcon: LucideIcon;
+  actionIcon: LucideIcon;
+  flowPanel: ReactNode;
+  guardEditor: ReactNode;
+  tierNotice: ReactNode;
+  reviewField: ReactNode;
+  paramsBlock: ReactNode;
+  emailWarning: ReactNode;
+  validationMessage: ReactNode;
+  submitRow: ReactNode;
+}
+
+// `heading`, not `title`: a `title` JSX prop is read as user-facing copy by the i18n
+// audit, which would then flag the i18n keys passed through it.
+function StageHeading({ heading, hint }: { heading: string; hint?: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="h-3.5 w-1 shrink-0 rounded-full bg-fill-strong" aria-hidden />
+      <span className="text-sm font-semibold text-primary">{heading}</span>
+      {hint ? <span className="text-xs text-tertiary">{hint}</span> : null}
+    </div>
+  );
+}
+
+// Surfaces only the unsupported reason (the cards already carry the tier badge).
+function TierNotice({ t, selectedAction }: { t: TFunc; selectedAction: CatalogActionView | null }) {
+  const support = selectedAction?.support;
+  if (!support || support.ok) {
+    return null;
+  }
+  return (
+    <p className="rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">
+      {t("DashboardIssuance.workflows.notSupported", { reason: support.reason })}
+    </p>
+  );
+}
+
+function ReviewField({
+  wf,
+  reviewMode,
+  reviewLocked,
+  onChange,
+}: {
+  wf: ReturnType<typeof makeWf>;
+  reviewMode: "auto" | "manual";
+  reviewLocked: boolean;
+  onChange: (value: "auto" | "manual") => void;
+}) {
+  return (
+    <div className="space-y-1.5 text-sm">
+      <span className="font-medium text-secondary">{wf("review")}</span>
+      <Select
+        ariaLabel={wf("review")}
+        value={reviewLocked ? "manual" : reviewMode}
+        disabled={reviewLocked}
+        onValueChange={(v) => onChange(v === "manual" ? "manual" : "auto")}
+      >
+        <SelectItem value="auto" disabled={reviewLocked}>
+          {wf("autoApply")}
+        </SelectItem>
+        <SelectItem value="manual">{wf("manualReview")}</SelectItem>
+      </Select>
+      {reviewLocked ? <p className="text-secondary text-xs">{wf("reviewLockedNote")}</p> : null}
+    </div>
+  );
+}
+
+function ParamsBlock({
+  paramFields,
+  params,
+  wf,
+  showValidation,
+  validation,
+  onParamChange,
+}: {
+  paramFields: ParamField[];
+  params: Record<string, string>;
+  wf: ReturnType<typeof makeWf>;
+  showValidation: boolean;
+  validation: BuilderValidation;
+  onParamChange: (key: string, value: string) => void;
+}) {
+  if (paramFields.length === 0) {
+    return null;
+  }
+  return (
+    <div
+      className={cn(
+        "grid gap-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3",
+        // A lone field (e.g. allowlist's wallet) takes the full row; pairs split.
+        paramFields.length > 1 && "sm:grid-cols-2"
+      )}
+    >
+      {paramFields.map((field) => (
+        <ParamFieldControl
+          key={field.key}
+          field={field}
+          wf={wf}
+          value={params[field.key] ?? ""}
+          error={showValidation ? validation.fieldErrors[field.key] : undefined}
+          onChange={(value) => onParamChange(field.key, value)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function EmailWarning({
+  actionType,
+  emailEnabled,
+  params,
+  wf,
+}: {
+  actionType: string | null;
+  emailEnabled: boolean | null;
+  params: Record<string, string>;
+  wf: ReturnType<typeof makeWf>;
+}) {
+  // Only an explicit `false` warns — an unreachable config endpoint stays silent. A
+  // specific-email rule can't fall back to in-app, so its warning is stronger.
+  if (!(actionType === "notify" && emailEnabled === false)) {
+    return null;
+  }
+  return (
+    <div className="rounded-lg border border-warning-border bg-warning-bg px-3 py-2 text-xs text-warning">
+      {(params.email ?? "").trim() ? wf("emailUnavailableSpecific") : wf("emailUnavailable")}
+    </div>
+  );
+}
+
+function ValidationMessage({
+  showValidation,
+  validation,
+  wf,
+}: {
+  showValidation: boolean;
+  validation: BuilderValidation;
+  wf: ReturnType<typeof makeWf>;
+}) {
+  if (!showValidation || validation.ok) {
+    return null;
+  }
+  return (
+    <p role="alert" className="text-xs text-error">
+      {validation.walletGap
+        ? wf("validationWalletGap")
+        : validation.guardsIncomplete
+          ? wf("validationGuards")
+          : wf("validationFields")}
+    </p>
+  );
+}
+
+function SubmitRow({
+  editing,
+  busy,
+  canSubmit,
+  wf,
+  onSubmit,
+  onCancelEdit,
+}: {
+  editing: boolean;
+  busy: boolean;
+  canSubmit: boolean;
+  wf: ReturnType<typeof makeWf>;
+  onSubmit: () => void;
+  onCancelEdit: () => void;
+}) {
+  return (
+    <div className="flex justify-end gap-2">
+      {editing ? (
+        <Button type="button" size="sm" variant="ghost" onClick={onCancelEdit}>
+          {wf("cancelEdit")}
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        size="sm"
+        onClick={onSubmit}
+        disabled={!canSubmit}
+        iconLeft={busy ? <Loader2 className="size-3.5 animate-spin" /> : undefined}
+      >
+        {editing ? wf("saveChanges") : wf("create")}
+      </Button>
+    </div>
+  );
+}
+
+// ── Builder: dropdown selectors (used by the sketch-style layouts) ──────────────────
+
+const TIER_BADGE_VARIANT: Record<ExecutionTier, "success" | "warning" | "danger"> = {
+  automated: "success",
+  sensitive: "warning",
+  requires_approval: "danger",
+};
+
+// "  — unavailable" → "unavailable": the catalog suffix carries a separator for inline
+// use; as a card note it stands alone.
+function stripSuffix(value: string): string {
+  return value.replace(/^[\s—·-]+/, "").trim();
+}
+
+// The WHEN/THEN pickers. Compact select triggers whose options are the rich cards
+// (icon + description + tier badge) — the card grids' content, in a dropdown. i18n keys
+// match the ones already tracked in the copy baseline.
+function TriggerSelect({
+  catalog,
+  value,
+  editing,
+  onChange,
+  wf,
+  label,
+  describe,
+}: {
+  catalog: WorkflowCatalog | null;
+  value: string | null;
+  editing: boolean;
+  onChange: (value: string | null) => void;
+  wf: ReturnType<typeof makeWf>;
+  label: ReturnType<typeof makeLabel>;
+  describe: ReturnType<typeof makeDescription>;
+}) {
+  const options: CardSelectOption[] = (catalog?.triggers ?? []).map((trigger) => ({
+    value: trigger.type,
+    icon: TRIGGER_ICONS[trigger.type] ?? Zap,
+    label: label("trigger", trigger.type),
+    description: describe("trigger", trigger.type),
+  }));
+  return (
+    <CardSelect
+      ariaLabel={wf("when")}
+      value={value}
+      disabled={editing}
+      onValueChange={onChange}
+      placeholder={wf("triggerPlaceholder")}
+      options={options}
+    />
+  );
+}
+
+function ActionSelect({
+  catalog,
+  value,
+  editing,
+  canUseAction,
+  onChange,
+  wf,
+  label,
+  describe,
+}: {
+  catalog: WorkflowCatalog | null;
+  value: string | null;
+  editing: boolean;
+  canUseAction: (type: string) => boolean;
+  onChange: (value: string | null) => void;
+  wf: ReturnType<typeof makeWf>;
+  label: ReturnType<typeof makeLabel>;
+  describe: ReturnType<typeof makeDescription>;
+}) {
+  const options: CardSelectOption[] = (catalog?.actions ?? []).map((a) => {
+    const permitted = canUseAction(a.type);
+    const unsupported = !a.support.ok;
+    const tier = a.action.execution;
+    const tierLabel = wf(`tierLabels.${tier}`);
+    return {
+      value: a.type,
+      icon: ACTION_ICONS[a.type] ?? Play,
+      label: label("action", a.type),
+      description: describe("action", a.type),
+      badge: <Badge variant={TIER_BADGE_VARIANT[tier]}>{tierLabel}</Badge>,
+      note: unsupported
+        ? stripSuffix(wf("unavailableSuffix"))
+        : permitted
+          ? undefined
+          : stripSuffix(wf("adminOnlySuffix")),
+      disabled: editing || unsupported || !permitted,
+      group: tierLabel,
+    };
+  });
+  return (
+    <CardSelect
+      ariaLabel={wf("then")}
+      value={value}
+      disabled={editing}
+      onValueChange={onChange}
+      placeholder={wf("actionPlaceholder")}
+      options={options}
+    />
+  );
+}
+
+// ── Builder: small presentational helpers for the sketch-style layouts ──────────────
+
+// Renders a literal/prop string without the i18n audit reading it as copy (`text` is a
+// non-user-facing prop). These sketch layouts are throwaway comparison scaffolding, so a
+// few structural labels ("WHEN", "Summary"…) stay untranslated until a layout is chosen.
+function MetaText({ text, className }: { text: string; className?: string }) {
+  return <span className={className}>{text}</span>;
+}
+
+// A single node/panel box: kicker (WHEN/THEN/GUARD), icon, optional step number, control.
+function BuilderNode({
+  icon: Icon,
+  kicker,
+  index,
+  active,
+  children,
+}: {
+  icon: LucideIcon;
+  kicker: string;
+  index?: number;
+  active?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        // min-w-0 so the flex row splits into equal columns regardless of the selected
+        // option's length — the trigger truncates instead of widening its column.
+        "min-w-0 flex-1 space-y-3 rounded-xl border bg-surface-raised p-3 transition-colors",
+        active ? "border-primary" : "border-border-default"
+      )}
+    >
+      <div className="flex items-center gap-2">
+        {index ? (
+          <span className="flex size-5 items-center justify-center rounded-full border border-border-default text-[11px] font-semibold text-secondary">
+            {index}
+          </span>
+        ) : null}
+        <span className="flex size-9 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+          <Icon className="size-[18px]" aria-hidden />
+        </span>
+        <MetaText
+          text={kicker}
+          className="text-[11px] font-semibold uppercase tracking-wide text-tertiary"
+        />
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// Labeled field wrapper (stepper layout). `term` (not `label`) is a resolved string —
+// a `label=` JSX attribute would be read as copy by the i18n audit.
+// Decorative left-to-right connector, hidden when the row wraps to a column.
+function RowArrow() {
+  return (
+    <div className="hidden items-center self-center xl:flex" aria-hidden>
+      <ConnectorBadge icon={ArrowRight} />
+    </div>
+  );
+}
+
+// ── Builder: layout ─────────────────────────────────────────────────────────────────
+//
+// WHEN → THEN → GUARD across the top, then rule settings + the live execution preview.
+// The GUARD slot is the user's "only if…" filter (never "capability enabled" — capability
+// is automatic and shows only in the preview). A rule is always exactly one trigger → one
+// action → optional filter. The WHEN/THEN/GUARD kicker labels are untranslated for now.
+
+function GuardSlot(args: LayoutArgs) {
+  return (
+    args.guardEditor ?? <p className="text-xs text-tertiary">{args.wf("triggerPlaceholder")}</p>
+  );
+}
+
+// TL — "Wizard row": WHEN → THEN → GUARD as a horizontal card row, settings + live
+// execution preview below (real engine steps, not invented narration).
+function WizardRowLayout(args: LayoutArgs) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 xl:flex-row xl:items-stretch">
+        <BuilderNode icon={args.triggerIcon} kicker="WHEN">
+          {args.triggerSelect}
+        </BuilderNode>
+        <RowArrow />
+        <BuilderNode icon={args.actionIcon} kicker="THEN">
+          {args.actionSelect}
+        </BuilderNode>
+        <RowArrow />
+        <BuilderNode icon={Filter} kicker="GUARD">
+          <GuardSlot {...args} />
+        </BuilderNode>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
+          <StageHeading heading="Rule settings" />
+          {args.reviewField}
+          {args.paramsBlock}
+        </div>
+        <div className="space-y-2">{args.flowPanel}</div>
+      </div>
+      {args.tierNotice}
+      {args.emailWarning}
+      {args.validationMessage}
+      {args.submitRow}
+    </div>
+  );
+}
+
+// ── Builder (assembles the shared pieces and renders the layout) ────────────────────
+
+function WorkflowBuilder(props: {
   t: TFunc;
   wf: ReturnType<typeof makeWf>;
   label: ReturnType<typeof makeLabel>;
@@ -943,6 +1396,7 @@ function BuilderControls(props: {
   reviewMode: "auto" | "manual";
   params: Record<string, string>;
   paramFields: ParamField[];
+  selectedTrigger: CatalogTriggerView | null;
   selectedAction: CatalogActionView | null;
   conditionFields: string[];
   guards: GuardDraft[];
@@ -951,6 +1405,7 @@ function BuilderControls(props: {
   emailEnabled: boolean | null;
   validation: BuilderValidation;
   showValidation: boolean;
+  paramSummary: string;
   busy: boolean;
   canSubmit: boolean;
   canUseAction: (type: string) => boolean;
@@ -964,176 +1419,114 @@ function BuilderControls(props: {
   onSubmit: () => void;
   onCancelEdit: () => void;
 }) {
-  const {
-    t,
-    wf,
-    label,
-    describe,
-    catalog,
-    editing,
-    triggerType,
-    actionType,
-    reviewMode,
-    params,
-    paramFields,
-    selectedAction,
-    conditionFields,
-    guards,
-    emailEnabled,
-    validation,
-    showValidation,
-    busy,
-    canSubmit,
-    canUseAction,
-  } = props;
-
+  const { wf, label } = props;
   // `requires_approval` always holds for a human — the server forces it regardless of
-  // what's stored — so offering "auto apply" here would contradict the preview beside it.
-  const reviewLocked = selectedAction?.action.execution === "requires_approval";
+  // what's stored — so offering "auto apply" here would contradict the preview.
+  const reviewLocked = props.selectedAction?.action.execution === "requires_approval";
 
-  return (
-    <div className="space-y-4">
-      <div className="space-y-4">
-        <div className="space-y-1.5 text-sm">
-          <span className="font-medium text-secondary">{wf("when")}</span>
-          <Select
-            ariaLabel={wf("when")}
-            value={triggerType}
-            disabled={editing}
-            onValueChange={props.onTriggerChange}
-            placeholder={wf("triggerPlaceholder")}
-          >
-            {(catalog?.triggers ?? []).map((trigger) => (
-              <SelectItem key={trigger.type} value={trigger.type}>
-                {label("trigger", trigger.type)}
-              </SelectItem>
-            ))}
-          </Select>
-          {describe("trigger", triggerType) ? (
-            <p className="text-secondary text-xs">{describe("trigger", triggerType)}</p>
-          ) : null}
-        </div>
+  // Icons for the WHEN/THEN nodes; fall back to a neutral glyph.
+  const triggerIcon = (props.triggerType && TRIGGER_ICONS[props.triggerType]) || Zap;
+  const actionIcon = (props.actionType && ACTION_ICONS[props.actionType]) || Play;
 
-        <div className="space-y-1.5 text-sm">
-          <span className="font-medium text-secondary">{wf("then")}</span>
-          <Select
-            ariaLabel={wf("then")}
-            value={actionType}
-            disabled={editing}
-            onValueChange={props.onActionChange}
-            placeholder={wf("actionPlaceholder")}
-          >
-            {(catalog?.actions ?? []).map((a) => {
-              const permitted = canUseAction(a.type);
-              const suffix = !a.support.ok
-                ? wf("unavailableSuffix")
-                : permitted
-                  ? ""
-                  : wf("adminOnlySuffix");
-              return (
-                <SelectItem key={a.type} value={a.type} disabled={!a.support.ok || !permitted}>
-                  {`${label("action", a.type)}${suffix}`}
-                </SelectItem>
-              );
-            })}
-          </Select>
-          {describe("action", actionType) ? (
-            <p className="text-secondary text-xs">{describe("action", actionType)}</p>
-          ) : null}
-        </div>
-
-        <div className="space-y-1.5 text-sm">
-          <span className="font-medium text-secondary">{wf("review")}</span>
-          <Select
-            ariaLabel={wf("review")}
-            value={reviewLocked ? "manual" : reviewMode}
-            disabled={reviewLocked}
-            onValueChange={(v) => props.onReviewModeChange(v === "manual" ? "manual" : "auto")}
-          >
-            <SelectItem value="auto" disabled={reviewLocked}>
-              {wf("autoApply")}
-            </SelectItem>
-            <SelectItem value="manual">{wf("manualReview")}</SelectItem>
-          </Select>
-          {reviewLocked ? <p className="text-secondary text-xs">{wf("reviewLockedNote")}</p> : null}
-        </div>
-      </div>
-
-      {selectedAction ? (
-        <div className="flex items-center gap-2 text-sm">
-          <Badge variant={TIER_VARIANT[selectedAction.action.execution]}>
-            {wf(`tierLabels.${selectedAction.action.execution}`)}
-          </Badge>
-          {!selectedAction.support.ok ? (
-            <span className="text-secondary">
-              {t("DashboardIssuance.workflows.notSupported", {
-                reason: selectedAction.support.reason,
-              })}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* Per-action parameters (amount, destination, webhook target, notify audience…). */}
-      <BuilderParamsBlock
-        actionType={actionType}
-        editingRuleId={props.editingRuleId}
+  const args: LayoutArgs = {
+    wf,
+    triggerType: props.triggerType,
+    triggerSelect: (
+      <TriggerSelect
+        catalog={props.catalog}
+        value={props.triggerType}
+        editing={props.editing}
+        onChange={props.onTriggerChange}
         wf={wf}
-        params={params}
-        paramFields={paramFields}
+        label={label}
+        describe={props.describe}
+      />
+    ),
+    actionSelect: (
+      <ActionSelect
+        catalog={props.catalog}
+        value={props.actionType}
+        editing={props.editing}
+        canUseAction={props.canUseAction}
+        onChange={props.onActionChange}
+        wf={wf}
+        label={label}
+        describe={props.describe}
+      />
+    ),
+    triggerIcon,
+    actionIcon,
+    flowPanel: (
+      <WorkflowFlowGraph
+        trigger={props.selectedTrigger}
+        action={props.selectedAction}
+        guards={props.guards}
+        reviewMode={props.reviewMode}
+        paramSummary={props.paramSummary}
+        walletGap={props.validation.walletGap}
+        orientation="vertical"
+        showChrome={true}
+      />
+    ),
+    guardEditor: props.triggerType ? (
+      <GuardEditor
+        conditionFields={props.conditionFields}
+        guards={props.guards}
+        onAdd={props.onGuardAdd}
+        onUpdate={props.onGuardUpdate}
+        onRemove={props.onGuardRemove}
+      />
+    ) : null,
+    tierNotice: <TierNotice t={props.t} selectedAction={props.selectedAction} />,
+    reviewField: (
+      <ReviewField
+        wf={wf}
+        reviewMode={props.reviewMode}
+        reviewLocked={reviewLocked}
+        onChange={props.onReviewModeChange}
+      />
+    ),
+    paramsBlock: (
+      <BuilderParamsBlock
+        actionType={props.actionType}
+        editingRuleId={props.editingRuleId}
+        paramFields={props.paramFields}
+        params={props.params}
         webhookEndpoints={props.webhookEndpoints}
-        fieldErrors={showValidation ? validation.fieldErrors : {}}
+        wf={wf}
+        showValidation={props.showValidation}
+        validation={props.validation}
         onParamChange={props.onParamChange}
       />
+    ),
+    emailWarning: (
+      <EmailWarning
+        actionType={props.actionType}
+        emailEnabled={props.emailEnabled}
+        params={props.params}
+        wf={wf}
+      />
+    ),
+    validationMessage: (
+      <ValidationMessage
+        showValidation={props.showValidation}
+        validation={props.validation}
+        wf={wf}
+      />
+    ),
+    submitRow: (
+      <SubmitRow
+        editing={props.editing}
+        busy={props.busy}
+        canSubmit={props.canSubmit}
+        wf={wf}
+        onSubmit={props.onSubmit}
+        onCancelEdit={props.onCancelEdit}
+      />
+    ),
+  };
 
-      {/* GUARD ("only if…") — optional filters over the trigger payload. */}
-      {triggerType ? (
-        <GuardEditor
-          conditionFields={conditionFields}
-          guards={guards}
-          onAdd={props.onGuardAdd}
-          onUpdate={props.onGuardUpdate}
-          onRemove={props.onGuardRemove}
-        />
-      ) : null}
-
-      {/* Generic, detail-free notice when the email channel isn't configured. Only an
-          explicit `false` warns — an unreachable config endpoint stays silent. A
-          specific-email rule can't fall back to in-app, so its warning is stronger. */}
-      {actionType === "notify" && emailEnabled === false ? (
-        <div className="rounded-lg border border-warning-border bg-warning-bg px-3 py-2 text-xs text-warning">
-          {(params.email ?? "").trim() ? wf("emailUnavailableSpecific") : wf("emailUnavailable")}
-        </div>
-      ) : null}
-
-      {showValidation && !validation.ok ? (
-        <p role="alert" className="text-xs text-error">
-          {validation.walletGap
-            ? wf("validationWalletGap")
-            : validation.guardsIncomplete
-              ? wf("validationGuards")
-              : wf("validationFields")}
-        </p>
-      ) : null}
-
-      <div className="flex justify-end gap-2">
-        {editing ? (
-          <Button type="button" size="sm" variant="ghost" onClick={props.onCancelEdit}>
-            {wf("cancelEdit")}
-          </Button>
-        ) : null}
-        <Button
-          type="button"
-          size="sm"
-          onClick={props.onSubmit}
-          disabled={!canSubmit}
-          iconLeft={busy ? <Loader2 className="size-3.5 animate-spin" /> : undefined}
-        >
-          {editing ? wf("saveChanges") : wf("create")}
-        </Button>
-      </div>
-    </div>
-  );
+  return <WizardRowLayout {...args} />;
 }
 
 // The per-action parameter inputs. send_webhook gets its bespoke registry/custom
@@ -1141,20 +1534,22 @@ function BuilderControls(props: {
 function BuilderParamsBlock({
   actionType,
   editingRuleId,
-  wf,
-  params,
   paramFields,
+  params,
   webhookEndpoints,
-  fieldErrors,
+  wf,
+  showValidation,
+  validation,
   onParamChange,
 }: {
   actionType: string | null;
   editingRuleId: string | null;
-  wf: ReturnType<typeof makeWf>;
-  params: Record<string, string>;
   paramFields: ParamField[];
+  params: Record<string, string>;
   webhookEndpoints: WebhookEndpointView[] | undefined;
-  fieldErrors: Record<string, string>;
+  wf: ReturnType<typeof makeWf>;
+  showValidation: boolean;
+  validation: BuilderValidation;
   onParamChange: (key: string, value: string) => void;
 }) {
   if (actionType === "send_webhook") {
@@ -1164,27 +1559,20 @@ function BuilderParamsBlock({
         wf={wf}
         params={params}
         endpoints={webhookEndpoints}
-        errors={fieldErrors}
+        errors={showValidation ? validation.fieldErrors : {}}
         onParamChange={onParamChange}
       />
     );
   }
-  if (paramFields.length === 0) {
-    return null;
-  }
   return (
-    <div className="grid gap-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3 sm:grid-cols-2">
-      {paramFields.map((field) => (
-        <ParamFieldControl
-          key={field.key}
-          field={field}
-          wf={wf}
-          value={params[field.key] ?? ""}
-          error={fieldErrors[field.key]}
-          onChange={(value) => onParamChange(field.key, value)}
-        />
-      ))}
-    </div>
+    <ParamsBlock
+      paramFields={paramFields}
+      params={params}
+      wf={wf}
+      showValidation={showValidation}
+      validation={validation}
+      onParamChange={onParamChange}
+    />
   );
 }
 
@@ -1229,6 +1617,9 @@ function ParamFieldControl({
         {field.required ? <span className="text-error"> *</span> : null}
       </Label>
       <Input
+        // The design-system TextInput is inline-flex (intrinsic width); stretch the root
+        // AND the inner field span so the control fills its grid cell.
+        className="w-full [&>span:first-child]:w-full"
         id={inputId}
         type={field.secret ? "password" : "text"}
         autoComplete={field.secret ? "off" : undefined}
@@ -1254,6 +1645,7 @@ function RulesCard({
   locale,
   canManage,
   canUseAction,
+  tierForAction,
   busyId,
   editingRuleId,
   onToggle,
@@ -1266,6 +1658,7 @@ function RulesCard({
   locale: string;
   canManage: boolean;
   canUseAction: (type: string) => boolean;
+  tierForAction: (type: string) => ExecutionTier;
   busyId: string | null;
   editingRuleId: string | null;
   onToggle: (rule: WorkflowRuleView) => void;
@@ -1280,7 +1673,12 @@ function RulesCard({
       </CardHeader>
       <CardContent>
         {rules.length === 0 ? (
-          <p className="text-sm text-secondary">{wf("rulesEmpty")}</p>
+          <div className="flex flex-col items-center gap-2 py-6 text-center">
+            <span className="flex size-10 items-center justify-center rounded-full bg-fill-subtle text-tertiary">
+              <Zap className="size-5" aria-hidden />
+            </span>
+            <p className="text-sm text-secondary">{wf("rulesEmpty")}</p>
+          </div>
         ) : (
           <ul className="divide-y divide-border-default">
             {rules.map((rule) => (
@@ -1295,6 +1693,7 @@ function RulesCard({
                 busy={busyId !== null}
                 rowBusy={busyId === rule.id}
                 editing={editingRuleId === rule.id}
+                tier={tierForAction(rule.action_type)}
                 onToggle={() => onToggle(rule)}
                 onEdit={() => onEdit(rule)}
                 onDelete={() => onDelete(rule)}
@@ -1335,26 +1734,27 @@ function HoldersCard({
         <CardDescription>{wf("holdersDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <div className="min-w-0 flex-1">
-            <Input
-              aria-label={wf("walletPlaceholder")}
-              value={walletAddress}
-              onChange={(e) => onWalletAddressChange(e.target.value)}
-              placeholder={wf("walletPlaceholder")}
-            />
+        <div className="space-y-2">
+          <Input
+            className="w-full [&>span:first-child]:w-full"
+            aria-label={wf("walletPlaceholder")}
+            value={walletAddress}
+            onChange={(e) => onWalletAddressChange(e.target.value)}
+            placeholder={wf("walletPlaceholder")}
+          />
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              onClick={onEnroll}
+              disabled={busyId !== null || !walletAddress.trim()}
+              iconLeft={
+                busyId === "enroll" ? <Loader2 className="size-3.5 animate-spin" /> : undefined
+              }
+            >
+              {wf("enrollWallet")}
+            </Button>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            onClick={onEnroll}
-            disabled={busyId !== null || !walletAddress.trim()}
-            iconLeft={
-              busyId === "enroll" ? <Loader2 className="size-3.5 animate-spin" /> : undefined
-            }
-          >
-            {wf("enrollWallet")}
-          </Button>
         </div>
         <HoldersList holders={holders} wf={wf} label={label} locale={locale} />
       </CardContent>
@@ -1418,7 +1818,12 @@ function ExecutionLogCard({
       </CardHeader>
       <CardContent>
         {executions.length === 0 ? (
-          <p className="text-sm text-secondary">{wf("logEmpty")}</p>
+          <div className="flex flex-col items-center gap-2 py-6 text-center">
+            <span className="flex size-10 items-center justify-center rounded-full bg-fill-subtle text-tertiary">
+              <Inbox className="size-5" aria-hidden />
+            </span>
+            <p className="text-sm text-secondary">{wf("logEmpty")}</p>
+          </div>
         ) : (
           <>
             <ul className="divide-y divide-border-default">
@@ -1472,6 +1877,7 @@ function RuleRow({
   busy,
   rowBusy,
   editing,
+  tier,
   onToggle,
   onEdit,
   onDelete,
@@ -1484,21 +1890,37 @@ function RuleRow({
   busy: boolean;
   rowBusy: boolean;
   editing: boolean;
+  tier: ExecutionTier;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const ActionIcon = ACTION_ICONS[rule.action_type] ?? Play;
+  const tierLabel = wf(`tierLabels.${tier}`);
   return (
-    <li className="flex items-center justify-between gap-4 py-3">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-primary">
-          {label("trigger", rule.trigger_type)} → {label("action", rule.action_type)}
-        </p>
-        <p className="text-xs text-secondary">
-          {rule.review_mode === "manual" ? wf("manualReview") : wf("autoApply")}
-          {" · "}
-          {formatRelativeTime(rule.created_at, locale)}
-        </p>
+    <li className="flex items-center justify-between gap-4 py-3.5">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+          <ActionIcon className="size-[18px]" />
+        </span>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-medium text-primary">
+            <span className="truncate">{label("trigger", rule.trigger_type)}</span>
+            <span
+              className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border-default text-tertiary"
+              aria-hidden
+            >
+              <ArrowRight className="size-3" />
+            </span>
+            <span className="truncate">{label("action", rule.action_type)}</span>
+            <Badge variant={TIER_BADGE_VARIANT[tier]}>{tierLabel}</Badge>
+          </div>
+          <p className="mt-0.5 text-xs text-secondary">
+            {rule.review_mode === "manual" ? wf("manualReview") : wf("autoApply")}
+            {" · "}
+            {formatRelativeTime(rule.created_at, locale)}
+          </p>
+        </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {rowBusy ? <Loader2 className="size-3.5 animate-spin text-secondary" /> : null}
@@ -1529,7 +1951,16 @@ function RuleRow({
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={onToggle} disabled={busy}>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={onToggle}
+              disabled={busy}
+              iconLeft={
+                rule.enabled ? <PowerOff className="size-3.5" /> : <Power className="size-3.5" />
+              }
+            >
               {rule.enabled ? wf("disable") : wf("enable")}
             </Button>
           </>
@@ -1553,23 +1984,42 @@ function HoldersList({
   locale: string;
 }) {
   if (holders.length === 0) {
-    return <p className="text-sm text-secondary">{wf("holdersEmpty")}</p>;
+    return (
+      <div className="flex flex-col items-center gap-2 py-6 text-center">
+        <span className="flex size-10 items-center justify-center rounded-full bg-fill-subtle text-tertiary">
+          <Wallet className="size-5" aria-hidden />
+        </span>
+        <p className="text-sm text-secondary">{wf("holdersEmpty")}</p>
+      </div>
+    );
   }
   return (
     <ul className="divide-y divide-border-default">
-      {holders.map((holder) => (
-        <li key={holder.id} className="flex items-center justify-between gap-4 py-2.5">
-          <div className="min-w-0">
-            <p className="truncate font-mono text-sm text-primary">{holder.wallet_address}</p>
-            <p className="text-xs text-secondary">
-              {formatRelativeTime(holder.created_at, locale)}
-            </p>
-          </div>
-          <Badge variant={holder.kyc_status === "verified" ? "success" : "default"}>
-            {label("status", holder.kyc_status)}
-          </Badge>
-        </li>
-      ))}
+      {holders.map((holder) => {
+        const status = KYC_STATUS_META[holder.kyc_status] ?? KYC_STATUS_FALLBACK;
+        const StatusIcon = status.icon;
+        return (
+          <li key={holder.id} className="flex items-center justify-between gap-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+                <Wallet className="size-[18px]" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate font-mono text-sm text-primary">{holder.wallet_address}</p>
+                <p className="text-xs text-secondary">
+                  {formatRelativeTime(holder.created_at, locale)}
+                </p>
+              </div>
+            </div>
+            <Badge variant={status.variant}>
+              <span className="inline-flex items-center gap-1 leading-none">
+                <StatusIcon className="size-3 shrink-0" aria-hidden />
+                {label("status", holder.kyc_status)}
+              </span>
+            </Badge>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -1619,28 +2069,43 @@ function ExecutionRow({
 }) {
   const destructive = tier === "requires_approval";
   const target = executionTarget(execution);
+  const ActionIcon = ACTION_ICONS[execution.action_type] ?? Play;
+  const StatusGlyph = STATUS_GLYPH[execution.status];
   return (
-    <li className="flex items-center justify-between gap-4 py-3">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[execution.status]}`}
-          aria-hidden
-        />
+    <li className="flex items-center justify-between gap-4 py-3.5">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+          <ActionIcon className="size-[18px]" aria-hidden />
+        </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-primary">
-            {label("action", execution.action_type)}{" "}
-            <span className="font-normal text-secondary">
-              · {label("status", execution.status)}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="text-sm font-medium text-primary">
+              {label("action", execution.action_type)}
             </span>
-          </p>
+            <Badge variant={STATUS_BADGE_VARIANT[execution.status]}>
+              <span className="inline-flex items-center gap-1 leading-none">
+                <StatusGlyph
+                  className={cn(
+                    "size-3 shrink-0",
+                    execution.status === "processing" && "animate-spin"
+                  )}
+                  aria-hidden
+                />
+                {label("status", execution.status)}
+              </span>
+            </Badge>
+          </div>
           {/* What this execution will actually do. Shown before the approve control so a
               held mint or seize is never authorized sight-unseen. */}
           {target ? (
-            <p className="truncate font-mono text-xs text-primary" title={target}>
+            <p className="mt-0.5 truncate font-mono text-xs text-primary" title={target}>
               {target}
             </p>
           ) : null}
-          <p className="truncate text-xs text-secondary" title={execution.error ?? undefined}>
+          <p
+            className="mt-0.5 truncate text-xs text-secondary"
+            title={execution.error ?? undefined}
+          >
             {label("trigger", execution.trigger_type)} ·{" "}
             {formatRelativeTime(execution.created_at, locale)} · {wf("attempt")}{" "}
             {execution.attempt_count}/{execution.max_attempts}
@@ -1660,11 +2125,25 @@ function ExecutionRow({
               onConfirm={onApprove}
             />
           ) : (
-            <Button type="button" size="sm" variant="secondary" onClick={onApprove} disabled={busy}>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={onApprove}
+              disabled={busy}
+              iconLeft={<Check className="size-3.5" />}
+            >
               {wf("approve")}
             </Button>
           )}
-          <Button type="button" size="sm" variant="ghost" onClick={onReject} disabled={busy}>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={onReject}
+            disabled={busy}
+            iconLeft={<X className="size-3.5" />}
+          >
             {wf("reject")}
           </Button>
         </div>
@@ -1678,7 +2157,14 @@ function ExecutionRow({
             onConfirm={onApprove}
           />
         ) : (
-          <Button type="button" size="sm" variant="secondary" onClick={onApprove} disabled={busy}>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={onApprove}
+            disabled={busy}
+            iconLeft={<RefreshCw className="size-3.5" />}
+          >
             {wf("retry")}
           </Button>
         )

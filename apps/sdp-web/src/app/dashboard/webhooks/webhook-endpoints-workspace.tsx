@@ -1,8 +1,8 @@
 "use client";
 
 import { LockIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -133,12 +133,12 @@ export function WebhookEndpointsWorkspace({ canManage }: { canManage: boolean })
                 {endpoints.map((endpoint) => (
                   <TableRow key={endpoint.id}>
                     <TableCell>
-                      <DashboardNavigationLink
+                      <Link
                         href={`/dashboard/webhooks/${encodeURIComponent(endpoint.id)}`}
                         className="text-primary underline-offset-2 hover:underline"
                       >
                         {endpoint.label}
-                      </DashboardNavigationLink>
+                      </Link>
                     </TableCell>
                     <TableCell className="max-w-[320px]">
                       <span className="block truncate text-secondary" title={endpoint.url}>

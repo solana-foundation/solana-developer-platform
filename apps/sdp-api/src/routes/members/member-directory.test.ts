@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const CLERK_API_URL = "https://clerk.example.test/v1";
@@ -156,10 +156,53 @@ describe("member directory", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    await clearTestDatabase(env);
     await clearKVStores(env);
     env.CLERK_SECRET_KEY = undefined;
     env.CLERK_API_URL = undefined;
+  });
+
+  describe("email resolution", () => {
+    /**
+     * Migration 0040 treats a value as recoverable only when it is both not a
+     * placeholder and shaped like an address. Testing only for `{{` let values like
+     * `unknown` through, so the endpoint returned something its own repair rule does
+     * not consider an email.
+     */
+    it("prefers the identity address over a stored value that is not an address", async () => {
+      await seedDirectory(1);
+      await getDb(env).batch([
+        getDb(env)
+          .prepare("UPDATE users SET email = 'unknown' WHERE id = 'usr_directory_0'")
+          .bind(),
+        getDb(env)
+          .prepare(
+            `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+               VALUES ('aui_directory_0', 'clerk', 'clerk_directory_0', 'usr_directory_0', ?)`
+          )
+          .bind("member0@example.com"),
+      ]);
+      await authenticateAs(["org:read"]);
+      stubClerk();
+
+      const directory = await listMembers();
+
+      expect(directory.members[0]?.user.email).toBe("member0@example.com");
+    });
+
+    it("falls back to the stored value when no copy is an address", async () => {
+      await seedDirectory(1);
+      await getDb(env)
+        .prepare("UPDATE users SET email = 'unknown' WHERE id = 'usr_directory_0'")
+        .run();
+      await authenticateAs(["org:read"]);
+      stubClerk();
+
+      const directory = await listMembers();
+
+      // Returning the stored value rather than NULL keeps the row renderable; the
+      // web side decides how to present something that is not an address.
+      expect(directory.members[0]?.user.email).toBe("unknown");
+    });
   });
 
   describe("invitation visibility", () => {

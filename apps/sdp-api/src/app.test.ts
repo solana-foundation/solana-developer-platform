@@ -4,6 +4,7 @@ import { SdpRpcError } from "@sdp/rpc/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, type SdpPlugin } from "@/app";
 import { AppError } from "@/lib/errors";
+import { rootLogger } from "@/runtime/logger";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import { env as baseEnv } from "@/test/helpers/env";
@@ -262,7 +263,7 @@ describe("createApp onError Sentry guard", () => {
   });
 
   it("redacts unexpected error log context", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
     const { obs, captureException } = makeObservability();
     const app = buildApp(obs);
 

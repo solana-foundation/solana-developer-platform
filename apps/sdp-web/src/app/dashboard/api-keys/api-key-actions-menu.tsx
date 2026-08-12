@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +11,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { rotateApiKeyAction } from "./actions";
 import { DeleteApiKeyModal } from "./delete-api-key-modal";
 
@@ -30,7 +30,7 @@ export function ApiKeyActionsMenu({
   onDeleted,
 }: ApiKeyActionsMenuProps) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const rotateFormRef = useRef<HTMLFormElement | null>(null);
 

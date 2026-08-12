@@ -1,6 +1,7 @@
 "use client";
 
-import { CalendarIcon, PhoneIcon, UserIcon } from "lucide-react";
+import { PhoneIcon, UserIcon } from "lucide-react";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
@@ -43,13 +44,11 @@ export function IdentityStep() {
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="dateOfBirth">{t("DashboardPayments.counterparty.dateOfBirth")}</Label>
-          <Input
+          <DatePicker
             size="xl"
             id="dateOfBirth"
-            type="date"
-            iconLeft={<CalendarIcon />}
             value={values.dateOfBirth}
-            onChange={(e) => setField("dateOfBirth", e.target.value)}
+            onChange={(value) => setField("dateOfBirth", value)}
           />
           {errors.dateOfBirth && <p className="mt-1 text-xs text-error">{errors.dateOfBirth}</p>}
         </div>

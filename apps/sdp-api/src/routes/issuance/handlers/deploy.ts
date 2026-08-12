@@ -19,13 +19,18 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService, type MosaicFeePayment } from "@/services/issuance/mosaic";
+import type { MosaicFeePayment } from "@/services/issuance/mosaic";
 import { createOrgSigner } from "@/services/solana";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { confirmDeploySchema, deployTokenSchema } from "../schemas";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
@@ -62,10 +67,8 @@ async function assertWalletCanPayDeployFees(env: Env, address: Address): Promise
  * Persist a mint that landed on-chain even though its metadata-URI follow-up
  * failed (see MintMetadataUpdateError). Mirrors the deploy success path: records
  * the mint, stamps the initial permanent delegate, and confirms the transaction
- * row. Isolated in its own try/catch so a secondary DB failure is logged rather
- * than escaping and burying the mint address — the caller still throws afterward
- * so the client knows the mint exists and not to redeploy. A swallowed write
- * here just means the mint isn't recorded, which the caller's error reports.
+ * row. A false result keeps the durable audit intent unresolved so operators can
+ * reconcile the live mint instead of accepting a misleading terminal outcome.
  */
 async function persistRecoveredMint(params: {
   tokenService: TokenService;
@@ -76,14 +79,14 @@ async function persistRecoveredMint(params: {
   aclMode: ReturnType<typeof getMosaicAclMode>;
   feePayment: MosaicFeePayment;
   result: MintMetadataUpdateError["result"];
-}): Promise<void> {
+}): Promise<boolean> {
   const { tokenService, txId, tokenId, token, custodyAddress, aclMode, feePayment, result } =
     params;
   const { mint, signature, slot, listAddress } = result;
   // The caller only invokes this once it has confirmed the mint landed on-chain;
   // bail defensively (and to narrow the type) if it somehow didn't.
   if (!mint) {
-    return;
+    return false;
   }
   const freezeAuthority = token.isFreezable ? custodyAddress : null;
   try {
@@ -119,12 +122,17 @@ async function persistRecoveredMint(params: {
         metadataUriFailed: true,
       },
     });
+    return true;
   } catch (persistError) {
-    console.error("Failed to persist recovered mint after metadata-URI failure", {
-      tokenId,
-      mintAddress: mint,
-      error: persistError instanceof Error ? persistError.message : String(persistError),
-    });
+    getLogger().error(
+      {
+        tokenId,
+        mintAddress: mint,
+        error: persistError instanceof Error ? persistError.message : String(persistError),
+      },
+      "Failed to persist recovered mint after metadata-URI failure"
+    );
+    return false;
   }
 }
 
@@ -132,8 +140,8 @@ async function persistRecoveredMint(params: {
  * Record the bookkeeping for a non-custodial deploy that has already landed
  * on-chain — by the time this runs, `setTokenDeployed` has flipped the token to
  * `active` and recorded the mint, which is irreversible. Stamps the initial
- * permanent delegate, writes the transaction row for audit parity with the
- * custodial path, and logs the audit event.
+ * permanent delegate and writes the transaction row for parity with the
+ * custodial path. The caller owns the pre-admitted audit intent and outcome.
  *
  * Isolated in its own try/catch: a secondary DB failure here must NOT surface as
  * a 500. A retry would hit confirmDeploy's `status !== "pending"` guard and 400
@@ -143,7 +151,6 @@ async function persistRecoveredMint(params: {
  * the already-deployed token row.
  */
 async function recordConfirmedDeploy(params: {
-  c: AppContext;
   tokenService: TokenService;
   organizationId: string;
   initiatedByKeyId: string;
@@ -158,7 +165,6 @@ async function recordConfirmedDeploy(params: {
   deployedToken: Awaited<ReturnType<TokenService["setTokenDeployed"]>>;
 }): Promise<Awaited<ReturnType<TokenService["setTokenDeployed"]>>> {
   const {
-    c,
     tokenService,
     organizationId,
     initiatedByKeyId,
@@ -211,31 +217,35 @@ async function recordConfirmedDeploy(params: {
       },
     });
 
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "deploy",
-      resourceType: "token",
-      resourceId: tokenId,
-      metadata: {
-        mode: "confirm",
-        mintAddress: mint,
-        signature,
-        slot: slot.toString(),
-        template: token.template,
-        ablListAddress: listAddress ?? null,
-      },
-    });
-
     return updatedToken;
   } catch (bookkeepingError) {
-    console.error("confirmDeploy: token is live on-chain but post-deploy bookkeeping failed", {
-      tokenId,
-      mintAddress: mint,
-      error:
-        bookkeepingError instanceof Error ? bookkeepingError.message : String(bookkeepingError),
-    });
+    getLogger().error(
+      {
+        tokenId,
+        mintAddress: mint,
+        error:
+          bookkeepingError instanceof Error ? bookkeepingError.message : String(bookkeepingError),
+      },
+      "confirmDeploy: token is live on-chain but post-deploy bookkeeping failed"
+    );
     return deployedToken;
   }
+}
+
+async function completeDeployFailureBeforeEffect(
+  auditService: AuditService,
+  c: AppContext,
+  auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined,
+  error: unknown
+): Promise<void> {
+  if (!auditIntent) {
+    return;
+  }
+
+  await auditService.completeCritical(c, auditIntent, {
+    status: "failure",
+    metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+  });
 }
 
 export const deployToken = async (c: AppContext) => {
@@ -250,7 +260,7 @@ export const deployToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   let token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -339,8 +349,18 @@ export const deployToken = async (c: AppContext) => {
   // Hoisted so the catch block can persist the mint authority if createToken
   // fails after the mint is already live on-chain (see MintMetadataUpdateError).
   let custodyAddress: Address | undefined;
+  const auditService = new AuditService(getDb(c.env));
+  let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
+  let onChainEffectCompleted = false;
 
   try {
+    auditIntent = await auditService.beginCritical(c, {
+      action: "deploy",
+      resourceType: "token",
+      resourceId: tokenId,
+      metadata: { template: token.template, aclMode, feePayment, mode: "execute" },
+    });
+
     // Resolve the signing wallet inside the try: it can throw, and now that we
     // hold the deploy claim (status=deploying) any failure before the mint lands
     // must release it (catch below) — otherwise the draft is stranded in
@@ -365,7 +385,7 @@ export const deployToken = async (c: AppContext) => {
     }
 
     // Create Mosaic service for template-based token deployment
-    const mosaic = createMosaicService(c.env, signer, feePayment);
+    const mosaic = createIssuanceMosaicService(c, signer, feePayment);
 
     const result = await mosaic.createToken({
       template: token.template,
@@ -391,6 +411,7 @@ export const deployToken = async (c: AppContext) => {
       enableAbl,
       aclMode,
     });
+    onChainEffectCompleted = true;
 
     const freezeAuthority = token.isFreezable ? custodyAddress : null;
 
@@ -426,20 +447,12 @@ export const deployToken = async (c: AppContext) => {
       },
     });
 
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "deploy",
-      resourceType: "token",
-      resourceId: tokenId,
+    await auditService.completeCritical(c, auditIntent, {
       metadata: {
         mintAddress: result.mint,
         signature: result.signature,
         slot: result.slot.toString(),
-        template: token.template,
         ablListAddress: result.listAddress,
-        aclMode,
-        feePayment,
       },
     });
 
@@ -452,7 +465,7 @@ export const deployToken = async (c: AppContext) => {
     // and mints a second, orphaned token. The hosted-URI pointer is left unset;
     // it can be fixed later via a metadata update.
     if (error instanceof MintMetadataUpdateError && custodyAddress && error.result.mint) {
-      await persistRecoveredMint({
+      const recovered = await persistRecoveredMint({
         tokenService,
         txId: tx.id,
         tokenId,
@@ -463,6 +476,18 @@ export const deployToken = async (c: AppContext) => {
         result: error.result,
       });
 
+      if (auditIntent && recovered) {
+        await auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            mintAddress: error.result.mint,
+            signature: error.result.signature,
+            slot: error.result.slot.toString(),
+            ablListAddress: error.result.listAddress,
+            metadataUriFollowUpFailed: true,
+          },
+        });
+      }
+
       throw new AppError(
         "TRANSACTION_FAILED",
         "Token mint was created on-chain, but setting its metadata URI failed. " +
@@ -470,6 +495,15 @@ export const deployToken = async (c: AppContext) => {
         { mintAddress: error.result.mint }
       );
     }
+
+    // A provider success followed by bookkeeping failure must stay unresolved.
+    // The durable intent is the reconciliation signal; marking it failed would
+    // tell callers the on-chain mint is safe to retry when it is not.
+    if (onChainEffectCompleted) {
+      throw error;
+    }
+
+    await completeDeployFailureBeforeEffect(auditService, c, auditIntent, error);
 
     // The mint did not land on-chain (the only "mint exists" failure is the
     // MintMetadataUpdateError handled above). Release the deploy claim so the
@@ -497,7 +531,7 @@ export const prepareDeploy = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -540,7 +574,7 @@ export const prepareDeploy = async (c: AppContext) => {
   const custodyAddress = signer.address;
 
   // Create Mosaic service and prepare transaction
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
@@ -669,7 +703,7 @@ export const confirmDeploy = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -771,35 +805,63 @@ export const confirmDeploy = async (c: AppContext) => {
       ? await deriveAblListAddress(custodyAddress, mint)
       : undefined;
 
-  // setTokenDeployed flips the token to `active` and records the mint — this is
-  // the irreversible commit point. Everything after it is bookkeeping; see
-  // recordConfirmedDeploy for why a failure there must not 500.
-  const deployedToken = await tokenService.setTokenDeployed(
-    tokenId,
-    mint,
-    custodyAddress,
-    freezeAuthority,
-    listAddress
-  );
-
-  const updatedToken = await recordConfirmedDeploy({
-    c,
-    tokenService,
-    organizationId: auth.organizationId,
-    initiatedByKeyId: auth.id,
-    token,
-    tokenId,
-    mint,
-    custodyAddress,
-    freezeAuthority,
-    listAddress,
-    signature: parsed.data.signature,
-    slot: status.slot,
-    deployedToken,
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "deploy",
+    resourceType: "token",
+    resourceId: tokenId,
+    metadata: {
+      mode: "confirm",
+      mintAddress: mint,
+      signature,
+      slot: status.slot.toString(),
+      template: token.template,
+      ablListAddress: listAddress ?? null,
+    },
   });
+  let deploymentRecorded = false;
 
-  const response: TokenResponse = { token: updatedToken };
-  return success(c, response);
+  try {
+    // setTokenDeployed flips the token to `active` and records the mint — this
+    // is the irreversible commit point. The durable intent above must exist
+    // before this write; later bookkeeping/outcome failures cannot make the
+    // already-confirmed deployment look retryable.
+    const deployedToken = await tokenService.setTokenDeployed(
+      tokenId,
+      mint,
+      custodyAddress,
+      freezeAuthority,
+      listAddress
+    );
+    deploymentRecorded = true;
+
+    const updatedToken = await recordConfirmedDeploy({
+      tokenService,
+      organizationId: auth.organizationId,
+      initiatedByKeyId: auth.id,
+      token,
+      tokenId,
+      mint,
+      custodyAddress,
+      freezeAuthority,
+      listAddress,
+      signature: parsed.data.signature,
+      slot: status.slot,
+      deployedToken,
+    });
+
+    await auditService.completeCritical(c, auditIntent);
+    const response: TokenResponse = { token: updatedToken };
+    return success(c, response);
+  } catch (error) {
+    if (!deploymentRecorded) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+    }
+    throw error;
+  }
 };
 
 /**
@@ -827,7 +889,7 @@ export const prepareDeployMetadata = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -851,7 +913,7 @@ export const prepareDeployMetadata = async (c: AppContext) => {
   ]);
 
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at
   // the SDP-hosted (or issuer-supplied) URL.

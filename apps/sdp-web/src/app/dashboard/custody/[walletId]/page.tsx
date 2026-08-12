@@ -1,11 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
+import { policyRuleRestricts } from "@sdp/policy";
 import type {
   CustodyWalletMetadataResponse,
   CustodyWalletTokenBalance,
   PaymentWalletPolicy,
-  PolicyRuleAction,
 } from "@sdp/types";
-import { SlidersHorizontal } from "lucide-react";
+import { ListChecks, SlidersHorizontal } from "lucide-react";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
 import {
@@ -26,7 +27,6 @@ import {
   WalletBalancesSkeleton,
   WalletControlsSkeleton,
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
+import { collectDestinationAllowlist, resolveMaxTransferAmount } from "@/lib/wallet-policy-rules";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -132,7 +133,9 @@ async function getWalletPolicy(
       return {
         policy: {
           walletId,
-          destinationAllowlist: [],
+          defaultAction: "allow",
+          rules: [],
+          controlProfile: null,
         },
         error: null,
       };
@@ -145,13 +148,14 @@ async function getWalletPolicy(
     }
 
     const json = (await response.json()) as { data?: { policy?: PaymentWalletPolicy } };
-    return {
-      policy: json.data?.policy ?? {
-        walletId,
-        destinationAllowlist: [],
-      },
-      error: null,
-    };
+    const policy = json.data?.policy;
+    if (!policy) {
+      return {
+        policy: null,
+        error: unavailableMessage,
+      };
+    }
+    return { policy, error: null };
   } catch {
     return {
       policy: null,
@@ -507,11 +511,6 @@ export async function WalletBalancesSection({
 }
 
 /**
- * Distinct mints named by the profile's asset rules. The rules array is the
- * source of truth for allowed assets; destinationAllowlist and the amount caps
- * are stored separately and say nothing about which tokens are permitted.
- */
-/**
  * Mints named by an allow-action asset rule — the only rules that express an
  * allowlist, and so the only ones honest to render under "Allowed assets".
  *
@@ -528,7 +527,7 @@ export async function WalletBalancesSection({
 function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
   const mints = new Set<string>();
 
-  for (const rule of policy?.rules ?? []) {
+  for (const rule of policy ? policy.rules : []) {
     if (rule.kind !== "asset") continue;
     if (rule.action && rule.action !== "allow") continue;
 
@@ -540,62 +539,18 @@ function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
   return [...mints];
 }
 
-/**
- * Whether a rule can produce anything other than `allow`.
- *
- * This mirrors evaluatePolicyRule in the API's policy-evaluation service. Two
- * details there drive the shape below:
- *
- * 1. An explicit `action` is authoritative for every kind — the evaluator
- *    applies it verbatim and only falls back to a per-kind default when the
- *    action is absent. So an `approval` rule pinned to `allow` permits, and a
- *    `review` or `provider_approval_required` action restricts on any kind.
- * 2. A rule with no criteria is not inert. `asset` with no assets, `amount`
- *    with no bounds and `destination` with neither list all resolve to
- *    `review`, which is a restriction rather than a no-op.
- */
-const RESTRICTIVE_RULE_ACTIONS = new Set<PolicyRuleAction>([
-  "deny",
-  "approval_required",
-  "provider_approval_required",
-  "review",
-]);
-
-function policyRuleRestricts(rule: NonNullable<PaymentWalletPolicy["rules"]>[number]): boolean {
-  if (rule.action) {
-    return RESTRICTIVE_RULE_ACTIONS.has(rule.action);
-  }
-
-  switch (rule.kind) {
-    case "approval":
-      // Defaults to approval_required rather than allow.
-      return true;
-    case "amount":
-      // Denies outside its bounds, and reviews when it has none.
-      return true;
-    case "destination":
-      // Denies on a blocklist hit or outside an allowlist, reviews when empty.
-      return true;
-    case "asset":
-      // Allows on a match and abstains otherwise, so it only restricts when it
-      // names nothing and falls through to review.
-      return !(rule.assets?.length || rule.asset);
-    default:
-      // always / operation_family / operation_type permit on a match.
-      return false;
-  }
-}
-
 function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
   if (!policy) return false;
   return (
-    policy.destinationAllowlist.length > 0 ||
-    Boolean(policy.maxTransferAmount) ||
-    Boolean(policy.maxDailyAmount) ||
+    // A destination allowlist or an amount cap restricts even when its rule
+    // carries an "allow" action: the allowlist denies every other address and
+    // the cap denies amounts above it.
+    collectDestinationAllowlist(policy.rules).length > 0 ||
+    resolveMaxTransferAmount(policy.rules) !== null ||
     // Operations matching no rule fall through to the policy default, so a
     // non-allow default is itself a restriction.
-    (policy.defaultAction !== undefined && policy.defaultAction !== "allow") ||
-    (policy.rules ?? []).some(policyRuleRestricts)
+    policy.defaultAction !== "allow" ||
+    policy.rules.some(policyRuleRestricts)
   );
 }
 
@@ -615,7 +570,8 @@ async function WalletControlsPanel({
     ownedTokensByMintPromise,
   ]);
   const hasRestrictions = walletPolicyHasRestrictions(policy);
-  const destinationCount = policy?.destinationAllowlist.length ?? 0;
+  const destinationCount = policy ? collectDestinationAllowlist(policy.rules).length : 0;
+  const maxTransferAmount = policy ? resolveMaxTransferAmount(policy.rules) : null;
   const allowedAssets = walletPolicyAssets(policy);
   // Names assets this org issued. Without it any mint outside the well-known
   // catalogue renders as a shortened address.
@@ -628,7 +584,7 @@ async function WalletControlsPanel({
   return (
     <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       <div className="flex flex-col gap-5 p-6 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 space-y-3">
+        <div className="min-w-0 flex-1 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-2xl font-medium text-primary">
               {t("DashboardCustody.walletControls")}
@@ -642,81 +598,65 @@ async function WalletControlsPanel({
           {policyError ? (
             <p className="text-sm text-error">{policyError}</p>
           ) : (
-            <div className="space-y-3">
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                <WalletControlMetric
-                  label={t("DashboardCustody.policyAllowedAssets")}
-                  value={
-                    allowedAssets.length > 0
-                      ? String(allowedAssets.length)
-                      : t("DashboardCustody.open")
-                  }
-                />
-                <WalletControlMetric
-                  label={t("DashboardCustody.destinations")}
-                  value={
-                    destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")
-                  }
-                />
-                <WalletControlMetric
-                  label={t("DashboardCustody.perTransfer")}
-                  value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
-                />
-                <WalletControlMetric
-                  label={t("DashboardCustody.daily")}
-                  value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
-                />
+            <div className="max-w-2xl overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
+              <div className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3">
+                <p className="text-[15px] text-secondary">
+                  {t("DashboardCustody.policyAllowedAssets")}
+                </p>
+                {/* Named here rather than under Balances: these are the assets the
+                    wallet may move, which is not the same as what it holds. */}
+                {allowedAssets.length > 0 ? (
+                  <ul className="flex min-w-0 flex-wrap justify-end gap-2">
+                    {allowedAssets.map((mint) => (
+                      <li
+                        key={mint}
+                        className="flex items-center gap-2 rounded-full border border-border-subtle bg-surface-raised py-1 pr-3 pl-1"
+                        title={mint}
+                      >
+                        {/* Only issued symbols are handed over: TokenMark already
+                            resolves well-known mints itself, and an unresolvable mint
+                            should keep its neutral placeholder rather than take a
+                            monogram cut from an address. */}
+                        <TokenMark mint={mint} symbol={issuedSymbolsByMint[mint]} size="sm" />
+                        <span className="text-xs font-medium text-secondary">
+                          {resolveTransferTokenLabel(mint, issuedSymbolsByMint)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[15px] text-primary">{t("DashboardCustody.open")}</p>
+                )}
               </div>
-              {/* Named here rather than under Balances: these are the assets the
-                  wallet may move, which is not the same as what it holds. */}
-              {allowedAssets.length > 0 ? (
-                <ul className="flex flex-wrap gap-2">
-                  {allowedAssets.map((mint) => (
-                    <li
-                      key={mint}
-                      className="flex items-center gap-2 rounded-full border border-border-subtle bg-fill-subtle py-1 pr-3 pl-1"
-                      title={mint}
-                    >
-                      {/* Only issued symbols are handed over: TokenMark already
-                          resolves well-known mints itself, and an unresolvable mint
-                          should keep its neutral placeholder rather than take a
-                          monogram cut from an address. */}
-                      <TokenMark mint={mint} symbol={issuedSymbolsByMint[mint]} size="sm" />
-                      <span className="text-xs font-medium text-secondary">
-                        {resolveTransferTokenLabel(mint, issuedSymbolsByMint)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              <WalletInfoRow
+                label={t("DashboardCustody.destinations")}
+                value={destinationCount > 0 ? String(destinationCount) : t("DashboardCustody.open")}
+              />
+              <WalletInfoRow
+                label={t("DashboardCustody.perTransfer")}
+                value={maxTransferAmount !== null ? maxTransferAmount : t("DashboardCustody.noCap")}
+              />
             </div>
           )}
         </div>
-        <Button
-          asChild
-          variant={hasRestrictions ? "secondary" : "default"}
-          className="w-full shrink-0 sm:w-auto"
-        >
-          <Link href={policyHref}>
-            <SlidersHorizontal className="size-4" />
-            {hasRestrictions
-              ? t("DashboardCustody.reviewControls")
-              : t("DashboardCustody.startProfile")}
-          </Link>
-        </Button>
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+          <Button asChild variant="secondary" className="w-full sm:w-auto">
+            <Link href={`${policyHref}/audit`}>
+              <ListChecks className="size-4" />
+              {t("DashboardCustody.policyAuditTitle")}
+            </Link>
+          </Button>
+          <Button asChild variant="secondary" className="w-full sm:w-auto">
+            <Link href={policyHref}>
+              <SlidersHorizontal className="size-4" />
+              {hasRestrictions
+                ? t("DashboardCustody.reviewControls")
+                : t("DashboardCustody.startProfile")}
+            </Link>
+          </Button>
+        </div>
       </div>
     </section>
-  );
-}
-
-function WalletControlMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 rounded-lg border border-border-subtle bg-fill-subtle px-3 py-2">
-      <p className="text-xs font-medium text-muted">{label}</p>
-      <p className="mt-1 truncate text-sm font-medium text-primary" title={value}>
-        {value}
-      </p>
-    </div>
   );
 }
 

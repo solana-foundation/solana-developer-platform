@@ -16,6 +16,7 @@ import {
 } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { getIssuedPolicyTokens } from "./policy-assets.data";
+import { firstSearchParam } from "./policy-audit.data";
 import { WalletPolicyStartingProfileFlow } from "./wallet-policy-starting-profile-flow";
 
 interface WalletPolicyResult {
@@ -51,6 +52,22 @@ async function getWalletDetail(
   return wallet;
 }
 
+/**
+ * A wallet without an active control profile: the implicit default-allow
+ * policy the API also reports for unconfigured wallets.
+ *
+ * @param walletId - The wallet the policy describes.
+ * @returns The implicit default-allow policy.
+ */
+function implicitDefaultAllowPolicy(walletId: string): PaymentWalletPolicy {
+  return {
+    walletId,
+    defaultAction: "allow",
+    rules: [],
+    controlProfile: null,
+  };
+}
+
 async function getWalletPolicy(
   request: SdpApiClient["request"],
   walletId: string
@@ -59,37 +76,29 @@ async function getWalletPolicy(
     const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/policies`);
     if (response.status === 404) {
       return {
-        policy: {
-          walletId,
-          destinationAllowlist: [],
-        },
+        policy: implicitDefaultAllowPolicy(walletId),
         error: null,
       };
     }
     if (!response.ok) {
       return {
-        policy: {
-          walletId,
-          destinationAllowlist: [],
-        },
+        policy: implicitDefaultAllowPolicy(walletId),
         error: "Wallet controls are unavailable right now.",
       };
     }
 
     const json = (await response.json()) as { data?: { policy?: PaymentWalletPolicy } };
-    return {
-      policy: json.data?.policy ?? {
-        walletId,
-        destinationAllowlist: [],
-      },
-      error: null,
-    };
+    const policy = json.data?.policy;
+    if (!policy) {
+      return {
+        policy: implicitDefaultAllowPolicy(walletId),
+        error: "Wallet controls are unavailable right now.",
+      };
+    }
+    return { policy, error: null };
   } catch {
     return {
-      policy: {
-        walletId,
-        destinationAllowlist: [],
-      },
+      policy: implicitDefaultAllowPolicy(walletId),
       error: "Wallet controls are unavailable right now.",
     };
   }
@@ -134,8 +143,10 @@ async function getComplianceScreeningEnabled(): Promise<boolean> {
 
 export default async function WalletPolicyPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ walletId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { userId, orgId } = await auth();
   if (!userId) {
@@ -145,8 +156,9 @@ export default async function WalletPolicyPage({
     redirect("/dashboard");
   }
 
-  const { walletId } = await params;
+  const [{ walletId }, resolvedSearchParams] = await Promise.all([params, searchParams]);
   const resolvedWalletId = decodeURIComponent(walletId);
+  const initialRevisionId = firstSearchParam(resolvedSearchParams.revision);
   const projectId = await getSelectedProjectId();
   if (!projectId) {
     redirect("/dashboard");
@@ -179,6 +191,7 @@ export default async function WalletPolicyPage({
       initialPolicy={policyResult.policy}
       policyError={policyResult.error}
       complianceScreeningEnabled={complianceScreeningEnabled}
+      initialRevisionId={initialRevisionId}
     />
   );
 }

@@ -1,14 +1,16 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { dispatchWorkflowEvent } from "./event-bus";
 
 type AppContext = Context<{ Bindings: Env }>;
 
 function logDispatchError(label: string, error: unknown): void {
-  console.error(`${label}: dispatch failed`, {
-    error: error instanceof Error ? error.message : String(error),
-  });
+  getLogger().error(
+    { error: error instanceof Error ? error.message : String(error) },
+    `${label}: dispatch failed`
+  );
 }
 
 // onramp_settled / offramp_settled — NOT token-scoped (fiat↔crypto has no asset), so
@@ -28,22 +30,35 @@ export function emitRampSettled(
   }
 ): void {
   const type = input.direction === "offramp" ? "offramp_settled" : "onramp_settled";
-  c.executionCtx.waitUntil(
-    dispatchWorkflowEvent(c.env, {
-      type,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      eventKey: `${type}:${input.transferId}`,
-      payload: {
-        transferId: input.transferId,
-        provider: input.provider ?? null,
-        counterpartyId: input.counterpartyId ?? null,
-        amount: input.amount ?? null,
-        fiatCurrency: input.fiatCurrency ?? null,
-        cryptoToken: input.cryptoToken ?? null,
-      },
-    }).catch((error) => logDispatchError("emitRampSettled", error))
-  );
+  // Start the dispatch BEFORE touching `c.executionCtx`. That getter throws on runtimes
+  // without an ExecutionContext (@hono/node-server, i.e. the Cloud Run deployment), and
+  // JS evaluates the callee `c.executionCtx.waitUntil` ahead of its arguments — so doing
+  // this inline meant the throw landed before the dispatch ever ran. The caller commits
+  // the transfer as terminal first, so the provider's retry short-circuits and the
+  // settlement trigger was lost for good.
+  const dispatched = dispatchWorkflowEvent(c.env, {
+    type,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    eventKey: `${type}:${input.transferId}`,
+    payload: {
+      transferId: input.transferId,
+      provider: input.provider ?? null,
+      counterpartyId: input.counterpartyId ?? null,
+      amount: input.amount ?? null,
+      fiatCurrency: input.fiatCurrency ?? null,
+      cryptoToken: input.cryptoToken ?? null,
+    },
+  }).catch((error) => logDispatchError("emitRampSettled", error));
+
+  try {
+    // Workers tear the isolate down at response time, so the promise needs waitUntil to
+    // survive. Node has no ExecutionContext and needs nothing: the process outlives the
+    // response and finishes the already-running dispatch on the event loop.
+    c.executionCtx.waitUntil(dispatched);
+  } catch {
+    // No ExecutionContext — the dispatch above is already in flight. Nothing to do.
+  }
 }
 
 // The guard-facing `attempt` field is an ordinal (1st, 2nd, … failed try for this due

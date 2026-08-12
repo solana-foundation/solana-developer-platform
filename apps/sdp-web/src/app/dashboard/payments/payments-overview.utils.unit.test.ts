@@ -1,6 +1,11 @@
-import { WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import { formatTokenAmount, resolveTransferTokenLabel } from "./payments-overview.utils";
+import {
+  formatTokenAmount,
+  isHttpUrl,
+  resolveTokenByMint,
+  resolveTransferTokenLabel,
+} from "./payments-overview.utils";
 
 const UNCATALOGUED_MINT = "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh";
 
@@ -50,6 +55,34 @@ describe("resolveTransferTokenLabel", () => {
   });
 });
 
+describe("resolveTokenByMint", () => {
+  it("maps the native SOL alias to the SOL mint", () => {
+    // Rows written by the native send path record the literal "SOL".
+    expect(resolveTokenByMint("SOL", {})).toMatchObject({
+      mint: SOL_MINT,
+      tokenName: "SOL",
+      isWellKnown: true,
+      tokenId: null,
+    });
+  });
+
+  it("resolves an issued mint to its id, symbol, and metadata image", () => {
+    const issued = {
+      id: "tok_1",
+      mintAddress: UNCATALOGUED_MINT,
+      symbol: "bSGD",
+      imageUrl: "https://cdn.example/bsgd.png",
+    };
+
+    expect(resolveTokenByMint(UNCATALOGUED_MINT, { [UNCATALOGUED_MINT]: issued })).toMatchObject({
+      tokenId: "tok_1",
+      tokenName: "bSGD",
+      metadataImageUrl: "https://cdn.example/bsgd.png",
+      isWellKnown: false,
+    });
+  });
+});
+
 describe("formatTokenAmount", () => {
   it("groups English amounts with commas and a dot decimal", () => {
     expect(formatTokenAmount("1234567.89", "en")).toBe("1,234,567.89");
@@ -69,5 +102,24 @@ describe("formatTokenAmount", () => {
 
   it("returns non-numeric input unchanged", () => {
     expect(formatTokenAmount("not-a-number", "fr")).toBe("not-a-number");
+  });
+});
+
+describe("isHttpUrl", () => {
+  it("accepts http and https URLs", () => {
+    expect(isHttpUrl("https://example.com/metadata.json")).toBe(true);
+    expect(isHttpUrl("http://localhost:3000/metadata.json")).toBe(true);
+  });
+
+  it("rejects executable and non-http schemes that must never reach an href", () => {
+    expect(isHttpUrl("javascript:alert(document.domain)")).toBe(false);
+    expect(isHttpUrl("data:text/html,<script>1</script>")).toBe(false);
+    expect(isHttpUrl("vbscript:msgbox(1)")).toBe(false);
+    expect(isHttpUrl("file:///etc/passwd")).toBe(false);
+  });
+
+  it("rejects unparseable values", () => {
+    expect(isHttpUrl("not-a-url")).toBe(false);
+    expect(isHttpUrl("")).toBe(false);
   });
 });

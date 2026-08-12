@@ -124,22 +124,38 @@ describe("operations route loading states", () => {
     expect(tabPlaceholders.match(/shrink-0/g)).toHaveLength(7);
   });
 
-  it("reserves active mobile identity geometry in the issuance-detail header", () => {
+  it("reserves the settled issuance-detail header shell, mark and actions", () => {
     const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
-    const identityRows = markup.match(
-      /<div class="([^"]*)" data-loading-identity-rows="issuance-detail">/
-    );
-    const identityClasses = identityRows?.[1] ?? "";
 
-    expect(identityRows).not.toBeNull();
-    expect(identityClasses).toContain("min-h-14");
-    expect(identityClasses).toContain("flex-col");
-    expect(identityClasses).toContain("sm:min-h-6");
-    expect(identityClasses).toContain("sm:flex-row");
+    // The card the settled header is, with the mark clipped by its own edge.
+    expect(markup).toContain("relative isolate overflow-hidden rounded-2xl");
+    // 208px hanging 40px off the left edge above lg; the same mark as a 56px
+    // avatar in flow below it, so neither width is left unreserved.
+    expect(markup).toContain("size-52");
+    expect(markup).toContain("-left-10");
+    expect(markup).toMatch(/size-14[^"]*rounded-full lg:hidden/);
+    // The ticker, beside the mark above lg and under the name below it.
+    expect(markup).toContain("left-[172px]");
+    expect(markup).toMatch(/h-8 w-20 rounded-full lg:hidden/);
+    // Actions float into the far corner above lg, in flow under a divider below.
+    expect(markup).toContain("border-border-subtle pt-4 lg:hidden");
+    expect(markup).toMatch(/absolute right-5 bottom-5 hidden[^"]*lg:flex/);
+  });
+
+  it("reserves both identifier rows in the issuance-detail header", () => {
+    const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
+    const metaLine = markup.match(/<div class="([^"]*)" data-loading-meta-line="issuance-detail">/);
+    const metaClasses = metaLine?.[1] ?? "";
+
+    expect(metaLine).not.toBeNull();
+    // Address and token id are both elided to one line, so the row is two stacked
+    // lines below sm and one from sm up — no wrapping id to reserve for any more.
+    expect(metaClasses).toContain("min-h-12");
+    expect(metaClasses).toContain("flex-col");
+    expect(metaClasses).toContain("sm:min-h-5");
+    expect(metaClasses).toContain("sm:flex-row");
     expect(markup).toContain("data-loading-address-row");
-    expect(markup).toContain('data-loading-token-id-lines="2"');
-    expect(markup).toContain("data-loading-token-id-continuation");
-    expect(markup).toContain("sm:hidden");
+    expect(markup).toContain("data-loading-token-id-row");
   });
 
   it("preserves the responsive and sticky geometry of the final routes", () => {

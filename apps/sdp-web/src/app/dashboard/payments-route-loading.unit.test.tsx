@@ -24,9 +24,6 @@ import RecurringPaymentsLoading from "./payments/recurring/loading";
 import PaymentRequestsLoading from "./payments/requests/loading";
 import TransactionsLoading from "./payments/transactions/loading";
 
-const dashboardWorkspaceMock = vi.hoisted(() => ({
-  counterpartyTab: "overview" as "overview" | "playground",
-}));
 const navigationMock = vi.hoisted(() => ({ tab: null as null | "playground" }));
 
 vi.mock("next/navigation", async (importOriginal) => {
@@ -36,14 +33,6 @@ vi.mock("next/navigation", async (importOriginal) => {
     useRouter: () => ({ push: () => undefined }),
     useSearchParams: () =>
       new URLSearchParams(navigationMock.tab ? { tab: navigationMock.tab } : undefined),
-  };
-});
-
-vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>();
-  return {
-    ...actual,
-    useDashboardWorkspace: () => dashboardWorkspaceMock,
   };
 });
 
@@ -88,7 +77,6 @@ function renderScopedLoadingStates(): string {
 
 describe("home and payments route loading states", () => {
   afterEach(() => {
-    dashboardWorkspaceMock.counterpartyTab = "overview";
     navigationMock.tab = null;
   });
 
@@ -105,7 +93,7 @@ describe("home and payments route loading states", () => {
 
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(5);
     expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
-    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(2);
+    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(3);
     expect(markup).toContain("lg:grid-cols-2");
     expect(markup).toContain("size-[208px]");
   });
@@ -248,9 +236,8 @@ describe("home and payments route loading states", () => {
   it("keeps the recurring list loader contained at a 390px viewport", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentsLoading />);
 
-    expect(markup).toContain("flex min-w-0 flex-col gap-4 p-4 sm:grid");
-    expect(markup).toContain("h-full min-h-0 min-w-0 flex-col");
-    expect(markup).toContain("flex min-h-0 min-w-0 flex-1 flex-col");
+    expect(markup).toContain("grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]");
+    expect(markup).toContain("flex min-w-0 grow flex-col overflow-hidden");
     expect(markup).toContain("table-scroll-container overflow-x-auto");
   });
 

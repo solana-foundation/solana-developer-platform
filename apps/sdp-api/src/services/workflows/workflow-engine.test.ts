@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
   createAssetWorkflowsRepository,
@@ -9,7 +9,7 @@ import {
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { emitKycApprovedForClearedEnrollments } from "./clearance";
 
 const TEST_PROJECT_ID = "prj_workflow_engine_test";
@@ -20,10 +20,6 @@ const TEST_TOKEN_ID = "tok_workflow_engine_test";
 describe("workflow engine (postgres)", () => {
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
-
-  afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
   });
 
   beforeEach(async () => {
@@ -425,5 +421,169 @@ describe("workflow engine (postgres)", () => {
     // Wallet is 'unverified' — clearance must not fire.
     const dispatched = await emitKycApprovedForClearedEnrollments(env, { kycWallet: wallet });
     expect(dispatched).toBe(0);
+  });
+
+  // A tick's rule/gate caches are shared across every tenant in the batch, while both
+  // lookups they memoize are tenant-scoped. Keyed on the bare id, the second tenant to
+  // ask for the same id gets the first tenant's answer and skips the predicate entirely.
+  //
+  // The rows below are inserted through the repository exactly as written, which is the
+  // point: nothing rejects an execution whose organization_id disagrees with the owner of
+  // its workflow_id or token_id. The table's organization_id and workflow_id foreign keys
+  // are separate constraints, so only the cache key can hold that line.
+  describe("per-tick cache is scoped to the tenant", () => {
+    const FOREIGN_ORG_ID = "org_workflow_cache_foreign";
+    const FOREIGN_PROJECT_ID = "prj_workflow_cache_foreign";
+    const FOREIGN_TOKEN_ID = "tok_workflow_cache_foreign";
+    // Five in-tenant rows saturate the worker pool (CONCURRENCY = 5) ahead of the sixth,
+    // so the foreign row is always shifted off the queue after a cache entry is written.
+    const IN_TENANT_ROWS = 5;
+
+    beforeEach(async () => {
+      const db = getDb(env);
+      await db
+        .prepare(
+          "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, 'Foreign Org', ?, 'individual', 'active')"
+        )
+        .bind(FOREIGN_ORG_ID, FOREIGN_ORG_ID)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Foreign Project', ?, 'sandbox', 'active', ?)`
+        )
+        .bind(FOREIGN_PROJECT_ID, FOREIGN_ORG_ID, FOREIGN_PROJECT_ID, TEST_USER.id)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (id, organization_id, project_id, name, symbol, created_by)
+           VALUES (?, ?, ?, 'Foreign Token', 'FRN', ?)`
+        )
+        .bind(FOREIGN_TOKEN_ID, FOREIGN_ORG_ID, FOREIGN_PROJECT_ID, TEST_USER.id)
+        .run();
+    });
+
+    async function seedInTenantExecutions(workflowId: string) {
+      const repo = createWorkflowExecutionsRepository(env);
+      for (let index = 0; index < IN_TENANT_ROWS; index += 1) {
+        await repo.createExecution({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          workflowId,
+          tokenId: TEST_TOKEN_ID,
+          triggerType: "kyc_approved",
+          actionType: "record",
+          status: "pending",
+          idempotencyKey: `in-tenant-${index}`,
+          triggerPayload: {},
+          maxAttempts: 5,
+        });
+      }
+    }
+
+    async function statusOf(executionId: string) {
+      const row = await getDb(env)
+        .prepare("SELECT status, error FROM workflow_executions WHERE id = ?")
+        .bind(executionId)
+        .first<{ status: string; error: string | null }>();
+      return row;
+    }
+
+    it("does not serve one tenant's rule to another tenant's execution", async () => {
+      const rule = await seedRule();
+      if (!rule) {
+        throw new Error("failed to seed rule");
+      }
+      await seedInTenantExecutions(rule.id);
+
+      // Same workflow_id, different owner — the exact key collision the cache had.
+      const foreign = await createWorkflowExecutionsRepository(env).createExecution({
+        organizationId: FOREIGN_ORG_ID,
+        projectId: FOREIGN_PROJECT_ID,
+        workflowId: rule.id,
+        tokenId: TEST_TOKEN_ID,
+        triggerType: "kyc_approved",
+        actionType: "record",
+        status: "pending",
+        idempotencyKey: "foreign-rule-probe",
+        triggerPayload: {},
+        maxAttempts: 5,
+      });
+      if (!foreign) {
+        throw new Error("failed to seed foreign execution");
+      }
+
+      await runDueWorkflowExecutions(env);
+
+      // getWorkflowById is scoped to (id, org, project), so the foreign tenant has no
+      // such rule. Anything but RULE_NOT_FOUND means it read through the cache.
+      expect(await statusOf(foreign.id)).toEqual({ status: "failed", error: "RULE_NOT_FOUND" });
+    });
+
+    it("does not serve one tenant's asset gate to another tenant's execution", async () => {
+      const rule = await seedRule();
+      if (!rule) {
+        throw new Error("failed to seed rule");
+      }
+      await seedInTenantExecutions(rule.id);
+
+      // The foreign tenant owns this rule, so loadRule resolves and the run reaches
+      // loadGate — where the token id belongs to the in-tenant token already cached.
+      const foreignRule = await createAssetWorkflowsRepository(env).createWorkflow({
+        organizationId: FOREIGN_ORG_ID,
+        projectId: FOREIGN_PROJECT_ID,
+        tokenId: TEST_TOKEN_ID,
+        triggerType: "kyc_approved",
+        actionType: "record",
+        definition: {
+          condition: null,
+          action: { type: "record", params: {} },
+          retryPolicy: { maxAttempts: 5, retryAfterMinutes: 5 },
+        },
+        version: 1,
+        reviewMode: "auto",
+        createdBy: TEST_USER.id,
+      });
+      if (!foreignRule) {
+        throw new Error("failed to seed foreign rule");
+      }
+      const foreign = await createWorkflowExecutionsRepository(env).createExecution({
+        organizationId: FOREIGN_ORG_ID,
+        projectId: FOREIGN_PROJECT_ID,
+        workflowId: foreignRule.id,
+        tokenId: TEST_TOKEN_ID,
+        triggerType: "kyc_approved",
+        actionType: "record",
+        status: "pending",
+        idempotencyKey: "foreign-gate-probe",
+        triggerPayload: {},
+        maxAttempts: 5,
+      });
+      if (!foreign) {
+        throw new Error("failed to seed foreign execution");
+      }
+
+      await runDueWorkflowExecutions(env);
+
+      expect(await statusOf(foreign.id)).toEqual({
+        status: "failed",
+        error: "ASSET_CONTEXT_UNAVAILABLE",
+      });
+    });
+
+    it("still resolves each tenant's own rule and gate from cache", async () => {
+      const rule = await seedRule();
+      if (!rule) {
+        throw new Error("failed to seed rule");
+      }
+      await seedInTenantExecutions(rule.id);
+
+      const result = await runDueWorkflowExecutions(env);
+
+      // The tenant-scoped key must not defeat the cache for the case it exists for:
+      // repeated rows of the same rule on the same token still all run.
+      expect(result.succeeded).toBe(IN_TENANT_ROWS);
+      expect(result.failed).toBe(0);
+    });
   });
 });

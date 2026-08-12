@@ -15,8 +15,9 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,6 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { cn } from "@/lib/utils";
 import { AuthoritiesGlyph } from "./asset-overview-hero";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
@@ -43,6 +43,7 @@ import {
   getTokenChips,
   getTokenTypeLabel,
   type IssuanceTokenView,
+  tokenMarkInitial,
 } from "./issuance-token-fields";
 import { IssuanceTokenList, ManageKebab, StatHint } from "./issuance-token-list";
 import type { TokenView } from "./issuance-token-view";
@@ -214,7 +215,7 @@ function IssuanceTokenGridCard({
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-tertiary">
-                {token.symbol.slice(0, 1) || "?"}
+                {tokenMarkInitial(token.symbol)}
               </div>
             )}
           </div>
@@ -456,7 +457,7 @@ export function IssuanceWorkspace({
     selectedPlaygroundApiKeyId,
     setPlaygroundApiKeys,
   } = useDashboardWorkspace();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [isCreateTokenModalOpen, setIsCreateTokenModalOpen] = useState(false);
   const isPlaygroundTab = issuanceTab === "playground";
 
@@ -643,8 +644,7 @@ export function IssuanceWorkspace({
   if (!assetProfilesEnabled) {
     return (
       <DashboardWorkspaceTabShell
-        isPlaygroundTab={isPlaygroundTab}
-        overviewClassName={ISSUANCE_OVERVIEW_PANEL_CLASS}
+        overviewClassName="space-y-6"
         overviewKey="tokens-tab"
         overview={
           <IssuanceLegacyOverview
@@ -674,7 +674,6 @@ export function IssuanceWorkspace({
 
   return (
     <DashboardWorkspaceTabShell
-      isPlaygroundTab={isPlaygroundTab}
       overviewClassName={ISSUANCE_OVERVIEW_PANEL_CLASS}
       overviewKey="tokens-tab"
       overview={

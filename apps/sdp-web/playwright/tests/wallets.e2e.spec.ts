@@ -1,5 +1,10 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
-import type { PaymentsDashboardWallet, Token, TokenTransaction } from "@sdp/types";
+import {
+  type PaymentsDashboardWallet,
+  SOL_MINT,
+  type Token,
+  type TokenTransaction,
+} from "@sdp/types";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
@@ -167,8 +172,17 @@ async function bootstrapWalletRouteFixture(
     if (input.withPolicy) {
       const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
       await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
-        destinationAllowlist: [],
-        maxTransferAmount: "25",
+        defaultAction: "allow",
+        rules: [
+          {
+            id: "per-transaction-limit",
+            kind: "amount",
+            max: "25",
+            assets: [SOL_MINT],
+            action: "allow",
+            name: "Per transaction limit",
+          },
+        ],
       });
     }
 
@@ -375,7 +389,7 @@ test.describe
       expect(await pageGeometry()).toEqual(mobileBaseline);
     });
 
-    test("wallet policy history routes preserve navigation", async ({ browser, page }) => {
+    test("wallet policy history opens the revision drawer", async ({ browser, page }) => {
       const { projectId, wallet } = await bootstrapWalletRouteFixture(browser, {
         labelPrefix: "Wallet Policy Routes",
         withPolicy: true,
@@ -385,25 +399,33 @@ test.describe
       const walletHref = `/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`;
       const policyHref = `${walletHref}/policy`;
       const auditHref = `${policyHref}/audit`;
-      const revisionsHref = `${policyHref}/revisions`;
+      const revisionTrigger = page.getByRole("button", { name: "Revision history" });
+      const drawer = page.getByRole("dialog", { name: "Revision history" });
 
       await page.goto(policyHref, { waitUntil: "domcontentloaded" });
+      await expect(revisionTrigger).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+
+      await revisionTrigger.click();
+      await expect(drawer).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(page).toHaveURL(/[?&]revision=/, { timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(page).toHaveURL(new RegExp(`${policyHref.replaceAll("/", "\\/")}\\?`));
+
+      await page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(page).not.toHaveURL(/[?&]revision=/);
+
+      await page.goto(`${policyHref}?revision=latest`, { waitUntil: "domcontentloaded" });
+      await expect(drawer).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden({ timeout: E2E_POLL_TIMEOUT_MS });
+
+      await page.goto(walletHref, { waitUntil: "domcontentloaded" });
       await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
-      await expect(page.locator(`a[href="${revisionsHref}"]`)).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
-
       await page.locator(`a[href="${auditHref}"]`).click();
       await expect(page).toHaveURL(new RegExp(`${auditHref.replaceAll("/", "\\/")}$`));
-      await expect(page.locator(`a[href="${revisionsHref}"]`)).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
-
-      await page.locator(`a[href="${revisionsHref}"]`).click();
-      await expect(page).toHaveURL(new RegExp(`${revisionsHref.replaceAll("/", "\\/")}$`));
-      await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
+      await expect(page.getByRole("button", { name: "Revision history" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
     });

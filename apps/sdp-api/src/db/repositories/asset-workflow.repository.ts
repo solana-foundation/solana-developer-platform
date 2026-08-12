@@ -38,9 +38,16 @@ export interface AssetWorkflowRow {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // Set by the soft delete; null on live rows. Only reads that opt into
+  // `includeDeleted` ever see a non-null value.
+  deleted_at: string | null;
 }
 
 export interface CreateAssetWorkflowInput {
+  // Callers that must reference the rule before it exists supply their own id — the
+  // webhook signing secret is keyed by rule id and is written first, so that a store
+  // failure leaves no row behind. Everyone else lets the repository mint one.
+  id?: string;
   organizationId: string;
   projectId: string;
   tokenId: string;
@@ -80,6 +87,10 @@ export interface AssetWorkflowsRepository {
     workflowId: string;
     organizationId: string;
     projectId: string;
+    // Soft-deleted rows are invisible to every read path by default. The delete
+    // handler alone opts in, so a retry of a delete whose cleanup failed can find
+    // the row it soft-deleted and finish the job instead of 404ing.
+    includeDeleted?: boolean;
   }): Promise<AssetWorkflowRow | null>;
   listWorkflowsForToken(params: {
     tokenId: string;

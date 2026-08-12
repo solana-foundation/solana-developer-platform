@@ -2,7 +2,7 @@
 
 import type { AssetProfile, Token } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { Loader2, Play } from "lucide-react";
+import { Loader2, Play, WalletIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -12,6 +12,7 @@ import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
 import { togglePublicField } from "../../create/draft-mapping";
+import { resolveVerifiedHolders } from "../../issuance-token-fields";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
@@ -217,7 +218,9 @@ export function AssetManagementWorkspace({
       />
 
       <Tabs
-        bordered
+        // No rule under the tab strip: the tab content below is already carded,
+        // so the border would read as a second, competing edge.
+        bordered={false}
         value={activeTab}
         onValueChange={(value) => syncActiveTabInUrl(value as AssetManagementTab)}
       >
@@ -309,6 +312,11 @@ export function AssetManagementWorkspace({
             tokenId={token.id}
             canManage={canManageTokenWrite}
             canManagePrivileged={canManageTokenAdmin}
+            // Enrollment defines who counts as a *verified holder* of the asset, so the
+            // roster only belongs on assets that gate on that (the "Verified holders"
+            // access mode = KYC capacity). On an ungated asset, enrolling a wallet does
+            // nothing, so the card is hidden rather than shown as dead UI.
+            verifiedHolders={resolveVerifiedHolders(form.draft)}
           />
         ) : null}
         {activeTab === "activity" ? <ActivityTab tokenId={token.id} /> : null}
@@ -354,8 +362,9 @@ export function AssetManagementWorkspace({
                 signerWalletId={ops.deploySignerWalletId}
                 signerUnavailableReason={ops.deploySignerSelection.unavailableReason}
                 onSignerWalletIdChange={ops.setDeploySignerWalletId}
+                helperText={t("DashboardIssuance.management.deploySignerHint")}
               />
-              <div className="flex items-center justify-end gap-2">
+              <div className="flex items-center justify-between gap-2">
                 <button
                   type="button"
                   onClick={ops.closeFundManagementModal}
@@ -366,11 +375,12 @@ export function AssetManagementWorkspace({
                 </button>
                 <button
                   type="button"
-                  onClick={() => ops.submitFundManagementAction("deploy")}
+                  onClick={() => ops.deployToken("wallet")}
                   disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
-                  className="inline-flex h-10 items-center rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
                 >
-                  {t("DashboardIssuance.workspace.deployNow")}
+                  <WalletIcon className="size-4" />
+                  {t("DashboardIssuance.management.deployWithWallet")}
                 </button>
               </div>
             </div>

@@ -10,6 +10,9 @@ updates:
     open-pull-requests-limit: 15
     cooldown:
       default-days: 7
+    # Existing direct dependencies are exact pins. Keep Dependabot's manifest
+    # updates exact as well, rather than widening a semver range.
+    versioning-strategy: increase
     groups:
       solana:
         patterns:

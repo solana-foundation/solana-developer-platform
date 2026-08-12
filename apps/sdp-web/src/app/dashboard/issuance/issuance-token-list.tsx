@@ -22,6 +22,7 @@ import {
   Terminal,
   UsersRound,
 } from "lucide-react";
+import Link from "next/link";
 import {
   type ReactNode,
   useCallback,
@@ -32,7 +33,6 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -51,6 +51,7 @@ import {
   getTokenChips,
   type IssuanceTokenView,
   tokenExplorerHref,
+  tokenMarkInitial,
 } from "./issuance-token-fields";
 import { WalletIdentityBadge } from "./wallet-identity";
 
@@ -107,7 +108,7 @@ function TokenAvatar({ token, size = 40 }: { token: IssuanceTokenView; size?: nu
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-tertiary">
-          {token.symbol.slice(0, 1) || "?"}
+          {tokenMarkInitial(token.symbol)}
         </div>
       )}
     </div>

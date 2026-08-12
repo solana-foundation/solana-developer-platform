@@ -15,6 +15,7 @@ import type {
   InitializeSigningResponse,
   SignerCheckResponse,
   SwitchProviderOptionsResponse,
+  SwitchSigningResponse,
 } from "@sdp/types";
 import { z } from "zod";
 
@@ -46,7 +47,6 @@ export const initializePrivySchema = z.object({
 export const initializeCoinbaseCdpSchema = z.object({
   provider: z.literal("coinbase_cdp"),
   network: z.enum(["solana", "solana-devnet"]).optional(),
-  walletAddress: z.string().min(32).max(44).optional(),
   accountPolicy: z
     .string()
     .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)
@@ -57,36 +57,29 @@ export const initializeCoinbaseCdpSchema = z.object({
 export const initializeParaSchema = z.object({
   provider: z.literal("para"),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
-  walletId: z.string().min(1).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
 export const initializeTurnkeySchema = z.object({
   provider: z.literal("turnkey"),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
-  privateKeyId: z.string().min(1).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
 export const initializeDfnsSchema = z.object({
   provider: z.literal("dfns"),
   network: z.enum(["Solana", "SolanaDevnet"]).optional(),
-  walletId: z.string().min(1).optional(),
-  signingKeyId: z.string().min(1).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
 export const initializeIbmHavenSchema = z.object({
   provider: z.literal("ibm_haven"),
   network: z.enum(["Solana", "SolanaDevnet"]).optional(),
-  walletId: z.string().min(1).optional(),
-  signingKeyId: z.string().min(1).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
 export const initializeAnchorageSchema = z.object({
   provider: z.literal("anchorage"),
-  walletId: z.string().min(1).optional(),
   walletLabel: z.string().max(100).optional(),
   network: z.enum(["solana", "solana-devnet"]).optional(),
 });
@@ -138,18 +131,28 @@ export type UpdateWalletRequest = z.infer<typeof updateWalletSchema>;
 // Switch Signing Provider
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const switchSigningSchema = z.discriminatedUnion("provider", [
-  initializeLocalSchema,
-  initializeFireblocksSchema,
-  initializePrivySchema,
-  initializeCoinbaseCdpSchema,
-  initializeParaSchema,
-  initializeTurnkeySchema,
-  initializeDfnsSchema,
-  initializeIbmHavenSchema,
-  initializeAnchorageSchema,
-  initializeUtilaSchema,
-]);
+const exactConnectionSwitchSchema = z
+  .object({
+    connectionId: z.string().min(1),
+    provider: custodyProviderSchema.optional(),
+  })
+  .strict();
+
+const providerSwitchSchema = z
+  .preprocess((value, ctx) => {
+    if (value !== null && typeof value === "object" && Object.hasOwn(value, "connectionId")) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["connectionId"],
+        message: "connectionId selects the exact-connection request variant",
+      });
+      return z.NEVER;
+    }
+    return value;
+  }, initializeSigningSchema)
+  .meta({ not: { required: ["connectionId"] } });
+
+export const switchSigningSchema = z.union([exactConnectionSwitchSchema, providerSwitchSchema]);
 
 export type SwitchSigningRequest = z.infer<typeof switchSigningSchema>;
 
@@ -224,4 +227,5 @@ export type {
   InitializeSigningResponse,
   SignerCheckResponse,
   SwitchProviderOptionsResponse,
+  SwitchSigningResponse,
 };

@@ -1,13 +1,13 @@
 "use client";
 
 import { CheckIcon, CopyIcon, LockIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { useCopy } from "@/lib/use-copy";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { ConfirmWebhookActionModal } from "../confirm-webhook-action-modal";
 import { EditWebhookEndpointModal } from "../edit-webhook-endpoint-modal";
 import { useWebhookEndpointActions } from "../use-webhook-endpoint-actions";
@@ -60,7 +60,7 @@ export function WebhookEndpointDetail({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const swr = usePersistedDashboardSWR<WebhookEndpointView>(
     ["webhook-endpoint", initialEndpoint.id],
     () => fetchWebhookEndpoint(initialEndpoint.id),

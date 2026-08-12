@@ -19,9 +19,9 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ── Base: pin Node + pnpm to the repo's packageManager ─────────────────────
-# Digest pinned so rebuilds don't silently float onto a new node:22-slim.
-# Refresh with: docker pull node:22-slim && docker inspect --format='{{index .RepoDigests 0}}' node:22-slim
-FROM node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb AS base
+# Digest pinned so rebuilds don't silently float onto a new node:24-slim.
+# Refresh with: docker pull node:24-slim && docker inspect --format='{{index .RepoDigests 0}}' node:24-slim
+FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1
@@ -38,10 +38,12 @@ COPY apps/sdp-web/package.json ./apps/sdp-web/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
+COPY packages/sdp-policy/package.json ./packages/sdp-policy/
 # sdp-web imports @sdp/issuance/capabilities (advanced-settings catalog); pull the
 # package and its workspace deps (@sdp/payments) into the frozen-install closure.
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
+COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -57,8 +59,10 @@ COPY apps/sdp-web ./apps/sdp-web
 COPY packages/sdp-types ./packages/sdp-types
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-solana ./packages/sdp-solana
+COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-issuance ./packages/sdp-issuance
 COPY packages/sdp-payments ./packages/sdp-payments
+COPY packages/sdp-private-channels ./packages/sdp-private-channels
 
 # Public env (each var is also exposed via ENV so Next picks it up at build).
 # __SDP_RT_*__ defaults are placeholders swapped at container start by docker/entrypoint.sh.
@@ -66,11 +70,9 @@ ARG NEXT_PUBLIC_API_BASE_URL
 ARG NEXT_PUBLIC_SDP_API_BASE_URL=__SDP_RT_NEXT_PUBLIC_SDP_API_BASE_URL__
 ARG NEXT_PUBLIC_SDP_DOCS_URL=__SDP_RT_NEXT_PUBLIC_SDP_DOCS_URL__
 ARG NEXT_PUBLIC_SOLANA_NETWORK=__SDP_RT_NEXT_PUBLIC_SOLANA_NETWORK__
-ARG NEXT_PUBLIC_SDP_ENVIRONMENT=__SDP_RT_NEXT_PUBLIC_SDP_ENVIRONMENT__
 ARG NEXT_PUBLIC_SENTRY_DSN
 ARG NEXT_PUBLIC_ENABLE_NETWORK_DEBUG
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=__SDP_RT_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY__
-ARG NEXT_PUBLIC_CLERK_JWT_TEMPLATE
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL
@@ -79,11 +81,9 @@ ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
     NEXT_PUBLIC_SDP_API_BASE_URL=$NEXT_PUBLIC_SDP_API_BASE_URL \
     NEXT_PUBLIC_SDP_DOCS_URL=$NEXT_PUBLIC_SDP_DOCS_URL \
     NEXT_PUBLIC_SOLANA_NETWORK=$NEXT_PUBLIC_SOLANA_NETWORK \
-    NEXT_PUBLIC_SDP_ENVIRONMENT=$NEXT_PUBLIC_SDP_ENVIRONMENT \
     NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN \
     NEXT_PUBLIC_ENABLE_NETWORK_DEBUG=$NEXT_PUBLIC_ENABLE_NETWORK_DEBUG \
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
-    NEXT_PUBLIC_CLERK_JWT_TEMPLATE=$NEXT_PUBLIC_CLERK_JWT_TEMPLATE \
     NEXT_PUBLIC_CLERK_SIGN_IN_URL=$NEXT_PUBLIC_CLERK_SIGN_IN_URL \
     NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=$NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL \
     NEXT_PUBLIC_CLERK_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_URL \
@@ -125,7 +125,7 @@ RUN --mount=type=secret,id=sentry_auth_token \
     pnpm --filter sdp-web build
 
 # ── Runtime: slim image with only the standalone output ────────────────────
-FROM node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb AS runner
+FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
@@ -133,9 +133,14 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1
 
-# Apply OS-level security patches not yet in the pinned base image.
+# Update npm for patched node-tar (CVE-2026-59873) and apply OS-level fixes
+# not yet in the pinned base image.
 # This layer is cached — rebuild with --no-cache to pick up new fixes.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+RUN npm install --global npm@12.0.2 \
+ && npm cache clean --force \
+ && apt-get update \
+ && apt-get upgrade -y \
+ && rm -rf /var/lib/apt/lists/*
 
 # Run as an unprivileged user. UID/GID 1001 matches the convention used by
 # the upstream Next.js Docker example to make k8s securityContext predictable.

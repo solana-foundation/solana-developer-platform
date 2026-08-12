@@ -1,6 +1,7 @@
 import type { AssetCategory, SelectedSetting, StoredAdvancedSettings } from "@sdp/types";
 import { getDb } from "@/db";
 import { createAssetProfilesRepository } from "@/db/repositories";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
@@ -23,11 +24,19 @@ export async function resolveAssetGateContext(
   env: Env,
   params: { tokenId: string; organizationId: string; projectId: string }
 ): Promise<AssetGateContext | null> {
-  const token = await new TokenService(getDb(env)).getToken(params);
+  // The caller's org/project are the trusted tenant identity — from the authenticated
+  // request on the save path, from the enqueue-time execution row on the engine path.
+  const scope = createTenantScope({
+    organizationId: params.organizationId,
+    projectId: params.projectId,
+  });
+  const token = await new TokenService(getDb(env), scope).getToken(params);
   if (!token) {
     return null;
   }
-  const profile = await createAssetProfilesRepository(env).getActiveAssetProfileByTokenId(params);
+  const profile = await createAssetProfilesRepository(env, scope).getActiveAssetProfileByTokenId(
+    params
+  );
   const stored = profile?.issuance_metadata?.settings as StoredAdvancedSettings | undefined;
   return {
     category: (profile?.asset_category ?? "generic") as AssetCategory,

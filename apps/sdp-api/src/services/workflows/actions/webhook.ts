@@ -4,6 +4,7 @@ import {
   generateWebhookDeliveryId,
   type WorkflowExecutionRow,
 } from "@/db/repositories";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { readActionSecret } from "../action-secret";
 import { resolveLiveEndpointSecrets } from "../endpoint-secret";
@@ -130,7 +131,7 @@ async function runEndpointSendWebhook(
     } catch (error) {
       // The delivery log is observability, not control flow: a failed insert must
       // never flip the action outcome (and never double-sends).
-      console.error("Failed to record webhook delivery", error);
+      getLogger().error({ error }, "Failed to record webhook delivery");
     }
   };
 

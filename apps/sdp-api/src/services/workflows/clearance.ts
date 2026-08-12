@@ -4,6 +4,7 @@ import {
   createWalletAssetEnrollmentsRepository,
   type KycWalletRow,
 } from "@/db/repositories";
+import { createTenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 import { dispatchWorkflowEvent } from "./event-bus";
 
@@ -15,7 +16,13 @@ async function resolveCounterpartyKind(env: Env, kycWallet: KycWalletRow): Promi
   if (!kycWallet.counterparty_id) {
     return null;
   }
-  const counterparty = await createCounterpartiesRepository(env).getCounterpartyById({
+  // The wallet row's org/project are the trusted tenant identity — it was written by an
+  // authenticated enrollment or a verified provider webhook, never request input.
+  const scope = createTenantScope({
+    organizationId: kycWallet.organization_id,
+    projectId: kycWallet.project_id,
+  });
+  const counterparty = await createCounterpartiesRepository(env, scope).getCounterpartyById({
     counterpartyId: kycWallet.counterparty_id,
     organizationId: kycWallet.organization_id,
     projectId: kycWallet.project_id,
@@ -29,7 +36,11 @@ async function resolveCounterpartyKind(env: Env, kycWallet: KycWalletRow): Promi
 // never re-allowlisted. Including the status transition lets each real transition fire
 // once while re-delivered webhooks for the same one stay no-ops.
 function transition(wallet: KycWalletRow): string {
-  return wallet.verified_at ?? wallet.updated_at;
+  // `status_changed_at` moves only when the status itself changes. `updated_at` used to
+  // stand in for a rejection (no `verified_at`), but it moves on any write to the row —
+  // enrolling the holder for a second asset re-upserts it — so a redelivery after an
+  // unrelated write re-dated the same rejection into a fresh key and enqueued it twice.
+  return wallet.status_changed_at;
 }
 
 // "Cleared to hold this asset" = identity verified AND an active enrollment exists.

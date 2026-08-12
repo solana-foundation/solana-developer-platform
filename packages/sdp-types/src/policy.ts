@@ -134,6 +134,9 @@ export interface WalletApprovalRequestOperationSummary {
   amount: string | null;
   destination: string | null;
   status: WalletOperationStatus;
+  executionStartedAt: string | null;
+  executionCompletedAt: string | null;
+  executionError: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -194,6 +197,7 @@ export interface WalletControlProfileRevision {
   revisionNumber: number;
   rules: PolicyRule[];
   defaultAction: PolicyDefaultAction;
+  commitMessage: string | null;
   createdBy: string | null;
   createdAt: string;
   activatedAt: string | null;
@@ -309,8 +313,7 @@ export interface WalletOperationActor {
 export type WalletOperationContext = Record<string, unknown>;
 export type WalletOperationProviderExtensions = Record<string, unknown>;
 
-export interface WalletOperationEnvelope {
-  id: string;
+export interface PolicyCandidate {
   organizationId: string;
   projectId: string | null;
   custodyWalletId: string | null;
@@ -325,6 +328,10 @@ export interface WalletOperationEnvelope {
   destination: string | null;
   context: WalletOperationContext;
   providerExtensions: WalletOperationProviderExtensions;
+}
+
+export interface WalletOperationEnvelope extends PolicyCandidate {
+  id: string;
   rawPayload: Record<string, unknown>;
   idempotencyKey: string | null;
   status: WalletOperationStatus;
@@ -350,10 +357,32 @@ export interface PolicyEvaluation {
 export interface MatchedPolicyRule {
   scope: PolicyRuleScope;
   ruleId: string | null;
-  kind: string;
+  kind: PolicyRule["kind"];
   decision: PolicyDecision;
   reason: string;
-  rule: Record<string, unknown>;
+  rule: PolicyRule;
+  /** Zero-based index of the operation leg the rule matched, or null for the operation itself. */
+  leg: number | null;
+}
+
+export interface PolicyDryRunCriterion {
+  scope: PolicyRuleScope;
+  ruleId: string | null;
+  kind: PolicyRule["kind"];
+  name: string | null;
+  matched: boolean;
+  action: PolicyDecision | null;
+  reason: string | null;
+  /** Zero-based index of the operation leg the criterion describes, or null for the operation itself. */
+  leg: number | null;
+}
+
+export interface PolicyDryRunResult {
+  decision: PolicyDecision;
+  reason: string;
+  criteria: PolicyDryRunCriterion[];
+  walletPolicyRevisionId: string | null;
+  apiKeyPolicyRevisionId: string | null;
 }
 
 export interface PolicyScopeEvaluation {
@@ -370,26 +399,7 @@ export interface PolicyScopeEvaluation {
 }
 
 export interface PolicyEvaluationContext {
-  operation: {
-    id: string;
-    organizationId: string;
-    projectId: string | null;
-    custodyWalletId: string | null;
-    walletId: string;
-    apiKeyId: string | null;
-    actor: WalletOperationActor | null;
-    source: string;
-    operationFamily: WalletOperationFamily;
-    operationType: string;
-    asset: string | null;
-    amount: string | null;
-    destination: string | null;
-    context: WalletOperationContext;
-    providerExtensions: WalletOperationProviderExtensions;
-    idempotencyKey: string | null;
-    rawPayload: Record<string, unknown>;
-    createdAt: string;
-  };
+  operation: Omit<WalletOperationEnvelope, "status" | "updatedAt">;
   walletPolicy: PolicyEvaluationPolicyContext;
   apiKeyPolicy: PolicyEvaluationPolicyContext | null;
 }
@@ -440,18 +450,21 @@ export interface PolicyEvaluationPolicyContext {
   requiresApproval: boolean;
 }
 
-export interface WalletOperationPolicyEvaluation {
-  operation: WalletOperationEnvelope;
+export interface CandidatePolicyEvaluation {
   wallet: PolicyScopeEvaluation;
   apiKey: PolicyScopeEvaluation | null;
   decision: PolicyDecision;
   reasonCode: PolicyEvaluationReasonCode | string;
   reason: string;
   matchedRules: MatchedPolicyRule[];
-  evaluationContext: PolicyEvaluationContext;
   requiresApproval: boolean;
   walletPolicyRevisionId: string | null;
   apiKeyPolicyRevisionId: string | null;
+}
+
+export interface WalletOperationPolicyEvaluation extends CandidatePolicyEvaluation {
+  operation: WalletOperationEnvelope;
+  evaluationContext: PolicyEvaluationContext;
 }
 
 export interface EffectivePolicy<TProfile, TRevision> {

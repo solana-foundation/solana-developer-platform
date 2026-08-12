@@ -6,6 +6,7 @@
 // fixed by redaction; this moves the value itself into the credential secret store, so
 // the rule row holds a reference rather than the key.
 
+import { getLogger } from "@/runtime/logger";
 import {
   type CredentialSecretStore,
   CredentialSecretStoreError,
@@ -52,6 +53,43 @@ export async function storeActionSecret(
       return { ok: false, reason: "UNAVAILABLE" };
     }
     throw error;
+  }
+}
+
+// Retires a secret nothing points at any more: the version superseded by a rotation, the
+// rule's key after a delete, or one written for a row that then failed to commit. Without
+// this the value stays readable in the backend indefinitely.
+//
+// Best effort by design. Only GCP Secret Manager has external versions to destroy (the
+// other backends store the ciphertext inline, and it goes away with the row), and a
+// cleanup failure must not fail a request whose primary write already succeeded — the
+// orphaned version is logged instead so it can be reaped out of band.
+export async function destroyActionSecret(
+  env: Env,
+  stored: StoredCredentialSecret | null | undefined
+): Promise<void> {
+  if (stored?.storageBackend !== "gcp_secret_manager" || !stored.secretVersionRef) {
+    return;
+  }
+  const secretStore = store(env);
+  if (!secretStore) {
+    return;
+  }
+  try {
+    await secretStore.destroyVersion({ secretVersionRef: stored.secretVersionRef });
+  } catch {
+    const version = stored.secretVersionRef.split("/").at(-1);
+    getLogger().error(
+      {
+        provider: PROVIDER,
+        storageBackend: stored.storageBackend,
+        ...(version && /^[1-9][0-9]*$/.test(version)
+          ? { providerResourceVersion: Number(version) }
+          : {}),
+        reason: "secret_cleanup_failed",
+      },
+      "workflow_action_secret_orphan_risk"
+    );
   }
 }
 

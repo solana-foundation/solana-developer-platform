@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { PaymentsRepository } from "./payments.repository";
 import { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 
@@ -20,11 +21,14 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {
     const db = getDb(env);
+    await db.prepare("DELETE FROM custody_scope_defaults").run();
+    await db.prepare("DELETE FROM custody_wallets").run();
+    await db.prepare("DELETE FROM custody_configs").run();
     await db.prepare("DELETE FROM payment_transfers").run();
     await db.prepare("DELETE FROM projects").run();
 
@@ -87,7 +91,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   async function seedTransfer(input: {
     id: string;
     status: string;
-    projectId?: string;
+    projectId?: string | null;
   }): Promise<void> {
     const now = new Date().toISOString();
     await getDb(env)
@@ -99,7 +103,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       .bind(
         input.id,
         TEST_ORG.id,
-        input.projectId ?? TEST_PROJECT_ID,
+        input.projectId === undefined ? TEST_PROJECT_ID : input.projectId,
         TEST_WALLET_ID,
         "USDC",
         "offramp",
@@ -194,6 +198,87 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
 
     expect(updated).toBeNull();
     expect(await readStatus("xfr_guard_project")).toBe("awaiting_payment");
+  });
+
+  it("makes a valid foreign transfer id indistinguishable from a missing row", async () => {
+    await seedTransfer({
+      id: "xfr_foreign_valid_id",
+      status: "awaiting_payment",
+      projectId: OTHER_PROJECT_ID,
+    });
+    const scoped = createPostgresPaymentsRepository(
+      getDb(env),
+      createTenantScope({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    );
+
+    await expect(
+      scoped.updateTransfer({
+        transferId: "xfr_foreign_valid_id",
+        status: "confirmed",
+        updatedAt: new Date().toISOString(),
+      })
+    ).resolves.toBeNull();
+    await expect(
+      scoped.getTransferById({
+        transferId: "xfr_foreign_valid_id",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    ).resolves.toBeNull();
+    expect(await readStatus("xfr_foreign_valid_id")).toBe("awaiting_payment");
+  });
+
+  it("lets an organization-scoped repository read and update project transfers", async () => {
+    await seedTransfer({ id: "xfr_org_admin", status: "awaiting_payment" });
+    const scoped = createPostgresPaymentsRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: null })
+    );
+
+    await expect(
+      scoped.getTransferById({
+        transferId: "xfr_org_admin",
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      })
+    ).resolves.toMatchObject({ id: "xfr_org_admin", project_id: TEST_PROJECT_ID });
+    await expect(
+      scoped.updateTransfer({
+        transferId: "xfr_org_admin",
+        status: "confirmed",
+        updatedAt: new Date().toISOString(),
+      })
+    ).resolves.toMatchObject({ id: "xfr_org_admin", status: "confirmed" });
+  });
+
+  it("rejects forged tenant claims before querying and preserves same-tenant writes", async () => {
+    await seedTransfer({ id: "xfr_owned_valid_id", status: "awaiting_payment" });
+    const scoped = createPostgresPaymentsRepository(
+      getDb(env),
+      createTenantScope({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    );
+
+    await expect(
+      scoped.getTransferById({
+        transferId: "xfr_owned_valid_id",
+        organizationId: TEST_ORG.id,
+        projectId: OTHER_PROJECT_ID,
+      })
+    ).rejects.toBeInstanceOf(TenantScopeViolationError);
+
+    await expect(
+      scoped.updateTransfer({
+        transferId: "xfr_owned_valid_id",
+        status: "confirmed",
+        updatedAt: new Date().toISOString(),
+      })
+    ).resolves.toMatchObject({ id: "xfr_owned_valid_id", status: "confirmed" });
   });
 
   it("persists idempotency metadata and looks it up by (org, key)", async () => {
@@ -311,5 +396,110 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     await expect(repo.createTransfer({ ...base, idempotencyKey: "dup-key" })).rejects.toSatisfy(
       (err: unknown) => isPostgresUniqueViolation(err)
     );
+  });
+});
+
+describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
+  const SOL_MINT_ADDRESS = "So11111111111111111111111111111111111111112";
+
+  beforeAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  afterAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  beforeEach(async () => {
+    const db = getDb(env);
+    await db.prepare("DELETE FROM payment_transfers").run();
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      )
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+      .run();
+  });
+
+  function transfer(token: string, suffix: string) {
+    return {
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: `Source${suffix}`,
+      destinationAddress: `Dest${suffix}`,
+      token,
+      amount: "1",
+      memo: null,
+      type: "transfer" as const,
+      direction: "outbound" as const,
+      status: "processing" as const,
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: null,
+      idempotencyKey: `token-filter-${suffix}`,
+      idempotencyFingerprint: `fp-${suffix}`,
+    };
+  }
+
+  async function seedMixedForms() {
+    // Exactly the shape the local ledger holds: the same asset written as a bare
+    // symbol on some rows and as its mint on others, all with type = transfer.
+    const repo = createPostgresPaymentsRepository(getDb(env));
+    await repo.createTransfer(transfer("SOL", "sym-1"));
+    await repo.createTransfer(transfer("SOL", "sym-2"));
+    await repo.createTransfer(transfer(SOL_MINT_ADDRESS, "mint-1"));
+    return repo;
+  }
+
+  const listArgs = { organizationId: TEST_ORG.id, projectId: null, limit: 50, offset: 0 };
+
+  it("returns the mint rows and the symbol rows for one filter", async () => {
+    const repo = await seedMixedForms();
+
+    // An exact match returned 2 for the symbol and 1 for the mint. Both are the
+    // same asset, so either spelling has to answer with all three.
+    const bySymbol = await repo.listTransfers({ ...listArgs, token: "SOL" });
+    const byMint = await repo.listTransfers({ ...listArgs, token: SOL_MINT_ADDRESS });
+
+    expect(bySymbol.rows).toHaveLength(3);
+    expect(byMint.rows).toHaveLength(3);
+  });
+
+  it("does not pull in a different asset that happens to share the catalogue", async () => {
+    const repo = await seedMixedForms();
+    await repo.createTransfer(transfer("USDC", "usdc-1"));
+
+    const bySymbol = await repo.listTransfers({ ...listArgs, token: "SOL" });
+
+    expect(bySymbol.rows).toHaveLength(3);
+    expect(bySymbol.rows.every((row) => row.token !== "USDC")).toBe(true);
+  });
+
+  it("treats a blank token as no filter rather than as a value to match", async () => {
+    const repo = await seedMixedForms();
+
+    // The query schema takes `token` as a bare optional string, so whitespace
+    // reaches the repository truthy. Matching it literally returned zero rows for
+    // what is really an absent filter.
+    const blank = await repo.listTransfers({ ...listArgs, token: "   " });
+
+    expect(blank.rows).toHaveLength(3);
+  });
+
+  it("returns nothing for a token the organization has never transferred", async () => {
+    const repo = await seedMixedForms();
+
+    const none = await repo.listTransfers({ ...listArgs, token: "JUP" });
+
+    expect(none.rows).toHaveLength(0);
   });
 });

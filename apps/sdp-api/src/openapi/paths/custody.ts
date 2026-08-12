@@ -13,6 +13,7 @@ import {
   setDefaultWalletResponseSchema,
   signerCheckRequestSchema,
   switchSigningRequestSchema,
+  switchSigningResponseSchema,
   updateCustodyWalletRequestSchema,
   walletIdParamSchema,
 } from "../schemas";
@@ -63,7 +64,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Switch wallet signing provider",
     operationId: "switchWalletSigningProvider",
     description:
-      "Ensures the target provider is active and sets it as the default signing provider for the requested scope. Existing on-chain authorities are not rotated.",
+      "Selects an active provider config or exact Custody Connection as the default signing target for the requested scope. Existing on-chain authorities are not rotated.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -74,9 +75,9 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     responses: {
       201: {
         description: "Wallet signing provider switched",
-        content: jsonContent(initializeSigningResponseSchema),
+        content: jsonContent(switchSigningResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -373,13 +374,17 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
   });
 
   for (const action of ["approve", "reject", "cancel"] as const) {
+    const authorization =
+      action === "cancel"
+        ? "The requester may cancel its own request; otherwise the resolver must be an active member of the assigned approval group, or an organization/API admin when no group is assigned. A user and the API keys they created are treated as the same requester."
+        : "The resolver must differ from the requester, including across a user session and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned.";
     registry.registerPath({
       method: "post",
       path: `/v1/wallets/approval-requests/{approvalRequestId}/${action}`,
       tags: ["Wallets"],
       summary: `${action[0].toUpperCase()}${action.slice(1)} wallet approval request`,
       operationId: `${action}WalletApprovalRequest`,
-      description: `${action[0].toUpperCase()}${action.slice(1)}s a pending wallet operation approval request.`,
+      description: `${action[0].toUpperCase()}${action.slice(1)}s a pending wallet operation approval request. ${authorization}`,
       security: [{ apiKeyAuth: [] }],
       request: {
         headers: projectScopeHeaders,

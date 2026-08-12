@@ -10,6 +10,7 @@
 import type { TokenTransactionType } from "@sdp/types";
 import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
+import { getLogger } from "@/runtime/logger";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { errorMessage } from "./onchain";
@@ -52,11 +53,10 @@ export async function recordWorkflowTransaction(
     });
     return true;
   } catch (error) {
-    console.error("workflow: transaction ledger write failed", {
-      executionId: execution.id,
-      type: input.type,
-      error: errorMessage(error),
-    });
+    getLogger().error(
+      { executionId: execution.id, type: input.type, error: errorMessage(error) },
+      "workflow: transaction ledger write failed"
+    );
     return false;
   }
 }

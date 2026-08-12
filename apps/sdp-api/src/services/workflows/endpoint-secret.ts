@@ -4,6 +4,7 @@
 // StoredCredentialSecret handle — the plaintext is returned exactly once by the
 // create/rotate handlers and has no read path afterwards.
 
+import { getLogger } from "@/runtime/logger";
 import {
   type CredentialSecretStore,
   CredentialSecretStoreError,
@@ -147,6 +148,6 @@ export async function destroyEndpointSecretVersion(
     if (error instanceof CredentialSecretStoreError && error.code === "UNSUPPORTED_OPERATION") {
       return;
     }
-    console.error("Failed to destroy displaced webhook endpoint secret version", error);
+    getLogger().error({ error }, "Failed to destroy displaced webhook endpoint secret version");
   }
 }

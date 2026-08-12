@@ -9,7 +9,12 @@ import type {
   ApiKeyWalletScope,
   PaymentsDashboardWallet,
 } from "@sdp/types";
+import { KeyRoundIcon, PlusIcon } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import {
   Table,
   TableBody,
@@ -198,6 +203,7 @@ export function ApiKeysTableClient({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const router = useRouter();
   const [apiKeys, setApiKeys] = useState(initialApiKeys);
 
   useEffect(() => {
@@ -215,7 +221,22 @@ export function ApiKeysTableClient({
   }, [wallets]);
 
   if (sortedApiKeys.length === 0) {
-    return <p className="text-sm text-secondary">{t("DashboardCustody.noApiKeysFound")}</p>;
+    return (
+      <ListEmptyState
+        icon={<KeyRoundIcon className="size-5" />}
+        message={t("DashboardCustody.noApiKeysFound")}
+        action={
+          canManageApiKeys ? (
+            <Button asChild size="sm">
+              <Link href="/dashboard/api-keys/new">
+                <PlusIcon className="size-4" />
+                {t("DashboardCustody.createNewApiKey")}
+              </Link>
+            </Button>
+          ) : null
+        }
+      />
+    );
   }
 
   return (
@@ -288,6 +309,7 @@ export function ApiKeysTableClient({
                     canRotate={canRotate}
                     onDeleted={() => {
                       setApiKeys((previous) => previous.filter((item) => item.id !== key.id));
+                      router.refresh();
                     }}
                   />
                 ) : null}

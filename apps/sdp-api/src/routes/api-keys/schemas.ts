@@ -1,6 +1,7 @@
 import { PERMISSIONS } from "@sdp/types";
 import { z } from "zod";
 import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
+import { refinePolicyRules, walletPolicyRuleSchema } from "../payments/schemas";
 
 const apiKeyAllowedIpSchema = z.string().refine(isValidIpAllowlistEntry, {
   message: "Must be a valid IPv4 or IPv6 address or CIDR range",
@@ -47,34 +48,19 @@ export const apiKeyRotateSchema = z.object({
 
 const policyDefaultActionSchema = z.enum(["allow", "deny", "approval_required", "review"]);
 
-const apiKeyPolicyRuleSchema = z
-  .object({
-    id: z.string().min(1).max(120).optional(),
-    name: z.string().min(1).max(120).optional(),
-    description: z.string().max(500).optional(),
-    action: z
-      .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
-      .optional(),
-    kind: z.enum([
-      "operation_family",
-      "operation_type",
-      "asset",
-      "destination",
-      "amount",
-      "approval",
-      "always",
-    ]),
-  })
-  .passthrough();
-
 export const apiKeyControlProfileCreateSchema = z.object({
   name: z.string().min(1).max(100),
 });
 
-export const apiKeyControlProfileRevisionCreateSchema = z.object({
-  rules: z.array(apiKeyPolicyRuleSchema).max(100),
+export const apiKeyControlProfileRevisionCreateBaseSchema = z.object({
+  rules: z.array(walletPolicyRuleSchema).max(100),
   defaultAction: policyDefaultActionSchema,
 });
+
+export const apiKeyControlProfileRevisionCreateSchema =
+  apiKeyControlProfileRevisionCreateBaseSchema.superRefine((revision, ctx) =>
+    refinePolicyRules(revision.rules, ctx)
+  );
 
 const allWalletPolicyBindingSchema = z.object({
   bindingScope: z.literal("all"),

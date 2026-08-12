@@ -1,6 +1,9 @@
 import type { TokenTransactionType } from "@sdp/types";
 import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
+import { AppError } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import { createToken2022Service } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { parsePositiveTokenAmount } from "@/services/token-operation.service";
@@ -23,24 +26,25 @@ import {
 import { recordWorkflowTransaction } from "./record-transaction";
 import type { ActionContext, ActionExecutionResult } from "./types";
 
-// The DB supply mirror is best-effort AFTER the on-chain truth: a mirror write failure
-// (e.g. MAX_SUPPLY_EXCEEDED on a drifted counter) must never fail — let alone re-run —
-// an action whose chain effect already landed. Surfaced via `mirrorFailed` in the result.
+// The DB supply mirror for settled burns, best-effort AFTER the on-chain truth: a mirror
+// write failure must never fail — let alone re-run — an action whose chain effect already
+// landed. Surfaced via `mirrorFailed` in the result. Mints never come through here: they
+// are counted atomically by `reserveMintSupply` before submission (see runMint), and
+// mirroring one after the fact would count it twice.
 async function mirrorSupply(
   env: Env,
   tokenId: string,
   amountStr: string,
-  op: "mint" | "burn"
+  op: "burn"
 ): Promise<boolean> {
   try {
     await new TokenService(getDb(env)).updateSupply(tokenId, amountStr, op);
     return true;
   } catch (error) {
-    console.error("workflow supply: DB mirror failed", {
-      tokenId,
-      op,
-      error: errorMessage(error),
-    });
+    getLogger().error(
+      { tokenId, op, error: errorMessage(error) },
+      "workflow supply: DB mirror failed"
+    );
     return false;
   }
 }
@@ -73,14 +77,14 @@ async function supplySucceeded(
 function parseAmount(
   action: ActionContext,
   decimals: number
-): { amountStr: string; mosaicAmount: number } | null {
+): { amountStr: string; mosaicAmount: number; amountBaseUnits: bigint } | null {
   const amountStr = resolveParam(action, "amount");
   if (!amountStr) {
     return null;
   }
   try {
-    const { mosaicAmount } = parsePositiveTokenAmount(amountStr, decimals);
-    return { amountStr, mosaicAmount };
+    const { mosaicAmount, amountBaseUnits } = parsePositiveTokenAmount(amountStr, decimals);
+    return { amountStr, mosaicAmount, amountBaseUnits };
   } catch {
     return null;
   }
@@ -134,23 +138,69 @@ export async function runMint(
     return policy.result;
   }
 
+  // The preflight above checked a supply snapshot loaded at prepareOnchain time; two
+  // concurrent mints (rule + rule, or rule + HTTP) both pass it and both land past
+  // `maxSupply`. The cap is ENFORCED here instead, the same way the HTTP execute route
+  // enforces it: `reserveMintSupply` is an atomic conditional UPDATE contending on the
+  // token row, run at the last moment before submission, so the second contender sees
+  // the first's count and is refused before its transaction leaves SDP.
+  //
+  // The reservation IS the count (see reserveMintSupply): nothing is added when the
+  // mint settles, and nothing is handed back when a post-submit failure is ambiguous —
+  // the transaction may still land. `POST /supply/refresh` reconciles from the mint
+  // account either way.
+  //
   // Destructive + not idempotent: a blind retry could double-mint (we cannot know
   // whether a failed submit landed). Any chain error is permanent — a human inspects
   // and explicitly re-approves via Retry.
+  let reservedSupply: string | null = null;
   let result: Awaited<ReturnType<typeof mosaic.mintTo>>;
   try {
-    result = await mosaic.mintTo({
-      mint: mintAddress,
-      destination,
-      amount: amount.mosaicAmount,
-      mintAuthority: signer.address,
-      feePayer: signer.address,
-    });
+    result = await mosaic.mintTo(
+      {
+        mint: mintAddress,
+        destination,
+        amount: amount.mosaicAmount,
+        mintAuthority: signer.address,
+        feePayer: signer.address,
+      },
+      async () => {
+        // The execution row's org/project are the trusted tenant identity (stamped at
+        // enqueue time from the authenticated rule), scoping the reservation exactly as
+        // the HTTP route's request scope does.
+        const tokenService = new TokenService(
+          getDb(env),
+          createTenantScope({
+            organizationId: execution.organization_id,
+            projectId: execution.project_id,
+          })
+        );
+        reservedSupply = await tokenService.reserveMintSupply(
+          token.id,
+          amount.amountBaseUnits.toString()
+        );
+        if (reservedSupply === null) {
+          throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+        }
+      }
+    );
   } catch (error) {
+    if (reservedSupply !== null) {
+      getLogger().warn(
+        {
+          event: "mint_supply_reservation_retained",
+          tokenId: token.id,
+          workflowExecutionId: execution.id,
+          reservedBaseUnits: amount.amountBaseUnits.toString(),
+          recordedSupplyBaseUnits: reservedSupply,
+          error: errorMessage(error),
+        },
+        "Workflow mint failed after it was submitted and its supply reserved; the reservation is kept because the transaction may still land. Refresh the token's supply to reconcile."
+      );
+    }
     return permanentFail(errorMessage(error));
   }
-  const mirrored = await mirrorSupply(env, token.id, amount.amountStr, "mint");
-  return supplySucceeded(env, execution, result, mirrored, {
+  return supplySucceeded(env, execution, result, true, {
     type: "mint",
     params: { destination, amount: amount.amountStr },
   });
@@ -172,6 +222,17 @@ export async function runBurn(
   const amount = parseAmount(action, decimals);
   if (!amount) {
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
+  }
+
+  // The signing wallet's operation policy (amount/velocity limits, custody approval)
+  // binds every custody-signed op, checked BEFORE the chain call — a rule must not be
+  // a way to destroy supply past limits the org configured for the key.
+  const policy = await preflightWalletPolicy(env, prep.ctx, {
+    operationType: "issuance_burn_execute",
+    amount: amount.amountStr,
+  });
+  if (!policy.ok) {
+    return policy.result;
   }
 
   // Destructive + not idempotent: any chain error is permanent (see runMint).
@@ -219,6 +280,15 @@ export async function runForceBurn(
   const amount = parseAmount(action, decimals);
   if (!amount) {
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
+  }
+
+  // Wallet policy for the permanent-delegate key, BEFORE the chain call (see runBurn).
+  const policy = await preflightWalletPolicy(env, prep.ctx, {
+    operationType: "issuance_force_burn_execute",
+    amount: amount.amountStr,
+  });
+  if (!policy.ok) {
+    return policy.result;
   }
 
   // Destructive + not idempotent: any chain error is permanent (see runMint).
@@ -278,6 +348,17 @@ export async function runSeize(
   const allowed = await preflightDestinationAllowed(env, prep.ctx, destination);
   if (!allowed.ok) {
     return allowed.result;
+  }
+
+  // Wallet policy for the permanent-delegate key, BEFORE the chain call (see runBurn).
+  // Seize moves value, so its destination is subject to the policy's destination rules.
+  const policy = await preflightWalletPolicy(env, prep.ctx, {
+    operationType: "issuance_seize_execute",
+    amount: amount.amountStr,
+    destination,
+  });
+  if (!policy.ok) {
+    return policy.result;
   }
 
   // Destructive + not idempotent: any chain error is permanent (see runMint).

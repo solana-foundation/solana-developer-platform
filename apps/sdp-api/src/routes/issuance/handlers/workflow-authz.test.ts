@@ -18,40 +18,33 @@ const MEMBER: Permission[] = ["tokens:read", "tokens:write"];
 const ADMIN: Permission[] = ["tokens:read", "tokens:write", "tokens:admin"];
 
 describe("workflow action authorization", () => {
-  it.each([
-    "allowlist_add",
-    "allowlist_remove",
-    "send_webhook",
-    "notify",
-    "record",
-  ])("lets tokens:write author the automated action %s", (action) => {
-    expect(permissionForWorkflowAction(action)).toBe("tokens:write");
-    expect(() => assertWorkflowActionPermitted(contextWith(MEMBER), action)).not.toThrow();
-  });
+  it.each(["allowlist_add", "allowlist_remove", "send_webhook", "notify", "record"])(
+    "lets tokens:write author the automated action %s",
+    (action) => {
+      expect(permissionForWorkflowAction(action)).toBe("tokens:write");
+      expect(() => assertWorkflowActionPermitted(contextWith(MEMBER), action)).not.toThrow();
+    }
+  );
 
   // The direct routes for these all require tokens:admin. A rule is the same operation
   // one hop removed, so it must clear the same bar.
-  it.each([
-    "pause",
-    "unpause",
-    "freeze",
-    "unfreeze",
-  ])("requires tokens:admin for the sensitive action %s", (action) => {
-    expect(permissionForWorkflowAction(action)).toBe("tokens:admin");
-    expect(() => assertWorkflowActionPermitted(contextWith(MEMBER), action)).toThrow();
-    expect(() => assertWorkflowActionPermitted(contextWith(ADMIN), action)).not.toThrow();
-  });
+  it.each(["pause", "unpause", "freeze", "unfreeze"])(
+    "requires tokens:admin for the sensitive action %s",
+    (action) => {
+      expect(permissionForWorkflowAction(action)).toBe("tokens:admin");
+      expect(() => assertWorkflowActionPermitted(contextWith(MEMBER), action)).toThrow();
+      expect(() => assertWorkflowActionPermitted(contextWith(ADMIN), action)).not.toThrow();
+    }
+  );
 
-  it.each([
-    "mint",
-    "burn",
-    "seize",
-    "force_burn",
-  ])("requires tokens:admin for the irreversible action %s", (action) => {
-    expect(permissionForWorkflowAction(action)).toBe("tokens:admin");
-    expect(() => assertWorkflowActionPermitted(contextWith(MEMBER), action)).toThrow();
-    expect(() => assertWorkflowActionPermitted(contextWith(ADMIN), action)).not.toThrow();
-  });
+  it.each(["mint", "burn", "seize", "force_burn"])(
+    "requires tokens:admin for the irreversible action %s",
+    (action) => {
+      expect(permissionForWorkflowAction(action)).toBe("tokens:admin");
+      expect(() => assertWorkflowActionPermitted(contextWith(MEMBER), action)).toThrow();
+      expect(() => assertWorkflowActionPermitted(contextWith(ADMIN), action)).not.toThrow();
+    }
+  );
 
   // The regression this whole guard exists for: a plain member is 403'd on
   // POST /tokens/:id/seize, so authoring or approving a seize rule must fail too.

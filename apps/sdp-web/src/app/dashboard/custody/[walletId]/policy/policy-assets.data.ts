@@ -5,6 +5,8 @@ export interface IssuedPolicyToken {
   token: string;
   name: string;
   mint: string;
+  /** Issuer-supplied metadata image, when the token declares one. */
+  imageUrl: string | null;
 }
 
 const ISSUED_TOKEN_PAGE_SIZE = 100;
@@ -20,6 +22,7 @@ interface IssuedTokenRow {
   mintAddress?: string | null;
   symbol?: string | null;
   name?: string | null;
+  imageUrl?: string | null;
 }
 
 interface IssuedTokenPage {
@@ -66,10 +69,12 @@ export async function getIssuedPolicyTokens(
         if (!mint) continue;
 
         const symbol = row.symbol?.trim();
+        const imageUrl = typeof row.imageUrl === "string" ? row.imageUrl.trim() : "";
         tokens.push({
           token: symbol || mint,
           name: row.name?.trim() || symbol || mint,
           mint,
+          imageUrl: imageUrl || null,
         });
       }
 

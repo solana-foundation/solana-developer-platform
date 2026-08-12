@@ -177,4 +177,6 @@ export type SigningErrorCode =
   | "INVALID_REQUEST"
   | "NETWORK_ERROR"
   | "ALREADY_INITIALIZED"
-  | "NOT_FOUND";
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "PROVIDER_CREDENTIAL_INVALID";

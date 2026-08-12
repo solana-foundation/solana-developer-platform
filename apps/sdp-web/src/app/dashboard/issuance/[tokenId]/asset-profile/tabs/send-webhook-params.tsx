@@ -1,8 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import type { WebhookEndpointView } from "@/app/dashboard/webhooks/webhook-endpoints.data";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -98,12 +98,12 @@ export function SendWebhookParams({
           ) : (
             <p className="text-xs text-secondary">
               {t("webhookNoEndpoints")}{" "}
-              <DashboardNavigationLink
+              <Link
                 href="/dashboard/webhooks"
                 className="text-primary underline underline-offset-2"
               >
                 {t("webhookManageEndpoints")}
-              </DashboardNavigationLink>
+              </Link>
             </p>
           )}
           {errors.endpointId ? (

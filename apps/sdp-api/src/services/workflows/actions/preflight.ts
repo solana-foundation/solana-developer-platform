@@ -13,6 +13,7 @@
 
 import type { Token } from "@sdp/types";
 import { getDb } from "@/db";
+import { createTenantScope } from "@/lib/tenant-scope";
 import {
   assertDestinationAllowedByControlList,
   getOnChainAllowlistMutationForMint,
@@ -20,7 +21,7 @@ import {
 import {
   enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
@@ -83,13 +84,30 @@ export async function preflightWalletPolicy(
   env: Env,
   ctx: OnchainContext,
   input: {
-    operationType: "issuance_mint_execute" | "issuance_update_authority_execute";
+    // burn/force_burn/seize have no HTTP policy gate to mirror (only mint and
+    // update-authority do); their types exist so that wallet-baseline rules — which
+    // match every operation when they name no operationTypes — bind the custody key
+    // here too, and so orgs can write type-specific rules for them.
+    operationType:
+      | "issuance_mint_execute"
+      | "issuance_update_authority_execute"
+      | "issuance_burn_execute"
+      | "issuance_force_burn_execute"
+      | "issuance_seize_execute";
     amount?: string | null;
     destination?: string | null;
   }
 ): Promise<PreflightOutcome> {
-  const walletId = ctx.token.signingWalletId ?? null;
+  // The wallet that will actually sign, not the token's nominal `signingWalletId`. An
+  // authority fallback can settle on a different custody wallet (rotated authority, or a
+  // token that names no wallet at all), and binding the policy to the nominal one meant
+  // the engine signed with wallet B while enforcing wallet A's limits — or enforcing
+  // nothing, because the nominal id was null while the fallback had positively identified
+  // a custody wallet to sign with.
+  const walletId = ctx.signerWalletId;
   if (!walletId) {
+    // No identified custody wallet — the org default signer. Same as the HTTP route,
+    // which also skips the policy when it has no wallet id to bind it to.
     return { ok: true };
   }
   const auth = {
@@ -102,7 +120,13 @@ export async function preflightWalletPolicy(
       auth as Parameters<typeof resolvePolicyCustodyWallet>[1],
       walletId
     );
-    await enforceWalletOperationPolicy(env, {
+    // The execution row's org/project are the trusted tenant identity here — they were
+    // stamped at enqueue time from the authenticated rule, not from any payload.
+    const scope = createTenantScope({
+      organizationId: ctx.execution.organization_id,
+      projectId: ctx.execution.project_id,
+    });
+    await enforceWalletOperationPolicy(env, scope, {
       organizationId: ctx.execution.organization_id,
       projectId: ctx.execution.project_id,
       custodyWalletId: policyWallet?.id ?? null,
@@ -114,6 +138,9 @@ export async function preflightWalletPolicy(
       asset: ctx.token.symbol,
       amount: input.amount ?? null,
       destination: input.destination ?? null,
+      // Single-leg: a rule's action moves one amount to one destination. Only batch
+      // operations (multi-recipient transfers) split into per-leg candidates.
+      legs: [],
       context: {
         tokenId: ctx.token.id,
         tokenSymbol: ctx.token.symbol,

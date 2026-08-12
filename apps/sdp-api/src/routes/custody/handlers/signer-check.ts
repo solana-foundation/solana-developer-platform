@@ -1,5 +1,4 @@
 import { SigningError } from "@sdp/custody/signing";
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import { resolveRpcTarget } from "@sdp/rpc/relay";
 import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
@@ -16,18 +15,19 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
+import { type ApiKeyContext, getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
-import { resolveKoraUserId } from "@/lib/kora-user";
 import { success } from "@/lib/response";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
+import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import {
-  enforceWalletOperationPolicy,
   resolvePolicyCustodyWallet,
   walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
+} from "@/services/policy/enforcement.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSigner } from "@/services/solana";
+import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { AppContext } from "../context";
 import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
 
@@ -35,6 +35,14 @@ import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
 const KORA_MEMO_ALLOWED_PROGRAM_HINT =
   "Add MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr to Kora validation.allowed_programs.";
+
+type SignerCheckBody = z.output<typeof signerCheckSchema>;
+
+interface SignerCheckPolicyResolved {
+  auth: ApiKeyContext;
+  resolvedWalletId: string;
+  memo: string;
+}
 
 function isKoraMemoProgramPolicyError(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -44,7 +52,15 @@ function isKoraMemoProgramPolicyError(message: string): boolean {
   );
 }
 
-export const signerCheck = async (c: AppContext) => {
+/**
+ * Parse and resolve a signer check into its wallet-operation policy candidate.
+ *
+ * @param c - Request context.
+ * @returns The candidate, validated body, resolved auth and wallet, and raw payload.
+ */
+export async function extractSignerCheckPolicyCandidate(
+  c: AppContext
+): Promise<PolicyGateExtraction> {
   const auth = getAuth(c);
   if (auth.authType !== "api_key") {
     throw new AppError("UNAUTHORIZED", "API key authentication is required");
@@ -52,7 +68,6 @@ export const signerCheck = async (c: AppContext) => {
 
   const body = await c.req.json().catch(() => ({}));
   const parsed = signerCheckSchema.safeParse(body);
-
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,
@@ -69,23 +84,39 @@ export const signerCheck = async (c: AppContext) => {
   }
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, resolvedWalletId);
-  await enforceWalletOperationPolicy(c.env, {
-    organizationId: auth.organizationId,
-    projectId: auth.projectId,
-    custodyWalletId: policyWallet?.id ?? null,
-    walletId: resolvedWalletId,
-    apiKeyId: auth.apiKeyId,
-    actor: walletOperationActorFromAuth(auth),
-    operationFamily: "raw_sign",
-    operationType: "custody_signer_check",
-    context: {
-      memo,
+  return {
+    candidate: {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      custodyWalletId: policyWallet === null ? null : policyWallet.id,
+      walletId: resolvedWalletId,
+      apiKeyId: auth.apiKeyId,
+      actor: walletOperationActorFromAuth(auth),
+      source: "api",
+      operationFamily: "raw_sign",
+      operationType: "custody_signer_check",
+      asset: null,
+      amount: null,
+      destination: null,
+      context: {
+        memo,
+      },
+      providerExtensions: {},
     },
+    legs: [],
+    body: parsed.data,
+    resolved: { auth, resolvedWalletId, memo },
     rawPayload: {
-      requestedWalletId: parsed.data.walletId ?? null,
+      requestedWalletId: parsed.data.walletId === undefined ? null : parsed.data.walletId,
       memo,
     },
-  });
+  };
+}
+
+export const signerCheck = async (c: AppContext) => {
+  const {
+    resolved: { auth, resolvedWalletId, memo },
+  } = getPolicyGateContext<SignerCheckBody, SignerCheckPolicyResolved>(c);
 
   try {
     const signer = await createOrgSigner(
@@ -95,7 +126,7 @@ export const signerCheck = async (c: AppContext) => {
       resolvedWalletId
     );
 
-    const feePayment = createFeePaymentAdapter(c.env, resolveKoraUserId(c));
+    const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const feePayer = await feePayment.getFeePayer();
 
     const rpcTarget = await resolveRpcTarget({
@@ -135,6 +166,7 @@ export const signerCheck = async (c: AppContext) => {
     const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
     const txEncoder = getTransactionEncoder();
     const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+    await beginApprovedWalletOperationEffect(c);
     const signature = await feePayment.signAndSend(txBytes);
 
     const confirmation = await confirmTransaction(rpc, signature, {

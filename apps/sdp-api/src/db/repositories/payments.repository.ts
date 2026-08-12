@@ -24,16 +24,6 @@ export function isRampTransferType(type: PaymentTransferType): type is RampTrans
 }
 export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
 export type { PaymentTransferStatus };
-export type PaymentWalletPolicyType = string;
-
-export interface PaymentWalletPolicyRow {
-  id: string;
-  custody_wallet_id: string;
-  policy_type: PaymentWalletPolicyType;
-  policy: string;
-  created_at: string;
-  updated_at: string;
-}
 
 export interface PaymentTransferRow {
   id: string;
@@ -122,15 +112,6 @@ export interface UpdatePaymentTransferInput {
   updatedAt: string;
 }
 
-export interface UpsertPaymentWalletPolicyInput {
-  id: string;
-  custodyWalletId: string;
-  policyType: PaymentWalletPolicyType;
-  policy: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface ListTransfersInput {
   organizationId: string;
   projectId: string | null;
@@ -206,7 +187,10 @@ export interface PaymentsRepository {
     fromStatuses: readonly PaymentTransferStatus[];
     toStatus: PaymentTransferStatus;
     updatedAt: string;
-    amount?: string;
+    amount?: string | null;
+    fiatAmount?: string | null;
+    providerData?: Record<string, unknown>;
+    error?: string | null;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   getTransferById(params: {
@@ -233,16 +217,4 @@ export interface PaymentsRepository {
     projectId: string | null;
   }): Promise<PaymentTransferRow[]>;
   listTransfers(params: ListTransfersInput): Promise<ListTransfersResult>;
-  listTransferAmounts(params: {
-    organizationId: string;
-    projectId: string | null;
-    walletId: string;
-    token: string;
-    direction: PaymentTransferDirection;
-    statuses: PaymentTransferStatus[];
-    createdAtFrom: string;
-    createdAtTo: string;
-  }): Promise<string[]>;
-  getWalletPoliciesByCustodyWalletId(custodyWalletId: string): Promise<PaymentWalletPolicyRow[]>;
-  upsertWalletPolicies(input: UpsertPaymentWalletPolicyInput[]): Promise<PaymentWalletPolicyRow[]>;
 }

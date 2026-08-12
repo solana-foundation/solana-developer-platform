@@ -365,17 +365,20 @@ describe("runSendWebhook (registry endpoint)", () => {
   it.each([
     ["deleted", { deleted_at: "2026-01-02T00:00:00.000Z" }, "ENDPOINT_DELETED"],
     ["disabled", { status: "disabled" as const }, "ENDPOINT_DISABLED"],
-  ])("fails permanently on a %s endpoint and records the misfire", async (_label, overrides, error) => {
-    getEndpointById.mockResolvedValue(endpointFixture(overrides));
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+  ])(
+    "fails permanently on a %s endpoint and records the misfire",
+    async (_label, overrides, error) => {
+      getEndpointById.mockResolvedValue(endpointFixture(overrides));
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
 
-    const outcome = await run();
+      const outcome = await run();
 
-    expect(outcome).toMatchObject({ status: "failed", retryable: false, error });
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(createDelivery.mock.calls[0][0]).toMatchObject({ status: "failed", error });
-  });
+      expect(outcome).toMatchObject({ status: "failed", retryable: false, error });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(createDelivery.mock.calls[0][0]).toMatchObject({ status: "failed", error });
+    }
+  );
 
   it("fails transiently (never unsigned) when the signing secret cannot be read", async () => {
     getEndpointById.mockResolvedValue(
@@ -401,20 +404,23 @@ describe("runSendWebhook (registry endpoint)", () => {
   it.each([
     [500, true],
     [404, false],
-  ])("records the delivery and maps HTTP %s retryability like the legacy path", async (status, retryable) => {
-    getEndpointById.mockResolvedValue(endpointFixture());
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status })));
+  ])(
+    "records the delivery and maps HTTP %s retryability like the legacy path",
+    async (status, retryable) => {
+      getEndpointById.mockResolvedValue(endpointFixture());
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status })));
 
-    const outcome = await run();
+      const outcome = await run();
 
-    expect(outcome).toMatchObject({ status: "failed", retryable, error: `HTTP_${status}` });
-    expect(createDelivery.mock.calls[0][0]).toMatchObject({
-      status: "failed",
-      responseStatus: status,
-      responseBody: "nope",
-      error: `HTTP_${status}`,
-    });
-  });
+      expect(outcome).toMatchObject({ status: "failed", retryable, error: `HTTP_${status}` });
+      expect(createDelivery.mock.calls[0][0]).toMatchObject({
+        status: "failed",
+        responseStatus: status,
+        responseBody: "nope",
+        error: `HTTP_${status}`,
+      });
+    }
+  );
 
   it("records a blocked delivery when the endpoint URL is rejected by the SSRF guard", async () => {
     getEndpointById.mockResolvedValue(endpointFixture({ url: "https://rebound.example.com/hook" }));

@@ -17,8 +17,8 @@ import type { SignatureStatusInfo } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import {
-  createPaymentsRepository,
-  createPaymentTransferBatchesRepository,
+  createSystemPaymentsRepository,
+  createSystemPaymentTransferBatchesRepository,
   type PaymentsRepository,
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories";
@@ -27,6 +27,7 @@ import type {
   UpdatePaymentTransferInput,
 } from "@/db/repositories/payments.repository";
 import { internalError } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
@@ -54,7 +55,7 @@ async function updateTerminalTransfer(
     if (transfer.project_id === null) {
       throw internalError("Transfer batch transfer is missing a project");
     }
-    await createPaymentTransferBatchesRepository(env).settleTransferBatch({
+    await createSystemPaymentTransferBatchesRepository(env).settleTransferBatch({
       transferId: transfer.id,
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
@@ -69,7 +70,7 @@ async function updateTerminalTransfer(
 }
 
 export async function trackPendingTransfers(env: Env): Promise<void> {
-  const repo = createPaymentsRepository(env);
+  const repo = createSystemPaymentsRepository(env);
   const now = new Date();
   const nowIso = now.toISOString();
 
@@ -107,10 +108,13 @@ async function recoverStuckProcessingTransfers(
         updatedAt: nowIso,
       });
     } catch (err) {
-      console.error("trackPendingTransfers: failed to recover stuck processing transfer", {
-        transferId: transfer.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      getLogger().error(
+        {
+          transfer_id: transfer.id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        "trackPendingTransfers: failed to recover stuck processing transfer"
+      );
     }
   }
 }
@@ -145,9 +149,12 @@ async function syncProcessingTransfersOnChain(
     const rpc = solanaRpc.createRpc(env);
     statuses = await solanaRpc.getSignatureStatuses(rpc, signatures);
   } catch (err) {
-    console.error("trackPendingTransfers: getSignatureStatuses RPC call failed", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    getLogger().error(
+      {
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingTransfers: getSignatureStatuses RPC call failed"
+    );
     return;
   }
 
@@ -201,10 +208,13 @@ async function syncProcessingTransfersOnChain(
       }
       // "processed" confirmation is too weak to record as confirmed — skip.
     } catch (err) {
-      console.error("trackPendingTransfers: failed to update transfer", {
-        transferId: transfer.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      getLogger().error(
+        {
+          transfer_id: transfer.id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        "trackPendingTransfers: failed to update transfer"
+      );
     }
   }
 }

@@ -1,10 +1,11 @@
-import type {
-  PolicyDecision,
-  WalletControlProfileRevisionHistory,
-  WalletOperationStatus,
-  WalletPolicyEvaluationDetail,
+import {
+  type PolicyDecision,
+  type WalletControlProfileRevisionHistory,
+  type WalletOperationStatus,
+  type WalletPolicyEvaluationDetail,
+  WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import Link from "next/link";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -51,7 +52,15 @@ export function OperationStatusBadge({ status }: { status: WalletOperationStatus
   return <Badge variant={STATUS_VARIANTS[status]}>{formatDisplayLabel(status)}</Badge>;
 }
 
-export function PolicyAuditLoadError({ backHref, t }: { backHref: string; t: PolicyTranslate }) {
+export function PolicyAuditLoadError({
+  backHref,
+  backLabel,
+  t,
+}: {
+  backHref: string;
+  backLabel: string;
+  t: PolicyTranslate;
+}) {
   return (
     <div className="mx-auto max-w-xl border-y border-border-default py-16 text-center">
       <h1 className="text-xl font-medium text-primary">
@@ -61,7 +70,7 @@ export function PolicyAuditLoadError({ backHref, t }: { backHref: string; t: Pol
         {t("DashboardCustody.policyAuditUnavailableDescription")}
       </p>
       <Button asChild variant="outline" className="mt-5">
-        <Link href={backHref}>{t("DashboardCustody.policyAuditBackToWalletControls")}</Link>
+        <Link href={backHref}>{backLabel}</Link>
       </Button>
     </div>
   );
@@ -71,13 +80,36 @@ export function shortIdentifier(value: string, edge = 6): string {
   return value.length <= edge * 2 + 3 ? value : `${value.slice(0, edge)}...${value.slice(-edge)}`;
 }
 
+const policyDateFormats = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * Returns a cached formatter — these run once per audit/revision row per
+ * render, and `Intl.DateTimeFormat` construction is expensive to repeat.
+ *
+ * @param locale - BCP 47 locale the formatter renders in.
+ * @param timeStyle - Time component to append, if any.
+ * @returns The shared formatter for that locale and style.
+ */
+function policyDateFormat(locale: string, timeStyle?: "short"): Intl.DateTimeFormat {
+  const key = timeStyle ? `${locale}+${timeStyle}` : locale;
+  let format = policyDateFormats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle });
+    policyDateFormats.set(key, format);
+  }
+  return format;
+}
+
 export function formatPolicyDateTime(value: string, locale: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return policyDateFormat(locale, "short").format(date);
+}
+
+export function formatPolicyDate(value: string, locale: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return policyDateFormat(locale).format(date);
 }
 
 export function formatOperation(evaluation: WalletPolicyEvaluationDetail): string {
@@ -86,7 +118,9 @@ export function formatOperation(evaluation: WalletPolicyEvaluationDetail): strin
 
 export function formatAssetAmount(evaluation: WalletPolicyEvaluationDetail, empty: string): string {
   const { amount, asset } = evaluation.walletOperation;
-  const displayAsset = asset ? shortIdentifier(asset, 5) : null;
+  const displayAsset = asset
+    ? (WELL_KNOWN_TOKEN_BY_MINT.get(asset)?.symbol ?? shortIdentifier(asset, 5))
+    : null;
   if (amount && displayAsset) return `${amount} ${displayAsset}`;
   return amount ?? displayAsset ?? empty;
 }
@@ -106,7 +140,7 @@ export function formatRevisionReference(
 ): string {
   if (!revisionId) return empty;
   const number = revisionNumber(history, revisionId);
-  return number ? `v${number}` : shortIdentifier(revisionId);
+  return number ? `#${number}` : shortIdentifier(revisionId);
 }
 
 export function requestIdFromEvaluation(evaluation: WalletPolicyEvaluationDetail): string | null {
@@ -123,7 +157,8 @@ export interface PolicyActor {
 
 export function policyActor(
   evaluation: WalletPolicyEvaluationDetail,
-  apiKeyNames: Record<string, string>
+  apiKeyNames: Record<string, string>,
+  userNames: Record<string, string>
 ): PolicyActor {
   const operation = evaluation.evaluationContext?.operation;
   if (operation?.apiKeyId) {
@@ -135,13 +170,16 @@ export function policyActor(
     };
   }
   if (operation?.actor) {
+    const name = operation.actor.id ? (userNames[operation.actor.id] ?? null) : null;
     return {
       type: "actor",
       id: operation.actor.id,
-      name: null,
-      value: operation.actor.id
-        ? `${formatDisplayLabel(operation.actor.type)} · ${operation.actor.id}`
-        : formatDisplayLabel(operation.actor.type),
+      name,
+      value:
+        name ??
+        (operation.actor.id
+          ? `${formatDisplayLabel(operation.actor.type)} · ${operation.actor.id}`
+          : formatDisplayLabel(operation.actor.type)),
     };
   }
   return {

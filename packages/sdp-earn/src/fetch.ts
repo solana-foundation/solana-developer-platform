@@ -1,0 +1,101 @@
+import type { EarnProviderId } from "@sdp/types/provider-access";
+import { SdpEarnError, type SdpEarnErrorCode } from "./errors";
+
+export interface ProviderRequestInit<TBody> {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  headers?: HeadersInit;
+  body?: TBody;
+}
+
+export interface ProviderResponse {
+  response: Response;
+  raw: string;
+  parsed: unknown;
+}
+
+function serializeProviderBody(body: unknown): BodyInit | undefined {
+  if (body === undefined) {
+    return undefined;
+  }
+  if (typeof body === "string") {
+    return body;
+  }
+  if (body instanceof URLSearchParams) {
+    return body;
+  }
+  return JSON.stringify(body);
+}
+
+export function classifyProviderStatus(status: number): SdpEarnErrorCode {
+  if (status === 409) return "CONFLICT";
+  if (status === 429) return "RATE_LIMITED";
+  if (status >= 500) return "PROVIDER_UNAVAILABLE";
+  return "BAD_REQUEST";
+}
+
+export function extractProviderErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== "object") return fallback;
+  const record = payload as {
+    error?: { message?: unknown };
+    message?: unknown;
+    reason?: unknown;
+  };
+  const message = record.error?.message ?? record.message ?? record.reason;
+  return typeof message === "string" && message.trim() ? message : fallback;
+}
+
+export async function providerFetch<TBody = never>(
+  provider: EarnProviderId,
+  url: string,
+  init: ProviderRequestInit<TBody>
+): Promise<ProviderResponse> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: init.method,
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...init.headers },
+      body: serializeProviderBody(init.body),
+    });
+  } catch {
+    throw new SdpEarnError("PROVIDER_UNAVAILABLE", `Failed to reach the ${provider} API`, {
+      provider,
+    });
+  }
+
+  const raw = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = undefined;
+  }
+
+  return { response, raw, parsed };
+}
+
+export async function providerFetchJson<TResponse, TBody = never>(
+  provider: EarnProviderId,
+  url: string,
+  init: ProviderRequestInit<TBody>
+): Promise<TResponse> {
+  const { response, parsed } = await providerFetch(provider, url, init);
+
+  if (!response.ok) {
+    throw new SdpEarnError(
+      classifyProviderStatus(response.status),
+      extractProviderErrorMessage(
+        parsed,
+        `${provider} request failed with status ${response.status}`
+      ),
+      { provider, providerStatus: response.status }
+    );
+  }
+
+  if (parsed === undefined) {
+    throw new SdpEarnError("PROVIDER_UNAVAILABLE", `${provider} returned an unparseable response`, {
+      provider,
+    });
+  }
+
+  return parsed as TResponse;
+}

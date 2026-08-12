@@ -37,6 +37,8 @@
     "empty": "Aucun membre pour l'instant.",
     "loadFailed": "Impossible de charger les membres : {error}",
     "unnamed": "Sans nom",
+    "unnamedMember": "Membre sans nom",
+    "emailUnavailable": "E-mail indisponible",
     "statusPending": "En attente",
     "invitedOn": "Invité le {date}",
     "columnActions": "Actions",
@@ -65,7 +67,7 @@
     "pause": "Pause",
     "resume": "Reprendre",
     "requestSummary": "Méthode, durée, résumé à copier",
-    "query": "Query",
+    "query": "Requête",
     "requestBody": "Corps de la requête",
     "response": "Réponse",
     "createApiKey": "Créer une clé API",
@@ -110,6 +112,7 @@
     "pageOf": "Page {page} sur {pageCount}",
     "previousPage": "Page précédente",
     "nextPage": "Page suivante",
+    "rowsPerPage": "Lignes par page",
     "loading": "Chargement…",
     "noOptionsAvailable": "Aucune option disponible.",
     "noSearchMatches": "Aucun résultat pour votre recherche.",
@@ -128,11 +131,15 @@
     "completeRequiredFields": "Complétez les champs requis : {fields}",
     "invalidApiKeyFormat": "Format de clé API invalide. Utilisez une clé brute comme sk_test_... ou sk_live_... avec un suffixe valide.",
     "playgroundExecutionFailed": "Échec de l’exécution Playground.",
-    "requestExecutionFailed": "Échec de l’exécution de la requête."
+    "requestExecutionFailed": "Échec de l’exécution de la requête.",
+    "invalidJsonField": "{field} doit contenir un JSON valide."
   },
   "dashboardShell": {
     "workspace": "Espace de travail",
     "openNavigation": "Ouvrir la navigation",
+    "primaryNavigation": "Principal",
+    "more": "Plus",
+    "moreDescription": "Accéder au reste du dashboard.",
     "closeNavigation": "Fermer la navigation",
     "sandbox": "Sandbox",
     "loadingDashboard": "Chargement du dashboard...",
@@ -142,7 +149,7 @@
     "signIn": "Se connecter",
     "selectOrganization": "Sélectionner une organisation",
     "selectOrganizationDescription": "Une organisation est requise pour continuer.",
-    "counterparty": "Counterparty",
+    "counterparty": "Contrepartie",
     "pay": "Payer",
     "deposit": "Déposer",
     "requests": "Demandes",
@@ -162,14 +169,14 @@
     "collapseSidebar": "Réduire la barre latérale",
     "expandSidebar": "Étendre la barre latérale",
     "closeNavigationOverlay": "Fermer la navigation",
-    "newCounterparty": "Nouveau Counterparty",
-    "manageCounterparty": "Gérer Counterparty",
-    "backToCounterparty": "Retour Counterparty",
+    "newCounterparty": "Nouvelle contrepartie",
+    "manageCounterparty": "Gérer la contrepartie",
+    "backToCounterparty": "Retour à la contrepartie",
     "backToWallets": "Retour aux Wallets",
     "backToWalletDetail": "Retour au détail Wallet",
     "createWallet": "Créer un Wallet",
-    "activateProvider": "Activer le provider",
-    "newAsset": "Nouvel Asset",
+    "activateProvider": "Activer le fournisseur",
+    "newAsset": "Nouvel actif",
     "assetManagement": "Gestion de l’asset",
     "backToOverview": "Retour à l’aperçu",
     "recurringPayments": "Paiements récurrents",
@@ -190,11 +197,10 @@
     "colorTheme": "Thème de couleur",
     "expandPaymentsMenu": "Développer le menu Paiements",
     "collapsePaymentsMenu": "Réduire le menu Paiements",
-    "backToWallet": "Retour au portefeuille",
-    "walletControls": "Contrôles du portefeuille",
+    "backToWallet": "Retour au Wallet",
+    "walletControls": "Contrôles du Wallet",
     "backToApprovals": "Retour aux approbations",
-    "webhooks": "Webhooks",
-    "backToWebhooks": "Retour aux webhooks"
+    "privateChannels": "Canaux privés"
   },
   "validation": {
     "allowlistValueRequired": "La valeur Allowlist est requise",
@@ -252,28 +258,5 @@
     "issuanceActivityUnavailable": "L’activité d’émission est indisponible pour le moment.",
     "failedToLoadActivity": "Échec du chargement de l’activité du dashboard",
     "balanceDataUnavailable": "Les données de solde sont indisponibles pour le moment."
-  },
-  "notifications": {
-    "ariaLabel": "Notifications",
-    "ariaLabelUnread": "Notifications, {count} non lues",
-    "title": "Notifications",
-    "markAllRead": "Tout marquer comme lu",
-    "loading": "Chargement…",
-    "empty": "Vous êtes à jour.",
-    "error": "Impossible de charger les notifications.",
-    "retry": "Réessayer",
-    "showMore": "Afficher plus",
-    "emailUnavailable": "L’envoi d’e-mails est indisponible pour le moment.",
-    "types": {
-      "workflow_execution": "Automatisation exécutée : {trigger}"
-    },
-    "triggerLabels": {
-      "kyc_approved": "KYC approuvé",
-      "kyc_rejected": "KYC rejeté",
-      "onramp_settled": "On-ramp réglé",
-      "offramp_settled": "Off-ramp réglé",
-      "recurring_payment_failed": "Paiement récurrent échoué",
-      "token_operation_completed": "Opération sur le token terminée"
-    }
   }
 }

@@ -9,7 +9,7 @@ import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const actualCreateSigningService = signingServiceModule.createSigningService;
@@ -232,11 +232,86 @@ describe("Custody wallet scope routes", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
     createSigningServiceMock.mockReset();
     getAccountInfoMock.mockReset();
     getSplTokenBalancesMock.mockReset();
+  });
+
+  it("dry-runs a signer check with zero writes", async () => {
+    await seedCachedKey({
+      signingWalletId: "privy_wallet_a",
+      walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+    });
+
+    const response = await app.request(
+      "/v1/wallets/signer-check",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({ walletId: "privy_wallet_a", memo: "policy dry run" }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { decision: "allow", criteria: [] },
+    });
+    expect(createSigningServiceMock).not.toHaveBeenCalled();
+
+    const operationCount = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+      .first<{ count: number }>();
+    expect(operationCount).toEqual({ count: 0 });
+  });
+
+  it("stops a denied signer check before signing side effects", async () => {
+    await seedCachedKey({
+      signingWalletId: "privy_wallet_a",
+      walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+    });
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+      .bind(TEST_PROJECT.id, PRIVY_CONFIG_ID)
+      .run();
+    const policyResponse = await app.request(
+      "/v1/payments/wallets/privy_wallet_a/policies",
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          defaultAction: "allow",
+          rules: [{ id: "deny-signer-check", kind: "always", action: "deny" }],
+        }),
+      },
+      env
+    );
+    expect(policyResponse.status).toBe(200);
+    createSigningServiceMock.mockClear();
+
+    const response = await app.request(
+      "/v1/wallets/signer-check",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ walletId: "privy_wallet_a", memo: "denied signer check" }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(createSigningServiceMock).not.toHaveBeenCalled();
   });
 
   it("filters listed wallets to the API key bindings", async () => {
@@ -451,6 +526,56 @@ describe("Custody wallet scope routes", () => {
     );
 
     expect(res.status).toBe(404);
+  });
+
+  it("prevents a project-scoped caller from changing an organization default wallet", async () => {
+    const res = await app.request(
+      "/v1/wallets/default-wallet",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "privy",
+          walletId: "privy_wallet_b",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(409);
+    const config = await getDb(env)
+      .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
+      .bind(PRIVY_CONFIG_ID)
+      .first<{ default_wallet_id: string | null }>();
+    expect(config?.default_wallet_id).toBe("privy_wallet_a");
+  });
+
+  it("prevents a project-scoped caller from deleting an organization wallet", async () => {
+    const res = await app.request(
+      "/v1/wallets",
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "privy",
+          walletId: "privy_wallet_b",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    const wallet = await getDb(env)
+      .prepare("SELECT status FROM custody_wallets WHERE wallet_id = ?")
+      .bind("privy_wallet_b")
+      .first<{ status: string }>();
+    expect(wallet?.status).toBe("active");
   });
 
   it("excludes custody configs from a different project in the same org", async () => {

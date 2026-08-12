@@ -24,13 +24,14 @@ function mapWorkflowRow(row: Record<string, unknown>): AssetWorkflowRow {
     created_by: (row.created_by as string | null) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
+    deleted_at: (row.deleted_at as string | null) ?? null,
   };
 }
 
 export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflowsRepository {
   return {
     async createWorkflow(input: CreateAssetWorkflowInput) {
-      const id = generateAssetWorkflowId();
+      const id = input.id ?? generateAssetWorkflowId();
       const row = await db
         .prepare(
           `INSERT INTO asset_workflows (
@@ -57,14 +58,21 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
     },
 
     async updateWorkflow(input: UpdateAssetWorkflowInput) {
-      const rowsAffected = await db
+      // One statement, not UPDATE + a separate read-back. The handler's failure path
+      // treats a rejection as "nothing committed" and retires the secret version the
+      // update would have installed — which is only sound if a rejection really means
+      // the row was not written. A second round-trip after the UPDATE could fail with
+      // the row already committed, and the catch would then destroy the credential the
+      // live rule points at, silently unsigning every later delivery.
+      const row = await db
         .prepare(
           `UPDATE asset_workflows
              SET definition = COALESCE(?::jsonb, definition),
                  review_mode = COALESCE(?, review_mode),
                  enabled = CASE WHEN ?::boolean THEN ? ELSE enabled END,
                  updated_at = sdp_iso_now()
-           WHERE id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL`
+           WHERE id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL
+           RETURNING *`
         )
         .bind(
           input.definition ? JSON.stringify(input.definition) : null,
@@ -75,15 +83,8 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
           input.organizationId,
           input.projectId
         )
-        .run();
-      if (rowsAffected === 0) {
-        return null;
-      }
-      return this.getWorkflowById({
-        workflowId: input.workflowId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+        .first<Record<string, unknown>>();
+      return row ? mapWorkflowRow(row) : null;
     },
 
     async deleteWorkflow(params) {
@@ -102,7 +103,8 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
       const row = await db
         .prepare(
           `SELECT * FROM asset_workflows
-             WHERE id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL`
+             WHERE id = ? AND organization_id = ? AND project_id = ?
+             ${params.includeDeleted ? "" : "AND deleted_at IS NULL"}`
         )
         .bind(params.workflowId, params.organizationId, params.projectId)
         .first<Record<string, unknown>>();

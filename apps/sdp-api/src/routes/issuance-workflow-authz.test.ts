@@ -10,20 +10,22 @@
 
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 const TOKEN_ID = "tok_workflow_authz_test";
 
 // Two principals differing only in `tokens:admin` — the exact line the tier gate draws.
 const MEMBER_KEY = { id: "key_wf_member", raw: "sk_test_wf_member", prefix: "sk_test_wf_" };
 const ADMIN_KEY = { id: "key_wf_admin", raw: "sk_test_wf_admin", prefix: "sk_test_wf_a" };
+// Read-only principal (the `api_readonly` scope set) for the holder-enrollment boundary.
+const READONLY_KEY = { id: "key_wf_readonly", raw: "sk_test_wf_readonly", prefix: "sk_test_wf_r" };
 
 function cachedKey(id: string, permissions: string[]): CachedApiKey {
   return {
@@ -62,10 +64,6 @@ describe("workflow authorization (routes)", () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
-  afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
-  });
-
   beforeEach(async () => {
     const db = getDb(env);
     const kv = createKVStoreSet(env);
@@ -78,6 +76,9 @@ describe("workflow authorization (routes)", () => {
 
     await db.prepare("DELETE FROM workflow_executions").run();
     await db.prepare("DELETE FROM asset_workflows").run();
+    // One test seeds a profile to unlock a capability-gated action; every other test in
+    // this file expects the bare token, so it must not survive into the next one.
+    await db.prepare("DELETE FROM asset_profiles").run();
     await db.prepare("DELETE FROM issued_tokens").run();
     await db.prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL").run();
     await db.prepare("DELETE FROM projects").run();
@@ -134,6 +135,7 @@ describe("workflow authorization (routes)", () => {
     for (const [key, permissions] of [
       [MEMBER_KEY, ["tokens:read", "tokens:write"]],
       [ADMIN_KEY, ["tokens:read", "tokens:write", "tokens:admin"]],
+      [READONLY_KEY, ["tokens:read"]],
     ] as const) {
       const hash = await hashString(key.raw, (env as { API_KEY_PEPPER: string }).API_KEY_PEPPER);
       await db
@@ -180,20 +182,17 @@ describe("workflow authorization (routes)", () => {
     expect(Number(stored?.count ?? 0)).toBe(0);
   });
 
-  it.each([
-    "mint",
-    "burn",
-    "force_burn",
-    "pause",
-    "freeze",
-  ])("refuses a tokens:write principal a %s rule", async (actionType) => {
-    const res = await post(MEMBER_KEY, base, {
-      triggerType: "kyc_approved",
-      actionType,
-      actionParams: actionType === "pause" || actionType === "freeze" ? {} : { amount: "1" },
-    });
-    expect(res.status).toBe(403);
-  });
+  it.each(["mint", "burn", "force_burn", "pause", "freeze"])(
+    "refuses a tokens:write principal a %s rule",
+    async (actionType) => {
+      const res = await post(MEMBER_KEY, base, {
+        triggerType: "kyc_approved",
+        actionType,
+        actionParams: actionType === "pause" || actionType === "freeze" ? {} : { amount: "1" },
+      });
+      expect(res.status).toBe(403);
+    }
+  );
 
   it("lets a tokens:write principal author an automated rule", async () => {
     const res = await post(MEMBER_KEY, base, {
@@ -214,6 +213,110 @@ describe("workflow authorization (routes)", () => {
       actionParams: { amount: "1000" },
     });
     expect(res.status).toBe(201);
+  });
+
+  // `requires_approval` means the action is irreversible, so "held for a human" is a
+  // property of the tier, not a default a caller may override. The engine already forces
+  // awaiting_review for the tier, so accepting `auto` was never an approval bypass — it
+  // persisted a row that contradicted the engine, and the builder renders review_mode, so
+  // a destructive rule was displayed to operators as auto-apply.
+  describe("review mode for irreversible actions", () => {
+    async function storedReviewMode(workflowId: string) {
+      const row = await getDb(env)
+        .prepare("SELECT review_mode FROM asset_workflows WHERE id = ?")
+        .bind(workflowId)
+        .first<{ review_mode: string }>();
+      return row?.review_mode;
+    }
+
+    it("refuses an explicit auto on create, writing nothing", async () => {
+      const res = await post(ADMIN_KEY, base, {
+        triggerType: "kyc_approved",
+        actionType: "mint",
+        actionParams: { amount: "1000" },
+        reviewMode: "auto",
+      });
+
+      expect(res.status).toBe(400);
+      const stored = await getDb(env)
+        .prepare("SELECT COUNT(*) AS count FROM asset_workflows")
+        .first<{ count: number }>();
+      expect(Number(stored?.count ?? 0)).toBe(0);
+    });
+
+    it("refuses flipping a stored mint rule to auto through an edit", async () => {
+      const created = await post(ADMIN_KEY, base, {
+        triggerType: "kyc_approved",
+        actionType: "mint",
+        actionParams: { amount: "1000" },
+      });
+      expect(created.status).toBe(201);
+      const { data } = (await created.json()) as { data: { workflow: { id: string } } };
+      expect(await storedReviewMode(data.workflow.id)).toBe("manual");
+
+      const patched = await app.request(
+        `${base}/${data.workflow.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${ADMIN_KEY.raw}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ reviewMode: "auto" }),
+        },
+        env
+      );
+
+      expect(patched.status).toBe(400);
+      expect(await storedReviewMode(data.workflow.id)).toBe("manual");
+    });
+
+    // The builder locks its review selector to manual for this tier but keeps its own
+    // state behind it, so it has to send the locked value rather than the raw state.
+    // This is the payload it sends — a rejection here means destructive rules cannot be
+    // authored from the UI at all.
+    it("accepts the manual the builder sends for a locked action", async () => {
+      const res = await post(ADMIN_KEY, base, {
+        triggerType: "kyc_approved",
+        actionType: "mint",
+        actionParams: { amount: "1000" },
+        reviewMode: "manual",
+      });
+
+      expect(res.status).toBe(201);
+      const { data } = (await res.json()) as { data: { workflow: { id: string } } };
+      expect(await storedReviewMode(data.workflow.id)).toBe("manual");
+    });
+
+    // The rejection is scoped to the tier that forbids auto: `sensitive` genuinely lets
+    // an issuer opt into unattended runs. `freeze` is capability-gated, so this needs the
+    // asset profile that unlocks it.
+    it("still lets a sensitive action opt into auto", async () => {
+      await getDb(env)
+        .prepare(
+          `INSERT OR REPLACE INTO asset_profiles
+             (id, organization_id, project_id, token_id, issuance_metadata, status)
+           VALUES (?, ?, ?, ?, ?::jsonb, 'active')`
+        )
+        .bind(
+          "asset_profile_wf_authz",
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TOKEN_ID,
+          JSON.stringify({ settings: { selected: { freezeAccounts: { enabled: true } } } })
+        )
+        .run();
+
+      const res = await post(ADMIN_KEY, base, {
+        triggerType: "kyc_rejected",
+        actionType: "freeze",
+        reviewMode: "auto",
+      });
+
+      expect(res.status).toBe(201);
+      const { data } = (await res.json()) as { data: { workflow: { id: string } } };
+      expect(await storedReviewMode(data.workflow.id)).toBe("auto");
+    });
   });
 
   // The escalation this closes has a second door: edit or delete a rule an admin wrote.
@@ -295,5 +398,32 @@ describe("workflow authorization (routes)", () => {
       .first<{ status: string; decided_by: string | null }>();
     expect(decided?.status).toBe("pending");
     expect(decided?.decided_by).toBe(ADMIN_KEY.id);
+  });
+
+  // Holder enrollment is a write: it creates kyc_wallets/wallet_asset_enrollments rows and
+  // can complete clearance, which emits kyc_approved and drives automated rules. The
+  // permission is declared on the route (`requirePermissions("tokens:write")`), not in the
+  // handler, so these pin the boundary at the HTTP layer where it is actually enforced.
+  describe("holder enrollment", () => {
+    const holders = `/v1/issuance/tokens/${TOKEN_ID}/holders`;
+    const wallet = { walletAddress: "So11111111111111111111111111111111111111112" };
+
+    it("refuses a read-only principal", async () => {
+      const res = await post(READONLY_KEY, holders, wallet);
+      expect(res.status).toBe(403);
+
+      // Nothing was written — a 403 that still enrolled would be no protection at all.
+      const row = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS n FROM kyc_wallets WHERE wallet_address = ?")
+        .bind(wallet.walletAddress)
+        .first<{ n: number }>();
+      expect(row?.n).toBe(0);
+    });
+
+    // Proves the 403 above is the permission gate rather than an unreachable route (a
+    // disabled feature flag or bad path would fail this too).
+    it("allows a tokens:write principal", async () => {
+      expect((await post(MEMBER_KEY, holders, wallet)).status).toBe(201);
+    });
   });
 });

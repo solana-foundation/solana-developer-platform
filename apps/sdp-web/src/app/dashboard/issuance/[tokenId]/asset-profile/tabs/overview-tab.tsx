@@ -2,11 +2,11 @@
 
 import type { AssetProfile, Token } from "@sdp/types";
 import {
+  Activity,
   ArrowUpRight,
   Building2,
   Clock,
   Coins,
-  Hash,
   type LucideIcon,
   RefreshCw,
   ShieldCheck,
@@ -16,6 +16,7 @@ import {
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { cn } from "@/lib/utils";
 import {
   AccessBadge,
   AssetOverviewHero,
@@ -30,6 +31,7 @@ import {
   formatSmartSupply,
   resolveAccessMode,
   resolveVerifiedHolders,
+  tokenStatusPresentation,
 } from "../../../issuance-token-fields";
 import { WalletIdentityBadge } from "../../../wallet-identity";
 import { formatDate, formatDateTime } from "../../token-management-workspace.utils";
@@ -86,6 +88,7 @@ export function OverviewTab({
   const signerWallet = buildWalletIdentityForSigner(token.signingWalletId, ops.authorityWallets, t);
   const accessMode = resolveAccessMode(token, draft);
   const verifiedHolders = resolveVerifiedHolders(draft);
+  const statusPresentation = tokenStatusPresentation(t, token.status);
   const signerBadge = signerWallet ? (
     <WalletIdentityBadge identity={signerWallet} onCopy={(value) => void ops.handleCopy(value)} />
   ) : null;
@@ -93,8 +96,8 @@ export function OverviewTab({
   return (
     <div className="space-y-4">
       {/* Identity hero — shared, presentational; also used by the issuance list's
-          expanded card so both surfaces stay identical. Tiles: Status · Smart supply
-          · Decimals · Smart date · Authorities glyph · Signer wallet. */}
+          expanded card so both surfaces stay identical. Tiles: Authorities ·
+          Access or signer · Issuer · Supply · Status · Smart date. */}
       <AssetOverviewHero
         description={token.description}
         website={draft.website}
@@ -156,9 +159,9 @@ export function OverviewTab({
                 value={signerBadge}
               />
             )}
-            {/* No status tile: the page header already carries the status pill next
-                to the asset name. Issuer name takes the slot instead — the one
-                identifying fact from the list card that this tab was missing. */}
+            {/* No status tile: the page header already carries the status. Issuer
+                name takes the slot instead — the one identifying fact from the
+                list card that this tab was missing. */}
             <StatTile
               icon={Building2}
               label={t("DashboardIssuance.config.issuerName")}
@@ -186,10 +189,26 @@ export function OverviewTab({
                 ) : null
               }
             />
+            {/* Status rather than decimals: the header states it too, but this tab
+                is where an operator looks for what the asset is doing, and the
+                decimal count is a fact they need once. Same dot-and-word pair as
+                the header, from the same presentation. */}
             <StatTile
-              icon={Hash}
-              label={t("DashboardIssuance.create.decimals")}
-              value={String(token.decimals)}
+              icon={Activity}
+              label={t("DashboardIssuance.transactions.status")}
+              value={
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 shrink-0 rounded-full",
+                      statusPresentation.dotClassName
+                    )}
+                  />
+                  <span className={statusPresentation.textClassName}>
+                    {statusPresentation.label}
+                  </span>
+                </span>
+              }
             />
             <StatTile
               icon={Clock}

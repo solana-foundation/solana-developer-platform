@@ -1,7 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Plus, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
@@ -65,20 +64,16 @@ export function GuardEditor({
     }
   };
 
-  return (
-    <div className="space-y-2 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-secondary">{wf("guardTitle")}</span>
-        {conditionFields.length > 0 ? (
-          <Button type="button" size="sm" variant="ghost" onClick={onAdd}>
-            {wf("guardAdd")}
-          </Button>
-        ) : null}
-      </div>
+  // Rendered bare: every caller already wraps this in a labelled container (a GUARD node
+  // kicker or an "Only if…" stage heading), so a self-titled bordered box here would be a
+  // redundant card-in-a-card. The trigger with no filterable fields is the only dead end.
+  if (conditionFields.length === 0) {
+    return <p className="text-xs text-tertiary">{wf("guardNoFields")}</p>;
+  }
 
-      {conditionFields.length === 0 ? (
-        <p className="text-xs text-tertiary">{wf("guardNoFields")}</p>
-      ) : guards.length === 0 ? (
+  return (
+    <div className="space-y-2">
+      {guards.length === 0 ? (
         <p className="text-xs text-tertiary">{wf("guardEmpty")}</p>
       ) : (
         <ul className="space-y-2">
@@ -162,6 +157,15 @@ export function GuardEditor({
           })}
         </ul>
       )}
+
+      <button
+        type="button"
+        onClick={onAdd}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border-default px-3 py-2 text-xs font-medium text-secondary transition-colors hover:border-border-strong hover:bg-fill-subtle/40 hover:text-primary"
+      >
+        <Plus className="size-3.5" aria-hidden />
+        {wf("guardAdd")}
+      </button>
     </div>
   );
 }

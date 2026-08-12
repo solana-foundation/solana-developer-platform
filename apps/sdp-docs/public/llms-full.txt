@@ -4397,7 +4397,9 @@ In your Clerk development app:
 
 - Copy the publishable key, secret key, and issuer into the
   [configurator](/docs/self-hosting/configurator).
-- Create a JWT template named `sdp-api`.
+- Customize the session token (Clerk dashboard → **Sessions** → **Customize
+  session token**) with the claims from the
+  [Clerk setup guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/apps/sdp-api/docs/self-hosting/clerk-setup.md).
 - Expose your local API with the webhook tunnel: reserve a free stable domain
   at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains), set it
   as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.env.local`, and run
@@ -4421,7 +4423,7 @@ Open the [configurator](/docs/self-hosting/configurator), keep the defaults for
 the first deployment, and fill in:
 
 - `SOLANA_RPC_URL` with a devnet RPC endpoint.
-- Clerk publishable key, secret key, issuer, JWT template, and webhook secret.
+- Clerk publishable key, secret key, issuer, and webhook secret.
 - Local signing with native fee payment.
 
 The signing step generates a local Solana signer in the browser and shows the
@@ -4455,7 +4457,7 @@ If the dashboard loads but organization state does not appear, check the API log
 docker compose logs -f sdp-api
 ```
 
-Look for Clerk webhook errors, JWT template mismatches, or missing
+Look for Clerk webhook errors, session token claim mismatches, or missing
 `CLERK_WEBHOOK_SECRET`.
 
 </Step>
@@ -5249,6 +5251,8 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | Prepare force burn transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze account |
 | `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | List frozen accounts |
+| `GET` | `/v1/issuance/tokens/{tokenId}/holders` | List verified holders |
+| `POST` | `/v1/issuance/tokens/{tokenId}/holders` | Enroll a verified holder |
 | `GET` | `/v1/issuance/tokens/{tokenId}/metadata.json` | Get public token metadata JSON |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Execute mint |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | Prepare mint transaction |
@@ -5259,6 +5263,15 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | List token transactions |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | Unfreeze account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | Unpause token transfers |
+| `GET` | `/v1/issuance/tokens/{tokenId}/workflows` | List workflow rules |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows` | Create a workflow rule |
+| `DELETE` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Delete a workflow rule |
+| `PATCH` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Update a workflow rule |
+| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/catalog` | List the workflow catalog for an asset |
+| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/executions` | List workflow executions |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve` | Approve a held execution |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/reject` | Reject a held execution |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry` | Retry a failed execution |
 | `GET` | `/v1/issuance/tokens/facets` | List token filter facets |
 | `GET` | `/v1/issuance/transactions` | List issuance transactions |
 
@@ -5291,9 +5304,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/subscriptions` | List subscriptions |
 | `POST` | `/v1/payments/subscriptions` | Create subscription |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}` | Get subscription |
-| `PATCH` | `/v1/payments/subscriptions/{subscriptionId}` | Update subscription |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | List subscription collection attempts |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | Create subscription collection attempt |
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | Prepare subscription authorization |
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | Prepare subscription cancellation |
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-collection` | Prepare subscription collection |

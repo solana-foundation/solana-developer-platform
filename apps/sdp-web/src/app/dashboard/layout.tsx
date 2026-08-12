@@ -6,7 +6,14 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { SelectOrganizationPanel } from "@/components/select-organization-panel";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
-import { assetProfiles, organizationOnboarding } from "@/flags";
+import {
+  assetProfiles,
+  earn,
+  heliusRings,
+  markets,
+  organizationOnboarding,
+  privateChannels,
+} from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
@@ -37,10 +44,22 @@ async function loadOnboardingStatus(): Promise<OrganizationOnboardingStatus | nu
 }
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const [{ orgRole, orgId, userId }, onboardingEnabled, assetProfilesEnabled] = await Promise.all([
+  const [
+    { orgRole, orgId, userId },
+    onboardingEnabled,
+    assetProfilesEnabled,
+    privateChannelsEnabled,
+    marketsEnabled,
+    earnEnabled,
+    heliusRingsEnabled,
+  ] = await Promise.all([
     getSdpAuth(),
     organizationOnboarding(),
     assetProfiles(),
+    privateChannels(),
+    markets(),
+    earn(),
+    heliusRings(),
   ]);
 
   if (!userId) {
@@ -85,7 +104,11 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       <NetworkDebugProvider>
         <DashboardShell
           assetProfilesEnabled={assetProfilesEnabled}
+          earnEnabled={earnEnabled}
+          heliusRingsEnabled={heliusRingsEnabled}
+          marketsEnabled={marketsEnabled}
           onboardingStatus={onboardingStatus}
+          privateChannelsEnabled={privateChannelsEnabled}
         >
           {children}
         </DashboardShell>

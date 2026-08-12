@@ -1,6 +1,8 @@
 /** Environment variables consumed by the Node API runtime. */
 
+import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { ApiKeyEnvironment, CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
@@ -45,7 +47,7 @@ export interface Env {
   GCP_SECRET_MANAGER_PROJECT_ID?: string;
   GCP_SECRET_MANAGER_SECRET_PREFIX?: string;
   GCP_SECRET_MANAGER_API_BASE_URL?: string;
-  PRIVY_BYOK_PROVISIONING_ENABLED?: string;
+  PRIVY_BYOK_ENABLED?: string;
 
   // Application secrets
   API_KEY_PEPPER?: string;
@@ -54,6 +56,8 @@ export interface Env {
   CUSTODY_KMS_KEY_NAME?: string;
   CUSTODY_KMS_API_BASE_URL?: string;
   CUSTODY_KMS_METADATA_TOKEN_URL?: string;
+  SPC_CREDENTIAL_ENCRYPTION_KEY?: string; // For encrypting invited SPC user passwords
+  SPC_CREDENTIAL_KMS_KEY_NAME?: string; // Optional Cloud KMS key for SPC credential envelopes
   COUNTERPARTY_PII_KMS_KEY_NAME?: string;
   COUNTERPARTY_PII_KMS_API_BASE_URL?: string;
   COUNTERPARTY_PII_KMS_METADATA_TOKEN_URL?: string;
@@ -69,7 +73,6 @@ export interface Env {
   // Clerk configuration
   CLERK_ISSUER?: string;
   CLERK_JWKS_URL?: string;
-  CLERK_AUDIENCE?: string;
   CLERK_SECRET_KEY?: string;
   CLERK_API_URL?: string;
   CLERK_WEBHOOK_SECRET?: string;
@@ -186,12 +189,10 @@ export interface Env {
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
+  KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
-
-  // AlphaLedger Vulcan Forge tokenization engine
-  ALPHALEDGER_API_KEY?: string;
 
   // MagicBlock private payments configuration
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
@@ -203,7 +204,10 @@ export interface Env {
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
   // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
-  ASSET_PROFILES_ENABLED?: string;
+  SDP_FLAG_ASSET_PROFILES?: string;
+
+  // Private Channels (SPC) feature gate — API routes + deposit/withdrawal cron.
+  PRIVATE_CHANNELS_ENABLED?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;
@@ -270,6 +274,21 @@ export interface Env {
   STRIPE_SECRET_KEY?: string;
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+
+  // Markets module gate (parent) and its Earn sub-module gate (child). Earn
+  // needs both; clearing MARKETS_ENABLED dark-launches the whole module.
+  MARKETS_ENABLED?: string;
+  EARN_ENABLED?: string;
+
+  // Earn vault-infra provider configuration
+  VEDA_API_KEY?: string;
+  VEDA_SANDBOX_API_KEY?: string;
+  UPSHIFT_API_KEY?: string;
+  UPSHIFT_SANDBOX_API_KEY?: string;
+  PERENA_API_KEY?: string;
+  PERENA_SANDBOX_API_KEY?: string;
+  GROUND_API_KEY?: string;
+  GROUND_SANDBOX_API_KEY?: string;
 }
 
 // Extend Hono's context with our bindings
@@ -277,6 +296,11 @@ declare module "hono" {
   interface ContextVariableMap {
     // API key auth context set by middleware
     projectId?: string;
+    projectEnvironment?: ApiKeyEnvironment;
+    approvedWalletOperationId?: string;
+    approvedWalletOperationAttemptId?: string;
+    // Set by policyGate middleware for gated routes
+    policyGate?: PolicyGateContext<unknown, unknown, WalletOperationPolicyEnforcement | null>;
     apiKey?: {
       id: string;
       organizationId: string;

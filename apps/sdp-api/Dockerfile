@@ -4,8 +4,8 @@
 #
 #     docker build -f apps/sdp-api/Dockerfile -t sdp-api .
 
-# Digest pinned so rebuilds don't float onto a new node:22-slim.
-FROM node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb AS base
+# Digest pinned so rebuilds don't float onto a new node:24-slim.
+FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH
 RUN corepack enable && corepack prepare pnpm@10.16.0 --activate
@@ -19,11 +19,17 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
+COPY packages/sdp-earn/package.json ./packages/sdp-earn/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
+COPY packages/sdp-policy/package.json ./packages/sdp-policy/
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
+COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
+COPY packages/sdp-spc-escrow/package.json ./packages/sdp-spc-escrow/
+COPY packages/sdp-spc-withdraw/package.json ./packages/sdp-spc-withdraw/
+COPY packages/kit-augment/package.json ./packages/kit-augment/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -36,16 +42,22 @@ COPY --from=deps /repo /repo
 COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
 COPY packages/sdp-env-config ./packages/sdp-env-config
+COPY packages/sdp-earn ./packages/sdp-earn
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
 COPY packages/sdp-solana ./packages/sdp-solana
+COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-issuance ./packages/sdp-issuance
+COPY packages/sdp-private-channels ./packages/sdp-private-channels
+COPY packages/sdp-spc-escrow ./packages/sdp-spc-escrow
+COPY packages/sdp-spc-withdraw ./packages/sdp-spc-withdraw
+COPY packages/kit-augment ./packages/kit-augment
 
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs
 
-FROM node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb AS runner
+FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
@@ -53,9 +65,14 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     MIGRATIONS_DIR=/app/migrations
 
-# Apply OS-level security patches not yet in the pinned base image.
+# Update npm for patched node-tar (CVE-2026-59873) and apply OS-level fixes
+# not yet in the pinned base image.
 # This layer is cached — rebuild with --no-cache to pick up new fixes.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+RUN npm install --global npm@12.0.2 \
+ && npm cache clean --force \
+ && apt-get update \
+ && apt-get upgrade -y \
+ && rm -rf /var/lib/apt/lists/*
 
 # UID/GID 1001 matches sdp-web so k8s securityContext is consistent.
 RUN groupadd --system --gid 1001 nodejs \
