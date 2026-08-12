@@ -138,6 +138,9 @@ export async function preflightWalletPolicy(
       asset: ctx.token.symbol,
       amount: input.amount ?? null,
       destination: input.destination ?? null,
+      // Single-leg: a rule's action moves one amount to one destination. Only batch
+      // operations (multi-recipient transfers) split into per-leg candidates.
+      legs: [],
       context: {
         tokenId: ctx.token.id,
         tokenSymbol: ctx.token.symbol,

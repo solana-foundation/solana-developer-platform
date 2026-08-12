@@ -663,6 +663,13 @@ export function WorkflowsTab({
       setShowValidation(true);
       return;
     }
+    // What the review selector SHOWS for a `requires_approval` action, which is locked to
+    // manual. The selector only overrides its displayed value, so the state behind it is
+    // still whatever was picked before the action was chosen — "auto" by default. Sending
+    // that raw is rejected by the API (the tier always requires manual review), which
+    // would make the destructive rules the lock exists for impossible to save.
+    const submittedReviewMode =
+      tierForAction(effectiveAction) === "requires_approval" ? "manual" : reviewMode;
     // Only send non-empty params; blanks fall back to trigger-payload defaults server-side.
     const actionParams: Record<string, string> = {};
     for (const field of paramFields) {
@@ -679,7 +686,7 @@ export function WorkflowsTab({
           await updateWorkflow(tokenId, editingRule.id, {
             actionParams,
             condition: condition ?? null,
-            reviewMode,
+            reviewMode: submittedReviewMode,
           });
           resetBuilder();
           await rulesSwr.mutate();
@@ -695,7 +702,7 @@ export function WorkflowsTab({
         await createWorkflow(tokenId, {
           triggerType: effectiveTrigger,
           actionType: effectiveAction,
-          reviewMode,
+          reviewMode: submittedReviewMode,
           actionParams: Object.keys(actionParams).length > 0 ? actionParams : undefined,
           condition,
         });

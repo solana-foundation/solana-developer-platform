@@ -76,6 +76,9 @@ describe("workflow authorization (routes)", () => {
 
     await db.prepare("DELETE FROM workflow_executions").run();
     await db.prepare("DELETE FROM asset_workflows").run();
+    // One test seeds a profile to unlock a capability-gated action; every other test in
+    // this file expects the bare token, so it must not survive into the next one.
+    await db.prepare("DELETE FROM asset_profiles").run();
     await db.prepare("DELETE FROM issued_tokens").run();
     await db.prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL").run();
     await db.prepare("DELETE FROM projects").run();
@@ -210,6 +213,110 @@ describe("workflow authorization (routes)", () => {
       actionParams: { amount: "1000" },
     });
     expect(res.status).toBe(201);
+  });
+
+  // `requires_approval` means the action is irreversible, so "held for a human" is a
+  // property of the tier, not a default a caller may override. The engine already forces
+  // awaiting_review for the tier, so accepting `auto` was never an approval bypass — it
+  // persisted a row that contradicted the engine, and the builder renders review_mode, so
+  // a destructive rule was displayed to operators as auto-apply.
+  describe("review mode for irreversible actions", () => {
+    async function storedReviewMode(workflowId: string) {
+      const row = await getDb(env)
+        .prepare("SELECT review_mode FROM asset_workflows WHERE id = ?")
+        .bind(workflowId)
+        .first<{ review_mode: string }>();
+      return row?.review_mode;
+    }
+
+    it("refuses an explicit auto on create, writing nothing", async () => {
+      const res = await post(ADMIN_KEY, base, {
+        triggerType: "kyc_approved",
+        actionType: "mint",
+        actionParams: { amount: "1000" },
+        reviewMode: "auto",
+      });
+
+      expect(res.status).toBe(400);
+      const stored = await getDb(env)
+        .prepare("SELECT COUNT(*) AS count FROM asset_workflows")
+        .first<{ count: number }>();
+      expect(Number(stored?.count ?? 0)).toBe(0);
+    });
+
+    it("refuses flipping a stored mint rule to auto through an edit", async () => {
+      const created = await post(ADMIN_KEY, base, {
+        triggerType: "kyc_approved",
+        actionType: "mint",
+        actionParams: { amount: "1000" },
+      });
+      expect(created.status).toBe(201);
+      const { data } = (await created.json()) as { data: { workflow: { id: string } } };
+      expect(await storedReviewMode(data.workflow.id)).toBe("manual");
+
+      const patched = await app.request(
+        `${base}/${data.workflow.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${ADMIN_KEY.raw}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ reviewMode: "auto" }),
+        },
+        env
+      );
+
+      expect(patched.status).toBe(400);
+      expect(await storedReviewMode(data.workflow.id)).toBe("manual");
+    });
+
+    // The builder locks its review selector to manual for this tier but keeps its own
+    // state behind it, so it has to send the locked value rather than the raw state.
+    // This is the payload it sends — a rejection here means destructive rules cannot be
+    // authored from the UI at all.
+    it("accepts the manual the builder sends for a locked action", async () => {
+      const res = await post(ADMIN_KEY, base, {
+        triggerType: "kyc_approved",
+        actionType: "mint",
+        actionParams: { amount: "1000" },
+        reviewMode: "manual",
+      });
+
+      expect(res.status).toBe(201);
+      const { data } = (await res.json()) as { data: { workflow: { id: string } } };
+      expect(await storedReviewMode(data.workflow.id)).toBe("manual");
+    });
+
+    // The rejection is scoped to the tier that forbids auto: `sensitive` genuinely lets
+    // an issuer opt into unattended runs. `freeze` is capability-gated, so this needs the
+    // asset profile that unlocks it.
+    it("still lets a sensitive action opt into auto", async () => {
+      await getDb(env)
+        .prepare(
+          `INSERT OR REPLACE INTO asset_profiles
+             (id, organization_id, project_id, token_id, issuance_metadata, status)
+           VALUES (?, ?, ?, ?, ?::jsonb, 'active')`
+        )
+        .bind(
+          "asset_profile_wf_authz",
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TOKEN_ID,
+          JSON.stringify({ settings: { selected: { freezeAccounts: { enabled: true } } } })
+        )
+        .run();
+
+      const res = await post(ADMIN_KEY, base, {
+        triggerType: "kyc_rejected",
+        actionType: "freeze",
+        reviewMode: "auto",
+      });
+
+      expect(res.status).toBe(201);
+      const { data } = (await res.json()) as { data: { workflow: { id: string } } };
+      expect(await storedReviewMode(data.workflow.id)).toBe("auto");
+    });
   });
 
   // The escalation this closes has a second door: edit or delete a rule an admin wrote.
