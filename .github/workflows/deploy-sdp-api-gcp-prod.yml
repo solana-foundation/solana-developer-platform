@@ -7,8 +7,8 @@ on:
         description: "Existing 40-character Git SHA image tag to redeploy (run from main)"
         type: string
         required: true
-  push:
-    branches: [main]
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -24,9 +24,8 @@ jobs:
     if: >-
       always() &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
-      github.ref == 'refs/heads/main' &&
-      (github.event_name == 'workflow_dispatch' ||
-       startsWith(github.event.head_commit.message, 'chore(main): release '))
+      (github.event_name == 'release' ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: production
@@ -51,7 +50,7 @@ jobs:
           echo "DEPLOY_IMAGE_SHA=${DEPLOY_IMAGE_SHA}" >> "${GITHUB_ENV}"
 
       - name: Checkout
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'release' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
 
       - name: Authenticate to GCP
@@ -64,11 +63,11 @@ jobs:
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
       - name: Configure Docker for Artifact Registry
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'release' }}
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
       - name: Build and push image
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'release' }}
         timeout-minutes: 20
         run: |
           set -euo pipefail
@@ -104,7 +103,7 @@ jobs:
           echo "Deploying ${tagged_image} as ${resolved_image}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Run database migrations
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'release' }}
         timeout-minutes: 15
         run: |
           gcloud run jobs update "${MIGRATE_JOB}" \

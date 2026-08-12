@@ -6,7 +6,8 @@ import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { optionalAuth } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { KEYED_IP_BACKSTOP_MAX_REQUESTS } from "@/middleware/rate-limit";
+import { enforceRateLimit, KEYED_IP_BACKSTOP_MAX_REQUESTS } from "@/middleware/rate-limit";
+import type { KVStoreSet } from "@/runtime/kv";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -216,6 +217,70 @@ describe("Rate limiting", () => {
       );
 
       expect(res.status).toBe(429);
+    });
+  });
+
+  describe("storage failure semantics", () => {
+    function enforcementApp(options: {
+      kv: "broken" | "missing";
+      failClosed: boolean;
+    }): Hono<{ Bindings: Env }> {
+      const mini = new Hono<{ Bindings: Env }>();
+      mini.onError((err, c) => {
+        if (err instanceof AppError) {
+          return c.json(err.toResponse(), err.statusCode as 429 | 503);
+        }
+        throw err;
+      });
+      if (options.kv === "broken") {
+        mini.use("*", async (c, next) => {
+          c.set("kv", {
+            rateLimits: {
+              admitSlidingWindow: () => Promise.reject(new Error("kv down")),
+            },
+          } as unknown as KVStoreSet);
+          await next();
+        });
+      }
+      mini.get("/resource", async (c) => {
+        await enforceRateLimit(c, "storage-failure-test", 5, {
+          failClosed: options.failClosed,
+        });
+        return c.text("ok");
+      });
+      return mini;
+    }
+
+    it("fails open on storage errors by default", async () => {
+      const res = await enforcementApp({ kv: "broken", failClosed: false }).request(
+        "/resource",
+        {},
+        env
+      );
+
+      expect(res.status).toBe(200);
+    });
+
+    it("fails closed with a 503 on storage errors when requested", async () => {
+      const res = await enforcementApp({ kv: "broken", failClosed: true }).request(
+        "/resource",
+        {},
+        env
+      );
+
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("SERVICE_UNAVAILABLE");
+    });
+
+    it("fails closed with a 503 when no counter store is bound", async () => {
+      const res = await enforcementApp({ kv: "missing", failClosed: true }).request(
+        "/resource",
+        {},
+        env
+      );
+
+      expect(res.status).toBe(503);
     });
   });
 });

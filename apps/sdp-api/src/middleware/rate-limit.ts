@@ -3,7 +3,7 @@ import type { Context, Next } from "hono";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
-import { rateLimited } from "@/lib/errors";
+import { rateLimited, serviceUnavailable } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { matchesFreePath } from "./path-match";
@@ -19,6 +19,14 @@ export const RATE_LIMIT_TIERS = {
 } as const satisfies Record<RateLimitTier, number>;
 
 const ANONYMOUS_MAX_REQUESTS = 20;
+
+/**
+ * Per-user-per-org ceiling for dashboard traffic (Clerk JWT or cookie
+ * session). Dashboard pages fan out many BFF calls in parallel, so this sits
+ * well above interactive use while still bounding a scripted session; costly
+ * endpoints layer tighter metered quotas on top (see metered-quota.ts).
+ */
+export const DASHBOARD_ACTOR_MAX_REQUESTS = 300;
 
 /**
  * Per-IP ceiling for requests that present an sk_-shaped credential. Keyed
@@ -158,25 +166,43 @@ async function isVerifiedClerkJwt(c: Context<{ Bindings: Env }>, token: string):
  * Side effects: sets the X-RateLimit-Limit/-Remaining/-Reset response headers
  * (Remaining reserves one slot for the in-flight request), and on admission
  * increments the current bucket's counter with a 2x-window TTL so it survives
- * long enough to serve as the next bucket's "previous". A failed counter
- * write logs and fails open. Rejected requests do not increment the counter.
+ * long enough to serve as the next bucket's "previous". Rejected requests do
+ * not increment the counter.
+ *
+ * Storage failure semantics are chosen per call site: by default a failed
+ * counter read/write logs and fails open, keeping cheap traffic flowing
+ * through a KV outage. Costly or side-effecting operations pass
+ * `failClosed: true`, which turns a missing KV binding or a storage error
+ * into a 503 — an unmetered request to a paid upstream is worse than a
+ * refused one.
  *
  * @param c - Request context; c.var.kv must be populated by kvStoreMiddleware.
  * @param identifier - Counter scope: client IP for anonymous traffic, API key
  *   id for keyed traffic.
  * @param maxRequests - Maximum admitted requests per window; the auth
  *   middleware passes RATE_LIMIT_TIERS[key.rateLimitTier].
+ * @param options - failClosed: reject with 503 instead of admitting when the
+ *   counter store is unavailable.
  * @returns Resolves once the request is admitted and the counter incremented.
  * @throws AppError RATE_LIMITED (429) with a Retry-After header when the
- *   estimated count has reached maxRequests.
+ *   estimated count has reached maxRequests; AppError SERVICE_UNAVAILABLE
+ *   (503) when failClosed is set and the counter store is unavailable.
  */
 export async function enforceRateLimit(
   c: Context<{ Bindings: Env }>,
   identifier: string,
-  maxRequests: number
+  maxRequests: number,
+  options: { failClosed?: boolean } = {}
 ): Promise<void> {
   const kv = c.var.kv?.rateLimits;
   if (!kv) {
+    if (options.failClosed) {
+      getLogger().error(
+        { event: "sdp_api_rate_limit_unavailable", identifier, reason: "kv_missing" },
+        "Rate limit store unavailable; failing closed"
+      );
+      throw serviceUnavailable("Rate limiting is unavailable; request refused");
+    }
     return;
   }
 
@@ -197,11 +223,18 @@ export async function enforceRateLimit(
       expirationTtl: Math.ceil((RATE_LIMIT_WINDOW_MS * 2) / 1000),
     })
     .catch((err) => {
-      getLogger().error({ error: err }, "Failed to update rate limit");
+      getLogger().error({ error: err, identifier }, "Failed to update rate limit");
       return null;
     });
 
   if (!admission) {
+    if (options.failClosed) {
+      getLogger().error(
+        { event: "sdp_api_rate_limit_unavailable", identifier, reason: "storage_error" },
+        "Rate limit store unavailable; failing closed"
+      );
+      throw serviceUnavailable("Rate limiting is unavailable; request refused");
+    }
     return;
   }
 
