@@ -1,7 +1,8 @@
 "use client";
 
 import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
-import { ChevronRight, Search } from "lucide-react";
+import { SegmentedControl } from "@solana/design-system/segmented-control";
+import { ChevronRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
@@ -9,7 +10,7 @@ import type { CustodyProviderAvailability } from "@/app/dashboard/custody/provid
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { RpcProviderMark } from "@/app/dashboard/onboarding/rpc-provider-mark";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
@@ -39,7 +40,7 @@ const STATUS_FILTERS: StatusFilter[] = [
 function statusLabel(status: IntegrationStatus | "all", t: Translate): string {
   switch (status) {
     case "all":
-      return t("Shared.integrations.filterAllStatuses");
+      return t("Shared.integrations.filterAll");
     case "active":
       return t("Shared.integrations.statusActive");
     case "available":
@@ -67,30 +68,6 @@ function StatusBadge({ status, t }: { status: IntegrationStatus; t: Translate })
     >
       {statusLabel(status, t)}
     </span>
-  );
-}
-
-function FilterPill({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean;
-  children: ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors motion-reduce:transition-none",
-        active ? "bg-primary text-on-primary" : "bg-fill-subtle text-secondary hover:bg-fill-strong"
-      )}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -239,47 +216,44 @@ export function IntegrationsCatalog({
   }, [custody, rpc, ramps, compliance, t]);
 
   const visible = rows.filter((row) => matchesFilters(row, { family, status, query }));
-  // The header tab is navigation, not a filter: "Clear filters" only resets
-  // what this page owns, so it never shows for a tab choice alone.
-  const filtered = status !== "all" || query.trim().length > 0;
   const clearFilters = () => {
     setStatus("all");
     setQuery("");
   };
 
   return (
-    <div className="w-full space-y-8 px-4 py-6 md:px-6">
-      <p className="mx-auto max-w-2xl text-center text-sm leading-6 text-tertiary">
-        {t("Shared.integrations.pageDescription")}
-      </p>
-
-      <div className="space-y-3" data-integrations-filters="true">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="w-full max-w-md">
-            <Input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              placeholder={t("Shared.integrations.searchPlaceholder")}
-              aria-label={t("Shared.integrations.searchPlaceholder")}
-              iconLeft={<Search />}
-              // The DS input paints its border on an inner span via
-              // --input-border-*, so border-* classes are inert here.
-              className="h-10 rounded-[10px] bg-surface-raised [--input-border-hover:var(--color-border-strong)] [--input-border-idle:var(--color-border-default)] [--input-border-width:1px]"
-            />
-          </div>
-          {filtered ? (
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              {t("Shared.integrations.clearFilters")}
-            </Button>
-          ) : null}
+    <div className="w-full space-y-6 px-4 py-5 md:px-6">
+      {/* No lead-in paragraph: each section explains itself, and the header
+          tabs already frame the page — content starts at the toolbar. The
+          status group is one contained segmented control (the secondary pill
+          tabs), so it can never shed an orphaned pill onto its own wrap line;
+          on narrow viewports it scrolls within its strip instead. */}
+      <div
+        className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between"
+        data-integrations-filters="true"
+      >
+        <div
+          className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] md:-mx-6 md:px-6 xl:mx-0 xl:px-0"
+          data-integrations-status-pills="true"
+        >
+          <SegmentedControl
+            aria-label={t("Shared.integrations.filterByStatus")}
+            items={STATUS_FILTERS.map((option) => ({
+              value: option,
+              label: statusLabel(option, t),
+            }))}
+            value={status}
+            // Re-clicking the active segment can emit an empty value from the
+            // underlying toggle group; a status filter always has a selection.
+            onValueChange={(value) => value && setStatus(value as StatusFilter)}
+          />
         </div>
-        <div className="flex flex-wrap items-center gap-2" data-integrations-status-pills="true">
-          {STATUS_FILTERS.map((option) => (
-            <FilterPill key={option} active={status === option} onClick={() => setStatus(option)}>
-              {statusLabel(option, t)}
-            </FilterPill>
-          ))}
+        <div className="w-full max-w-xs xl:w-64 xl:shrink-0">
+          <SearchInput
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder={t("Shared.integrations.searchPlaceholder")}
+          />
         </div>
       </div>
 
