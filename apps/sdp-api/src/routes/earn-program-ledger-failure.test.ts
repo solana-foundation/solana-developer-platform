@@ -3,7 +3,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, EarnPortfolioWithdrawal } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPostgresEarnRepository } from "@/db/repositories";
+import { createPostgresEarnRepository, type EarnProviderWalletRow } from "@/db/repositories";
 import app from "@/index";
 import { applyEarnWithdrawalObservationToRow } from "@/services/earn-withdrawal-ledger.service";
 import { env } from "@/test/helpers/env";
@@ -62,6 +62,7 @@ const WITHDRAWAL: EarnPortfolioWithdrawal = {
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
 let originalGroundSandboxApiKey: string | undefined;
+let program: EarnProviderWalletRow;
 
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
@@ -111,6 +112,8 @@ beforeEach(async () => {
       ),
   ]);
 
+  // Captured, not discarded: since PRO-1670 a withdrawal is addressed through
+  // its program's own id, so the request URL is built from this row.
   const wallet = await createPostgresEarnRepository(getDb(env)).insertProviderWallet({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
@@ -123,6 +126,7 @@ beforeEach(async () => {
   if (!wallet) {
     throw new Error("failed to seed program wallet");
   }
+  program = wallet;
 });
 
 afterEach(async () => {
@@ -140,7 +144,7 @@ describe("Earn withdrawal ledger — post-acceptance bookkeeping failure", () =>
     );
 
     const res = await app.request(
-      "/v1/earn/program/withdrawals",
+      `/v1/earn/programs/${program.id}/withdrawals`,
       {
         method: "POST",
         headers: {
@@ -148,7 +152,7 @@ describe("Earn withdrawal ledger — post-acceptance bookkeeping failure", () =>
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
-          provider: "ground",
+          // No `provider`: the path program owns it (PRO-1670).
           requestId: "3f9e8d7c-6b5a-4f4e-8d3c-2b1a0f9e8d7c",
           amountUsd: "10.00",
           token: "usdc",
@@ -167,10 +171,17 @@ describe("Earn withdrawal ledger — post-acceptance bookkeeping failure", () =>
     expect(vi.mocked(applyEarnWithdrawalObservationToRow)).toHaveBeenCalledTimes(3);
 
     // The intent row survives, ref-less: healed by a same-key retry or the
-    // ledger sweep — never silently lost, never a failed response.
+    // ledger sweep — never silently lost, never a failed response. wallet_id is
+    // asserted too: with N programs per org+environment+provider legal, the row
+    // must be pinned to the program in the PATH, not merely to some program of
+    // this organization's.
     const row = await getDb(env)
-      .prepare("SELECT status, provider_reference FROM earn_program_withdrawals")
-      .first<{ status: string; provider_reference: string | null }>();
-    expect(row).toEqual({ status: "requested", provider_reference: null });
+      .prepare("SELECT status, provider_reference, wallet_id FROM earn_program_withdrawals")
+      .first<{ status: string; provider_reference: string | null; wallet_id: string }>();
+    expect(row).toEqual({
+      status: "requested",
+      provider_reference: null,
+      wallet_id: program.id,
+    });
   });
 });

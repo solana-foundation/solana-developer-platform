@@ -2,10 +2,10 @@
 import type { EarnPortfolioWalletActivity, EarnPortfolioWalletStatus } from "@sdp/types";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { EarnProgramState } from "./earn-program-data";
+import type { EarnProgramsState } from "./earn-program-data";
 import {
   EARN_PROGRAM_DEDUPING_MS,
-  earnProgramRefreshInterval,
+  earnProgramsRefreshInterval,
   useEarnWalletActivityToasts,
   useEarnWithdrawalOutcomeToast,
 } from "./earn-program-data";
@@ -31,43 +31,128 @@ const KEY = {
   failed: "DashboardEarn.overview.activityFailed",
 };
 
+function program(
+  id: string,
+  status: EarnPortfolioWalletStatus,
+  activity?: EarnPortfolioWalletActivity
+) {
+  return {
+    id,
+    provider: "ground",
+    label: "Treasury earn",
+    createdAt: "2026-07-18T09:00:00.000Z",
+    yield: { currentApy: "0.058", earnedUsd: "0", positions: [] },
+    wallet: {
+      providerWalletRef: `wallet-ref-${id}`,
+      status,
+      activity,
+      balance: {
+        totalUsd: "19.00",
+        withdrawableUsd: "19.00",
+        reservedUsd: "0",
+        earnedUsd: "0",
+      },
+      positions: [],
+      allocations: {},
+    },
+  };
+}
+
+/** Single-program state, the shape most cases here drive. */
 function programState(
   status: EarnPortfolioWalletStatus,
   activity?: EarnPortfolioWalletActivity
-): EarnProgramState {
+): EarnProgramsState {
+  return { kind: "ready", programs: [program("1", status, activity)] } as EarnProgramsState;
+}
+
+/** Multi-program state, for the per-program snapshot rules. */
+function programsState(
+  ...specs: [string, EarnPortfolioWalletStatus, EarnPortfolioWalletActivity?][]
+): EarnProgramsState {
   return {
-    kind: "active",
-    program: {
-      provider: "ground",
-      label: "Treasury earn",
-      createdAt: "2026-07-18T09:00:00.000Z",
-      yield: { currentApy: "0.058", earnedUsd: "0", positions: [] },
-      wallet: {
-        providerWalletRef: "wallet-ref-1",
-        status,
-        activity,
-        balance: {
-          totalUsd: "19.00",
-          withdrawableUsd: "19.00",
-          reservedUsd: "0",
-          earnedUsd: "0",
-        },
-        positions: [],
-        allocations: {},
-      },
-    },
-  } as EarnProgramState;
+    kind: "ready",
+    programs: specs.map(([id, status, activity]) => program(id, status, activity)),
+  } as EarnProgramsState;
 }
 
 /** Replays a sequence of provider observations through one mounted hook. */
-function observe(...states: Array<EarnProgramState | undefined>) {
-  const { rerender } = renderHook((state: EarnProgramState | undefined) =>
+function observe(...states: Array<EarnProgramsState | undefined>) {
+  const { rerender } = renderHook((state: EarnProgramsState | undefined) =>
     useEarnWalletActivityToasts(state)
   );
   for (const state of states) {
     rerender(state);
   }
 }
+
+describe("useEarnWalletActivityToasts across several programs", () => {
+  beforeEach(() => {
+    toasts.success.mockClear();
+    toasts.error.mockClear();
+  });
+
+  /**
+   * The regression this exists to prevent: with one remembered snapshot instead
+   * of one per program, the hook compares program A's busy wallet against
+   * program B's ready wallet, reads a transition that never happened, and
+   * announces money that never moved.
+   */
+  it("does not announce a completion when only the program ORDER changed", () => {
+    observe(
+      programsState(["a", "busy", "rebalancing"], ["b", "ready"]),
+      // Same two programs, same two statuses — only the order differs.
+      programsState(["b", "ready"], ["a", "busy", "rebalancing"])
+    );
+    expect(toasts.success).not.toHaveBeenCalled();
+    expect(toasts.error).not.toHaveBeenCalled();
+  });
+
+  it("announces the program that actually settled, and only once", () => {
+    observe(
+      programsState(["a", "busy", "rebalancing"], ["b", "busy", "rebalancing"]),
+      programsState(["a", "ready"], ["b", "busy", "rebalancing"])
+    );
+    expect(toasts.success).toHaveBeenCalledTimes(1);
+    expect(toasts.success).toHaveBeenCalledWith(KEY.rebalance);
+  });
+
+  it("announces each program separately as each settles", () => {
+    observe(
+      programsState(["a", "busy", "rebalancing"], ["b", "busy", "rebalancing"]),
+      programsState(["a", "ready"], ["b", "busy", "rebalancing"]),
+      programsState(["a", "ready"], ["b", "ready"])
+    );
+    expect(toasts.success).toHaveBeenCalledTimes(2);
+  });
+
+  // A program that disappears must not leave a snapshot a re-created id could
+  // inherit and fire a transition on first sight.
+  /**
+   * A non-ready interlude (credentials pulled, a failed read) breaks the
+   * observation chain: by the time the read recovers, a busy program may have
+   * settled minutes ago, and announcing that pairing would claim a completion
+   * nobody watched happen. Recovery must behave like a first mount — silent.
+   */
+  it("does not announce across an unconfigured interlude", () => {
+    observe(
+      programsState(["a", "busy", "rebalancing"]),
+      { kind: "unconfigured" } as EarnProgramsState,
+      programsState(["a", "ready"])
+    );
+    expect(toasts.success).not.toHaveBeenCalled();
+    expect(toasts.error).not.toHaveBeenCalled();
+  });
+
+  it("forgets a program that is no longer listed", () => {
+    observe(
+      programsState(["a", "busy", "rebalancing"]),
+      programsState(["b", "ready"]),
+      programsState(["a", "ready"])
+    );
+    expect(toasts.success).not.toHaveBeenCalled();
+  });
+});
 
 describe("useEarnWalletActivityToasts", () => {
   beforeEach(() => {
@@ -127,7 +212,10 @@ describe("useEarnWalletActivityToasts", () => {
   });
 
   it("ignores a program that is absent or unconfigured", () => {
-    observe(programState("busy", "withdrawing"), { kind: "none" } as EarnProgramState);
+    observe(programState("busy", "withdrawing"), {
+      kind: "ready",
+      programs: [],
+    } as EarnProgramsState);
     expect(toasts.success).not.toHaveBeenCalled();
     expect(toasts.error).not.toHaveBeenCalled();
   });
@@ -166,7 +254,7 @@ describe("useEarnWithdrawalOutcomeToast", () => {
   async function watch(status: string) {
     const ref = `wd_${status}`;
     fetchMock.mockResolvedValue(withdrawalOf(ref, status));
-    renderHook(() => useEarnWithdrawalOutcomeToast(ref));
+    renderHook(() => useEarnWithdrawalOutcomeToast("prog_1", ref));
     // Let SWR resolve the first read and the effect run.
     await act(async () => {
       await Promise.resolve();
@@ -214,8 +302,47 @@ describe("useEarnWithdrawalOutcomeToast", () => {
     expect(toasts.error).not.toHaveBeenCalled();
   });
 
+  /**
+   * The retire signal: a settled watcher has nothing left to do, and keeping it
+   * mounted accumulates dead SWR subscriptions over a long session — so the
+   * caller must hear exactly one "done" to unmount it, and must NOT hear it
+   * while the withdrawal is still in flight.
+   */
+  it("fires onSettled once on a terminal status, and not before", async () => {
+    const settled = vi.fn();
+    fetchMock.mockResolvedValue(withdrawalOf("wd_settle_cb", "processing"));
+    const { rerender } = renderHook(() =>
+      useEarnWithdrawalOutcomeToast("prog_1", "wd_settle_cb", settled)
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(settled).not.toHaveBeenCalled();
+
+    // SWR caches by key, so drive the terminal read through a fresh key the
+    // way the sibling cases do — same watcher semantics, new withdrawal.
+    fetchMock.mockResolvedValue(withdrawalOf("wd_settle_done", "completed"));
+    rerender();
+    renderHook(() => useEarnWithdrawalOutcomeToast("prog_1", "wd_settle_done", settled));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(settled).toHaveBeenCalledTimes(1);
+  });
+
   it("issues no request at all when nothing was submitted", async () => {
-    renderHook(() => useEarnWithdrawalOutcomeToast(undefined));
+    renderHook(() => useEarnWithdrawalOutcomeToast(undefined, undefined));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // The key is a conjunction, so each half must gate on its own: a withdrawal
+  // ref with no resolved program would otherwise build /programs/undefined/...
+  it("issues no request when only one half of the key is known", async () => {
+    renderHook(() => useEarnWithdrawalOutcomeToast("prog_1", undefined));
+    renderHook(() => useEarnWithdrawalOutcomeToast(undefined, "wd_1"));
     await act(async () => {
       await Promise.resolve();
     });
@@ -230,20 +357,22 @@ describe("useEarnWithdrawalOutcomeToast", () => {
  */
 describe("earnProgramRefreshInterval", () => {
   it("keeps re-reading only while the provider is mid-operation", () => {
-    expect(earnProgramRefreshInterval(programState("busy", "withdrawing"))).toBe(10_000);
-    expect(earnProgramRefreshInterval(programState("busy", "rebalancing"))).toBe(10_000);
+    expect(earnProgramsRefreshInterval(programState("busy", "withdrawing"))).toBe(10_000);
+    expect(earnProgramsRefreshInterval(programState("busy", "rebalancing"))).toBe(10_000);
     // Unrecognized busy still converges; that is the state most at risk of
     // sticking forever if it did not.
-    expect(earnProgramRefreshInterval(programState("busy"))).toBe(10_000);
+    expect(earnProgramsRefreshInterval(programState("busy"))).toBe(10_000);
     // A wizard step waits on a deposit address that does not exist yet.
-    expect(earnProgramRefreshInterval(programState("creating"))).toBe(4_000);
+    expect(earnProgramsRefreshInterval(programState("creating"))).toBe(4_000);
   });
 
   it("stops entirely once nothing is in flight", () => {
-    expect(earnProgramRefreshInterval(programState("ready"))).toBe(0);
-    expect(earnProgramRefreshInterval(programState("failed"))).toBe(0);
-    expect(earnProgramRefreshInterval({ kind: "none" } as EarnProgramState)).toBe(0);
-    expect(earnProgramRefreshInterval(undefined)).toBe(0);
+    expect(earnProgramsRefreshInterval(programState("ready"))).toBe(0);
+    expect(earnProgramsRefreshInterval(programState("failed"))).toBe(0);
+    expect(earnProgramsRefreshInterval({ kind: "ready", programs: [] } as EarnProgramsState)).toBe(
+      0
+    );
+    expect(earnProgramsRefreshInterval(undefined)).toBe(0);
   });
 
   it("dedupes for less time than it waits between polls", async () => {
@@ -253,8 +382,8 @@ describe("earnProgramRefreshInterval", () => {
     // every assertion above true and the feature still broken in a browser.
     const { DASHBOARD_SWR_CONFIG } = await import("@/lib/dashboard-swr-config");
     const cadences = [
-      earnProgramRefreshInterval(programState("busy", "withdrawing")),
-      earnProgramRefreshInterval(programState("creating")),
+      earnProgramsRefreshInterval(programState("busy", "withdrawing")),
+      earnProgramsRefreshInterval(programState("creating")),
     ];
     for (const cadence of cadences) {
       expect(EARN_PROGRAM_DEDUPING_MS).toBeLessThan(cadence);

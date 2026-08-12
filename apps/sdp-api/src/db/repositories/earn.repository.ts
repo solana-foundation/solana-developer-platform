@@ -49,10 +49,15 @@ export interface EarnStrategyRow {
 }
 
 /**
- * Link to the ONE provider-managed wallet an organization shares per
- * environment (UNIQUE (organization_id, environment, provider) in
- * 0049_earn_provider_wallets.sql). project_id records the provisioning
- * project only — it is not part of the wallet's scope.
+ * Link to ONE provider-managed wallet — an Earn "program". An organization may
+ * hold N of them per (environment, provider) since PRO-1670; each pins a single
+ * vault and nothing rebalances across them. The uniqueness that used to cap this
+ * at one row per (organization, environment, provider) is gone (migration 0056),
+ * replaced by a GLOBAL UNIQUE (provider, provider_wallet_ref): a provider-side
+ * wallet holds real funds, so exactly one link row may claim it platform-wide.
+ *
+ * project_id records the provisioning project only — it is not part of the
+ * program's scope, and every project in an environment reaches every program.
  */
 export interface EarnProviderWalletRow {
   id: string;
@@ -145,6 +150,20 @@ export interface InsertEarnProviderWalletInput {
   createdBy: string;
 }
 
+export interface ListEarnProviderWalletsInput {
+  organizationId: string;
+  environment: SdpEnvironment;
+  /** Optional filter; omitted lists every provider's programs. */
+  provider?: EarnProviderId;
+  limit: number;
+  offset: number;
+}
+
+export interface ListEarnProviderWalletsResult {
+  rows: EarnProviderWalletRow[];
+  total: number;
+}
+
 /** Insert-at-intent: the row exists before the provider call is accepted. */
 export interface CreateEarnProgramWithdrawalInput {
   organizationId: string;
@@ -205,11 +224,36 @@ export interface EarnRepository {
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
   listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult>;
 
-  /** The org's single shared wallet for a provider+environment, if provisioned. */
-  getProviderWallet(params: {
+  /**
+   * One program by its own id, scoped to (organization, environment). The
+   * program id is caller-supplied on every `/programs/:programId` route, so both
+   * scopes are load-bearing: without organization_id a guessed id reads another
+   * tenant's program, and without environment a sandbox id resolves for a
+   * production session (the pre-PRO-1670 (org, environment, provider) lookup made
+   * both structurally impossible; an addressable id does not).
+   */
+  getProviderWalletById(params: {
     organizationId: string;
     environment: SdpEnvironment;
+    walletId: string;
+  }): Promise<EarnProviderWalletRow | null>;
+  /**
+   * Every program for an (organization, environment), oldest first. The order is
+   * a stability requirement, not a preference — see migration 0056's header.
+   */
+  listProviderWallets(input: ListEarnProviderWalletsInput): Promise<ListEarnProviderWalletsResult>;
+  /**
+   * Lookup by the provider-side wallet ref, keyed on 0056's global unique. Two
+   * callers need it and neither has an organization to scope by: the create path
+   * resolves a provider replay (the provider answers a retried create with the
+   * ORIGINAL ref, so the insert lands on that unique and the row it collided with
+   * IS the caller's program), and the dev seed asks whether the shared sandbox
+   * wallet is already linked anywhere. Callers assert ownership after the fetch,
+   * exactly as getProgramWithdrawalByProviderReference does.
+   */
+  getProviderWalletByRef(params: {
     provider: EarnProviderId;
+    providerWalletRef: string;
   }): Promise<EarnProviderWalletRow | null>;
   insertProviderWallet(input: InsertEarnProviderWalletInput): Promise<EarnProviderWalletRow | null>;
 

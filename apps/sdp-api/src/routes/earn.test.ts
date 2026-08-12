@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
+  type EarnProviderWalletRow,
   type EarnStrategyRow,
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
@@ -180,6 +181,29 @@ async function seedStrategy(
   return strategy;
 }
 
+/**
+ * A real `earn_provider_wallets` row, so the `:programId` probes below ride an
+ * id the handler actually resolves. Provider "ground" on purpose: it is NOT the
+ * entitled provider here (seedAuth entitles only "veda") and this file sets no
+ * GROUND credentials, which is exactly why the probe uses the one per-program
+ * route that takes no provider gate at all.
+ */
+async function seedProgram(): Promise<EarnProviderWalletRow> {
+  const row = await createPostgresEarnRepository(getDb(env)).insertProviderWallet({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    environment: "sandbox",
+    provider: "ground",
+    providerWalletRef: crypto.randomUUID(),
+    label: null,
+    createdBy: TEST_USER.id,
+  });
+  if (!row) {
+    throw new Error("Failed to seed earn program");
+  }
+  return row;
+}
+
 function getEarn(path: string) {
   return app.request(
     path,
@@ -289,6 +313,95 @@ describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
       );
       expect(res.status, path).toBe(404);
     }
+  });
+});
+
+describe("Earn routes — retired program surfaces (PRO-1670)", () => {
+  // The singular `/program` family was an implicit create-or-update keyed on
+  // (organization, environment, provider), which stops being addressable the
+  // moment a second program exists. Every path below has an addressable
+  // `/programs[/:programId]` replacement; a stale registration would quietly
+  // hand callers the one-program model back.
+  //
+  // Both tests PAIR the 404s with a live probe of the replacement, because a 404
+  // for a URL that was never registered passes even if the replacement is
+  // broken — the same trap the /nav case above avoids by riding a real strategy
+  // id. This file's seedAuth entitles only "veda" and sets no GROUND
+  // credentials, so the probes are deliberately the two program routes that
+  // answer without any provider call: the UNFILTERED collection (no provider
+  // named ⇒ no credential gate) and the withdrawal LEDGER list (no provider gate
+  // whatsoever, by design — ADR 0002: the audit trail outlives credential
+  // removal).
+
+  it("serves 404 for the singular /program paths, while the collection answers", async () => {
+    await seedAuth();
+
+    for (const path of [
+      "/v1/earn/program",
+      "/v1/earn/program?provider=ground",
+      "/v1/earn/program/deposits",
+      "/v1/earn/program/withdrawals",
+      "/v1/earn/program/withdrawals/wd_x",
+    ]) {
+      const res = await getEarn(path);
+      expect(res.status, path).toBe(404);
+    }
+
+    for (const [method, path] of [
+      ["PUT", "/v1/earn/program"],
+      ["POST", "/v1/earn/program/withdrawals"],
+      ["POST", "/v1/earn/program/withdrawal-preview"],
+    ] as const) {
+      const res = await app.request(
+        path,
+        {
+          method,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({}),
+        },
+        env
+      );
+      expect(res.status, `${method} ${path}`).toBe(404);
+    }
+
+    // The pairing: /programs is registered and serves the collection envelope
+    // end to end. An empty collection is a 200, never a 404 — the plural surface
+    // cannot 404 for emptiness, which is what makes the 404s above meaningful.
+    const collection = await getEarn("/v1/earn/programs");
+    expect(collection.status).toBe(200);
+    const body = (await collection.json()) as {
+      data: { programs: unknown[]; total: number; page: number; pageSize: number };
+    };
+    expect(body.data).toEqual({ programs: [], total: 0, page: 1, pageSize: 20 });
+  });
+
+  it("routes the per-program sub-paths under a real program id", async () => {
+    await seedAuth();
+    const program = await seedProgram();
+
+    // The retired sub-paths 404 …
+    for (const path of ["/v1/earn/program/deposits", "/v1/earn/program/withdrawals"]) {
+      const res = await getEarn(path);
+      expect(res.status, path).toBe(404);
+    }
+
+    // … and the same shape under `/programs/:programId` resolves the row and
+    // answers. Non-vacuous by construction: swap in an id that does not exist
+    // and this is a 404 too, so the 200 proves the route is registered AND that
+    // the id addressed a real program.
+    const ledger = await getEarn(`/v1/earn/programs/${program.id}/withdrawals`);
+    expect(ledger.status).toBe(200);
+    const ledgerBody = (await ledger.json()) as {
+      data: { withdrawals: unknown[]; total: number };
+    };
+    expect(ledgerBody.data.withdrawals).toEqual([]);
+    expect(ledgerBody.data.total).toBe(0);
+
+    const unknownProgram = await getEarn("/v1/earn/programs/earn_provider_wallet_nope/withdrawals");
+    expect(unknownProgram.status).toBe(404);
   });
 });
 
