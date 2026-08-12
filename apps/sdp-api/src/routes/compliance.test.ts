@@ -6,7 +6,7 @@ import app from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_compliance_test",
@@ -156,6 +156,58 @@ describe("Compliance routes", () => {
 
     vi.restoreAllMocks();
     await clearKVStores(env);
+  });
+
+  it("429s a screening request once the actor's metered quota is exhausted", async () => {
+    await seedRateLimit(
+      env,
+      `metered:compliance-screening:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+      30
+    );
+
+    const res = await app.request(
+      "/v1/compliance/address-screenings",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+          network: "solana",
+          intent: "transfer_destination",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("RATE_LIMITED");
+  });
+
+  it("429s screenings for every actor once the org-wide quota is exhausted", async () => {
+    await seedRateLimit(env, `metered:compliance-screening:org:${TEST_ORG.id}`, 120);
+
+    const res = await app.request(
+      "/v1/compliance/address-screenings",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+          network: "solana",
+          intent: "transfer_destination",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(429);
   });
 
   it("returns forbidden when the organization has no enabled compliance providers", async () => {
