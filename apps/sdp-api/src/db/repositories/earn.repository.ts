@@ -1,9 +1,8 @@
 import type {
   EarnApyType,
   EarnLiquidityTerm,
-  EarnMovementDirection,
-  EarnMovementStatus,
-  EarnPositionStatus,
+  EarnPortfolioToken,
+  EarnProgramWithdrawalRecordStatus,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnStrategyStatus,
@@ -15,20 +14,12 @@ export function generateEarnStrategyId(): string {
   return `earn_strategy_${crypto.randomUUID()}`;
 }
 
-export function generateEarnPositionId(): string {
-  return `earn_position_${crypto.randomUUID()}`;
-}
-
-export function generateEarnMovementId(): string {
-  return `earn_movement_${crypto.randomUUID()}`;
-}
-
-export function generateEarnNavSnapshotId(): string {
-  return `earn_nav_${crypto.randomUUID()}`;
-}
-
 export function generateEarnProviderWalletId(): string {
   return `earn_provider_wallet_${crypto.randomUUID()}`;
+}
+
+export function generateEarnProgramWithdrawalId(): string {
+  return `earn_program_withdrawal_${crypto.randomUUID()}`;
 }
 
 export interface EarnStrategyRow {
@@ -57,52 +48,6 @@ export interface EarnStrategyRow {
   updated_at: string;
 }
 
-export interface EarnPositionRow {
-  id: string;
-  organization_id: string;
-  project_id: string;
-  strategy_id: string;
-  wallet_id: string;
-  share_amount: string;
-  cost_basis: string | null;
-  status: EarnPositionStatus;
-  provider_data: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface EarnMovementRow {
-  id: string;
-  organization_id: string;
-  project_id: string;
-  position_id: string;
-  strategy_id: string;
-  direction: EarnMovementDirection;
-  token_mint: string;
-  amount: string;
-  share_amount: string | null;
-  status: EarnMovementStatus;
-  transaction_signature: string | null;
-  /** Open TEXT, same drift rule as EarnStrategyRow.provider. */
-  provider: string | null;
-  provider_reference: string | null;
-  provider_data: Record<string, unknown>;
-  external_id: string | null;
-  redemption_available_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface EarnNavSnapshotRow {
-  id: string;
-  strategy_id: string;
-  share_price: string;
-  apy: string | null;
-  tvl: string | null;
-  as_of: string;
-  created_at: string;
-}
-
 /**
  * Link to the ONE provider-managed wallet an organization shares per
  * environment (UNIQUE (organization_id, environment, provider) in
@@ -122,6 +67,39 @@ export interface EarnProviderWalletRow {
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * One row of the withdrawal ledger (migration 0055): the durable record of the
+ * one money movement SDP initiates. Written at intent (status 'requested') and
+ * advanced by guarded CAS on every provider observation — see
+ * services/earn-withdrawal-ledger.service.ts for the transition matrix.
+ */
+export interface EarnProgramWithdrawalRow {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  wallet_id: string;
+  /** Open TEXT, same drift rule as EarnStrategyRow.provider. */
+  provider: string;
+  status: EarnProgramWithdrawalRecordStatus;
+  amount_requested_usd: string;
+  amount_paid_usd: string | null;
+  fee_usd: string | null;
+  token: EarnPortfolioToken;
+  destination_address: string;
+  failure_reason: string | null;
+  /** Derived provider request id — the idempotency anchor (wallet-scoped unique). */
+  request_id: string;
+  idempotency_fingerprint: string;
+  /** Provider withdrawalRef; null while the row is an unresolved intent. */
+  provider_reference: string | null;
+  provider_data: Record<string, unknown>;
+  created_by: string | null;
+  initiated_by_key_id: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
 }
 
 /** Catalogue sync upsert, keyed on (provider, provider_reference, environment). */
@@ -157,75 +135,6 @@ export interface ListEarnStrategiesResult {
   total: number;
 }
 
-export interface CreateEarnPositionInput {
-  organizationId: string;
-  projectId: string;
-  strategyId: string;
-  walletId: string;
-}
-
-export interface ListEarnPositionsInput {
-  organizationId: string;
-  projectId: string;
-  strategyId?: string;
-  includeClosed?: boolean;
-  limit: number;
-  offset: number;
-}
-
-export interface ListEarnPositionsResult {
-  rows: EarnPositionRow[];
-  total: number;
-}
-
-export interface CreateEarnMovementInput {
-  organizationId: string;
-  projectId: string;
-  positionId: string;
-  strategyId: string;
-  direction: EarnMovementDirection;
-  tokenMint: string;
-  amount: string;
-  shareAmount: string | null;
-  provider: EarnProviderId | null;
-  providerReference: string | null;
-  providerData: Record<string, unknown>;
-  externalId: string | null;
-  redemptionAvailableAt: string | null;
-}
-
-export interface UpdateEarnMovementStatusInput {
-  movementId: string;
-  organizationId: string;
-  projectId: string;
-  status: EarnMovementStatus;
-  transactionSignature?: string;
-  shareAmount?: string;
-  redemptionAvailableAt?: string;
-}
-
-export interface ListEarnMovementsInput {
-  organizationId: string;
-  projectId: string;
-  positionId?: string;
-  direction?: EarnMovementDirection;
-  limit: number;
-  offset: number;
-}
-
-export interface ListEarnMovementsResult {
-  rows: EarnMovementRow[];
-  total: number;
-}
-
-export interface InsertEarnNavSnapshotInput {
-  strategyId: string;
-  sharePrice: string;
-  apy: string | null;
-  tvl: string | null;
-  asOf: string;
-}
-
 export interface InsertEarnProviderWalletInput {
   organizationId: string;
   projectId: string;
@@ -236,35 +145,65 @@ export interface InsertEarnProviderWalletInput {
   createdBy: string;
 }
 
+/** Insert-at-intent: the row exists before the provider call is accepted. */
+export interface CreateEarnProgramWithdrawalInput {
+  organizationId: string;
+  projectId: string;
+  walletId: string;
+  provider: EarnProviderId;
+  amountRequestedUsd: string;
+  token: EarnPortfolioToken;
+  destinationAddress: string;
+  requestId: string;
+  idempotencyFingerprint: string;
+  providerData: Record<string, unknown>;
+  createdBy: string | null;
+  initiatedByKeyId: string | null;
+}
+
+/**
+ * Guarded compare-and-swap: transitions the row only when its current status
+ * is one of `fromStatuses` (pure SQL guard, `status = ANY(...)`), scoped to the
+ * organization. Selector is either the row id (create path — the only way a
+ * row acquires `providerReference`) or (provider, providerReference) for
+ * observation paths. `undefined` fields are untouched; `null` is written;
+ * `providerData` is a shallow JSONB merge. Returns null when nothing matched —
+ * missing row, wrong org, or the status moved concurrently; callers must not
+ * try to tell those apart (payments precedent).
+ */
+export type UpdateEarnProgramWithdrawalSelector =
+  | { withdrawalId: string }
+  | { provider: string; providerReference: string };
+
+export interface UpdateEarnProgramWithdrawalStatusGuardedInput {
+  selector: UpdateEarnProgramWithdrawalSelector;
+  organizationId: string;
+  fromStatuses: readonly EarnProgramWithdrawalRecordStatus[];
+  toStatus: EarnProgramWithdrawalRecordStatus;
+  providerReference?: string;
+  amountPaidUsd?: string | null;
+  feeUsd?: string | null;
+  failureReason?: string | null;
+  completedAt?: string | null;
+  providerData?: Record<string, unknown>;
+}
+
+export interface ListEarnProgramWithdrawalsInput {
+  organizationId: string;
+  walletId: string;
+  limit: number;
+  offset: number;
+}
+
+export interface ListEarnProgramWithdrawalsResult {
+  rows: EarnProgramWithdrawalRow[];
+  total: number;
+}
+
 export interface EarnRepository {
   upsertStrategy(input: UpsertEarnStrategyInput): Promise<EarnStrategyRow | null>;
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
   listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult>;
-
-  createPosition(input: CreateEarnPositionInput): Promise<EarnPositionRow | null>;
-  getPositionById(params: {
-    positionId: string;
-    organizationId: string;
-    projectId: string;
-  }): Promise<EarnPositionRow | null>;
-  listPositions(input: ListEarnPositionsInput): Promise<ListEarnPositionsResult>;
-
-  createMovement(input: CreateEarnMovementInput): Promise<EarnMovementRow | null>;
-  getMovementById(params: {
-    movementId: string;
-    organizationId: string;
-    projectId: string;
-  }): Promise<EarnMovementRow | null>;
-  /** Webhook settlement lookup — provider events carry no org/project scope. */
-  getMovementByProviderReference(params: {
-    provider: EarnProviderId;
-    providerReference: string;
-  }): Promise<EarnMovementRow | null>;
-  updateMovementStatus(input: UpdateEarnMovementStatusInput): Promise<EarnMovementRow | null>;
-  listMovements(input: ListEarnMovementsInput): Promise<ListEarnMovementsResult>;
-
-  insertNavSnapshot(input: InsertEarnNavSnapshotInput): Promise<EarnNavSnapshotRow | null>;
-  listNavSnapshots(params: { strategyId: string; limit: number }): Promise<EarnNavSnapshotRow[]>;
 
   /** The org's single shared wallet for a provider+environment, if provisioned. */
   getProviderWallet(params: {
@@ -273,4 +212,29 @@ export interface EarnRepository {
     provider: EarnProviderId;
   }): Promise<EarnProviderWalletRow | null>;
   insertProviderWallet(input: InsertEarnProviderWalletInput): Promise<EarnProviderWalletRow | null>;
+
+  createProgramWithdrawal(
+    input: CreateEarnProgramWithdrawalInput
+  ): Promise<EarnProgramWithdrawalRow | null>;
+  /**
+   * Replay lookup, WALLET-scoped like the unique index: sibling projects in one
+   * environment share the wallet, so a narrower (org, project) anchor would
+   * miss replays (see migration 0055's index comment).
+   */
+  getProgramWithdrawalByRequestId(params: {
+    organizationId: string;
+    walletId: string;
+    requestId: string;
+  }): Promise<EarnProgramWithdrawalRow | null>;
+  /** Observation lookup — global index; callers assert the org on the write. */
+  getProgramWithdrawalByProviderReference(params: {
+    provider: string;
+    providerReference: string;
+  }): Promise<EarnProgramWithdrawalRow | null>;
+  updateProgramWithdrawalStatusGuarded(
+    input: UpdateEarnProgramWithdrawalStatusGuardedInput
+  ): Promise<EarnProgramWithdrawalRow | null>;
+  listProgramWithdrawals(
+    input: ListEarnProgramWithdrawalsInput
+  ): Promise<ListEarnProgramWithdrawalsResult>;
 }

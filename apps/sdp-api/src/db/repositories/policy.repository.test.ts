@@ -201,7 +201,7 @@ describe("PolicyRepository (postgres)", () => {
     await expect(
       repo.createWalletControlProfileRevision({
         profileId: "wcp_missing",
-        rules: [{ kind: "amount", max: "10" }],
+        rules: [{ kind: "amount", asset: "USDC", max: "10" }],
       })
     ).resolves.toBeNull();
 
@@ -223,7 +223,7 @@ describe("PolicyRepository (postgres)", () => {
     });
     const walletRevision = await repo.createWalletControlProfileRevision({
       profileId: walletProfile?.id ?? "",
-      rules: [{ kind: "amount", max: "100" }],
+      rules: [{ kind: "amount", asset: "USDC", max: "100" }],
     });
     await repo.activateWalletControlProfileRevision({
       profileId: walletProfile?.id ?? "",
@@ -817,6 +817,7 @@ describe("PolicyRepository (postgres)", () => {
       actor: null,
       operationFamily: "program",
       operationType: "program_call",
+      legs: [],
       rawPayload: { programId: "program_1" },
     });
 

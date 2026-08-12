@@ -11,10 +11,6 @@ import { createPostgresPaymentsRepository } from "./payments.repository.postgres
 const TEST_PROJECT_ID = "prj_payments_repo_test";
 const OTHER_PROJECT_ID = "prj_payments_repo_test_other";
 const TEST_WALLET_ID = "wallet_payments_repo_test";
-const ORG_CUSTODY_CONFIG_ID = "ccfg_payments_repo_org";
-const PROJECT_CUSTODY_CONFIG_ID = "ccfg_payments_repo_project";
-const ORG_CUSTODY_WALLET_ID = "cwal_payments_repo_org";
-const PROJECT_CUSTODY_WALLET_ID = "cwal_payments_repo_project";
 const CANCELABLE = ["pending", "awaiting_payment"] as const;
 
 describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
@@ -30,7 +26,6 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
-    await db.prepare("DELETE FROM payment_wallet_policies").run();
     await db.prepare("DELETE FROM custody_scope_defaults").run();
     await db.prepare("DELETE FROM custody_wallets").run();
     await db.prepare("DELETE FROM custody_configs").run();
@@ -257,87 +252,6 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         updatedAt: new Date().toISOString(),
       })
     ).resolves.toMatchObject({ id: "xfr_org_admin", status: "confirmed" });
-  });
-
-  it("allows inherited wallet-policy reads but reserves organization-wallet writes", async () => {
-    const db = getDb(env);
-    for (const [configId, projectId, walletId, custodyWalletId, publicKey] of [
-      [ORG_CUSTODY_CONFIG_ID, null, "wallet_org", ORG_CUSTODY_WALLET_ID, "OrgWallet111"],
-      [
-        PROJECT_CUSTODY_CONFIG_ID,
-        TEST_PROJECT_ID,
-        "wallet_project",
-        PROJECT_CUSTODY_WALLET_ID,
-        "ProjectWallet111",
-      ],
-    ] as const) {
-      await db
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, status)
-           VALUES (?, ?, ?, 'local', 'encrypted', 'active')`
-        )
-        .bind(configId, TEST_ORG.id, projectId)
-        .run();
-      await db
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-           VALUES (?, ?, ?, ?, 'Payments repository wallet', 'transfer', 'active')`
-        )
-        .bind(custodyWalletId, configId, walletId, publicKey)
-        .run();
-    }
-
-    const now = new Date().toISOString();
-    await db
-      .prepare(
-        `INSERT INTO payment_wallet_policies
-           (id, custody_wallet_id, policy_type, policy, created_at, updated_at)
-         VALUES ('pwp_org', ?, 'transfer', 'deny', ?, ?)`
-      )
-      .bind(ORG_CUSTODY_WALLET_ID, now, now)
-      .run();
-
-    const projectScoped = createPostgresPaymentsRepository(
-      db,
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
-    );
-    await expect(
-      projectScoped.getWalletPoliciesByCustodyWalletId(ORG_CUSTODY_WALLET_ID)
-    ).resolves.toHaveLength(1);
-    await expect(
-      projectScoped.upsertWalletPolicies([
-        {
-          id: "pwp_project_attack",
-          custodyWalletId: ORG_CUSTODY_WALLET_ID,
-          policyType: "transfer",
-          policy: "allow",
-          createdAt: now,
-          updatedAt: now,
-        },
-      ])
-    ).rejects.toBeInstanceOf(TenantScopeViolationError);
-
-    const organizationScoped = createPostgresPaymentsRepository(
-      db,
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: null })
-    );
-    await expect(
-      organizationScoped.getWalletPoliciesByCustodyWalletId(PROJECT_CUSTODY_WALLET_ID)
-    ).resolves.toEqual([]);
-    await expect(
-      organizationScoped.upsertWalletPolicies([
-        {
-          id: "pwp_org_admin",
-          custodyWalletId: PROJECT_CUSTODY_WALLET_ID,
-          policyType: "transfer",
-          policy: "allow",
-          createdAt: now,
-          updatedAt: now,
-        },
-      ])
-    ).resolves.toHaveLength(1);
   });
 
   it("rejects forged tenant claims before querying and preserves same-tenant writes", async () => {
