@@ -98,9 +98,47 @@ export async function destroyActionSecret(
   }
 }
 
-// Queue a failed destroy for the sweeper, and log either way. The insert is itself
-// best effort — if it also fails there is nothing left but the log, which is exactly
-// where this started, so the log keeps every field needed to find the version by hand.
+// This insert is the ONLY durable record that an orphaned credential still needs
+// destroying — the sweeper reads nothing else — so one attempt is not enough to stake it
+// on. Everything that realistically fails it is transient (a dropped connection, a
+// deadlock, a statement timeout), and the request's primary write committed moments ago,
+// so the database was reachable a heartbeat earlier. A few quick retries turn a blip into
+// a queued row instead of a credential that stays readable in the backend forever.
+//
+// Deliberately short: the caller is a request that has already committed its work and
+// cannot be failed by anything here, so the whole budget is a fraction of a second.
+const QUEUE_ATTEMPTS = 3;
+const QUEUE_BACKOFF_MS = 50;
+
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function queueRetirement(
+  env: Env,
+  input: Parameters<
+    ReturnType<typeof createWorkflowSecretRetirementsRepository>["recordRetirement"]
+  >[0]
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= QUEUE_ATTEMPTS; attempt++) {
+    try {
+      // Idempotent on the version ref, so a retry after an ambiguous failure (the insert
+      // landed but the response never arrived) updates the row rather than duplicating it.
+      await createWorkflowSecretRetirementsRepository(env).recordRetirement(input);
+      return true;
+    } catch {
+      if (attempt === QUEUE_ATTEMPTS) {
+        return false;
+      }
+      await pause(QUEUE_BACKOFF_MS * attempt);
+    }
+  }
+  return false;
+}
+
+// Queue a failed destroy for the sweeper, and log either way. If the queue write cannot
+// be made to stick at all, there is nothing left but the log — which is exactly where
+// this started — so it keeps every field needed to find the version by hand.
 async function recordFailedRetirement(
   env: Env,
   stored: StoredCredentialSecret,
@@ -109,19 +147,14 @@ async function recordFailedRetirement(
 ): Promise<void> {
   const version = stored.secretVersionRef?.split("/").at(-1);
   const reason = cause instanceof Error ? cause.message : String(cause);
-  let queued = true;
-  try {
-    await createWorkflowSecretRetirementsRepository(env).recordRetirement({
-      organizationId: context?.orgId ?? "unknown",
-      workflowId: context?.workflowId ?? null,
-      storageBackend: stored.storageBackend,
-      secretRef: stored.secretRef ?? null,
-      secretVersionRef: stored.secretVersionRef as string,
-      error: reason,
-    });
-  } catch {
-    queued = false;
-  }
+  const queued = await queueRetirement(env, {
+    organizationId: context?.orgId ?? "unknown",
+    workflowId: context?.workflowId ?? null,
+    storageBackend: stored.storageBackend,
+    secretRef: stored.secretRef ?? null,
+    secretVersionRef: stored.secretVersionRef as string,
+    error: reason,
+  });
   getLogger().error(
     {
       provider: PROVIDER,

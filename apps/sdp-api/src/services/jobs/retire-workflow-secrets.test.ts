@@ -31,6 +31,33 @@ vi.mock("@/services/credential-secret-store", async (importOriginal) => ({
   createCredentialSecretStore,
 }));
 
+// How many times the queue insert rejects before it is allowed through, standing in for
+// the transient Postgres errors the driver propagates (dropped connection, deadlock,
+// statement timeout). Everything else delegates to the real repository.
+const queueInsertFailures = vi.hoisted(() => ({ remaining: 0 }));
+
+vi.mock("@/db/repositories", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db/repositories")>();
+  return {
+    ...actual,
+    createWorkflowSecretRetirementsRepository: (
+      env: Parameters<typeof actual.createWorkflowSecretRetirementsRepository>[0]
+    ) => {
+      const repo = actual.createWorkflowSecretRetirementsRepository(env);
+      return {
+        ...repo,
+        recordRetirement(input: Parameters<typeof repo.recordRetirement>[0]) {
+          if (queueInsertFailures.remaining > 0) {
+            queueInsertFailures.remaining -= 1;
+            return Promise.reject(new Error("Connection terminated unexpectedly"));
+          }
+          return repo.recordRetirement(input);
+        },
+      };
+    },
+  };
+});
+
 const VERSION_REF = "projects/p/secrets/sdp-workflow-action-1/versions/3";
 
 function storedSecret(versionRef = VERSION_REF): StoredCredentialSecret {
@@ -62,6 +89,7 @@ describe("orphaned workflow secret retirement", () => {
     vi.clearAllMocks();
     createCredentialSecretStore.mockReturnValue(secretStore);
     secretStore.destroyVersion.mockResolvedValue(undefined);
+    queueInsertFailures.remaining = 0;
     await getDb(env).prepare("DELETE FROM workflow_action_secret_retirements").run();
   });
 
@@ -81,6 +109,35 @@ describe("orphaned workflow secret retirement", () => {
     // Traceable back to the rule it came from, and carrying why it failed.
     expect(queued[0]?.workflow_id).toBe("asset_workflow_1");
     expect(queued[0]?.last_error).toContain("permission denied");
+  });
+
+  // The queue row is the ONLY thing the sweeper reads, so losing the insert loses the
+  // orphan entirely. A single attempt used to be the whole budget: one dropped connection
+  // between the failed destroy and the insert and the version stayed readable in the
+  // backend forever, with nothing that would ever try again.
+  it("still queues the orphan when the insert fails transiently", async () => {
+    secretStore.destroyVersion.mockRejectedValue(new Error("permission denied"));
+    queueInsertFailures.remaining = 2;
+
+    await destroyActionSecret(env, storedSecret(), { orgId: "org_1", workflowId: "wf_1" });
+
+    const queued = await queuedRetirements();
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.secret_version_ref).toBe(VERSION_REF);
+    expect(queued[0]?.last_error).toContain("permission denied");
+  });
+
+  // The honest boundary: retries narrow the window, they do not close it. A database that
+  // stays unreachable leaves the log as the only record — and retirement still must not
+  // fail the request that already committed.
+  it("does not throw when the insert cannot be made to stick at all", async () => {
+    secretStore.destroyVersion.mockRejectedValue(new Error("permission denied"));
+    queueInsertFailures.remaining = 10;
+
+    await expect(
+      destroyActionSecret(env, storedSecret(), { orgId: "org_1", workflowId: "wf_1" })
+    ).resolves.toBeUndefined();
+    expect(await queuedRetirements()).toHaveLength(0);
   });
 
   it("queues nothing when the destroy succeeds", async () => {
