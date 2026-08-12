@@ -74,8 +74,8 @@ function harness() {
     getReservation: vi.fn().mockResolvedValue(null),
     createReservation: vi.fn().mockResolvedValue(true),
     reopenReleasedReservation: vi.fn().mockResolvedValue(null),
-    markSigned: vi.fn().mockResolvedValue(true),
-    markSubmitted: vi.fn().mockResolvedValue(true),
+    markSigned: vi.fn().mockResolvedValue("persisted"),
+    markSubmitted: vi.fn().mockResolvedValue("persisted"),
     markChargedUnknown: vi.fn().mockResolvedValue(true),
     markReleased: vi.fn().mockResolvedValue(true),
     markRedisSettled: vi.fn().mockResolvedValue(true),
@@ -348,7 +348,7 @@ describe("BudgetedFeePayment", () => {
 
   it("does not open the breaker when reconciliation already committed a slow submission", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
-    repository.markSubmitted.mockResolvedValue(false);
+    repository.markSubmitted.mockResolvedValue("stale");
     repository.getReservation.mockResolvedValueOnce(null).mockResolvedValue({
       id: "reservation_1",
       status: "committed",
@@ -364,9 +364,23 @@ describe("BudgetedFeePayment", () => {
     expect(budgetRedis.cancel).not.toHaveBeenCalled();
   });
 
+  it("releases the racing reservation instead of tripping the breaker on a duplicate signature", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    repository.markSubmitted.mockResolvedValue("duplicate_signature");
+    await expect(feePayment.signAndSend(buildTransaction())).resolves.toBe("signature_1");
+    expect(provider.signAndSend).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "Transaction already sponsored under another reservation"
+    );
+    expect(budgetRedis.settle).toHaveBeenCalled();
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+  });
+
   it("still opens the breaker when a lost submission did not advance on-chain", async () => {
     const { feePayment, repository } = harness();
-    repository.markSubmitted.mockResolvedValue(false);
+    repository.markSubmitted.mockResolvedValue("stale");
     repository.getReservation.mockResolvedValueOnce(null).mockResolvedValue({
       id: "reservation_1",
       status: "released",
@@ -503,7 +517,7 @@ describe("BudgetedFeePayment", () => {
 
   it("fails closed when a stale provider callback loses ownership to a retry", async () => {
     const { feePayment, repository, budgetRedis } = harness();
-    repository.markSubmitted.mockResolvedValueOnce(false);
+    repository.markSubmitted.mockResolvedValueOnce("stale");
 
     await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",

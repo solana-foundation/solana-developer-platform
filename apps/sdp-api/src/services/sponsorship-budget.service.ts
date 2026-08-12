@@ -20,6 +20,7 @@ import {
   type CreateSponsorshipReservationInput,
   type SponsorshipBudgetPolicy,
   SponsorshipBudgetRepository,
+  type SignaturePersistResult,
   type SponsorshipNetwork,
   type SponsorshipReservation,
   type SponsorshipReservationStatus,
@@ -197,9 +198,9 @@ export class BudgetedFeePayment implements FeePaymentPort {
         error
       );
     }
-    let persisted: boolean;
+    let result: SignaturePersistResult;
     try {
-      persisted = await this.repository.markSigned(
+      result = await this.repository.markSigned(
         reservation.id,
         reservation.attempt,
         encodeBase64(signed),
@@ -213,8 +214,12 @@ export class BudgetedFeePayment implements FeePaymentPort {
         error
       );
     }
+    if (result === "duplicate_signature") {
+      await this.releaseDuplicateSignature(reservation);
+      return signed;
+    }
     if (
-      !persisted &&
+      result !== "persisted" &&
       !(await this.durablyAdvanced(reservation, ["signed", "submitted", "committed"]))
     ) {
       return this.accountingUnavailable(
@@ -243,9 +248,9 @@ export class BudgetedFeePayment implements FeePaymentPort {
       }
       throw error;
     }
-    let persisted: boolean;
+    let result: SignaturePersistResult;
     try {
-      persisted = await this.repository.markSubmitted(
+      result = await this.repository.markSubmitted(
         reservation.id,
         reservation.attempt,
         signature
@@ -258,7 +263,11 @@ export class BudgetedFeePayment implements FeePaymentPort {
         error
       );
     }
-    if (!persisted && !(await this.durablyAdvanced(reservation, ["submitted", "committed"]))) {
+    if (result === "duplicate_signature") {
+      await this.releaseDuplicateSignature(reservation);
+      return signature;
+    }
+    if (result !== "persisted" && !(await this.durablyAdvanced(reservation, ["submitted", "committed"]))) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
         "Submitted sponsorship outcome could not be persisted",
@@ -695,6 +704,18 @@ export class BudgetedFeePayment implements FeePaymentPort {
       resolveNetwork(this.env),
       "Ambiguous sponsorship outcome could not be persisted",
       "Ambiguous sponsorship state transition was lost"
+    );
+  }
+
+  private async releaseDuplicateSignature(
+    reservation: Awaited<ReturnType<BudgetedFeePayment["admit"]>>
+  ): Promise<void> {
+    await this.releaseDeterministic(
+      reservation,
+      new FeePaymentError(
+        "Transaction already sponsored under another reservation",
+        "RATE_LIMITED"
+      )
     );
   }
 

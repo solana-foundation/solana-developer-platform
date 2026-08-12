@@ -60,6 +60,14 @@ export interface SponsorshipReservation {
   attempt: number;
 }
 
+export type SignaturePersistResult = "persisted" | "stale" | "duplicate_signature";
+
+function isDuplicateSignatureError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const pg = error as { code?: string; constraint?: string };
+  return pg.code === "23505" && pg.constraint === "idx_sponsorship_budget_reservations_signature";
+}
+
 export interface SponsorshipLiveWindowReservation {
   id: string;
   attempt: number;
@@ -345,26 +353,38 @@ export class SponsorshipBudgetRepository {
     expectedAttempt: number,
     signedTransaction: string,
     signature: string
-  ): Promise<boolean> {
-    return (
-      (await this.db.execute(
+  ): Promise<SignaturePersistResult> {
+    try {
+      const updated = await this.db.execute(
         `UPDATE sponsorship_budget_reservations
        SET status = 'signed', signed_transaction = ?, signature = ?, updated_at = sdp_iso_now()
        WHERE id = ? AND attempt = ? AND status = 'reserved'`,
         [signedTransaction, signature, id, expectedAttempt]
-      )) === 1
-    );
+      );
+      return updated === 1 ? "persisted" : "stale";
+    } catch (error) {
+      if (isDuplicateSignatureError(error)) return "duplicate_signature";
+      throw error;
+    }
   }
 
-  async markSubmitted(id: string, expectedAttempt: number, signature: string): Promise<boolean> {
-    return (
-      (await this.db.execute(
+  async markSubmitted(
+    id: string,
+    expectedAttempt: number,
+    signature: string
+  ): Promise<SignaturePersistResult> {
+    try {
+      const updated = await this.db.execute(
         `UPDATE sponsorship_budget_reservations
        SET status = 'submitted', signature = ?, submitted_at = sdp_iso_now(), updated_at = sdp_iso_now()
        WHERE id = ? AND attempt = ? AND status IN ('reserved', 'signed')`,
         [signature, id, expectedAttempt]
-      )) === 1
-    );
+      );
+      return updated === 1 ? "persisted" : "stale";
+    } catch (error) {
+      if (isDuplicateSignatureError(error)) return "duplicate_signature";
+      throw error;
+    }
   }
 
   async markChargedUnknown(id: string, expectedAttempt: number, reason: string): Promise<boolean> {

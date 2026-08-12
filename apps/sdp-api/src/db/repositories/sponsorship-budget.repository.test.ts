@@ -256,13 +256,13 @@ describe("SponsorshipBudgetRepository", () => {
     await expect(repository.markRedisSettled(input.id, 1)).resolves.toBe(true);
     await expect(repository.reopenReleasedReservation(input, 1)).resolves.toBe(2);
 
-    await expect(repository.markSubmitted(input.id, 1, "stale_signature")).resolves.toBe(false);
+    await expect(repository.markSubmitted(input.id, 1, "stale_signature")).resolves.toBe("stale");
     await expect(repository.markChargedUnknown(input.id, 1, "stale timeout")).resolves.toBe(false);
     await expect(repository.markReleased(input.id, 1, "stale rejection")).resolves.toBe(false);
     await expect(repository.recordReconciliationMiss(input.id, 1, 0)).resolves.toBe(false);
     await expect(
       repository.markSigned(input.id, 2, "signed_transaction", "signature_2")
-    ).resolves.toBe(true);
+    ).resolves.toBe("persisted");
     await expect(repository.settleReservation(input.id, 1, "released", 0)).resolves.toBe(false);
     await expect(repository.settleReservation(input.id, 2, "committed", 4)).resolves.toBe(true);
 
@@ -280,11 +280,28 @@ describe("SponsorshipBudgetRepository", () => {
     ).toEqual({ attempt: 2, status: "committed", redis_settled_at: null });
   });
 
+  it("reports a duplicate_signature when another reservation already owns the signature", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const first = reservationInput("reservation_sig_owner");
+    const second = { ...reservationInput("reservation_sig_racer"), transactionDigest: "digest_2" };
+    await repository.createReservation(first);
+    await repository.createReservation(second);
+    await expect(repository.markSubmitted(first.id, 1, "shared_signature")).resolves.toBe(
+      "persisted"
+    );
+    await expect(repository.markSubmitted(second.id, 1, "shared_signature")).resolves.toBe(
+      "duplicate_signature"
+    );
+    await expect(
+      repository.markSigned(second.id, 1, "signed_transaction", "shared_signature")
+    ).resolves.toBe("duplicate_signature");
+  });
+
   it("retains an ambiguous submitted attempt as charged unknown", async () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
     const input = reservationInput("reservation_submitted_unknown");
     await repository.createReservation(input);
-    await expect(repository.markSubmitted(input.id, 1, "signature_1")).resolves.toBe(true);
+    await expect(repository.markSubmitted(input.id, 1, "signature_1")).resolves.toBe("persisted");
     await expect(
       repository.markChargedUnknown(input.id, 1, "history remained unavailable")
     ).resolves.toBe(true);
