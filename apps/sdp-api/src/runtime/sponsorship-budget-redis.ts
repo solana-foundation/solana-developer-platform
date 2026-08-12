@@ -71,6 +71,12 @@ for i = 1, count do
   if not control or control ~= expected_version .. ':1' then return {-3, i} end
 end
 if existing or redis.call('GET', KEYS[5]) then return {2, tonumber(existing or '0')} end
+local ownership_field = ARGV[4 + count * 6]
+local seeded = redis.call('HGET', KEYS[1], ownership_field)
+if seeded then
+  redis.call('SET', KEYS[3], seeded, 'PX', ARGV[3 + count * 6])
+  return {1, tonumber(seeded)}
+end
 for i = 1, count do
   local offset = 2 + ((i - 1) * 6)
   local field = ARGV[offset + 1]

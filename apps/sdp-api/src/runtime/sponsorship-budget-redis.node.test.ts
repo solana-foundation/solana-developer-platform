@@ -572,6 +572,57 @@ describe("SponsorshipBudgetRedis", () => {
     expect(await raw.hget(hourKey, "__reservation:res_b:1")).toBeNull();
   });
 
+  it("adopts a reconstruction-seeded reservation instead of double-counting its own reserve", async () => {
+    const base = {
+      network: "devnet" as const,
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+    };
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+
+    await expect(
+      budget.reserve({
+        ...base,
+        reservationId: "reservation_a",
+        attempt: 1,
+        amount: 5,
+        usage: {
+          hour: { global: 8, organization: 8, project: 0 },
+          day: { global: 8, organization: 8, project: 0 },
+        },
+        liveReservations: {
+          hour: [{ id: "reservation_b", attempt: 1, reservedLamports: 8 }],
+          day: [{ id: "reservation_b", attempt: 1, reservedLamports: 8 }],
+        },
+      })
+    ).resolves.toBe("admitted");
+
+    expect(await raw.hget(hourKey, "global")).toBe("13");
+    expect(await raw.hget(hourKey, "__reservation:reservation_b:1")).toBe("8");
+
+    await expect(
+      budget.reserve({
+        ...base,
+        reservationId: "reservation_b",
+        attempt: 1,
+        amount: 8,
+        usage: {
+          hour: { global: 13, organization: 13, project: 0 },
+          day: { global: 13, organization: 13, project: 0 },
+        },
+        liveReservations: { hour: [], day: [] },
+      })
+    ).resolves.toBe("admitted");
+
+    expect(await raw.hget(hourKey, "global")).toBe("13");
+    expect(await raw.hget(dayKey, "global")).toBe("13");
+    expect(await raw.get("sdp:sponsorship:{devnet}:reservation:reservation_b:1")).toBe("8");
+  });
+
   it("rejects settlement when an existing reservation has the wrong amount", async () => {
     const input = {
       network: "devnet" as const,
