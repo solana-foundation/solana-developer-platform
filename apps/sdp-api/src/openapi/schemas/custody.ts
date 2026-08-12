@@ -71,7 +71,15 @@ export const createCustodyWalletRequestSchema = createWalletSchemaBase
       example: true,
     }),
   })
-  .openapi({ description: "Create wallet request body." });
+  .openapi({
+    description: "Create wallet request body.",
+    example: {
+      provider: "privy",
+      label: "Mint authority wallet",
+      purpose: "mint_authority",
+      setDefault: true,
+    },
+  });
 
 export const setDefaultWalletRequestSchema = setDefaultWalletSchemaBase
   .extend({

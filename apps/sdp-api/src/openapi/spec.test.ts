@@ -132,6 +132,12 @@ describe("OpenAPI spec", () => {
     expect(requestSchema.properties?.connectionId?.example).toBeUndefined();
     expect(requestSchema.required ?? []).not.toContain("connectionId");
     expect(requestSchema.required ?? []).not.toContain("provider");
+    expect(requestSchema.example).toEqual({
+      provider: "privy",
+      label: "Mint authority wallet",
+      purpose: "mint_authority",
+      setDefault: true,
+    });
   });
 
   it("documents exact-one wallet ownership and request-time runtime admission", () => {

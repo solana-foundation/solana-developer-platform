@@ -325,7 +325,7 @@
             "description": "Provisions a new wallet for the effective custody target, a provider-only resolved target, or an exact Custody Connection selected by connectionId.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"connectionId\": \"\",\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
+              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
