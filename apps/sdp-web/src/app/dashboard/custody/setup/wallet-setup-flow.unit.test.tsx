@@ -35,6 +35,48 @@ function renderFlow(initialProvider: "privy" | null = null): string {
 }
 
 describe("WalletSetupFlow", () => {
+  it("keeps the legacy wallet details for privy while the BYOK flag is off", () => {
+    const markup = renderFlow("privy");
+
+    expect(markup).toContain("Wallet details");
+    expect(markup).not.toContain("data-privy-byok-form");
+  });
+
+  it("sends an uninstalled privy to provider details when BYOK is on", () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <WalletSetupFlow
+          connectedProviders={[]}
+          enabledProviders={["privy"]}
+          initialProvider="privy"
+          privyByokEnabled
+        />
+      </I18nProvider>
+    );
+
+    expect(markup).toContain("Provider details");
+    expect(markup).toContain("data-privy-byok-form");
+    expect(markup).toMatch(/type="password"/);
+    // The credential form owns its submit; the footer offers no second one.
+    expect(markup).not.toContain("Create wallet");
+  });
+
+  it("keeps an installed privy on the additional-wallet path even with BYOK on", () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <WalletSetupFlow
+          connectedProviders={["privy"]}
+          enabledProviders={["privy"]}
+          initialProvider="privy"
+          privyByokEnabled
+        />
+      </I18nProvider>
+    );
+
+    expect(markup).toContain("Wallet details");
+    expect(markup).not.toContain("data-privy-byok-form");
+  });
+
   it("uses the shared top progress and bottom action layout for provider selection", () => {
     const markup = renderFlow();
 

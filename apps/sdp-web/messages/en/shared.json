@@ -332,6 +332,8 @@
     "searchPlaceholder": "Search integrations",
     "filterAllFamilies": "All",
     "filterAllStatuses": "All statuses",
+    "filterAll": "All",
+    "filterByStatus": "Filter by status",
     "clearFilters": "Clear filters",
     "emptyTitle": "No integrations match",
     "emptyBody": "Try a different search or clear the filters.",
