@@ -4,20 +4,38 @@ import { resolveEventViewerForAuth } from "./event-access";
 
 const PROJECT_ID = "prj_event_access";
 
-function auth(overrides: Partial<ApiKeyContext> = {}): ApiKeyContext {
+const AUTH_BASE = {
+  id: "usr_event_access",
+  organizationId: "org_event_access",
+  projectId: PROJECT_ID,
+  role: "member",
+  permissions: ["payments:read"],
+  environment: "dashboard",
+  signingWalletId: null,
+  signingWalletIds: [],
+  walletBindings: [],
+} satisfies Partial<ApiKeyContext>;
+
+function auth(
+  overrides: Partial<Omit<ApiKeyContext, "authType" | "apiKeyId" | "userId">> = {}
+): ApiKeyContext {
   return {
-    id: "usr_event_access",
-    organizationId: "org_event_access",
-    projectId: PROJECT_ID,
-    role: "member",
-    permissions: ["payments:read"],
-    environment: "dashboard",
-    signingWalletId: null,
-    signingWalletIds: [],
-    walletBindings: [],
+    ...AUTH_BASE,
     authType: "session",
     userId: "usr_event_access",
     apiKeyId: null,
+    ...overrides,
+  };
+}
+
+function apiKeyAuth(
+  overrides: Partial<Omit<ApiKeyContext, "authType" | "apiKeyId" | "userId">> = {}
+): ApiKeyContext {
+  return {
+    ...AUTH_BASE,
+    authType: "api_key",
+    userId: null,
+    apiKeyId: "key_event_access",
     ...overrides,
   };
 }
@@ -33,15 +51,7 @@ describe("resolveEventViewerForAuth", () => {
   it("gives API keys full event visibility", async () => {
     const deps = dependencies();
 
-    const viewer = await resolveEventViewerForAuth(
-      auth({
-        authType: "api_key",
-        userId: null,
-        apiKeyId: "key_event_access",
-      }),
-      PROJECT_ID,
-      deps
-    );
+    const viewer = await resolveEventViewerForAuth(apiKeyAuth(), PROJECT_ID, deps);
 
     expect(viewer).toEqual({ scope: "all" });
     expect(deps.findPrivateChannelUser).not.toHaveBeenCalled();
@@ -51,16 +61,7 @@ describe("resolveEventViewerForAuth", () => {
     const deps = dependencies();
 
     await expect(
-      resolveEventViewerForAuth(
-        auth({
-          authType: "api_key",
-          projectId: "prj_other",
-          userId: null,
-          apiKeyId: "key_event_access",
-        }),
-        PROJECT_ID,
-        deps
-      )
+      resolveEventViewerForAuth(apiKeyAuth({ projectId: "prj_other" }), PROJECT_ID, deps)
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     expect(deps.findPrivateChannelUser).not.toHaveBeenCalled();

@@ -23,6 +23,7 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
 
@@ -976,6 +977,59 @@ describe("Payments routes — ramps", () => {
       .bind("xfr_moneygram_amount_guard")
       .first<{ status: string }>();
     expect(transfer?.status).toBe("pending");
+  });
+
+  describe("metered quotas", () => {
+    it("429s an estimate once the actor's metered quota is exhausted", async () => {
+      await seedRateLimit(
+        env,
+        `metered:ramp-estimate:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+        30
+      );
+
+      const res = await app.request(
+        "/v1/payments/ramps/onramp/estimate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ fiatCurrency: "USD", assetRail: "USDC_SOL", fiatAmount: "100" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(429);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("RATE_LIMITED");
+    });
+
+    it("429s a quote once the org-wide metered quota is exhausted", async () => {
+      await seedRateLimit(env, `metered:ramp-quote:org:${TEST_ORG.id}`, 60);
+
+      const res = await app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "bvnk",
+            cryptoToken: "USDC",
+            fiatCurrency: "EUR",
+            fiatAmount: "100",
+            counterpartyId: "cpty_quota_test",
+            destinationWallet: TEST_WALLET_ID,
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(429);
+    });
   });
 
   describe("session-caller environment resolution", () => {
