@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import { LanguagePicker } from "@/components/language-picker";
+import { NotificationBell } from "@/components/notification-bell";
 import { Badge } from "@/components/ui/badge";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -33,6 +34,8 @@ type DashboardTopBarProps = {
   centeredTitle?: string;
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
+  // Notifications ship with the asset-profiles feature (its only producer today).
+  showNotifications?: boolean;
 };
 
 export function HeaderBackAction({
@@ -165,6 +168,7 @@ export function DashboardTopBar({
   centeredTitle,
   topBarLeadingContent,
   hasHeaderTabs = false,
+  showNotifications = false,
 }: DashboardTopBarProps) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
@@ -176,6 +180,14 @@ export function DashboardTopBar({
     </>
   ) : null;
   const centersPageTitle = !hasHeaderTabs && !hideTitle;
+  const trailingContent = (
+    <>
+      <LanguagePicker />
+      {showNotifications ? <NotificationBell /> : null}
+      <UserButton />
+      {sandboxBadge}
+    </>
+  );
 
   if (centeredTitle || centersPageTitle) {
     return (
@@ -190,13 +202,7 @@ export function DashboardTopBar({
             {topBarLeadingContent}
           </>
         }
-        trailingContent={
-          <>
-            <LanguagePicker />
-            <UserButton />
-            {sandboxBadge}
-          </>
-        }
+        trailingContent={trailingContent}
       />
     );
   }
@@ -215,13 +221,7 @@ export function DashboardTopBar({
           {topBarLeadingContent}
         </>
       }
-      trailingContent={
-        <>
-          <LanguagePicker />
-          <UserButton />
-          {sandboxBadge}
-        </>
-      }
+      trailingContent={trailingContent}
     />
   );
 }

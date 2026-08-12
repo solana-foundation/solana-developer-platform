@@ -17,6 +17,7 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import { resolvePolicyCustodyWallet } from "@/services/policy/enforcement.service";
 import type { TokenService } from "@/services/token.service";
+import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -374,6 +375,18 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
 
     await tokenService.applySettledTokenAuthority(tx.id, tokenId, role, newAuthority);
+
+    // This handler now takes its inputs from the policy gate, whose `auth.projectId` is
+    // nullable; the emit needs the resolved project scope, as every other one does.
+    const { projectId } = requireProjectScope(c);
+    emitTokenOperationCompleted(c, {
+      organizationId: auth.organizationId,
+      projectId,
+      tokenId,
+      operation: "update_authority",
+      signature: result.signature,
+      slot: result.slot.toString(),
+    });
 
     return success(c, { transaction: updatedTx });
   } catch (error) {

@@ -91,6 +91,13 @@ export class TransactionalEmailService {
   }
 }
 
+// Whether transactional email can be sent (both provider secrets present). Callers use
+// this to skip email gracefully / surface a generic "unavailable" badge WITHOUT leaking
+// which provider or env vars are involved.
+export function isEmailConfigured(env: Env): boolean {
+  return Boolean(env.RESEND_API_KEY?.trim() && env.EMAIL_FROM?.trim());
+}
+
 export function createTransactionalEmailService(env: Env): TransactionalEmailService {
   const apiKey = env.RESEND_API_KEY?.trim();
   if (!apiKey) {

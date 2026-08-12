@@ -2867,6 +2867,26 @@ export class TokenService {
   }
 
   /**
+   * Resolve the id of the *active* allowlist entry for an address, or null when none
+   * is active. Used by the headless workflow `allowlist_remove` action, which knows the
+   * wallet address but not the entry id the route handler gets from its URL.
+   */
+  async getActiveAllowlistEntryIdByAddress(
+    tokenId: string,
+    address: string
+  ): Promise<string | null> {
+    await this.assertTokenInTenant(tokenId);
+    const row = await this.db
+      .prepare(
+        "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
+      )
+      .bind(tokenId, address)
+      .first<{ id: string }>();
+
+    return row?.id ?? null;
+  }
+
+  /**
    * Look up an allowlist entry's status by address, regardless of state.
    * Returns `null` when no entry has ever existed (vs `"revoked"` when an
    * operator has explicitly removed the address).
