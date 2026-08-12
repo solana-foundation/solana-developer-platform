@@ -39,6 +39,7 @@ import internalCustody from "@/routes/internal-custody";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
+import notifications from "@/routes/notifications";
 import onboarding from "@/routes/onboarding";
 import openapi from "@/routes/openapi";
 import organizations from "@/routes/organizations";
@@ -345,6 +346,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/api-keys", apiKeys);
   v1.route("/counterparties", counterparties);
   v1.route("/members", members);
+  v1.route("/notifications", notifications);
   v1.route("/auth", auth);
   v1.route("/projects", projects);
   v1.route("/rpc", rpc);

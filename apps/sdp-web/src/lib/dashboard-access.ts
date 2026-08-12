@@ -13,6 +13,10 @@ export interface DashboardCapabilities {
   canManageCustody: boolean;
   canManageOrgSettings: boolean;
   canManageTokenAdmin: boolean;
+  // Authoring `automated` workflow rules (allowlist/notify/webhook/record) — reversible
+  // side effects that don't need the admin bar the on-chain tiers do. The API enforces
+  // the same split per action tier; this only decides what the builder offers.
+  canManageTokenWrite: boolean;
   canUseWalletSignerCheck: boolean;
 }
 
@@ -40,6 +44,7 @@ export function resolveDashboardAccess(role: string | null | undefined): Dashboa
       canManageCustody: hasPermission(permissions, "custody:admin"),
       canManageOrgSettings: hasPermission(permissions, "org:write"),
       canManageTokenAdmin: hasPermission(permissions, "tokens:admin"),
+      canManageTokenWrite: hasPermission(permissions, "tokens:write"),
       // Current dashboard implementation creates a short-lived API key before signer check.
       canUseWalletSignerCheck:
         hasPermission(permissions, "wallets:write") && hasPermission(permissions, "api-keys:write"),

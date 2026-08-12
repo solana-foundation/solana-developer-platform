@@ -5251,6 +5251,8 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | Prepare force burn transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze account |
 | `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | List frozen accounts |
+| `GET` | `/v1/issuance/tokens/{tokenId}/holders` | List verified holders |
+| `POST` | `/v1/issuance/tokens/{tokenId}/holders` | Enroll a verified holder |
 | `GET` | `/v1/issuance/tokens/{tokenId}/metadata.json` | Get public token metadata JSON |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Execute mint |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | Prepare mint transaction |
@@ -5261,6 +5263,15 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | List token transactions |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | Unfreeze account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | Unpause token transfers |
+| `GET` | `/v1/issuance/tokens/{tokenId}/workflows` | List workflow rules |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows` | Create a workflow rule |
+| `DELETE` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Delete a workflow rule |
+| `PATCH` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Update a workflow rule |
+| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/catalog` | List the workflow catalog for an asset |
+| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/executions` | List workflow executions |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve` | Approve a held execution |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/reject` | Reject a held execution |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry` | Retry a failed execution |
 | `GET` | `/v1/issuance/tokens/facets` | List token filter facets |
 | `GET` | `/v1/issuance/transactions` | List issuance transactions |
 
