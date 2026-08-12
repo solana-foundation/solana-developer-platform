@@ -54,6 +54,20 @@ export async function insertWorkflowSecretRetirement(
     .run();
 }
 
+// The counterpart, likewise runnable inside another repository's transaction: a write
+// that COMMITS a reference to a version cancels the obligation to destroy it, atomically.
+// That is what lets the obligation be recorded before the reference exists — the only
+// ordering in which a rejected write cannot leave a credential nobody knows about.
+export async function deleteWorkflowSecretRetirement(
+  exec: Pick<AppDb, "prepare">,
+  secretVersionRef: string
+): Promise<void> {
+  await exec
+    .prepare("DELETE FROM workflow_action_secret_retirements WHERE secret_version_ref = ?")
+    .bind(secretVersionRef)
+    .run();
+}
+
 export function createPostgresWorkflowSecretRetirementsRepository(
   db: AppDb
 ): WorkflowSecretRetirementsRepository {
@@ -63,10 +77,7 @@ export function createPostgresWorkflowSecretRetirementsRepository(
     },
 
     async deleteRetirementByVersionRef(secretVersionRef: string) {
-      await db
-        .prepare("DELETE FROM workflow_action_secret_retirements WHERE secret_version_ref = ?")
-        .bind(secretVersionRef)
-        .run();
+      await deleteWorkflowSecretRetirement(db, secretVersionRef);
     },
 
     async listDueRetirements(params) {

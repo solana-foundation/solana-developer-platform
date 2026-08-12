@@ -24,7 +24,11 @@ import {
 import { badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
-import { destroyActionSecret, storeActionSecret } from "@/services/workflows/action-secret";
+import {
+  destroyActionSecret,
+  queuePendingActionSecret,
+  storeActionSecret,
+} from "@/services/workflows/action-secret";
 import { resolveAssetGateContext } from "@/services/workflows/asset-gate";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
@@ -214,6 +218,10 @@ export const createWorkflow = async (c: AppContext) => {
   const actionSecret = secret
     ? await storeActionSecretOrRefuse(c.env, { orgId, workflowId, secret })
     : null;
+  // The credential exists in the backend and nothing references it yet, so its destruction
+  // is queued NOW and cancelled by the insert below if that commits. Recording it only on
+  // the failure path meant the record was lost exactly when the database was what failed.
+  await queuePendingActionSecret(c.env, { orgId, workflowId, stored: actionSecret });
 
   const repo = createAssetWorkflowsRepository(c.env);
   const definition: AssetWorkflowDefinition = {
@@ -243,6 +251,9 @@ export const createWorkflow = async (c: AppContext) => {
       reviewMode: parsed.data.reviewMode ?? defaultReviewMode(parsed.data.actionType),
       enabled: parsed.data.enabled,
       createdBy: auth.id,
+      // Committing the row makes the credential referenced, which discharges the
+      // obligation queued just above — in this transaction, so a rollback keeps it.
+      clearRetirementFor: actionSecret,
     })
     .catch(async (error: unknown) => {
       await destroyActionSecret(c.env, actionSecret, { orgId, workflowId });
@@ -350,6 +361,11 @@ export const updateWorkflow = async (c: AppContext) => {
   const actionSecret = secret
     ? await storeActionSecretOrRefuse(c.env, { orgId, workflowId, secret })
     : previousSecret;
+  // As in create: the version just written has no reader until the update commits, so its
+  // destruction is queued first and cancelled by that commit.
+  if (secret) {
+    await queuePendingActionSecret(c.env, { orgId, workflowId, stored: actionSecret });
+  }
 
   // An edit that doesn't re-send the secret keeps the stored reference — reads redact
   // it, so requiring it on every save would silently erase it.
@@ -383,6 +399,7 @@ export const updateWorkflow = async (c: AppContext) => {
         secret && previousSecret?.secretVersionRef !== actionSecret?.secretVersionRef
           ? previousSecret
           : null,
+      clearRetirementFor: secret ? actionSecret : null,
     })
     .catch(async (error: unknown) => {
       await destroyActionSecret(c.env, secret ? actionSecret : null, { orgId, workflowId });

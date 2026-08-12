@@ -148,6 +148,46 @@ async function queueRetirement(
   return false;
 }
 
+// Records, BEFORE the row that will reference it is attempted, that a freshly written
+// credential currently has no reader. The write that commits the reference cancels this in
+// its own transaction, so the two possible outcomes are "the row points at the version"
+// and "the version is queued for destruction" — never neither.
+//
+// Ordering is the whole point. Queued after a failed write, the record is lost exactly
+// when the database is what failed; queued before it, the database has already answered
+// once and the obligation is durable no matter what the write does next. Best effort in
+// turn: if this cannot be written the caller is no worse off than before, so it must not
+// fail a create that would otherwise succeed.
+export async function queuePendingActionSecret(
+  env: Env,
+  params: { orgId: string; workflowId: string; stored: StoredCredentialSecret | null }
+): Promise<void> {
+  const stored = params.stored;
+  if (stored?.storageBackend !== "gcp_secret_manager" || !stored.secretVersionRef) {
+    return;
+  }
+  const queued = await queueRetirement(env, {
+    organizationId: params.orgId,
+    workflowId: params.workflowId,
+    storageBackend: stored.storageBackend,
+    secretRef: stored.secretRef ?? null,
+    secretVersionRef: stored.secretVersionRef,
+    error: "written for a rule that has not committed yet",
+  });
+  if (!queued) {
+    getLogger().error(
+      {
+        provider: PROVIDER,
+        secretVersionRef: stored.secretVersionRef,
+        workflowId: params.workflowId,
+        queuedForRetry: false,
+        reason: "secret_precommit_queue_failed",
+      },
+      "workflow_action_secret_orphan_risk"
+    );
+  }
+}
+
 // Queue a failed destroy for the sweeper, and log either way. If the queue write cannot
 // be made to stick at all, there is nothing left but the log — which is exactly where
 // this started — so it keeps every field needed to find the version by hand.

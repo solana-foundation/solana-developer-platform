@@ -58,6 +58,10 @@ export interface CreateAssetWorkflowInput {
   reviewMode: ReviewMode;
   enabled?: boolean;
   createdBy?: string | null;
+  // The credential this row is about to reference, provisionally queued for destruction
+  // before the row was attempted. Committing the row cancels that obligation in the same
+  // transaction. See `clearRetirementFor` on UpdateAssetWorkflowInput.
+  clearRetirementFor?: StoredCredentialSecret | null;
 }
 
 export interface UpdateAssetWorkflowInput {
@@ -72,6 +76,12 @@ export interface UpdateAssetWorkflowInput {
   // is lost precisely when the database is what failed, and nothing else would ever
   // retry. Ignored unless it names a backend with an external version to destroy.
   retireSecret?: StoredCredentialSecret | null;
+  // The mirror image: a credential this write makes REFERENCED — the version a rotation
+  // installs. It was queued for destruction before the write was attempted, which is the
+  // only ordering in which a rejected write cannot strand it, so committing the reference
+  // cancels the obligation in the same transaction. Either the row points at the version
+  // or the version is queued for destruction; there is no state where neither holds.
+  clearRetirementFor?: StoredCredentialSecret | null;
 }
 
 export interface AssetWorkflowsRepositoryContext {

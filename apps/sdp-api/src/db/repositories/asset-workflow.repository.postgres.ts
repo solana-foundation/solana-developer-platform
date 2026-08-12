@@ -9,7 +9,10 @@ import {
   generateAssetWorkflowId,
   type UpdateAssetWorkflowInput,
 } from "./asset-workflow.repository";
-import { insertWorkflowSecretRetirement } from "./workflow-secret-retirement.repository.postgres";
+import {
+  deleteWorkflowSecretRetirement,
+  insertWorkflowSecretRetirement,
+} from "./workflow-secret-retirement.repository.postgres";
 
 // Records, inside the caller's transaction, that a credential this write orphans still
 // needs destroying. Only GCP Secret Manager has an external version to destroy — the other
@@ -19,6 +22,18 @@ import { insertWorkflowSecretRetirement } from "./workflow-secret-retirement.rep
 // the transaction buys is that a failure of BOTH the destroy and that cleanup can no
 // longer lose the orphan, because the obligation was committed by the same statement that
 // created it.
+// Cancels the provisional obligation recorded before this write was attempted, now that
+// the row committed and genuinely references the version.
+async function clearQueuedSecret(
+  exec: Pick<AppDb, "prepare">,
+  stored: StoredCredentialSecret | null | undefined
+): Promise<void> {
+  if (stored?.storageBackend !== "gcp_secret_manager" || !stored.secretVersionRef) {
+    return;
+  }
+  await deleteWorkflowSecretRetirement(exec, stored.secretVersionRef);
+}
+
 async function queueOrphanedSecret(
   exec: Pick<AppDb, "prepare">,
   params: {
@@ -65,29 +80,36 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
   return {
     async createWorkflow(input: CreateAssetWorkflowInput) {
       const id = input.id ?? generateAssetWorkflowId();
-      const row = await db
-        .prepare(
-          `INSERT INTO asset_workflows (
-             id, organization_id, project_id, token_id, trigger_type, action_type,
-             definition, version, enabled, review_mode, created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, COALESCE(?, TRUE), ?, ?)
-           RETURNING *`
-        )
-        .bind(
-          id,
-          input.organizationId,
-          input.projectId,
-          input.tokenId,
-          input.triggerType,
-          input.actionType,
-          JSON.stringify(input.definition),
-          input.version,
-          input.enabled ?? null,
-          input.reviewMode,
-          input.createdBy ?? null
-        )
-        .first<Record<string, unknown>>();
-      return row ? mapWorkflowRow(row) : null;
+      return db.transaction(async (tx) => {
+        const row = await tx
+          .prepare(
+            `INSERT INTO asset_workflows (
+               id, organization_id, project_id, token_id, trigger_type, action_type,
+               definition, version, enabled, review_mode, created_by
+             ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, COALESCE(?, TRUE), ?, ?)
+             RETURNING *`
+          )
+          .bind(
+            id,
+            input.organizationId,
+            input.projectId,
+            input.tokenId,
+            input.triggerType,
+            input.actionType,
+            JSON.stringify(input.definition),
+            input.version,
+            input.enabled ?? null,
+            input.reviewMode,
+            input.createdBy ?? null
+          )
+          .first<Record<string, unknown>>();
+        // The rule now references the credential, so the obligation recorded before this
+        // insert was attempted is discharged — by this transaction, so a rollback keeps it.
+        if (row) {
+          await clearQueuedSecret(tx, input.clearRetirementFor);
+        }
+        return row ? mapWorkflowRow(row) : null;
+      });
     },
 
     async updateWorkflow(input: UpdateAssetWorkflowInput) {
@@ -128,6 +150,9 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
             retireSecret: input.retireSecret,
             reason: "superseded by a key rotation",
           });
+          // …and the version this rotation installs is now referenced, so its provisional
+          // obligation goes away with the same commit.
+          await clearQueuedSecret(tx, input.clearRetirementFor);
         }
         return row ? mapWorkflowRow(row) : null;
       });
