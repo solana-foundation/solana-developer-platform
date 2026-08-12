@@ -41,7 +41,7 @@ The API exposes these public REST endpoints (all require API key or session toke
 
 ### Prerequisites
 
-- **Node.js 22+**
+- **Node.js 24+**
 - **pnpm 10.16+**
 - **Docker or another Compose-compatible runtime** — Runs local Postgres 16 and Redis 7
 - **Doppler CLI** — Recommended for team configuration. Install: `brew install dopplerhq/cli/doppler`; external contributors can use `.env.local` instead.

@@ -846,6 +846,7 @@ async function prepareSubscriptionLifecycle(
   const subscriptionPda = subscription.subscription_pda
     ? assertValidAddress(subscription.subscription_pda, "subscriptionPda")
     : derivedSubscriptionPda;
+  const tokenMint = assertSubscriptionTokenMint(plan.token);
   const subscriberSigner = createNoopSigner(subscriber);
   const instruction =
     operation === "cancel"
@@ -858,6 +859,7 @@ async function prepareSubscriptionLifecycle(
           planPda,
           subscriber: subscriberSigner,
           subscriptionPda,
+          tokenMint,
         });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
     c,

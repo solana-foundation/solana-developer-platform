@@ -15,7 +15,7 @@ export function formatRelativeTime(value: string, locale?: string): string {
 
   const diffMs = date.getTime() - Date.now();
   const diffMinutes = Math.round(diffMs / 60_000);
-  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "narrow" });
 
   if (Math.abs(diffMinutes) < 60) {
     return formatter.format(diffMinutes, "minute");

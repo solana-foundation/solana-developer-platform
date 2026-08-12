@@ -6,6 +6,7 @@ import {
   isMarketsEnabled,
   isPrivateChannelsEnabled,
   isPrivyByokEnabled,
+  resolveNewCustodySetupMethod,
 } from "./feature-flags";
 
 describe("isAssetProfilesEnabled", () => {
@@ -93,6 +94,34 @@ describe("isCustodyConnectionRuntimeEnabled", () => {
     expect(isCustodyConnectionRuntimeEnabled({ PRIVY_BYOK_ENABLED: "true" }, "turnkey")).toBe(
       false
     );
+  });
+});
+
+describe("resolveNewCustodySetupMethod", () => {
+  it.each([
+    [{ PRIVY_BYOK_ENABLED: "false" }, "privy", "legacy_config"],
+    [{ PRIVY_BYOK_ENABLED: "true" }, "turnkey", "legacy_config"],
+    [{ PRIVY_BYOK_ENABLED: "true", SDP_DEPLOYMENT_MODE: "managed" }, "privy", "stored_credentials"],
+    [
+      {
+        PRIVY_BYOK_ENABLED: "true",
+        SDP_DEPLOYMENT_MODE: "self_hosted",
+        SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED: "true",
+      },
+      "privy",
+      "stored_credentials",
+    ],
+    [
+      {
+        PRIVY_BYOK_ENABLED: "true",
+        SDP_DEPLOYMENT_MODE: "self_hosted",
+        SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED: "false",
+      },
+      "privy",
+      "deployment_credentials",
+    ],
+  ] as const)("resolves %j for %s to %s", (env, provider, expected) => {
+    expect(resolveNewCustodySetupMethod(env, provider)).toBe(expected);
   });
 });
 

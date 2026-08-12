@@ -23,19 +23,27 @@ import {
 } from "@/services/stores/provider-credential.store";
 import type { Env } from "@/types/env";
 
-const privyCredentialSubmissionSchema = z
+const privyCredentialFieldsSchema = z
   .object({
-    provider: z.literal("privy"),
-    walletLabel: z.string().trim().min(1).max(100).optional(),
-    fields: z
-      .object({
-        credentialLabel: z.string().trim().min(1),
-        scope: z.literal("project"),
-        appId: z.string().trim().min(1),
-        appSecret: z.string().min(1),
-      })
-      .strict(),
+    credentialLabel: z.string().trim().min(1),
+    scope: z.literal("project"),
+    appId: z.string().trim().min(1),
+    appSecret: z.string().min(1),
   })
+  .strict();
+
+const privyCredentialSubmissionBaseSchema = z.object({
+  provider: z.literal("privy"),
+  requestDelayMs: z.number().int().min(0).max(3000).optional(),
+  walletLabel: z.string().trim().min(1).max(100).optional(),
+});
+
+const privyCredentialSubmissionSchema = privyCredentialSubmissionBaseSchema
+  .extend({ fields: privyCredentialFieldsSchema.optional() })
+  .strict();
+
+const privyCredentialReplacementSchema = privyCredentialSubmissionBaseSchema
+  .extend({ fields: privyCredentialFieldsSchema })
   .strict();
 
 const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
@@ -131,7 +139,7 @@ internalCustody.post("/connections/:connectionId/provider-credentials", async (c
   }
 
   const body = await c.req.json().catch(() => null);
-  const parsed = privyCredentialSubmissionSchema.safeParse(body);
+  const parsed = privyCredentialReplacementSchema.safeParse(body);
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,

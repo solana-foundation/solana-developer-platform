@@ -10,6 +10,7 @@ import {
   UsersIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
@@ -44,7 +45,6 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
 import type { CounterpartyPlaygroundView } from "./counterparty-playground-config";
@@ -79,7 +79,7 @@ export function CounterpartyWorkspace({
 }: CounterpartyWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   const isPlaygroundTab = useDashboardTab() === "playground";
 

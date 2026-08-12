@@ -2,8 +2,9 @@
 
 import type { PaymentRecurringPayment, PaymentRecurringPaymentStatus } from "@sdp/types";
 import { ChevronRightIcon, PlusIcon, RepeatIcon, SearchIcon, XIcon } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -24,7 +25,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import {
   formatDisplayAmount,
   resolveTokenByMint,
@@ -69,7 +69,7 @@ export function RecurringPaymentsWorkspace({
   counterparties,
 }: RecurringPaymentsWorkspaceProps) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -207,12 +207,14 @@ export function RecurringPaymentsWorkspace({
                 </SelectItem>
               ))}
             </Select>
-            <Button asChild size="sm">
-              <Link href="/dashboard/payments/recurring/create">
-                <PlusIcon className="size-4" />
-                {t("DashboardPayments.recurring.createPayment")}
-              </Link>
-            </Button>
+            {listIsEmpty ? null : (
+              <Button asChild size="sm">
+                <Link href="/dashboard/payments/recurring/create">
+                  <PlusIcon className="size-4" />
+                  {t("DashboardPayments.recurring.createPayment")}
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
         {initialError ? (

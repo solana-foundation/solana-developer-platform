@@ -18,13 +18,12 @@ import {
   createCredentialSecretStore,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
+import {
+  getPrivyProviderAccountFingerprint,
+  PRIVY_RUNTIME_ENV_FIELDS,
+} from "@/services/custody/privy-credential";
 import { createPrivyAdapterFromCredential } from "@/services/domain/signing/provider-adapter-factory";
 import type { Env } from "@/types/env";
-
-const PRIVY_RUNTIME_ENV_FIELDS = {
-  appId: "PRIVY_APP_ID",
-  appSecret: "PRIVY_APP_SECRET",
-} as const satisfies Record<string, keyof Env & string>;
 
 type ConfigAdapterResolver = (
   organizationId: string,
@@ -121,6 +120,7 @@ interface ConnectionCredentialRow {
   provider_credential_id: string;
   credential_status: string;
   provider_account_fingerprint: string | null;
+  request_delay_ms: number | null;
   credential_version: number;
   source: "stored" | "runtime";
   storage_backend: CredentialSecretStorageBackend;
@@ -369,7 +369,7 @@ export class CustodyRuntimeTargets {
     const row = await this.db.queryOne<ConnectionCredentialRow>(
       `SELECT c.id AS connection_id, c.provider,
               c.status AS connection_status, c.last_check_status,
-              c.provider_account_fingerprint,
+              c.provider_account_fingerprint, c.request_delay_ms,
               default_wallet.wallet_id AS default_wallet_id,
               default_wallet.status AS default_wallet_status,
               pc.id AS provider_credential_id,
@@ -411,6 +411,8 @@ export class CustodyRuntimeTargets {
       row.provider_credential_id,
       row.credential_version,
       row.secret_version_ref ?? "none",
+      row.connection_id,
+      row.request_delay_ms ?? "env",
     ].join(":");
     if (row.storage_backend !== "runtime_env") {
       const cached = this.adapterCache.get(cacheKey);
@@ -423,6 +425,7 @@ export class CustodyRuntimeTargets {
     const adapter = createPrivyAdapterFromCredential(this.env, {
       ...secret,
       defaultWalletId: row.default_wallet_id,
+      requestDelayMs: row.request_delay_ms ?? undefined,
     });
     if (row.storage_backend !== "runtime_env") {
       this.adapterCache.set(cacheKey, adapter);
@@ -444,6 +447,7 @@ export class CustodyRuntimeTargets {
         : {}),
     };
 
+    let credential: { appId: string; appSecret: string };
     try {
       const payload = await createCredentialSecretStore(this.env, row.storage_backend).read({
         orgId: target.organizationId,
@@ -454,11 +458,21 @@ export class CustodyRuntimeTargets {
       if (!appId || !appSecret) {
         throw new Error("incomplete credential payload");
       }
-      return { appId, appSecret };
+      credential = { appId, appSecret };
     } catch {
       this.logUnavailable(target, "credential_secret_unavailable");
       throw providerUnavailable("Custody credential is temporarily unavailable");
     }
+
+    if (
+      row.source === "runtime" &&
+      (await getPrivyProviderAccountFingerprint(credential.appId)) !==
+        row.provider_account_fingerprint
+    ) {
+      this.logUnavailable(target, "provider_account_mismatch");
+      throw conflict("Custody runtime credential does not match the connected Provider account");
+    }
+    return credential;
   }
 
   private mapConfigTarget(row: ConfigRow): ConfigRuntimeTarget {
@@ -531,6 +545,7 @@ export class CustodyRuntimeTargets {
       | "connection_unusable"
       | "connection_changed"
       | "credential_secret_unavailable"
+      | "provider_account_mismatch"
   ): void {
     getLogger().warn(
       {

@@ -16,9 +16,9 @@ import {
   WalletIcon,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,

@@ -67,7 +67,6 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import {
   enforceWalletOperationPolicy,
-  recordLegacyWalletPolicyDenial,
   walletOperationActorFromAuth,
 } from "@/services/policy/enforcement.service";
 import {
@@ -79,7 +78,6 @@ import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { type AppContext, getFeePayment, getPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
-import { assertWalletPolicyAllowsTransfer } from "../policy";
 import {
   createTransferSchema,
   listTransfersQuerySchema,
@@ -320,6 +318,7 @@ async function enforcePaymentTransferOperationPolicy(
         memo: input.memo === undefined ? null : input.memo,
         privateTransfer: input.privateTransfer === true,
       }),
+      legs: [],
       rawPayload: input.rawPayload,
     },
     approvedWalletOperationId(c),
@@ -370,6 +369,7 @@ export async function extractTransferPolicyCandidate(c: AppContext): Promise<Pol
       memo: parsed.data.memo === undefined ? null : parsed.data.memo,
       privateTransfer: Boolean(privateTransfer),
     }),
+    legs: [],
     body: parsed.data,
     resolved: { scope, operation, privateTransfer },
     rawPayload: {
@@ -837,7 +837,7 @@ async function executePreparedPrivateTransfer(
   }
 
   for (const wallet of signerWallets.values()) {
-    // The source wallet's operation and legacy policies were enforced before preparation.
+    // The source wallet's operation policy was enforced before preparation.
     if (wallet.walletId === operation.sourceWallet.walletId) {
       continue;
     }
@@ -847,7 +847,7 @@ async function executePreparedPrivateTransfer(
       sourceAddress: assertValidAddress(wallet.publicKey, "required signer"),
       sourceWallet: wallet,
     };
-    const enforcement = await enforcePaymentTransferOperationPolicy(c, scope, signerOperation, {
+    await enforcePaymentTransferOperationPolicy(c, scope, signerOperation, {
       operationType: "payment_transfer_execute",
       privateTransfer: true,
       rawPayload: {
@@ -857,19 +857,6 @@ async function executePreparedPrivateTransfer(
         amount: operation.amount,
       },
     });
-    try {
-      await assertWalletPolicyAllowsTransfer(c, {
-        organizationId: scope.auth.organizationId,
-        projectId: scope.auth.projectId,
-        wallet,
-        destinationAddress: operation.destinationAddress,
-        token: operation.token,
-        amount: operation.amount,
-      });
-    } catch (error) {
-      await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
-      throw error;
-    }
   }
 
   const signers = await Promise.all(
@@ -1051,23 +1038,8 @@ export async function createTransfer(c: AppContext) {
   const {
     body,
     resolved: { scope, operation, privateTransfer },
-    enforcement,
   } = getPolicyGateContext<CreateTransferBody, TransferPolicyResolved>(c);
   const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
-
-  try {
-    await assertWalletPolicyAllowsTransfer(c, {
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-      wallet: operation.sourceWallet,
-      destinationAddress: operation.destinationAddress,
-      token: operation.token,
-      amount: operation.amount,
-    });
-  } catch (error) {
-    await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
-    throw error;
-  }
 
   if (privateTransfer) {
     assertMagicBlockKoraSponsoredExecutionOptions(privateTransfer.magicBlock);

@@ -331,6 +331,7 @@ export async function extractOnrampQuotePolicyCandidate(
       context: {},
       providerExtensions: { provider: input.provider },
     },
+    legs: [],
     body: input,
     resolved: { scope, projectId, counterparty, wallet, walletAddress },
     rawPayload: {
@@ -385,6 +386,7 @@ export async function extractOfframpQuotePolicyCandidate(
       context: {},
       providerExtensions: { provider: input.provider },
     },
+    legs: [],
     body: input,
     resolved: { scope, projectId, counterparty, wallet, walletAddress },
     rawPayload: {

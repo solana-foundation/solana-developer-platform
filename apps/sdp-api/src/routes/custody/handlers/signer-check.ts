@@ -103,6 +103,7 @@ export async function extractSignerCheckPolicyCandidate(
       },
       providerExtensions: {},
     },
+    legs: [],
     body: parsed.data,
     resolved: { auth, resolvedWalletId, memo },
     rawPayload: {

@@ -478,7 +478,6 @@ describe("Payments routes — ramps", () => {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
-          destinationAllowlist: [],
           defaultAction: "allow",
           rules: [{ id: "deny-ramp-quotes", kind: "always", action: "deny" }],
         }),
