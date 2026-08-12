@@ -19,15 +19,21 @@ test("manual production deploy requires an immutable SHA-tagged image", () => {
   assert.match(workflow, /\^sha256:\[0-9a-f\]\{64\}\$/);
 });
 
+test("production deploys are triggered by release publication, not push", () => {
+  assert.match(workflow, /release:\n\s+types: \[published\]/);
+  assert.doesNotMatch(workflow, /push:/);
+  assert.doesNotMatch(workflow, /head_commit\.message/);
+});
+
 test("manual production redeploy always skips builds and migrations", () => {
   assert.doesNotMatch(workflow, /run_migrations:/);
   assert.match(
     workflow,
-    /- name: Build and push image\n\s+if: \$\{\{ github\.event_name == 'push' \}\}/
+    /- name: Build and push image\n\s+if: \$\{\{ github\.event_name == 'release' \}\}/
   );
   assert.match(
     workflow,
-    /- name: Run database migrations\n\s+if: \$\{\{ github\.event_name == 'push' \}\}/
+    /- name: Run database migrations\n\s+if: \$\{\{ github\.event_name == 'release' \}\}/
   );
 });
 
