@@ -27,11 +27,12 @@ Companion docs:
   onboarding a curator is a data change, zero code (see
   `EARN_KNOWN_CURATOR_LABELS` in `@sdp/types`).
 - **One shared portfolio wallet per (organization, environment, provider).**
-  Selecting a strategy sets that wallet's strategy weights as a *single*
-  allocation — `pct: 100` for the selected strategy's stablecoin lane
-  (`singleStrategyAllocation`, `earn-deposit-model.ts`) — and an omitted token
-  lane keeps its current weights, so a USDC pick never disturbs an existing USDT
-  one. One wallet per org is enforced by a DB unique constraint
+  Selecting a strategy points that wallet's stablecoin lane at a *single*
+  vault — `pct: 100` for the selected strategy's lane
+  (`singleStrategyAllocation`, `earn-deposit-model.ts`), which is the only
+  shape the V1 API accepts: PRO-1667 caps each token group at one allocation
+  entry per program. An omitted token lane keeps its current allocation, so a
+  USDC pick never disturbs an existing USDT one. One wallet per org is enforced by a DB unique constraint
   (`earn_provider_wallets`, migration 0049). This is SDP's product model, not a
   provider constraint: Ground has no concept of an SDP organization, one Ground
   account holds many portfolio wallets, and every SDP org shares a single account
@@ -65,7 +66,7 @@ Ground's [Portfolio Wallets API](https://docs.groundtech.co/docs/portfolio-walle
 | `allocations[].type` (observed: `market`, `liquidity`, `loan`, `reserve`, `rwa`, `treasury`) | `source_kind`: `rwa` / `defi` (dominant allocation; `rwa` + `treasury` are the RWA side) |
 | `mode` | only `active` sources are listed; `buy_only` is excluded (would trap funds — ADR 0002 exit-safety) |
 | Portfolio wallet (`POST /v2/wallets`, `GET /v2/wallets/{id}`) | The org's shared program: `earn_provider_wallets.provider_wallet_ref` |
-| Strategy weights | `PUT /v1/earn/program` allocations (percent, 0.1 grid, sum = 100 per token group) → Ground target weights. Takes an idempotent `requestId` forwarded on BOTH branches (`POST /v2/wallets` on create, `PATCH /v2/wallets/{id}/strategy` on update) — Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
+| Strategy weights | `PUT /v1/earn/program` allocations → Ground target weights. **V1 is single-vault (PRO-1667): exactly one entry per token group, which the sum rule pins to `pct: 100`.** The weighted wire shape (percent, 0.1 grid, sum = 100 per group) is unchanged and the multi-entry surface is dormant — the API side of re-enabling weights is relaxing the route-schema cap (wire shape and provider contract untouched), but the dashboard separately needs weight authoring + share display back (removed by design) before the cap can safely relax. Takes an idempotent `requestId` forwarded on BOTH branches (`POST /v2/wallets` on create, `PATCH /v2/wallets/{id}/strategy` on update) — Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
 | `depositAddresses.solana{,_devnet}` | The program's funding address (only Solana is surfaced) |
 | Deposits / withdrawals / previews | `GET /v1/earn/program/deposits`, `POST /v1/earn/program/withdrawal-preview`, `POST /v1/earn/program/withdrawals` (idempotent `requestId`) |
 
@@ -247,7 +248,8 @@ packages/sdp-types/src/earn.ts     Wire DTOs shared by API + web: strategies,
 
 packages/sdp-earn/src/
   types.ts                         Provider contracts. EarnVaultProvider (base:
-                                   listStrategies/getNav/quotes) and the
+                                   provider + declaredSupport + listStrategies
+                                   — every member real and called) and the
                                    OPTIONAL EarnPortfolioWalletProvider
                                    capability (create/get wallet, update
                                    strategy, deposits, withdrawal preview/
@@ -263,7 +265,6 @@ packages/sdp-earn/src/
   support.ts                       Declared-support validation: catalogue rows
                                    outside a provider's declared envelope are
                                    drift, not data.
-  nav.ts                           Share-price/NAV bigint math.
   providers/stub.ts                StubEarnClient — every method NOT_IMPLEMENTED;
                                    a new provider starts as a ~10-line subclass.
   providers/ground/client.ts       The live Ground integration (catalogue
@@ -272,13 +273,19 @@ packages/sdp-earn/src/
 
 apps/sdp-api/src/
   routes/earn/                     /v1/earn HTTP surface. handlers/program.ts is
-                                   the shared-wallet family; strategies/
-                                   positions/movements/quotes are the
-                                   catalogue + per-strategy families.
-  db/migrations/postgres/0048,0049 earn_strategies, earn_positions,
-                                   earn_movements, earn_nav_snapshots (0048);
+                                   the shared-wallet family (live provider
+                                   reads + the withdrawal ledger); strategies
+                                   is the catalogue family.
+  db/migrations/postgres/0048–0055 earn_strategies (0048);
                                    earn_provider_wallets (0049, shared-wallet
-                                   link).
+                                   link); earn_program_withdrawals (0055, the
+                                   withdrawal ledger — 0055 also dropped the
+                                   never-written positions/movements/NAV
+                                   tables, PRO-1628).
+  services/earn-withdrawal-ledger.service.ts
+                                   Withdrawal-ledger status machine + appliers
+                                   (Hono-free; poll path today, sweep/webhooks
+                                   later).
   db/repositories/earn.*           Row types + Postgres impl (open-string
                                    provider columns; dispatch must go through
                                    the fail-closed resolver).
@@ -341,10 +348,10 @@ Two things write `earn_strategies`, and only one of them is a production path.
 - **Why it exists:** browse a populated catalogue without a Ground API key and
   without waiting for the cron; deterministic data for demos and UI work.
 - **What it seeds:** 10 fixtures whose ids/names/APYs/liquidity/curators mirror
-  Ground's real sandbox catalogue (so local dev looks like production), plus NAV
-  history, plus exactly one **paused** row (`ground-jtrsy-usdc-vault`) that
-  exercises the ADR 0002 exit-safety split — deposits blocked, withdrawals still
-  quotable.
+  Ground's real sandbox catalogue (so local dev looks like production), plus
+  exactly one **paused** row (`ground-jtrsy-usdc-vault`) that exercises the
+  operator-pause invariants — hidden from the default catalogue, unselectable
+  as an allocation target, and sticky against the sync re-asserting `active`.
 - **Fixtures are labelled, never confused with real data:** every seeded row
   carries the `seed-demo-` `provider_reference` prefix and
   `riskMetadata.seedFixture`. `--clean` deletes **only** prefixed rows, so it can
@@ -355,8 +362,8 @@ Two things write `earn_strategies`, and only one of them is a production path.
   forward APY, a real Solana deposit address) rather than an empty onboarding
   screen. One org, one program — the same unique constraint production enforces,
   so the seed never hands an org a second wallet, and other local orgs stay
-  unlinked. The wallet is shared with teammates: funding it, re-weighting it
-  through the wizard, or withdrawing from it changes what they see. Re-run the
+  unlinked. The wallet is shared with teammates: funding it, changing its
+  strategy through the wizard, or withdrawing from it changes what they see. Re-run the
   seed after your first Clerk sign-in and it moves its own link onto your real
   org; a program you created through the wizard is never moved. `--clean` removes
   the link, never the Ground wallet.
@@ -372,7 +379,6 @@ Two things write `earn_strategies`, and only one of them is a production path.
 
   ```bash
   DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm -C apps/sdp-api db:seed:earn
-  DATABASE_URL=... pnpm -C apps/sdp-api db:seed:earn -- --days 30   # longer NAV history
   DATABASE_URL=... pnpm -C apps/sdp-api db:seed:earn -- --clean     # remove the fixtures
   ```
 
@@ -384,10 +390,11 @@ Two things write `earn_strategies`, and only one of them is a production path.
 
 ## Invariants (do not break)
 
-1. **Money out beats money off.** Deposit-side operations (`PUT /program`,
-   deposit quotes) gate on full provider *availability* (entitlement +
-   enablement + credentials). Withdrawal and read paths gate only on
-   *configured credentials* — disabling a provider must never trap funds.
+1. **Money out beats money off.** The deposit-side operation (`PUT /program`)
+   gates on full provider *availability* (entitlement + enablement +
+   credentials). Withdrawal and live-read paths gate only on *configured
+   credentials*, and the withdrawal-ledger list takes no provider gate at all
+   — disabling a provider must never trap funds or hide their history.
 2. **Fail closed on drift.** Provider ids from the DB are open strings; all
    dispatch goes through `resolveEarnProviderClient`, which throws on unknown
    ids rather than guessing.

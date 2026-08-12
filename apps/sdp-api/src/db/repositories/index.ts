@@ -33,31 +33,20 @@ export type {
 } from "./counterparty-account.repository";
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
-  CreateEarnMovementInput,
-  CreateEarnPositionInput,
-  EarnMovementRow,
-  EarnNavSnapshotRow,
-  EarnPositionRow,
+  CreateEarnProgramWithdrawalInput,
+  EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
-  InsertEarnNavSnapshotInput,
   InsertEarnProviderWalletInput,
-  ListEarnMovementsInput,
-  ListEarnMovementsResult,
-  ListEarnPositionsInput,
-  ListEarnPositionsResult,
+  ListEarnProgramWithdrawalsInput,
+  ListEarnProgramWithdrawalsResult,
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
-  UpdateEarnMovementStatusInput,
+  UpdateEarnProgramWithdrawalStatusGuardedInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-export {
-  generateEarnMovementId,
-  generateEarnNavSnapshotId,
-  generateEarnPositionId,
-  generateEarnStrategyId,
-} from "./earn.repository";
+export { generateEarnProgramWithdrawalId, generateEarnStrategyId } from "./earn.repository";
 export { createPostgresEarnRepository } from "./earn.repository.postgres";
 export type {
   CreatePaymentRecurringPaymentActivationAttemptInput,
