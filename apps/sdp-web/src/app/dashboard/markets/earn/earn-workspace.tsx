@@ -391,16 +391,20 @@ function ProgramCard({
 /**
  * Renders nothing; exists because hooks are per-instance. Mounting one per
  * submitted withdrawal is what lets N in-flight withdrawals each poll to their
- * own terminal status and announce exactly once.
+ * own terminal status and announce exactly once — and `onSettled` is how one
+ * retires afterwards, so settled watchers do not accumulate as dead SWR
+ * subscriptions over a long session.
  */
 function WithdrawalOutcomeWatcher({
   programId,
   withdrawalRef,
+  onSettled,
 }: {
   programId: string;
   withdrawalRef: string;
+  onSettled: () => void;
 }) {
-  useEarnWithdrawalOutcomeToast(programId, withdrawalRef);
+  useEarnWithdrawalOutcomeToast(programId, withdrawalRef, onSettled);
   return null;
 }
 
@@ -419,7 +423,9 @@ function ProgramsSection() {
   // a user can submit a second withdrawal while the first still processes, and
   // a single slot would orphan the first watch — its outcome toast (including a
   // failure) would simply never fire. Each entry carries its program, since a
-  // withdrawal is only addressable through the program that made it.
+  // withdrawal is only addressable through the program that made it. Entries
+  // retire themselves once announced (the watcher's onSettled), so the list
+  // holds only in-flight watches.
   const [watched, setWatched] = useState<readonly { programId: string; withdrawalRef: string }[]>(
     []
   );
@@ -499,7 +505,19 @@ function ProgramsSection() {
       ))}
 
       {watched.map((entry) => (
-        <WithdrawalOutcomeWatcher key={`${entry.programId}:${entry.withdrawalRef}`} {...entry} />
+        <WithdrawalOutcomeWatcher
+          key={`${entry.programId}:${entry.withdrawalRef}`}
+          {...entry}
+          onSettled={() =>
+            setWatched((current) =>
+              current.filter(
+                (candidate) =>
+                  candidate.programId !== entry.programId ||
+                  candidate.withdrawalRef !== entry.withdrawalRef
+              )
+            )
+          }
+        />
       ))}
 
       {withdrawProgram ? (

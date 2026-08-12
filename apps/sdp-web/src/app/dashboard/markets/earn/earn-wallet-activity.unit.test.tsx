@@ -302,6 +302,34 @@ describe("useEarnWithdrawalOutcomeToast", () => {
     expect(toasts.error).not.toHaveBeenCalled();
   });
 
+  /**
+   * The retire signal: a settled watcher has nothing left to do, and keeping it
+   * mounted accumulates dead SWR subscriptions over a long session — so the
+   * caller must hear exactly one "done" to unmount it, and must NOT hear it
+   * while the withdrawal is still in flight.
+   */
+  it("fires onSettled once on a terminal status, and not before", async () => {
+    const settled = vi.fn();
+    fetchMock.mockResolvedValue(withdrawalOf("wd_settle_cb", "processing"));
+    const { rerender } = renderHook(() =>
+      useEarnWithdrawalOutcomeToast("prog_1", "wd_settle_cb", settled)
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(settled).not.toHaveBeenCalled();
+
+    // SWR caches by key, so drive the terminal read through a fresh key the
+    // way the sibling cases do — same watcher semantics, new withdrawal.
+    fetchMock.mockResolvedValue(withdrawalOf("wd_settle_done", "completed"));
+    rerender();
+    renderHook(() => useEarnWithdrawalOutcomeToast("prog_1", "wd_settle_done", settled));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(settled).toHaveBeenCalledTimes(1);
+  });
+
   it("issues no request at all when nothing was submitted", async () => {
     renderHook(() => useEarnWithdrawalOutcomeToast(undefined, undefined));
     await act(async () => {

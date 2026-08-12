@@ -474,13 +474,22 @@ const WITHDRAWAL_OUTCOME_KEYS: Record<EarnPortfolioWithdrawal["status"], Message
  * resolves once someone signs), then announces once. Passing `undefined` for
  * either argument — no withdrawal submitted this session, or the program read
  * has not resolved — does nothing and issues no requests.
+ *
+ * `onSettled` fires once, right after the announcement, so the caller can
+ * retire the watch: a settled watcher has nothing left to do, and keeping it
+ * mounted would accumulate dead SWR subscriptions over a long session.
  */
 export function useEarnWithdrawalOutcomeToast(
   programId: string | undefined,
-  withdrawalRef: string | undefined
+  withdrawalRef: string | undefined,
+  onSettled?: () => void
 ): void {
   const t = useTranslations();
   const announced = useRef<string | undefined>(undefined);
+  // A ref so a re-created callback identity can never re-trigger the effect —
+  // the announcement (and therefore the retire signal) must fire exactly once.
+  const onSettledRef = useRef(onSettled);
+  onSettledRef.current = onSettled;
 
   const { data } = useSWR(
     programId && withdrawalRef ? ["dashboard-earn-withdrawal", programId, withdrawalRef] : null,
@@ -507,10 +516,12 @@ export function useEarnWithdrawalOutcomeToast(
     const message = t(WITHDRAWAL_OUTCOME_KEYS[data.status]);
     if (data.status === "completed") {
       toast.success(message);
-      return;
+    } else {
+      // Partial counts as a problem, not a success: some of the money did not
+      // arrive, and saying "complete" would be the lie this hook exists to
+      // avoid.
+      toast.error(message);
     }
-    // Partial counts as a problem, not a success: some of the money did not
-    // arrive, and saying "complete" would be the lie this hook exists to avoid.
-    toast.error(message);
+    onSettledRef.current?.();
   }, [data, t]);
 }
