@@ -182,6 +182,16 @@ async function storedRules() {
   return result.results;
 }
 
+// The durable queue the sweeper drains: what a destroy that could not happen left behind.
+async function queuedRetirements() {
+  const result = await getDb(env)
+    .prepare(
+      "SELECT secret_version_ref FROM workflow_action_secret_retirements ORDER BY created_at ASC"
+    )
+    .all<{ secret_version_ref: string }>();
+  return result.results.map((row) => row.secret_version_ref);
+}
+
 describe("workflow signing-secret lifecycle (routes)", () => {
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -216,6 +226,7 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       await kv.rateLimits.delete(key.name);
     }
 
+    await db.prepare("DELETE FROM workflow_action_secret_retirements").run();
     await db.prepare("DELETE FROM workflow_executions").run();
     await db.prepare("DELETE FROM asset_workflows").run();
     await db.prepare("DELETE FROM issued_tokens").run();
@@ -505,7 +516,8 @@ describe("workflow signing-secret lifecycle (routes)", () => {
     });
 
     // Cleanup is best effort by contract: the rule is already gone, so a backend failure
-    // must not turn a successful delete into an error the caller retries.
+    // must not turn a successful delete into an error the caller retries. It is not
+    // dropped either — the version goes on the queue the sweeper drains.
     it("succeeds even when the backend refuses the destroy", async () => {
       const workflowId = await createRuleWithSecret();
       secretStore.destroyVersion.mockRejectedValue(new Error("permission denied"));
@@ -513,6 +525,25 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       const res = await request("DELETE", `${base}/${workflowId}`);
 
       expect(res.status).toBe(200);
+      expect(await queuedRetirements()).toEqual([versionRef(1)]);
+    });
+
+    // The same obligation when the failure comes one step earlier. A store the process
+    // cannot CONSTRUCT is unreachable, not absent — the distinction reads already make.
+    // Bailing out on it skipped the queue along with the destroy, so a deployment whose
+    // credential-store config had broken (an unset project id, a typo'd backend name)
+    // orphaned the rule's signing key on every delete, silently: the version stayed
+    // readable in the backend with no rule pointing at it and nothing that would retry.
+    it("queues the retirement when the store cannot be constructed", async () => {
+      const workflowId = await createRuleWithSecret();
+      createCredentialSecretStore.mockImplementation(() => {
+        throw new CredentialSecretStoreError("not configured", "INVALID_CONFIGURATION");
+      });
+
+      const res = await request("DELETE", `${base}/${workflowId}`);
+
+      expect(res.status).toBe(200);
+      expect(await queuedRetirements()).toEqual([versionRef(1)]);
     });
 
     // Execution withdrawal runs last, so its failure leaves the rule soft-deleted with

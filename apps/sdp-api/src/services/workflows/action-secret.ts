@@ -67,7 +67,7 @@ export async function storeActionSecret(
 // replaced the reference, or a delete that already removed the rule. Failing here would
 // report an error for work that actually happened.
 //
-// So a backend failure is recorded as durable work instead of only logged: the sweeper
+// So a failure to retire is recorded as durable work instead of only logged: the sweeper
 // (retireOrphanedActionSecrets) retries it until the version is gone. A log line alone
 // left the superseded credential alive in the backend with nothing pointing at it and
 // nothing that would ever try again.
@@ -77,15 +77,22 @@ export async function destroyActionSecret(
   // Recorded with the retirement so an operator can trace an orphan back to its rule.
   context?: { orgId?: string | null; workflowId?: string | null }
 ): Promise<void> {
+  // Nothing to retire: the other backends keep the ciphertext inline, so it goes away
+  // with the row. This is the one early return that is genuinely a no-op.
   if (stored?.storageBackend !== "gcp_secret_manager" || !stored.secretVersionRef) {
     return;
   }
-  const secretStore = store(env);
-  if (!secretStore) {
-    return;
-  }
+  // Building the store is inside the try on purpose. A store this process cannot
+  // construct is unreachable, not absent — the same distinction reads make — and the
+  // queue is exactly what "could not retire it now" means here; the sweeper leaves such
+  // rows pending until the deployment can reach the backend again. Bailing out on an
+  // unconstructible store skipped the queue along with the destroy, so a broken
+  // credential-store config orphaned every rotated and deleted signing key silently,
+  // with no record that any of it had happened.
   try {
-    await secretStore.destroyVersion({ secretVersionRef: stored.secretVersionRef });
+    await createCredentialSecretStore(env).destroyVersion({
+      secretVersionRef: stored.secretVersionRef,
+    });
   } catch (error) {
     await recordFailedRetirement(env, stored, context, error);
   }
