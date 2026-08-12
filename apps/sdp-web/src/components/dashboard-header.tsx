@@ -508,7 +508,22 @@ function getIntegrationsPageConfig(
   if (pathname.startsWith("/dashboard/integrations")) {
     // Card-grid page: fill the shell's wide container instead of stacking a
     // second max-width inside the centered default and stranding gutters.
-    return { title: t("Shared.dashboardShell.integrations"), contentWidthClass: "max-w-7xl" };
+    return {
+      title: t("Shared.dashboardShell.integrations"),
+      // The family axis rides the header tabs like policies; the catalog keeps
+      // status and search as its own secondary filters.
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("Shared.integrations.filterAllFamilies") },
+          { id: "custody", label: t("Shared.integrations.custodyTitle") },
+          { id: "rpc", label: t("Shared.integrations.rpcTitle") },
+          { id: "ramps", label: t("Shared.integrations.rampsTitle") },
+          { id: "compliance", label: t("Shared.integrations.complianceTitle") },
+        ],
+        hideOnMobile: false,
+      },
+      contentWidthClass: "max-w-7xl",
+    };
   }
   return null;
 }

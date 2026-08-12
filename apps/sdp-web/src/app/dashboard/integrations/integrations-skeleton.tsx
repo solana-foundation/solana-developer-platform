@@ -7,18 +7,11 @@ export function IntegrationsSkeleton() {
       </div>
       <div className="space-y-3">
         <div className="h-11 w-full max-w-md rounded-2xl bg-fill-subtle" />
-        {/* Two rows, matching the family and status pill rows the loaded
-            catalog renders: five family pills, six status pills. */}
-        <div className="flex flex-col gap-2">
-          {[
-            [48, 104, 84, 92, 116],
-            [104, 96, 132, 84, 148, 120],
-          ].map((row) => (
-            <div key={row.join()} className="flex flex-wrap gap-2">
-              {row.map((width) => (
-                <div key={width} className="h-8 rounded-full bg-fill-subtle" style={{ width }} />
-              ))}
-            </div>
+        {/* One row, matching the six status pills the loaded catalog renders;
+            the family axis lives in the header tabs. */}
+        <div className="flex flex-wrap gap-2">
+          {[104, 96, 132, 84, 148, 120].map((width) => (
+            <div key={width} className="h-8 rounded-full bg-fill-subtle" style={{ width }} />
           ))}
         </div>
       </div>
