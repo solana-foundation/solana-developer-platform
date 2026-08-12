@@ -24,9 +24,31 @@ const archivoNarrow = Archivo_Narrow({
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations();
+  const title = t("Metadata.title");
+  const description = t("Metadata.description");
   return {
-    title: t("Metadata.title"),
-    description: t("Metadata.description"),
+    // Resolves the og/twitter image file conventions to absolute URLs, which
+    // link unfurlers require. Vercel previews inherit the canonical origin on
+    // purpose: preview links unfurl with production media instead of leaking
+    // preview hostnames into caches.
+    metadataBase: new URL(process.env.NEXT_PUBLIC_SDP_WEB_URL ?? "https://platform.solana.com"),
+    title: {
+      default: title,
+      template: `%s · ${title}`,
+    },
+    description,
+    applicationName: title,
+    openGraph: {
+      type: "website",
+      siteName: title,
+      title,
+      description,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
   };
 }
 
