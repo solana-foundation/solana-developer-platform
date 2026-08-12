@@ -464,7 +464,6 @@ function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
       return "RATE_LIMITED";
     case -32002:
       return "INSUFFICIENT_BALANCE";
-    case -32000:
     case -32600:
     case -32602:
       return "SIGNING_FAILED";

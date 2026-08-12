@@ -51,6 +51,46 @@ function makeAdapter(getConfig: () => Promise<unknown>): KoraAdapter {
   return new KoraAdapter({ rpcUrl: "https://kora.example", userId: "u1", client: transport });
 }
 
+function makeAdapterRejectingSend(rpcErrorMessage: string): KoraAdapter {
+  const transport = {
+    getPayerSigner: async () => ({ signer_address: SIGNER }),
+    signTransaction: async () => ({ signed_transaction: "" }),
+    signAndSendTransaction: async () => {
+      throw new Error(rpcErrorMessage);
+    },
+    estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+    getSupportedTokens: async () => ({ tokens: [] }),
+    getConfig: async () => ({}),
+  } as unknown as KoraTransport;
+  return new KoraAdapter({ rpcUrl: "https://kora.example", userId: "u1", client: transport });
+}
+
+describe("KoraAdapter error classification", () => {
+  it("treats a generic Kora server error as ambiguous, not a deterministic rejection", async () => {
+    const adapter = makeAdapterRejectingSend("RPC Error -32000: server exploded");
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array(64)),
+      (error: unknown) => error instanceof FeePaymentError && error.code === "NETWORK_ERROR"
+    );
+  });
+
+  it("keeps invalid-request rejections deterministic", async () => {
+    const adapter = makeAdapterRejectingSend("RPC Error -32602: invalid params");
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array(64)),
+      (error: unknown) => error instanceof FeePaymentError && error.code === "SIGNING_FAILED"
+    );
+  });
+
+  it("keeps rate limits deterministic and releasable", async () => {
+    const adapter = makeAdapterRejectingSend("RPC Error -32001: rate limited");
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array(64)),
+      (error: unknown) => error instanceof FeePaymentError && error.code === "RATE_LIMITED"
+    );
+  });
+});
+
 describe("KoraAdapter.getSponsorshipConfiguration", () => {
   it("fails closed when Kora omits validation_config", async () => {
     const adapter = makeAdapter(async () => ({}));
