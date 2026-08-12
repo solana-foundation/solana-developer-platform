@@ -133,25 +133,32 @@ async function recordFailedRetirement(
   );
 }
 
-// Returns null when there is no stored secret, or when it can't be read — the webhook
-// action then sends unsigned rather than failing the delivery outright, and says so in
-// the execution result.
+// `secret: null` means the rule carries no signing key at all — an unsigned delivery is
+// then what the issuer configured. `ok: false` means the rule HAS one and it could not be
+// read, which is a different answer entirely and the caller must not treat it as "no key":
+// collapsing the two into null let a transient secret-store failure silently downgrade a
+// signed webhook to an unsigned one, and report the execution as succeeded.
+export type ReadActionSecretResult = { ok: true; secret: string | null } | { ok: false };
+
 export async function readActionSecret(
   env: Env,
   params: { orgId: string; stored: StoredCredentialSecret | null | undefined }
-): Promise<string | null> {
+): Promise<ReadActionSecretResult> {
   if (!params.stored) {
-    return null;
+    return { ok: true, secret: null };
   }
   const secretStore = store(env);
+  // A rule holding a stored reference on a deployment with no secret store configured:
+  // the key exists and is unreachable, not absent.
   if (!secretStore) {
-    return null;
+    return { ok: false };
   }
   try {
     const payload = await secretStore.read({ orgId: params.orgId, stored: params.stored });
     const value = payload[PAYLOAD_KEY];
-    return typeof value === "string" && value ? value : null;
+    // A stored reference that yields no usable value is unreadable, not unsigned.
+    return typeof value === "string" && value ? { ok: true, secret: value } : { ok: false };
   } catch {
-    return null;
+    return { ok: false };
   }
 }

@@ -1,6 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowExecutionRow } from "@/db/repositories";
 import type { Env } from "@/types/env";
+
+// The credential store backing a rule's stored signing key. Faked so a read can be made
+// to fail on demand — the point of the fail-open tests below.
+const secretStore = vi.hoisted(() => ({
+  storageBackend: "gcp_secret_manager" as const,
+  write: vi.fn(),
+  read: vi.fn(),
+  destroyVersion: vi.fn(),
+}));
+vi.mock("@/services/credential-secret-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/credential-secret-store")>()),
+  createCredentialSecretStore: () => secretStore,
+}));
 
 // DNS is stubbed so the SSRF guard's behavior is asserted rather than the test host's
 // resolver: `example.com` answers public, `rebound.example.com` answers private.
@@ -41,6 +54,10 @@ function executionFixture(): WorkflowExecutionRow {
 }
 
 describe("runSendWebhook", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -186,5 +203,68 @@ describe("runSendWebhook", () => {
       params: { url: "https://example.com/hook" },
     });
     expect(outcome).toMatchObject({ status: "failed", retryable: true, error: "socket hang up" });
+  });
+
+  // A rule carrying a signing key must never deliver without one. "Could not read the
+  // key" and "there is no key" are different answers, and treating the first as the
+  // second stripped the receiver's only way to authenticate the payload — while the
+  // engine recorded the execution as succeeded, so nothing retried and nothing surfaced.
+  describe("when the rule has a signing secret the store cannot return", () => {
+    const storedRef = {
+      storageBackend: "gcp_secret_manager",
+      secretRef: "projects/p/secrets/sdp-workflow-action-1",
+      secretVersionRef: "projects/p/secrets/sdp-workflow-action-1/versions/1",
+    } as never;
+
+    it("does not deliver, and asks the engine to retry", async () => {
+      secretStore.read.mockRejectedValue(new Error("secret manager unavailable"));
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const outcome = await runSendWebhook(env, executionFixture(), {
+        params: { url: "https://example.com/hook" },
+        actionSecret: storedRef,
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(outcome).toMatchObject({
+        status: "failed",
+        retryable: true,
+        error: "SECRET_UNREADABLE",
+      });
+    });
+
+    // Same answer when the reference resolves to nothing usable: the key is configured,
+    // so an empty read is a failed read, not an unsigned rule.
+    it("does not deliver when the stored reference yields no value", async () => {
+      secretStore.read.mockResolvedValue({});
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const outcome = await runSendWebhook(env, executionFixture(), {
+        params: { url: "https://example.com/hook" },
+        actionSecret: storedRef,
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(outcome).toMatchObject({ retryable: true, error: "SECRET_UNREADABLE" });
+    });
+
+    // The counterpart that must keep working: a readable key still signs, so the fix
+    // did not turn every stored secret into a failure.
+    it("signs with the stored key when the store returns it", async () => {
+      secretStore.read.mockResolvedValue({ secret: "from-the-store" });
+      const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const outcome = await runSendWebhook(env, executionFixture(), {
+        params: { url: "https://example.com/hook" },
+        actionSecret: storedRef,
+      });
+
+      expect(outcome).toMatchObject({ status: "succeeded" });
+      const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+      expect(headers["x-sdp-signature-256"]).toMatch(/^sha256=[0-9a-f]{64}$/);
+    });
   });
 });

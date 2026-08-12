@@ -73,11 +73,20 @@ export async function runSendWebhook(
   }
   // The signing key lives in the credential store; `params.secret` is only a fallback
   // for a rule saved before that (and for tests that pass one inline).
-  const secret =
-    (await readActionSecret(env, {
-      orgId: execution.organization_id,
-      stored: action.actionSecret,
-    })) ?? resolveParam(action, "secret");
+  const stored = await readActionSecret(env, {
+    orgId: execution.organization_id,
+    stored: action.actionSecret,
+  });
+  // A rule that HAS a signing key must never deliver without one. Sending unsigned
+  // because the store was briefly unavailable strips the receiver's only means of
+  // authenticating the payload — and a receiver that correctly rejects it would see a
+  // permanent 4xx rather than the retry this deserves. Transient: the engine retries
+  // with backoff, and a store that stays down ends as a visible failure instead of a
+  // stream of unsigned deliveries.
+  if (!stored.ok) {
+    return transientFail("SECRET_UNREADABLE");
+  }
+  const secret = stored.secret ?? resolveParam(action, "secret");
 
   const body = JSON.stringify({
     type: execution.trigger_type,
