@@ -1,7 +1,7 @@
 /**
- * LOCAL DEVELOPMENT ONLY — seeds an Earn strategy catalogue + NAV history into
- * a developer's own Postgres so /v1/earn/strategies and the Earn dashboard have
- * something to render without Ground credentials.
+ * LOCAL DEVELOPMENT ONLY — seeds an Earn strategy catalogue into a developer's
+ * own Postgres so /v1/earn/strategies and the Earn dashboard have something to
+ * render without Ground credentials.
  *
  * This is NOT how deployed catalogue data arrives. The hourly catalogue-sync
  * cron (src/cron/earn-catalogue-sync.ts) pulls each provider's live catalogue
@@ -27,8 +27,8 @@
  * Run both and the fixtures show up as twins beside the synced rows — the
  * prefix, and `riskMetadata.seedFixture`, are how you tell them apart.
  *
- * Rows go through the same write API the sync uses (upsertStrategy /
- * insertNavSnapshot) and are checked against the provider registry and its
+ * Rows go through the same write API the sync uses (upsertStrategy) and are
+ * checked against the provider registry and its
  * declared support envelope with the exact helper the sync validates with, so
  * fixtures behave exactly like synced rows.
  *
@@ -57,11 +57,9 @@
  *     Ground wallet itself untouched.
  *
  * Idempotent: strategies upsert on (provider, provider_reference, environment)
- * so re-running updates exactly those rows in place (ids stay stable, positions
- * opened against them survive) and NAV points upsert on (strategy_id, as_of).
+ * so re-running updates exactly those rows in place (ids stay stable).
  *
- *   pnpm -C apps/sdp-api db:seed:earn                            # sandbox fixtures + NAV history
- *   pnpm -C apps/sdp-api db:seed:earn -- --days 30               # longer NAV history
+ *   pnpm -C apps/sdp-api db:seed:earn                            # sandbox catalogue fixtures
  *   pnpm -C apps/sdp-api db:seed:earn -- --clean                 # remove the fixtures again
  *
  * Sandbox-only, and the target DATABASE_URL must be a loopback host — anything
@@ -82,7 +80,7 @@ import {
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { type AppDb, asTransactionalClient, closeDatabasePools, createDatabaseClient } from "@/db";
-import type { EarnRepository, InsertEarnNavSnapshotInput } from "@/db/repositories";
+import type { EarnRepository } from "@/db/repositories";
 import { createPostgresEarnRepository } from "@/db/repositories";
 
 /** Ownership marker for seeded rows — see the header for what it protects. */
@@ -101,8 +99,6 @@ const SEED_DEPOSIT_TOKENS: readonly EarnDepositTokenSymbol[] = ["USDC"];
 // catalogue-sync maps every source to `variable`; fixtures mirror that instead
 // of inventing fixed-rate products.
 const SEED_APY_TYPE: EarnApyType = "variable";
-const DEFAULT_NAV_DAYS = 14;
-const DAY_MS = 86_400_000;
 
 /**
  * Ownership marker for seeded provider-wallet links. `--clean` deletes only
@@ -188,7 +184,7 @@ interface SeedStrategy {
   redemptionDelayDays: number | null;
   /** Open curator id — @sdp/types maps known ones to display labels. */
   curator: string;
-  /** Anchor TVL in USD; NAV snapshots wobble around it. */
+  /** TVL in USD, surfaced through riskMetadata like the sync's copy. */
   tvlUsd: number;
   /** Defaults to active — exactly one fixture is paused on purpose. */
   status?: EarnStrategyStatus;
@@ -342,8 +338,7 @@ function buildRiskMetadata(strategy: SeedStrategy): EarnStrategyRiskMetadata {
   return {
     curator: strategy.curator,
     riskTier: riskTierForApy(strategy.apy),
-    // Same field the sync copies from Ground, and the anchor the NAV series
-    // wobbles around — held in step so catalogue and NAV never disagree.
+    // Same field the sync copies from Ground.
     tvlUsd: strategy.tvlUsd,
     // Fixture marker, visible everywhere risk metadata is (API payloads, psql),
     // so a seeded row never reads as live truth. --clean keys off the
@@ -369,49 +364,48 @@ function resolveDepositMints(): string[] {
   return mints;
 }
 
-/**
- * Daily midnight-UTC NAV points, oldest first: share price compounds at
- * apy/365 from 1.0 up to today, TVL wobbles mildly around the anchor.
- * Deterministic for a given day, and as_of values repeat across runs so
- * insertNavSnapshot updates the same points in place.
- */
-function buildNavSeries(
-  strategy: SeedStrategy,
-  strategyId: string,
-  days: number,
-  nowMs: number
-): InsertEarnNavSnapshotInput[] {
-  const today = new Date(nowMs);
-  const todayUtcMs = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-  const dailyRate = Number(strategy.apy) / 365;
-
-  return Array.from({ length: days }, (_, index) => {
-    const age = days - 1 - index;
-    return {
-      strategyId,
-      sharePrice: ((1 + dailyRate) ** index).toFixed(8),
-      apy: strategy.apy,
-      tvl: (strategy.tvlUsd * (1 + 0.03 * Math.sin(index / 2))).toFixed(2),
-      asOf: new Date(todayUtcMs - age * DAY_MS).toISOString(),
-    };
-  });
-}
-
 // ── Database ────────────────────────────────────────────────────────────────
 
 async function deleteSeeded(db: AppDb): Promise<number> {
-  // earn_nav_snapshots cascade from earn_strategies; earn_positions FKs are
-  // RESTRICT, so cleaning fails loudly if positions were opened against
-  // seeded strategies rather than orphaning them.
   return db.execute(
     "DELETE FROM earn_strategies WHERE environment = ? AND provider_reference LIKE ?",
     [SEED_ENVIRONMENT, `${SEED_REFERENCE_PREFIX}%`]
   );
 }
 
+/**
+ * Withdrawal history PINS a wallet link: earn_program_withdrawals FKs the link
+ * row with no cascade (history is undeletable by design — migration 0055 /
+ * PRO-1628), so a seeded link that has been withdrawn against can be neither
+ * cleaned nor moved. Skipping beats crashing on the FK, and keeping the link
+ * where its history lives is the correct outcome anyway.
+ */
+async function countHistoryPinnedSeededWallets(db: AppDb): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*)::int AS pinned FROM earn_provider_wallets w
+        WHERE w.environment = ? AND w.provider = ? AND w.label = ?
+          AND EXISTS (SELECT 1 FROM earn_program_withdrawals x WHERE x.wallet_id = w.id)`
+    )
+    .bind(SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL)
+    .first<{ pinned: number }>();
+  return row?.pinned ?? 0;
+}
+
 async function deleteSeededWallets(db: AppDb): Promise<number> {
+  const pinned = await countHistoryPinnedSeededWallets(db);
+  if (pinned > 0) {
+    console.log(
+      `  keeping ${pinned} seeded link(s) with withdrawal history — history is undeletable by design (PRO-1628).`
+    );
+  }
   return db.execute(
-    "DELETE FROM earn_provider_wallets WHERE environment = ? AND provider = ? AND label = ?",
+    `DELETE FROM earn_provider_wallets
+      WHERE environment = ? AND provider = ? AND label = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM earn_program_withdrawals x
+           WHERE x.wallet_id = earn_provider_wallets.id
+        )`,
     [SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL]
   );
 }
@@ -498,6 +492,16 @@ async function seedProviderWallets(
     return { linked: 0, kept: 1, moved: false, skipped: false };
   }
 
+  // A seeded link with withdrawal history cannot move: its row is the FK
+  // target of that history (undeletable by design), and the history belongs
+  // to the org that withdrew. Leave it and say so, rather than crash mid-move.
+  if ((await countHistoryPinnedSeededWallets(db)) > 0) {
+    console.log(
+      `  ${organization.slug}: NOT moved — the seeded link has withdrawal history and stays with the org that withdrew (PRO-1628).`
+    );
+    return { linked: 0, kept: 1, moved: false, skipped: false };
+  }
+
   // The move is one transaction: the delete and the insert must land together or
   // not at all. Committing the delete on its own would leave no program link if
   // the insert then failed, putting the dashboard back on the empty onboarding
@@ -507,7 +511,12 @@ async function seedProviderWallets(
     // Only ever removes rows this seed created; a wizard-made link carries a
     // different label and is left alone.
     const removed = await tx.execute(
-      "DELETE FROM earn_provider_wallets WHERE environment = ? AND provider = ? AND label = ?",
+      `DELETE FROM earn_provider_wallets
+        WHERE environment = ? AND provider = ? AND label = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM earn_program_withdrawals x
+             WHERE x.wallet_id = earn_provider_wallets.id
+          )`,
       [SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL]
     );
     await txRepo.insertProviderWallet({
@@ -531,10 +540,8 @@ async function seedProviderWallets(
 async function seedStrategy(
   repo: EarnRepository,
   strategy: SeedStrategy,
-  depositMints: string[],
-  days: number,
-  nowMs: number
-): Promise<number> {
+  depositMints: string[]
+): Promise<void> {
   const reference = seededReference(strategy);
 
   // Validate exactly as the catalogue-sync cron would before persisting.
@@ -567,12 +574,6 @@ async function seedStrategy(
   if (!row) {
     throw new Error(`Upsert returned no row for ${reference}`);
   }
-
-  const navPoints = buildNavSeries(strategy, row.id, days, nowMs);
-  for (const navPoint of navPoints) {
-    await repo.insertNavSnapshot(navPoint);
-  }
-  return navPoints.length;
 }
 
 // ── Entry point ─────────────────────────────────────────────────────────────
@@ -597,14 +598,6 @@ function requireLocalDatabase(databaseUrl: string): void {
       `Refusing to touch ${hostname}: db:seed:earn writes local-development fixtures and only runs against a local database (localhost / 127.0.0.1 / ::1).`
     );
   }
-}
-
-function readFlag(name: string): string | undefined {
-  const index = process.argv.indexOf(`--${name}`);
-  if (index === -1) {
-    return undefined;
-  }
-  return process.argv[index + 1];
 }
 
 function summarize(): void {
@@ -644,10 +637,6 @@ async function main(): Promise<void> {
     );
   }
   const cleanOnly = process.argv.includes("--clean");
-  const days = Number(readFlag("days") ?? DEFAULT_NAV_DAYS);
-  if (!Number.isInteger(days) || days < 1 || days > 365) {
-    throw new Error("--days must be an integer between 1 and 365");
-  }
 
   const db = createDatabaseClient(databaseUrl);
   const repo = createPostgresEarnRepository(db);
@@ -663,10 +652,8 @@ async function main(): Promise<void> {
     }
 
     const depositMints = resolveDepositMints();
-    const nowMs = Date.now();
-    let navPointCount = 0;
     for (const strategy of SEED_STRATEGIES) {
-      navPointCount += await seedStrategy(repo, strategy, depositMints, days, nowMs);
+      await seedStrategy(repo, strategy, depositMints);
     }
 
     const { total } = await repo.listStrategies({
@@ -675,9 +662,7 @@ async function main(): Promise<void> {
       limit: 1,
       offset: 0,
     });
-    console.log(
-      `Upserted ${SEED_STRATEGIES.length} strategies with ${navPointCount} NAV points (${days} days each).`
-    );
+    console.log(`Upserted ${SEED_STRATEGIES.length} strategies.`);
     summarize();
     console.log(`  catalogue now holds ${total} ${SEED_ENVIRONMENT} strategies in total.`);
 

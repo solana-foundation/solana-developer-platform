@@ -3,6 +3,7 @@
 import {
   BlocksIcon,
   CircleCheckBigIcon,
+  CircleDotDashedIcon,
   KeyRoundIcon,
   LibraryIcon,
   type LucideIcon,
@@ -11,9 +12,9 @@ import {
   TrendingUpIcon,
   XIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect } from "react";
 import { docsHref } from "@/components/dashboard-nav";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -40,6 +41,7 @@ function getMoreGroups(
     canReadApprovals: boolean;
     canManageOrgSettings: boolean;
     earnEnabled: boolean;
+    heliusRingsEnabled: boolean;
     marketsEnabled: boolean;
   }
 ): MoreGroup[] {
@@ -53,6 +55,15 @@ function getMoreGroups(
                 label: t("Shared.dashboardShell.earn"),
                 href: DASHBOARD_SIDE_NAV_HREFS.markets,
                 icon: TrendingUpIcon,
+              },
+            ]
+          : []),
+        ...(options.heliusRingsEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.heliusRings"),
+                href: DASHBOARD_SIDE_NAV_HREFS.heliusRings,
+                icon: CircleDotDashedIcon,
               },
             ]
           : []),
@@ -128,9 +139,9 @@ function TileLink({
     );
   }
   return (
-    <DashboardNavigationLink href={href} onClick={onClick} className={className} {...rest}>
+    <Link href={href} onClick={onClick} className={className} {...rest}>
       {children}
-    </DashboardNavigationLink>
+    </Link>
   );
 }
 
@@ -141,14 +152,14 @@ function TileLink({
  * bar's drawer trigger is hidden below `xl`, because two entry points to the same
  * destinations is worse than one. The workspace switcher rides along at the top,
  * since project switching was the one thing the drawer offered that a tab bar
- * cannot express. Internal tiles use `DashboardNavigationLink` so they keep the
- * same pre-commit loading feedback as every other managed link.
+ * cannot express.
  */
 export function DashboardMoreSheet({
   pathname,
   canReadApprovals,
   canManageOrgSettings,
   earnEnabled,
+  heliusRingsEnabled,
   marketsEnabled,
   onClose,
 }: {
@@ -156,6 +167,7 @@ export function DashboardMoreSheet({
   canReadApprovals: boolean;
   canManageOrgSettings: boolean;
   earnEnabled: boolean;
+  heliusRingsEnabled: boolean;
   marketsEnabled: boolean;
   onClose: () => void;
 }) {
@@ -164,6 +176,7 @@ export function DashboardMoreSheet({
     canReadApprovals,
     canManageOrgSettings,
     earnEnabled,
+    heliusRingsEnabled,
     marketsEnabled,
   });
 

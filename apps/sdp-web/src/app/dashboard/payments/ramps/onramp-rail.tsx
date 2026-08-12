@@ -1,6 +1,6 @@
 "use client";
 
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { WizardSummaryList } from "../wizard-summary-list";

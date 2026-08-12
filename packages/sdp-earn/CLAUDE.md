@@ -119,7 +119,8 @@ Practical notes:
   design. Use the dashboard, or mint a key for your own org.
 - **The seeded program starts at whatever the shared wallet currently holds.**
   It carries a live single-strategy allocation (one strategy at 100% — the
-  shape the deposit flow authors), so the overview shows a real forward APY.
+  only shape the V1 API accepts, PRO-1667), so the overview shows a real
+  forward APY.
   The wallet is shared with teammates and IS funded from time to time for
   exit-path testing, so do not treat any particular balance as the baseline —
   read it from the dashboard. Fund it by sending devnet USDC to the wallet's
@@ -165,7 +166,10 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 
 ## Contracts
 
-- `EarnVaultProvider` (src/types.ts) is the base contract; the portfolio-wallet
+- `EarnVaultProvider` (src/types.ts) is the base contract — slimmed by
+  PRO-1628 to `provider` + `declaredSupport` + `listStrategies`, every member
+  real and called (the per-strategy quote/execution seams live in git history
+  until PRO-1634 gives them a consumer); the portfolio-wallet
   surface (`EarnPortfolioWalletProvider`) is an **optional capability** detected
   via `supportsPortfolioWallets()` (src/capabilities.ts, all-or-nothing method
   presence). New optional surfaces follow the same pattern: interface extension
