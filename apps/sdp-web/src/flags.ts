@@ -80,18 +80,6 @@ export const organizationOnboarding = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
-export const alphaledgerTokenizationEngine = flag<boolean, DashboardFlagEntities>({
-  key: "alphaledger-tokenization-engine",
-  adapter: vercelAdapter(),
-  identify: identifyDashboardEntities,
-  defaultValue: flagDefault("SDP_FLAG_ALPHALEDGER_TOKENIZATION_ENGINE", false),
-  description: "Offer the AlphaLedger tokenization engine as an issuance provider option.",
-  options: [
-    { value: false, label: "Mosaic only" },
-    { value: true, label: "AlphaLedger available" },
-  ],
-});
-
 export const assetProfiles = flag<boolean, DashboardFlagEntities>({
   key: "asset-profiles",
   adapter: vercelAdapter(),
@@ -111,6 +99,19 @@ export const privateChannels = flag<boolean, DashboardFlagEntities>({
   defaultValue: flagDefault("PRIVATE_CHANNELS_ENABLED", false),
   description:
     "Show the Private Channels payments workspace (instance, channels, members, deposits, transfers, withdrawals).",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
+export const heliusRings = flag<boolean, DashboardFlagEntities>({
+  key: "helius-rings",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("HELIUS_RINGS_ENABLED", false),
+  description:
+    "Show the Helius Rings devnet workspace (shielded wallets, private transfers, zones, timelocks).",
   options: [
     { value: false, label: "Hidden" },
     { value: true, label: "Enabled" },

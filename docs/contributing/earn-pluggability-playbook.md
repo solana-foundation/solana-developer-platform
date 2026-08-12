@@ -40,9 +40,8 @@ the closed unions live in code, per the ADR 0001 asset-profiles pattern.
 1. Add the value to the matching const array in
    `packages/sdp-types/src/earn.ts`: `EARN_STRATEGY_SOURCE_KINDS`,
    `EARN_APY_TYPES`, `EARN_LIQUIDITY_TERMS`, or
-   `EARN_DEPOSIT_TOKEN_SYMBOLS`. (`EARN_KNOWN_UNDERLYING_SOURCES` is
-   deliberately non-exhaustive — new yield sources need no entry at all,
-   an entry only labels a known one.)
+   `EARN_DEPOSIT_TOKEN_SYMBOLS`. (`underlyingSource` is an open string with
+   no registry at all — new yield sources need no entry anywhere.)
 2. That's the whole DB story — no migration, no CHECK constraint to alter.
 3. Filters follow automatically: `apps/sdp-api/src/routes/earn/schemas.ts`
    builds its query validation as `z.enum(EARN_STRATEGY_SOURCE_KINDS)` (etc.),
@@ -79,8 +78,7 @@ being a `NOT_IMPLEMENTED` stub) never sinks the others' pass.
 **Local dev.** Provider credentials aren't needed to get a catalogue:
 
 ```bash
-pnpm -C apps/sdp-api db:seed:earn                            # sandbox catalogue + NAV history
-pnpm -C apps/sdp-api db:seed:earn -- --days 30               # longer NAV history
+pnpm -C apps/sdp-api db:seed:earn                            # sandbox catalogue fixtures
 pnpm -C apps/sdp-api db:seed:earn -- --clean                 # remove seeded rows again
 ```
 
@@ -89,9 +87,9 @@ The seed is **local-development only**: it refuses any non-local
 `--environment production` — passing it exits with an error).
 
 The script (`apps/sdp-api/scripts/seed-earn-demo.ts`) writes through the same
-`upsertStrategy`/`insertNavSnapshot` API and declared-support validation the
-sync uses, so seeded rows behave exactly like synced ones; it is idempotent
-on the `seed-demo-` provider-reference prefix.
+`upsertStrategy` API and declared-support validation the sync uses, so seeded
+rows behave exactly like synced ones; it is idempotent on the `seed-demo-`
+provider-reference prefix.
 
 **Update.** Sync-owned fields (name, APY, mints, risk metadata, ...) converge
 on the next run; manual edits to those columns get overwritten. `status` is the
@@ -103,10 +101,10 @@ catalogue and cannot be undone by a sync pass.
 **Remove — flip status, never delete.** `EARN_STRATEGY_STATUSES` is
 `active | paused | deprecated`:
 
-- `paused` — reversible stop. Deposit quotes/execution are refused
-  (409 `STRATEGY_NOT_AVAILABLE`); withdrawals and all reads keep working
-  (the row leaves the default catalogue list, which filters to `active`, but
-  stays fetchable by id).
+- `paused` — reversible stop. The strategy cannot be selected as a program
+  allocation target (`PUT /program` validates against the *active* catalogue);
+  withdrawals and all reads keep working (the row leaves the default catalogue
+  list, which filters to `active`, but stays fetchable by id).
 - `deprecated` — terminal wind-down. Same runtime semantics as `paused`;
   the difference is intent (the strategy will not come back).
 
@@ -120,13 +118,15 @@ entitlement override off, or pull the environment credentials — withdrawals
 continue either way.
 
 The asymmetry is the ADR 0002 exit-safety invariant — **money out always
-beats money off**: deposits require an *active* strategy plus the full
-entitled+configured provider gate, while withdrawals ignore strategy status
-and need only provider credentials (`assertEarnProviderConfigured`). Both
-halves are enforced in `requireQuotableStrategy`
-(`apps/sdp-api/src/routes/earn/handlers/quotes.ts`) and covered by route
-tests (`apps/sdp-api/src/routes/earn.test.ts`). Never delete a strategy row:
-positions and movements FK into it, and history must survive wind-down.
+beats money off**: money-in requires an *active* strategy plus the full
+entitled+configured provider gate (`PUT /program` via
+`assertProviderAvailable` + `assertKnownYieldSources`), while withdrawals
+ignore strategy status and need only provider credentials
+(`assertEarnProviderConfigured`) — and the withdrawal-ledger list needs not
+even that. Both halves are covered by route tests
+(`apps/sdp-api/src/routes/earn-program.test.ts`). Never delete a strategy
+row: catalogue history must survive wind-down, and program allocations
+reference strategies by provider reference.
 
 ## 4. Add a vault-infra provider — add the id, follow the compiler
 
@@ -148,6 +148,7 @@ copyable precedent (`ground` id, `GroundEarnClient`, `GROUND_API_KEY` /
 | 5. Availability | `apps/sdp-api/src/services/provider-availability.service.ts` | One line: `<id>: keyPairCredentialDefinition("<Label>", "<ID>")`. |
 | 6. Credential keys | `apps/sdp-api/src/types/env.d.ts` | `<ID>_API_KEY` + `<ID>_SANDBOX_API_KEY`. `keyPairCredentialDefinition` binds its derived keys to `keyof Env`, so skipping this is a compile error. |
 | 7. Key projections | `turbo.json` `globalEnv` + `scripts/secret-keys.mjs` | Both keys in both files (+ the secret manager for deployed environments). |
+| 8. Managed deployments | sdp-infra `terraform/envs/<env>/terraform.tfvars` | Append the credential key(s) to `app_secret_keys` (the Doppler → Secret Manager mirror; also add the value to that env's Doppler config). Dev carries sandbox keys only — production keys are a launch-gated decision (PRO-1647). Nothing else: the Cloud Run service and Job read the same secret set, and the hourly catalogue sync picks the provider up from `EARN_PROVIDER_CLIENTS` with zero job changes (`src/job.ts` never names providers; an un-credentialed provider skips fail-closed with `PROVIDER_NOT_CONFIGURED`). |
 
 Tests that enforce the checklist (run them; they fail on the exact step you
 missed):
@@ -171,7 +172,10 @@ strategies and draining positions first, then removing the id.
 Some providers front a *portfolio* wallet (one wallet, weighted allocations
 across yield sources) rather than per-strategy deposits. That surface is an
 **optional** extension of the base contract — implement it only when the
-provider actually offers it.
+provider actually offers it. Note the capability is weighted by design, but
+the V1 product caps each token group at ONE allocation entry per program
+(PRO-1667, ADR 0002 addendum) — a new provider only ever receives
+single-vault targets until weights are re-enabled post-V1.
 
 1. **Implement the full interface, or none of it.**
    `EarnPortfolioWalletProvider` (`packages/sdp-earn/src/types.ts`) extends
@@ -223,9 +227,12 @@ process before anything can talk to Ground's sandbox. Locally that means
 (`scripts/doppler/run-with-config.sh`) overlays `apps/*/.env.local` on top of
 the Doppler-injected values, so the file wins with no `DOPPLER_PRESERVE_ENV`
 opt-in — a plain shell export, by contrast, is dropped. Deployed environments
-take the key from Doppler/Secret Manager instead. Until it resolves, the
-provider is `configured: false` and every call fails closed with
-`PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't care).
+take the key from Doppler/Secret Manager instead — reaching a *managed* runtime
+additionally requires the key in sdp-infra's `app_secret_keys` (step 8 of the
+§4 checklist), which feeds both the Cloud Run service and the cron Job. Until
+it resolves, the provider is `configured: false` and every call fails closed
+with `PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't
+care).
 
 **Reaching Earn at all needs both module flags:** `MARKETS_ENABLED` (parent)
 and `EARN_ENABLED` (child) are off by default in *every* environment, local dev

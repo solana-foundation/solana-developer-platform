@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   createCustodySetupWalletAction,
@@ -22,7 +23,6 @@ import { Label } from "@/components/ui/label";
 import { ProviderSelectionCard } from "@/components/ui/provider-selection-card";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 
 type SetupStep = "provider" | "details";
 
@@ -191,7 +191,7 @@ export function WalletSetupFlow({
   initialProvider = null,
 }: WalletSetupFlowProps) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const availability = useMemo(
     () => resolveCustodyProviderAvailability({ connectedProviders, enabledProviders }),

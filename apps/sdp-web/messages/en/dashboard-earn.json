@@ -11,7 +11,6 @@
       "currentApy": "Current APY",
       "holdingsTitle": "Where the money sits",
       "holdingsEmpty": "No deposits detected yet. Funds land as cash, then deploy toward the strategy on the provider's later rebalances.",
-      "programShare": "{pct}% of program",
       "walletStatusCreating": "Setting up",
       "walletStatusBusy": "Processing",
       "walletStatusWithdrawing": "Withdrawing",

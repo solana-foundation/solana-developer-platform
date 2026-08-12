@@ -672,7 +672,7 @@ async function runMetadataScheduleUpdate(input: {
         stage: "update_plan",
         updatedAt: new Date().toISOString(),
       });
-      const instruction = subscriptionsProgram.getUpdatePlanOverlayInstruction({
+      const instruction = await subscriptionsProgram.getUpdatePlanOverlayInstruction({
         endTs: onChainPlan.data.data.endTs,
         metadataUri: input.resolved.metadataUri ?? "",
         owner: sourceSigner,

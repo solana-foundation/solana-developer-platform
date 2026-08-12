@@ -2,10 +2,10 @@
 
 import { UserButton } from "@clerk/nextjs";
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { LanguagePicker } from "@/components/language-picker";
 import { NotificationBell } from "@/components/notification-bell";
 import { Badge } from "@/components/ui/badge";
@@ -48,7 +48,7 @@ export function HeaderBackAction({
   compactOnMobile?: boolean;
 }) {
   return (
-    <DashboardNavigationLink
+    <Link
       href={href}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary"
     >
@@ -61,7 +61,7 @@ export function HeaderBackAction({
       >
         {label}
       </span>
-    </DashboardNavigationLink>
+    </Link>
   );
 }
 

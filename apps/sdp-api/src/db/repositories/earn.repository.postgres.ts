@@ -1,9 +1,8 @@
 import type {
   EarnApyType,
   EarnLiquidityTerm,
-  EarnMovementDirection,
-  EarnMovementStatus,
-  EarnPositionStatus,
+  EarnPortfolioToken,
+  EarnProgramWithdrawalRecordStatus,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnStrategyStatus,
@@ -11,29 +10,21 @@ import type {
 } from "@sdp/types";
 import type { AppDb } from "@/db";
 import type {
-  CreateEarnMovementInput,
-  CreateEarnPositionInput,
-  EarnMovementRow,
-  EarnNavSnapshotRow,
-  EarnPositionRow,
+  CreateEarnProgramWithdrawalInput,
+  EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
-  InsertEarnNavSnapshotInput,
   InsertEarnProviderWalletInput,
-  ListEarnMovementsInput,
-  ListEarnMovementsResult,
-  ListEarnPositionsInput,
-  ListEarnPositionsResult,
+  ListEarnProgramWithdrawalsInput,
+  ListEarnProgramWithdrawalsResult,
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
-  UpdateEarnMovementStatusInput,
+  UpdateEarnProgramWithdrawalStatusGuardedInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 import {
-  generateEarnMovementId,
-  generateEarnNavSnapshotId,
-  generateEarnPositionId,
+  generateEarnProgramWithdrawalId,
   generateEarnProviderWalletId,
   generateEarnStrategyId,
 } from "./earn.repository";
@@ -60,45 +51,6 @@ function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
   };
 }
 
-function mapPositionRow(row: Record<string, unknown>): EarnPositionRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    strategy_id: row.strategy_id as string,
-    wallet_id: row.wallet_id as string,
-    share_amount: row.share_amount as string,
-    cost_basis: row.cost_basis as string | null,
-    status: row.status as EarnPositionStatus,
-    provider_data: row.provider_data as Record<string, unknown>,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
-}
-
-function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    position_id: row.position_id as string,
-    strategy_id: row.strategy_id as string,
-    direction: row.direction as EarnMovementDirection,
-    token_mint: row.token_mint as string,
-    amount: row.amount as string,
-    share_amount: row.share_amount as string | null,
-    status: row.status as EarnMovementStatus,
-    transaction_signature: row.transaction_signature as string | null,
-    provider: row.provider as string | null,
-    provider_reference: row.provider_reference as string | null,
-    provider_data: row.provider_data as Record<string, unknown>,
-    external_id: row.external_id as string | null,
-    redemption_available_at: row.redemption_available_at as string | null,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
-}
-
 function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletRow {
   return {
     id: row.id as string,
@@ -114,27 +66,41 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
   };
 }
 
-function mapNavSnapshotRow(row: Record<string, unknown>): EarnNavSnapshotRow {
+function mapProgramWithdrawalRow(row: Record<string, unknown>): EarnProgramWithdrawalRow {
   return {
     id: row.id as string,
-    strategy_id: row.strategy_id as string,
-    share_price: row.share_price as string,
-    apy: row.apy as string | null,
-    tvl: row.tvl as string | null,
-    as_of: row.as_of as string,
+    organization_id: row.organization_id as string,
+    project_id: row.project_id as string,
+    wallet_id: row.wallet_id as string,
+    provider: row.provider as string,
+    status: row.status as EarnProgramWithdrawalRecordStatus,
+    amount_requested_usd: row.amount_requested_usd as string,
+    amount_paid_usd: row.amount_paid_usd as string | null,
+    fee_usd: row.fee_usd as string | null,
+    token: row.token as EarnPortfolioToken,
+    destination_address: row.destination_address as string,
+    failure_reason: row.failure_reason as string | null,
+    request_id: row.request_id as string,
+    idempotency_fingerprint: row.idempotency_fingerprint as string,
+    provider_reference: row.provider_reference as string | null,
+    provider_data: row.provider_data as Record<string, unknown>,
+    created_by: row.created_by as string | null,
+    initiated_by_key_id: row.initiated_by_key_id as string | null,
     created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+    completed_at: row.completed_at as string | null,
   };
 }
 
 /**
- * Shared count+page read for the three earn list methods (same shape as the
+ * Shared count+page read for the earn list methods (same shape as the
  * payments-family where-builder idiom). Ordering is fixed at newest-first with
  * id as the deterministic tiebreaker — bulk catalogue syncs write many rows in
  * the same instant, so created_at alone would make pages unstable.
  */
 async function selectPage<Row>(
   db: AppDb,
-  table: "earn_strategies" | "earn_positions" | "earn_movements",
+  table: "earn_strategies" | "earn_program_withdrawals",
   conditions: string[],
   bindings: unknown[],
   window: { limit: number; offset: number },
@@ -256,182 +222,6 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       return selectPage(db, "earn_strategies", conditions, bindings, input, mapStrategyRow);
     },
 
-    async createPosition(input: CreateEarnPositionInput) {
-      const id = generateEarnPositionId();
-
-      const row = await db
-        .prepare(
-          `INSERT INTO earn_positions (
-             id, organization_id, project_id, strategy_id, wallet_id
-           ) VALUES (?, ?, ?, ?, ?)
-           RETURNING *`
-        )
-        .bind(id, input.organizationId, input.projectId, input.strategyId, input.walletId)
-        .first<Record<string, unknown>>();
-
-      return row ? mapPositionRow(row) : null;
-    },
-
-    async getPositionById(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_positions
-             WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(params.positionId, params.organizationId, params.projectId)
-        .first<Record<string, unknown>>();
-      return row ? mapPositionRow(row) : null;
-    },
-
-    async listPositions(input: ListEarnPositionsInput): Promise<ListEarnPositionsResult> {
-      const conditions = ["organization_id = ?", "project_id = ?"];
-      const bindings: unknown[] = [input.organizationId, input.projectId];
-
-      if (!input.includeClosed) {
-        conditions.push("status = 'active'");
-      }
-      if (input.strategyId) {
-        conditions.push("strategy_id = ?");
-        bindings.push(input.strategyId);
-      }
-
-      return selectPage(db, "earn_positions", conditions, bindings, input, mapPositionRow);
-    },
-
-    async createMovement(input: CreateEarnMovementInput) {
-      const id = generateEarnMovementId();
-
-      const row = await db
-        .prepare(
-          `INSERT INTO earn_movements (
-             id, organization_id, project_id, position_id, strategy_id,
-             direction, token_mint, amount, share_amount,
-             provider, provider_reference, provider_data,
-             external_id, redemption_available_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
-           RETURNING *`
-        )
-        .bind(
-          id,
-          input.organizationId,
-          input.projectId,
-          input.positionId,
-          input.strategyId,
-          input.direction,
-          input.tokenMint,
-          input.amount,
-          input.shareAmount,
-          input.provider,
-          input.providerReference,
-          JSON.stringify(input.providerData ?? {}),
-          input.externalId,
-          input.redemptionAvailableAt
-        )
-        .first<Record<string, unknown>>();
-
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async getMovementById(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_movements
-             WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(params.movementId, params.organizationId, params.projectId)
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async getMovementByProviderReference(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_movements
-             WHERE provider = ? AND provider_reference = ?`
-        )
-        .bind(params.provider, params.providerReference)
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async updateMovementStatus(input: UpdateEarnMovementStatusInput) {
-      const row = await db
-        .prepare(
-          `UPDATE earn_movements
-             SET status = ?,
-                 transaction_signature = COALESCE(?, transaction_signature),
-                 share_amount = COALESCE(?, share_amount),
-                 redemption_available_at = COALESCE(?, redemption_available_at),
-                 updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND organization_id = ?
-             AND project_id = ?
-           RETURNING *`
-        )
-        .bind(
-          input.status,
-          input.transactionSignature ?? null,
-          input.shareAmount ?? null,
-          input.redemptionAvailableAt ?? null,
-          input.movementId,
-          input.organizationId,
-          input.projectId
-        )
-        .first<Record<string, unknown>>();
-
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async listMovements(input: ListEarnMovementsInput): Promise<ListEarnMovementsResult> {
-      const conditions = ["organization_id = ?", "project_id = ?"];
-      const bindings: unknown[] = [input.organizationId, input.projectId];
-
-      if (input.positionId) {
-        conditions.push("position_id = ?");
-        bindings.push(input.positionId);
-      }
-      if (input.direction) {
-        conditions.push("direction = ?");
-        bindings.push(input.direction);
-      }
-
-      return selectPage(db, "earn_movements", conditions, bindings, input, mapMovementRow);
-    },
-
-    async insertNavSnapshot(input: InsertEarnNavSnapshotInput) {
-      const id = generateEarnNavSnapshotId();
-
-      const row = await db
-        .prepare(
-          `INSERT INTO earn_nav_snapshots (
-             id, strategy_id, share_price, apy, tvl, as_of
-           ) VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (strategy_id, as_of) DO UPDATE SET
-             share_price = EXCLUDED.share_price,
-             apy = EXCLUDED.apy,
-             tvl = EXCLUDED.tvl
-           RETURNING *`
-        )
-        .bind(id, input.strategyId, input.sharePrice, input.apy, input.tvl, input.asOf)
-        .first<Record<string, unknown>>();
-
-      return row ? mapNavSnapshotRow(row) : null;
-    },
-
-    async listNavSnapshots(params) {
-      const { results } = await db
-        .prepare(
-          `SELECT * FROM earn_nav_snapshots
-             WHERE strategy_id = ?
-             ORDER BY as_of DESC
-             LIMIT ?`
-        )
-        .bind(params.strategyId, params.limit)
-        .all<Record<string, unknown>>();
-
-      return (results ?? []).map(mapNavSnapshotRow);
-    },
-
     async getProviderWallet(params) {
       const row = await db
         .prepare(
@@ -467,6 +257,140 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         .first<Record<string, unknown>>();
 
       return row ? mapProviderWalletRow(row) : null;
+    },
+
+    async createProgramWithdrawal(input: CreateEarnProgramWithdrawalInput) {
+      const id = generateEarnProgramWithdrawalId();
+
+      // Status comes from the DB default ('requested'): an intent row exists
+      // before the provider call is accepted, never in any other state.
+      const row = await db
+        .prepare(
+          `INSERT INTO earn_program_withdrawals (
+             id, organization_id, project_id, wallet_id, provider,
+             amount_requested_usd, token, destination_address,
+             request_id, idempotency_fingerprint, provider_data,
+             created_by, initiated_by_key_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+           RETURNING *`
+        )
+        .bind(
+          id,
+          input.organizationId,
+          input.projectId,
+          input.walletId,
+          input.provider,
+          input.amountRequestedUsd,
+          input.token,
+          input.destinationAddress,
+          input.requestId,
+          input.idempotencyFingerprint,
+          JSON.stringify(input.providerData ?? {}),
+          input.createdBy,
+          input.initiatedByKeyId
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapProgramWithdrawalRow(row) : null;
+    },
+
+    async getProgramWithdrawalByRequestId(params) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_program_withdrawals
+             WHERE organization_id = ? AND wallet_id = ? AND request_id = ?`
+        )
+        .bind(params.organizationId, params.walletId, params.requestId)
+        .first<Record<string, unknown>>();
+      return row ? mapProgramWithdrawalRow(row) : null;
+    },
+
+    async getProgramWithdrawalByProviderReference(params) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_program_withdrawals
+             WHERE provider = ? AND provider_reference = ?`
+        )
+        .bind(params.provider, params.providerReference)
+        .first<Record<string, unknown>>();
+      return row ? mapProgramWithdrawalRow(row) : null;
+    },
+
+    async updateProgramWithdrawalStatusGuarded(
+      input: UpdateEarnProgramWithdrawalStatusGuardedInput
+    ) {
+      // Dynamic SET list, payments idiom: `undefined` means "don't touch",
+      // `null` is a real write; provider_data is a shallow JSONB merge.
+      // updated_at is DB-stamped (earn convention), never caller-supplied.
+      const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
+      const assignmentValues: unknown[] = [input.toStatus];
+      if (input.providerReference !== undefined) {
+        assignments.push("provider_reference = ?");
+        assignmentValues.push(input.providerReference);
+      }
+      if (input.amountPaidUsd !== undefined) {
+        assignments.push("amount_paid_usd = ?");
+        assignmentValues.push(input.amountPaidUsd);
+      }
+      if (input.feeUsd !== undefined) {
+        assignments.push("fee_usd = ?");
+        assignmentValues.push(input.feeUsd);
+      }
+      if (input.failureReason !== undefined) {
+        assignments.push("failure_reason = ?");
+        assignmentValues.push(input.failureReason);
+      }
+      if (input.completedAt !== undefined) {
+        assignments.push("completed_at = ?");
+        assignmentValues.push(input.completedAt);
+      }
+      if (input.providerData !== undefined) {
+        assignments.push("provider_data = provider_data || ?::jsonb");
+        assignmentValues.push(JSON.stringify(input.providerData));
+      }
+
+      // The CAS guard and the org scope live in the same WHERE as the selector,
+      // so the whole transition is one atomic statement: the loser of a
+      // concurrent race simply matches zero rows.
+      const conditions = ["organization_id = ?", "status = ANY(?)"];
+      const conditionValues: unknown[] = [input.organizationId, [...input.fromStatuses]];
+      if ("withdrawalId" in input.selector) {
+        conditions.push("id = ?");
+        conditionValues.push(input.selector.withdrawalId);
+      } else {
+        conditions.push("provider = ?", "provider_reference = ?");
+        conditionValues.push(input.selector.provider, input.selector.providerReference);
+      }
+
+      const row = await db
+        .prepare(
+          `UPDATE earn_program_withdrawals
+             SET ${assignments.join(", ")}
+           WHERE ${conditions.join(" AND ")}
+           RETURNING *`
+        )
+        .bind(...assignmentValues, ...conditionValues)
+        .first<Record<string, unknown>>();
+
+      return row ? mapProgramWithdrawalRow(row) : null;
+    },
+
+    async listProgramWithdrawals(
+      input: ListEarnProgramWithdrawalsInput
+    ): Promise<ListEarnProgramWithdrawalsResult> {
+      // Wallet-scoped, not (org, project): the program wallet is shared by
+      // every project in the environment, so one program = one history.
+      const conditions = ["organization_id = ?", "wallet_id = ?"];
+      const bindings: unknown[] = [input.organizationId, input.walletId];
+
+      return selectPage(
+        db,
+        "earn_program_withdrawals",
+        conditions,
+        bindings,
+        input,
+        mapProgramWithdrawalRow
+      );
     },
   };
 }

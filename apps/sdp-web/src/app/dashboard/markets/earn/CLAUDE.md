@@ -20,8 +20,8 @@ reintroduce fixture modules. Data flows: BFF proxies
   stablecoins). Zero-value NON-strategy slices never render — Ground keeps
   reporting a drained lane's residual cash bucket at $0 (provider plumbing,
   not a holding) — while nonzero value always renders whatever rail it sits
-  on, so the list still sums to the wallet total. A share percent renders only
-  when value sits behind it.
+  on, so the list still sums to the wallet total. No share percents render —
+  V1 is single-vault (PRO-1667) — and the provider-reported `pct` is ignored.
   Deliberately **not** grouped by curator — see "One strategy, no curator step"
   below.
 - `earn-program-data.ts` — THE data seam. `useEarnProgram()` discriminates
@@ -39,8 +39,10 @@ reintroduce fixture modules. Data flows: BFF proxies
   the wallet only reports that the provider stopped, and a failed, cancelled or
   partial payout leaves it exactly as idle as a settled one — so
   `useEarnWithdrawalOutcomeToast(ref)` follows the WITHDRAWAL's own status
-  instead (terminal = completed / partially_completed / failed / cancelled;
-  `pending_approval` keeps waiting, since it still resolves). Only `completed`
+  instead (terminal = the shared `EARN_TERMINAL_WITHDRAWAL_STATUSES` from
+  `@sdp/types` — completed / partially_completed / failed / cancelled — the
+  same set the API's withdrawal ledger uses; `pending_approval` keeps waiting,
+  since it still resolves). Only `completed`
   is a success toast — partial is a problem, not a win. Sourcing a settlement
   claim from a wallet transition is the bug to never reintroduce. SWR suspends
   polling for a hidden tab and revalidates on focus — which is why the cadence
@@ -119,10 +121,11 @@ sentence about timing must trace to one of those.
 ### One strategy, no curator step
 
 The flow selects exactly ONE strategy and sends `pct: 100` for that strategy's
-stablecoin lane. Curator-first selection and manual weight editing were removed
-on purpose; curator is metadata rendered beside a strategy, never a gate. Do not
-reintroduce a curator step, a weight editor, or curator grouping without
-changing this note.
+stablecoin lane — since PRO-1667 that is also the only shape the API accepts
+(one allocation entry per token group). Curator-first selection and manual
+weight editing were removed on purpose; curator is metadata rendered beside a
+strategy, never a gate. Do not reintroduce a curator step, a weight editor, or
+curator grouping without changing this note.
 
 Omitting a token lane **preserves** it server-side (Ground: "the omitted group
 is not changed"), which is why the review copy promises only the selected lane.

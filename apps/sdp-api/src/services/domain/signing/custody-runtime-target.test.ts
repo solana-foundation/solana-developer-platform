@@ -35,7 +35,7 @@ describe("CustodyRuntimeTargets", () => {
       "fetch",
       vi.fn().mockImplementation(
         async () =>
-          new Response(JSON.stringify({ address: CONNECTION_PUBLIC_KEY }), {
+          new Response(JSON.stringify({ address: CONNECTION_PUBLIC_KEY, chain_type: "solana" }), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           })
