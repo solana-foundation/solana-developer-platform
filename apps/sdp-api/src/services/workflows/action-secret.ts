@@ -188,9 +188,19 @@ export async function queuePendingActionSecret(
   }
 }
 
-// Queue a failed destroy for the sweeper, and log either way. If the queue write cannot
-// be made to stick at all, there is nothing left but the log — which is exactly where
-// this started — so it keeps every field needed to find the version by hand.
+// Queue a failed destroy for the sweeper, and log either way.
+//
+// This write is a REFRESH, not the record itself. Every caller reaches here with the
+// obligation already committed — by the write that orphaned the version (delete, rotation)
+// or by the provisional queueing that precedes a write which might not commit (create,
+// rotation). All this adds is the reason the destroy failed. So its own failure is not
+// "the credential is lost": that is only true if the earlier record ALSO failed to land,
+// which takes a database that was unavailable for the whole request — and then there is no
+// durable medium to record anything in anyway.
+//
+// Hence the lookup before claiming nothing will collect it. Reporting `queuedForRetry:
+// false` on a version the sweeper is already going to take sends an operator chasing a
+// credential that is not actually stranded.
 async function recordFailedRetirement(
   env: Env,
   stored: StoredCredentialSecret,
@@ -199,14 +209,23 @@ async function recordFailedRetirement(
 ): Promise<void> {
   const version = stored.secretVersionRef?.split("/").at(-1);
   const reason = cause instanceof Error ? cause.message : String(cause);
-  const queued = await queueRetirement(env, {
+  const versionRef = stored.secretVersionRef as string;
+  const refreshed = await queueRetirement(env, {
     organizationId: context?.orgId ?? "unknown",
     workflowId: context?.workflowId ?? null,
     storageBackend: stored.storageBackend,
     secretRef: stored.secretRef ?? null,
-    secretVersionRef: stored.secretVersionRef as string,
+    secretVersionRef: versionRef,
     error: reason,
   });
+  // A failed refresh still leaves the earlier record standing, so ask rather than assume.
+  // An unreadable answer counts as not queued: the point of the flag is to summon a human
+  // when nothing else will act, and "I could not tell" has to fall on that side.
+  const queued =
+    refreshed ||
+    (await createWorkflowSecretRetirementsRepository(env)
+      .hasRetirement(versionRef)
+      .catch(() => false));
   getLogger().error(
     {
       provider: PROVIDER,

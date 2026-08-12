@@ -80,6 +80,14 @@ export function createPostgresWorkflowSecretRetirementsRepository(
       await deleteWorkflowSecretRetirement(db, secretVersionRef);
     },
 
+    async hasRetirement(secretVersionRef: string) {
+      const row = await db
+        .prepare("SELECT 1 FROM workflow_action_secret_retirements WHERE secret_version_ref = ?")
+        .bind(secretVersionRef)
+        .first<Record<string, unknown>>();
+      return row !== null;
+    },
+
     async listDueRetirements(params) {
       const result = await db
         .prepare(
