@@ -253,9 +253,14 @@ Two properties make that safe:
   fail *after* committing, and retiring then would destroy the credential the live rule now
   points at — signing every later delivery with a dead key.
 - **A failed destroy becomes durable work, not a log line.** Retirement always runs after a
-  write that already committed, so it can never fail the request. A backend error is queued
-  in `workflow_action_secret_retirements` (`0056`) keyed on the version ref, and the
-  workflow tick drains it with capped exponential backoff, never abandoning a row. Deleting
+  write that already committed, so it can never fail the request. A backend error — or a
+  credential store this process cannot even construct, which is unreachable rather than
+  absent — is queued in `workflow_action_secret_retirements` (`0056`) keyed on the version
+  ref. A **dedicated cron task behind no feature flag** drains it with capped exponential
+  backoff, never abandoning a row. The drain deliberately does not ride on the workflow
+  tick: that tick is gated on asset profiles, and the queue only ever holds credentials
+  that are already orphaned, so turning the feature off would strand its cleanup
+  permanently — precisely when disabling the feature is the incident response. Deleting
   a rule is likewise idempotent over its own partial failure — the delete handler reads
   soft-deleted rows, so a retry finishes cleanup a first attempt died in the middle of.
   The table carries **no foreign keys on purpose**: the work must outlive the rule, project
