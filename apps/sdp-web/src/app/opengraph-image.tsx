@@ -1,6 +1,13 @@
 import { ImageResponse } from "next/og";
+import { getMessages, translate } from "@/i18n/messages";
 
-export const alt = "Solana Developer Platform";
+// The card is a shared brand artifact: unfurlers cache one image per URL, so
+// it always renders the English catalog copy instead of the request locale.
+const messages = getMessages("en");
+const productName = translate(messages, "Metadata.title");
+const tagline = translate(messages, "Home.title");
+
+export const alt = productName;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -32,7 +39,7 @@ export default function OpengraphImage() {
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
         role="img"
-        aria-label="Solana"
+        aria-label={translate(messages, "Home.solanaLogo")}
       >
         <defs>
           <linearGradient id="solana" x1="0" y1="18" x2="20" y2="0" gradientUnits="userSpaceOnUse">
@@ -44,10 +51,10 @@ export default function OpengraphImage() {
       </svg>
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
         <div style={{ fontSize: 72, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.05 }}>
-          Solana Developer Platform
+          {productName}
         </div>
         <div style={{ fontSize: 30, lineHeight: 1.4, color: "#a3a3ad", maxWidth: 900 }}>
-          Build any financial product, without worrying about the infrastructure.
+          {tagline}
         </div>
       </div>
       <div style={{ display: "flex", fontSize: 24, color: "#6f6f7a" }}>platform.solana.com</div>
