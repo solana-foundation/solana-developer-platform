@@ -1,14 +1,36 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { type MeteredQuotaConfig, meteredQuota } from "@/middleware/metered-quota";
 import type { Env } from "@/types/env";
 import { autocomplete, getPlace, getStaticMap } from "./handlers";
+
+// Every route proxies a billed Google Places call; autocomplete fires per
+// keystroke, so the actor ceiling stays interactive-typing friendly.
+const PLACES_QUOTA: MeteredQuotaConfig = { name: "places", actorMax: 120, orgMax: 600 };
 
 const places = new Hono<{ Bindings: Env }>();
 
 places.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 
-places.post("/autocomplete", requirePermissions("counterparties:write"), autocomplete);
-places.get("/static-map", requirePermissions("counterparties:write"), getStaticMap);
-places.get("/:placeId", requirePermissions("counterparties:write"), getPlace);
+// The quota sits after the permission gate: callers the route would reject
+// must not be able to charge the org-wide pool and starve authorized users.
+places.post(
+  "/autocomplete",
+  requirePermissions("counterparties:write"),
+  meteredQuota(PLACES_QUOTA),
+  autocomplete
+);
+places.get(
+  "/static-map",
+  requirePermissions("counterparties:write"),
+  meteredQuota(PLACES_QUOTA),
+  getStaticMap
+);
+places.get(
+  "/:placeId",
+  requirePermissions("counterparties:write"),
+  meteredQuota(PLACES_QUOTA),
+  getPlace
+);
 
 export default places;
