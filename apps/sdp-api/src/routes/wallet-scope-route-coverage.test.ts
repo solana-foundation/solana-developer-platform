@@ -120,6 +120,25 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /tokens",
       "POST /tokens/:tokenId/allowlist",
       "POST /tokens/:tokenId/supply/refresh",
+      // Asset profiles: holder enrollment and the workflow builder. None of these
+      // resolves a signing wallet — they read and write rule/holder rows and flip
+      // execution status. The signing wallet for a rule's on-chain effect is resolved
+      // by the cron engine at execution time (workflows/actions/onchain.ts), which is
+      // also where that effect is bound to the wallet's operation policy, since no
+      // request is in scope by then.
+      "ALL /tokens/:tokenId/workflows",
+      "ALL /tokens/:tokenId/workflows/*",
+      "DELETE /tokens/:tokenId/workflows/:workflowId",
+      "GET /tokens/:tokenId/holders",
+      "GET /tokens/:tokenId/workflows",
+      "GET /tokens/:tokenId/workflows/catalog",
+      "GET /tokens/:tokenId/workflows/executions",
+      "PATCH /tokens/:tokenId/workflows/:workflowId",
+      "POST /tokens/:tokenId/holders",
+      "POST /tokens/:tokenId/workflows",
+      "POST /tokens/:tokenId/workflows/executions/:executionId/approve",
+      "POST /tokens/:tokenId/workflows/executions/:executionId/reject",
+      "POST /tokens/:tokenId/workflows/executions/:executionId/retry",
     ]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
