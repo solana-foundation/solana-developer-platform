@@ -66,6 +66,8 @@ it("deduplicates org-level custody configs and repoints references", async () =>
       binding_scope TEXT NOT NULL DEFAULT 'selected',
       wallet_id TEXT,
       custody_wallet_id TEXT REFERENCES custody_wallets(id) ON DELETE SET NULL,
+      wallet_control_profile_id TEXT REFERENCES wallet_control_profiles(id) ON DELETE SET NULL,
+      api_key_control_profile_id TEXT,
       created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z',
       CONSTRAINT api_key_wallet_policy_bindings_wallet_check_shadow CHECK (
         binding_scope <> 'selected'
@@ -121,12 +123,14 @@ it("deduplicates org-level custody configs and repoints references", async () =>
          ('wcp_dup_conflict_active', 'cwlt_old_shared2', 'active')`
     );
     await client.query(
-      `INSERT INTO api_key_wallet_policy_bindings (id, api_key_id, wallet_id, custody_wallet_id, created_at) VALUES
-         ('akb_dup', 'key_dup', 'wallet_shared', 'cwlt_mid_shared', '2026-01-01T00:00:00.000Z'),
-         ('akb_kept', 'key_merge', 'wallet_shared2', 'cwlt_new_shared2', '2026-01-01T00:00:00.000Z'),
-         ('akb_redundant', 'key_merge', 'wallet_shared2', 'cwlt_old_shared2', '2026-01-02T00:00:00.000Z'),
-         ('akb_race_a', 'key_race', 'wallet_shared', 'cwlt_mid_shared', '2026-01-01T00:00:00.000Z'),
-         ('akb_race_b', 'key_race', 'wallet_shared', 'cwlt_old_shared', '2026-01-02T00:00:00.000Z')`
+      `INSERT INTO api_key_wallet_policy_bindings
+         (id, api_key_id, wallet_id, custody_wallet_id, wallet_control_profile_id, api_key_control_profile_id, created_at) VALUES
+         ('akb_dup', 'key_dup', 'wallet_shared', 'cwlt_mid_shared', NULL, NULL, '2026-01-01T00:00:00.000Z'),
+         ('akb_kept', 'key_merge', 'wallet_shared2', 'cwlt_new_shared2', NULL, NULL, '2026-01-01T00:00:00.000Z'),
+         ('akb_redundant', 'key_merge', 'wallet_shared2', 'cwlt_old_shared2', 'wcp_dup_conflict_active', 'akcp_loser', '2026-01-02T00:00:00.000Z'),
+         ('akb_race_a', 'key_race', 'wallet_shared', 'cwlt_mid_shared', NULL, NULL, '2026-01-01T00:00:00.000Z'),
+         ('akb_race_b', 'key_race', 'wallet_shared', 'cwlt_old_shared', NULL, NULL, '2026-01-02T00:00:00.000Z'),
+         ('akb_locked', 'key_lock', 'wallet_shared2', 'cwlt_old_shared2', 'wcp_dup_conflict_active', NULL, '2026-01-03T00:00:00.000Z')`
     );
     await client.query(
       `INSERT INTO wallet_operations (id, custody_wallet_id)
@@ -201,13 +205,23 @@ it("deduplicates org-level custody configs and repoints references", async () =>
     expect(binding.rows[0]?.custody_wallet_id).toBe("cwlt_new_shared");
 
     // A key bound to both the duplicate and the surviving row keeps exactly
-    // one binding — the survivor-pointing one.
+    // one binding — the survivor-pointing one — and inherits the deleted
+    // binding's policy assignments. The inherited wallet-profile reference
+    // resolves to the surviving wallet's active profile (the referenced
+    // profile was demoted, and a binding to an inactive profile is rejected
+    // at policy resolution).
     const mergedBindings = await client.query(
-      `SELECT id, custody_wallet_id FROM api_key_wallet_policy_bindings
+      `SELECT id, custody_wallet_id, wallet_control_profile_id, api_key_control_profile_id
+       FROM api_key_wallet_policy_bindings
        WHERE api_key_id = 'key_merge'`
     );
     expect(mergedBindings.rows).toEqual([
-      { id: "akb_kept", custody_wallet_id: "cwlt_new_shared2" },
+      {
+        id: "akb_kept",
+        custody_wallet_id: "cwlt_new_shared2",
+        wallet_control_profile_id: "wcp_kept_active",
+        api_key_control_profile_id: "akcp_loser",
+      },
     ]);
 
     // A key bound to two duplicate rows of the same surviving wallet keeps
@@ -218,6 +232,17 @@ it("deduplicates org-level custody configs and repoints references", async () =>
     );
     expect(racedBindings.rows).toEqual([
       { id: "akb_race_a", custody_wallet_id: "cwlt_new_shared" },
+    ]);
+
+    // A binding that referenced the now-demoted profile is repointed at the
+    // surviving wallet's active profile instead of being locked out.
+    const repairedBinding = await client.query(
+      `SELECT custody_wallet_id, wallet_control_profile_id
+       FROM api_key_wallet_policy_bindings
+       WHERE id = 'akb_locked'`
+    );
+    expect(repairedBinding.rows).toEqual([
+      { custody_wallet_id: "cwlt_new_shared2", wallet_control_profile_id: "wcp_kept_active" },
     ]);
 
     const operation = await client.query(

@@ -99,18 +99,24 @@ WHERE wcp.custody_wallet_id = wdup.id
 -- 'disabled' so the policy and its revisions survive for operator review
 -- instead of silently cascade-deleting with the duplicate wallet (which
 -- would leave repointed API-key bindings governed by a weaker profile with
--- no trace of the stricter one).
+-- no trace of the stricter one). Captured first so bindings referencing a
+-- demoted profile can be repaired below.
+CREATE TEMP TABLE custody_demoted_profiles ON COMMIT DROP AS
+SELECT wcp.id, wdup.keep_id
+FROM wallet_control_profiles wcp
+JOIN custody_wallet_duplicates wdup ON wcp.custody_wallet_id = wdup.id
+WHERE wcp.status = 'active';
+
 DO $$
 DECLARE
     demoted_profile_count BIGINT;
 BEGIN
     UPDATE wallet_control_profiles wcp
-    SET custody_wallet_id = wdup.keep_id,
+    SET custody_wallet_id = dp.keep_id,
         status = 'disabled',
         updated_at = sdp_iso_now()
-    FROM custody_wallet_duplicates wdup
-    WHERE wcp.custody_wallet_id = wdup.id
-      AND wcp.status = 'active';
+    FROM custody_demoted_profiles dp
+    WHERE wcp.id = dp.id;
 
     GET DIAGNOSTICS demoted_profile_count = ROW_COUNT;
     IF demoted_profile_count > 0 THEN
@@ -122,32 +128,71 @@ $$;
 -- The selected-binding unique index is on (api_key_id, custody_wallet_id)
 -- since 0053, so one key can legally bind both a duplicate wallet row and
 -- the surviving row of the same provider wallet. Merge to one binding per
--- (key, surviving wallet): drop the redundant ones, then repoint the
--- winners. Leaving a loser in place is not an option either — the FK's
--- ON DELETE SET NULL would break the selected-binding CHECK when the
--- duplicate wallet cascades away.
+-- (key, surviving wallet): an existing survivor-pointing binding wins,
+-- else the oldest duplicate-row binding. Leaving a loser in place is not
+-- an option either — the FK's ON DELETE SET NULL would break the
+-- selected-binding CHECK when the duplicate wallet cascades away.
+CREATE TEMP TABLE custody_binding_winners ON COMMIT DROP AS
+SELECT DISTINCT ON (b.api_key_id, wdup.keep_id) b.id
+FROM api_key_wallet_policy_bindings b
+JOIN custody_wallet_duplicates wdup ON b.custody_wallet_id = wdup.id
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM api_key_wallet_policy_bindings kept_b
+    WHERE kept_b.api_key_id = b.api_key_id
+      AND kept_b.custody_wallet_id = wdup.keep_id
+)
+ORDER BY b.api_key_id, wdup.keep_id, b.created_at, b.id;
+
+-- Snapshot the losers' policy assignments before deleting them so the
+-- surviving binding can inherit them below.
+CREATE TEMP TABLE custody_binding_losers ON COMMIT DROP AS
+SELECT b.id, b.api_key_id, wdup.keep_id, b.wallet_control_profile_id,
+       b.api_key_control_profile_id, b.created_at
+FROM api_key_wallet_policy_bindings b
+JOIN custody_wallet_duplicates wdup ON b.custody_wallet_id = wdup.id
+WHERE b.id NOT IN (SELECT id FROM custody_binding_winners);
+
 DELETE FROM api_key_wallet_policy_bindings b
-USING custody_wallet_duplicates wdup
-WHERE b.custody_wallet_id = wdup.id
-  AND (
-      EXISTS (
-          SELECT 1
-          FROM api_key_wallet_policy_bindings kept_b
-          WHERE kept_b.api_key_id = b.api_key_id
-            AND kept_b.custody_wallet_id = wdup.keep_id
-      )
-      OR b.id NOT IN (
-          SELECT DISTINCT ON (inner_b.api_key_id, wd.keep_id) inner_b.id
-          FROM api_key_wallet_policy_bindings inner_b
-          JOIN custody_wallet_duplicates wd ON inner_b.custody_wallet_id = wd.id
-          ORDER BY inner_b.api_key_id, wd.keep_id, inner_b.created_at, inner_b.id
-      )
-  );
+WHERE b.id IN (SELECT id FROM custody_binding_losers);
 
 UPDATE api_key_wallet_policy_bindings b
 SET custody_wallet_id = wdup.keep_id
 FROM custody_wallet_duplicates wdup
 WHERE b.custody_wallet_id = wdup.id;
+
+-- Carry the deleted bindings' explicit policy assignments onto the
+-- surviving binding where it has none (oldest assignment wins per column),
+-- so merging never silently drops a policy-profile assignment.
+UPDATE api_key_wallet_policy_bindings b
+SET wallet_control_profile_id = COALESCE(b.wallet_control_profile_id, l.wallet_control_profile_id),
+    api_key_control_profile_id = COALESCE(b.api_key_control_profile_id, l.api_key_control_profile_id)
+FROM (
+    SELECT api_key_id, keep_id,
+           (array_remove(array_agg(wallet_control_profile_id ORDER BY created_at, id), NULL))[1]
+               AS wallet_control_profile_id,
+           (array_remove(array_agg(api_key_control_profile_id ORDER BY created_at, id), NULL))[1]
+               AS api_key_control_profile_id
+    FROM custody_binding_losers
+    GROUP BY api_key_id, keep_id
+) l
+WHERE b.api_key_id = l.api_key_id
+  AND b.custody_wallet_id = l.keep_id
+  AND (b.wallet_control_profile_id IS NULL OR b.api_key_control_profile_id IS NULL)
+  AND (l.wallet_control_profile_id IS NOT NULL OR l.api_key_control_profile_id IS NOT NULL);
+
+-- Policy resolution rejects a binding whose referenced profile is not
+-- active, so bindings referencing a demoted profile would lock their key
+-- out. Repoint them at the surviving wallet's active profile — the policy
+-- that actually governs the wallet (it exists whenever a demotion
+-- happened: demotion requires the survivor to hold an active profile).
+UPDATE api_key_wallet_policy_bindings b
+SET wallet_control_profile_id = active_wcp.id
+FROM custody_demoted_profiles dp
+JOIN wallet_control_profiles active_wcp
+  ON active_wcp.custody_wallet_id = dp.keep_id
+ AND active_wcp.status = 'active'
+WHERE b.wallet_control_profile_id = dp.id;
 
 UPDATE wallet_operations op
 SET custody_wallet_id = wdup.keep_id
