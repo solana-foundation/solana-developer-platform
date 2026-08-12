@@ -194,11 +194,13 @@ export async function submitPrivyCredentialAction(
       // replaying a request that can only fail the same way. A rejected
       // REPLACEMENT leaves the failed connection standing and still blocking
       // fresh submissions, so its id rides along or the next correction
-      // would be routed into exactly that blocked fresh path.
+      // would be routed into exactly that blocked fresh path — unless the
+      // rejection is a 404: the connection is gone, and a fresh submission
+      // is the only recovery that can converge.
       return {
         status: "failed",
         message: message || t("DashboardCustody.byokSubmitFailed"),
-        ...(replaceConnectionId ? { connectionId: replaceConnectionId } : {}),
+        ...(replaceConnectionId && status !== 404 ? { connectionId: replaceConnectionId } : {}),
       };
     }
     // No response at all: the POST may have committed server-side, which is

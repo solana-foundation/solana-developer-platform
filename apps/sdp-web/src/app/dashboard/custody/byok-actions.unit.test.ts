@@ -224,6 +224,19 @@ describe("submitPrivyCredentialAction outcome classification", () => {
     });
   });
 
+  it("drops the replacement target when the connection is gone", async () => {
+    client.fetch.mockRejectedValueOnce(apiError(404, "Custody Connection not found"));
+    const form = submitForm();
+    form.set("connectionId", "conn_test");
+
+    // Routing corrections at a deleted connection would 404 forever; the
+    // fresh submission path is the only one that can still converge.
+    await expect(submitPrivyCredentialAction(form)).resolves.toEqual({
+      status: "failed",
+      message: "Custody Connection not found",
+    });
+  });
+
   it("treats any answered HTTP error as terminal, never as replayable", async () => {
     client.fetch.mockRejectedValueOnce(
       apiError(409, "A Privy custody installation is already in progress for this project")
