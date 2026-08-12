@@ -1,0 +1,51 @@
+name: Deploy sdp-web to Vercel (prod)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (tag or SHA) to deploy"
+        type: string
+        required: true
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdp-web-vercel-deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy production build
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@58.9.4
+
+      - name: Pull Vercel environment
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build production artifact
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy prebuilt artifact
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}

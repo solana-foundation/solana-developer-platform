@@ -36,6 +36,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
+import { collectDestinationAllowlist, resolveMaxTransferAmount } from "@/lib/wallet-policy-rules";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -132,7 +133,9 @@ async function getWalletPolicy(
       return {
         policy: {
           walletId,
-          destinationAllowlist: [],
+          defaultAction: "allow",
+          rules: [],
+          controlProfile: null,
         },
         error: null,
       };
@@ -145,13 +148,14 @@ async function getWalletPolicy(
     }
 
     const json = (await response.json()) as { data?: { policy?: PaymentWalletPolicy } };
-    return {
-      policy: json.data?.policy ?? {
-        walletId,
-        destinationAllowlist: [],
-      },
-      error: null,
-    };
+    const policy = json.data?.policy;
+    if (!policy) {
+      return {
+        policy: null,
+        error: unavailableMessage,
+      };
+    }
+    return { policy, error: null };
   } catch {
     return {
       policy: null,
@@ -507,11 +511,6 @@ export async function WalletBalancesSection({
 }
 
 /**
- * Distinct mints named by the profile's asset rules. The rules array is the
- * source of truth for allowed assets; destinationAllowlist and the amount caps
- * are stored separately and say nothing about which tokens are permitted.
- */
-/**
  * Mints named by an allow-action asset rule — the only rules that express an
  * allowlist, and so the only ones honest to render under "Allowed assets".
  *
@@ -528,7 +527,7 @@ export async function WalletBalancesSection({
 function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
   const mints = new Set<string>();
 
-  for (const rule of policy?.rules ?? []) {
+  for (const rule of policy ? policy.rules : []) {
     if (rule.kind !== "asset") continue;
     if (rule.action && rule.action !== "allow") continue;
 
@@ -543,13 +542,15 @@ function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
 function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
   if (!policy) return false;
   return (
-    policy.destinationAllowlist.length > 0 ||
-    Boolean(policy.maxTransferAmount) ||
-    Boolean(policy.maxDailyAmount) ||
+    // A destination allowlist or an amount cap restricts even when its rule
+    // carries an "allow" action: the allowlist denies every other address and
+    // the cap denies amounts above it.
+    collectDestinationAllowlist(policy.rules).length > 0 ||
+    resolveMaxTransferAmount(policy.rules) !== null ||
     // Operations matching no rule fall through to the policy default, so a
     // non-allow default is itself a restriction.
-    (policy.defaultAction !== undefined && policy.defaultAction !== "allow") ||
-    (policy.rules ?? []).some(policyRuleRestricts)
+    policy.defaultAction !== "allow" ||
+    policy.rules.some(policyRuleRestricts)
   );
 }
 
@@ -569,7 +570,8 @@ async function WalletControlsPanel({
     ownedTokensByMintPromise,
   ]);
   const hasRestrictions = walletPolicyHasRestrictions(policy);
-  const destinationCount = policy?.destinationAllowlist.length ?? 0;
+  const destinationCount = policy ? collectDestinationAllowlist(policy.rules).length : 0;
+  const maxTransferAmount = policy ? resolveMaxTransferAmount(policy.rules) : null;
   const allowedAssets = walletPolicyAssets(policy);
   // Names assets this org issued. Without it any mint outside the well-known
   // catalogue renders as a shortened address.
@@ -632,11 +634,7 @@ async function WalletControlsPanel({
               />
               <WalletInfoRow
                 label={t("DashboardCustody.perTransfer")}
-                value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
-              />
-              <WalletInfoRow
-                label={t("DashboardCustody.daily")}
-                value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
+                value={maxTransferAmount !== null ? maxTransferAmount : t("DashboardCustody.noCap")}
               />
             </div>
           )}

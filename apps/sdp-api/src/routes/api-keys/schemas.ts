@@ -1,7 +1,7 @@
 import { PERMISSIONS } from "@sdp/types";
 import { z } from "zod";
 import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
-import { walletPolicyRuleSchema } from "../payments/schemas";
+import { refinePolicyRules, walletPolicyRuleSchema } from "../payments/schemas";
 
 const apiKeyAllowedIpSchema = z.string().refine(isValidIpAllowlistEntry, {
   message: "Must be a valid IPv4 or IPv6 address or CIDR range",
@@ -52,10 +52,15 @@ export const apiKeyControlProfileCreateSchema = z.object({
   name: z.string().min(1).max(100),
 });
 
-export const apiKeyControlProfileRevisionCreateSchema = z.object({
+export const apiKeyControlProfileRevisionCreateBaseSchema = z.object({
   rules: z.array(walletPolicyRuleSchema).max(100),
   defaultAction: policyDefaultActionSchema,
 });
+
+export const apiKeyControlProfileRevisionCreateSchema =
+  apiKeyControlProfileRevisionCreateBaseSchema.superRefine((revision, ctx) =>
+    refinePolicyRules(revision.rules, ctx)
+  );
 
 const allWalletPolicyBindingSchema = z.object({
   bindingScope: z.literal("all"),

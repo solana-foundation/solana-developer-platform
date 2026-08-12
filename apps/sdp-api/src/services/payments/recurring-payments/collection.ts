@@ -45,7 +45,7 @@ import {
   DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
   parsePositiveIntegerConfig,
 } from "../recurring-payment-config";
-import { assertWalletPolicyAllowsTransferWithRepository } from "../wallet-policy";
+import { enforceRecurringPaymentPolicy } from "./policy";
 import {
   activationErrorMessage,
   confirmSubscriptionSignature,
@@ -997,13 +997,29 @@ export async function collectRecurringPayment(input: {
       throw new AppError("CONFLICT", "Recurring payment collection is already processing");
     }
 
-    await assertWalletPolicyAllowsTransferWithRepository(paymentsRepo, {
+    await enforceRecurringPaymentPolicy({
+      env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      wallet: input.sourceWallet,
-      destinationAddress: input.recurringPayment.destination_address,
+      sourceWallet: input.sourceWallet,
+      operationType: "recurring_payment_collection",
       token: input.recurringPayment.token,
       amount: input.recurringPayment.amount,
+      destination: input.recurringPayment.destination_address,
+      apiKeyId: input.initiatedByKeyId,
+      actor:
+        input.initiatedByKeyId === null
+          ? null
+          : {
+              type: "api_key",
+              id: input.initiatedByKeyId,
+              apiKeyId: input.initiatedByKeyId,
+            },
+      rawPayload: {
+        recurringPaymentId: input.recurringPayment.id,
+        subscriptionId: subscription.id,
+        collectionDueAt: dueAt,
+      },
     });
 
     transfer = await paymentsRepo.createTransfer({

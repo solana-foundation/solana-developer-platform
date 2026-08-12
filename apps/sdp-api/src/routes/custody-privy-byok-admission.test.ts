@@ -129,12 +129,27 @@ async function seedBlockingConnection(): Promise<void> {
   ]);
 }
 
+async function getConnectionSetupRowCounts() {
+  const counts = await getDb(env)
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM provider_credentials) AS credentials,
+         (SELECT COUNT(*) FROM custody_connections) AS connections,
+         (SELECT COUNT(*) FROM custody_wallets) AS wallets`
+    )
+    .first<{ credentials: number; connections: number; wallets: number }>();
+  if (!counts) throw new Error("Connection setup row count query returned no row");
+  return counts;
+}
+
 describe("legacy Privy setup admission", () => {
   const original = {
     flag: env.PRIVY_BYOK_ENABLED,
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
+    deploymentMode: env.SDP_DEPLOYMENT_MODE,
+    selfHostedStoredSetup: env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED,
   };
 
   beforeEach(async () => {
@@ -152,6 +167,8 @@ describe("legacy Privy setup admission", () => {
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
+    env.SDP_DEPLOYMENT_MODE = original.deploymentMode;
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = original.selfHostedStoredSetup;
     await clearKVStores(env);
   });
 
@@ -173,6 +190,44 @@ describe("legacy Privy setup admission", () => {
       expect(configs?.count).toBe(0);
     }
   );
+
+  it("rejects fresh self-hosted runtime setup through public initialize without writes", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "false";
+    env.PRIVY_APP_ID = "runtime-app-id";
+    env.PRIVY_APP_SECRET = "runtime-app-secret";
+    const before = await getConnectionSetupRowCounts();
+
+    const response = await request("initialize");
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "FORBIDDEN",
+        message: "New Privy setup must use stored credentials",
+      },
+    });
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(await getConnectionSetupRowCounts()).toEqual(before);
+  });
+
+  it("rejects public initialize when an active Config coexists with a pending Connection", async () => {
+    await seedLegacyConfig("active");
+    await seedBlockingConnection();
+    const before = await getConnectionSetupRowCounts();
+
+    const response = await request("initialize");
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
+        message: "Privy custody setup already exists for this project",
+      },
+    });
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(await getConnectionSetupRowCounts()).toEqual(before);
+  });
 
   it("treats inactive Config reactivation as fresh setup", async () => {
     await seedLegacyConfig("inactive");

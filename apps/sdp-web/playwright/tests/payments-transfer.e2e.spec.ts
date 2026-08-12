@@ -17,6 +17,9 @@ test.describe
     let destinationAddress = "";
     let counterpartyName = "";
     let accountLabel = "";
+    let deniedDestinationAddress = "";
+    let deniedCounterpartyName = "";
+    let deniedAccountLabel = "";
     let sourceWalletLabel = "";
     let sourceWalletId = "";
     let transferTokenSymbol = "";
@@ -59,8 +62,27 @@ test.describe
         destinationAddress,
       });
 
+      deniedDestinationAddress = await createExternalSolanaAddress();
+      deniedCounterpartyName = `E2E Blocked Payee ${suffix}`;
+      deniedAccountLabel = `E2E Blocked Solana ${suffix}`;
+      await seedCounterpartyWithSolanaAccount(api, {
+        displayName: deniedCounterpartyName,
+        email: `e2e-blocked-payee-${suffix}@example.com`,
+        accountLabel: deniedAccountLabel,
+        destinationAddress: deniedDestinationAddress,
+      });
+
       await api.put(`/v1/payments/wallets/${sourceWalletId}/policies`, {
-        destinationAllowlist: [destinationAddress],
+        defaultAction: "allow",
+        rules: [
+          {
+            id: "allowlist-destinations",
+            kind: "destination",
+            allowlist: [destinationAddress],
+            action: "allow",
+            name: "Allowed destinations",
+          },
+        ],
       });
       await session.page.close();
     });
@@ -123,5 +145,77 @@ test.describe
       const transferRow = app.getByRole("link").filter({ hasText: shortenedDestination }).first();
       await expect(transferRow).toBeVisible({ timeout: 120_000 });
       await expect(transferRow).toContainText("0.01");
+    });
+
+    test("wallet policy denies a transfer to a non-allowlisted destination", async ({ page }) => {
+      const app = page.locator("main");
+      const next = app.getByRole("button", { name: "Next", exact: true });
+
+      await page.goto("/dashboard/payments/pay");
+
+      await app.getByRole("button", { name: "Counterparty", exact: true }).click();
+      await page.getByPlaceholder("Search counterparties").fill(deniedCounterpartyName);
+      await page.getByRole("button", { name: deniedCounterpartyName }).click();
+      await expect(next).toBeEnabled({ timeout: 120_000 });
+      await next.click();
+
+      const onchainMethod = app.getByRole("button", { name: "Onchain transfer" });
+      const destinationSelect = app.getByRole("button", { name: "Destination account" });
+      await expect(onchainMethod.or(destinationSelect)).toBeVisible({ timeout: 120_000 });
+      if (await onchainMethod.isVisible()) {
+        await onchainMethod.click();
+        await expect(next).toBeEnabled();
+        await next.click();
+      }
+
+      await destinationSelect.click();
+      await page.getByRole("button", { name: deniedAccountLabel }).click();
+      await expect(next).toBeEnabled({ timeout: 120_000 });
+      await next.click();
+
+      await app.getByRole("button", { name: "Source wallet" }).click();
+      await page.getByPlaceholder("Search wallets").fill(sourceWalletLabel);
+      await page.getByRole("button", { name: sourceWalletLabel }).click();
+
+      await app.getByRole("button", { name: "Asset" }).click();
+      await page.getByRole("button", { name: transferTokenSymbol, exact: true }).click();
+
+      await app.getByLabel("Amount", { exact: true }).fill("0.01");
+      await expect(next).toBeEnabled({ timeout: 120_000 });
+      await next.click();
+
+      await expect(app.getByText("Review transfer")).toBeVisible();
+      const sendButton = app.getByRole("button", { name: "Send transfer", exact: true });
+      await expect(sendButton).toBeEnabled({ timeout: 120_000 });
+
+      const transferResponsePromise = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/dashboard/payments/transfers" &&
+          response.request().method() === "POST",
+        { timeout: 120_000 }
+      );
+      await sendButton.click();
+
+      const transferResponse = await transferResponsePromise;
+      expect(transferResponse.status()).toBe(403);
+      const transferBody = (await transferResponse.json()) as {
+        error?: { code?: string; message?: string };
+      };
+      expect(transferBody.error?.code).toBe("FORBIDDEN");
+      expect(transferBody.error?.message).toBe("Wallet operation denied by policy");
+
+      await expect(page.getByText("Transfer failed.", { exact: true })).toBeVisible({
+        timeout: 120_000,
+      });
+      await expect(page.getByText(/Wallet operation denied by policy/)).toBeVisible();
+      await expect(app.getByText("Transfer submitted")).not.toBeVisible();
+
+      await page.goto("/dashboard/payments");
+      const allowedShortened = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
+      await expect(app.getByRole("link").filter({ hasText: allowedShortened }).first()).toBeVisible(
+        { timeout: 120_000 }
+      );
+      const deniedShortened = `${deniedDestinationAddress.slice(0, 6)}…${deniedDestinationAddress.slice(-4)}`;
+      await expect(app.getByRole("link").filter({ hasText: deniedShortened })).toHaveCount(0);
     });
   });

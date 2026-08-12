@@ -48,6 +48,7 @@ export interface Env {
   GCP_SECRET_MANAGER_SECRET_PREFIX?: string;
   GCP_SECRET_MANAGER_API_BASE_URL?: string;
   PRIVY_BYOK_ENABLED?: string;
+  SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED?: string;
 
   // Application secrets
   API_KEY_PEPPER?: string;
