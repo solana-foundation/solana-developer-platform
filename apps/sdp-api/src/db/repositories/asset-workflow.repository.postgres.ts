@@ -58,14 +58,21 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
     },
 
     async updateWorkflow(input: UpdateAssetWorkflowInput) {
-      const rowsAffected = await db
+      // One statement, not UPDATE + a separate read-back. The handler's failure path
+      // treats a rejection as "nothing committed" and retires the secret version the
+      // update would have installed — which is only sound if a rejection really means
+      // the row was not written. A second round-trip after the UPDATE could fail with
+      // the row already committed, and the catch would then destroy the credential the
+      // live rule points at, silently unsigning every later delivery.
+      const row = await db
         .prepare(
           `UPDATE asset_workflows
              SET definition = COALESCE(?::jsonb, definition),
                  review_mode = COALESCE(?, review_mode),
                  enabled = CASE WHEN ?::boolean THEN ? ELSE enabled END,
                  updated_at = sdp_iso_now()
-           WHERE id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL`
+           WHERE id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL
+           RETURNING *`
         )
         .bind(
           input.definition ? JSON.stringify(input.definition) : null,
@@ -76,15 +83,8 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
           input.organizationId,
           input.projectId
         )
-        .run();
-      if (rowsAffected === 0) {
-        return null;
-      }
-      return this.getWorkflowById({
-        workflowId: input.workflowId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+        .first<Record<string, unknown>>();
+      return row ? mapWorkflowRow(row) : null;
     },
 
     async deleteWorkflow(params) {

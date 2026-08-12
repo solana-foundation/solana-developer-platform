@@ -58,6 +58,14 @@ const repoRejects = vi.hoisted(
     }) as Record<string, Error | null>
 );
 
+// Fails the Nth getWorkflowById call of a request, standing in for a dropped connection
+// on a read. Positional on purpose: the rotation regression needs to fail a read that
+// FOLLOWS a committed write, which no all-or-nothing switch can express.
+const getWorkflowByIdFailure = vi.hoisted(() => ({
+  failOnCall: null as number | null,
+  calls: 0,
+}));
+
 vi.mock("@/db/repositories", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db/repositories")>();
   return {
@@ -66,19 +74,30 @@ vi.mock("@/db/repositories", async (importOriginal) => {
       env: Parameters<typeof actual.createAssetWorkflowsRepository>[0]
     ) => {
       const repo = actual.createAssetWorkflowsRepository(env);
-      return {
+      // Delegation binds `this` to the wrapped object, so a method the repository
+      // calls on ITSELF (e.g. an internal read following a write) still routes
+      // through these interceptors — the rotation regression depends on that.
+      const wrapped: typeof repo = {
         ...repo,
         createWorkflow(input: Parameters<typeof repo.createWorkflow>[0]) {
           return repoRejects.createWorkflow
             ? Promise.reject(repoRejects.createWorkflow)
-            : repo.createWorkflow(input);
+            : repo.createWorkflow.call(wrapped, input);
         },
         updateWorkflow(input: Parameters<typeof repo.updateWorkflow>[0]) {
           return repoRejects.updateWorkflow
             ? Promise.reject(repoRejects.updateWorkflow)
-            : repo.updateWorkflow(input);
+            : repo.updateWorkflow.call(wrapped, input);
+        },
+        getWorkflowById(input: Parameters<typeof repo.getWorkflowById>[0]) {
+          getWorkflowByIdFailure.calls += 1;
+          if (getWorkflowByIdFailure.failOnCall === getWorkflowByIdFailure.calls) {
+            return Promise.reject(new Error("Connection terminated unexpectedly"));
+          }
+          return repo.getWorkflowById.call(wrapped, input);
         },
       };
+      return wrapped;
     },
     createWorkflowExecutionsRepository: (
       env: Parameters<typeof actual.createWorkflowExecutionsRepository>[0]
@@ -173,6 +192,8 @@ describe("workflow signing-secret lifecycle (routes)", () => {
     repoRejects.createWorkflow = null;
     repoRejects.updateWorkflow = null;
     repoRejects.cancelOpenExecutionsForWorkflow = null;
+    getWorkflowByIdFailure.failOnCall = null;
+    getWorkflowByIdFailure.calls = 0;
     createCredentialSecretStore.mockReturnValue(secretStore);
     // Each write mints the next version, the way Secret Manager's addVersion does — that
     // difference between the old and new ref is what rotation cleanup keys on.
@@ -353,6 +374,34 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       // …and the rule points at the version that is still alive.
       const [row] = await storedRules();
       expect(row.definition.actionSecret?.secretVersionRef).toBe(versionRef(2));
+    });
+
+    // The repository's update used to be UPDATE + a separate read-back. A read failure
+    // after the UPDATE committed took the handler's rejection path, which retires the
+    // version the update installed — but the committed row now POINTS at that version,
+    // so the live rule signed with a destroyed credential while the caller was told the
+    // edit never happened. The write is one statement now: a rotation either commits
+    // and answers 200, or rejects with nothing written.
+    it("never destroys the version a committed rotation installed", async () => {
+      const workflowId = await createRuleWithSecret();
+      // Call 1 of the PATCH is the handler's own precondition read. Failing call 2
+      // targets what follows the write: on the two-statement repository that is the
+      // post-commit read-back; on the atomic one, no second read exists to fail.
+      getWorkflowByIdFailure.calls = 0;
+      getWorkflowByIdFailure.failOnCall = 2;
+
+      const res = await request("PATCH", `${base}/${workflowId}`, {
+        actionParams: { url: WEBHOOK_URL, secret: ROTATED_SECRET },
+      });
+
+      expect(res.status).toBe(200);
+      const [row] = await storedRules();
+      expect(row.definition.actionSecret?.secretVersionRef).toBe(versionRef(2));
+      expect(secretStore.destroyVersion).not.toHaveBeenCalledWith({
+        secretVersionRef: versionRef(2),
+      });
+      // Ordinary rotation cleanup still ran: only the superseded version was retired.
+      expect(secretStore.destroyVersion).toHaveBeenCalledWith({ secretVersionRef: versionRef(1) });
     });
 
     // The destructive mistake in the other direction: retiring a version the rule still
