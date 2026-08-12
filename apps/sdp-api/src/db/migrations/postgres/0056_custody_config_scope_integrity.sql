@@ -165,7 +165,10 @@ WHERE b.custody_wallet_id = wdup.id;
 -- surviving binding where it has none (oldest assignment wins per column).
 -- When both sides carry an assignment the survivor's wins — it is the one
 -- that already governed the surviving wallet, and the loser's route ceases
--- to exist — and the discard is reported below, never silent.
+-- to exist — and the discard is reported below, never silent. Which of two
+-- profiles is "stricter" is not machine-decidable, so no automatic pick can
+-- guarantee the stronger policy; the NOTICE flags the affected keys for the
+-- operator to make that call.
 UPDATE api_key_wallet_policy_bindings b
 SET wallet_control_profile_id = COALESCE(b.wallet_control_profile_id, l.wallet_control_profile_id),
     api_key_control_profile_id = COALESCE(b.api_key_control_profile_id, l.api_key_control_profile_id)
@@ -240,6 +243,13 @@ SET custody_wallet_id = wdup.keep_id
 FROM custody_wallet_duplicates wdup
 WHERE op.custody_wallet_id = wdup.id;
 
+-- Deleting the duplicate configs cascades their remaining (unmovable)
+-- wallets away. custody_connections are unaffected by construction: every
+-- wallet deleted here is config-owned, so its custody_connection_id is NULL
+-- (0046's one-owner CHECK), while custody_connections_default_wallet_owner_fkey
+-- (0046) only lets a connection default reference a wallet carrying that
+-- connection's id — no connection default can point at any row this delete
+-- removes.
 DELETE FROM custody_configs c
 USING custody_config_duplicates dup
 WHERE c.id = dup.id;
