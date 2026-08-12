@@ -233,6 +233,7 @@ type StoredConnection = {
   project_id: string;
   provider: string;
   provider_credential_id: string;
+  request_delay_ms: number | null;
   status: string;
   setup_metadata: Record<string, unknown>;
   last_check_status: string | null;
@@ -243,7 +244,7 @@ type StoredConnection = {
 async function getConnectionForCredential(credentialId: string): Promise<StoredConnection> {
   const connection = await getDb(env)
     .prepare(
-      `SELECT id, project_id, provider, provider_credential_id, status,
+      `SELECT id, project_id, provider, provider_credential_id, request_delay_ms, status,
               setup_metadata, last_check_status, last_check_at, last_check_failure_code
        FROM custody_connections
        WHERE provider_credential_id = ?`
@@ -297,10 +298,13 @@ async function markInitialValidationFailed(
 describe("POST /internal/dashboard/custody/provider-credentials", () => {
   const original = {
     deploymentMode: env.SDP_DEPLOYMENT_MODE,
+    selfHostedStoredSetup: env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED,
     backend: env.CREDENTIAL_SECRET_STORE_BACKEND,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
     provisioningFlag: env.PRIVY_BYOK_ENABLED,
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
+    privyAppId: env.PRIVY_APP_ID,
+    privyAppSecret: env.PRIVY_APP_SECRET,
   };
 
   beforeEach(async () => {
@@ -317,10 +321,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     env.SDP_DEPLOYMENT_MODE = original.deploymentMode;
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = original.selfHostedStoredSetup;
     env.CREDENTIAL_SECRET_STORE_BACKEND = original.backend;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     env.PRIVY_BYOK_ENABLED = original.provisioningFlag;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
+    env.PRIVY_APP_ID = original.privyAppId;
+    env.PRIVY_APP_SECRET = original.privyAppSecret;
     await clearKVStores(env);
   });
 
@@ -328,7 +335,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
     const response = await submit(app, token, {
       key: "submit-privy-credentials-1",
-      body: { ...VALID_BODY, walletLabel: "  Treasury Wallet  " },
+      body: { ...VALID_BODY, requestDelayMs: 175, walletLabel: "  Treasury Wallet  " },
     });
 
     expect(response.status).toBe(201);
@@ -373,6 +380,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       project_id: PROJECT_ID,
       provider: "privy",
       provider_credential_id: body.data.providerCredential.id,
+      request_delay_ms: 175,
       status: "pending",
       setup_metadata: { pendingWalletLabel: "Treasury Wallet" },
     });
@@ -566,6 +574,9 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     ],
     ["blank wallet label", { ...VALID_BODY, walletLabel: "   " }],
     ["long wallet label", { ...VALID_BODY, walletLabel: "x".repeat(101) }],
+    ["negative request delay", { ...VALID_BODY, requestDelayMs: -1 }],
+    ["fractional request delay", { ...VALID_BODY, requestDelayMs: 1.5 }],
+    ["excessive request delay", { ...VALID_BODY, requestDelayMs: 3001 }],
     ["blank normalized app ID", { ...VALID_BODY, fields: { ...VALID_BODY.fields, appId: "   " } }],
     [
       "blank normalized label",
@@ -672,7 +683,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(await deniedNewIntent.json()).toMatchObject({
       error: {
         code: "FORBIDDEN",
-        message: "Stored credential provisioning is disabled for this provider",
+        message: "Custody Connection setup is disabled for this provider",
       },
     });
     expect(await getDomainCounts()).toEqual({
@@ -709,6 +720,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       },
     ],
     ["wallet label", { ...VALID_BODY, walletLabel: "Different wallet" }],
+    ["request delay", { ...VALID_BODY, requestDelayMs: 250 }],
   ])("rejects same-key %s reuse before another secret write", async (_field, changedBody) => {
     const { app, token } = buildApp();
     expect(
@@ -749,6 +761,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
   it("denies an unseen key before constructing the secret store when the flag is off", async () => {
     env.PRIVY_BYOK_ENABLED = undefined;
+    env.CREDENTIAL_FINGERPRINT_PEPPER = undefined;
     const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
     const { app, token } = buildApp();
 
@@ -773,16 +786,175 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(auditCount?.count).toBe(0);
   });
 
-  it("keeps stored Connection setup disabled for self-hosted deployments until HOO-771", async () => {
+  it("creates a metadata-only runtime Credential and pending Connection for self-hosted setup", async () => {
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
+    env.PRIVY_APP_ID = "runtime-app-1234";
+    env.PRIVY_APP_SECRET = "runtime-secret";
     const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
     const { app, token } = buildApp();
 
-    const response = await submit(app, token, { key: "self-hosted-before-runtime-bootstrap" });
+    const response = await submit(app, token, {
+      key: "self-hosted-runtime-submission",
+      body: {
+        provider: "privy",
+        requestDelayMs: 125,
+        walletLabel: "Runtime treasury",
+      },
+    });
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      data: { providerCredential: { id: string; label: string }; connectionId: string };
+    };
+    expect(body.data).toMatchObject({
+      connectionId: expect.stringMatching(/^cconn_/),
+      providerCredential: {
+        id: expect.stringMatching(/^pcred_/),
+        label: "Privy runtime credentials",
+      },
+    });
+    expect(factory).not.toHaveBeenCalled();
+    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
+
+    const credential = await getDb(env)
+      .prepare(
+        `SELECT source, storage_backend, secret_ref, secret_version_ref,
+                encrypted_secret_payload, idempotency_fingerprint
+         FROM provider_credentials
+         WHERE id = ?`
+      )
+      .bind(body.data.providerCredential.id)
+      .first<{
+        source: string;
+        storage_backend: string;
+        secret_ref: string | null;
+        secret_version_ref: string | null;
+        encrypted_secret_payload: string | null;
+        idempotency_fingerprint: string;
+      }>();
+    expect(credential).toEqual({
+      source: "runtime",
+      storage_backend: "runtime_env",
+      secret_ref: null,
+      secret_version_ref: null,
+      encrypted_secret_payload: null,
+      idempotency_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(await getConnectionForCredential(body.data.providerCredential.id)).toMatchObject({
+      id: body.data.connectionId,
+      request_delay_ms: 125,
+      setup_metadata: { pendingWalletLabel: "Runtime treasury" },
+      status: "pending",
+    });
+  });
+
+  it.each([
+    {
+      name: "submitted fields for runtime setup",
+      configure: () => {
+        env.SDP_DEPLOYMENT_MODE = "self_hosted";
+        env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
+        env.PRIVY_APP_ID = "runtime-app-1234";
+        env.PRIVY_APP_SECRET = "runtime-secret";
+      },
+      body: VALID_BODY,
+      key: "runtime-fields-mismatch",
+      message: "Credential fields are not accepted for runtime setup",
+    },
+    {
+      name: "missing fields for stored setup",
+      configure: () => {
+        env.SDP_DEPLOYMENT_MODE = "managed";
+      },
+      body: { provider: "privy" },
+      key: "stored-fields-missing",
+      message: "Credential fields are required for stored setup",
+    },
+  ])("rejects $name before secret or domain writes", async ({ configure, body, key, message }) => {
+    configure();
+    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+    const { app, token } = buildApp();
+
+    const response = await submit(app, token, {
+      key,
+      body,
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "BAD_REQUEST", message },
+    });
     expect(factory).not.toHaveBeenCalled();
     expect(await getDomainCounts()).toEqual({ credentials: 0, connections: 0, wallets: 0 });
+  });
+
+  it("replays a runtime submission before a later stored-source preference", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
+    env.PRIVY_APP_ID = "runtime-app-replay";
+    env.PRIVY_APP_SECRET = "runtime-secret";
+    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+    const { app, token } = buildApp();
+    const runtimeBody = { provider: "privy", walletLabel: "Runtime replay" } as const;
+
+    const first = await submit(app, token, {
+      key: "runtime-replay-before-policy",
+      body: runtimeBody,
+    });
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as { data: unknown };
+
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "true";
+    const replay = await submit(app, token, {
+      key: "runtime-replay-before-policy",
+      body: runtimeBody,
+    });
+    expect(replay.status).toBe(201);
+    expect(((await replay.json()) as { data: unknown }).data).toEqual(firstBody.data);
+
+    const freshStoredIntent = await submit(app, token, {
+      key: "stored-after-runtime-policy",
+      body: runtimeBody,
+    });
+    expect(freshStoredIntent.status).toBe(400);
+    expect(await freshStoredIntent.json()).toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: "Credential fields are required for stored setup",
+      },
+    });
+    expect(factory).not.toHaveBeenCalled();
+    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
+  });
+
+  it("rejects stored Credential replacement for a failed runtime Connection", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
+    env.PRIVY_APP_ID = "runtime-replacement-app";
+    env.PRIVY_APP_SECRET = "runtime-replacement-secret";
+    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+    const { app, token } = buildApp();
+    const created = await submit(app, token, {
+      key: "runtime-replacement-v1",
+      body: { provider: "privy" },
+    });
+    const createdBody = (await created.json()) as {
+      data: { providerCredential: { id: string }; connectionId: string };
+    };
+    await markInitialValidationFailed(getDb(env), {
+      credentialId: createdBody.data.providerCredential.id,
+      connectionId: createdBody.data.connectionId,
+    });
+
+    const response = await replace(app, token, createdBody.data.connectionId, {
+      key: "runtime-replacement-v2",
+      body: VALID_BODY,
+    });
+
+    expect(response.status).toBe(409);
+    expect(factory).not.toHaveBeenCalled();
+    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
   });
 
   it("replaces credentials only on the exact eligible failed connection", async () => {
@@ -897,11 +1069,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it("clears the pending wallet label when replacement omits walletLabel", async () => {
+  it("clears optional Connection settings when replacement omits them", async () => {
     const { app, token } = buildApp();
     const first = await submit(app, token, {
       key: "replacement-clear-label-v1",
-      body: { ...VALID_BODY, walletLabel: "First wallet" },
+      body: { ...VALID_BODY, requestDelayMs: 225, walletLabel: "First wallet" },
     });
     const firstBody = (await first.json()) as {
       data: { providerCredential: { id: string } };
@@ -931,6 +1103,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     const connection = await getConnectionForCredential(replacementBody.data.providerCredential.id);
     expect(connection.id).toBe(connectionId);
+    expect(connection.request_delay_ms).toBeNull();
     expect(connection.setup_metadata).toEqual({});
   });
 
@@ -1273,40 +1446,51 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it("admits a pending Connection beside the selected active Project Config", async () => {
-    const db = getDb(env);
-    const configId = "cust_active_exact_project";
-    await db.batch([
-      db
-        .prepare(
-          `INSERT INTO custody_configs (
+  it.each([
+    { source: "stored", body: VALID_BODY },
+    { source: "runtime", body: { provider: "privy" } },
+  ] as const)(
+    "admits a pending $source Connection beside the selected active Project Config",
+    async ({ source, body }) => {
+      if (source === "runtime") {
+        env.SDP_DEPLOYMENT_MODE = "self_hosted";
+        env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
+        env.PRIVY_APP_ID = "runtime-active-config-app";
+        env.PRIVY_APP_SECRET = "runtime-active-config-secret";
+      }
+      const db = getDb(env);
+      const configId = "cust_active_exact_project";
+      await db.batch([
+        db
+          .prepare(
+            `INSERT INTO custody_configs (
              id, organization_id, project_id, provider, config_encrypted,
              encryption_version, default_wallet_id, status
            ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'legacy-wallet', 'active')`
-        )
-        .bind(configId, ORGANIZATION_ID, PROJECT_ID),
-      db
-        .prepare(
-          `INSERT INTO custody_wallets (
+          )
+          .bind(configId, ORGANIZATION_ID, PROJECT_ID),
+        db
+          .prepare(
+            `INSERT INTO custody_wallets (
              id, custody_config_id, wallet_id, public_key, label, status
            ) VALUES (
              'cwal_active_exact_project', ?, 'legacy-wallet',
              'legacy-public-key', 'Legacy wallet', 'active'
            )`
-        )
-        .bind(configId),
-      db
-        .prepare(
-          `INSERT INTO custody_scope_defaults (
+          )
+          .bind(configId),
+        db
+          .prepare(
+            `INSERT INTO custody_scope_defaults (
              id, organization_id, project_id, default_custody_config_id
            ) VALUES ('csd_active_exact_project', ?, ?, ?)`
-        )
-        .bind(ORGANIZATION_ID, PROJECT_ID, configId),
-    ]);
-    const readLegacyState = () =>
-      db
-        .prepare(
-          `SELECT c.id AS config_id, c.config_encrypted, c.default_wallet_id,
+          )
+          .bind(ORGANIZATION_ID, PROJECT_ID, configId),
+      ]);
+      const readLegacyState = () =>
+        db
+          .prepare(
+            `SELECT c.id AS config_id, c.config_encrypted, c.default_wallet_id,
                   c.status AS config_status, w.id AS custody_wallet_id,
                   w.wallet_id, w.public_key, w.status AS wallet_status,
                   w.custody_config_id, w.custody_connection_id,
@@ -1316,36 +1500,47 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
            JOIN custody_scope_defaults d
              ON d.organization_id = c.organization_id AND d.project_id = c.project_id
            WHERE c.id = ?`
-        )
-        .bind(configId)
-        .first();
-    const legacyBefore = await readLegacyState();
-    const { app, token } = buildApp();
+          )
+          .bind(configId)
+          .first();
+      const legacyBefore = await readLegacyState();
+      const { app, token } = buildApp();
 
-    const response = await submit(app, token, {
-      key: "legacy-active-coexistence",
-    });
-    expect(response.status).toBe(201);
-    const body = (await response.json()) as {
-      data: { providerCredential: { id: string } };
-    };
-    expect(body.data.providerCredential).toMatchObject({
-      provider: "privy",
-      projectId: PROJECT_ID,
-      status: "pending",
-    });
-    expect(await getConnectionForCredential(body.data.providerCredential.id)).toMatchObject({
-      project_id: PROJECT_ID,
-      provider: "privy",
-      status: "pending",
-    });
-    expect(await getDomainCounts()).toEqual({
-      credentials: 1,
-      connections: 1,
-      wallets: 1,
-    });
-    expect(await readLegacyState()).toEqual(legacyBefore);
-  });
+      const response = await submit(app, token, {
+        key: `legacy-active-${source}-coexistence`,
+        body,
+      });
+      expect(response.status).toBe(201);
+      const responseBody = (await response.json()) as {
+        data: { providerCredential: { id: string } };
+      };
+      expect(responseBody.data.providerCredential).toMatchObject({
+        provider: "privy",
+        projectId: PROJECT_ID,
+        status: "pending",
+      });
+      expect(
+        await getConnectionForCredential(responseBody.data.providerCredential.id)
+      ).toMatchObject({
+        project_id: PROJECT_ID,
+        provider: "privy",
+        status: "pending",
+      });
+      expect(await getDomainCounts()).toEqual({
+        credentials: 1,
+        connections: 1,
+        wallets: 1,
+      });
+      expect(await readLegacyState()).toEqual(legacyBefore);
+      if (source === "runtime") {
+        const audits = await db
+          .prepare("SELECT metadata FROM audit_logs WHERE resource_type = 'provider_credential'")
+          .all();
+        expect(JSON.stringify(audits.results)).not.toContain("runtime-active-config-app");
+        expect(JSON.stringify(audits.results)).not.toContain("runtime-active-config-secret");
+      }
+    }
+  );
 
   it("allows an inactive exact-project config and active organization fallback", async () => {
     await getDb(env).batch([
@@ -1607,11 +1802,22 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(logged).not.toContain("exact secret");
   });
 
-  it("converges concurrent same-key submissions on one credential and connection", async () => {
+  it.each([
+    { source: "stored", body: VALID_BODY },
+    { source: "runtime", body: { provider: "privy" } },
+  ] as const)("converges concurrent same-key $source submissions", async ({ source, body }) => {
+    if (source === "runtime") {
+      env.SDP_DEPLOYMENT_MODE = "self_hosted";
+      env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
+      env.PRIVY_APP_ID = "runtime-concurrent-app";
+      env.PRIVY_APP_SECRET = "runtime-concurrent-secret";
+    }
+    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
     const { app, token } = buildApp();
+    const key = `concurrent-same-key-${source}`;
     const [left, right] = await Promise.all([
-      submit(app, token, { key: "concurrent-same-key" }),
-      submit(app, token, { key: "concurrent-same-key" }),
+      submit(app, token, { key, body }),
+      submit(app, token, { key, body }),
     ]);
 
     expect(left.status).toBe(201);
@@ -1637,6 +1843,28 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       )
       .first<{ count: number }>();
     expect(auditCount?.count).toBe(1);
+    if (source === "runtime") {
+      expect(factory).not.toHaveBeenCalled();
+    }
+  });
+
+  it("allows only one runtime submission across concurrent different keys", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
+    env.PRIVY_APP_ID = "runtime-concurrent-different-app";
+    env.PRIVY_APP_SECRET = "runtime-concurrent-different-secret";
+    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+    const { app, token } = buildApp();
+    const body = { provider: "privy" } as const;
+
+    const responses = await Promise.all([
+      submit(app, token, { key: "runtime-concurrent-left", body }),
+      submit(app, token, { key: "runtime-concurrent-right", body }),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect(factory).not.toHaveBeenCalled();
+    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
   });
 
   it("compensates the losing secret write when concurrent fresh installations race", async () => {
