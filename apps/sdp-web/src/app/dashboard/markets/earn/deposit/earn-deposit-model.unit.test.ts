@@ -200,8 +200,8 @@ describe("availableTokens", () => {
 
 describe("singleStrategyAllocation", () => {
   it("puts the whole stablecoin lane into the chosen strategy", () => {
-    // The API validates weights on a 0.1 grid summing to exactly 100 per lane,
-    // so one entry at 100 is the minimal valid program.
+    // The V1 API caps each lane at one entry and the sum rule pins it to 100,
+    // so one entry at 100 is the only valid program shape.
     expect(
       singleStrategyAllocation(
         strategy({ id: "a", providerReference: "morpho-gauntlet-usdc", depositMints: [USDC] })

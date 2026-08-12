@@ -6,7 +6,14 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { SelectOrganizationPanel } from "@/components/select-organization-panel";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
-import { assetProfiles, earn, markets, organizationOnboarding, privateChannels } from "@/flags";
+import {
+  assetProfiles,
+  earn,
+  heliusRings,
+  markets,
+  organizationOnboarding,
+  privateChannels,
+} from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
@@ -44,6 +51,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     privateChannelsEnabled,
     marketsEnabled,
     earnEnabled,
+    heliusRingsEnabled,
   ] = await Promise.all([
     getSdpAuth(),
     organizationOnboarding(),
@@ -51,6 +59,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     privateChannels(),
     markets(),
     earn(),
+    heliusRings(),
   ]);
 
   if (!userId) {
@@ -96,6 +105,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         <DashboardShell
           assetProfilesEnabled={assetProfilesEnabled}
           earnEnabled={earnEnabled}
+          heliusRingsEnabled={heliusRingsEnabled}
           marketsEnabled={marketsEnabled}
           onboardingStatus={onboardingStatus}
           privateChannelsEnabled={privateChannelsEnabled}

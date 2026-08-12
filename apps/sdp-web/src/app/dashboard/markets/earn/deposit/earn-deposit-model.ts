@@ -185,9 +185,10 @@ export function profileSummaries(strategies: readonly EarnStrategy[]): readonly 
 
 /**
  * The program request for a single chosen strategy: 100% of that strategy's
- * stablecoin group. The API validates weights on a 0.1 grid summing to exactly
- * 100 per group, and omitted groups keep their current allocation — so picking
- * a USDC strategy never disturbs an existing USDT strategy.
+ * stablecoin group. This is the only shape the V1 API accepts — it caps each
+ * token group at exactly one entry (PRO-1667), and the sum rule pins it to
+ * 100. Omitted groups keep their current allocation, so picking a USDC
+ * strategy never disturbs an existing USDT strategy.
  */
 export function singleStrategyAllocation(
   strategy: EarnStrategy
