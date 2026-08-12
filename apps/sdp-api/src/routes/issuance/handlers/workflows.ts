@@ -131,6 +131,22 @@ function defaultReviewMode(actionType: WorkflowActionType): "auto" | "manual" {
   return resolveWorkflowAction(actionType)?.execution === "automated" ? "auto" : "manual";
 }
 
+// The engine holds `requires_approval` actions for a human regardless of the stored
+// mode (event-bus forces `awaiting_review`), so accepting `auto` here would persist a
+// mode the engine ignores — the rule would claim to run unattended while every
+// execution quietly queues for review.
+function assertReviewModeCompatible(
+  actionType: WorkflowActionType,
+  reviewMode: "auto" | "manual" | undefined
+): void {
+  if (
+    reviewMode === "auto" &&
+    resolveWorkflowAction(actionType)?.execution === "requires_approval"
+  ) {
+    throw badRequest(`Action ${actionType} always requires manual review`);
+  }
+}
+
 // Validate the action's params, mapping failures onto the same 400 shape as the body
 // schema so the builder can render them inline per field.
 function assertActionParamsValid(
@@ -155,6 +171,7 @@ export const createWorkflow = async (c: AppContext) => {
   // Tier gate: authoring a `seize` rule is authoring a seize (C1). Runs before any
   // lookup so an unauthorized caller learns nothing about the token.
   assertWorkflowActionPermitted(c, parsed.data.actionType);
+  assertReviewModeCompatible(parsed.data.actionType, parsed.data.reviewMode);
 
   const actionParams = parsed.data.actionParams ?? {};
   assertActionParamsValid(parsed.data.actionType, actionParams);
@@ -304,6 +321,7 @@ export const updateWorkflow = async (c: AppContext) => {
   // Tier comes from the stored action, never the request: the body can't change
   // `action_type`, so trusting it here would let a member edit a seize rule.
   assertWorkflowActionPermitted(c, existing.action_type);
+  assertReviewModeCompatible(existing.action_type, parsed.data.reviewMode);
 
   // Only rebuild the definition when definition fields were supplied.
   const definitionSupplied =
@@ -385,7 +403,10 @@ export const updateWorkflow = async (c: AppContext) => {
 
   // Turning a rule off withdraws what it already queued: an execution held for approval
   // is a pending side effect of a rule the operator just decided they don't want.
-  if (parsed.data.enabled === false && existing.enabled) {
+  // Keyed on the request, not the enabled transition — a withdrawal that fails after
+  // the row committed must be reachable by retrying the same PATCH, and on the retry
+  // the rule is already disabled. A repeat on a long-disabled rule matches no rows.
+  if (parsed.data.enabled === false) {
     await createWorkflowExecutionsRepository(c.env).cancelOpenExecutionsForWorkflow({
       workflowId,
       organizationId: orgId,
