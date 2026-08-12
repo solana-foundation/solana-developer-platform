@@ -214,6 +214,28 @@ describe("CustodyRuntimeTargets", () => {
     }
   );
 
+  it("does not fall back to an Organization Config when matching Connection state is unusable", async () => {
+    const effectiveConfig = await seedConfig({ provider: "turnkey" });
+    const organizationConfig = await seedConfig({ provider: "privy", projectId: null });
+    await seedConnection({ lastCheckStatus: "retry_unknown" });
+    await setOrganizationDefault(organizationConfig.id);
+    await setProjectDefault(effectiveConfig.id, null);
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.resolve({
+        kind: "provider",
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        provider: "privy",
+      })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      statusCode: 409,
+      message: "Custody Connection is unavailable",
+    });
+  });
+
   it("keeps a selected unusable Connection ahead of an active matching Config", async () => {
     const config = await seedConfig({ provider: "privy" });
     const connection = await seedConnection({ lastCheckStatus: "retry_unknown" });
