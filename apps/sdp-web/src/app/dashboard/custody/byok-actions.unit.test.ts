@@ -21,10 +21,22 @@ const credential = {
   id: "pcred_test",
   provider: "privy",
   label: "Production app",
-  scope: "organization",
+  scope: "project",
   status: "active",
   displayMetadata: { appIdSuffix: "1234" },
 };
+
+function completionResult(status: string, code?: string) {
+  return {
+    providerCredential: credential,
+    connectionId: "conn_test",
+    completion: {
+      status,
+      attemptedAt: "2026-08-12T00:00:00.000Z",
+      ...(code ? { code } : {}),
+    },
+  };
+}
 
 function apiError(status: number, message: string): Error {
   return new Error(`SDP API request failed (${status}): ${JSON.stringify({ error: { message } })}`);
@@ -34,7 +46,6 @@ function submitForm(): FormData {
   const formData = new FormData();
   formData.set("idempotencyKey", "key_test");
   formData.set("credentialLabel", "Production app");
-  formData.set("scope", "organization");
   formData.set("appId", "app_test");
   formData.set("appSecret", "secret_test");
   return formData;
@@ -48,84 +59,94 @@ describe("recheckPrivyCredentialAction", () => {
     mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
-  it("returns success and revalidates when the check passes", async () => {
-    client.fetch.mockResolvedValue({
-      providerCredential: credential,
-      check: { status: "success", checkedAt: "2026-08-06T00:00:00.000Z" },
-    });
+  it("returns success and revalidates when the completion passes", async () => {
+    client.fetch.mockResolvedValue(completionResult("success"));
 
-    await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
+    await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
       status: "success",
     });
+    expect(client.fetch).toHaveBeenCalledWith(
+      "/internal/dashboard/custody/connections/conn_test/complete",
+      expect.objectContaining({ method: "POST" })
+    );
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/dashboard/custody");
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/dashboard/wallets");
   });
 
-  it("reports a failed check as invalid credentials", async () => {
-    client.fetch.mockResolvedValue({
-      providerCredential: credential,
-      check: { status: "failed", checkedAt: "2026-08-06T00:00:00.000Z" },
-    });
+  it("reports a failed completion as invalid credentials with the connection replaceable", async () => {
+    client.fetch.mockResolvedValue(completionResult("failed", "invalid_credentials"));
 
-    await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
+    await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
       status: "failed",
       message: "DashboardCustody.byokInvalidCredentials",
+      connectionId: "conn_test",
     });
   });
 
-  it("keeps a retry_unknown check outcome re-checkable", async () => {
-    client.fetch.mockResolvedValue({
-      providerCredential: credential,
-      check: { status: "retry_unknown", checkedAt: "2026-08-06T00:00:00.000Z" },
-    });
+  it("names the already-connected provider account when that is the failure", async () => {
+    client.fetch.mockResolvedValue(
+      completionResult("failed", "provider_account_already_connected")
+    );
 
-    await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
+    await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
+      status: "failed",
+      message: "DashboardCustody.byokAccountAlreadyConnected",
+      connectionId: "conn_test",
+    });
+  });
+
+  it.each([["retry_unknown"], ["running"]])("keeps a %s completion re-runnable", async (status) => {
+    client.fetch.mockResolvedValue(completionResult(status));
+
+    await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
       status: "retry_unknown",
-      providerCredentialId: "pcred_test",
+      connectionId: "conn_test",
     });
   });
 
   it.each([
-    [403, "Install checks are not enabled for this organization"],
-    [409, "Privy wallet cannot be reconciled"],
-  ])("treats a %i refusal as terminal but keeps the credential re-checkable", async (status, message) => {
-    client.fetch.mockRejectedValue(apiError(status, message));
+    [403, "Provider credential installation is unavailable"],
+    [409, "Custody Connection completion already in progress"],
+  ])(
+    "treats a %i refusal as terminal but keeps the connection re-checkable",
+    async (status, message) => {
+      client.fetch.mockRejectedValue(apiError(status, message));
 
-    await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
+      await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
+        status: "refused",
+        message,
+        connectionId: "conn_test",
+      });
+    }
+  );
+
+  it("treats a 404 as terminal without an id because the connection is gone", async () => {
+    client.fetch.mockRejectedValue(apiError(404, "Custody Connection not found"));
+
+    await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
       status: "failed",
-      message,
-      providerCredentialId: "pcred_test",
+      message: "Custody Connection not found",
     });
   });
 
-  it("treats a 404 as terminal without an id because the credential is gone", async () => {
-    client.fetch.mockRejectedValue(apiError(404, "Provider credential not found"));
+  it.each([[500], [408], [429]])(
+    "keeps a %i response re-runnable because the outcome is unknown",
+    async (status) => {
+      client.fetch.mockRejectedValue(apiError(status, "try later"));
 
-    await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
-      status: "failed",
-      message: "Provider credential not found",
-    });
-  });
+      await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
+        status: "retry_unknown",
+        connectionId: "conn_test",
+      });
+    }
+  );
 
-  it.each([
-    [500],
-    [408],
-    [429],
-  ])("keeps a %i response re-checkable because the outcome is unknown", async (status) => {
-    client.fetch.mockRejectedValue(apiError(status, "try later"));
-
-    await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
-      status: "retry_unknown",
-      providerCredentialId: "pcred_test",
-    });
-  });
-
-  it("keeps a transport failure re-checkable", async () => {
+  it("keeps a transport failure re-runnable", async () => {
     client.fetch.mockRejectedValue(new Error("fetch failed"));
 
-    await expect(recheckPrivyCredentialAction("pcred_test")).resolves.toEqual({
+    await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
       status: "retry_unknown",
-      providerCredentialId: "pcred_test",
+      connectionId: "conn_test",
     });
   });
 });
@@ -138,25 +159,64 @@ describe("submitPrivyCredentialAction outcome classification", () => {
     mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
-  it("runs the connection check after storing the credential", async () => {
-    client.fetch.mockResolvedValueOnce({ providerCredential: credential }).mockResolvedValueOnce({
-      providerCredential: credential,
-      check: { status: "success", checkedAt: "2026-08-06T00:00:00.000Z" },
-    });
+  it("runs the connection completion after storing the credential", async () => {
+    client.fetch
+      .mockResolvedValueOnce({ providerCredential: credential, connectionId: "conn_test" })
+      .mockResolvedValueOnce(completionResult("success"));
 
     await expect(submitPrivyCredentialAction(submitForm())).resolves.toEqual({
       status: "success",
     });
     expect(client.fetch).toHaveBeenCalledTimes(2);
+    expect(client.fetch).toHaveBeenNthCalledWith(
+      1,
+      "/internal/dashboard/custody/provider-credentials",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(client.fetch).toHaveBeenNthCalledWith(
+      2,
+      "/internal/dashboard/custody/connections/conn_test/complete",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("always submits project-scoped fields; organization scope no longer exists", async () => {
+    client.fetch
+      .mockResolvedValueOnce({ providerCredential: credential, connectionId: "conn_test" })
+      .mockResolvedValueOnce(completionResult("success"));
+
+    await submitPrivyCredentialAction(submitForm());
+
+    const body = JSON.parse(String(client.fetch.mock.calls[0]?.[1]?.body)) as {
+      fields: { scope: string };
+    };
+    expect(body.fields.scope).toBe("project");
+  });
+
+  it("replaces the credentials on a failed connection when the form carries its id", async () => {
+    client.fetch
+      .mockResolvedValueOnce({ providerCredential: credential, connectionId: "conn_test" })
+      .mockResolvedValueOnce(completionResult("success"));
+    const form = submitForm();
+    form.set("connectionId", "conn_test");
+
+    await expect(submitPrivyCredentialAction(form)).resolves.toEqual({ status: "success" });
+    expect(client.fetch).toHaveBeenNthCalledWith(
+      1,
+      "/internal/dashboard/custody/connections/conn_test/provider-credentials",
+      expect.objectContaining({ method: "POST" })
+    );
   });
 
   it("treats any answered HTTP error as terminal, never as replayable", async () => {
-    client.fetch.mockRejectedValueOnce(apiError(409, "Privy custody setup already exists"));
+    client.fetch.mockRejectedValueOnce(
+      apiError(409, "A Privy custody installation is already in progress for this project")
+    );
 
     // A definitive conflict must not enter the frozen-replay loop.
     await expect(submitPrivyCredentialAction(submitForm())).resolves.toEqual({
       status: "failed",
-      message: "Privy custody setup already exists",
+      message: "A Privy custody installation is already in progress for this project",
     });
   });
 

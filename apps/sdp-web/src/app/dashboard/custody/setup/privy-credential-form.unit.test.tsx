@@ -59,7 +59,9 @@ describe("PrivyCredentialForm", () => {
     const secret = screen.getByLabelText("Privy app secret") as HTMLInputElement;
     expect(secret.type).toBe("password");
     expect(secret.value).toBe("");
-    expect(screen.getByLabelText("Credential scope")).toBeTruthy();
+    // Stored credentials always bind to the calling project now; the form no
+    // longer offers an organization scope the API would reject.
+    expect(screen.queryByLabelText("Credential scope")).toBeNull();
   });
 
   it("submits with an idempotency key and routes to wallets on success", async () => {
@@ -176,12 +178,12 @@ describe("PrivyCredentialForm", () => {
     expect(screen.queryByRole("button", { name: "Connect and verify" })).toBeNull();
   });
 
-  it("keeps a refused credential re-checkable instead of resetting to a doomed resubmit", async () => {
+  it("keeps a refused completion re-checkable instead of resetting to a doomed resubmit", async () => {
     const onLock = vi.fn();
     vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
-      status: "failed",
+      status: "refused",
       message: "Install checks are not enabled for this organization",
-      providerCredentialId: "pcred_1",
+      connectionId: "conn_1",
     });
     vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({ status: "success" });
     const user = userEvent.setup();
@@ -202,9 +204,37 @@ describe("PrivyCredentialForm", () => {
     expect(onLock).toHaveBeenLastCalledWith(false);
 
     await user.click(screen.getByRole("button", { name: "Check again" }));
-    await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("pcred_1"));
+    await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_1"));
     await waitFor(() => expect(push.mock.calls[0]?.[0]).toBe("/dashboard/wallets"));
     await waitFor(() => expect(onLock).toHaveBeenLastCalledWith(false));
+  });
+
+  it("routes the corrected resubmit through replacement when the failed connection survives", async () => {
+    vi.mocked(submitPrivyCredentialAction)
+      .mockResolvedValueOnce({
+        status: "failed",
+        message: "Privy rejected these credentials.",
+        connectionId: "conn_1",
+      })
+      .mockResolvedValueOnce({ status: "success" });
+    const user = userEvent.setup();
+    renderForm();
+
+    await fillAndSubmit(user);
+    await screen.findByRole("alert");
+    // The failed connection blocks fresh submissions server-side, so the
+    // corrected attempt must target it as a replacement under a new key.
+    const secret = screen.getByLabelText("Privy app secret") as HTMLInputElement;
+    expect(secret.value).toBe("");
+    await user.type(secret, "corrected-secret");
+    await user.click(screen.getByRole("button", { name: "Connect and verify" }));
+
+    await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
+    const first = vi.mocked(submitPrivyCredentialAction).mock.calls[0]?.[0] as FormData;
+    expect(first.get("connectionId")).toBeNull();
+    const second = vi.mocked(submitPrivyCredentialAction).mock.calls[1]?.[0] as FormData;
+    expect(String(second.get("connectionId"))).toBe("conn_1");
+    expect(submittedKey(1)).not.toBe(submittedKey(0));
   });
 
   it("treats a rejected submit call as an unknown outcome with the replay intact", async () => {
@@ -234,7 +264,7 @@ describe("PrivyCredentialForm", () => {
   it("stays on the recovery screen when a re-check call rejects", async () => {
     vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
       status: "retry_unknown",
-      providerCredentialId: "pcred_1",
+      connectionId: "conn_1",
     });
     vi.mocked(recheckPrivyCredentialAction)
       .mockRejectedValueOnce(new Error("fetch failed"))
@@ -254,7 +284,7 @@ describe("PrivyCredentialForm", () => {
   it("offers a safe re-check instead of resubmitting after an unknown outcome", async () => {
     vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
       status: "retry_unknown",
-      providerCredentialId: "pcred_1",
+      connectionId: "conn_1",
     });
     vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({ status: "success" });
     const user = userEvent.setup();
@@ -266,7 +296,7 @@ describe("PrivyCredentialForm", () => {
     expect(screen.queryByLabelText("Privy app secret")).toBeNull();
 
     await user.click(checkAgain);
-    await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("pcred_1"));
+    await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_1"));
     await waitFor(() => expect(push.mock.calls[0]?.[0]).toBe("/dashboard/wallets"));
     expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(1);
   });

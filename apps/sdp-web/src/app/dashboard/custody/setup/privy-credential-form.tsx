@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { type FormEvent, useRef, useState, useTransition } from "react";
 import {
   type PrivyByokSubmitResult,
@@ -11,16 +12,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 
 type CheckState =
   | { kind: "idle" }
-  | { kind: "failed"; message: string }
-  // The server refused the check but keeps the credential and its pending
+  // Terminal for the attempt. With a `connectionId`, the failed connection
+  // survives server-side and blocks fresh submissions, so the corrected
+  // resubmit must replace the credentials on that connection.
+  | { kind: "failed"; message: string; connectionId?: string }
+  // The server refused to run the completion but keeps the pending
   // connection, so a fresh submission would be rejected as an existing setup;
-  // re-checking the same credential is the only path that can still converge.
-  | { kind: "refused"; message: string; providerCredentialId: string }
-  | { kind: "retry_unknown"; providerCredentialId: string }
+  // re-running the same completion is the only path that can still converge.
+  | { kind: "refused"; message: string; connectionId: string }
+  | { kind: "retry_unknown"; connectionId: string }
   // The POST may have committed server-side. The exact payload is frozen so a
   // retry replays it verbatim under the same key; editing anything would make
   // the same key carry a different fingerprint and conflict forever.
@@ -37,8 +40,9 @@ const FIELD_INPUT_CLASS =
  *   from the API; after a terminal failure the field starts empty again.
  * - One idempotency key per submission attempt, held in state and reused if the
  *   same submission is retried, so a retry replays instead of duplicating.
- * - A `retry_unknown` outcome re-checks the same credential rather than
- *   resubmitting; the credential and secret are already stored server-side.
+ * - A `retry_unknown` outcome re-runs the same connection's completion rather
+ *   than resubmitting; the credential and secret are already stored
+ *   server-side.
  */
 export function PrivyCredentialForm({
   formId,
@@ -49,7 +53,7 @@ export function PrivyCredentialForm({
   onRecoveryLockChange?: (locked: boolean) => void;
 }) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
@@ -73,38 +77,45 @@ export function PrivyCredentialForm({
     }
     if (result.status === "retry_unknown") {
       onRecoveryLockChange?.(true);
-      setCheck({ kind: "retry_unknown", providerCredentialId: result.providerCredentialId });
+      setCheck({ kind: "retry_unknown", connectionId: result.connectionId });
+      return;
+    }
+    if (result.status === "refused") {
+      // The refusal left the pending connection behind server-side, so offer
+      // the re-run that can still converge — but release the lock: a
+      // deterministic refusal may need an external fix first, and the pending
+      // connection survives leaving this step.
+      onRecoveryLockChange?.(false);
+      setCheck({
+        kind: "refused",
+        message: result.message,
+        connectionId: result.connectionId,
+      });
       return;
     }
     if (result.status === "failed") {
-      if (result.providerCredentialId) {
-        // The refusal left the stored credential and its pending connection
-        // behind server-side, so offer the re-check that can still converge —
-        // but release the lock: a deterministic refusal may need an external
-        // fix first, and the pending connection survives leaving this step.
-        onRecoveryLockChange?.(false);
-        setCheck({
-          kind: "refused",
-          message: result.message,
-          providerCredentialId: result.providerCredentialId,
-        });
-        return;
-      }
-      // Terminal for this attempt: the rejected credential was removed
-      // server-side, so the next submit is a fresh one — fresh key, and the
-      // rejected secret is cleared rather than left to be typed onto.
+      // Terminal for this attempt: the next submit is a corrected one — fresh
+      // key, and the rejected secret is cleared rather than left to be typed
+      // onto. When the failed connection survives server-side its id rides
+      // along so the resubmit replaces that connection's credentials instead
+      // of colliding with it as a fresh submission.
       onRecoveryLockChange?.(false);
       setIdempotencyKey(crypto.randomUUID());
       setAppSecret("");
-      setCheck({ kind: "failed", message: result.message });
+      setCheck({ kind: "failed", message: result.message, connectionId: result.connectionId });
       return;
     }
     if (result.status === "invalid") {
       // Nothing left the client, so there is nothing to recover: back to the
       // editable form with the message. The key is untouched — it was never
-      // spent — and the secret stays typed since no server saw it.
+      // spent — the secret stays typed since no server saw it, and a pending
+      // replacement target survives for the corrected submit.
       onRecoveryLockChange?.(false);
-      setCheck({ kind: "failed", message: result.message });
+      setCheck((prev) => ({
+        kind: "failed",
+        message: result.message,
+        connectionId: prev.kind === "failed" ? prev.connectionId : undefined,
+      }));
       return;
     }
     // Transport-level uncertainty: the submission may have committed, so the
@@ -121,6 +132,11 @@ export function PrivyCredentialForm({
     }
     const formData = new FormData(form);
     formData.set("idempotencyKey", idempotencyKey);
+    if (check.kind === "failed" && check.connectionId) {
+      // A conclusively failed connection blocks fresh submissions; the
+      // corrected credentials must replace it instead.
+      formData.set("connectionId", check.connectionId);
+    }
     lastPayloadRef.current = formData;
     // Locked from the moment the POST leaves: if it commits while the response
     // is in flight, unmounting here would discard the only replay state.
@@ -151,17 +167,17 @@ export function PrivyCredentialForm({
     });
   };
 
-  const handleRecheck = (providerCredentialId: string) => {
+  const handleRecheck = (connectionId: string) => {
     if (isPending) {
       return;
     }
     startTransition(async () => {
       try {
-        applyResult(await recheckPrivyCredentialAction(providerCredentialId));
+        applyResult(await recheckPrivyCredentialAction(connectionId));
       } catch {
-        // The check is idempotent and the credential survives server-side, so
-        // a lost action response leaves the current recovery state valid; stay
-        // on it with the same re-check still offered.
+        // The completion is replay-safe and the connection survives
+        // server-side, so a lost action response leaves the current recovery
+        // state valid; stay on it with the same re-check still offered.
       }
     });
   };
@@ -198,7 +214,7 @@ export function PrivyCredentialForm({
         <div>
           <Button
             type="button"
-            onClick={() => handleRecheck(check.providerCredentialId)}
+            onClick={() => handleRecheck(check.connectionId)}
             disabled={isPending}
           >
             {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokCheckAgain")}
@@ -217,7 +233,7 @@ export function PrivyCredentialForm({
         <div>
           <Button
             type="button"
-            onClick={() => handleRecheck(check.providerCredentialId)}
+            onClick={() => handleRecheck(check.connectionId)}
             disabled={isPending}
           >
             {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokCheckAgain")}
@@ -242,24 +258,6 @@ export function PrivyCredentialForm({
         />
         <p className="text-sm leading-5 text-tertiary">
           {t("DashboardCustody.providerCredentialLabelDescription")}
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="byok-scope">{t("DashboardCustody.providerCredentialScope")}</Label>
-        <select
-          id="byok-scope"
-          name="scope"
-          defaultValue="organization"
-          className="h-12 w-full rounded-2xl border border-border-default bg-surface-raised px-4 text-sm text-primary"
-        >
-          <option value="organization">
-            {t("DashboardCustody.providerCredentialScopeOrganization")}
-          </option>
-          <option value="project">{t("DashboardCustody.providerCredentialScopeProject")}</option>
-        </select>
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerCredentialScopeDescription")}
         </p>
       </div>
 
