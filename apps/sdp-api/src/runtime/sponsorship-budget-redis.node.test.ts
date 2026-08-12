@@ -502,6 +502,76 @@ describe("SponsorshipBudgetRedis", () => {
     expect(await raw.hget(dayKey, "__reservation:reservation_partial:1")).toBeNull();
   });
 
+  it("settles a reservation whose scope field a cross-tenant rebuild never initialized", async () => {
+    const hourBucket = "2026-08-03T10:00:00.000Z";
+    const dayBucket = "2026-08-03T00:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const policies = [policy("global", 1, true, 20), policy("organization", 1, true, 20)];
+
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_b",
+        projectId: null,
+        hourBucket,
+        dayBucket,
+        reservationId: "res_b",
+        attempt: 1,
+        amount: 5,
+        policies,
+        usage: EMPTY_USAGE,
+        liveReservations: { hour: [], day: [] },
+      })
+    ).resolves.toBe("admitted");
+
+    await raw.del(hourKey, "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z");
+    await raw.del("sdp:sponsorship:{devnet}:reservation:res_b:1");
+
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_a",
+        projectId: null,
+        hourBucket,
+        dayBucket,
+        reservationId: "res_a",
+        attempt: 1,
+        amount: 3,
+        policies,
+        usage: {
+          hour: { global: 5, organization: 0, project: 0 },
+          day: { global: 5, organization: 0, project: 0 },
+        },
+        liveReservations: {
+          hour: [{ id: "res_b", attempt: 1, reservedLamports: 5 }],
+          day: [{ id: "res_b", attempt: 1, reservedLamports: 5 }],
+        },
+      })
+    ).resolves.toBe("admitted");
+
+    expect(await raw.hget(hourKey, "global")).toBe("8");
+    expect(await raw.hget(hourKey, "__initialized:organization:org_b")).toBeNull();
+    expect(await raw.hget(hourKey, "__reservation:res_b:1")).toBe("5");
+
+    await expect(
+      budget.settle({
+        network: "devnet",
+        organizationId: "org_b",
+        projectId: null,
+        hourBucket,
+        dayBucket,
+        reservationId: "res_b",
+        attempt: 1,
+        reservedLamports: 5,
+        actualLamports: 2,
+        detectMissingReservation: true,
+      })
+    ).resolves.toBe(-3);
+
+    expect(await raw.hget(hourKey, "global")).toBe("5");
+    expect(await raw.hget(hourKey, "__reservation:res_b:1")).toBeNull();
+  });
+
   it("rejects settlement when an existing reservation has the wrong amount", async () => {
     const input = {
       network: "devnet" as const,

@@ -159,13 +159,12 @@ for key_index = 1, 2 do
     should_adjust = hash_owned ~= false
   end
   if should_adjust then
-    for i = 4, 3 + count do
-      if not redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then return {0, 1} end
-    end
     if delta < 0 then
       for i = 4, 3 + count do
-        local current = tonumber(redis.call('HGET', KEYS[key_index], ARGV[i]) or '0')
-        if current < -delta then return {0, 1} end
+        if redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then
+          local current = tonumber(redis.call('HGET', KEYS[key_index], ARGV[i]) or '0')
+          if current < -delta then return {0, 1} end
+        end
       end
     end
   end
@@ -181,7 +180,9 @@ for key_index = 1, 2 do
   if should_adjust then
     if delta ~= 0 then
       for i = 4, 3 + count do
-        redis.call('HINCRBY', KEYS[key_index], ARGV[i], delta)
+        if redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then
+          redis.call('HINCRBY', KEYS[key_index], ARGV[i], delta)
+        end
       end
     end
     redis.call('HDEL', KEYS[key_index], ownership_field)
