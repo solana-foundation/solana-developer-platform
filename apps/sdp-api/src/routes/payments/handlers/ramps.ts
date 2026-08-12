@@ -44,6 +44,7 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
   AppError,
   badRequest,
@@ -544,6 +545,9 @@ export async function advanceCounterpartyRequirements(
   }
 }
 
+/** Ceiling on simultaneous live provider estimate calls per request. */
+export const RAMP_ESTIMATE_PROVIDER_CONCURRENCY = 3;
+
 async function estimateAcrossProviders(
   c: AppContext,
   providers: readonly RampProviderId[],
@@ -552,8 +556,10 @@ async function estimateAcrossProviders(
   const scope = await resolveScope(c);
   const ctx = rampRuntime(c);
 
-  return Promise.all(
-    providers.map(async (provider): Promise<RampProviderEstimateResult> => {
+  const settled = await mapSettledWithConcurrency(
+    [...providers],
+    RAMP_ESTIMATE_PROVIDER_CONCURRENCY,
+    async (provider): Promise<RampProviderEstimateResult> => {
       try {
         await assertRampProviderAvailable(c, provider, scope.auth.organizationId);
         const estimate = await runProvider(provider, ctx);
@@ -568,8 +574,11 @@ async function estimateAcrossProviders(
           error: error instanceof Error ? error.message : String(error),
         };
       }
-    })
+    }
   );
+
+  // The mapper catches internally, so every result is fulfilled.
+  return settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
 }
 
 export async function estimateOnramp(c: AppContext) {
