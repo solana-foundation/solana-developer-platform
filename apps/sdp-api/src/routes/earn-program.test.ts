@@ -60,6 +60,8 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const GROUND_SANDBOX_KEY = "ground-sandbox-test-api-key";
 const GROUND_PRODUCTION_KEY = "ground-production-test-api-key";
 const GROUND_SOURCE = "morpho-gauntlet-usdc";
+const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+const GROUND_USDT_SOURCE = "morpho-gauntlet-usdt";
 const WALLET_REF = "8f14e45f-ceea-467f-9b6b-3c1a5c7f9d21";
 const SOLANA_DESTINATION = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -449,16 +451,18 @@ describe("Earn program — PUT create-or-update", () => {
     expect(createWallet).not.toHaveBeenCalled();
   });
 
-  it("rejects allocation groups whose weights do not sum to 100", async () => {
+  it("rejects more than one allocation entry per token group (V1 single-vault cap)", async () => {
     await seedAuth();
     await seedGroundStrategy();
+    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
 
+    // Weights deliberately sum to 100 so the cap is the only violation.
     const res = await requestEarn("PUT", "/v1/earn/program", {
       provider: "ground",
       allocations: {
         usdc: [
-          { yieldSourceId: GROUND_SOURCE, pct: 60 },
-          { yieldSourceId: "morpho-steakhouse-usdc", pct: 30 },
+          { yieldSourceId: GROUND_SOURCE, pct: 50 },
+          { yieldSourceId: "morpho-steakhouse-usdc", pct: 50 },
         ],
       },
     });
@@ -466,7 +470,50 @@ describe("Earn program — PUT create-or-update", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("BAD_REQUEST");
+    expect(JSON.stringify(body)).toContain("exactly one allocation entry per token group");
+    expect(createWallet).not.toHaveBeenCalled();
+  });
+
+  it("rejects a lone allocation entry whose weight is not 100", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+
+    // With the group capped at one entry, the sum rule pins that entry to 100.
+    const res = await requestEarn("PUT", "/v1/earn/program", {
+      provider: "ground",
+      allocations: { usdc: [{ yieldSourceId: GROUND_SOURCE, pct: 60 }] },
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
     expect(JSON.stringify(body)).toContain("sum to exactly 100");
+  });
+
+  it("accepts one entry per token group across both deposit tokens", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    await seedGroundStrategy({
+      providerReference: GROUND_USDT_SOURCE,
+      name: "Gauntlet USDT",
+      depositMints: [USDT_MINT],
+    });
+    const createWallet = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWallet").mockResolvedValue(WALLET_SNAPSHOT);
+
+    // The cap is per token group, not per body: usdc and usdt each carry one vault.
+    const res = await requestEarn("PUT", "/v1/earn/program", {
+      provider: "ground",
+      allocations: {
+        usdc: [{ yieldSourceId: GROUND_SOURCE, pct: 100 }],
+        usdt: [{ yieldSourceId: GROUND_USDT_SOURCE, pct: 100 }],
+      },
+    });
+
+    expect(res.status).toBe(201);
+    expect(createWallet).toHaveBeenCalledTimes(1);
   });
 
   it("blocks PUT when the organization is not entitled or credentials are missing", async () => {

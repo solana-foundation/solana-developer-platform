@@ -27,11 +27,12 @@ Companion docs:
   onboarding a curator is a data change, zero code (see
   `EARN_KNOWN_CURATOR_LABELS` in `@sdp/types`).
 - **One shared portfolio wallet per (organization, environment, provider).**
-  Selecting a strategy sets that wallet's strategy weights as a *single*
-  allocation — `pct: 100` for the selected strategy's stablecoin lane
-  (`singleStrategyAllocation`, `earn-deposit-model.ts`) — and an omitted token
-  lane keeps its current weights, so a USDC pick never disturbs an existing USDT
-  one. One wallet per org is enforced by a DB unique constraint
+  Selecting a strategy points that wallet's stablecoin lane at a *single*
+  vault — `pct: 100` for the selected strategy's lane
+  (`singleStrategyAllocation`, `earn-deposit-model.ts`), which is the only
+  shape the V1 API accepts: PRO-1667 caps each token group at one allocation
+  entry per program. An omitted token lane keeps its current allocation, so a
+  USDC pick never disturbs an existing USDT one. One wallet per org is enforced by a DB unique constraint
   (`earn_provider_wallets`, migration 0049). This is SDP's product model, not a
   provider constraint: Ground has no concept of an SDP organization, one Ground
   account holds many portfolio wallets, and every SDP org shares a single account
@@ -65,7 +66,7 @@ Ground's [Portfolio Wallets API](https://docs.groundtech.co/docs/portfolio-walle
 | `allocations[].type` (observed: `market`, `liquidity`, `loan`, `reserve`, `rwa`, `treasury`) | `source_kind`: `rwa` / `defi` (dominant allocation; `rwa` + `treasury` are the RWA side) |
 | `mode` | only `active` sources are listed; `buy_only` is excluded (would trap funds — ADR 0002 exit-safety) |
 | Portfolio wallet (`POST /v2/wallets`, `GET /v2/wallets/{id}`) | The org's shared program: `earn_provider_wallets.provider_wallet_ref` |
-| Strategy weights | `PUT /v1/earn/program` allocations (percent, 0.1 grid, sum = 100 per token group) → Ground target weights. Takes an idempotent `requestId` forwarded on BOTH branches (`POST /v2/wallets` on create, `PATCH /v2/wallets/{id}/strategy` on update) — Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
+| Strategy weights | `PUT /v1/earn/program` allocations → Ground target weights. **V1 is single-vault (PRO-1667): exactly one entry per token group, which the sum rule pins to `pct: 100`.** The weighted wire shape (percent, 0.1 grid, sum = 100 per group) is unchanged and the multi-entry surface is dormant — the API side of re-enabling weights is relaxing the route-schema cap (wire shape and provider contract untouched), but the dashboard separately needs weight authoring + share display back (removed by design) before the cap can safely relax. Takes an idempotent `requestId` forwarded on BOTH branches (`POST /v2/wallets` on create, `PATCH /v2/wallets/{id}/strategy` on update) — Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
 | `depositAddresses.solana{,_devnet}` | The program's funding address (only Solana is surfaced) |
 | Deposits / withdrawals / previews | `GET /v1/earn/program/deposits`, `POST /v1/earn/program/withdrawal-preview`, `POST /v1/earn/program/withdrawals` (idempotent `requestId`) |
 
@@ -361,8 +362,8 @@ Two things write `earn_strategies`, and only one of them is a production path.
   forward APY, a real Solana deposit address) rather than an empty onboarding
   screen. One org, one program — the same unique constraint production enforces,
   so the seed never hands an org a second wallet, and other local orgs stay
-  unlinked. The wallet is shared with teammates: funding it, re-weighting it
-  through the wizard, or withdrawing from it changes what they see. Re-run the
+  unlinked. The wallet is shared with teammates: funding it, changing its
+  strategy through the wizard, or withdrawing from it changes what they see. Re-run the
   seed after your first Clerk sign-in and it moves its own link onto your real
   org; a program you created through the wizard is never moved. `--clean` removes
   the link, never the Ground wallet.

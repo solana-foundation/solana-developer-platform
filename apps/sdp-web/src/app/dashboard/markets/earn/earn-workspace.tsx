@@ -140,11 +140,6 @@ function ProgramSkeleton() {
   );
 }
 
-/** "80" not "80.0" — the tenth only earns its place when it is non-zero. */
-function formatShare(pct: number): string {
-  return Number.isInteger(pct) ? String(pct) : pct.toFixed(1);
-}
-
 function HoldingsList({
   allocations,
   rows,
@@ -190,13 +185,6 @@ function HoldingsList({
                   strategy ? liquidityLabel(strategy) : null,
                   strategy ? strategySourceLabel(strategy) : null,
                   cashStatus(position),
-                  // A share only means something once value sits behind it: a
-                  // target weight next to $0.00 contradicts the row above it.
-                  position.pct !== undefined && Number(position.valueUsd) > 0
-                    ? t("DashboardEarn.overview.programShare", {
-                        pct: formatShare(position.pct),
-                      })
-                    : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}

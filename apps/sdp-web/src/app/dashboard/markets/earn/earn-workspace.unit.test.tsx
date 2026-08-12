@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnProgramState } from "./earn-program-data";
 
 // Values-aware identity translations, so assertions can pin interpolations
-// (e.g. the trimmed share "programShare(80)").
+// (e.g. a delayed liquidity label rendering its settlement-day count).
 vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string, values?: Record<string, string | number>) =>
     values ? `${key}(${Object.values(values).join(",")})` : key,
@@ -179,24 +179,19 @@ describe("EarnWorkspace with an active program", () => {
             reservedUsd: "5000.50",
             earnedUsd: "1250.75",
           },
+          // The V1 shape: one vault per token lane. Freshly funded, so most
+          // value still sits as cash awaiting the provider's deploy — and the
+          // provider still reports `pct` on the wire; the workspace ignores it.
           positions: [
             {
               kind: "yield_source",
               label: "Morpho Gauntlet USDC",
-              valueUsd: "100000.00",
-              pct: 80,
+              valueUsd: "20000.50",
+              pct: 16,
               yieldSourceId: "morpho-gauntlet-usdc",
               token: "usdc",
             },
-            {
-              kind: "yield_source",
-              label: "Morpho Steakhouse USDC",
-              valueUsd: "20000.50",
-              pct: 16,
-              yieldSourceId: "morpho-steakhouse-usdc",
-              token: "usdc",
-            },
-            { kind: "cash", label: "Cash (USDC)", valueUsd: "5000.00", pct: 4, token: "usdc" },
+            { kind: "cash", label: "Cash (USDC)", valueUsd: "105000.00", pct: 84, token: "usdc" },
           ],
           allocations: {
             usdc: [{ yieldSourceId: "morpho-gauntlet-usdc", weightBps: 10_000 }],
@@ -220,12 +215,10 @@ describe("EarnWorkspace with an active program", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("DashboardEarn.overview.holdingsTitle");
     const gauntlet = html.indexOf("Morpho Gauntlet USDC");
-    const steakhouse = html.indexOf("Morpho Steakhouse USDC");
     const cash = html.indexOf("Cash (USDC)");
     expect(gauntlet).toBeGreaterThan(-1);
-    expect(steakhouse).toBeGreaterThan(gauntlet);
-    // Cash is not deployed, so it sorts last regardless of value.
-    expect(cash).toBeGreaterThan(steakhouse);
+    // Cash is not deployed, so it sorts last even though it holds 5x the value.
+    expect(cash).toBeGreaterThan(gauntlet);
   });
 
   it("renders the provider's position label verbatim so no chain name is rebuilt", () => {
@@ -326,10 +319,11 @@ describe("EarnWorkspace with an active program", () => {
     expect(html).toContain("Cash (USDC)");
   });
 
-  it("shows a trimmed share only where value sits behind it", () => {
+  it("never renders a share percent beside holdings — V1 is single-vault", () => {
+    // The fixture's positions carry `pct` (the provider keeps reporting it);
+    // the workspace must not surface it as portfolio framing.
     const html = renderToStaticMarkup(<EarnWorkspace />);
-    expect(html).toContain("DashboardEarn.overview.programShare(80)");
-    expect(html).not.toContain("programShare(80.0)");
+    expect(html).not.toContain("programShare");
   });
 
   it("keeps the deposit address one copy away on the dashboard", () => {
