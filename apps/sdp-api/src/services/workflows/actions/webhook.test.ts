@@ -4,6 +4,27 @@ import type { WebhookEndpointRow, WorkflowExecutionRow } from "@/db/repositories
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 import type { Env } from "@/types/env";
 
+// The one credential store both suites below run against — a module can only be mocked
+// once, so this has to serve the legacy path and the registry path at the same time.
+//
+// `read` defaults to "decrypt" by parsing the handle's own payload, which is what the
+// registry suite needs so endpoint-secret.ts (grace expiry, per-key readability) runs for
+// real against its fixtures. The legacy suite overrides it per test to make a read fail or
+// return a specific key on demand.
+const secretStore = vi.hoisted(() => ({
+  storageBackend: "gcp_secret_manager" as const,
+  write: vi.fn(),
+  read: vi.fn(
+    async ({ stored }: { stored: { encryptedSecretPayload?: string } }) =>
+      JSON.parse(stored.encryptedSecretPayload ?? "{}") as Record<string, unknown>
+  ),
+  destroyVersion: vi.fn(),
+}));
+vi.mock("@/services/credential-secret-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/credential-secret-store")>()),
+  createCredentialSecretStore: () => secretStore,
+}));
+
 // DNS is stubbed so the SSRF guard's behavior is asserted rather than the test host's
 // resolver: `example.com` answers public, `rebound.example.com` answers private.
 vi.mock("node:dns/promises", () => ({
@@ -26,24 +47,6 @@ vi.mock("@/db/repositories", async (importOriginal) => {
     ...actual,
     createWebhookEndpointsRepository: () => ({ getEndpointById }),
     createWebhookDeliveriesRepository: () => ({ createDelivery }),
-  };
-});
-
-// A fake secret store that "decrypts" by parsing the handle's payload, so
-// endpoint-secret.ts (including the grace-expiry logic) runs for real.
-vi.mock("@/services/credential-secret-store", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/credential-secret-store")>();
-  return {
-    ...actual,
-    createCredentialSecretStore: () => ({
-      storageBackend: "encrypted_db" as const,
-      write: async () => {
-        throw new Error("write not used in this test");
-      },
-      read: async ({ stored }: { stored: StoredCredentialSecret }) =>
-        JSON.parse(stored.encryptedSecretPayload ?? "{}") as Record<string, unknown>,
-      destroyVersion: async () => {},
-    }),
   };
 });
 
@@ -77,6 +80,10 @@ function executionFixture(): WorkflowExecutionRow {
 }
 
 describe("runSendWebhook", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -223,6 +230,69 @@ describe("runSendWebhook", () => {
     });
     expect(outcome).toMatchObject({ status: "failed", retryable: true, error: "socket hang up" });
   });
+
+  // A rule carrying a signing key must never deliver without one. "Could not read the
+  // key" and "there is no key" are different answers, and treating the first as the
+  // second stripped the receiver's only way to authenticate the payload — while the
+  // engine recorded the execution as succeeded, so nothing retried and nothing surfaced.
+  describe("when the rule has a signing secret the store cannot return", () => {
+    const storedRef = {
+      storageBackend: "gcp_secret_manager",
+      secretRef: "projects/p/secrets/sdp-workflow-action-1",
+      secretVersionRef: "projects/p/secrets/sdp-workflow-action-1/versions/1",
+    } as never;
+
+    it("does not deliver, and asks the engine to retry", async () => {
+      secretStore.read.mockRejectedValue(new Error("secret manager unavailable"));
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const outcome = await runSendWebhook(env, executionFixture(), {
+        params: { url: "https://example.com/hook" },
+        actionSecret: storedRef,
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(outcome).toMatchObject({
+        status: "failed",
+        retryable: true,
+        error: "SECRET_UNREADABLE",
+      });
+    });
+
+    // Same answer when the reference resolves to nothing usable: the key is configured,
+    // so an empty read is a failed read, not an unsigned rule.
+    it("does not deliver when the stored reference yields no value", async () => {
+      secretStore.read.mockResolvedValue({});
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const outcome = await runSendWebhook(env, executionFixture(), {
+        params: { url: "https://example.com/hook" },
+        actionSecret: storedRef,
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(outcome).toMatchObject({ retryable: true, error: "SECRET_UNREADABLE" });
+    });
+
+    // The counterpart that must keep working: a readable key still signs, so the fix
+    // did not turn every stored secret into a failure.
+    it("signs with the stored key when the store returns it", async () => {
+      secretStore.read.mockResolvedValue({ secret: "from-the-store" });
+      const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const outcome = await runSendWebhook(env, executionFixture(), {
+        params: { url: "https://example.com/hook" },
+        actionSecret: storedRef,
+      });
+
+      expect(outcome).toMatchObject({ status: "succeeded" });
+      const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+      expect(headers["x-sdp-signature-256"]).toMatch(/^sha256=[0-9a-f]{64}$/);
+    });
+  });
 });
 
 const ENDPOINT_ID = "webhook_endpoint_5e60b7b0-9ff1-4f4c-a56b-6db5f9e0c001";
@@ -260,6 +330,9 @@ function hmacHex(secret: string, payload: string): string {
 
 describe("runSendWebhook (registry endpoint)", () => {
   beforeEach(() => {
+    // The legacy suite above stubs `read` per test on the shared store; reset restores the
+    // payload-parsing default these fixtures rely on.
+    secretStore.read.mockReset();
     getEndpointById.mockReset();
     createDelivery.mockReset();
     createDelivery.mockImplementation(async (input: Record<string, unknown>) => input);
@@ -399,6 +472,54 @@ describe("runSendWebhook (registry endpoint)", () => {
       status: "failed",
       error: "SECRET_UNAVAILABLE",
     });
+  });
+
+  // Mid-rotation both keys are live, so a receiver still on the old one verifies against
+  // it. Sending only the current signature is indistinguishable from unsigned to that
+  // receiver — and its rejection would be a permanent 4xx that never retries.
+  it("fails transiently rather than dropping an unreadable previous key during grace", async () => {
+    getEndpointById.mockResolvedValue(
+      endpointFixture({
+        previous_secret_storage: { storageBackend: "encrypted_db" },
+        previous_secret_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      })
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await run();
+
+    expect(outcome).toMatchObject({
+      status: "failed",
+      retryable: true,
+      error: "PREVIOUS_SECRET_UNAVAILABLE",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(createDelivery.mock.calls[0][0]).toMatchObject({
+      status: "failed",
+      error: "PREVIOUS_SECRET_UNAVAILABLE",
+    });
+  });
+
+  // The same unreadable handle past its expiry is simply not a live key any more.
+  it("still delivers when an unreadable previous key's grace has already expired", async () => {
+    getEndpointById.mockResolvedValue(
+      endpointFixture({
+        previous_secret_storage: { storageBackend: "encrypted_db" },
+        previous_secret_expires_at: new Date(Date.now() - 1_000).toISOString(),
+      })
+    );
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await run();
+
+    expect(outcome).toMatchObject({ status: "succeeded" });
+    const headers = (fetchMock.mock.calls[0] as [URL, RequestInit])[1].headers as Record<
+      string,
+      string
+    >;
+    expect(headers["x-sdp-signature"].match(/v1=/g)).toHaveLength(1);
   });
 
   it.each([

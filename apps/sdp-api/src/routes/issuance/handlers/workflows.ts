@@ -273,12 +273,12 @@ export const createWorkflow = async (c: AppContext) => {
       createdBy: auth.id,
     })
     .catch(async (error: unknown) => {
-      await destroyActionSecret(c.env, actionSecret);
+      await destroyActionSecret(c.env, actionSecret, { orgId, workflowId });
       throw error;
     });
 
   if (!workflow) {
-    await destroyActionSecret(c.env, actionSecret);
+    await destroyActionSecret(c.env, actionSecret, { orgId, workflowId });
     throw badRequest("Failed to create workflow");
   }
 
@@ -410,13 +410,13 @@ export const updateWorkflow = async (c: AppContext) => {
       enabled: parsed.data.enabled,
     })
     .catch(async (error: unknown) => {
-      await destroyActionSecret(c.env, secret ? actionSecret : null);
+      await destroyActionSecret(c.env, secret ? actionSecret : null, { orgId, workflowId });
       throw error;
     });
   if (!workflow) {
     // The rule went away between the read and the write, so no row points at the version
     // we just wrote.
-    await destroyActionSecret(c.env, secret ? actionSecret : null);
+    await destroyActionSecret(c.env, secret ? actionSecret : null, { orgId, workflowId });
     throw notFound("Workflow");
   }
 
@@ -430,7 +430,7 @@ export const updateWorkflow = async (c: AppContext) => {
     previousSecret?.secretVersionRef &&
     previousSecret.secretVersionRef !== actionSecret?.secretVersionRef
   ) {
-    await destroyActionSecret(c.env, previousSecret);
+    await destroyActionSecret(c.env, previousSecret, { orgId, workflowId });
   }
 
   // Turning a rule off withdraws what it already queued: an execution held for approval
@@ -483,7 +483,7 @@ export const deleteWorkflow = async (c: AppContext) => {
   // version is a logged no-op). Skipped only when a concurrent delete owns the row —
   // it reached the soft delete first, so this cleanup is its to run.
   if (removed || existing.deleted_at !== null) {
-    await destroyActionSecret(c.env, existing.definition.actionSecret);
+    await destroyActionSecret(c.env, existing.definition.actionSecret, { orgId, workflowId });
   }
   // Anything this rule had queued or held is withdrawn with it — otherwise a held mint
   // from a deleted rule stays in the approval queue, approvable.

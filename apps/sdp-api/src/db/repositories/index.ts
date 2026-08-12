@@ -362,6 +362,7 @@ export {
   createWebhookDeliveriesRepository,
   createWebhookEndpointsRepository,
   createWorkflowExecutionsRepository,
+  createWorkflowSecretRetirementsRepository,
 } from "./repository-factory";
 export type {
   ListTokensOptions,
@@ -399,3 +400,9 @@ export type {
   WorkflowExecutionsRepository,
 } from "./workflow-execution.repository";
 export { createPostgresWorkflowExecutionsRepository } from "./workflow-execution.repository.postgres";
+export type {
+  RecordWorkflowSecretRetirementInput,
+  WorkflowSecretRetirementRow,
+  WorkflowSecretRetirementsRepository,
+} from "./workflow-secret-retirement.repository";
+export { createPostgresWorkflowSecretRetirementsRepository } from "./workflow-secret-retirement.repository.postgres";

@@ -13,6 +13,7 @@ import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
+import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { dispatchWorkflowAction } from "@/services/workflows/actions";
 import { type AssetGateContext, resolveAssetGateContext } from "@/services/workflows/asset-gate";
 import type { Env } from "@/types/env";
@@ -341,6 +342,17 @@ export async function runDueWorkflowExecutions(
       }
     })
   );
+
+  // Drain any secret retirements that failed at request time. Runs on the workflow tick
+  // rather than a cron of its own: the queue is only ever filled by the workflow rule
+  // handlers, and it is normally empty. Never fails the tick — the executions above are
+  // the job's actual work, and an orphaned credential stays queued for the next one.
+  await retireOrphanedActionSecrets(env, now).catch((error: unknown) => {
+    getLogger().error(
+      { error: error instanceof Error ? error.message : String(error) },
+      "workflow engine: secret retirement sweep failed"
+    );
+  });
 
   return result;
 }

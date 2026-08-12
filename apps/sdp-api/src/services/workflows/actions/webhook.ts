@@ -57,11 +57,20 @@ async function runLegacySendWebhook(
   }
   // The signing key lives in the credential store; `params.secret` is only a fallback
   // for a rule saved before that (and for tests that pass one inline).
-  const secret =
-    (await readActionSecret(env, {
-      orgId: execution.organization_id,
-      stored: action.actionSecret,
-    })) ?? resolveParam(action, "secret");
+  const stored = await readActionSecret(env, {
+    orgId: execution.organization_id,
+    stored: action.actionSecret,
+  });
+  // A rule that HAS a signing key must never deliver without one. Sending unsigned
+  // because the store was briefly unavailable strips the receiver's only means of
+  // authenticating the payload — and a receiver that correctly rejects it would see a
+  // permanent 4xx rather than the retry this deserves. Transient: the engine retries
+  // with backoff, and a store that stays down ends as a visible failure instead of a
+  // stream of unsigned deliveries.
+  if (!stored.ok) {
+    return transientFail("SECRET_UNREADABLE");
+  }
+  const secret = stored.secret ?? resolveParam(action, "secret");
 
   const body = buildEventBody(execution);
   const headers: Record<string, string> = {
@@ -144,12 +153,13 @@ async function runEndpointSendWebhook(
     return permanentFail("ENDPOINT_DISABLED");
   }
 
-  const secrets = await resolveLiveEndpointSecrets(env, execution.organization_id, endpoint);
-  if (!secrets) {
+  const signing = await resolveLiveEndpointSecrets(env, execution.organization_id, endpoint);
+  if (!signing.ok) {
     // Store hiccups can clear; unlike the legacy path, a managed endpoint never
-    // degrades to an unsigned delivery.
-    await logDelivery({ status: "failed", error: "SECRET_UNAVAILABLE" });
-    return transientFail("SECRET_UNAVAILABLE");
+    // degrades to an unsigned delivery — nor, mid-rotation, to one the receiver's
+    // current key cannot verify. The reason distinguishes which key is unreadable.
+    await logDelivery({ status: "failed", error: signing.reason });
+    return transientFail(signing.reason);
   }
 
   const timestampSeconds = Math.floor(Date.now() / 1000);
@@ -159,7 +169,7 @@ async function runEndpointSendWebhook(
     "x-sdp-delivery": deliveryId,
     "x-sdp-event": execution.trigger_type,
     "x-sdp-timestamp": String(timestampSeconds),
-    "x-sdp-signature": await signV2(secrets, timestampSeconds, body),
+    "x-sdp-signature": await signV2(signing.secrets, timestampSeconds, body),
   };
 
   const outcome = await sendWebhook({ url: endpoint.url, body, headers });

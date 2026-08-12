@@ -258,7 +258,10 @@ export const rotateWebhookEndpointSecret = async (c: AppContext) => {
   }
 
   // Whatever occupied the previous slot is displaced for good by this rotation.
-  await destroyEndpointSecretVersion(c.env, existing.previous_secret_storage);
+  await destroyEndpointSecretVersion(c.env, existing.previous_secret_storage, {
+    orgId,
+    endpointId,
+  });
 
   const graceMs = gracePeriodHours * 3_600_000;
   const endpoint = await repo.rotateSecret({
@@ -274,7 +277,7 @@ export const rotateWebhookEndpointSecret = async (c: AppContext) => {
   }
   if (graceMs <= 0) {
     // No grace: the old current key dies immediately.
-    await destroyEndpointSecretVersion(c.env, existing.secret_storage);
+    await destroyEndpointSecretVersion(c.env, existing.secret_storage, { orgId, endpointId });
   }
 
   await new AuditService(getDb(c.env)).log(c, {
@@ -386,8 +389,10 @@ export const redeliverWebhookDelivery = async (c: AppContext) => {
     throw conflict("Original request body was truncated and cannot be redelivered");
   }
 
-  const secrets = await resolveLiveEndpointSecrets(c.env, orgId, endpoint);
-  if (!secrets) {
+  // Refuse rather than redeliver unsigned — or, mid-rotation, without the key the
+  // receiver may still be verifying with.
+  const signing = await resolveLiveEndpointSecrets(c.env, orgId, endpoint);
+  if (!signing.ok) {
     throw internalError("Webhook endpoint signing secret is unavailable");
   }
 
@@ -402,7 +407,7 @@ export const redeliverWebhookDelivery = async (c: AppContext) => {
       "x-sdp-delivery": newDeliveryId,
       "x-sdp-event": original.trigger_type,
       "x-sdp-timestamp": String(timestampSeconds),
-      "x-sdp-signature": await signV2(secrets, timestampSeconds, original.request_body),
+      "x-sdp-signature": await signV2(signing.secrets, timestampSeconds, original.request_body),
     },
   });
 

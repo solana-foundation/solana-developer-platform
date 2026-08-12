@@ -87,7 +87,18 @@
   <line x1="406" y1="626" x2="421" y2="626" stroke="#475569" stroke-width="1.6" marker-end="url(#aSlate)"/>
   <line x1="642" y1="626" x2="657" y2="626" stroke="#475569" stroke-width="1.6" marker-end="url(#aSlate)"/>
   <line x1="778" y1="626" x2="793" y2="626" stroke="#475569" stroke-width="1.6" marker-end="url(#aSlate)"/>
-  <text x="520" y="664" text-anchor="middle" font-size="10.5" fill="#64748b">per-tick rule / gate caches · reads params · secret · retry from asset_workflows · single-shot for approval-gated actions</text>
+  <text x="520" y="664" text-anchor="middle" font-size="10.5" fill="#64748b">per-tick rule / gate caches · reads params · secret · retry from asset_workflows · single-shot for approval-gated actions · sweeps secret retirements</text>
+
+  <!-- ================= SECRET RETIREMENT QUEUE ================= -->
+  <rect x="1010" y="556" width="290" height="116" rx="8" fill="#f8fafc" stroke="#334155"/>
+  <text x="1155" y="580" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0f172a">workflow_action_secret_retirements</text>
+  <text x="1155" y="599" text-anchor="middle" font-size="10.5" fill="#334155">a destroy the backend refused, queued</text>
+  <text x="1155" y="616" text-anchor="middle" font-size="10.5" fill="#334155">rotation · delete · uncommitted write</text>
+  <text x="1155" y="637" text-anchor="middle" font-size="10.5" fill="#64748b">retried with capped backoff, never</text>
+  <text x="1155" y="653" text-anchor="middle" font-size="10.5" fill="#64748b">abandoned · no FKs: outlives the rule</text>
+  <!-- cron -> retirement queue (sweep). The gap between the panels is only 30px, so the
+       relationship is carried by the arrow and the panel's own label, not by a caption. -->
+  <line x1="980" y1="614" x2="1009" y2="614" stroke="#475569" stroke-width="1.6" marker-end="url(#aSlate)"/>
 
   <!-- ledger -> cron (poll) -->
   <line x1="700" y1="468" x2="700" y2="556" stroke="#475569" stroke-width="2" marker-end="url(#aSlate)"/>
