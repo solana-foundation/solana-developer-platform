@@ -6,6 +6,7 @@ import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { isSentryEnabled } from "@/runtime/observability";
 import { nodeObservability } from "@/runtime/observability-node";
+import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
@@ -26,11 +27,19 @@ vi.mock("@/cron/pending-transfers", () => ({
   PENDING_TRANSFERS_MONITOR: "sdp-api-track-pending-transfers",
 }));
 
+vi.mock("@/cron/workflow-executions", () => ({
+  WORKFLOW_EXECUTIONS_CRON: "* * * * *",
+  WORKFLOW_EXECUTIONS_MONITOR: "sdp-api-run-workflow-executions",
+}));
+
 vi.mock("@/db/client", () => ({
   closeDatabasePools: vi.fn(async () => {}),
 }));
 
-vi.mock("@/lib/runtime-env", () => ({
+// `isAssetProfilesEnabled` (real, via feature-flags) needs the real
+// `isSelfHostedDeployment`; only the env lookup itself is stubbed.
+vi.mock("@/lib/runtime-env", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/runtime-env")>()),
   getProcessEnv: vi.fn(),
 }));
 
@@ -50,6 +59,10 @@ vi.mock("@/runtime/observability-node", () => ({
     withScope: vi.fn(),
     withMonitor: vi.fn((_slug: string, fn: () => Promise<unknown>) => fn()),
   },
+}));
+
+vi.mock("@/services/jobs/run-workflow-executions", () => ({
+  runDueWorkflowExecutions: vi.fn(async () => {}),
 }));
 
 vi.mock("@/services/jobs/track-pending-transfers", () => ({
@@ -79,6 +92,9 @@ describe("runCronJob", () => {
       .mockReset()
       .mockResolvedValue(undefined as never);
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
+    vi.mocked(runDueWorkflowExecutions)
+      .mockReset()
+      .mockResolvedValue(undefined as never);
     vi.mocked(nodeObservability.withMonitor)
       .mockReset()
       .mockImplementation((_slug, fn) => fn());
@@ -97,15 +113,26 @@ describe("runCronJob", () => {
     expect(trackPendingTransfers).not.toHaveBeenCalled();
   });
 
-  it("runs only the ungated pair when the Earn flags are off", async () => {
+  it("runs the ungated pair and the workflow tick when the Earn flags are off", async () => {
     await runCronJob();
 
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
     expect(recoverApprovedWalletOperations).toHaveBeenCalledTimes(1);
+    // Managed deployments always have asset profiles on, so the workflow tick runs.
+    expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
     expect(Sentry.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the workflow tick on a self-hosted deployment without the asset-profiles flag", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ SDP_DEPLOYMENT_MODE: "self_hosted" }));
+
+    await runCronJob();
+
+    expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
   });
 
   it("requires both flags — the parent flag alone never runs the earn tick", async () => {
@@ -138,9 +165,15 @@ describe("runCronJob", () => {
 
     await runCronJob();
 
-    // The job-level monitor wraps only the ungated pair, exactly as before.
-    expect(nodeObservability.withMonitor).toHaveBeenCalledExactlyOnceWith(
+    // The pair keeps the transfers monitor; the workflow tick reports to its own.
+    expect(nodeObservability.withMonitor).toHaveBeenCalledTimes(2);
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       "sdp-api-track-pending-transfers",
+      expect.any(Function),
+      { schedule: { type: "crontab", value: "* * * * *" } }
+    );
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
+      "sdp-api-run-workflow-executions",
       expect.any(Function),
       { schedule: { type: "crontab", value: "* * * * *" } }
     );
@@ -171,6 +204,7 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).rejects.toThrow("reconciliation down");
 
+    expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
