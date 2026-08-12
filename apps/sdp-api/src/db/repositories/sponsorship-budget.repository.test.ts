@@ -147,6 +147,23 @@ describe("SponsorshipBudgetRepository", () => {
     ).toEqual({ count: 6 });
   });
 
+  it("returns window usage sums as JavaScript numbers, not NUMERIC strings", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const input = reservationInput("reservation_usage_types");
+    await expect(repository.createReservation(input)).resolves.toBe(true);
+    const usage = await repository.getWindowUsage({
+      network: input.network,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      hourBucket: input.hourBucket,
+      dayBucket: input.dayBucket,
+    });
+    expect(usage).toEqual({
+      hour: { global: 5, organization: 5, project: 5 },
+      day: { global: 5, organization: 5, project: 5 },
+    });
+  });
+
   it("reopens a released reservation exactly once and only after Redis settlement", async () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
     const input = reservationInput("reservation_retry");

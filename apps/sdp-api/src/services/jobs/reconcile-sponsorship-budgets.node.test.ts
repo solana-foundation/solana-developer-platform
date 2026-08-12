@@ -1,3 +1,4 @@
+import { address } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import type { SponsorshipReconciliationReservation } from "@/db/repositories/sponsorship-budget.repository";
 import type { Env } from "@/types/env";
@@ -48,11 +49,15 @@ const ZERO_OUTFLOW_FEE_PAYER_POLICY = {
 } as const;
 
 const PROVIDER_CONFIGURATION = {
-  signerAddress: "fee_payer_1" as never,
+  signerAddress: address("4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q"),
   maxAllowedLamports: 10n,
   feePayerMayTransferLamports: false,
   feePayerPolicy: ZERO_OUTFLOW_FEE_PAYER_POLICY,
 };
+
+const TEST_SIGNATURE =
+  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
+const TEST_BLOCKHASH = "29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2";
 
 function reservation(
   overrides: Partial<SponsorshipReconciliationReservation> = {}
@@ -60,7 +65,7 @@ function reservation(
   return {
     id: "reservation_1",
     status: "submitted",
-    signature: "signature_1",
+    signature: TEST_SIGNATURE,
     signedTransaction: null,
     reservedLamports: 5,
     actualLamports: null,
@@ -70,7 +75,7 @@ function reservation(
     projectId: "project_1",
     feePayer: PROVIDER_CONFIGURATION.signerAddress,
     providerConfigFingerprint: sponsorshipProviderConfigFingerprint(PROVIDER_CONFIGURATION),
-    recentBlockhash: "blockhash_1",
+    recentBlockhash: TEST_BLOCKHASH,
     hourBucket: "2026-08-03T10:00:00.000Z",
     dayBucket: "2026-08-03T00:00:00.000Z",
     missCount: 0,
