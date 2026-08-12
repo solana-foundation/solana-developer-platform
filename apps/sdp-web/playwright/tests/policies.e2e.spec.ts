@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { SOL_MINT } from "@sdp/types";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
@@ -38,8 +39,17 @@ test.describe("policies responsive table", () => {
       );
       const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
       await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
-        destinationAllowlist: [],
-        maxTransferAmount: "25",
+        defaultAction: "allow",
+        rules: [
+          {
+            id: "per-transaction-limit",
+            kind: "amount",
+            max: "25",
+            assets: [SOL_MINT],
+            action: "allow",
+            name: "Per transaction limit",
+          },
+        ],
       });
     } finally {
       await session.page.close();

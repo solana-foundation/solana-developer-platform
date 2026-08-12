@@ -44,7 +44,6 @@ const POSTGRES_TEST_TABLES = [
   "payment_transfer_recipients",
   "payment_transfer_batches",
   "payment_transfers",
-  "payment_wallet_policies",
   "frozen_accounts",
   "token_allowlist_statuses",
   "token_allowlists",

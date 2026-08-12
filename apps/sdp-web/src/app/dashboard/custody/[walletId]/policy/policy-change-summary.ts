@@ -1,15 +1,11 @@
-import type {
-  PaymentWalletPolicy,
-  PolicyDefaultAction,
-  PolicyRule,
-  PolicyRuleAction,
-} from "@sdp/types";
+import type { PolicyDefaultAction, PolicyRule, PolicyRuleAction } from "@sdp/types";
 import {
   resolveTokenByMint,
   shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
 import type { useTranslations } from "@/i18n/provider";
 import { formatDisplayLabel } from "@/lib/utils";
+import type { WalletPolicyWritePayload } from "./wallet-policy-authoring";
 import {
   DEFAULT_ACTION_LABEL_KEYS,
   FAMILY_LABEL_KEYS,
@@ -32,15 +28,13 @@ export interface PolicyChangeGroup {
 
 export interface PolicyFieldLabels {
   defaultAction: string;
-  maxDailyAmount: string;
-  destinationAllowlist: string;
   operationControls: string;
   operationLabel: (operation: string) => string;
   actionLabel: (action: PolicyRuleAction) => string;
   defaultActionLabel: (action: PolicyDefaultAction) => string;
 }
 
-type PolicyPayload = PaymentWalletPolicy & { rules: PolicyRule[] };
+type PolicyPayload = WalletPolicyWritePayload;
 
 /**
  * Builds the translated field labels and enum formatters the change summary
@@ -52,8 +46,6 @@ type PolicyPayload = PaymentWalletPolicy & { rules: PolicyRule[] };
 export function buildPolicyFieldLabels(t: Translate): PolicyFieldLabels {
   return {
     defaultAction: t("DashboardCustody.policyDefaultAction"),
-    maxDailyAmount: t("DashboardCustody.policyCommitDailyLimit"),
-    destinationAllowlist: t("DashboardCustody.policyAllowList"),
     operationControls: t("DashboardCustody.policyReviewOperationControls"),
     operationLabel: (operation) =>
       Object.hasOwn(FAMILY_LABEL_KEYS, operation)
@@ -283,53 +275,6 @@ function pushScalarChange(
 }
 
 /**
- * Emits rows for destination-allowlist membership changes, plus an empty
- * result row when the allowlist ends up empty.
- *
- * @param rows - The row list to append to.
- * @param before - The currently active policy payload.
- * @param after - The payload about to be activated.
- * @param labels - Translated display labels.
- */
-function pushAllowlistChanges(
-  rows: PolicyChangeRow[],
-  before: PolicyPayload,
-  after: PolicyPayload,
-  labels: PolicyFieldLabels
-): void {
-  const removedAddresses = before.destinationAllowlist.filter(
-    (address) => !after.destinationAllowlist.includes(address)
-  );
-  const addedAddresses = after.destinationAllowlist.filter(
-    (address) => !before.destinationAllowlist.includes(address)
-  );
-  if (removedAddresses.length > 0) {
-    rows.push({
-      direction: "removed",
-      group: "destinationAllowlist",
-      label: labels.destinationAllowlist,
-      value: removedAddresses.map(shortenAddress).join(", "),
-    });
-  }
-  if (addedAddresses.length > 0) {
-    rows.push({
-      direction: "added",
-      group: "destinationAllowlist",
-      label: labels.destinationAllowlist,
-      value: addedAddresses.map(shortenAddress).join(", "),
-    });
-  }
-  if (removedAddresses.length > 0 && after.destinationAllowlist.length === 0) {
-    rows.push({
-      direction: "result",
-      group: "destinationAllowlist",
-      label: labels.destinationAllowlist,
-      value: "",
-    });
-  }
-}
-
-/**
  * Emits rows for operation-control action transitions, batching operations
  * that share the same removed or added action into one row each.
  *
@@ -478,19 +423,9 @@ export function summarizePolicyChanges(
     rows,
     "defaultAction",
     labels.defaultAction,
-    before.defaultAction === undefined
-      ? undefined
-      : labels.defaultActionLabel(before.defaultAction),
-    after.defaultAction === undefined ? undefined : labels.defaultActionLabel(after.defaultAction)
+    labels.defaultActionLabel(before.defaultAction),
+    labels.defaultActionLabel(after.defaultAction)
   );
-  pushScalarChange(
-    rows,
-    "maxDailyAmount",
-    labels.maxDailyAmount,
-    before.maxDailyAmount,
-    after.maxDailyAmount
-  );
-  pushAllowlistChanges(rows, before, after, labels);
   pushOperationChanges(rows, before, after, labels);
   pushRuleChanges(rows, before, after);
   return rows;

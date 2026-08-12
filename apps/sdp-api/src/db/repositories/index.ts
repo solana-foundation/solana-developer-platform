@@ -156,10 +156,7 @@ export type {
   PaymentTransferRow,
   PaymentTransferStatus,
   PaymentTransferType,
-  PaymentWalletPolicyRow,
-  PaymentWalletPolicyType,
   UpdatePaymentTransferInput,
-  UpsertPaymentWalletPolicyInput,
 } from "./payments.repository";
 export {
   isRampTransferType,

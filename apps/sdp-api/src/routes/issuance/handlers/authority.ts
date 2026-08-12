@@ -243,6 +243,7 @@ export async function extractUpdateAuthorityPolicyCandidate(
       amount: null,
       destination: newAuthority,
     }),
+    legs: [],
     body: input,
     resolved: {
       tokenId,

@@ -539,6 +539,7 @@ export async function extractMintPolicyCandidate(c: AppContext): Promise<PolicyG
             amount: input.mint.amount,
             destination: input.mint.destination,
           }),
+    legs: [],
     body: input,
     resolved: {
       tokenId,

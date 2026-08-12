@@ -22,6 +22,7 @@ describe("approved wallet-operation type resumption", () => {
       custodyWalletId: "cw_1",
       walletId: "wallet_1",
       apiKeyId: "key_1",
+      legs: [],
       operationFamily,
       operationType,
       asset: "USDC",

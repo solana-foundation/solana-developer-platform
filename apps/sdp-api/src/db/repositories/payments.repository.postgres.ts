@@ -8,9 +8,7 @@ import type {
   ListTransfersResult,
   PaymentsRepository,
   PaymentTransferRow,
-  PaymentWalletPolicyRow,
   UpdatePaymentTransferInput,
-  UpsertPaymentWalletPolicyInput,
 } from "./payments.repository";
 import { generatePaymentTransferId } from "./payments.repository";
 
@@ -162,17 +160,6 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
   };
 }
 
-function mapPolicyRow(row: Record<string, unknown>): PaymentWalletPolicyRow {
-  return {
-    id: row.id as string,
-    custody_wallet_id: row.custody_wallet_id as string,
-    policy_type: row.policy_type as string,
-    policy: row.policy as string,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
-}
-
 function buildTransferScopeWhere(params: {
   organizationId: string;
   projectId: string | null;
@@ -204,23 +191,6 @@ function buildTransferScopeWhere(params: {
   };
 }
 
-async function getWalletPoliciesInternal(
-  db: DatabaseExecutor,
-  custodyWalletId: string
-): Promise<PaymentWalletPolicyRow[]> {
-  const rows = await db
-    .prepare(
-      `SELECT *
-       FROM payment_wallet_policies
-       WHERE custody_wallet_id = ?
-       ORDER BY created_at ASC`
-    )
-    .bind(custodyWalletId)
-    .all<Record<string, unknown>>();
-
-  return rows.results.map(mapPolicyRow);
-}
-
 export function createPostgresPaymentsRepository(
   db: DatabaseExecutor,
   tenantScope?: TenantScope
@@ -231,32 +201,6 @@ export function createPostgresPaymentsRepository(
       assertTenantClaim(tenantScope, claim, "PaymentsRepository");
     }
   };
-  const ownsCustodyWallet = async (
-    custodyWalletId: string,
-    access: "read" | "write"
-  ): Promise<boolean> => {
-    if (!tenantScope) return true;
-    const projectClause =
-      tenantScope.projectId === null
-        ? ""
-        : access === "read"
-          ? "AND (cc.project_id = ? OR cc.project_id IS NULL)"
-          : "AND cc.project_id = ?";
-    const projectValues = tenantScope.projectId === null ? [] : [tenantScope.projectId];
-    const row = await db
-      .prepare(
-        `SELECT cw.id
-         FROM custody_wallets cw
-         JOIN custody_configs cc ON cc.id = cw.custody_config_id
-         WHERE cw.id = ?
-           AND cc.organization_id = ?
-           ${projectClause}`
-      )
-      .bind(custodyWalletId, tenantScope.organizationId, ...projectValues)
-      .first<{ id: string }>();
-    return row !== null;
-  };
-
   return {
     async createTransfer(input: CreatePaymentTransferInput) {
       assertScope(input);
@@ -631,42 +575,6 @@ export function createPostgresPaymentsRepository(
       };
     },
 
-    async listTransferAmounts(params) {
-      assertScope(params);
-      if (params.statuses.length === 0) {
-        return [];
-      }
-
-      const scope = buildTransferScopeWhere({
-        organizationId: params.organizationId,
-        projectId: params.projectId,
-        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: [
-          "wallet_id = ?",
-          "token = ?",
-          "direction = ?",
-          `status IN (${buildInClause(params.statuses.length)})`,
-          "created_at >= ?",
-          "created_at < ?",
-        ],
-        extraValues: [
-          params.walletId,
-          params.token,
-          params.direction,
-          ...params.statuses,
-          params.createdAtFrom,
-          params.createdAtTo,
-        ],
-      });
-
-      const rows = await db
-        .prepare(`SELECT amount FROM payment_transfers WHERE ${scope.where}`)
-        .bind(...scope.values)
-        .all<{ amount: string }>();
-
-      return rows.results.map((row) => row.amount);
-    },
-
     async listTransfersByStatus({
       statuses,
       types,
@@ -719,53 +627,6 @@ export function createPostgresPaymentsRepository(
         .all<Record<string, unknown>>();
 
       return rows.results.map(mapTransferRow);
-    },
-
-    async getWalletPoliciesByCustodyWalletId(custodyWalletId) {
-      if (!(await ownsCustodyWallet(custodyWalletId, "read"))) {
-        return [];
-      }
-      return getWalletPoliciesInternal(db, custodyWalletId);
-    },
-
-    async upsertWalletPolicies(inputs: UpsertPaymentWalletPolicyInput[]) {
-      if (inputs.length === 0) {
-        return [];
-      }
-
-      for (const input of inputs) {
-        if (!(await ownsCustodyWallet(input.custodyWalletId, "write"))) {
-          throw new TenantScopeViolationError(
-            "PaymentsRepository.upsertWalletPolicies rejected a foreign custody wallet"
-          );
-        }
-        await db
-          .prepare(
-            `INSERT INTO payment_wallet_policies (
-               id,
-               custody_wallet_id,
-               policy_type,
-               policy,
-               created_at,
-               updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT (custody_wallet_id, policy_type)
-             DO UPDATE SET
-               policy = EXCLUDED.policy,
-               updated_at = EXCLUDED.updated_at`
-          )
-          .bind(
-            input.id,
-            input.custodyWalletId,
-            input.policyType,
-            input.policy,
-            input.createdAt,
-            input.updatedAt
-          )
-          .run();
-      }
-
-      return getWalletPoliciesInternal(db, inputs[0].custodyWalletId);
     },
   };
 }
