@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.60.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.59.0...v0.60.0) (2026-08-12)
+
+### Features
+
+* **web:** install Privy from stored credentials in the setup flow ([#1126](https://github.com/solana-foundation/solana-developer-platform/pull/1126)) ([a7a076b](https://github.com/solana-foundation/solana-developer-platform/commit/a7a076b4f848906805c94553d351c13a1256efe5))
+* **issuance:** Workflow Builder — event-driven automations for asset profiles (Phase 5) ([#1099](https://github.com/solana-foundation/solana-developer-platform/pull/1099)) ([912e8c9](https://github.com/solana-foundation/solana-developer-platform/commit/912e8c9e7fbbee9f629ff6011c5e11fdffca75c0))
+
+### Bug Fixes
+
+* HOO-1010 Deepsec: enforce fail-closed limits on metered dashboard proxies ([#1215](https://github.com/solana-foundation/solana-developer-platform/pull/1215)) ([14ca057](https://github.com/solana-foundation/solana-developer-platform/commit/14ca057a9841cd97e6901a377981fdbf5858df2a))
+
+### Maintenance
+
+* promote sdp-api and sdp-web to prod on release publish ([#1248](https://github.com/solana-foundation/solana-developer-platform/pull/1248)) ([a655234](https://github.com/solana-foundation/solana-developer-platform/commit/a6552341e1435512bd1092736f4016ca8bc40ef5))
+
 ## [0.59.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.58.0...v0.59.0) (2026-08-12)
 
 ### Features
