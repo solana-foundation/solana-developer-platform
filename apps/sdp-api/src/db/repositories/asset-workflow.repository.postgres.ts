@@ -120,6 +120,28 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
       // the row already committed, and the catch would then destroy the credential the
       // live rule points at, silently unsigning every later delivery.
       return db.transaction(async (tx) => {
+        // The row's own secret, read under lock, is the authority — never the caller's.
+        // The handler read the rule outside this transaction, so a rotation that committed
+        // in between leaves it naming a version that is already retired: it would queue
+        // that one (gone already) and orphan the version the rule actually points at, and
+        // an edit that does not resend a secret would write the stale ref back over the
+        // rotation, leaving the live rule signing with a destroyed key.
+        const locked = await tx
+          .prepare(
+            `SELECT definition FROM asset_workflows
+               WHERE id = ? AND organization_id = ? AND project_id = ? AND deleted_at IS NULL
+               FOR UPDATE`
+          )
+          .bind(input.workflowId, input.organizationId, input.projectId)
+          .first<Record<string, unknown>>();
+        if (!locked) {
+          return null;
+        }
+        const currentSecret = (locked.definition as AssetWorkflowDefinition).actionSecret ?? null;
+        const definition = input.definition
+          ? { ...input.definition, actionSecret: input.rotateSecretTo ?? currentSecret }
+          : undefined;
+
         const row = await tx
           .prepare(
             `UPDATE asset_workflows
@@ -131,7 +153,7 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
              RETURNING *`
           )
           .bind(
-            input.definition ? JSON.stringify(input.definition) : null,
+            definition ? JSON.stringify(definition) : null,
             input.reviewMode ?? null,
             input.enabled !== undefined,
             input.enabled ?? false,
@@ -143,16 +165,18 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
         // Only once the rotation actually landed: a statement that matched nothing left
         // the rule pointing at the version the caller wanted retired, and queueing it
         // would have the sweeper destroy the key the live rule still signs with.
-        if (row) {
-          await queueOrphanedSecret(tx, {
-            organizationId: input.organizationId,
-            workflowId: input.workflowId,
-            retireSecret: input.retireSecret,
-            reason: "superseded by a key rotation",
-          });
+        if (row && input.rotateSecretTo) {
+          if (currentSecret?.secretVersionRef !== input.rotateSecretTo.secretVersionRef) {
+            await queueOrphanedSecret(tx, {
+              organizationId: input.organizationId,
+              workflowId: input.workflowId,
+              retireSecret: currentSecret,
+              reason: "superseded by a key rotation",
+            });
+          }
           // …and the version this rotation installs is now referenced, so its provisional
           // obligation goes away with the same commit.
-          await clearQueuedSecret(tx, input.clearRetirementFor);
+          await clearQueuedSecret(tx, input.rotateSecretTo);
         }
         return row ? mapWorkflowRow(row) : null;
       });
@@ -160,6 +184,22 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
 
     async deleteWorkflow(params) {
       return db.transaction(async (tx) => {
+        // Same reason as the update: the caller's view of the stored key predates this
+        // transaction, so a rotation that committed in between would have the delete queue
+        // an already-retired version and orphan the one the rule really points at.
+        // Soft-deleted rows are included — the retry of a delete whose cleanup died still
+        // has to find the key it left behind.
+        const locked = await tx
+          .prepare(
+            `SELECT definition FROM asset_workflows
+               WHERE id = ? AND organization_id = ? AND project_id = ?
+               FOR UPDATE`
+          )
+          .bind(params.workflowId, params.organizationId, params.projectId)
+          .first<Record<string, unknown>>();
+        if (!locked) {
+          return false;
+        }
         const rowsAffected = await tx
           .prepare(
             `UPDATE asset_workflows
@@ -174,7 +214,7 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
         await queueOrphanedSecret(tx, {
           organizationId: params.organizationId,
           workflowId: params.workflowId,
-          retireSecret: params.retireSecret,
+          retireSecret: (locked.definition as AssetWorkflowDefinition).actionSecret,
           reason: "orphaned by a rule delete",
         });
         return rowsAffected > 0;

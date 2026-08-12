@@ -76,6 +76,13 @@ const getWorkflowByIdFailure = vi.hoisted(() => ({
 // realistic shape of the reported scenario.
 const retirementWritesFail = vi.hoisted(() => ({ fromCall: null as number | null, calls: 0 }));
 
+// Rewrites what the handler's pre-transaction read returns, standing in for a concurrent
+// request that committed a rotation after this one read the rule. A real interleaving
+// cannot be forced deterministically from a single-process test; the observable cause is
+// the handler acting on a definition that no longer matches the row, which this reproduces
+// exactly.
+const staleWorkflowRead = vi.hoisted(() => ({ definition: null as unknown }));
+
 vi.mock("@/db/repositories", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db/repositories")>();
   return {
@@ -104,7 +111,15 @@ vi.mock("@/db/repositories", async (importOriginal) => {
           if (getWorkflowByIdFailure.failOnCall === getWorkflowByIdFailure.calls) {
             return Promise.reject(new Error("Connection terminated unexpectedly"));
           }
-          return repo.getWorkflowById.call(wrapped, input);
+          const result = repo.getWorkflowById.call(wrapped, input);
+          if (staleWorkflowRead.definition === null) {
+            return result;
+          }
+          return result.then((row) =>
+            row
+              ? { ...row, definition: staleWorkflowRead.definition as typeof row.definition }
+              : row
+          );
         },
       };
       return wrapped;
@@ -231,6 +246,7 @@ describe("workflow signing-secret lifecycle (routes)", () => {
     getWorkflowByIdFailure.calls = 0;
     retirementWritesFail.fromCall = null;
     retirementWritesFail.calls = 0;
+    staleWorkflowRead.definition = null;
     createCredentialSecretStore.mockReturnValue(secretStore);
     // Each write mints the next version, the way Secret Manager's addVersion does — that
     // difference between the old and new ref is what rotation cleanup keys on.
@@ -712,6 +728,54 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       const [row] = await storedRules();
       expect(row.definition.actionSecret?.secretVersionRef).toBe(versionRef(1));
       expect(await queuedRetirements()).not.toContain(versionRef(1));
+    });
+  });
+
+  // Both handlers read the rule before opening their transaction, and used that read to
+  // decide which version to retire. A rotation committing in between makes it name a
+  // version that is already gone — so the delete or edit retired nothing and orphaned the
+  // version the rule actually pointed at, permanently. The row's own value, read under
+  // lock inside the transaction, is the authority now.
+  describe("when a rotation commits between the handler's read and its write", () => {
+    async function rotateBehindTheCallersBack(workflowId: string) {
+      const [before] = await storedRules();
+      const res = await request("PATCH", `${base}/${workflowId}`, {
+        actionParams: { url: WEBHOOK_URL, secret: ROTATED_SECRET },
+      });
+      expect(res.status).toBe(200);
+      // Everything from here on sees the pre-rotation rule, as a request that had already
+      // read it would.
+      staleWorkflowRead.definition = before.definition;
+      vi.clearAllMocks();
+      secretStore.destroyVersion.mockResolvedValue(undefined);
+    }
+
+    it("delete queues the version the row holds, not the one the caller read", async () => {
+      const workflowId = await createRuleWithSecret();
+      await rotateBehindTheCallersBack(workflowId);
+
+      const res = await request("DELETE", `${base}/${workflowId}`);
+
+      expect(res.status).toBe(200);
+      // v1 was already retired by the rotation; v2 is what this delete orphans.
+      expect(await queuedRetirements()).toEqual([versionRef(2)]);
+    });
+
+    it("an edit that resends no secret keeps the row's key rather than the stale one", async () => {
+      const workflowId = await createRuleWithSecret();
+      await rotateBehindTheCallersBack(workflowId);
+
+      const res = await request("PATCH", `${base}/${workflowId}`, {
+        actionParams: { url: "https://hooks.example.com/edited" },
+      });
+
+      expect(res.status).toBe(200);
+      const [row] = await storedRules();
+      // Writing the stale ref back would leave the live rule signing with v1 — destroyed
+      // by the rotation — so every later delivery would fail to sign.
+      expect(row.definition.actionSecret?.secretVersionRef).toBe(versionRef(2));
+      expect(row.definition.action.params.url).toBe("https://hooks.example.com/edited");
+      expect(await queuedRetirements()).toHaveLength(0);
     });
   });
 

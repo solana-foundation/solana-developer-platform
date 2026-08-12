@@ -71,17 +71,19 @@ export interface UpdateAssetWorkflowInput {
   definition?: AssetWorkflowDefinition;
   reviewMode?: ReviewMode;
   enabled?: boolean;
-  // A credential this write orphans — the version a rotation supersedes. Queued for
-  // destruction in the SAME transaction as the write, because a record written afterwards
-  // is lost precisely when the database is what failed, and nothing else would ever
-  // retry. Ignored unless it names a backend with an external version to destroy.
-  retireSecret?: StoredCredentialSecret | null;
-  // The mirror image: a credential this write makes REFERENCED — the version a rotation
-  // installs. It was queued for destruction before the write was attempted, which is the
-  // only ordering in which a rejected write cannot strand it, so committing the reference
-  // cancels the obligation in the same transaction. Either the row points at the version
-  // or the version is queued for destruction; there is no state where neither holds.
-  clearRetirementFor?: StoredCredentialSecret | null;
+  // The version this request wrote to the credential store, when it rotated the key. Set
+  // it and the write installs that version and retires whatever the row currently holds —
+  // read under lock inside the transaction, never taken from the caller, because the
+  // caller's view of the stored key predates the transaction and a concurrent rotation
+  // makes it name a version that is already gone.
+  //
+  // Both halves commit with the write. The superseded version is queued for destruction,
+  // because a record written afterwards is lost precisely when the database is what
+  // failed. The installed version's own provisional obligation — queued before this write
+  // was attempted, the only ordering in which a rejected write cannot strand it — is
+  // cancelled, so the two reachable states are "the row points at the version" and "the
+  // version is queued for destruction", never neither.
+  rotateSecretTo?: StoredCredentialSecret | null;
 }
 
 export interface AssetWorkflowsRepositoryContext {
@@ -93,13 +95,13 @@ export interface AssetWorkflowsRepository {
   updateWorkflow(input: UpdateAssetWorkflowInput): Promise<AssetWorkflowRow | null>;
   // Soft delete (keeps the rule's execution history; hard DELETE would cascade).
   // Returns false when the rule doesn't exist or is already deleted.
+  // The rule's own signing key is orphaned the moment this commits, so its retirement is
+  // recorded by the same transaction — from the row's current value, read under lock. See
+  // UpdateAssetWorkflowInput.
   deleteWorkflow(params: {
     workflowId: string;
     organizationId: string;
     projectId: string;
-    // The rule's own signing key: orphaned the moment the delete commits, so its
-    // retirement is recorded by the same transaction. See UpdateAssetWorkflowInput.
-    retireSecret?: StoredCredentialSecret | null;
   }): Promise<boolean>;
   getWorkflowById(params: {
     workflowId: string;
