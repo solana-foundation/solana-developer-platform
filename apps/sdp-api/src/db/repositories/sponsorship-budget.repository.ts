@@ -379,12 +379,12 @@ export class SponsorshipBudgetRepository {
   ): Promise<{ hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage }> {
     const row = await executor.queryOne<Record<string, number>>(
       `SELECT
-         COALESCE(SUM(CASE WHEN hour_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0) AS global_hour,
-         COALESCE(SUM(CASE WHEN hour_bucket = ? AND organization_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0) AS organization_hour,
-         COALESCE(SUM(CASE WHEN hour_bucket = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0) AS project_hour,
-         COALESCE(SUM(CASE WHEN day_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0) AS global_day,
-         COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0) AS organization_day,
-         COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0) AS project_day
+         COALESCE(SUM(CASE WHEN hour_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS global_hour,
+         COALESCE(SUM(CASE WHEN hour_bucket = ? AND organization_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS organization_hour,
+         COALESCE(SUM(CASE WHEN hour_bucket = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS project_hour,
+         COALESCE(SUM(CASE WHEN day_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS global_day,
+         COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS organization_day,
+         COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS project_day
        FROM sponsorship_budget_reservations
        WHERE network = ? AND status <> 'released' AND (hour_bucket = ? OR day_bucket = ?)`,
       [
