@@ -285,6 +285,16 @@ funding instructions and nothing else — never imply a transfer happens.
   appearing in the UI as a provider-client bug, not something to patch here.
   A `cash` position can be a token the org never deposited on Solana, so do not
   assume positions imply a Solana deposit — only the addresses do.
+- **The CATALOGUE is Solana-hosted-only; POSITIONS are not, and that is not a
+  bug here.** Since the `not_solana_hosted` gate (`@sdp/earn`), the strategy
+  catalogue lists and stores only vaults hosted on Solana, so the wizard can no
+  longer offer an EVM vault. But a program whose Ground wallet was pointed at an
+  off-Solana vault BEFORE that gate still renders that vault's name under "Where
+  the money sits" — the position comes from Ground's live wallet response, not
+  from `earn_strategies`, and real value sits in it. Do not filter such a
+  position out of the UI: hiding a funded position hides customer money, which
+  is worse than naming a vault we would no longer offer. Clearing one means
+  re-targeting the allocation in Ground (a money movement), not a web change.
 - Design system: SDP quiet-institutional (see `.claude/skills/sdp-ui-designer`).
   Inter only — monospace is forbidden, including for addresses; use
   `tabular-nums` for numeric alignment. The ONE exception is a genuine code
