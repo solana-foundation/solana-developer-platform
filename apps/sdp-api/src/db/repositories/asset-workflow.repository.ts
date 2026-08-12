@@ -67,6 +67,11 @@ export interface UpdateAssetWorkflowInput {
   definition?: AssetWorkflowDefinition;
   reviewMode?: ReviewMode;
   enabled?: boolean;
+  // A credential this write orphans — the version a rotation supersedes. Queued for
+  // destruction in the SAME transaction as the write, because a record written afterwards
+  // is lost precisely when the database is what failed, and nothing else would ever
+  // retry. Ignored unless it names a backend with an external version to destroy.
+  retireSecret?: StoredCredentialSecret | null;
 }
 
 export interface AssetWorkflowsRepositoryContext {
@@ -82,6 +87,9 @@ export interface AssetWorkflowsRepository {
     workflowId: string;
     organizationId: string;
     projectId: string;
+    // The rule's own signing key: orphaned the moment the delete commits, so its
+    // retirement is recorded by the same transaction. See UpdateAssetWorkflowInput.
+    retireSecret?: StoredCredentialSecret | null;
   }): Promise<boolean>;
   getWorkflowById(params: {
     workflowId: string;

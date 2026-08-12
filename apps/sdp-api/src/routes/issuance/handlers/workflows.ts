@@ -376,6 +376,13 @@ export const updateWorkflow = async (c: AppContext) => {
       definition,
       reviewMode: parsed.data.reviewMode,
       enabled: parsed.data.enabled,
+      // Queued for destruction by the same transaction that installs the new version, so
+      // the obligation cannot be lost by whatever happens after the row commits. Guarded
+      // on the refs actually differing for the same reason the destroy below is.
+      retireSecret:
+        secret && previousSecret?.secretVersionRef !== actionSecret?.secretVersionRef
+          ? previousSecret
+          : null,
     })
     .catch(async (error: unknown) => {
       await destroyActionSecret(c.env, secret ? actionSecret : null, { orgId, workflowId });
@@ -442,7 +449,15 @@ export const deleteWorkflow = async (c: AppContext) => {
   }
   assertWorkflowActionPermitted(c, existing.action_type);
 
-  const removed = await repo.deleteWorkflow({ workflowId, organizationId: orgId, projectId });
+  // The rule's key is orphaned the moment the soft delete commits, so the record that it
+  // still needs destroying commits with it — the destroy below is then an optimisation,
+  // not the only thing standing between a failure and a credential nobody retires.
+  const removed = await repo.deleteWorkflow({
+    workflowId,
+    organizationId: orgId,
+    projectId,
+    retireSecret: existing.definition.actionSecret,
+  });
   // The rule is gone from every read path, so its signing key has no reader left. The
   // soft delete keeps the reference on the row for history; the value itself is retired
   // rather than left recoverable from the secret backend. Retired immediately after the

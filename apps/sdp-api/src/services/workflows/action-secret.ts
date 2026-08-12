@@ -95,6 +95,18 @@ export async function destroyActionSecret(
     });
   } catch (error) {
     await recordFailedRetirement(env, stored, context, error);
+    return;
+  }
+  // Destroyed. Discharge the obligation the committing write recorded (rotation and
+  // delete queue it in their own transaction, so it is already there). Best effort on
+  // purpose: a row left behind costs one sweep that finds the version already gone,
+  // whereas failing here would report an error for work that actually happened.
+  try {
+    await createWorkflowSecretRetirementsRepository(env).deleteRetirementByVersionRef(
+      stored.secretVersionRef
+    );
+  } catch {
+    // The sweeper reconciles it.
   }
 }
 

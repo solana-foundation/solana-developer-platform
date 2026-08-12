@@ -66,6 +66,12 @@ const getWorkflowByIdFailure = vi.hoisted(() => ({
   calls: 0,
 }));
 
+// Makes the request-time queue write reject, so the transaction that committed with the
+// delete or rotation is the only thing that could have recorded the orphan. Note this
+// intercepts the REPOSITORY only — the transactional insert goes through
+// `insertWorkflowSecretRetirement` directly and is deliberately not stubbed out.
+const retirementWritesFail = vi.hoisted(() => ({ value: false }));
+
 vi.mock("@/db/repositories", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db/repositories")>();
   return {
@@ -98,6 +104,19 @@ vi.mock("@/db/repositories", async (importOriginal) => {
         },
       };
       return wrapped;
+    },
+    createWorkflowSecretRetirementsRepository: (
+      env: Parameters<typeof actual.createWorkflowSecretRetirementsRepository>[0]
+    ) => {
+      const repo = actual.createWorkflowSecretRetirementsRepository(env);
+      return {
+        ...repo,
+        recordRetirement(input: Parameters<typeof repo.recordRetirement>[0]) {
+          return retirementWritesFail.value
+            ? Promise.reject(new Error("Connection terminated unexpectedly"))
+            : repo.recordRetirement(input);
+        },
+      };
     },
     createWorkflowExecutionsRepository: (
       env: Parameters<typeof actual.createWorkflowExecutionsRepository>[0]
@@ -204,6 +223,7 @@ describe("workflow signing-secret lifecycle (routes)", () => {
     repoRejects.cancelOpenExecutionsForWorkflow = null;
     getWorkflowByIdFailure.failOnCall = null;
     getWorkflowByIdFailure.calls = 0;
+    retirementWritesFail.value = false;
     createCredentialSecretStore.mockReturnValue(secretStore);
     // Each write mints the next version, the way Secret Manager's addVersion does — that
     // difference between the old and new ref is what rotation cleanup keys on.
@@ -501,6 +521,9 @@ describe("workflow signing-secret lifecycle (routes)", () => {
 
       expect(res.status).toBe(200);
       expect(secretStore.destroyVersion).toHaveBeenCalledWith({ secretVersionRef: versionRef(1) });
+      // The obligation the delete's transaction recorded is discharged by the destroy, so
+      // the queue does not accumulate a row per deleted rule.
+      expect(await queuedRetirements()).toHaveLength(0);
     });
 
     // Retired before the next failure point on purpose: a retry can now finish a failed
@@ -588,6 +611,63 @@ describe("workflow signing-secret lifecycle (routes)", () => {
       const res = await request("DELETE", `${base}/wf_never_existed`);
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  // The window a retry could never close: the destroy fails AND the queue write fails.
+  // The queued row is the only durable record of an orphan and the sweeper reads nothing
+  // else, so the version stayed readable in the backend with nothing that would ever try
+  // again — and the queue write fails precisely when the database is what broke, which is
+  // also the one thing a retry cannot outrun.
+  //
+  // Recording the obligation in the same transaction as the write that creates it removes
+  // the window rather than narrowing it: there is no longer an instant where the rule is
+  // gone (or repointed) and the obligation is not yet written. The destroy at request time
+  // becomes an optimisation that clears the row early.
+  describe("when the destroy and the queue write both fail", () => {
+    beforeEach(() => {
+      secretStore.destroyVersion.mockRejectedValue(new Error("permission denied"));
+      retirementWritesFail.value = true;
+    });
+
+    it("still has the deleted rule's key queued", async () => {
+      const workflowId = await createRuleWithSecret();
+
+      const res = await request("DELETE", `${base}/${workflowId}`);
+
+      expect(res.status).toBe(200);
+      expect(await queuedRetirements()).toEqual([versionRef(1)]);
+    });
+
+    it("still has the rotation's superseded version queued", async () => {
+      const workflowId = await createRuleWithSecret();
+
+      const res = await request("PATCH", `${base}/${workflowId}`, {
+        actionParams: { url: WEBHOOK_URL, secret: ROTATED_SECRET },
+      });
+
+      expect(res.status).toBe(200);
+      // Only the superseded one: the version the rotation installed is what the live rule
+      // now signs with, and queueing it would have the sweeper destroy a working key.
+      expect(await queuedRetirements()).toEqual([versionRef(1)]);
+      const [row] = await storedRules();
+      expect(row.definition.actionSecret?.secretVersionRef).toBe(versionRef(2));
+    });
+
+    // A rotation that never landed orphans nothing: the rule still points at the version
+    // the caller wanted retired.
+    it("queues nothing when the rotation itself is rejected", async () => {
+      const workflowId = await createRuleWithSecret();
+      repoRejects.updateWorkflow = new Error("deadlock detected");
+
+      const res = await request("PATCH", `${base}/${workflowId}`, {
+        actionParams: { url: WEBHOOK_URL, secret: ROTATED_SECRET },
+      });
+
+      expect(res.status).toBe(500);
+      const [row] = await storedRules();
+      expect(row.definition.actionSecret?.secretVersionRef).toBe(versionRef(1));
+      expect(await queuedRetirements()).not.toContain(versionRef(1));
     });
   });
 

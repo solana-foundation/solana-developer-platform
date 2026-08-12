@@ -29,6 +29,9 @@ export interface WorkflowSecretRetirementsRepository {
   // Idempotent on `secret_version_ref` — the same failed retirement can be reported by a
   // later request (or a retried one) without queueing the work twice.
   recordRetirement(input: RecordWorkflowSecretRetirementInput): Promise<void>;
+  // Discharges an obligation recorded by the write that created it, once the version is
+  // actually gone. Keyed on the ref because the writer never sees the row's id.
+  deleteRetirementByVersionRef(secretVersionRef: string): Promise<void>;
   listDueRetirements(params: {
     dueBefore: string;
     limit: number;
