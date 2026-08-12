@@ -11,6 +11,7 @@
 
 import { type ScheduledTask, schedule } from "node-cron";
 import {
+  isAssetProfilesEnabled,
   isEarnEnabled,
   isPrivateChannelsEnabled,
   isRecurringPaymentCollectionEnabled,
@@ -33,6 +34,11 @@ import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import { runWorkflowExecutions, WORKFLOW_EXECUTIONS_CRON } from "./workflow-executions";
+import {
+  runWorkflowSecretRetirements,
+  WORKFLOW_SECRET_RETIREMENTS_CRON,
+} from "./workflow-secret-retirements";
 
 export interface CronDeps {
   env: Env;
@@ -120,6 +126,21 @@ export function startCron(deps: CronDeps): CronHandle | null {
     );
   }
 
+  if (isAssetProfilesEnabled(deps.env)) {
+    tasks.push(
+      schedule(WORKFLOW_EXECUTIONS_CRON, () => {
+        if (stopping) {
+          return;
+        }
+        runWorkflowExecutions({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        });
+      })
+    );
+  }
+
   if (isPrivateChannelsEnabled(deps.env)) {
     tasks.push(
       schedule(PENDING_DEPOSITS_CRON, () => {
@@ -161,6 +182,28 @@ export function startCron(deps: CronDeps): CronHandle | null {
       })
     );
   }
+
+  // Deliberately outside every feature gate, and in particular outside the asset-profiles
+  // block above. The queue this drains is durable and outlives the feature that filled
+  // it: a rule's signing-secret version is already orphaned by the time a row exists —
+  // the rule is gone, nothing references the version, and it stays readable in the
+  // backend until something destroys it. Riding on the workflow tick meant turning asset
+  // profiles off stranded that cleanup permanently, which is the opposite of what
+  // disabling a feature should do (and disabling it is a plausible incident response,
+  // exactly when the cleanup matters most). The sweep is a no-op on the empty queue every
+  // other deployment has.
+  tasks.push(
+    schedule(WORKFLOW_SECRET_RETIREMENTS_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runWorkflowSecretRetirements({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
 
   return {
     stop() {

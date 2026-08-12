@@ -3,7 +3,9 @@ import type { AmountPolicyRule, PolicyCandidate } from "@sdp/types";
 import { type RuleEvaluation, ruleValues } from "./helpers";
 
 /**
- * Evaluate an `amount` rule against an operation. Denies outside the [min, max]
+ * Evaluate an `amount` rule against an operation. Amount bounds are always
+ * keyed by asset mint — a bound is meaningless across tokens — so a rule
+ * naming no asset is vacuous and reviews. Denies outside the [min, max]
  * bounds; reviews when the bounds or the operation amount are not valid decimals.
  *
  * @param rule - The rule to evaluate.
@@ -16,7 +18,11 @@ export function evaluateAmountRule(
 ): RuleEvaluation | null {
   const assets = ruleValues(rule.asset, rule.assets);
 
-  if (assets.length > 0 && (operation.asset === null || !assets.includes(operation.asset))) {
+  if (assets.length === 0) {
+    return { rule, decision: "review", reason: "Amount rule has no assets." };
+  }
+
+  if (operation.asset === null || !assets.includes(operation.asset)) {
     return null;
   }
 

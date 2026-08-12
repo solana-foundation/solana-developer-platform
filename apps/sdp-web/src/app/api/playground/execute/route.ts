@@ -1,17 +1,47 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
 
-type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+const PUBLIC_API_PATH_PREFIX = "/v1/";
+const INVALID_PATH_MESSAGE = "Path must start with '/v1/'";
 
-interface PlaygroundExecuteRequestBody {
-  method?: PlaygroundMethod;
-  path?: string;
-  body?: unknown;
-  apiKey?: string | null;
+function normalizePublicApiPath(path: string, requestUrl: string): string | null {
+  if (!path.startsWith("/")) return null;
+
+  try {
+    const normalizedUrl = new URL(path, requestUrl);
+    if (!normalizedUrl.pathname.startsWith(PUBLIC_API_PATH_PREFIX)) return null;
+    return `${normalizedUrl.pathname}${normalizedUrl.search}`;
+  } catch {
+    return null;
+  }
 }
 
-const ALLOWED_METHODS = new Set<PlaygroundMethod>(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+/**
+ * Playground request envelope. The path is restricted to public /v1 mounts so
+ * the proxy cannot replay keys against internal or admin routes. It is parsed
+ * as a URL before the mount check so fetch cannot reinterpret traversal
+ * segments after validation. apiKey must be non-empty — an absent key
+ * previously fell back to the caller's dashboard session, escalating scope
+ * past the selected key (Hacktron audit).
+ */
+const playgroundExecuteSchema = z.object({
+  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"], { error: "Invalid method" }),
+  path: z.string({ error: "Invalid path" }),
+  body: z.unknown().optional(),
+  apiKey: z
+    .string({ error: "API key is required" })
+    .trim()
+    .min(1, { error: "API key is required" }),
+});
+
+/**
+ * Ceiling on the playground request envelope. Playground bodies are
+ * hand-authored JSON; anything near this size is abuse of the proxy, not a
+ * documented API call.
+ */
+const MAX_REQUEST_BYTES = 256 * 1024;
 
 function failureResponse(
   trace: ReturnType<typeof createTimedTrace>,
@@ -43,65 +73,32 @@ export async function POST(request: Request) {
       return failureResponse(trace, 403, "Active organization required");
     }
 
-    const payload = (await request.json()) as PlaygroundExecuteRequestBody;
-    const method = payload.method;
-    const path = payload.path;
-
-    if (!method || !ALLOWED_METHODS.has(method)) {
-      const response = NextResponse.json(
-        { error: "Invalid method" },
-        {
-          status: 400,
-          headers: {
-            "X-SDP-Trace-ID": trace.traceId,
-            "Server-Timing": trace.serverTiming(),
-          },
-        }
-      );
-      logRouteResult(trace, 400, { error: "Invalid method" });
-      return response;
+    const rawBody = await request.text();
+    if (rawBody.length > MAX_REQUEST_BYTES) {
+      return failureResponse(trace, 413, "Request body too large");
     }
 
-    if (!path || typeof path !== "string") {
-      const response = NextResponse.json(
-        { error: "Invalid path" },
-        {
-          status: 400,
-          headers: {
-            "X-SDP-Trace-ID": trace.traceId,
-            "Server-Timing": trace.serverTiming(),
-          },
-        }
-      );
-      logRouteResult(trace, 400, { error: "Invalid path" });
-      return response;
-    }
-    if (!path.startsWith("/")) {
-      const response = NextResponse.json(
-        { error: "Path must start with '/'" },
-        {
-          status: 400,
-          headers: {
-            "X-SDP-Trace-ID": trace.traceId,
-            "Server-Timing": trace.serverTiming(),
-          },
-        }
-      );
-      logRouteResult(trace, 400, { error: "Path must start with '/'" });
-      return response;
+    let json: unknown;
+    try {
+      json = JSON.parse(rawBody);
+    } catch {
+      return failureResponse(trace, 400, "Invalid JSON body");
     }
 
-    // Reject empty apiKey: the previous fallback silently executed under the
-    // caller's dashboard session, escalating scope past the selected key.
-    const normalizedApiKey = typeof payload.apiKey === "string" ? payload.apiKey.trim() : "";
-    if (!normalizedApiKey) {
-      return failureResponse(trace, 400, "API key is required");
+    const parsed = playgroundExecuteSchema.safeParse(json);
+    if (!parsed.success) {
+      return failureResponse(trace, 400, parsed.error.issues[0].message);
+    }
+    const { method, path: requestedPath, body: requestBody, apiKey } = parsed.data;
+    const path = normalizePublicApiPath(requestedPath, request.url);
+    if (!path) {
+      return failureResponse(trace, 400, INVALID_PATH_MESSAGE);
     }
 
     const client = await createSdpApiClient(trace.childContext("route.playground.execute.api"));
     const verification = await client.request("/internal/playground/api-key/verify", {
       method: "POST",
-      body: JSON.stringify({ apiKey: normalizedApiKey }),
+      body: JSON.stringify({ apiKey }),
     });
     if (!verification.ok) {
       return failureResponse(trace, 403, "API key is not available for the selected project");
@@ -109,10 +106,10 @@ export async function POST(request: Request) {
 
     const response = await client.request(path, {
       method,
-      headers: { Authorization: `Bearer ${normalizedApiKey}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
       body:
-        method !== "GET" && payload.body !== null && payload.body !== undefined
-          ? JSON.stringify(payload.body)
+        method !== "GET" && requestBody !== null && requestBody !== undefined
+          ? JSON.stringify(requestBody)
           : undefined,
     });
 

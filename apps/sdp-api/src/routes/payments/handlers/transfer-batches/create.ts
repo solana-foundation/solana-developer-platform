@@ -1,4 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import type { PolicyCandidate } from "@sdp/types";
 import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
@@ -15,15 +16,11 @@ import {
   beginApprovedWalletOperationEffect,
   runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
-import {
-  recordLegacyWalletPolicyDenial,
-  walletOperationActorFromAuth,
-} from "@/services/policy/enforcement.service";
+import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../../context";
 import { createTransferBatchSchema } from "../../schemas";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
-import { assertLegacyBatchPolicies } from "./policy";
 import { resolveBatchRequest } from "./resolve";
 import { buildTransferBatchResponse, resolveTransferBatchIdempotencyReplay } from "./respond";
 import {
@@ -88,10 +85,13 @@ async function respondToTransferBatchReplay(
 }
 
 /**
- * Parse and resolve a transfer-batch request into its wallet-operation policy candidate.
+ * Parse and resolve a transfer-batch request into its wallet-operation policy
+ * candidate: the batch total as the aggregate candidate plus one leg per
+ * recipient, so destination and amount rules evaluate every recipient while
+ * amount rules also bind the total.
  *
  * @param c - Request context.
- * @returns The candidate, validated body, resolved request, and raw payload.
+ * @returns The candidate, its legs, validated body, resolved request, and raw payload.
  */
 export async function extractTransferBatchPolicyCandidate(
   c: AppContext
@@ -105,28 +105,34 @@ export async function extractTransferBatchPolicyCandidate(
 
   const input = parsed.data;
   const resolved = await resolveBatchRequest(c, input, ["payments:write"]);
+  const candidate: PolicyCandidate = {
+    organizationId: resolved.scope.auth.organizationId,
+    projectId: resolved.scope.auth.projectId,
+    custodyWalletId: resolved.sourceWallet.id,
+    walletId: resolved.sourceWallet.walletId,
+    apiKeyId: resolved.scope.auth.apiKeyId,
+    actor: walletOperationActorFromAuth(resolved.scope.auth),
+    source: "api",
+    operationFamily: "payment",
+    operationType: "payment_transfer_batch_execute",
+    asset: resolved.tokenContext.token,
+    amount: resolved.totalAmount,
+    destination: null,
+    context: {
+      sourceAddress: resolved.sourceAddress,
+      recipientCount: resolved.recipients.length,
+      transactionCount: null,
+    },
+    providerExtensions: {},
+  };
 
   return {
-    candidate: {
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.scope.auth.projectId,
-      custodyWalletId: resolved.sourceWallet.id,
-      walletId: resolved.sourceWallet.walletId,
-      apiKeyId: resolved.scope.auth.apiKeyId,
-      actor: walletOperationActorFromAuth(resolved.scope.auth),
-      source: "api",
-      operationFamily: "payment",
-      operationType: "payment_transfer_batch_execute",
-      asset: resolved.tokenContext.token,
-      amount: resolved.totalAmount,
-      destination: null,
-      context: {
-        sourceAddress: resolved.sourceAddress,
-        recipientCount: resolved.recipients.length,
-        transactionCount: null,
-      },
-      providerExtensions: {},
-    },
+    candidate,
+    legs: resolved.recipients.map((recipient) => ({
+      ...candidate,
+      amount: recipient.amount,
+      destination: recipient.destinationAddress,
+    })),
     body: input,
     resolved: {
       ...resolved,
@@ -136,10 +142,15 @@ export async function extractTransferBatchPolicyCandidate(
       externalId: input.externalId === undefined ? null : input.externalId,
       source: input.source,
       token: input.token,
-      recipients: input.recipients.map((recipient) => ({
-        externalId: recipient.externalId === undefined ? null : recipient.externalId,
+      // Resolved destinations ride in the payload so an approved batch pins
+      // the exact addresses that were evaluated: a counterparty account whose
+      // address changes between approval and replay fails the replay match
+      // instead of executing to a destination policy never saw.
+      recipients: resolved.recipients.map((recipient) => ({
+        externalId: recipient.externalId,
         counterpartyId: recipient.counterpartyId,
         counterpartyAccountId: recipient.counterpartyAccountId,
+        destinationAddress: recipient.destinationAddress,
         amount: recipient.amount,
       })),
       options: input.options === undefined ? null : input.options,
@@ -224,19 +235,13 @@ export async function findTransferBatchIdempotentKeyReplay(
  * @returns JSON batch response with recipients and chunk transfers.
  */
 export async function createTransferBatch(c: AppContext) {
-  const { body, resolved, enforcement } = getPolicyGateContext<
+  const { body, resolved } = getPolicyGateContext<
     CreateTransferBatchInput,
     TransferBatchGateResolved
   >(c);
   const idempotencyKeyHeader = c.req.header("Idempotency-Key");
   const idempotencyKey = idempotencyKeyHeader === undefined ? null : idempotencyKeyHeader;
   const idempotencyFingerprint = idempotencyKey ? resolved.idempotencyFingerprint : null;
-  try {
-    await assertLegacyBatchPolicies(c, resolved);
-  } catch (error) {
-    await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
-    throw error;
-  }
 
   const feePayment = getFeePayment(c);
   const [signer, feePayer, lifetime] = await Promise.all([

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.59.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.58.0...v0.59.0) (2026-08-12)
+
+### Features
+
+* Runtime env connection ([#1238](https://github.com/solana-foundation/solana-developer-platform/pull/1238)) ([00ece43](https://github.com/solana-foundation/solana-developer-platform/commit/00ece43737094178734ab414dd7e3d41a419e498))
+* **policy:** drop legacy payment_wallet_policies and cut over to control profiles (PRO-1617) ([#1232](https://github.com/solana-foundation/solana-developer-platform/pull/1232)) ([65bb807](https://github.com/solana-foundation/solana-developer-platform/commit/65bb807fd2bce9ee8055442e77b6046a51df9010))
+* **earn:** single-vault V1 — one allocation entry per token group (PRO-1667) ([#1243](https://github.com/solana-foundation/solana-developer-platform/pull/1243)) ([b4b3478](https://github.com/solana-foundation/solana-developer-platform/commit/b4b3478b455942593443fe9edb3f8da262be571a))
+* **earn:** withdrawal ledger + live-only positions — ledger vs live decided (PRO-1628) ([#1239](https://github.com/solana-foundation/solana-developer-platform/pull/1239)) ([025c7ac](https://github.com/solana-foundation/solana-developer-platform/commit/025c7acf4e44a8e6a12bcf13b495fce80ea04112))
+* **helius:** add helius rings feature entry ([#1234](https://github.com/solana-foundation/solana-developer-platform/pull/1234)) ([9b287d3](https://github.com/solana-foundation/solana-developer-platform/commit/9b287d3bb1ac082d3c1c464ecbc075e47c237e9c))
+
 ## [0.58.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.57.0...v0.58.0) (2026-08-11)
 
 ### Features

@@ -361,6 +361,8 @@ export interface MatchedPolicyRule {
   decision: PolicyDecision;
   reason: string;
   rule: PolicyRule;
+  /** Zero-based index of the operation leg the rule matched, or null for the operation itself. */
+  leg: number | null;
 }
 
 export interface PolicyDryRunCriterion {
@@ -371,6 +373,8 @@ export interface PolicyDryRunCriterion {
   matched: boolean;
   action: PolicyDecision | null;
   reason: string | null;
+  /** Zero-based index of the operation leg the criterion describes, or null for the operation itself. */
+  leg: number | null;
 }
 
 export interface PolicyDryRunResult {
