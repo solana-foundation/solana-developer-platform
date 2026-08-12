@@ -37,21 +37,24 @@ async function persistGlobalEnabled(enabled: boolean) {
   const env = getProcessEnv();
   const repository = new SponsorshipBudgetRepository(getDb(env));
   const network = parseNetwork();
-  const current = (await repository.listPolicies(network)).find(
-    (policy) => policy.scopeType === "global" && policy.scopeId === null
-  );
-  if (!current) throw new Error("No matching policy exists; use `set` with explicit limits first");
-  const policy = await repository.upsertPolicy({
+  const policy = await repository.setPolicyEnabled({
     network,
     scopeType: "global",
     scopeId: null,
     enabled,
-    perTransactionLamports: current.perTransactionLamports,
-    hourlyLamports: current.hourlyLamports,
-    dailyLamports: current.dailyLamports,
     operator: requireArg("operator"),
     reason: requireArg("reason"),
   });
+  if (!policy) {
+    const current = (await repository.listPolicies(network)).find(
+      (candidate) => candidate.scopeType === "global" && candidate.scopeId === null
+    );
+    if (!current) {
+      throw new Error("No matching policy exists; use `set` with explicit limits first");
+    }
+    console.log(JSON.stringify(current, null, 2));
+    return;
+  }
   await new SponsorshipBudgetRedis(env).syncPolicy(policy);
   console.log(JSON.stringify(policy, null, 2));
 }

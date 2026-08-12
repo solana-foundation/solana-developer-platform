@@ -296,22 +296,45 @@ export class SponsorshipBudgetRepository {
     return updated?.attempt ?? null;
   }
 
+  async setPolicyEnabled(input: {
+    network: SponsorshipNetwork;
+    scopeType: SponsorshipBudgetScopeType;
+    scopeId: string | null;
+    enabled: boolean;
+    operator: string;
+    reason: string;
+  }): Promise<SponsorshipBudgetPolicy | null> {
+    return this.db.transaction(async (tx) => {
+      const row = await tx.queryOne<PolicyRow>(
+        `UPDATE sponsorship_budget_policies
+           SET enabled = ?, version = version + 1, updated_by = ?, update_reason = ?, updated_at = sdp_iso_now()
+         WHERE network = ? AND scope_type = ? AND scope_id IS NOT DISTINCT FROM ? AND enabled <> ?
+         RETURNING *`,
+        [
+          input.enabled,
+          input.operator,
+          input.reason,
+          input.network,
+          input.scopeType,
+          input.scopeId,
+          input.enabled,
+        ]
+      );
+      if (!row) return null;
+      await this.insertRevision(tx, row, input.operator, input.reason);
+      return mapPolicy(row);
+    });
+  }
+
   async tripGlobalBreaker(
     network: SponsorshipNetwork,
     reason: string
   ): Promise<SponsorshipBudgetPolicy | null> {
-    const global = (await this.listPolicies(network)).find(
-      (policy) => policy.scopeType === "global" && policy.scopeId === null
-    );
-    if (!global?.enabled) return global ?? null;
-    return this.upsertPolicy({
+    return this.setPolicyEnabled({
       network,
       scopeType: "global",
       scopeId: null,
       enabled: false,
-      perTransactionLamports: global.perTransactionLamports,
-      hourlyLamports: global.hourlyLamports,
-      dailyLamports: global.dailyLamports,
       operator: "system:sponsorship-breaker",
       reason,
     });

@@ -274,4 +274,12 @@ describe("runCronJob", () => {
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
+
+  it("reconciles sponsorship budgets even when pending-transfer tracking fails", async () => {
+    vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("transfers down"));
+
+    await expect(runCronJob()).rejects.toThrow("transfers down");
+
+    expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
+  });
 });

@@ -70,6 +70,46 @@ describe("SponsorshipBudgetRepository", () => {
     expect(policies.map((policy) => policy.id)).toEqual(["global", "org_exact", "project_default"]);
   });
 
+  it("toggles enabled without clobbering a concurrently-updated limit", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const updated = await repository.upsertPolicy({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: true,
+      perTransactionLamports: 111,
+      hourlyLamports: 222,
+      dailyLamports: 333,
+      operator: "operator",
+      reason: "raise limits",
+    });
+
+    const disabled = await repository.setPolicyEnabled({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: false,
+      operator: "system:sponsorship-breaker",
+      reason: "trip",
+    });
+    expect(disabled).not.toBeNull();
+    expect(disabled?.enabled).toBe(false);
+    expect(disabled?.perTransactionLamports).toBe(111);
+    expect(disabled?.hourlyLamports).toBe(222);
+    expect(disabled?.dailyLamports).toBe(333);
+    expect(disabled?.version).toBe(updated.version + 1);
+
+    const noop = await repository.setPolicyEnabled({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: false,
+      operator: "system:sponsorship-breaker",
+      reason: "already tripped",
+    });
+    expect(noop).toBeNull();
+  });
+
   it("writes an audited revision for each policy change and prevents mutation", async () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
     const changed = await repository.upsertPolicy({
