@@ -1,9 +1,10 @@
 import {
+  createCounterpartiesRepository,
   createKycWalletsRepository,
-  createSystemCounterpartiesRepository,
   createWalletAssetEnrollmentsRepository,
   type KycWalletRow,
 } from "@/db/repositories";
+import { createTenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 import { dispatchWorkflowEvent } from "./event-bus";
 
@@ -15,7 +16,13 @@ async function resolveCounterpartyKind(env: Env, kycWallet: KycWalletRow): Promi
   if (!kycWallet.counterparty_id) {
     return null;
   }
-  const counterparty = await createSystemCounterpartiesRepository(env).getCounterpartyById({
+  // The wallet row's org/project are the trusted tenant identity — it was written by an
+  // authenticated enrollment or a verified provider webhook, never request input.
+  const scope = createTenantScope({
+    organizationId: kycWallet.organization_id,
+    projectId: kycWallet.project_id,
+  });
+  const counterparty = await createCounterpartiesRepository(env, scope).getCounterpartyById({
     counterpartyId: kycWallet.counterparty_id,
     organizationId: kycWallet.organization_id,
     projectId: kycWallet.project_id,
