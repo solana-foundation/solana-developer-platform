@@ -165,10 +165,15 @@ WHERE b.custody_wallet_id = wdup.id;
 -- surviving binding where it has none (oldest assignment wins per column).
 -- When both sides carry an assignment the survivor's wins — it is the one
 -- that already governed the surviving wallet, and the loser's route ceases
--- to exist — and the discard is reported below, never silent. Which of two
--- profiles is "stricter" is not machine-decidable, so no automatic pick can
--- guarantee the stronger policy; the NOTICE flags the affected keys for the
--- operator to make that call.
+-- to exist — and the discard is reported below, never silent. This cannot
+-- weaken authorization relative to the pre-migration state: both bindings
+-- named the same provider wallet (custody_wallet_duplicates pairs rows by
+-- wallet_id within one org+provider group), so before the merge the key
+-- could already operate through the survivor binding's policy by targeting
+-- the surviving row. Removing the duplicate route leaves the key with a
+-- policy it already held; which of the two profiles was "stricter" is not
+-- machine-decidable, so the NOTICE flags the affected keys for the operator
+-- to make that call.
 UPDATE api_key_wallet_policy_bindings b
 SET wallet_control_profile_id = COALESCE(b.wallet_control_profile_id, l.wallet_control_profile_id),
     api_key_control_profile_id = COALESCE(b.api_key_control_profile_id, l.api_key_control_profile_id)
