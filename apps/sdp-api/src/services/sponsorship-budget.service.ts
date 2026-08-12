@@ -18,9 +18,9 @@ import {
 import { getDb } from "@/db";
 import {
   type CreateSponsorshipReservationInput,
+  type SignaturePersistResult,
   type SponsorshipBudgetPolicy,
   SponsorshipBudgetRepository,
-  type SignaturePersistResult,
   type SponsorshipNetwork,
   type SponsorshipReservation,
   type SponsorshipReservationStatus,
@@ -220,7 +220,12 @@ export class BudgetedFeePayment implements FeePaymentPort {
     }
     if (
       result !== "persisted" &&
-      !(await this.durablyAdvanced(reservation, ["signed", "submitted", "committed"]))
+      !(await this.durablyAdvanced(reservation, [
+        "signed",
+        "submitted",
+        "committed",
+        "charged_unknown",
+      ]))
     ) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
@@ -250,11 +255,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
     }
     let result: SignaturePersistResult;
     try {
-      result = await this.repository.markSubmitted(
-        reservation.id,
-        reservation.attempt,
-        signature
-      );
+      result = await this.repository.markSubmitted(reservation.id, reservation.attempt, signature);
     } catch (error) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
@@ -267,7 +268,10 @@ export class BudgetedFeePayment implements FeePaymentPort {
       await this.releaseDuplicateSignature(reservation);
       return signature;
     }
-    if (result !== "persisted" && !(await this.durablyAdvanced(reservation, ["submitted", "committed"]))) {
+    if (
+      result !== "persisted" &&
+      !(await this.durablyAdvanced(reservation, ["submitted", "committed", "charged_unknown"]))
+    ) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
         "Submitted sponsorship outcome could not be persisted",
@@ -712,10 +716,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
   ): Promise<void> {
     await this.releaseDeterministic(
       reservation,
-      new FeePaymentError(
-        "Transaction already sponsored under another reservation",
-        "RATE_LIMITED"
-      )
+      new FeePaymentError("Transaction already sponsored under another reservation", "RATE_LIMITED")
     );
   }
 

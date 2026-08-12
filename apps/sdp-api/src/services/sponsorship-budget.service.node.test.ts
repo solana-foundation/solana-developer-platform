@@ -378,6 +378,23 @@ describe("BudgetedFeePayment", () => {
     expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
   });
 
+  it("does not open the breaker when reconciliation already charged the in-flight reservation as unknown", async () => {
+    const { feePayment, provider, repository } = harness();
+    repository.markSubmitted.mockResolvedValue("stale");
+    repository.getReservation.mockResolvedValueOnce(null).mockResolvedValue({
+      id: "reservation_1",
+      status: "charged_unknown",
+      signature: "signature_1",
+      signedTransaction: null,
+      reservedLamports: 5_000,
+      actualLamports: null,
+      attempt: 1,
+    });
+    await expect(feePayment.signAndSend(buildTransaction())).resolves.toBe("signature_1");
+    expect(provider.signAndSend).toHaveBeenCalledOnce();
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+  });
+
   it("still opens the breaker when a lost submission did not advance on-chain", async () => {
     const { feePayment, repository } = harness();
     repository.markSubmitted.mockResolvedValue("stale");
