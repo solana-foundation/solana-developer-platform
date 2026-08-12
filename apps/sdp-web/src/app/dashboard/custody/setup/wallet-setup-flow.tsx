@@ -16,6 +16,7 @@ import {
   type CustodyProviderAvailability,
   resolveCustodyProviderAvailability,
 } from "@/app/dashboard/custody/provider-display-status";
+import { PrivyCredentialForm } from "@/app/dashboard/custody/setup/privy-credential-form";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +69,8 @@ interface WalletSetupFlowProps {
   connectedProviders: KnownCustodyProvider[];
   enabledProviders: KnownCustodyProvider[];
   initialProvider?: KnownCustodyProvider | null;
+  /** Stored-credential install for Privy; ships dark until the flag is on. */
+  privyByokEnabled?: boolean;
 }
 
 function getInitialSelection(input: {
@@ -189,6 +192,7 @@ export function WalletSetupFlow({
   connectedProviders,
   enabledProviders,
   initialProvider = null,
+  privyByokEnabled = false,
 }: WalletSetupFlowProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -210,6 +214,9 @@ export function WalletSetupFlow({
     initialSelection.provider
   );
   const [walletLabel, setWalletLabel] = useState("");
+  // While a BYOK submission is in an unknown state, leaving the step would
+  // unmount the frozen payload and key that are the only path to recovery.
+  const [byokRecoveryLocked, setByokRecoveryLocked] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submissionInFlightRef = useRef(false);
 
@@ -226,6 +233,10 @@ export function WalletSetupFlow({
     ? !isConnected || selectedProviderEntry.supportsAdditionalWallets
     : false;
   const formAction = isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction;
+  // An uninstalled Privy under BYOK goes through provider details (credential
+  // submission + connection check) instead of the legacy initialize path,
+  // which the API refuses once stored-credential setup is enforced.
+  const isByokDetails = privyByokEnabled && selectedProviderEntry?.id === "privy" && !isConnected;
 
   const continueFromProvider = () => {
     if (!selectedProviderEntry) {
@@ -329,7 +340,9 @@ export function WalletSetupFlow({
   const heading =
     currentStep === "provider"
       ? t("DashboardCustody.chooseProvider")
-      : t("DashboardCustody.walletDetails");
+      : isByokDetails
+        ? t("DashboardCustody.byokProviderDetails")
+        : t("DashboardCustody.walletDetails");
   const canContinue = Boolean(selectedProviderEntry);
   const stepIndex = SETUP_STEPS.indexOf(currentStep);
 
@@ -415,6 +428,11 @@ export function WalletSetupFlow({
                   selectedProvider={selectedProvider}
                 />
               </form>
+            ) : isByokDetails ? (
+              <PrivyCredentialForm
+                formId={DETAILS_FORM_ID}
+                onRecoveryLockChange={setByokRecoveryLocked}
+              />
             ) : (
               <form id={DETAILS_FORM_ID} onSubmit={handleDetailsSubmit} className="grid gap-4">
                 {formContent}
@@ -429,15 +447,21 @@ export function WalletSetupFlow({
         data-wallet-setup-actions="true"
       >
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={goBack}
-            disabled={isPending}
-            iconLeft={currentStep === "details" ? <ArrowLeft className="size-4" /> : undefined}
-          >
-            {currentStep === "provider" ? t("DashboardCustody.cancel") : t("DashboardCustody.back")}
-          </Button>
+          {byokRecoveryLocked ? (
+            <span />
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={goBack}
+              disabled={isPending}
+              iconLeft={currentStep === "details" ? <ArrowLeft className="size-4" /> : undefined}
+            >
+              {currentStep === "provider"
+                ? t("DashboardCustody.cancel")
+                : t("DashboardCustody.back")}
+            </Button>
+          )}
 
           {currentStep === "provider" ? (
             <Button
@@ -448,7 +472,7 @@ export function WalletSetupFlow({
             >
               {t("DashboardCustody.next")}
             </Button>
-          ) : (
+          ) : isByokDetails ? null : (
             <Button
               type="submit"
               form={DETAILS_FORM_ID}
