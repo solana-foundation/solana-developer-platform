@@ -247,7 +247,14 @@ export class KoraAdapter implements FeePaymentPort {
         this.getFeePayer(),
         this.client.getConfig(),
       ]);
-      const { max_allowed_lamports, fee_payer_policy } = config.validation_config;
+      const validationConfig = config?.validation_config;
+      if (!validationConfig) {
+        throw new Error("Kora getConfig omitted validation_config");
+      }
+      const { max_allowed_lamports, fee_payer_policy } = validationConfig;
+      if (max_allowed_lamports === undefined || max_allowed_lamports === null) {
+        throw new Error("Kora getConfig omitted validation_config.max_allowed_lamports");
+      }
       const maxAllowedLamports = BigInt(max_allowed_lamports);
       if (maxAllowedLamports < 0n) {
         throw new Error("Kora returned a negative max_allowed_lamports");
