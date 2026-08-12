@@ -1,17 +1,19 @@
 export function IntegrationsSkeleton() {
   return (
-    <div className="w-full animate-pulse space-y-8 px-4 py-6 md:px-6">
-      <div className="mx-auto max-w-2xl space-y-2">
-        <div className="mx-auto h-4 w-full rounded bg-fill-subtle" />
-        <div className="mx-auto h-4 w-1/2 rounded bg-fill-subtle" />
+    <div className="w-full animate-pulse space-y-6 px-4 py-6 md:px-6">
+      <div className="max-w-2xl space-y-2">
+        <div className="h-4 w-full rounded bg-fill-subtle" />
+        <div className="h-4 w-1/2 rounded bg-fill-subtle" />
       </div>
-      {/* One toolbar row, matching the loaded catalog: six status pills
-          leading, the search field trailing at toolbar width. */}
-      <div className="flex flex-wrap items-center gap-2">
-        {[104, 96, 132, 84, 148, 120].map((width) => (
-          <div key={width} className="h-8 rounded-full bg-fill-subtle" style={{ width }} />
-        ))}
-        <div className="h-10 w-full rounded-[10px] bg-fill-subtle sm:ms-auto sm:w-64" />
+      {/* Matches the loaded toolbar: pills cluster leading with the search
+          slot on the right from lg up, stacked search-first below. */}
+      <div className="flex flex-col-reverse gap-3 lg:flex-row lg:items-center">
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          {[104, 96, 132, 84, 148, 120].map((width) => (
+            <div key={width} className="h-8 rounded-full bg-fill-subtle" style={{ width }} />
+          ))}
+        </div>
+        <div className="h-10 w-full rounded-[10px] bg-fill-subtle lg:w-64 lg:shrink-0" />
       </div>
       {[0, 1].map((section) => (
         <div key={section} className="space-y-4">

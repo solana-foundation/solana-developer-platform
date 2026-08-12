@@ -248,28 +248,36 @@ export function IntegrationsCatalog({
   };
 
   return (
-    <div className="w-full space-y-8 px-4 py-6 md:px-6">
-      <p className="mx-auto max-w-2xl text-center text-sm leading-6 text-tertiary">
+    <div className="w-full space-y-6 px-4 py-6 md:px-6">
+      {/* Left-aligned lead-in: with the family tabs in the header above, a
+          centered slogan floats in dead space instead of leading the page. */}
+      <p className="max-w-2xl text-sm leading-6 text-tertiary">
         {t("Shared.integrations.pageDescription")}
       </p>
 
-      {/* One toolbar row: status pills lead, search trails at toolbar width.
-          The family axis already moved to the header tabs, so stacking a
-          second full-width row here would reopen the clash it removed. */}
-      <div className="flex flex-wrap items-center gap-2" data-integrations-filters="true">
-        <div className="flex flex-wrap items-center gap-2" data-integrations-status-pills="true">
-          {STATUS_FILTERS.map((option) => (
-            <FilterPill key={option} active={status === option} onClick={() => setStatus(option)}>
-              {statusLabel(option, t)}
-            </FilterPill>
-          ))}
+      {/* One toolbar: status pills lead and wrap within their own cluster,
+          search holds a fixed slot on the right from lg up. Below lg the two
+          stack, with the search full-width first — never a lonely field
+          floating right on its own wrap line. */}
+      <div
+        className="flex flex-col-reverse gap-3 lg:flex-row lg:items-center"
+        data-integrations-filters="true"
+      >
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          <div className="contents" data-integrations-status-pills="true">
+            {STATUS_FILTERS.map((option) => (
+              <FilterPill key={option} active={status === option} onClick={() => setStatus(option)}>
+                {statusLabel(option, t)}
+              </FilterPill>
+            ))}
+          </div>
+          {filtered ? (
+            <Button variant="ghost" size="sm" onClick={clearFilters}>
+              {t("Shared.integrations.clearFilters")}
+            </Button>
+          ) : null}
         </div>
-        {filtered ? (
-          <Button variant="ghost" size="sm" onClick={clearFilters}>
-            {t("Shared.integrations.clearFilters")}
-          </Button>
-        ) : null}
-        <div className="w-full sm:ms-auto sm:w-64">
+        <div className="w-full lg:w-64 lg:shrink-0">
           <SearchInput
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
