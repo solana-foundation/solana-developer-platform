@@ -669,7 +669,7 @@ describe("Custody wallet scope routes", () => {
 
     it("lets a wallet-scoped key re-default to a wallet inside its bindings", async () => {
       await seedCachedKey({
-        projectId: null,
+        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:write"] }],
       });
 
@@ -699,7 +699,7 @@ describe("Custody wallet scope routes", () => {
 
     it("masks re-defaulting to a wallet outside the key bindings as unknown", async () => {
       await seedCachedKey({
-        projectId: null,
+        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
       });
 
@@ -729,7 +729,7 @@ describe("Custody wallet scope routes", () => {
 
     it("returns 404 when a wallet-scoped key deletes a wallet outside its bindings", async () => {
       await seedCachedKey({
-        projectId: null,
+        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
       });
 
@@ -759,7 +759,7 @@ describe("Custody wallet scope routes", () => {
 
     it("lets a bound wallet through the delete binding gate", async () => {
       await seedCachedKey({
-        projectId: null,
+        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:write"] }],
       });
 
@@ -788,7 +788,7 @@ describe("Custody wallet scope routes", () => {
 
     it("rejects wallet creation with a wallet-scoped key", async () => {
       await seedCachedKey({
-        projectId: null,
+        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
       });
 
@@ -810,7 +810,7 @@ describe("Custody wallet scope routes", () => {
 
     it("rejects provider initialization with a wallet-scoped key", async () => {
       await seedCachedKey({
-        projectId: null,
+        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
       });
 
@@ -832,7 +832,7 @@ describe("Custody wallet scope routes", () => {
 
     it("rejects provider switching with a wallet-scoped key", async () => {
       await seedCachedKey({
-        projectId: null,
+        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
       });
 

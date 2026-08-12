@@ -51,6 +51,25 @@ it("deduplicates org-level custody configs and repoints references", async () =>
       id TEXT PRIMARY KEY,
       custody_config_id TEXT REFERENCES custody_configs(id) ON DELETE SET NULL
     )`);
+    await client.query(`CREATE TEMP TABLE wallet_control_profiles (
+      id TEXT PRIMARY KEY,
+      custody_wallet_id TEXT NOT NULL REFERENCES custody_wallets(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'draft',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z'
+    )`);
+    await client.query(`CREATE UNIQUE INDEX idx_wallet_control_profiles_active_wallet_shadow
+      ON wallet_control_profiles(custody_wallet_id)
+      WHERE status = 'active'`);
+    await client.query(`CREATE TEMP TABLE api_key_wallet_policy_bindings (
+      id TEXT PRIMARY KEY,
+      api_key_id TEXT NOT NULL,
+      wallet_id TEXT,
+      custody_wallet_id TEXT REFERENCES custody_wallets(id) ON DELETE SET NULL
+    )`);
+    await client.query(`CREATE TEMP TABLE wallet_operations (
+      id TEXT PRIMARY KEY,
+      custody_wallet_id TEXT REFERENCES custody_wallets(id) ON DELETE SET NULL
+    )`);
 
     // org_dup holds three org-level privy configs; the newest active row wins.
     await client.query(
@@ -79,6 +98,22 @@ it("deduplicates org-level custody configs and repoints references", async () =>
     // Dangling default pointer that must be repaired before the FK lands.
     await client.query(`UPDATE custody_configs SET default_wallet_id = 'wallet_gone'
        WHERE id = 'cfg_clean'`);
+
+    // Dependents of the unmovable duplicate wallet (cwlt_mid_shared): all of
+    // these must survive on the survivor's copy instead of cascading away.
+    await client.query(
+      `INSERT INTO wallet_control_profiles (id, custody_wallet_id, status) VALUES
+         ('wcp_dup_active', 'cwlt_mid_shared', 'active'),
+         ('wcp_dup_draft', 'cwlt_mid_shared', 'draft')`
+    );
+    await client.query(
+      `INSERT INTO api_key_wallet_policy_bindings (id, api_key_id, wallet_id, custody_wallet_id)
+       VALUES ('akb_dup', 'key_dup', 'wallet_shared', 'cwlt_mid_shared')`
+    );
+    await client.query(
+      `INSERT INTO wallet_operations (id, custody_wallet_id)
+       VALUES ('wop_dup', 'cwlt_mid_shared')`
+    );
 
     await client.query(sql);
 
@@ -111,11 +146,32 @@ it("deduplicates org-level custody configs and repoints references", async () =>
       { id: "cwlt_new_shared", wallet_id: "wallet_shared" },
     ]);
 
-    // The duplicate's unmovable shared wallet cascades away with its config.
+    // The duplicate's unmovable shared wallet cascades away with its config…
     const orphanWallet = await client.query(
       `SELECT id FROM custody_wallets WHERE id = 'cwlt_mid_shared'`
     );
     expect(orphanWallet.rows).toHaveLength(0);
+
+    // …but its dependents were repointed at the survivor's copy first.
+    const profiles = await client.query(
+      `SELECT id, status FROM wallet_control_profiles
+       WHERE custody_wallet_id = 'cwlt_new_shared'
+       ORDER BY id`
+    );
+    expect(profiles.rows).toEqual([
+      { id: "wcp_dup_active", status: "active" },
+      { id: "wcp_dup_draft", status: "draft" },
+    ]);
+
+    const binding = await client.query(
+      `SELECT custody_wallet_id FROM api_key_wallet_policy_bindings WHERE id = 'akb_dup'`
+    );
+    expect(binding.rows[0]?.custody_wallet_id).toBe("cwlt_new_shared");
+
+    const operation = await client.query(
+      `SELECT custody_wallet_id FROM wallet_operations WHERE id = 'wop_dup'`
+    );
+    expect(operation.rows[0]?.custody_wallet_id).toBe("cwlt_new_shared");
 
     // Untouched scopes survive, and the dangling default was repaired.
     const clean = await client.query(

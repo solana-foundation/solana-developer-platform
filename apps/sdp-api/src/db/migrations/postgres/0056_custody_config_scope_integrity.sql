@@ -59,6 +59,54 @@ WHERE w.custody_config_id = dup.id
           inner_w.id
   );
 
+-- Wallets that could not move (the survivor already holds the same provider
+-- wallet id) will cascade away with their config. Repoint their dependents
+-- at the survivor's copy first so policies, API-key bindings, and operation
+-- history are preserved rather than cascaded or nulled.
+CREATE TEMP TABLE custody_wallet_duplicates ON COMMIT DROP AS
+SELECT dup_w.id, kept.id AS keep_id
+FROM custody_wallets dup_w
+JOIN custody_config_duplicates dup ON dup.id = dup_w.custody_config_id
+JOIN custody_wallets kept
+  ON kept.custody_config_id = dup.keep_id
+ AND kept.wallet_id = dup_w.wallet_id;
+
+-- One active control profile per wallet: non-active profiles always move;
+-- an active profile moves only if the survivor's wallet has none (one
+-- candidate per survivor).
+UPDATE wallet_control_profiles wcp
+SET custody_wallet_id = wdup.keep_id
+FROM custody_wallet_duplicates wdup
+WHERE wcp.custody_wallet_id = wdup.id
+  AND (
+      wcp.status <> 'active'
+      OR wcp.id IN (
+          SELECT DISTINCT ON (wd.keep_id) inner_wcp.id
+          FROM wallet_control_profiles inner_wcp
+          JOIN custody_wallet_duplicates wd ON inner_wcp.custody_wallet_id = wd.id
+          WHERE inner_wcp.status = 'active'
+            AND NOT EXISTS (
+                SELECT 1
+                FROM wallet_control_profiles kept_wcp
+                WHERE kept_wcp.custody_wallet_id = wd.keep_id
+                  AND kept_wcp.status = 'active'
+            )
+          ORDER BY wd.keep_id, inner_wcp.updated_at DESC, inner_wcp.id
+      )
+  );
+
+-- The selected-binding unique index is on (api_key_id, wallet_id), and the
+-- duplicate shares the survivor's wallet_id, so repointing cannot collide.
+UPDATE api_key_wallet_policy_bindings b
+SET custody_wallet_id = wdup.keep_id
+FROM custody_wallet_duplicates wdup
+WHERE b.custody_wallet_id = wdup.id;
+
+UPDATE wallet_operations op
+SET custody_wallet_id = wdup.keep_id
+FROM custody_wallet_duplicates wdup
+WHERE op.custody_wallet_id = wdup.id;
+
 DELETE FROM custody_configs c
 USING custody_config_duplicates dup
 WHERE c.id = dup.id;
