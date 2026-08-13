@@ -156,12 +156,38 @@ const solanaDestinationSchema = z.preprocess(
   })
 );
 
-export const earnProgramWithdrawalPreviewSchema = z.object({
-  amountUsd: usdAmountSchema,
+/**
+ * The preview and the create used to share a schema by `.extend()`, and they
+ * deliberately no longer do.
+ *
+ * PRO-1675 made the preview's `amountUsd` OPTIONAL — asked without one it
+ * answers what the lane can pay right now instead of validating a request. Had
+ * the create kept extending the preview, that single edit would have silently
+ * made the amount optional on the PAYOUT path too: `POST .../withdrawals` would
+ * have accepted a body with no amount. Each schema now DECLARES its own
+ * `amountUsd`, so optionality cannot travel between them at all — the
+ * relationship a reviewer has to verify is gone rather than merely corrected.
+ * Pinned by "keeps amountUsd required even though the preview made it optional"
+ * in `../earn-program.test.ts`.
+ */
+const earnProgramWithdrawalTokenShape = {
   token: z.enum(EARN_PORTFOLIO_TOKENS),
+} as const;
+
+export const earnProgramWithdrawalPreviewSchema = z.object({
+  /**
+   * Omit to ask the liquidity question — "how much can this lane pay right
+   * now?" — which is what the withdraw modal asks before the user types
+   * anything. Present, it also validates that specific amount is fillable.
+   */
+  amountUsd: usdAmountSchema.optional(),
+  ...earnProgramWithdrawalTokenShape,
 });
 
-export const earnProgramWithdrawalCreateSchema = earnProgramWithdrawalPreviewSchema.extend({
+export const earnProgramWithdrawalCreateSchema = z.object({
+  /** REQUIRED — a payout with no amount is not a request. See the note above. */
+  amountUsd: usdAmountSchema,
+  ...earnProgramWithdrawalTokenShape,
   /**
    * Caller-owned idempotency key (UUIDv4). Optional HERE only because the
    * `Idempotency-Key` header is the other accepted source — the handler

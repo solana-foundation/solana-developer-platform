@@ -1355,6 +1355,80 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     expect(statusBody.data.withdrawal.status).toBe("processing");
   });
 
+  /**
+   * PRO-1675: the preview answers the LIQUIDITY question when asked without an
+   * amount, and that optionality must not reach the payout path.
+   */
+  describe("amount-less preview (the liquidity read)", () => {
+    it("omits amountUsd from the provider call and answers with the lane ceiling", async () => {
+      await seedAuth();
+      const program = await seedProgramWallet();
+      const preview = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "previewPortfolioWithdrawal")
+        .mockResolvedValue({
+          feeUsd: "0.10",
+          withdrawableUsd: "412.50",
+          totalUsdAfterWithdrawal: "412.50",
+          processingEstimate: {
+            basis: "banking_days",
+            typicalMinDuration: "P1D",
+            typicalMaxDuration: "P3D",
+          },
+        });
+
+      const res = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
+        token: "usdc",
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { preview: { withdrawableUsd: string; amountRequestedUsd?: string } };
+      };
+      expect(body.data.preview.withdrawableUsd).toBe("412.50");
+      // Absent, not null: nothing was requested, so nothing was requested.
+      expect(body.data.preview.amountRequestedUsd).toBeUndefined();
+      // The provider input must not carry the key at all — a provider keys the
+      // two request forms off its PRESENCE, and `undefined` is not omission
+      // once it has been spread into an object literal.
+      const [, input] = preview.mock.calls[0] ?? [];
+      expect(input).toEqual({ providerWalletRef: WALLET_REF, token: "usdc" });
+      expect(input && "amountUsd" in input).toBe(false);
+    });
+
+    it("keeps amountUsd required on the payout path even though the preview made it optional", async () => {
+      await seedAuth();
+      const program = await seedProgramWallet();
+      const createWithdrawal = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal");
+
+      // The regression this pins: the create schema used to `.extend()` the
+      // preview schema, so relaxing the preview would have silently accepted a
+      // payout with no amount. If this 400 ever becomes a 201, the two schemas
+      // have been re-coupled.
+      const res = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
+        requestId: "0b1f2c3d-4e5a-4b6c-8d9e-0f1a2b3c4d5e",
+        token: "usdc",
+        destinationAddress: SOLANA_DESTINATION,
+      });
+
+      expect(res.status).toBe(400);
+      expect(createWithdrawal).not.toHaveBeenCalled();
+    });
+
+    it("still 503s without credentials rather than inventing a liquidity figure", async () => {
+      await seedAuth();
+      const program = await seedProgramWallet();
+      const preview = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "previewPortfolioWithdrawal");
+      env.GROUND_SANDBOX_API_KEY = undefined;
+
+      const res = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
+        token: "usdc",
+      });
+
+      expect(res.status).toBe(503);
+      expect(preview).not.toHaveBeenCalled();
+    });
+  });
+
   // The provider dedupes a withdrawal on its request id, and since PRO-1628
   // that same derived id also anchors the SDP-side intent row — a two-layer
   // defence. Every case here exists to keep the id stable across attempts and
