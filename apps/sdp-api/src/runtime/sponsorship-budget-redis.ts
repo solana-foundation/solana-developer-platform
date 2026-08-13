@@ -93,14 +93,18 @@ for i = 1, count do
   local per_tx = tonumber(ARGV[offset + 2])
   local hour_limit = tonumber(ARGV[offset + 3])
   local day_limit = tonumber(ARGV[offset + 4])
-  if (not counted_hour or not counted_day) and amount > per_tx then return {0, i} end
-  if not counted_hour then
-    local hour_used = tonumber(redis.call('HGET', KEYS[1], field) or '0')
-    if hour_used + amount > hour_limit then return {0, i} end
+  if amount > per_tx then return {0, i} end
+  local hour_used = tonumber(redis.call('HGET', KEYS[1], field) or '0')
+  if counted_hour then
+    if hour_used > hour_limit then return {0, i} end
+  elseif hour_used + amount > hour_limit then
+    return {0, i}
   end
-  if not counted_day then
-    local day_used = tonumber(redis.call('HGET', KEYS[2], field) or '0')
-    if day_used + amount > day_limit then return {0, i} end
+  local day_used = tonumber(redis.call('HGET', KEYS[2], field) or '0')
+  if counted_day then
+    if day_used > day_limit then return {0, i} end
+  elseif day_used + amount > day_limit then
+    return {0, i}
   end
 end
 if not counted_hour then

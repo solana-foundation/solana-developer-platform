@@ -604,6 +604,91 @@ describe("SponsorshipBudgetRedis", () => {
     expect(await raw.hget(hourKey, "__reservation:res_b:1")).toBeNull();
   });
 
+  it("denies an adopted reservation that exceeds the per-transaction limit", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_self",
+        attempt: 1,
+        amount: 11,
+        policies: [policy("global", 1, true, 10), policy("organization", 1, true, 10)],
+        usage: {
+          hour: { global: 11, organization: 11, project: 0 },
+          day: { global: 11, organization: 11, project: 0 },
+        },
+        liveReservations: {
+          hour: [
+            {
+              id: "res_self",
+              attempt: 1,
+              reservedLamports: 11,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "res_self",
+              attempt: 1,
+              reservedLamports: 11,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+        },
+      })
+    ).resolves.toBe("denied");
+
+    expect(await raw.get("sdp:sponsorship:{devnet}:reservation:res_self:1")).toBeNull();
+    expect(await raw.hget(hourKey, "global")).toBe("11");
+  });
+
+  it("denies an adopted reservation once the seeded window already exceeds its limit", async () => {
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_over",
+        attempt: 1,
+        amount: 5,
+        policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+        usage: {
+          hour: { global: 25, organization: 25, project: 0 },
+          day: { global: 25, organization: 25, project: 0 },
+        },
+        liveReservations: {
+          hour: [
+            {
+              id: "res_over",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "res_over",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+        },
+      })
+    ).resolves.toBe("denied");
+  });
+
   it("adopts a reconstruction-seeded reservation instead of double-counting its own reserve", async () => {
     const base = {
       network: "devnet" as const,
