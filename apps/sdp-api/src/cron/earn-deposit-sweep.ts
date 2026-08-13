@@ -40,6 +40,17 @@
  * platform's pass. It gates nothing — it is not a request path and never decides
  * whether money may move.
  *
+ * A wallet that FAILS gets one immediate second attempt before the scan checkpoint
+ * moves, because the checkpoint advances past the whole batch and a failed wallet
+ * would otherwise wait for the scan to wrap. Above MAX_WALLETS_PER_RUN programs that
+ * wait is bounded by programs/MAX_WALLETS_PER_RUN passes (below it the scan clears
+ * its cursor, so every pass starts at the head and a failure is retried next tick).
+ * Holding the checkpoint back instead would be worse, not better: one persistently
+ * broken wallet mid-batch would starve every wallet after it indefinitely. So the
+ * scan always advances, the retry recovers the transient case that causes almost all
+ * of these failures, and `failures` counts only wallets that failed BOTH attempts —
+ * that is the number an operator should act on.
+ *
  * Adding a provider is a registry change only: neither execution path names one,
  * and capability comes from `supportsPortfolioWallets`.
  */
@@ -125,8 +136,11 @@ const SKIPPABLE_SWEEP_ERROR_CODES: ReadonlySet<string> = new Set([
 export interface EarnDepositSweepResult {
   walletsScanned: number;
   walletsSkipped: number;
+  /** Wallets given one immediate second attempt after failing. */
+  walletsRetried: number;
   pagesFetched: number;
   depositsObserved: number;
+  /** Wallets that failed BOTH attempts — the count an operator should act on. */
   failures: number;
 }
 
@@ -182,6 +196,7 @@ export async function sweepEarnDeposits(env: Env): Promise<EarnDepositSweepResul
   const result: EarnDepositSweepResult = {
     walletsScanned: 0,
     walletsSkipped: 0,
+    walletsRetried: 0,
     pagesFetched: 0,
     depositsObserved: 0,
     failures: 0,
@@ -217,40 +232,45 @@ async function sweepEnvironment(
   // signal on the exact pass an operator would be reading.
   const clientsByProvider = new Map<string, EarnPortfolioWalletProvider | null>();
 
+  const failedWallets: EarnProviderWalletRow[] = [];
   for (const wallet of wallets) {
-    const client = resolveSweepClient(clientsByProvider, wallet, environment);
-    if (client === null) {
-      result.walletsSkipped += 1;
-      continue;
-    }
-
-    try {
-      await sweepWallet(repo, cache, client, ctx, wallet, result);
+    const outcome = await attemptWallet(repo, cache, clientsByProvider, ctx, wallet, result);
+    if (outcome === "swept") {
       result.walletsScanned += 1;
-    } catch (error) {
-      const code = skippableCode(error);
-      if (code !== undefined) {
-        // Credentials can also fail on the first real call rather than at
-        // resolution; treat it as the same steady state and memoize it so the
-        // remaining wallets on this provider short-circuit.
-        clientsByProvider.set(wallet.provider, null);
-        result.walletsSkipped += 1;
-        getLogger().info(
-          { provider: wallet.provider, environment, code },
-          "sweepEarnDeposits: provider skipped"
-        );
-        continue;
-      }
+    } else if (outcome === "skipped") {
+      result.walletsSkipped += 1;
+    } else {
+      failedWallets.push(wallet);
+    }
+  }
+
+  // ONE immediate retry for the wallets that failed, before the checkpoint moves.
+  //
+  // The checkpoint advances past the whole batch, so without this a wallet that
+  // failed here would not be revisited until the environment scan wrapped — which
+  // only matters above MAX_WALLETS_PER_RUN programs (below it the scan clears its
+  // cursor and every pass starts at the head), but there it is bounded by
+  // programs/MAX_WALLETS_PER_RUN passes and is silent while it lasts.
+  //
+  // Retrying HERE rather than holding the checkpoint back is deliberate. Stopping
+  // the checkpoint at the first failure would trade one stale wallet for a far worse
+  // failure: a persistently broken wallet in the middle of a batch would starve
+  // every wallet after it, forever. Advancing past the batch keeps the scan moving
+  // no matter what, and this retry recovers the case that actually causes these
+  // failures — a transient blip, a 429, a brief 5xx — seconds later.
+  //
+  // A wallet that fails twice is a real failure: logged, counted, and left for the
+  // wrap. Cost is bounded by the batch and is zero on a healthy pass; per-page
+  // cursor persistence means the retry RESUMES the walk rather than restarting it.
+  for (const wallet of failedWallets) {
+    result.walletsRetried += 1;
+    const outcome = await attemptWallet(repo, cache, clientsByProvider, ctx, wallet, result);
+    if (outcome === "swept") {
+      result.walletsScanned += 1;
+    } else if (outcome === "skipped") {
+      result.walletsSkipped += 1;
+    } else {
       result.failures += 1;
-      getLogger().error(
-        {
-          provider: wallet.provider,
-          environment,
-          walletId: wallet.id,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        "sweepEarnDeposits: wallet pass failed"
-      );
     }
   }
 
@@ -279,6 +299,59 @@ async function sweepEnvironment(
   const last = wallets[wallets.length - 1];
   if (last) {
     await cache.put(scanKey, encodeScanCursor(last));
+  }
+}
+
+type WalletAttemptOutcome = "swept" | "skipped" | "failed";
+
+/**
+ * One attempt at one wallet, shared by the batch pass and its retry so both
+ * classify an outcome identically.
+ *
+ * Returns rather than throwing: a single program can never sink the platform's
+ * pass, and the caller needs to distinguish a real failure (worth retrying) from a
+ * steady-state skip (worth nothing).
+ */
+async function attemptWallet(
+  repo: EarnRepository,
+  cache: KVStore,
+  clientsByProvider: Map<string, EarnPortfolioWalletProvider | null>,
+  ctx: EarnRuntimeContext,
+  wallet: EarnProviderWalletRow,
+  result: EarnDepositSweepResult
+): Promise<WalletAttemptOutcome> {
+  const environment = ctx.environment;
+  const client = resolveSweepClient(clientsByProvider, wallet, environment);
+  if (client === null) {
+    return "skipped";
+  }
+
+  try {
+    await sweepWallet(repo, cache, client, ctx, wallet, result);
+    return "swept";
+  } catch (error) {
+    const code = skippableCode(error);
+    if (code !== undefined) {
+      // Credentials can also fail on the first real call rather than at
+      // resolution; treat it as the same steady state and memoize it so the
+      // remaining wallets on this provider short-circuit.
+      clientsByProvider.set(wallet.provider, null);
+      getLogger().info(
+        { provider: wallet.provider, environment, code },
+        "sweepEarnDeposits: provider skipped"
+      );
+      return "skipped";
+    }
+    getLogger().error(
+      {
+        provider: wallet.provider,
+        environment,
+        walletId: wallet.id,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "sweepEarnDeposits: wallet pass failed"
+    );
+    return "failed";
   }
 }
 

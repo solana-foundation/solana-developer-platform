@@ -250,6 +250,66 @@ describe("runEarnDepositSweepIfDue", () => {
     expect(mocks.applyEarnDepositObservation).toHaveBeenCalledTimes(1);
   });
 
+  it("retries a failed wallet once in the same pass, so a blip is not left for the wrap", async () => {
+    // The checkpoint advances past the whole batch, so a wallet that failed would
+    // otherwise wait for the scan to wrap. A transient failure — the usual cause —
+    // is recovered seconds later instead.
+    const bad = makeWallet({ id: "earn_provider_wallet_flaky" });
+    mocks.scanProviderWallets.mockImplementation(
+      async ({ environment }: { environment: string }) => (environment === "sandbox" ? [bad] : [])
+    );
+    const listPortfolioDeposits = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("socket hang up"))
+      .mockResolvedValueOnce({ deposits: [DEPOSIT], nextCursor: null });
+    mocks.resolveEarnProviderClient.mockReturnValue(makeClient(listPortfolioDeposits));
+
+    await expect(runEarnDepositSweepIfDue(env)).resolves.toBe("swept");
+
+    expect(listPortfolioDeposits).toHaveBeenCalledTimes(2);
+    // The retry succeeded, so this is NOT reported as a failure an operator must act on.
+    expect(mocks.applyEarnDepositObservation).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts a wallet that fails BOTH attempts as one failure, and keeps the pass alive", async () => {
+    const bad = makeWallet({ id: "earn_provider_wallet_broken", provider: "veda" });
+    const good = makeWallet({ id: "earn_provider_wallet_ok", provider: "upshift" });
+    mocks.scanProviderWallets.mockImplementation(
+      async ({ environment }: { environment: string }) =>
+        environment === "sandbox" ? [bad, good] : []
+    );
+    const brokenFeed = vi.fn(async () => {
+      throw new Error("provider API down");
+    });
+    mocks.resolveEarnProviderClient.mockImplementation((id: string) =>
+      id === "veda" ? makeClient(brokenFeed) : makeClient(onePage([DEPOSIT]))
+    );
+
+    await expect(runEarnDepositSweepIfDue(env)).resolves.toBe("swept");
+
+    // Two attempts on the broken wallet; the healthy one is swept exactly once and
+    // is never dragged into the retry.
+    expect(brokenFeed).toHaveBeenCalledTimes(2);
+    expect(mocks.applyEarnDepositObservation).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a wallet whose provider is a steady-state skip", async () => {
+    // An un-credentialed or capability-less provider is not a failure, so retrying it
+    // would double the log noise on exactly the pass an operator is reading.
+    mocks.scanProviderWallets.mockImplementation(
+      async ({ environment }: { environment: string }) =>
+        environment === "sandbox" ? [makeWallet()] : []
+    );
+    const listPortfolioDeposits = vi.fn(async () => {
+      throw new SdpEarnError("PROVIDER_NOT_CONFIGURED", "no key");
+    });
+    mocks.resolveEarnProviderClient.mockReturnValue(makeClient(listPortfolioDeposits));
+
+    await expect(runEarnDepositSweepIfDue(env)).resolves.toBe("swept");
+
+    expect(listPortfolioDeposits).toHaveBeenCalledTimes(1);
+  });
+
   it("treats absent credentials as a steady state and skips the provider ONCE, not once per wallet", async () => {
     // An un-credentialed environment is the normal pre-launch state. Logging (and
     // calling) once per program would drown the signal on the exact pass an
