@@ -34,8 +34,6 @@ type DashboardTopBarProps = {
   centeredTitle?: string;
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
-  // Notifications ship with the asset-profiles feature (its only producer today).
-  showNotifications?: boolean;
 };
 
 export function HeaderBackAction({
@@ -168,7 +166,6 @@ export function DashboardTopBar({
   centeredTitle,
   topBarLeadingContent,
   hasHeaderTabs = false,
-  showNotifications = false,
 }: DashboardTopBarProps) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
@@ -183,7 +180,7 @@ export function DashboardTopBar({
   const trailingContent = (
     <>
       <LanguagePicker />
-      {showNotifications ? <NotificationBell /> : null}
+      <NotificationBell />
       <UserButton />
       {sandboxBadge}
     </>

@@ -1,23 +1,26 @@
 "use client";
 
-import { Bell, CheckCheck, Loader2, type LucideIcon, Zap } from "lucide-react";
+import type { NotificationDto } from "@sdp/types";
+import {
+  BadgeCheck,
+  Banknote,
+  Bell,
+  CheckCheck,
+  Loader2,
+  type LucideIcon,
+  ShieldCheck,
+  Users,
+  Zap,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatRelativeTime } from "@/app/dashboard/activity-format-utils";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useInboxStream } from "./use-inbox-stream";
 
-interface NotificationItem {
-  id: string;
-  type: string;
-  title: string;
-  body: string | null;
-  resource_type: string | null;
-  resource_id: string | null;
-  params: Record<string, unknown> | null;
-  read_at: string | null;
-  created_at: string;
-}
+// The API's wire shape (raw snake_case rows) — shared with sdp-api via @sdp/types.
+type NotificationItem = NotificationDto;
 
 const POLL_INTERVAL_MS = 60_000;
 const PAGE_SIZE = 15;
@@ -42,9 +45,20 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T | null> {
   }
 }
 
-// Icon tile per notification type (workflow automations today; falls back to the bell).
+// Icon tile per notification type (falls back to the bell for unknown types).
 const TYPE_ICON: Record<string, LucideIcon> = {
   workflow_execution: Zap,
+  workflow_run_failed: Zap,
+  workflow_approval_requested: ShieldCheck,
+  workflow_approval_decided: ShieldCheck,
+  member_invited: Users,
+  member_joined: Users,
+  member_invite_revoked: Users,
+  member_removed: Users,
+  payment_settled: Banknote,
+  recurring_payment_failed: Banknote,
+  kyc_approved: BadgeCheck,
+  kyc_rejected: BadgeCheck,
 };
 
 // Humanize any snake_case system key left in server-composed text (e.g. an older row
@@ -58,14 +72,28 @@ function humanizeKeys(text: string): string {
   });
 }
 
-// Deep-link a notification to its subject (today: a token's asset profile; workflow
-// notifications land directly on the Workflows tab).
+// Deep-link a notification to its subject. Keep this map in lockstep with the API's
+// email-CTA map (apps/sdp-api/src/services/notifications/resource-links.ts). Unknown
+// resource types render without a link.
 function hrefFor(item: NotificationItem): string | null {
-  if (item.resource_type === "token" && item.resource_id) {
-    const base = `/dashboard/issuance/${item.resource_id}`;
-    return item.type === "workflow_execution" ? `${base}?tab=workflows` : base;
+  switch (item.resource_type) {
+    case "token": {
+      if (!item.resource_id) return null;
+      const base = `/dashboard/issuance/${item.resource_id}`;
+      return item.type.startsWith("workflow_") ? `${base}?tab=workflows` : base;
+    }
+    case "member":
+    case "invitation":
+      return "/dashboard/members";
+    case "payment_transfer":
+      return "/dashboard/payments";
+    case "recurring_payment":
+      return "/dashboard/payments/recurring";
+    case "counterparty":
+      return "/dashboard/payments/counterparty";
+    default:
+      return null;
   }
-  return null;
 }
 
 export function NotificationBell() {
@@ -98,11 +126,16 @@ export function NotificationBell() {
     [t]
   );
 
-  // Server-composed title unless the row carries structured params without a custom
-  // title — then render a localized template so French users don't read English.
+  // Server-composed title unless the row's type has a localized template — then render
+  // that so French users don't read English. workflow_execution keeps its trigger-label
+  // interpolation (and honors rule-authored custom titles); every other known type maps
+  // straight to Shared.notifications.types.<type>, with the server title as fallback.
   const displayTitle = (item: NotificationItem): string => {
     const params = item.params ?? {};
-    if (item.type === "workflow_execution" && !params.customTitle) {
+    if (item.type === "workflow_execution") {
+      if (params.customTitle) {
+        return item.title;
+      }
       const triggerType = typeof params.triggerType === "string" ? params.triggerType : null;
       if (triggerType) {
         const trigger = safeT(
@@ -112,8 +145,9 @@ export function NotificationBell() {
         );
         return safeT("Shared.notifications.types.workflow_execution", { trigger }, item.title);
       }
+      return item.title;
     }
-    return item.title;
+    return safeT(`Shared.notifications.types.${item.type}`, undefined, item.title);
   };
 
   const refreshCount = useCallback(async () => {
@@ -147,6 +181,23 @@ export function NotificationBell() {
     const data = await getJson<{ emailEnabled: boolean }>("/api/dashboard/notifications/config");
     setEmailEnabled(data ? data.emailEnabled : null);
   }, []);
+
+  // Realtime nudges over SSE: the badge updates instantly from the pushed count, and
+  // an open panel refetches its first page. Purely additive — the polling below stays
+  // as the fallback whenever the stream is down.
+  const openRef = useRef(open);
+  openRef.current = open;
+  useInboxStream(
+    useCallback(
+      (nudge) => {
+        setUnread(nudge.unread);
+        if (openRef.current) {
+          void loadList(1);
+        }
+      },
+      [loadList]
+    )
+  );
 
   // Poll the unread count so the badge stays live without a socket. Hidden tabs skip
   // the tick; returning to the tab refreshes immediately.
