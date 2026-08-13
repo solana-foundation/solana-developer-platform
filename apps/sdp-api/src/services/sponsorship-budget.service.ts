@@ -415,6 +415,23 @@ export class BudgetedFeePayment implements FeePaymentPort {
     return policies;
   }
 
+  private async assertSponsorshipEnabled(
+    context: AdmissionContext,
+    policies: SponsorshipBudgetPolicy[],
+    durable: DurableAdmission | null,
+    reservationAttempt: number
+  ): Promise<void> {
+    if (policies.every((policy) => policy.enabled)) return;
+    if (durable?.kind === "owned") {
+      await this.releaseDurable(
+        context,
+        reservationAttempt,
+        "sponsorship disabled during admission"
+      );
+    }
+    throw new FeePaymentError("Sponsorship is disabled for this scope", "PROVIDER_NOT_AVAILABLE");
+  }
+
   private async admitAgainstCurrentPolicy(
     context: AdmissionContext,
     operation: AdmissionOperation,
@@ -423,19 +440,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
     let durable: DurableAdmission | null = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const policies = await this.resolveEnabledPolicies(context);
-      if (policies.some((policy) => !policy.enabled)) {
-        if (durable?.kind === "owned") {
-          await this.releaseDurable(
-            context,
-            reservationAttempt,
-            "sponsorship disabled during admission"
-          );
-        }
-        throw new FeePaymentError(
-          "Sponsorship is disabled for this scope",
-          "PROVIDER_NOT_AVAILABLE"
-        );
-      }
+      await this.assertSponsorshipEnabled(context, policies, durable, reservationAttempt);
       if (!durable) {
         durable = await this.persistReservationDurable(
           context,
