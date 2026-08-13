@@ -15,6 +15,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
+import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
@@ -43,8 +44,23 @@ export async function runCronJob(): Promise<void> {
     // Approved-wallet-operation replay rides the pending-transfers tick (same
     // cadence/monitor), matching the in-process cron runner.
     await monitored(PENDING_TRANSFERS_MONITOR, PENDING_TRANSFERS_CRON, async () => {
-      await trackPendingTransfers(env);
-      await recoverApprovedWalletOperations(env);
+      const outcomes = await Promise.allSettled([
+        (async () => {
+          await trackPendingTransfers(env);
+          await recoverApprovedWalletOperations(env);
+        })(),
+        reconcileSponsorshipBudgets(env),
+      ]);
+      const rejected = outcomes.filter(
+        (outcome): outcome is PromiseRejectedResult => outcome.status === "rejected"
+      );
+      if (rejected.length === 1) throw rejected[0].reason;
+      if (rejected.length > 1) {
+        throw new AggregateError(
+          rejected.map((outcome) => outcome.reason),
+          "pending-transfers tick had multiple failures"
+        );
+      }
     });
     // The workflow engine has no other tick in the Cloud Run deployment shape (the
     // in-process cron scheduler is skipped under K_SERVICE) — without this, enqueued
