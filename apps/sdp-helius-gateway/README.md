@@ -38,27 +38,30 @@ Two consequences shape this crate:
 
 ## Status
 
-`GET /health` is the only route wired up so far. It answers unauthenticated, because a liveness probe
-carries no shared secret and requiring one would make an HMAC misconfiguration look like a dead
-container instead of failing requests with a clear cause.
+`/health` is implemented. All eight flow endpoints are routed and return
+`501 NOT_IMPLEMENTED` with the real error body, so a `404` in a test means a routing mistake rather than
+unfinished work. Each one parses and validates its request first, which means the contract is exercised
+before the flow behind it exists.
 
-The full contract is already here as types in [`src/wire/`](src/wire/), ahead of the handlers that will
-consume it. That ordering is deliberate: the contract is the thing SDP builds against and the thing
-worth reviewing first, and `wire/mod.rs` carries a module-wide `allow(dead_code)` for exactly as long
-as nothing reads it.
+`/health` answers unauthenticated, because a liveness probe carries no shared secret and requiring one
+would make an HMAC misconfiguration look like a dead container instead of failing requests with a clear
+cause.
 
-Eight endpoints are specified and land behind this one, five of which never see a secret:
+| Endpoint | Caller | Key material | Status |
+| --- | --- | --- | --- |
+| `POST /v1/wallets/register` | `sdp-api` | no | 501 |
+| `POST /v1/wallets/merging` | `sdp-api` | no | 501 |
+| `POST /v1/operations/shield` | `sdp-api` | no | 501 |
+| `POST /v1/transactions/assemble` | `sdp-api` | no | 501 |
+| `POST /v1/nullifiers/status` | `sdp-api` | no | 501 |
+| `POST /v1/wallets/sync` | `rings-key-auth` | yes | 501 |
+| `POST /v1/operations/plan` | `rings-key-auth` | yes | 501 |
+| `POST /v1/operations/prove` | `rings-key-auth` | yes | 501 |
+| `GET /health` | none | no | **200** |
 
-| Endpoint | Caller | Key material |
-| --- | --- | --- |
-| `POST /v1/wallets/register` | `sdp-api` | no |
-| `POST /v1/wallets/merging` | `sdp-api` | no |
-| `POST /v1/operations/shield` | `sdp-api` | no |
-| `POST /v1/transactions/assemble` | `sdp-api` | no |
-| `POST /v1/nullifiers/status` | `sdp-api` | no |
-| `POST /v1/wallets/sync` | `rings-key-auth` | yes |
-| `POST /v1/operations/plan` | `rings-key-auth` | yes |
-| `POST /v1/operations/prove` | `rings-key-auth` | yes |
+Five of the eight never see a secret. The caller column is enforced, not documentation: each route is
+verified against its own caller's HMAC secret, so a key-bearing route signed with the sdp-api secret is
+`401`.
 
 Registration is keyless because a `ShieldedAddress` is built entirely from public halves — the owner's
 Ed25519 pubkey, the 32-byte nullifier pubkey and the 33-byte compressed P256 viewing pubkey — so no
@@ -93,7 +96,7 @@ Each preflight read is bounded in-process. The agave client retries a `429` five
 ## Running it
 
 ```bash
-cargo test                 # 14 unit + 1 contract test
+cargo test                 # 22 unit + 16 contract tests
 cargo clippy --all-targets --locked -- -D warnings
 cargo fmt --check
 
@@ -114,6 +117,85 @@ CI runs the same three commands in
 path-filtered to this directory. It is the crate's only correctness gate: Biome ignores `.rs`, the
 `typecheck` job resolves this directory and then no-ops via `--if-present`, and CodeQL has no Rust
 analysis.
+
+## Timeout ladder
+
+Every budget below is a number this service chooses. That is the whole point of the section: **nothing
+upstream bounds a prove call**, so if the gateway does not impose a bound, there is none.
+
+### In-process route budgets
+
+Defined in `src/routes/mod.rs`, enforced as tower layers, and checked against each other at compile
+time by a `const` block in the same file.
+
+| Route | Constant | Budget | Why |
+| --- | --- | --- | --- |
+| `/v1/transactions/assemble` | `DEFAULT_TIMEOUT` | 15 s | pure local work, no RPC, no key material |
+| `/v1/wallets/register` | `RPC_TIMEOUT` | 35 s | one registry read, above the agave client's own 30 s |
+| `/v1/operations/shield` | `RPC_TIMEOUT` | 35 s | same |
+| `/v1/wallets/merging` | `RPC_TIMEOUT` | 35 s | one registry read, same shape as register |
+| `/v1/nullifiers/status` | `SYNC_TIMEOUT` | 60 s | indexer-bound; borrows sync's budget |
+| `/v1/wallets/sync` | `SYNC_TIMEOUT` | 60 s | several indexer rounds |
+| `/v1/operations/plan` | `PLAN_TIMEOUT` | 60 s | a sync plus input selection |
+| `/v1/operations/prove` | `PROVE_TIMEOUT` | 660 s | backstop; see below |
+| `/health` | none | — | serves a startup snapshot, no request-time I/O |
+
+`RPC_TIMEOUT` sits deliberately above 30 s. The agave RPC client applies its own 30 s per-request
+timeout, so a route that gives up sooner turns every slow-RPC case into a bodyless `504` and throws away
+the `RPC_UNAVAILABLE` the transport was about to report.
+
+### The prove ladder
+
+| # | Layer | Value | Status |
+| --- | --- | --- | --- |
+| 1 | SDK `AsyncPollConfig::max_wait_secs` | 600 s | lands with the prove handler |
+| 2 | handler `tokio::time::timeout` | 630 s | lands with the prove handler |
+| 3 | layer `PROVE_TIMEOUT` | 660 s | **exists today** |
+| 4 | Cloud Run `--timeout` | 700 s | sdp-infra, **not applied** |
+| 5 | SDP outbound client | 720 s | no SDP caller exists yet |
+| 6 | Cloud Run `--task-timeout` | 780 s | sdp-infra, currently 120 s |
+
+**Why it has to increase outward.** Only the innermost bound that fires can answer with a structured
+`ErrorBody`. Every layer above it produces a bodyless `504` (first the tower layer, then Cloud Run's own
+error page) and leaves SDP to guess what happened. A ladder that inverts anywhere converts a diagnosable
+failure into an opaque one.
+
+**What the SDK's 600 is not.** `PROVE_REQUEST_TIMEOUT_SECS = 600` is easy to read as a ceiling on a
+prove call. It is a timeout on one HTTP request. The submit is retried three times with a two-second
+backoff, and transfer and merge proofs are queued, so the SDK then polls a job under
+`AsyncPollConfig::max_wait_secs` (default 1200). That poll ceiling counts only the time spent *sleeping*
+between polls, never the time spent inside the status request: 1200/3 is 400 polls, each of which can
+take up to 600 s on its own. So the SDK has no wall-clock bound at all, and layer 2 is the only thing
+that provides one.
+
+**600 s is an unmeasured placeholder.** It is a guess with no measurement behind it. Replace it with p99
+of a cold transfer prove and a cold merge prove against the devnet prover, then re-derive rows 2 to 6.
+Upstream gives a prior worth calibrating against: a first P256 request loads a 63 MB proving key and
+runs a 205k-constraint Groth16 prove, and the prover server caps *synchronous* work per circuit well
+below that.
+
+**The handler must classify the SDK's own timeout as `PROVER_TIMEOUT`.** When layer 1 fires, the SDK
+returns a generic `ClientError::ProverServer`, whose natural mapping is `PROVER_FAILED` with
+`retryable: false`. That would tell SDP never to retry a prove that merely timed out. Layer 1 is
+deliberately the first to fire because its error carries the `job_id`, which is useful for
+reconciliation, but that only helps if the handler translates it.
+
+**Layer timeouts are a backstop, never the plan.** The async Photon client is built with no HTTP timeout
+at all, so `/sync` and `/plan` need their own `tokio::time::timeout` for the same reason `/prove` does.
+The same applies at startup: `src/zolana/preflight.rs` bounds each RPC read itself, because the agave
+client retries a `429` five times honouring `Retry-After` and a single read can otherwise take around 13
+minutes without ever being unreachable.
+
+**Launch gate.** Until sdp-infra sets `--timeout=700`, Cloud Run's 300 s default truncates every prove
+and layer 3 is unreachable in production. The prove handler is blocked on that flag, not just on its own
+implementation.
+
+**Why the sync budgets are provisional.** `WalletProjection` in `src/wire/common.rs` round-trips
+`tagCounters` and `utxos`, but not upstream's `request_count`, `known_senders` or `known_recipients`. So
+every stateless request rediscovers the counterparty graph from zero and re-sweeps every shared view-tag
+stream at roughly 100 µs per ECDH. Whatever `/sync` and `/plan` measure today will change structurally
+once the projection carries that state, so treat their budgets as provisional for that reason and not
+only for being unmeasured.
 
 ## Findings
 
