@@ -146,22 +146,32 @@ if not amount_value then return 0 end
 local amount = tonumber(amount_value)
 if hour_owned and tonumber(hour_owned) ~= amount then return -2 end
 if day_owned and tonumber(day_owned) ~= amount then return -2 end
+local function covers(hash_key, field)
+  if redis.call('HGET', hash_key, ARGV[1] .. ':' .. field) then return true end
+  if not redis.call('HGET', hash_key, ARGV[1]) then return false end
+  for i = 2, #ARGV do
+    if redis.call('HGET', hash_key, ARGV[1] .. ':' .. ARGV[i]) then return false end
+  end
+  return redis.call('HGET', hash_key, '__initialized:' .. field) ~= false
+end
 for i = 2, #ARGV do
   local field = ARGV[i]
   for key_index = 1, 2 do
-    if redis.call('HGET', KEYS[key_index], ARGV[1] .. ':' .. field) then
+    if covers(KEYS[key_index], field) then
       local used = tonumber(redis.call('HGET', KEYS[key_index], field) or '0')
       if used < amount then return -1 end
     end
   end
 end
-for i = 2, #ARGV do
-  local field = ARGV[i]
-  for key_index = 1, 2 do
-    local covered = ARGV[1] .. ':' .. field
-    if redis.call('HGET', KEYS[key_index], covered) then
-      redis.call('HINCRBY', KEYS[key_index], field, -amount)
-      redis.call('HDEL', KEYS[key_index], covered)
+for key_index = 1, 2 do
+  local adjusted = {}
+  for i = 2, #ARGV do
+    adjusted[i] = covers(KEYS[key_index], ARGV[i])
+  end
+  for i = 2, #ARGV do
+    if adjusted[i] then
+      redis.call('HINCRBY', KEYS[key_index], ARGV[i], -amount)
+      redis.call('HDEL', KEYS[key_index], ARGV[1] .. ':' .. ARGV[i])
     end
   end
 end
@@ -181,12 +191,20 @@ local owned_value = redis.call('GET', KEYS[3])
 if not owned_value and ARGV[5 + count] ~= '1' then return {0, 2} end
 if owned_value and tonumber(owned_value) ~= reserved then return {0, 2} end
 local ownership_field = ARGV[6 + count]
+local function covers(hash_key, field)
+  if redis.call('HGET', hash_key, ownership_field .. ':' .. field) then return true end
+  if not redis.call('HGET', hash_key, ownership_field) then return false end
+  for i = 4, 3 + count do
+    if redis.call('HGET', hash_key, ownership_field .. ':' .. ARGV[i]) then return false end
+  end
+  return redis.call('HGET', hash_key, '__initialized:' .. field) ~= false
+end
 for key_index = 1, 2 do
   local hash_owned = redis.call('HGET', KEYS[key_index], ownership_field)
   if hash_owned and tonumber(hash_owned) ~= reserved then return {0, 2} end
   if delta < 0 then
     for i = 4, 3 + count do
-      if redis.call('HGET', KEYS[key_index], ownership_field .. ':' .. ARGV[i]) then
+      if covers(KEYS[key_index], ARGV[i]) then
         local current = tonumber(redis.call('HGET', KEYS[key_index], ARGV[i]) or '0')
         if current < -delta then return {0, 1} end
       end
@@ -194,11 +212,14 @@ for key_index = 1, 2 do
   end
 end
 for key_index = 1, 2 do
+  local adjusted = {}
   for i = 4, 3 + count do
-    local covered = ownership_field .. ':' .. ARGV[i]
-    if redis.call('HGET', KEYS[key_index], covered) then
+    adjusted[i] = covers(KEYS[key_index], ARGV[i])
+  end
+  for i = 4, 3 + count do
+    if adjusted[i] then
       if delta ~= 0 then redis.call('HINCRBY', KEYS[key_index], ARGV[i], delta) end
-      redis.call('HDEL', KEYS[key_index], covered)
+      redis.call('HDEL', KEYS[key_index], ownership_field .. ':' .. ARGV[i])
     end
   end
   redis.call('HDEL', KEYS[key_index], ownership_field)

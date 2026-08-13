@@ -620,6 +620,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
   ): Promise<void> {
     try {
       await this.repository.markReleased(context.id, attempt, reason);
+      await this.repository.markRedisSettled(context.id, attempt);
     } catch (error) {
       return this.accountingUnavailable(
         context.network,

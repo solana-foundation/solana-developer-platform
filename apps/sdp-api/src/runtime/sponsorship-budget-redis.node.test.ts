@@ -604,6 +604,80 @@ describe("SponsorshipBudgetRedis", () => {
     expect(await raw.hget(hourKey, "__reservation:res_b:1")).toBeNull();
   });
 
+  it("settles a reservation left behind by the previous ownership format", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    for (const key of [hourKey, dayKey]) {
+      await raw.hset(
+        key,
+        "global",
+        "10",
+        "__initialized:global",
+        "1",
+        "organization:org_1",
+        "10",
+        "__initialized:organization:org_1",
+        "1",
+        "__reservation:res_legacy:1",
+        "10"
+      );
+    }
+
+    await expect(
+      budget.settle({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_legacy",
+        attempt: 1,
+        reservedLamports: 10,
+        actualLamports: 4,
+        detectMissingReservation: true,
+      })
+    ).resolves.toBe(-6);
+
+    expect(await raw.hget(hourKey, "global")).toBe("4");
+    expect(await raw.hget(hourKey, "organization:org_1")).toBe("4");
+    expect(await raw.hget(dayKey, "global")).toBe("4");
+    expect(await raw.hget(hourKey, "__reservation:res_legacy:1")).toBeNull();
+  });
+
+  it("cancels a reservation left behind by the previous ownership format", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    for (const key of [hourKey, dayKey]) {
+      await raw.hset(
+        key,
+        "global",
+        "10",
+        "__initialized:global",
+        "1",
+        "organization:org_1",
+        "10",
+        "__initialized:organization:org_1",
+        "1",
+        "__reservation:res_legacy_cancel:1",
+        "10"
+      );
+    }
+
+    await budget.cancel({
+      network: "devnet",
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      reservationId: "res_legacy_cancel",
+      attempt: 1,
+    });
+
+    expect(await raw.hget(hourKey, "global")).toBe("0");
+    expect(await raw.hget(dayKey, "organization:org_1")).toBe("0");
+    expect(await raw.hget(hourKey, "__reservation:res_legacy_cancel:1")).toBeNull();
+  });
+
   it("counts a tenant once when its field is seeded into an already warm window", async () => {
     const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
     const policies = [policy("global", 1, true, 1000), policy("organization", 1, true, 1000)];

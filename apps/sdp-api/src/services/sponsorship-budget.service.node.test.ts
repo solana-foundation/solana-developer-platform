@@ -241,6 +241,17 @@ describe("BudgetedFeePayment", () => {
     expect(provider.signAndSend).not.toHaveBeenCalled();
   });
 
+  it("leaves an admission-released reservation reopenable by a later retry", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    budgetRedis.reserve.mockResolvedValueOnce("denied");
+
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(repository.markRedisSettled).toHaveBeenCalledWith(expect.any(String), 1);
+  });
+
   it("releases deterministic pre-send rejections", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     vi.mocked(provider.signAndSend).mockRejectedValueOnce(
