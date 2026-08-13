@@ -14,6 +14,7 @@ import {
   markNotificationRead,
   updateNotificationPreferences,
 } from "./handlers";
+import { streamNotifications } from "./stream";
 
 const notifications = new Hono<{ Bindings: Env }>();
 
@@ -22,6 +23,8 @@ notifications.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: t
 notifications.get("/", requirePermissions("org:read"), listNotifications);
 notifications.get("/unread-count", requirePermissions("org:read"), getUnreadCount);
 notifications.get("/config", requirePermissions("org:read"), getNotificationConfig);
+// SSE realtime channel (dashboard-internal; excluded from the OpenAPI spec).
+notifications.get("/stream", requirePermissions("org:read"), streamNotifications);
 // Preferences are a personal resource (org:read is the whole-router bar): every member
 // controls their own matrix, same as mark-read.
 notifications.get("/preferences", requirePermissions("org:read"), getNotificationPreferences);
