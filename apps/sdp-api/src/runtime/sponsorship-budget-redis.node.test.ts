@@ -604,6 +604,49 @@ describe("SponsorshipBudgetRedis", () => {
     expect(await raw.hget(hourKey, "__reservation:res_b:1")).toBeNull();
   });
 
+  it("does not re-count a reservation of the previous ownership format on retry", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    for (const key of [hourKey, dayKey]) {
+      await raw.hset(
+        key,
+        "global",
+        "10",
+        "__initialized:global",
+        "1",
+        "organization:org_1",
+        "10",
+        "__initialized:organization:org_1",
+        "1",
+        "__reservation:res_legacy_retry:1",
+        "10"
+      );
+    }
+
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_legacy_retry",
+        attempt: 1,
+        amount: 10,
+        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+        usage: {
+          hour: { global: 10, organization: 10, project: 0 },
+          day: { global: 10, organization: 10, project: 0 },
+        },
+        liveReservations: { hour: [], day: [] },
+      })
+    ).resolves.toBe("admitted");
+
+    expect(await raw.hget(hourKey, "global")).toBe("10");
+    expect(await raw.hget(hourKey, "organization:org_1")).toBe("10");
+    expect(await raw.hget(dayKey, "global")).toBe("10");
+  });
+
   it("settles a reservation left behind by the previous ownership format", async () => {
     const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
     const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";

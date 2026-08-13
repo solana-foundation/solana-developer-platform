@@ -525,13 +525,11 @@ function ProgramsSection() {
           // Remount per program so no draft amount, destination, or minted
           // idempotency key can survive a switch between programs.
           key={withdrawProgram.id}
-          balance={withdrawProgram.wallet.balance}
           onClose={() => setWithdrawProgramId(undefined)}
           onWithdrawalCreated={(withdrawalRef) => {
             setWatched((current) => [...current, { programId: withdrawProgram.id, withdrawalRef }]);
             refresh();
           }}
-          positions={withdrawProgram.wallet.positions}
           programId={withdrawProgram.id}
         />
       ) : null}

@@ -1158,6 +1158,111 @@ describe("GroundEarnClient.previewPortfolioWithdrawal", () => {
     }
     assert.equal(fetchMock.mock.callCount(), 0);
   });
+
+  // PRO-1675: the liquidity form. Ground keys it off the field's ABSENCE, so
+  // this asserts the key is missing rather than merely falsy — `null` and `0`
+  // are different questions and `0` is off `parseUsdAmount`'s pattern anyway.
+  it("OMITS amountUsd entirely when asked for the lane maximum", async () => {
+    const fetchMock = stubGroundFetch({
+      body: {
+        amountRequestedUsd: null,
+        feeUsd: "0.100000",
+        withdrawableUsd: "412.500000",
+        totalUsdAfterWithdrawal: "412.500000",
+      },
+    });
+
+    const preview = await client.previewPortfolioWithdrawal(sandboxCtx, {
+      providerWalletRef: "wal_1",
+      token: "usdc",
+    });
+
+    const body = requestBody(fetchMock);
+    assert.deepEqual(body, { destinationChain: "solana_devnet", token: "usdc" });
+    assert.equal("amountUsd" in body, false);
+    assert.equal(preview.withdrawableUsd, "412.500000");
+    assert.equal(preview.amountRequestedUsd, undefined);
+  });
+
+  it("still refuses a token Ground cannot route to Solana, amount or not", async () => {
+    const fetchMock = stubGroundFetch({ body: {} });
+
+    await assert.rejects(
+      client.previewPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        token: "usdt",
+      }),
+      earnError("BAD_REQUEST")
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  // The 409 body is the only place the provider says HOW short a request is.
+  // Losing it is why an over-request used to read as "…failed with status 409".
+  it("carries the 409 lane balance onto SdpEarnError.details", async () => {
+    stubGroundFetch({
+      status: 409,
+      body: {
+        error: { code: "insufficient_funds", message: "insufficient funds" },
+        balance: { totalUsd: "900.00", withdrawableUsd: "412.50", reservedUsd: "487.50" },
+      },
+    });
+
+    await assert.rejects(
+      client.previewPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        amountUsd: "800",
+        token: "usdc",
+      }),
+      (error: unknown) => {
+        const earn = error as { code: string; details?: Record<string, unknown> };
+        assert.equal(earn.code, "CONFLICT");
+        assert.deepEqual(earn.details?.balance, {
+          totalUsd: "900.00",
+          withdrawableUsd: "412.50",
+          reservedUsd: "487.50",
+        });
+        // The transport's own facts are not overwritable by the normalizer.
+        assert.equal(earn.details?.provider, "ground");
+        assert.equal(earn.details?.providerStatus, 409);
+        return true;
+      }
+    );
+  });
+
+  it("normalizes a nested, numeric balance and declines a 409 that carries none", async () => {
+    stubGroundFetch(
+      {
+        status: 409,
+        // Ground nests the payload inconsistently across endpoints, and sends
+        // JSON numbers here where the success payload uses strings.
+        body: { error: { message: "nope", balance: { withdrawableUsd: 412.5 } } },
+      },
+      // A conflict with no balance (Ground's `request_id_conflict` shape) must
+      // pass through untouched rather than gaining an empty `balance`.
+      { status: 409, body: { error: { message: "request_id_conflict" } } }
+    );
+
+    const preview = () =>
+      client.previewPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        amountUsd: "800",
+        token: "usdc",
+      });
+
+    await assert.rejects(preview(), (error: unknown) => {
+      const earn = error as { details?: Record<string, unknown> };
+      assert.deepEqual(earn.details?.balance, { withdrawableUsd: "412.5" });
+      return true;
+    });
+
+    await assert.rejects(preview(), (error: unknown) => {
+      const earn = error as { message: string; details?: Record<string, unknown> };
+      assert.equal(earn.message, "request_id_conflict");
+      assert.equal("balance" in (earn.details ?? {}), false);
+      return true;
+    });
+  });
 });
 
 describe("GroundEarnClient.createPortfolioWithdrawal", () => {
