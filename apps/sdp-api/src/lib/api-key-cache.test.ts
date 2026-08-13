@@ -140,6 +140,33 @@ describe("fillApiKeyCache under CAS exhaustion", () => {
     expect(adopted.organizationStatus).toBe("deleted");
   });
 
+  it("fences the fallback re-read against a revocation landing during it", async () => {
+    // Exhaustion path: every loop read sees an empty slot (reads 1-4), the
+    // Postgres re-read returns an active snapshot — and in the gap before
+    // the fallback returns, a concurrent revocation commits and lands its
+    // terminal entry in the slot. The fence read must observe it and let
+    // the terminal state win instead of authorizing the active snapshot.
+    const revoked = entryWithStatus("revoked");
+    let reads = 0;
+    const kv = {
+      ...contendedStore(null),
+      get: async () => {
+        reads += 1;
+        return reads <= 4 ? null : JSON.stringify(revoked);
+      },
+    } as KVStore;
+    const activeRow = { ...revokedRow(), status: "active" };
+
+    const adopted = await fillApiKeyCache(dbReturning(activeRow), kv, KEY_HASH, {
+      ...entryWithStatus("active"),
+      // Distinct from what the DB returns, so the CAS loop keeps losing
+      // rather than short-circuiting on an authoritative match.
+      permissions: [],
+    });
+
+    expect(adopted.status).toBe("revoked");
+  });
+
   it("verifies a WON install against Postgres and repairs an evicted revocation", async () => {
     // The slot is empty because eviction removed the revocation's terminal
     // entry, so the write-if-absent CAS succeeds — but the win proves

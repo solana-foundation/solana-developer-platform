@@ -218,6 +218,21 @@ export async function fillApiKeyCache(
   // read; the next miss re-fills through the write-if-absent path above.
   const authoritative = await loadCachedApiKeyFromDb(db, keyHash);
   if (authoritative) {
+    if (!isTerminalStatus(authoritative.status)) {
+      // Fence the re-read: a revocation can commit right after it, and
+      // terminal states land in the slot with an unconditional write. Check
+      // the slot once more and let any terminal entry observed there win —
+      // the same stickiness every other path honors. (A terminal entry
+      // appearing after our active re-read can only mean a commit newer
+      // than that re-read.)
+      const fencedRaw = await kv.get(cacheKey);
+      if (fencedRaw !== null) {
+        const fenced = tryParseAuthoritativeEntry(fencedRaw);
+        if (fenced && isTerminalStatus(fenced.status)) {
+          return fenced;
+        }
+      }
+    }
     return authoritative;
   }
 
