@@ -9,7 +9,7 @@ import type {
 } from "@/db/repositories/sponsorship-budget.repository";
 import type { Env } from "@/types/env";
 import { getRedisClient } from "./kv-redis";
-import { getLogger } from "./logger";
+import { logEvent } from "./money-path-events";
 
 const INITIALIZE_LUA = `
 local count = tonumber(ARGV[1])
@@ -332,35 +332,29 @@ export class SponsorshipBudgetRedis {
     if (result[0] === 1) return "admitted";
     const scopeType = this.scopeTypeAt(result[1]);
     if (result[0] === -3) {
-      getLogger().warn(
-        {
-          event: "sdp_api_sponsorship_stale_policy",
-          network: input.network,
-          scope_type: scopeType,
-          organization_id: input.organizationId,
-          project_id: input.projectId,
-        },
-        "sponsorship admission hit a stale policy version"
-      );
-      return "stale_policy";
-    }
-    const policy = policyByScope.get(scopeType);
-    getLogger().warn(
-      {
-        event: "sdp_api_sponsorship_denied",
+      logEvent("warn", {
+        event: "sdp_api_sponsorship_stale_policy",
         network: input.network,
         scope_type: scopeType,
         organization_id: input.organizationId,
         project_id: input.projectId,
-        requested_lamports: input.amount,
-        per_transaction_lamports: policy?.perTransactionLamports,
-        hourly_lamports: policy?.hourlyLamports,
-        daily_lamports: policy?.dailyLamports,
-        hour_used_lamports: input.usage.hour[scopeType],
-        day_used_lamports: input.usage.day[scopeType],
-      },
-      "sponsorship admission denied by budget"
-    );
+      });
+      return "stale_policy";
+    }
+    const policy = policyByScope.get(scopeType);
+    logEvent("warn", {
+      event: "sdp_api_sponsorship_denied",
+      network: input.network,
+      scope_type: scopeType,
+      organization_id: input.organizationId,
+      project_id: input.projectId,
+      requested_lamports: input.amount,
+      per_transaction_lamports: policy?.perTransactionLamports,
+      hourly_lamports: policy?.hourlyLamports,
+      daily_lamports: policy?.dailyLamports,
+      hour_used_lamports: input.usage.hour[scopeType],
+      day_used_lamports: input.usage.day[scopeType],
+    });
     return "denied";
   }
 

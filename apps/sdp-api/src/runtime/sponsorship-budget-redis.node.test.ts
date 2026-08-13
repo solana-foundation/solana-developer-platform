@@ -5,10 +5,11 @@ import type { Env } from "@/types/env";
 import { closeAllRedisClients } from "./kv-redis";
 import { SponsorshipBudgetRedis } from "./sponsorship-budget-redis";
 
-const logWarn = vi.hoisted(() => vi.fn());
+const logEvent = vi.hoisted(() => vi.fn());
 
-vi.mock("./logger", () => ({
-  getLogger: () => ({ warn: logWarn, error: vi.fn(), info: vi.fn() }),
+vi.mock("./money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./money-path-events")>()),
+  logEvent,
 }));
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
@@ -79,7 +80,7 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   it("records which scope and limit rejected an admission", async () => {
-    logWarn.mockClear();
+    logEvent.mockClear();
     await expect(
       budget.reserve({
         network: "devnet",
@@ -98,7 +99,8 @@ describe("SponsorshipBudgetRedis", () => {
       })
     ).resolves.toBe("denied");
 
-    expect(logWarn).toHaveBeenCalledWith(
+    expect(logEvent).toHaveBeenCalledWith(
+      "warn",
       expect.objectContaining({
         event: "sdp_api_sponsorship_denied",
         network: "devnet",
@@ -108,8 +110,7 @@ describe("SponsorshipBudgetRedis", () => {
         per_transaction_lamports: 5,
         hourly_lamports: 5,
         hour_used_lamports: 4,
-      }),
-      expect.any(String)
+      })
     );
   });
 

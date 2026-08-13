@@ -17,12 +17,11 @@ import type { Env } from "@/types/env";
 import type { SponsorshipScope } from "./sponsorship.service";
 import { BudgetedFeePayment } from "./sponsorship-budget.service";
 
-const logError = vi.hoisted(() => vi.fn());
-const logWarn = vi.hoisted(() => vi.fn());
-const logInfo = vi.hoisted(() => vi.fn());
+const logEvent = vi.hoisted(() => vi.fn());
 
-vi.mock("@/runtime/logger", () => ({
-  getLogger: () => ({ error: logError, warn: logWarn, info: logInfo }),
+vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
+  logEvent,
 }));
 
 const FEE_PAYER = "11111111111111111111111111111111" as Address;
@@ -268,23 +267,25 @@ describe("BudgetedFeePayment", () => {
       code: "PROVIDER_NOT_AVAILABLE",
     });
 
-    expect(logError).toHaveBeenCalledWith(
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
       expect.objectContaining({
         event: "sdp_api_sponsorship_accounting_unavailable",
         network: "devnet",
         organization_id: "org_1",
-        error: "ledger offline",
-      }),
-      expect.any(String)
+        error_name: "Error",
+      })
     );
-    expect(logError).toHaveBeenCalledWith(
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
       expect.objectContaining({
         event: "sdp_api_sponsorship_breaker_tripped",
         network: "devnet",
         reason: "Submitted sponsorship persistence failed",
-      }),
-      expect.any(String)
+      })
     );
+    const payloads = logEvent.mock.calls.map(([, payload]) => JSON.stringify(payload));
+    expect(payloads.some((payload) => payload.includes("ledger offline"))).toBe(false);
   });
 
   it("releases deterministic pre-send rejections", async () => {
