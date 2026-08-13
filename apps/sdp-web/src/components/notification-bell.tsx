@@ -12,7 +12,7 @@ import {
   Users,
   Zap,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatRelativeTime } from "@/app/dashboard/activity-format-utils";
 import type { MessageKey } from "@/i18n/messages";
@@ -61,6 +61,18 @@ const TYPE_ICON: Record<string, LucideIcon> = {
   kyc_rejected: BadgeCheck,
 };
 
+// Status tint per type — color is reserved for exactly this. Failures and successes
+// share icons with their neutral siblings (Banknote, BadgeCheck), so without the tint
+// "Payment settled" and "Recurring payment failed" were byte-identical at a glance.
+const TYPE_TILE_CLASS: Record<string, string> = {
+  workflow_run_failed: "bg-error-bg text-error",
+  recurring_payment_failed: "bg-error-bg text-error",
+  kyc_rejected: "bg-error-bg text-error",
+  payment_settled: "bg-success-bg text-success",
+  kyc_approved: "bg-success-bg text-success",
+};
+const NEUTRAL_TILE_CLASS = "bg-fill-subtle text-secondary";
+
 // Humanize any snake_case system key left in server-composed text (e.g. an older row
 // that stored `token_operation_completed`): "token_operation_completed" → "Token
 // operation completed". A display-time safety net so no raw event key ever reaches a
@@ -88,12 +100,19 @@ function hrefFor(item: NotificationItem): string | null {
     case "invitation":
       return "/dashboard/members";
     case "payment_transfer":
-      return "/dashboard/payments";
+      // The transfer list lives on the transactions sub-page, not the payments hub.
+      return "/dashboard/payments/transactions";
     case "recurring_payment":
-      return "/dashboard/payments/recurring";
+      return item.resource_id
+        ? `/dashboard/payments/recurring/${item.resource_id}`
+        : "/dashboard/payments/recurring";
     case "counterparty":
-      return "/dashboard/payments/counterparty";
+      return item.resource_id
+        ? `/dashboard/payments/counterparty/${item.resource_id}`
+        : "/dashboard/payments/counterparty";
     default:
+      // Includes kyc_wallet (no detail route exists) — such rows render without link
+      // affordance and click-to-mark-read only.
       return null;
   }
 }
@@ -101,7 +120,6 @@ function hrefFor(item: NotificationItem): string | null {
 export function NotificationBell() {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useRouter();
   const titleId = useId();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
@@ -113,6 +131,7 @@ export function NotificationBell() {
   const [emailEnabled, setEmailEnabled] = useState<boolean | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   // Drops out-of-order responses (rapid open/close, slow network).
   const listGeneration = useRef(0);
   // Deepest page currently loaded — the next "Show more" fetches pageRef + 1. Derived
@@ -296,11 +315,14 @@ export function NotificationBell() {
     };
   }, [refreshCount]);
 
-  // Load the list (first page) + email availability when the panel opens.
+  // Load the list (first page) + email availability when the panel opens, and move
+  // focus into the dialog — without this a screen reader's cursor stays on the
+  // trigger and the open panel is never announced. close() restores focus.
   useEffect(() => {
     if (open) {
       void loadList(1);
       void loadConfig();
+      panelRef.current?.focus();
     }
   }, [open, loadList, loadConfig]);
 
@@ -381,17 +403,16 @@ export function NotificationBell() {
     }
   };
 
-  const onItemClick = (item: NotificationItem) => {
-    // Navigation never waits on the mark-read POST: it's best-effort bookkeeping with
-    // its own timeout/rollback, and gating the click on it made a slow API feel like
-    // a dead button.
+  // Rows with a destination render as real links (navigation belongs to next/link —
+  // middle-click, copy-link, and history all work); this handler only does the
+  // bookkeeping. It never awaits the mark-read POST: that's best-effort with its own
+  // timeout/rollback, and gating activation on it made a slow API feel like a dead row.
+  const onItemActivate = (item: NotificationItem) => {
     if (!item.read_at) {
       void markRead(item.id);
     }
-    const href = hrefFor(item);
-    if (href) {
+    if (hrefFor(item)) {
       setOpen(false);
-      router.push(href);
     }
   };
 
@@ -413,17 +434,29 @@ export function NotificationBell() {
       >
         <Bell className="h-4.5 w-4.5" />
         {unread > 0 ? (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-info px-1 text-[10px] font-semibold text-white">
+          // bg-primary/text-on-primary flips with the theme; the old bg-info/text-white
+          // put white 10px text on LIGHT blue in dark mode (~1.7:1). A count isn't a
+          // status, so the neutral emphasis pair is also the token-correct choice.
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-on-primary">
             {unread > 99 ? "99+" : unread}
           </span>
         ) : null}
       </button>
+      {/* Realtime badge changes on an unfocused element are silent to assistive tech;
+          this polite live region announces them without stealing focus. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {unread > 0
+          ? safeT("Shared.notifications.ariaLabelUnread", { count: unread }, `${unread}`)
+          : ""}
+      </span>
 
       {open ? (
         <div
           role="dialog"
           aria-labelledby={titleId}
-          className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-border-default bg-surface-raised shadow-lg"
+          ref={panelRef}
+          tabIndex={-1}
+          className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-border-default bg-surface-raised outline-none"
         >
           <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
             <span id={titleId} className="text-sm font-semibold text-primary">
@@ -454,7 +487,7 @@ export function NotificationBell() {
             locale={locale}
             t={t}
             displayTitle={displayTitle}
-            onItemClick={onItemClick}
+            onItemActivate={onItemActivate}
             onRetryInitial={() => void loadList(1)}
             onShowMore={() => void loadList(pageRef.current + 1)}
           />
@@ -472,7 +505,7 @@ function NotificationPanelBody(props: {
   locale: string;
   t: ReturnType<typeof useTranslations>;
   displayTitle: (item: NotificationItem) => string;
-  onItemClick: (item: NotificationItem) => void;
+  onItemActivate: (item: NotificationItem) => void;
   onRetryInitial: () => void;
   onShowMore: () => void;
 }) {
@@ -484,7 +517,7 @@ function NotificationPanelBody(props: {
     locale,
     t,
     displayTitle,
-    onItemClick,
+    onItemActivate,
     onRetryInitial,
     onShowMore,
   } = props;
@@ -523,38 +556,61 @@ function NotificationPanelBody(props: {
         {items.map((item) => {
           const TypeIcon = TYPE_ICON[item.type] ?? Bell;
           const unread = !item.read_at;
+          const href = hrefFor(item);
+          const content = (
+            <>
+              <span
+                className={`relative flex size-9 shrink-0 items-center justify-center rounded-lg ${TYPE_TILE_CLASS[item.type] ?? NEUTRAL_TILE_CLASS}`}
+                aria-hidden
+              >
+                <TypeIcon className="size-[18px]" />
+                {unread ? (
+                  <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-info ring-2 ring-surface-raised" />
+                ) : null}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span
+                  className={`block truncate text-sm ${unread ? "font-semibold text-primary" : "font-medium text-secondary"}`}
+                >
+                  {/* The dot is aria-hidden with the icon tile — read state needs a
+                      textual form too. */}
+                  {unread ? (
+                    <span className="sr-only">{t("Shared.notifications.unreadItem")} </span>
+                  ) : null}
+                  {humanizeKeys(displayTitle(item))}
+                </span>
+                {item.body ? (
+                  <span className="mt-0.5 block text-xs text-secondary">
+                    {humanizeKeys(item.body)}
+                  </span>
+                ) : null}
+                <span className="mt-0.5 block text-xs text-tertiary">
+                  {formatRelativeTime(item.created_at, locale)}
+                </span>
+              </span>
+            </>
+          );
           return (
             <li key={item.id}>
-              <button
-                type="button"
-                onClick={() => onItemClick(item)}
-                className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
-              >
-                <span
-                  className="relative flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary"
-                  aria-hidden
+              {href ? (
+                // A real link, not a router.push button: middle-click/Cmd-click open a
+                // tab, the status bar previews the URL, copy-link works.
+                <Link
+                  href={href}
+                  onClick={() => onItemActivate(item)}
+                  className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
                 >
-                  <TypeIcon className="size-[18px]" />
-                  {unread ? (
-                    <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-info ring-2 ring-surface-raised" />
-                  ) : null}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={`block truncate text-sm ${unread ? "font-semibold text-primary" : "font-medium text-secondary"}`}
-                  >
-                    {humanizeKeys(displayTitle(item))}
-                  </span>
-                  {item.body ? (
-                    <span className="mt-0.5 block text-xs text-secondary">
-                      {humanizeKeys(item.body)}
-                    </span>
-                  ) : null}
-                  <span className="mt-0.5 block text-xs text-tertiary">
-                    {formatRelativeTime(item.created_at, locale)}
-                  </span>
-                </span>
-              </button>
+                  {content}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onItemActivate(item)}
+                  className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
+                >
+                  {content}
+                </button>
+              )}
             </li>
           );
         })}

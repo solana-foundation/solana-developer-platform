@@ -67,9 +67,13 @@ export async function updateNotificationPreferencesAction(
     });
     return { status: "success", message: t("Shared.notifications.preferences.saved") };
   } catch (error) {
+    // The translated message ALWAYS wins over the raw upstream string: this feeds a
+    // toast, and "SDP API request failed with status 500" is neither localized nor
+    // actionable for the reader. The detail stays server-side.
+    console.error("updateNotificationPreferencesAction failed", error);
     return {
       status: "error",
-      message: toErrorMessage(error, t("Shared.notifications.preferences.saveFailed")),
+      message: t("Shared.notifications.preferences.saveFailed"),
     };
   }
 }
