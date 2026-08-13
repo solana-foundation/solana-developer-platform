@@ -260,6 +260,31 @@ describe("API key revocation cache invalidation", () => {
     expect(await requestWithKey(TARGET_KEY.raw)).toBe(401);
   });
 
+  it("does not authenticate from a pending, unverified cache fill", async () => {
+    // Freeze the middle of a fill: the pending install sits in the slot but
+    // its Postgres verification has not completed — and the key is already
+    // revoked in the DB (the exact eviction race the marker exists for). A
+    // cache-hit reader must treat the pending entry as a miss and fall
+    // through to Postgres.
+    await getDb(env)
+      .prepare("UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now') WHERE id = ?")
+      .bind(TARGET_KEY.id)
+      .run();
+
+    const kv = createKVStoreSet(env);
+    await kv.apiKeys.put(
+      apiKeyCacheKey(targetHash),
+      JSON.stringify({
+        ...cachedEntry(TARGET_KEY),
+        organizationStatus: "active",
+        pendingVerification: true,
+      }),
+      { expirationTtl: 3600 }
+    );
+
+    expect(await requestWithKey(TARGET_KEY.raw)).toBe(401);
+  });
+
   it("re-asserts the cache when revoking an already-revoked key", async () => {
     // Simulate an earlier revocation that reached Postgres but crashed before
     // the cache write: DB says deactivated, cache still says active.

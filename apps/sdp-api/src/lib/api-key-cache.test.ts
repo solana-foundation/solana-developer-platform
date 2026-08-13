@@ -140,6 +140,37 @@ describe("fillApiKeyCache under CAS exhaustion", () => {
     expect(adopted.organizationStatus).toBe("deleted");
   });
 
+  it("never publishes a reader-trusted entry before verification", async () => {
+    // A CAS win lands in the slot BEFORE the Postgres verify runs, and a
+    // concurrent cache-hit reader would trust it during that gap — while
+    // eviction may have erased a newer revocation's terminal entry. The
+    // install must therefore carry the pendingVerification marker readers
+    // treat as a miss; only the verified publish may be trusted.
+    const installed: string[] = [];
+    const kv = {
+      ...contendedStore(null),
+      get: async () => null,
+      compareAndSet: async (_key: string, _expected: string | null, value: string) => {
+        installed.push(value);
+        return true;
+      },
+      put: async () => {},
+    } as KVStore;
+    const activeRow = { ...revokedRow(), status: "active" };
+
+    await fillApiKeyCache(dbReturning(activeRow), kv, KEY_HASH, entryWithStatus("active"));
+
+    const first = JSON.parse(installed[0] ?? "{}") as { pendingVerification?: boolean };
+    expect(first.pendingVerification).toBe(true);
+    // The verified publish replaces the marker with the trusted entry.
+    const last = JSON.parse(installed[installed.length - 1] ?? "{}") as {
+      pendingVerification?: boolean;
+      status?: string;
+    };
+    expect(last.pendingVerification).toBeUndefined();
+    expect(last.status).toBe("active");
+  });
+
   it("fences the fallback re-read against a revocation landing during it", async () => {
     // Exhaustion path: every loop read sees an empty slot (reads 1-4), the
     // Postgres re-read returns an active snapshot — and in the gap before

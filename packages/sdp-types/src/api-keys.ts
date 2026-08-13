@@ -93,6 +93,15 @@ export interface CachedApiKey {
    * reserved for legacy cache entries written before this check was deployed.
    */
   organizationStatus?: string;
+  /**
+   * Set on a cache entry a miss-path fill has installed but not yet verified
+   * against Postgres. Readers must treat such entries as cache misses: the
+   * install's snapshot predates its CAS win, and cache eviction can have
+   * erased a newer revocation's terminal entry in between. The fill replaces
+   * the marker with a trusted entry only after its post-install Postgres read
+   * comes back clean.
+   */
+  pendingVerification?: true;
 }
 
 // API Request/Response types

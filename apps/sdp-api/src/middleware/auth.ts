@@ -82,8 +82,12 @@ async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | n
   // Payloads written before rotation-deadline or organization-status
   // enforcement do not contain these properties. Treat them as misses so a
   // deploy cannot extend an old key's validity until the legacy one-hour
-  // cache entry expires.
+  // cache entry expires. Pending installs are misses too: a fill's snapshot
+  // is not trustworthy until its post-install Postgres verification clears
+  // it — cache eviction can have erased a newer revocation's terminal entry
+  // before the fill's CAS won the slot.
   return cached &&
+    !cached.pendingVerification &&
     Object.hasOwn(cached, "rotationDeadline") &&
     Object.hasOwn(cached, "organizationStatus")
     ? cached

@@ -142,6 +142,11 @@ export async function loadCachedApiKeyFromDb(
 function tryParseAuthoritativeEntry(raw: string): CachedApiKey | null {
   try {
     const parsed = JSON.parse(raw) as CachedApiKey;
+    // Pending installs are another fill's not-yet-verified snapshot — no
+    // more trustworthy than this fill's own.
+    if (parsed.pendingVerification) {
+      return null;
+    }
     return Object.hasOwn(parsed, "rotationDeadline") && Object.hasOwn(parsed, "organizationStatus")
       ? parsed
       : null;
@@ -170,16 +175,21 @@ export async function fillApiKeyCache(
   entry: CachedApiKey
 ): Promise<CachedApiKey> {
   const cacheKey = apiKeyCacheKey(keyHash);
-  const value = JSON.stringify(entry);
+  // Installs go in marked pending: readers treat them as misses until the
+  // post-install Postgres read clears them. Publishing a trusted entry
+  // straight from the CAS would let concurrent cache-hit readers authorize
+  // from a snapshot whose win proves nothing under eviction.
+  const pending: CachedApiKey = { ...entry, pendingVerification: true };
+  const pendingValue = JSON.stringify(pending);
   let expected: string | null = null;
 
   for (let attempt = 0; attempt < 3; attempt++) {
     if (
-      await kv.compareAndSet(cacheKey, expected, value, {
+      await kv.compareAndSet(cacheKey, expected, pendingValue, {
         expirationTtl: API_KEY_CACHE_TTL_SECONDS,
       })
     ) {
-      return await verifyInstalledFill(db, kv, cacheKey, keyHash, entry, value);
+      return await verifyInstalledFill(db, kv, cacheKey, keyHash, entry, pendingValue);
     }
 
     const currentRaw = await kv.get(cacheKey);
@@ -248,12 +258,15 @@ export async function fillApiKeyCache(
  * Winning the CAS would then install this fill's pre-race snapshot as
  * authoritative for a fresh TTL.
  *
- * So every successful install is verified against Postgres. The verify read
- * postdates the install: any revocation it cannot see must commit later,
- * and that revocation's own unconditional cache write then overwrites this
- * install. If the verified state has drifted from the installed snapshot,
- * the slot is repaired and the caller authenticates against the verified
- * state.
+ * So installs are two-phase. The CAS lands a pendingVerification-marked
+ * entry that every reader treats as a miss, then this verify re-reads
+ * Postgres and only a clean result publishes the trusted entry. The verify
+ * read postdates the install, so any revocation it cannot see must commit
+ * later — and from the install onward the slot is occupied, so that later
+ * revocation's unconditional cache write always has this entry to
+ * overwrite; eviction anywhere in the chain only ever degrades to a miss.
+ * Drifted installs are repaired and the caller authenticates against the
+ * verified state.
  */
 async function verifyInstalledFill(
   db: DatabaseClient,
@@ -261,7 +274,7 @@ async function verifyInstalledFill(
   cacheKey: string,
   keyHash: string,
   entry: CachedApiKey,
-  installedValue: string
+  pendingValue: string
 ): Promise<CachedApiKey> {
   const fresh = await loadCachedApiKeyFromDb(db, keyHash);
   if (!fresh) {
@@ -270,12 +283,19 @@ async function verifyInstalledFill(
     return { ...entry, status: "revoked", organizationStatus: "deleted" };
   }
 
-  if (JSON.stringify(fresh) !== installedValue) {
-    await overwriteWithAuthoritativeState(kv, cacheKey, fresh);
-    return fresh;
+  const trustedValue = JSON.stringify(entry);
+  if (JSON.stringify(fresh) === trustedValue) {
+    // Clean verify: publish the trusted entry over our own pending install.
+    // Losing this CAS means a newer write claimed the slot after the
+    // install — leave it in place; pending entries read as misses anyway.
+    await kv.compareAndSet(cacheKey, pendingValue, trustedValue, {
+      expirationTtl: API_KEY_CACHE_TTL_SECONDS,
+    });
+    return entry;
   }
 
-  return entry;
+  await overwriteWithAuthoritativeState(kv, cacheKey, fresh);
+  return fresh;
 }
 
 function tryParseStatus(raw: string): ApiKeyStatus | null {
