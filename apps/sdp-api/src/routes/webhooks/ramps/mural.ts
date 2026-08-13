@@ -20,6 +20,7 @@ import {
   emitKycApprovedForClearedEnrollments,
   emitKycRejectedForEnrollments,
 } from "@/services/workflows/clearance";
+import { notifyRampSettled } from "@/services/notifications";
 import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { AppContext, WebhookProcessor } from "./processor";
 import { applyRampSettlementEvent } from "./settlements";
@@ -198,17 +199,20 @@ async function handleAccountCredited(
   // Workflow trigger seam: this on-ramp settled (Mural credit path bypasses
   // applyRampSettlementEvent, so it emits here directly).
   if (transfer.project_id) {
-    emitRampSettled(c, {
+    const settled = {
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
-      direction: "onramp",
+      direction: "onramp" as const,
       transferId: transfer.id,
       provider: transfer.provider,
       counterpartyId: transfer.counterparty_id,
       amount: String(event.tokenAmount),
       fiatCurrency: transfer.fiat_currency,
       cryptoToken: transfer.token,
-    });
+    };
+    emitRampSettled(c, settled);
+    // Admin notification + counterparty settlement receipt (idempotent on transferId).
+    notifyRampSettled(c, settled);
   }
 }
 

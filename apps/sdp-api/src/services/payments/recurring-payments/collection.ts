@@ -40,6 +40,7 @@ import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
+import { notifyRecurringPaymentFailed } from "@/services/notifications";
 import { emitRecurringPaymentFailed } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
 import {
@@ -437,6 +438,14 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     recurringPaymentId: input.recurringPaymentId,
     subscriptionId: input.attempt.subscription_id,
     dueAt: input.attempt.due_at,
+    attemptId: input.attempt.id,
+    error: message,
+  });
+  // Admin notification, one per failed attempt (idempotent on the attempt id).
+  await notifyRecurringPaymentFailed(input.env, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPaymentId,
     attemptId: input.attempt.id,
     error: message,
   });
