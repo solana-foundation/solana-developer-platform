@@ -112,6 +112,7 @@ export interface ProvisionPrivyOptions {
   walletId?: string;
   externalId?: string;
   idempotencyKey?: string;
+  credentialRequest?: boolean;
 }
 
 export interface PrivyProvisioningConfig {
@@ -285,6 +286,7 @@ export async function provisionFireblocksVaultAccount(
   return { vaultAccountId, assetId, apiBaseUrl };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: ponytail: keep legacy and credential modes in one Provider boundary; split if a third mode is added.
 export async function provisionPrivyWallet(
   runtime: CustodyProvisioningRuntime,
   config: PrivyProvisioningConfig,
@@ -323,6 +325,8 @@ export async function provisionPrivyWallet(
   const externalWalletLookup = options.externalId
     ? { apiBaseUrl, authHeader, appId, externalId: options.externalId }
     : undefined;
+  const credentialRequest =
+    options.credentialRequest === true || externalWalletLookup !== undefined;
   if (externalWalletLookup) {
     const existing = await findPrivyWalletByExternalId(
       runtime,
@@ -337,7 +341,7 @@ export async function provisionPrivyWallet(
       apiBaseUrl,
       authHeader,
       appId,
-      storedCredentialRequest: externalWalletLookup !== undefined,
+      storedCredentialRequest: credentialRequest,
       idempotencyKey: options.idempotencyKey,
       method: "POST",
       path: "/wallets",
@@ -352,7 +356,10 @@ export async function provisionPrivyWallet(
     }
 
     if (!created?.id || !created.address) {
-      throw new SigningError("Privy wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+      throw new SigningError(
+        credentialRequest ? "Privy wallet outcome is unknown" : "Privy wallet creation failed",
+        credentialRequest ? "NETWORK_ERROR" : "PROVIDER_NOT_CONFIGURED"
+      );
     }
     return { walletId: created.id, address: created.address };
   } catch (error) {
