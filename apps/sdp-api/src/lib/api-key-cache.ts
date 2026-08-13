@@ -4,9 +4,12 @@
  * Two rules keep cached authentication from outliving authoritative
  * revocation in Postgres:
  *
- * 1. Miss-path fills are write-if-absent. A fill computed from a DB read that
- *    happened before a revocation can never overwrite the authoritative state
- *    a revocation wrote moments later.
+ * 1. Miss-path fills are write-if-absent, and every successful install is
+ *    verified against Postgres afterwards. A fill computed from a DB read
+ *    that happened before a revocation can never overwrite the authoritative
+ *    state a revocation wrote moments later — and when cache eviction or TTL
+ *    expiry empties the slot of that authoritative write, the post-install
+ *    verification catches the stale install and repairs it.
  * 2. Mutation paths (revoke, update, rotate, organization delete) re-read the
  *    key from Postgres and overwrite the cache with that state instead of
  *    deleting the entry. Deleting would leave an empty slot an in-flight
@@ -156,7 +159,9 @@ function tryParseAuthoritativeEntry(raw: string): CachedApiKey | null {
  * the exception — readers treat them as misses, so they are upgraded to the
  * fresh DB state rather than adopted. If every attempt loses without an
  * authoritative entry ever being observed, the key is re-read from Postgres
- * rather than authenticated from this fill's own pre-race snapshot.
+ * rather than authenticated from this fill's own pre-race snapshot — and a
+ * WON attempt is verified against Postgres too, because an empty slot may
+ * mean eviction of a newer write rather than absence of one.
  */
 export async function fillApiKeyCache(
   db: DatabaseClient,
@@ -174,7 +179,7 @@ export async function fillApiKeyCache(
         expirationTtl: API_KEY_CACHE_TTL_SECONDS,
       })
     ) {
-      return entry;
+      return await verifyInstalledFill(db, kv, cacheKey, keyHash, entry, value);
     }
 
     const currentRaw = await kv.get(cacheKey);
@@ -220,6 +225,44 @@ export async function fillApiKeyCache(
   return { ...entry, status: "revoked", organizationStatus: "deleted" };
 }
 
+/**
+ * A write-if-absent win proves nothing when cache eviction is possible: an
+ * empty slot is indistinguishable from a slot whose newer authoritative
+ * write (a revocation's terminal entry, a hard-delete tombstone) Redis
+ * evicted moments earlier — and TTL expiry of that entry looks the same.
+ * Winning the CAS would then install this fill's pre-race snapshot as
+ * authoritative for a fresh TTL.
+ *
+ * So every successful install is verified against Postgres. The verify read
+ * postdates the install: any revocation it cannot see must commit later,
+ * and that revocation's own unconditional cache write then overwrites this
+ * install. If the verified state has drifted from the installed snapshot,
+ * the slot is repaired and the caller authenticates against the verified
+ * state.
+ */
+async function verifyInstalledFill(
+  db: DatabaseClient,
+  kv: KVStore,
+  cacheKey: string,
+  keyHash: string,
+  entry: CachedApiKey,
+  installedValue: string
+): Promise<CachedApiKey> {
+  const fresh = await loadCachedApiKeyFromDb(db, keyHash);
+  if (!fresh) {
+    // The row vanished between this fill's DB read and now (hard delete).
+    await writeRevokedTombstone(kv, cacheKey);
+    return { ...entry, status: "revoked", organizationStatus: "deleted" };
+  }
+
+  if (JSON.stringify(fresh) !== installedValue) {
+    await overwriteWithAuthoritativeState(kv, cacheKey, fresh);
+    return fresh;
+  }
+
+  return entry;
+}
+
 function tryParseStatus(raw: string): ApiKeyStatus | null {
   try {
     const parsed = JSON.parse(raw) as { status?: unknown };
@@ -243,36 +286,51 @@ export async function refreshApiKeyCache(
   const cacheKey = apiKeyCacheKey(keyHash);
 
   if (!fresh) {
-    // Row is gone entirely (hard delete). Deleting the slot would leave it
-    // empty for an in-flight fill from a pre-delete DB read to repopulate
-    // with the stale active snapshot for the full TTL — the same race the
-    // rest of this module exists to prevent. Occupy the slot with a revoked
-    // tombstone instead: fills lose their write-if-absent race against it,
-    // adopt it, and the middleware rejects on its terminal status before
-    // reading any other field.
-    const tombstone: CachedApiKey = {
-      id: "",
-      organizationId: "",
-      projectId: "",
-      role: "api_readonly",
-      permissions: [],
-      environment: "sandbox",
-      rateLimitTier: "standard",
-      allowedIps: null,
-      signingWalletId: null,
-      signingWalletIds: [],
-      walletBindings: [],
-      status: "revoked",
-      expiresAt: null,
-      rotationDeadline: null,
-      organizationStatus: "deleted",
-    };
-    await kv.put(cacheKey, JSON.stringify(tombstone), {
-      expirationTtl: API_KEY_CACHE_TTL_SECONDS,
-    });
+    await writeRevokedTombstone(kv, cacheKey);
     return;
   }
 
+  await overwriteWithAuthoritativeState(kv, cacheKey, fresh);
+}
+
+/**
+ * Row is gone entirely (hard delete). Deleting the slot would leave it
+ * empty for an in-flight fill from a pre-delete DB read to repopulate
+ * with the stale active snapshot for the full TTL — the same race the
+ * rest of this module exists to prevent. Occupy the slot with a revoked
+ * tombstone instead: fills lose their write-if-absent race against it,
+ * adopt it, and the middleware rejects on its terminal status before
+ * reading any other field.
+ */
+async function writeRevokedTombstone(kv: KVStore, cacheKey: string): Promise<void> {
+  const tombstone: CachedApiKey = {
+    id: "",
+    organizationId: "",
+    projectId: "",
+    role: "api_readonly",
+    permissions: [],
+    environment: "sandbox",
+    rateLimitTier: "standard",
+    allowedIps: null,
+    signingWalletId: null,
+    signingWalletIds: [],
+    walletBindings: [],
+    status: "revoked",
+    expiresAt: null,
+    rotationDeadline: null,
+    organizationStatus: "deleted",
+  };
+  await kv.put(cacheKey, JSON.stringify(tombstone), {
+    expirationTtl: API_KEY_CACHE_TTL_SECONDS,
+  });
+}
+
+/** Overwrite the slot with fresh Postgres state; terminal states are sticky. */
+async function overwriteWithAuthoritativeState(
+  kv: KVStore,
+  cacheKey: string,
+  fresh: CachedApiKey
+): Promise<void> {
   const value = JSON.stringify(fresh);
   const freshIsTerminal = isTerminalStatus(fresh.status);
 

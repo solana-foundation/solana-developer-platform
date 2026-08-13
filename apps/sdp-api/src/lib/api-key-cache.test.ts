@@ -139,4 +139,47 @@ describe("fillApiKeyCache under CAS exhaustion", () => {
     expect(adopted.status).toBe("revoked");
     expect(adopted.organizationStatus).toBe("deleted");
   });
+
+  it("verifies a WON install against Postgres and repairs an evicted revocation", async () => {
+    // The slot is empty because eviction removed the revocation's terminal
+    // entry, so the write-if-absent CAS succeeds — but the win proves
+    // nothing, and Postgres says revoked.
+    const writes: string[] = [];
+    const kv = {
+      ...contendedStore(null),
+      get: async () => null,
+      compareAndSet: async () => true,
+      put: async (_key: string, value: string) => {
+        writes.push(value);
+      },
+    } as KVStore;
+
+    const adopted = await fillApiKeyCache(
+      dbReturning(revokedRow()),
+      kv,
+      KEY_HASH,
+      entryWithStatus("active")
+    );
+
+    expect(adopted.status).toBe("revoked");
+  });
+
+  it("trusts a WON install without extra cache writes while Postgres still matches", async () => {
+    const writes: string[] = [];
+    const kv = {
+      ...contendedStore(null),
+      get: async () => null,
+      compareAndSet: async () => true,
+      put: async (_key: string, value: string) => {
+        writes.push(value);
+      },
+    } as KVStore;
+    const entry = entryWithStatus("active");
+    const activeRow = { ...revokedRow(), status: "active" };
+
+    const adopted = await fillApiKeyCache(dbReturning(activeRow), kv, KEY_HASH, entry);
+
+    expect(adopted).toBe(entry);
+    expect(writes).toHaveLength(0);
+  });
 });

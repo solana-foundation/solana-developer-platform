@@ -227,6 +227,39 @@ describe("API key revocation cache invalidation", () => {
     expect(await readCachedStatus(targetHash)).toBe("revoked");
   });
 
+  it("does not let a stale fill win its CAS against an evicted revocation entry", async () => {
+    await app.request(
+      `/v1/api-keys/${TARGET_KEY.id}`,
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${ADMIN_KEY.raw}`,
+        },
+        body: JSON.stringify({ confirmation: TARGET_KEY.name }),
+      },
+      env
+    );
+
+    // Redis evicts the revocation's terminal entry (memory pressure) before
+    // an in-flight fill — whose DB read predates the revocation — runs its
+    // write-if-absent CAS. The empty slot lets the CAS win: the install must
+    // not stand as authoritative for the next TTL.
+    const kv = createKVStoreSet(env);
+    await kv.apiKeys.delete(apiKeyCacheKey(targetHash));
+
+    const adopted = await fillApiKeyCache(
+      getDb(env),
+      kv.apiKeys,
+      targetHash,
+      cachedEntry(TARGET_KEY)
+    );
+
+    expect(adopted.status).toBe("deactivated");
+    expect(await readCachedStatus(targetHash)).toBe("deactivated");
+    expect(await requestWithKey(TARGET_KEY.raw)).toBe(401);
+  });
+
   it("re-asserts the cache when revoking an already-revoked key", async () => {
     // Simulate an earlier revocation that reached Postgres but crashed before
     // the cache write: DB says deactivated, cache still says active.
