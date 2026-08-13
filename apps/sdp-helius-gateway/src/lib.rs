@@ -21,8 +21,10 @@
 //! rather than by calling handlers directly is the difference between testing the
 //! contract and testing the functions behind it.
 
+pub mod auth;
 pub mod config;
 pub mod error;
+pub mod extract;
 pub mod redact;
 pub mod routes;
 pub mod state;
