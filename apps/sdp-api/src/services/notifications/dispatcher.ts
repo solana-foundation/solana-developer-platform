@@ -17,11 +17,13 @@ import {
 } from "@sdp/types";
 import { getDb } from "@/db";
 import {
+  createCounterpartiesRepository,
   createNotificationDeliveriesRepository,
   createNotificationPreferencesRepository,
   createNotificationsRepository,
   type NotificationDeliveriesRepository,
 } from "@/db/repositories";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { publishInboxNudge } from "@/runtime/pubsub-redis";
 import {
@@ -291,6 +293,9 @@ export async function dispatchNotification(
 
 export interface CounterpartyEmailInput {
   organizationId: string;
+  // Counterparties are project-scoped rows; producers pass the ids from the trusted
+  // domain record (transfer / kyc wallet), never request input.
+  projectId: string;
   counterpartyId: string;
   type: NotificationType;
   eventKey: string;
@@ -317,11 +322,22 @@ export async function dispatchCounterpartyEmail(
     if (!isEmailConfigured(env)) {
       return { emailed: 0 };
     }
-    const counterparty = await getDb(env)
-      .prepare(`SELECT email, name FROM counterparties WHERE id = ? AND organization_id = ?`)
-      .bind(input.counterpartyId, input.organizationId)
-      .first<{ email: string | null; name: string | null }>();
-    const recipient = counterparty?.email?.trim();
+    // Through the tenant-scoped repository, never raw SQL: counterparty PII (the
+    // email) lives encrypted in pii_encrypted — the plain column is only a
+    // migration-phase shadow — and the scope pins the lookup to the producer's org.
+    const scope = createTenantScope({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    const counterparty = await createCounterpartiesRepository(env, scope).getCounterpartyById({
+      counterpartyId: input.counterpartyId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    if (!counterparty || counterparty.status !== "active") {
+      return { emailed: 0 };
+    }
+    const recipient = counterparty.email.trim();
     if (!recipient) {
       // No contact email on record — a clean no-op, not an error.
       return { emailed: 0 };

@@ -80,9 +80,7 @@ export function notifyApprovalDecided(
       // An execution is decided once, so the id alone keys idempotency.
       eventKey: `workflow_approval_decided:${input.execution.id}`,
       title:
-        input.decision === "approved"
-          ? "Workflow action approved"
-          : "Workflow action rejected",
+        input.decision === "approved" ? "Workflow action approved" : "Workflow action rejected",
       body: `The held "${actionLabel}" action was ${input.decision}.`,
       resourceType: "token",
       resourceId: input.execution.token_id,
@@ -284,6 +282,7 @@ export function notifyRampSettled(
     input.counterpartyId
       ? dispatchCounterpartyEmail(c.env, {
           organizationId: input.organizationId,
+          projectId: input.projectId,
           counterpartyId: input.counterpartyId,
           type: "payment_settled",
           eventKey: `payment_settled:${input.transferId}`,
@@ -357,6 +356,7 @@ export async function notifyKycOutcome(
     input.kycWallet.counterparty_id
       ? dispatchCounterpartyEmail(env, {
           organizationId: input.kycWallet.organization_id,
+          projectId: input.kycWallet.project_id,
           counterpartyId: input.kycWallet.counterparty_id,
           type,
           eventKey,
@@ -372,8 +372,7 @@ export async function notifyKycOutcome(
     if (result.status === "rejected") {
       getLogger().error(
         {
-          error:
-            result.reason instanceof Error ? result.reason.message : String(result.reason),
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
         },
         "notifyKycOutcome: dispatch failed"
       );
