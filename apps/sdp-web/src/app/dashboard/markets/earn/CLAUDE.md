@@ -31,10 +31,10 @@ the body `requestId` form, which is the only one that can get through.
 - `layout.tsx` — the `earn()` flag gate (`notFound()`); `../layout.tsx` gates the
   whole Markets module the same way. Pages hold no flag checks — add new Earn
   routes under this segment and they inherit both gates.
-- `earn-workspace.tsx` — overview: ONE CARD PER PROGRAM, stacked as repeated
-  records with no switcher (hiding a funded program behind a tab would make a
-  reader hunt for money they hold). Each card owns its money tiles, its FLAT
-  value-ordered holdings list (deployed slices first, cash last), its copyable
+- `earn-workspace.tsx` — overview: ONE CARD PER PROGRAM, stacked newest first as
+  repeated records with no switcher (hiding a funded program behind a tab would
+  make a reader hunt for money they hold). Each card owns its money tiles, its
+  FLAT value-ordered holdings list (deployed slices first, cash last), its copyable
   deposit-address row (the funding loop without re-walking the wizard), and the
   two verbs that manage it — Withdraw, and Change strategy, which links to
   `deposit?program=<id>`. Above them, an aggregate portfolio strip (total /
