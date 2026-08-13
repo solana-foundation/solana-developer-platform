@@ -19,6 +19,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/types` |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
+| `@sdp/helius-gateway` | Rust sidecar over the Helius Rings (zolana) SDK; builds unsigned Solana transactions. Built with cargo, not pnpm. | None |
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | None |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/kamino` | Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
@@ -41,6 +42,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/custody` -> `@sdp/types`
 - `@sdp/earn` -> `@sdp/types`
 - `@sdp/env-config` -> None
+- `@sdp/helius-gateway` -> None
 - `@sdp/helius-rings` -> None
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/kamino` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
