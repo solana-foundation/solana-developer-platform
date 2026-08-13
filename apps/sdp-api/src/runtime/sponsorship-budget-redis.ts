@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import type { Redis } from "ioredis";
 import type {
   SponsorshipBudgetPolicy,
+  SponsorshipBudgetScopeType,
   SponsorshipBudgetUsage,
   SponsorshipLiveWindowReservation,
   SponsorshipNetwork,
 } from "@/db/repositories/sponsorship-budget.repository";
 import type { Env } from "@/types/env";
 import { getRedisClient } from "./kv-redis";
+import { getLogger } from "./logger";
 
 const INITIALIZE_LUA = `
 local count = tonumber(ARGV[1])
@@ -328,8 +330,43 @@ export class SponsorshipBudgetRedis {
     )) as [number, number];
     if (result[0] === 2) return "duplicate";
     if (result[0] === 1) return "admitted";
-    if (result[0] === -3) return "stale_policy";
+    const scopeType = this.scopeTypeAt(result[1]);
+    if (result[0] === -3) {
+      getLogger().warn(
+        {
+          event: "sdp_api_sponsorship_stale_policy",
+          network: input.network,
+          scope_type: scopeType,
+          organization_id: input.organizationId,
+          project_id: input.projectId,
+        },
+        "sponsorship admission hit a stale policy version"
+      );
+      return "stale_policy";
+    }
+    const policy = policyByScope.get(scopeType);
+    getLogger().warn(
+      {
+        event: "sdp_api_sponsorship_denied",
+        network: input.network,
+        scope_type: scopeType,
+        organization_id: input.organizationId,
+        project_id: input.projectId,
+        requested_lamports: input.amount,
+        per_transaction_lamports: policy?.perTransactionLamports,
+        hourly_lamports: policy?.hourlyLamports,
+        daily_lamports: policy?.dailyLamports,
+        hour_used_lamports: input.usage.hour[scopeType],
+        day_used_lamports: input.usage.day[scopeType],
+      },
+      "sponsorship admission denied by budget"
+    );
     return "denied";
+  }
+
+  private scopeTypeAt(index: number): SponsorshipBudgetScopeType {
+    if (index === 1) return "global";
+    return index === 2 ? "organization" : "project";
   }
 
   async cancel(input: Omit<BudgetAdmissionInput, "amount" | "policies" | "usage">): Promise<void> {

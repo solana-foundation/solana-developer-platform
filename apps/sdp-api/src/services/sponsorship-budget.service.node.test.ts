@@ -17,6 +17,14 @@ import type { Env } from "@/types/env";
 import type { SponsorshipScope } from "./sponsorship.service";
 import { BudgetedFeePayment } from "./sponsorship-budget.service";
 
+const logError = vi.hoisted(() => vi.fn());
+const logWarn = vi.hoisted(() => vi.fn());
+const logInfo = vi.hoisted(() => vi.fn());
+
+vi.mock("@/runtime/logger", () => ({
+  getLogger: () => ({ error: logError, warn: logWarn, info: logInfo }),
+}));
+
 const FEE_PAYER = "11111111111111111111111111111111" as Address;
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
 const SCOPE: SponsorshipScope = {
@@ -250,6 +258,33 @@ describe("BudgetedFeePayment", () => {
     });
     expect(repository.markReleased).toHaveBeenCalledOnce();
     expect(repository.markRedisSettled).toHaveBeenCalledWith(expect.any(String), 1);
+  });
+
+  it("records the breaker transition with the reason that caused it", async () => {
+    const { feePayment, repository } = harness();
+    repository.markSubmitted.mockRejectedValue(new Error("ledger offline"));
+
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_accounting_unavailable",
+        network: "devnet",
+        organization_id: "org_1",
+        error: "ledger offline",
+      }),
+      expect.any(String)
+    );
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_breaker_tripped",
+        network: "devnet",
+        reason: "Submitted sponsorship persistence failed",
+      }),
+      expect.any(String)
+    );
   });
 
   it("releases deterministic pre-send rejections", async () => {

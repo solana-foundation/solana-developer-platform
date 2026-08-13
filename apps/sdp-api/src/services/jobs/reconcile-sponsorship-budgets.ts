@@ -111,6 +111,23 @@ export async function reconcileSponsorshipBudgets(
     }
   }
 
+  getLogger().info(
+    {
+      event: "sdp_api_sponsorship_reconciliation_tick",
+      network,
+      candidates: reservations.length,
+      failed: failures.length,
+      batch_saturated: reservations.length === RECONCILIATION_BATCH_SIZE,
+      charged_unknown: reservations.filter((entry) => entry.status === "charged_unknown").length,
+      awaiting_redis_sync: reservations.filter(
+        (entry) =>
+          (entry.status === "committed" || entry.status === "released") &&
+          entry.redisSettledAt === null
+      ).length,
+    },
+    "sponsorship reconciliation tick completed"
+  );
+
   if (failures.length > 0) {
     throw new AggregateError(
       failures,

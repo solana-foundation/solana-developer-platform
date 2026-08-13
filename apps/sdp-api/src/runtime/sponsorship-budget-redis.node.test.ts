@@ -1,9 +1,15 @@
 import Redis from "ioredis";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
 import type { Env } from "@/types/env";
 import { closeAllRedisClients } from "./kv-redis";
 import { SponsorshipBudgetRedis } from "./sponsorship-budget-redis";
+
+const logWarn = vi.hoisted(() => vi.fn());
+
+vi.mock("./logger", () => ({
+  getLogger: () => ({ warn: logWarn, error: vi.fn(), info: vi.fn() }),
+}));
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 const EMPTY_USAGE = {
@@ -70,6 +76,41 @@ describe("SponsorshipBudgetRedis", () => {
     const hour = await raw.hgetall("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z");
     expect(hour).toMatchObject({ global: "3", "organization:org_1": "3" });
     expect(Object.keys(hour).some((field) => field.includes("undefined"))).toBe(false);
+  });
+
+  it("records which scope and limit rejected an admission", async () => {
+    logWarn.mockClear();
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "reservation_denied",
+        attempt: 1,
+        amount: 9,
+        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 5)],
+        usage: {
+          hour: { global: 4, organization: 4, project: 0 },
+          day: { global: 4, organization: 4, project: 0 },
+        },
+      })
+    ).resolves.toBe("denied");
+
+    expect(logWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_denied",
+        network: "devnet",
+        scope_type: "organization",
+        organization_id: "org_1",
+        requested_lamports: 9,
+        per_transaction_lamports: 5,
+        hourly_lamports: 5,
+        hour_used_lamports: 4,
+      }),
+      expect.any(String)
+    );
   });
 
   it("enforces concurrent limits atomically across all applicable scopes", async () => {
