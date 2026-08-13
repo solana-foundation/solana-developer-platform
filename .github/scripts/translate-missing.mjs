@@ -225,7 +225,6 @@ async function main() {
     agentUrl,
     agentUsername: process.env.TRANSLATION_AGENT_USERNAME,
     agentPassword: process.env.TRANSLATION_AGENT_PASSWORD,
-    maxKeys: Number(process.env.TRANSLATION_AGENT_MAX_KEYS || 500),
     batchSize: Number(process.env.TRANSLATION_AGENT_BATCH_SIZE || 50),
     maxRetries: Number(process.env.TRANSLATION_AGENT_MAX_RETRIES || 2),
   });

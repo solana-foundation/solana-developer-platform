@@ -92,7 +92,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Wallet balances",
         content: jsonContent(walletBalancesResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500]),
     },
   });
 

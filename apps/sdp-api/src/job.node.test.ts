@@ -7,12 +7,13 @@ import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { isSentryEnabled } from "@/runtime/observability";
 import { nodeObservability } from "@/runtime/observability-node";
+import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
-import { runCronJob } from "./job";
+import { describeCronFailure, runCronJob } from "./job";
 
 vi.mock("@sentry/node", () => ({
   close: vi.fn(async () => true),
@@ -84,6 +85,10 @@ vi.mock("@/services/jobs/track-pending-transfers", () => ({
   trackPendingTransfers: vi.fn(async () => {}),
 }));
 
+vi.mock("@/services/jobs/reconcile-sponsorship-budgets", () => ({
+  reconcileSponsorshipBudgets: vi.fn(async () => {}),
+}));
+
 vi.mock("@/services/policy/approved-operation-replay", () => ({
   recoverApprovedWalletOperations: vi.fn(async () => {}),
 }));
@@ -104,6 +109,9 @@ describe("runCronJob", () => {
       .mockReset()
       .mockResolvedValue(undefined as never);
     vi.mocked(recoverApprovedWalletOperations)
+      .mockReset()
+      .mockResolvedValue(undefined as never);
+    vi.mocked(reconcileSponsorshipBudgets)
       .mockReset()
       .mockResolvedValue(undefined as never);
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
@@ -128,6 +136,7 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow(/REDIS_URL is required/);
 
     expect(trackPendingTransfers).not.toHaveBeenCalled();
+    expect(reconcileSponsorshipBudgets).not.toHaveBeenCalled();
   });
 
   it("runs the ungated pair and the workflow tick when the Earn flags are off", async () => {
@@ -135,6 +144,7 @@ describe("runCronJob", () => {
 
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
     expect(recoverApprovedWalletOperations).toHaveBeenCalledTimes(1);
+    expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
     // Managed deployments always have asset profiles on, so the workflow tick runs.
     expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
@@ -208,7 +218,7 @@ describe("runCronJob", () => {
 
     // Sentry disabled: no observability handed to the earn tick.
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(env, undefined);
-    const pairOrder = vi.mocked(recoverApprovedWalletOperations).mock.invocationCallOrder[0];
+    const pairOrder = vi.mocked(reconcileSponsorshipBudgets).mock.invocationCallOrder[0];
     const earnOrder = vi.mocked(runEarnCatalogueSyncIfDue).mock.invocationCallOrder[0];
     expect(earnOrder).toBeGreaterThan(pairOrder);
   });
@@ -300,6 +310,7 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow("sync exploded");
 
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
     expect(Sentry.close).toHaveBeenCalledTimes(1);
@@ -309,12 +320,47 @@ describe("runCronJob", () => {
     vi.mocked(getProcessEnv).mockReturnValue(
       makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
     );
-    vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("reconciliation down"));
+    vi.mocked(reconcileSponsorshipBudgets).mockRejectedValue(new Error("sponsorship down"));
 
-    await expect(runCronJob()).rejects.toThrow("reconciliation down");
+    await expect(runCronJob()).rejects.toThrow("sponsorship down");
 
     expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles sponsorship budgets even when pending-transfer tracking fails", async () => {
+    vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("transfers down"));
+
+    await expect(runCronJob()).rejects.toThrow("transfers down");
+
+    expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports every underlying cause when a tick fails on more than one task", () => {
+    const failure = new AggregateError(
+      [new Error("transfers down"), new Error("sponsorship down")],
+      "pending-transfers tick had multiple failures"
+    );
+
+    expect(describeCronFailure(failure)).toEqual({
+      error: failure,
+      causes: [
+        { message: "transfers down", stack: expect.any(String) },
+        { message: "sponsorship down", stack: expect.any(String) },
+      ],
+    });
+  });
+
+  it("keeps a single failure unchanged", () => {
+    const failure = new Error("transfers down");
+    expect(describeCronFailure(failure)).toEqual({ error: failure });
+  });
+
+  it("describes a rejected non-error value", () => {
+    expect(describeCronFailure(new AggregateError(["boom"], "tick"))).toEqual({
+      error: expect.any(AggregateError),
+      causes: [{ message: "boom" }],
+    });
   });
 });

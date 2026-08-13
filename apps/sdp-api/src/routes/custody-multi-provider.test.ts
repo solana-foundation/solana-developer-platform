@@ -626,6 +626,44 @@ describe("Custody multi-provider routes", () => {
     ).toBe(true);
   });
 
+  it("keeps active Connection wallets visible with fresh Runtime Execution Admission", async () => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    const connection = await seedActivePrivyConnection("inventory");
+
+    const readWallet = async () => {
+      const response = await app.request(
+        "/v1/wallets",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: {
+          wallets: Array<Record<string, unknown> & { walletId: string }>;
+        };
+      };
+      return body.data.wallets.find((wallet) => wallet.walletId === connection.walletId);
+    };
+
+    await expect(readWallet()).resolves.toMatchObject({
+      custodyConnectionId: connection.connectionId,
+      isDefaultProvider: false,
+      isRuntimeExecutionAllowed: true,
+      provider: "privy",
+    });
+
+    env.PRIVY_BYOK_ENABLED = "false";
+    await expect(readWallet()).resolves.toMatchObject({
+      custodyConnectionId: connection.connectionId,
+      isDefaultProvider: false,
+      isRuntimeExecutionAllowed: false,
+      provider: "privy",
+    });
+  });
+
   it("returns active configs and defaultConfigId from /v1/wallets/configs", async () => {
     const res = await app.request(
       "/v1/wallets/configs",

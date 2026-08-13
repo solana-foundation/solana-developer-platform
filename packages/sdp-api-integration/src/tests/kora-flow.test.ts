@@ -8,9 +8,14 @@ import {
   requestWithApiKey,
 } from "../helpers/integration";
 
-const { createSigningService, TEST_ORG, TEST_PROJECT } = apiTestSupport;
+const { createSigningService, getDb, SponsorshipBudgetRepository, TEST_ORG, TEST_PROJECT } =
+  apiTestSupport;
 
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+const KORA_LIVE_SMOKE_PER_TRANSACTION_LAMPORTS = 20_000_000;
+const KORA_LIVE_SMOKE_POLICY_OPERATOR = "kora-live-smoke";
+const KORA_LIVE_SMOKE_POLICY_REASON =
+  "Permit isolated live Kora smoke against the reviewed provider outflow ceiling";
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
@@ -213,10 +218,48 @@ function assertKoraLiveSmokeEnvConfigured() {
 
 describe("Kora Fee Payment (Live Smoke)", () => {
   const request = requestWithApiKey();
+  let liveSmokePolicies: Awaited<
+    ReturnType<InstanceType<typeof SponsorshipBudgetRepository>["resolvePolicies"]>
+  >;
 
   beforeAll(async () => {
     assertKoraLiveSmokeEnvConfigured();
     await initIntegrationSuite();
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    for (const policy of [
+      {
+        scopeType: "global" as const,
+        scopeId: null,
+        hourlyLamports: 2_000_000_000,
+        dailyLamports: 10_000_000_000,
+      },
+      {
+        scopeType: "organization" as const,
+        scopeId: TEST_ORG.id,
+        hourlyLamports: 1_000_000_000,
+        dailyLamports: 5_000_000_000,
+      },
+      {
+        scopeType: "project" as const,
+        scopeId: TEST_PROJECT.id,
+        hourlyLamports: 1_000_000_000,
+        dailyLamports: 3_000_000_000,
+      },
+    ]) {
+      await repository.upsertPolicy({
+        network: "devnet",
+        ...policy,
+        enabled: true,
+        perTransactionLamports: KORA_LIVE_SMOKE_PER_TRANSACTION_LAMPORTS,
+        operator: KORA_LIVE_SMOKE_POLICY_OPERATOR,
+        reason: KORA_LIVE_SMOKE_POLICY_REASON,
+      });
+    }
+    liveSmokePolicies = await repository.resolvePolicies({
+      network: "devnet",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+    });
     await createSigningService(env).initializePrivySigning(TEST_ORG.id, TEST_PROJECT.id, {
       walletLabel: "Kora project root wallet",
     });
@@ -224,6 +267,19 @@ describe("Kora Fee Payment (Live Smoke)", () => {
 
   afterAll(async () => {
     await cleanupIntegrationSuite();
+  });
+
+  it("uses audited budget overrides for every live-smoke scope", () => {
+    expect(liveSmokePolicies.map((policy) => policy.scopeType)).toEqual([
+      "global",
+      "organization",
+      "project",
+    ]);
+    for (const policy of liveSmokePolicies) {
+      expect(policy.perTransactionLamports).toBe(KORA_LIVE_SMOKE_PER_TRANSACTION_LAMPORTS);
+      expect(policy.updatedBy).toBe(KORA_LIVE_SMOKE_POLICY_OPERATOR);
+      expect(policy.updateReason).toBe(KORA_LIVE_SMOKE_POLICY_REASON);
+    }
   });
 
   it("submits a Privy signer-check memo through Kora signAndSend", {

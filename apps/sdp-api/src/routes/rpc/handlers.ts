@@ -11,6 +11,10 @@ import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
 import { success } from "@/lib/response";
+import {
+  checkResolvedRpcTargetConnection,
+  getProviderSetupDefinition,
+} from "@/services/provider-setup-registry";
 import type { Env } from "@/types/env";
 import { rpcProjectQuerySchema, rpcRelayPayloadSchema } from "./schemas";
 
@@ -265,26 +269,11 @@ export const testRpcConnection = async (c: AppContext) => {
   });
 
   const startedAt = Date.now();
-  const headers = {
-    "Content-Type": "application/json",
-    ...target.headers,
-  };
-
   try {
-    const upstream = await fetch(target.endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "rpc-connectivity-test",
-        method: "getVersion",
-        params: [],
-      }),
-    });
-
-    const rawBody = await upstream.text();
-    const upstreamBody = rawBody ? tryParseJson(rawBody) : null;
-    const elapsedMs = Date.now() - startedAt;
+    const { upstream, upstreamBody, elapsedMs } =
+      target.providerId === "custom"
+        ? await checkResolvedRpcTargetConnection({ target })
+        : await getProviderSetupDefinition("rpc", target.providerId).checkConnection({ target });
 
     await recordRpcRelayTelemetry(c.var.kv.cache, {
       providerId: target.providerId,
