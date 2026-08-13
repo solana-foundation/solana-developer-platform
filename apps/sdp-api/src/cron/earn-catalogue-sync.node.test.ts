@@ -23,6 +23,7 @@ const SLOT_KEY = "cron:earn-catalogue-sync:slot";
 const mocks = vi.hoisted(() => ({
   providerClients: {} as Record<string, EarnVaultProvider>,
   upsertStrategy: vi.fn(),
+  deleteUnlistedStrategies: vi.fn(),
   get: vi.fn(),
   compareAndSet: vi.fn(),
   compareAndDelete: vi.fn(),
@@ -37,7 +38,10 @@ vi.mock("@sdp/earn", async (importOriginal) => {
 });
 
 vi.mock("@/db/repositories", () => ({
-  createEarnRepository: vi.fn(() => ({ upsertStrategy: mocks.upsertStrategy })),
+  createEarnRepository: vi.fn(() => ({
+    upsertStrategy: mocks.upsertStrategy,
+    deleteUnlistedStrategies: mocks.deleteUnlistedStrategies,
+  })),
 }));
 
 vi.mock("@/runtime/kv-redis", () => ({
@@ -99,13 +103,20 @@ function installProviders(providers: Record<string, EarnVaultProvider>): void {
 describe("runEarnCatalogueSyncIfDue", () => {
   beforeEach(() => {
     mocks.upsertStrategy.mockReset().mockResolvedValue(undefined);
+    mocks.deleteUnlistedStrategies.mockReset().mockResolvedValue([]);
     // Default slot state: empty and claimable.
     mocks.get.mockReset().mockResolvedValue(null);
     mocks.compareAndSet.mockReset().mockResolvedValue(true);
     mocks.compareAndDelete.mockReset().mockResolvedValue(true);
     vi.mocked(createEarnRepository)
       .mockReset()
-      .mockImplementation(() => ({ upsertStrategy: mocks.upsertStrategy }) as never);
+      .mockImplementation(
+        () =>
+          ({
+            upsertStrategy: mocks.upsertStrategy,
+            deleteUnlistedStrategies: mocks.deleteUnlistedStrategies,
+          }) as never
+      );
     installProviders({});
   });
 
@@ -327,6 +338,79 @@ describe("runEarnCatalogueSyncIfDue", () => {
 
     expect(outcome).toBe("synced");
     expect(mocks.upsertStrategy).not.toHaveBeenCalled();
+    expect(mocks.compareAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("deletes rows the provider no longer lists, per provider and environment", async () => {
+    // The keep set is what the provider still lists; the repository decides
+    // what that leaves behind. This is what makes a tightened catalogue gate
+    // (Ground's `not_solana_hosted`) reach rows ALREADY stored.
+    installProviders({
+      ground: makeProvider(
+        "ground",
+        vi.fn(async () => [
+          makeSnapshot("kamino-allez-usdc"),
+          makeSnapshot("kamino-steakhouse-usdc"),
+        ])
+      ),
+    });
+    mocks.deleteUnlistedStrategies.mockResolvedValue(["morpho-gauntlet-usdc", "aave-v3-usdc"]);
+
+    const outcome = await runEarnCatalogueSyncIfDue(env);
+
+    expect(outcome).toBe("synced");
+    expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(2);
+    expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      provider: "ground",
+      environment: "sandbox",
+      listedProviderReferences: ["kamino-allez-usdc", "kamino-steakhouse-usdc"],
+    });
+    expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      provider: "ground",
+      environment: "production",
+      listedProviderReferences: ["kamino-allez-usdc", "kamino-steakhouse-usdc"],
+    });
+  });
+
+  it("never deletes off an empty catalogue or a partial write pass", async () => {
+    // Both are cases where the pass cannot prove what the provider lists, so a
+    // whole shelf must never be torn down on the strength of them.
+    installProviders({
+      ground: makeProvider(
+        "ground",
+        vi.fn(async () => [])
+      ),
+    });
+    expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+    expect(mocks.deleteUnlistedStrategies).not.toHaveBeenCalled();
+
+    mocks.get.mockResolvedValue(null);
+    mocks.compareAndSet.mockResolvedValue(true);
+    mocks.upsertStrategy.mockRejectedValue(new Error("write conflict"));
+    installProviders({
+      ground: makeProvider(
+        "ground",
+        vi.fn(async () => [makeSnapshot("kamino-allez-usdc")])
+      ),
+    });
+
+    expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+    expect(mocks.deleteUnlistedStrategies).not.toHaveBeenCalled();
+  });
+
+  it("keeps a delete failure inside the provider's pass", async () => {
+    // Same degradation contract as upsert: the catalogue stays stale for an
+    // hour, the tick still counts as run, and the slot is not released.
+    installProviders({
+      ground: makeProvider(
+        "ground",
+        vi.fn(async () => [makeSnapshot("kamino-allez-usdc")])
+      ),
+    });
+    mocks.deleteUnlistedStrategies.mockRejectedValue(new Error("deadlock detected"));
+
+    expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+    expect(mocks.upsertStrategy).toHaveBeenCalledTimes(2);
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 });

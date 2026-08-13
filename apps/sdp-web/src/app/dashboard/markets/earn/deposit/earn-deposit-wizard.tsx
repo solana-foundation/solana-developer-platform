@@ -23,24 +23,21 @@ import { EarnDepositSkeleton } from "../earn-route-skeletons";
 import { SummaryRow } from "./earn-deposit-chrome";
 import {
   availableTokens,
-  type EarnDepositProfile,
+  defaultStrategyFilters,
   type EarnStrategyFilters,
-  profileFilters,
-  profileSummaries,
   singleStrategyAllocation,
   visibleStrategies,
 } from "./earn-deposit-model";
 import { useEarnFundingWallets, walletDisplayName } from "./earn-funding-wallets";
 import { type EarnApiKeyView, IntegrationScreen } from "./integration-screen";
-import { ProfileStep } from "./profile-step";
 import { ProgramLiveScreen } from "./program-live-screen";
 import { ReviewStep } from "./review-step";
 import { StrategyStep } from "./strategy-step";
 import { WalletStep } from "./wallet-step";
 
-const CREATE_STEPS = ["wallet", "profile", "strategy", "review"] as const;
+const CREATE_STEPS = ["wallet", "strategy", "review"] as const;
 /** A change-strategy run moves no funds, so it never asks for a wallet. */
-const UPDATE_STEPS = ["profile", "strategy", "review"] as const;
+const UPDATE_STEPS = ["strategy", "review"] as const;
 type DepositStep = (typeof CREATE_STEPS)[number];
 
 const STEP_META: Record<
@@ -51,11 +48,6 @@ const STEP_META: Record<
     label: "DashboardEarn.deposit.progressWallet",
     title: "DashboardEarn.deposit.walletTitle",
     description: "DashboardEarn.deposit.walletDescription",
-  },
-  profile: {
-    label: "DashboardEarn.deposit.progressProfile",
-    title: "DashboardEarn.deposit.profileTitle",
-    description: "DashboardEarn.deposit.profileDescription",
   },
   strategy: {
     label: "DashboardEarn.deposit.progressStrategy",
@@ -78,7 +70,6 @@ const EARN_DASHBOARD_PATH = "/dashboard/markets/earn";
  */
 const STEP_PENDING_LABEL: Record<Exclude<DepositStep, "review">, MessageKey> = {
   wallet: "DashboardEarn.deposit.selectWallet",
-  profile: "DashboardEarn.deposit.selectProfile",
   strategy: "DashboardEarn.deposit.selectStrategy",
 };
 
@@ -180,23 +171,6 @@ function useWizardStepFocus(step: DepositStep, outcome: Outcome | null) {
       heading.focus({ preventScroll: true });
     }
   }, [step, outcome]);
-}
-
-/**
- * Choosing a profile reseeds the browse filters and DROPS a selection the new
- * filters would hide, so the review step can never confirm a strategy the user
- * can no longer see.
- */
-function applyProfile(
-  next: EarnDepositProfile,
-  strategyId: string | null,
-  liveStrategies: readonly EarnStrategy[]
-): { filters: EarnStrategyFilters; strategyId: string | null } {
-  const filters = profileFilters(next);
-  const stillVisible =
-    strategyId !== null &&
-    visibleStrategies(liveStrategies, filters).some((strategy) => strategy.id === strategyId);
-  return { filters, strategyId: stillVisible ? strategyId : null };
 }
 
 /** Full-screen stop state: one message, one action. */
@@ -315,23 +289,20 @@ export function EarnDepositWizard({
    * again. It shapes the funding instructions; it never moves money.
    */
   const [walletId, setWalletId] = useState<string | null>(null);
-  const [profile, setProfile] = useState<EarnDepositProfile | null>(null);
-  const [filters, setFilters] = useState<EarnStrategyFilters | null>(null);
+  const [filters, setFilters] = useState<EarnStrategyFilters>(defaultStrategyFilters);
   const [strategyId, setStrategyId] = useState<string | null>(initialStrategyId ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
-  const summaries = useMemo(() => profileSummaries(liveStrategies), [liveStrategies]);
   const tokens = useMemo(() => availableTokens(liveStrategies), [liveStrategies]);
-  const activeFilters = filters ?? profileFilters(profile ?? "balanced");
   const browsable = useMemo(
-    () => visibleStrategies(liveStrategies, activeFilters),
-    [activeFilters, liveStrategies]
+    () => visibleStrategies(liveStrategies, filters),
+    [filters, liveStrategies]
   );
 
   const selectedWallet = (wallets ?? []).find((wallet) => wallet.id === walletId);
-  const selectedStrategy: EarnStrategy | undefined = liveStrategies.find(
+  const selectedStrategy: EarnStrategy | undefined = browsable.find(
     (strategy) => strategy.id === strategyId
   );
 
@@ -355,28 +326,27 @@ export function EarnDepositWizard({
   // `rawStep` starts at "wallet" before the program read resolves; on a
   // re-target run that maps onto the first real step instead.
   const stepOrder: readonly DepositStep[] = retargeting ? UPDATE_STEPS : CREATE_STEPS;
-  const step: DepositStep = retargeting && rawStep === "wallet" ? "profile" : rawStep;
+  const step: DepositStep = retargeting && rawStep === "wallet" ? "strategy" : rawStep;
 
   const requestIdFor = useStrategyRequestId();
 
   const stepReady: Record<DepositStep, boolean> = {
     wallet: walletId !== null,
-    profile: profile !== null,
     strategy: selectedStrategy !== undefined,
     review: selectedStrategy !== undefined && !providerUnconfigured && !submitting,
   };
 
   useWizardStepFocus(step, outcome);
 
-  const chooseProfile = (next: EarnDepositProfile) => {
-    const { filters: nextFilters, strategyId: nextStrategyId } = applyProfile(
-      next,
-      strategyId,
-      liveStrategies
-    );
-    setProfile(next);
-    setFilters(nextFilters);
-    setStrategyId(nextStrategyId);
+  /** A hidden row cannot remain selected and silently advance to review. */
+  const changeFilters = (next: EarnStrategyFilters) => {
+    setFilters(next);
+    if (
+      strategyId !== null &&
+      !visibleStrategies(liveStrategies, next).some((strategy) => strategy.id === strategyId)
+    ) {
+      setStrategyId(null);
+    }
   };
 
   const confirm = async () => {
@@ -482,7 +452,7 @@ export function EarnDepositWizard({
 
   /**
    * One element per step, looked up rather than branched through in the render.
-   * Building all four is free — they are plain elements, and only the looked-up
+   * Building all three is free — they are plain elements, and only the looked-up
    * one is ever mounted.
    */
   const stepBody: Record<DepositStep, ReactNode> = {
@@ -496,22 +466,13 @@ export function EarnDepositWizard({
         wallets={wallets ?? []}
       />
     ),
-    profile: (
-      <ProfileStep
-        hasError={Boolean(catalogueError)}
-        isLoading={catalogueLoading}
-        onSelect={chooseProfile}
-        selectedProfile={profile}
-        summaries={summaries}
-      />
-    ),
     strategy: (
       <StrategyStep
-        filters={activeFilters}
+        filters={filters}
         hasError={Boolean(catalogueError)}
         isLoading={catalogueLoading}
-        onFiltersChange={setFilters}
-        onReset={() => setFilters(profileFilters(profile ?? "balanced"))}
+        onFiltersChange={changeFilters}
+        onReset={() => changeFilters(defaultStrategyFilters())}
         onSelect={setStrategyId}
         selectedStrategyId={strategyId}
         strategies={browsable}

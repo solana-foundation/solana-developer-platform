@@ -43,6 +43,7 @@ export type {
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
   CreateEarnProgramWithdrawalInput,
+  DeleteUnlistedEarnStrategiesInput,
   EarnProgramDepositRow,
   EarnProgramMovementRow,
   EarnProgramMovementSum,
@@ -66,6 +67,7 @@ export type {
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 export {
+  EARN_SEED_REFERENCE_PREFIX,
   generateEarnProgramDepositId,
   generateEarnProgramWithdrawalId,
   generateEarnStrategyId,

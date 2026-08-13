@@ -61,7 +61,9 @@ const yieldSource = (overrides: Record<string, unknown> = {}) => ({
   name: "Morpho Gauntlet USDC",
   description: null,
   mode: "active",
-  chain: "ethereum",
+  // Solana-hosted so the catalogue happy path survives the `not_solana_hosted`
+  // gate; the host-chain drops are asserted explicitly in distillGroundYieldSource.
+  chain: "solana_devnet",
   apyBps: 356,
   navUpdateMode: "continuous",
   tvlUsd: 512_400_000,
@@ -165,7 +167,12 @@ describe("GroundEarnClient.listStrategies", () => {
 
   it("uses the production host and key, and skips tokens Ground cannot route on Solana", async () => {
     const fetchMock = stubGroundFetch({
-      body: page([yieldSource(), yieldSource({ id: "tether-reserve", depositToken: "usdt" })]),
+      // Production's Solana chain key is `solana`, not sandbox's `solana_devnet`
+      // — the fixture default would be dropped as `not_solana_hosted` here.
+      body: page([
+        yieldSource({ chain: "solana" }),
+        yieldSource({ id: "tether-reserve", depositToken: "usdt", chain: "solana" }),
+      ]),
     });
 
     const strategies = await client.listStrategies(productionCtx);
@@ -391,8 +398,8 @@ describe("GroundEarnClient.listStrategies", () => {
 describe("distillGroundYieldSource", () => {
   const distill = (
     overrides: Record<string, unknown>,
-    cluster: "devnet" | "mainnet-beta" = "devnet"
-  ) => distillGroundYieldSource(yieldSource(overrides) as GroundYieldSource, cluster);
+    environment: "sandbox" | "production" = "sandbox"
+  ) => distillGroundYieldSource(yieldSource(overrides) as GroundYieldSource, environment);
 
   it("names the gate that keeps each source out of the catalogue", () => {
     assert.deepEqual(distill({ mode: "buy_only" }), {
@@ -403,12 +410,52 @@ describe("distillGroundYieldSource", () => {
       outcome: "dropped",
       reason: "inactive_mode",
     });
-    // Rail-gated, not mint-gated: USDT drops even on mainnet-beta, where a
-    // well-known mint exists — Ground's Solana rails carry USDC only.
-    assert.deepEqual(distill({ depositToken: "usdt" }, "mainnet-beta"), {
+    // Rail-gated, not mint-gated: USDT drops even in production, where a
+    // well-known mint exists — Ground's Solana rails carry USDC only. Ordered
+    // ahead of the host-chain gate, so this stays the reported reason for a
+    // USDT source wherever it is hosted.
+    assert.deepEqual(distill({ depositToken: "usdt", chain: "solana" }, "production"), {
       outcome: "dropped",
       reason: "not_solana_routable",
     });
+  });
+
+  it("catalogues Solana-HOSTED sources only, per environment", () => {
+    // The vaults that prompted the gate: Ethereum-hosted USDC sources Ground
+    // funds over Solana rails. Every one of these was catalogued before.
+    for (const chain of ["ethereum", "ethereum_sepolia", "base", "solana"]) {
+      assert.deepEqual(
+        distill({ chain }),
+        { outcome: "dropped", reason: "not_solana_hosted" },
+        `sandbox must refuse a ${chain}-hosted source`
+      );
+    }
+    // Chain keys are per-environment: sandbox's Solana is `solana_devnet`,
+    // production's is `solana` — neither is catalogued in the other.
+    assert.equal(distill({ chain: "solana" }, "production").outcome, "catalogued");
+    assert.equal(distill({ chain: "solana_devnet" }, "production").outcome, "dropped");
+  });
+
+  it("fails closed when a source reports no host chain", () => {
+    // Ground does not document `chain` as required, and an unlabelled source
+    // cannot be shown to be Solana-hosted — refuse rather than assume.
+    for (const chain of [null, undefined, "", "   ", "SOLANA_MAINNET", "unknown"]) {
+      assert.deepEqual(
+        distill({ chain }),
+        { outcome: "dropped", reason: "not_solana_hosted" },
+        `chain=${JSON.stringify(chain)} must not be catalogued`
+      );
+    }
+  });
+
+  it("accepts the host chain case- and whitespace-insensitively", () => {
+    for (const chain of ["SOLANA_DEVNET", " solana_devnet ", "Solana_Devnet"]) {
+      assert.equal(
+        distill({ chain }).outcome,
+        "catalogued",
+        `chain=${JSON.stringify(chain)} names this environment's Solana rail`
+      );
+    }
   });
 
   it("catalogues an active USDC source with the snapshot listStrategies publishes", () => {
