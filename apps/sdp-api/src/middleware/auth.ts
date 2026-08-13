@@ -11,7 +11,13 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyWalletBinding, CachedApiKey } from "@sdp/types";
+import type {
+  ApiKeyEnvironment,
+  ApiKeyRole,
+  ApiKeyWalletAuthorizationBinding,
+  ApiKeyWalletScope,
+  CachedApiKey,
+} from "@sdp/types";
 import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db";
@@ -54,9 +60,10 @@ interface ApiKeyContext {
   role: ApiKeyRole;
   permissions: Permission[];
   environment: ApiKeyEnvironment;
+  walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
   signingWalletIds: string[];
-  walletBindings: ApiKeyWalletBinding[];
+  walletBindings: Array<ApiKeyWalletAuthorizationBinding & { custodyWalletId: string }>;
 }
 
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
@@ -82,7 +89,14 @@ async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | n
   // Payloads written before rotation-deadline enforcement do not contain this
   // property. Treat them as misses so a deploy cannot extend an old key's
   // validity until the legacy one-hour cache entry expires.
-  return cached && Object.hasOwn(cached, "rotationDeadline") ? cached : null;
+  return cached &&
+    Object.hasOwn(cached, "rotationDeadline") &&
+    (cached.walletScope === "all" || cached.walletScope === "selected") &&
+    (cached.walletBindings ?? []).every(
+      (binding) => typeof binding.custodyWalletId === "string" && binding.custodyWalletId.length > 0
+    )
+    ? cached
+    : null;
 }
 
 async function isKnownInvalidKey(kv: KVStore, keyHash: string): Promise<boolean> {
@@ -138,24 +152,36 @@ async function getFromDatabaseAndCache(
 
   const walletBindingsResult = await db
     .prepare(
-      `SELECT wallet_id, permissions
+      `SELECT wallet_id, custody_wallet_id, permissions
        FROM api_key_wallet_permissions
        WHERE api_key_id = ?
        ORDER BY created_at ASC`
     )
     .bind(result.id)
-    .all<{ wallet_id: string; permissions: string }>();
+    .all<{ wallet_id: string; custody_wallet_id: string | null; permissions: string }>();
 
-  const walletBindings: ApiKeyWalletBinding[] = (walletBindingsResult.results ?? []).map((row) => {
+  const permissionRows = walletBindingsResult.results ?? [];
+  const walletScope: ApiKeyWalletScope =
+    permissionRows.length > 0 || result.signing_wallet_id !== null ? "selected" : "all";
+  const walletBindings = permissionRows.flatMap((row) => {
+    if (!row.custody_wallet_id) {
+      return [];
+    }
     const parsed = safeParsePermissionsArray(row.permissions);
-    return {
-      walletId: row.wallet_id,
-      permissions: parsed.length > 0 ? parsed : ["*"],
-    };
+    return [
+      {
+        walletId: row.wallet_id,
+        custodyWalletId: row.custody_wallet_id,
+        permissions: parsed.length > 0 ? parsed : (["*"] as Permission[]),
+      },
+    ];
   });
 
   const signingWalletIds = walletBindings.map((binding) => binding.walletId);
-  const signingWalletId = result.signing_wallet_id ?? signingWalletIds[0] ?? null;
+  const signingWalletId =
+    walletBindings.find((binding) => binding.walletId === result.signing_wallet_id)?.walletId ??
+    signingWalletIds[0] ??
+    null;
 
   const cached: CachedApiKey = {
     id: result.id,
@@ -168,6 +194,7 @@ async function getFromDatabaseAndCache(
     environment: result.environment as "sandbox" | "production",
     rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
     allowedIps: parseOptionalPostgresJson<string[]>(result.allowed_ips),
+    walletScope,
     signingWalletId,
     signingWalletIds,
     walletBindings,
@@ -292,32 +319,37 @@ function safeParsePermissionsArray(value: string | null | undefined): Permission
 }
 
 function normalizeWalletBindings(cachedKey: CachedApiKey): {
+  walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
   signingWalletIds: string[];
-  walletBindings: ApiKeyWalletBinding[];
+  walletBindings: Array<ApiKeyWalletAuthorizationBinding & { custodyWalletId: string }>;
 } {
   const rawBindings = cachedKey.walletBindings ?? [];
   const walletBindings = rawBindings
-    .filter((binding) => typeof binding.walletId === "string" && binding.walletId.length > 0)
+    .filter(
+      (binding): binding is ApiKeyWalletAuthorizationBinding & { custodyWalletId: string } =>
+        typeof binding.walletId === "string" &&
+        binding.walletId.length > 0 &&
+        typeof binding.custodyWalletId === "string" &&
+        binding.custodyWalletId.length > 0
+    )
     .map((binding) => ({
       walletId: binding.walletId,
+      custodyWalletId: binding.custodyWalletId,
       permissions:
         binding.permissions && binding.permissions.length > 0
           ? binding.permissions
           : (["*"] as Permission[]),
     }));
 
-  if (walletBindings.length === 0 && cachedKey.signingWalletId) {
-    walletBindings.push({
-      walletId: cachedKey.signingWalletId,
-      permissions: ["*"],
-    });
-  }
-
   const signingWalletIds = walletBindings.map((binding) => binding.walletId);
-  const signingWalletId = cachedKey.signingWalletId ?? signingWalletIds[0] ?? null;
+  const signingWalletId =
+    walletBindings.find((binding) => binding.walletId === cachedKey.signingWalletId)?.walletId ??
+    signingWalletIds[0] ??
+    null;
 
   return {
+    walletScope: cachedKey.walletScope as ApiKeyWalletScope,
     signingWalletId,
     signingWalletIds,
     walletBindings,
@@ -396,6 +428,7 @@ export function authMiddleware() {
       role: cachedKey.role,
       permissions: cachedKey.permissions,
       environment: cachedKey.environment,
+      walletScope: normalizedWalletBindings.walletScope,
       signingWalletId: normalizedWalletBindings.signingWalletId,
       signingWalletIds: normalizedWalletBindings.signingWalletIds,
       walletBindings: normalizedWalletBindings.walletBindings,

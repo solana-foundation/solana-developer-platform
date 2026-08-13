@@ -437,6 +437,116 @@ describe("Connection-owned wallet control plane", () => {
     ).toEqual({ status: "active" });
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
+
+  it("keeps Connection wallet policy control-plane available while runtime is disabled", async () => {
+    env.PRIVY_BYOK_ENABLED = "false";
+    const headers = {
+      Authorization: `Bearer ${API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const policyPath = `/v1/payments/wallets/${SECOND_WALLET_ID}/policies`;
+
+    const update = await app.request(
+      policyPath,
+      {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ defaultAction: "deny", rules: [], commitMessage: "Lock wallet" }),
+      },
+      env
+    );
+    const updateBody = await update.json();
+    expect(update.status, JSON.stringify(updateBody)).toBe(200);
+    expect(updateBody).toMatchObject({
+      data: {
+        policy: {
+          walletId: SECOND_WALLET_ID,
+          defaultAction: "deny",
+          controlProfile: { status: "active", commitMessage: "Lock wallet" },
+        },
+      },
+    });
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profiles (
+             id, organization_id, project_id, api_key_id, name, status, active_revision_id
+           ) VALUES ('akcp_connection_wallets', ?, ?, ?, 'Connection controls',
+                     'active', 'akcpr_connection_wallets')`
+        )
+        .bind(ORGANIZATION_ID, PROJECT_ID, API_KEY.id),
+      getDb(env).prepare(
+        `INSERT INTO api_key_control_profile_revisions (
+             id, profile_id, revision_number, rules, default_action, activated_at
+           ) VALUES ('akcpr_connection_wallets', 'akcp_connection_wallets', 1,
+                     '[]', 'deny', sdp_iso_now())`
+      ),
+    ]);
+    const binding = await app.request(
+      `/v1/api-keys/${API_KEY.id}/policy-bindings`,
+      {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+          mode: "replace",
+          bindings: [
+            {
+              bindingScope: "selected",
+              walletId: SECOND_WALLET_ID,
+              apiKeyControlProfileId: "akcp_connection_wallets",
+            },
+          ],
+        }),
+      },
+      env
+    );
+    expect(binding.status).toBe(200);
+    await expect(binding.json()).resolves.toMatchObject({
+      data: {
+        policyBindings: [
+          {
+            walletId: SECOND_WALLET_ID,
+            custodyWalletId: SECOND_WALLET_RECORD_ID,
+          },
+        ],
+      },
+    });
+
+    const [policy, revisions, evaluations, inventory] = await Promise.all([
+      app.request(policyPath, { headers }, env),
+      app.request(`${policyPath}/revisions`, { headers }, env),
+      app.request(`${policyPath}/evaluations`, { headers }, env),
+      app.request("/v1/policies?target=wallet", { headers }, env),
+    ]);
+
+    expect(policy.status).toBe(200);
+    await expect(policy.json()).resolves.toMatchObject({
+      data: { policy: { walletId: SECOND_WALLET_ID, defaultAction: "deny" } },
+    });
+    expect(revisions.status).toBe(200);
+    await expect(revisions.json()).resolves.toMatchObject({
+      data: {
+        profile: { custodyWalletId: SECOND_WALLET_RECORD_ID },
+        revisions: [{ revisionNumber: 1 }],
+      },
+    });
+    expect(evaluations.status).toBe(200);
+    await expect(evaluations.json()).resolves.toMatchObject({ data: [] });
+    expect(inventory.status).toBe(200);
+    await expect(inventory.json()).resolves.toMatchObject({
+      data: {
+        controls: expect.arrayContaining([
+          expect.objectContaining({
+            targetId: SECOND_WALLET_RECORD_ID,
+            walletId: SECOND_WALLET_ID,
+            status: "active",
+          }),
+        ]),
+      },
+    });
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+  });
 });
 
 async function walletCount(): Promise<number> {

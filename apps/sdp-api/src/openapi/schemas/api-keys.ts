@@ -454,6 +454,11 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       description: "If true, provisions a new custody wallet and binds it to the key.",
       example: false,
     }),
+    connectionId: withOpenApi(apiKeyCreateSchemaBase.shape.connectionId, {
+      description:
+        "Optional exact Custody Connection for wallet provisioning. Requires walletScope 'selected' and provisionWallet true.",
+      example: "cconn_123",
+    }),
     walletLabel: withOpenApi(apiKeyCreateSchemaBase.shape.walletLabel, {
       description: "Optional label for a provisioned wallet.",
       example: "Mint authority wallet",
@@ -463,7 +468,18 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       example: "mint_authority",
     }),
   })
-  .openapi({ description: "Create API key request body." });
+  .openapi({
+    description: "Create API key request body.",
+    example: {
+      name: "Primary Key",
+      role: "api_developer",
+      walletScope: "selected",
+      provisionWallet: true,
+      connectionId: "cconn_123",
+      walletLabel: "Mint authority wallet",
+      walletPurpose: "mint_authority",
+    },
+  });
 
 export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
   .extend({

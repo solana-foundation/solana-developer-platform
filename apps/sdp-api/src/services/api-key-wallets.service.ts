@@ -7,6 +7,10 @@ export interface ApiKeyWalletBinding {
   permissions: Permission[];
 }
 
+export interface ExactApiKeyWalletBinding extends ApiKeyWalletBinding {
+  custodyWalletId: string;
+}
+
 export interface ApiKeyWalletBindingForKey extends ApiKeyWalletBinding {
   apiKeyId: string;
 }
@@ -74,7 +78,7 @@ export async function listApiKeyWalletBindingsForApiKeys(
 export async function replaceApiKeyWalletBindings(
   db: DatabaseClient,
   apiKeyId: string,
-  bindings: ApiKeyWalletBinding[]
+  bindings: ExactApiKeyWalletBinding[]
 ): Promise<void> {
   const statements: PreparedStatement[] = [
     db.prepare("DELETE FROM api_key_wallet_permissions WHERE api_key_id = ?").bind(apiKeyId),
@@ -84,13 +88,15 @@ export async function replaceApiKeyWalletBindings(
     statements.push(
       db
         .prepare(
-          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES (?, ?, ?, ?)`
+          `INSERT INTO api_key_wallet_permissions
+             (id, api_key_id, wallet_id, custody_wallet_id, permissions)
+           VALUES (?, ?, ?, ?, ?)`
         )
         .bind(
           `akw_${crypto.randomUUID()}`,
           apiKeyId,
           binding.walletId,
+          binding.custodyWalletId,
           JSON.stringify(normalizeApiKeyWalletPermissions(binding.permissions))
         )
     );
@@ -102,14 +108,16 @@ export async function replaceApiKeyWalletBindings(
 export async function upsertApiKeyWalletBinding(
   db: DatabaseClient,
   apiKeyId: string,
-  binding: ApiKeyWalletBinding
+  binding: ExactApiKeyWalletBinding
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO api_key_wallet_permissions
+         (id, api_key_id, wallet_id, custody_wallet_id, permissions)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(api_key_id, wallet_id)
        DO UPDATE SET
+         custody_wallet_id = excluded.custody_wallet_id,
          permissions = excluded.permissions,
          updated_at = sdp_iso_now()`
     )
@@ -117,6 +125,7 @@ export async function upsertApiKeyWalletBinding(
       `akw_${crypto.randomUUID()}`,
       apiKeyId,
       binding.walletId,
+      binding.custodyWalletId,
       JSON.stringify(normalizeApiKeyWalletPermissions(binding.permissions))
     )
     .run();
@@ -129,11 +138,13 @@ export async function cloneApiKeyWalletBindings(
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+      `INSERT INTO api_key_wallet_permissions
+         (id, api_key_id, wallet_id, custody_wallet_id, permissions)
         SELECT
          'akw_' || md5(random()::text || clock_timestamp()::text),
          ?,
          wallet_id,
+         custody_wallet_id,
          permissions
        FROM api_key_wallet_permissions
        WHERE api_key_id = ?`

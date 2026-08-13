@@ -1348,9 +1348,12 @@ export class SigningService {
     params: {
       walletId: string;
       provider?: SigningConfiguration["provider"];
+      configId?: string;
     }
   ): Promise<void> {
-    const config = await this.getConfigurationForMutation(orgId, projectId, params.provider);
+    const config = params.configId
+      ? await this.configStore.getById(params.configId)
+      : await this.getConfigurationForMutation(orgId, projectId, params.provider);
     if (!config) {
       throw new SigningError(
         params.provider
@@ -1358,6 +1361,15 @@ export class SigningService {
           : "Custody not initialized",
         "NOT_FOUND"
       );
+    }
+    if (
+      config.organizationId !== orgId ||
+      (config.projectId !== null && config.projectId !== projectId)
+    ) {
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+    if (params.provider && params.provider !== config.provider) {
+      throw new SigningError("Provider does not match custody wallet", "INVALID_REQUEST");
     }
 
     await this.assertProviderEnabled(orgId, config.provider);

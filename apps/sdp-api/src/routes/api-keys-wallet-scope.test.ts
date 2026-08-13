@@ -341,17 +341,78 @@ describe("API key wallet scope routes", () => {
 
     const bindings = await getDb(env)
       .prepare(
-        "SELECT wallet_id FROM api_key_wallet_permissions WHERE api_key_id = ? ORDER BY wallet_id"
+        `SELECT wallet_id, custody_wallet_id
+         FROM api_key_wallet_permissions
+         WHERE api_key_id = ?
+         ORDER BY wallet_id`
       )
       .bind(body.data.apiKey.id)
-      .all<{ wallet_id: string }>();
-    expect(bindings.results?.map((row) => row.wallet_id)).toEqual(["wal_scope_a", "wal_scope_b"]);
+      .all<{ wallet_id: string; custody_wallet_id: string | null }>();
+    expect(bindings.results).toEqual([
+      { wallet_id: "wal_scope_a", custody_wallet_id: "cwlt_scope_a" },
+      { wallet_id: "wal_scope_b", custody_wallet_id: "cwlt_scope_b" },
+    ]);
 
     const policyBindings = await getDb(env)
       .prepare("SELECT COUNT(*) AS count FROM api_key_wallet_policy_bindings WHERE api_key_id = ?")
       .bind(body.data.apiKey.id)
       .first<{ count: number }>();
     expect(Number(policyBindings?.count)).toBe(0);
+  });
+
+  it("rejects a newly authored wallet binding when its provider wallet ID is ambiguous", async () => {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted, status)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "cust_cfg_api_key_wallet_scope_duplicate",
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          "privy",
+          "test-config",
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "cwlt_scope_a_duplicate",
+          "cust_cfg_api_key_wallet_scope_duplicate",
+          "wal_scope_a",
+          "pub_scope_a_duplicate",
+          "Duplicate Wallet Scope A",
+          "transfer",
+          "active"
+        ),
+    ]);
+
+    const response = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          name: "Ambiguous wallet key",
+          walletScope: "selected",
+          signingWalletId: "wal_scope_a",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    const keyCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM api_keys WHERE name = ?")
+      .bind("Ambiguous wallet key")
+      .first<{ count: number }>();
+    expect(Number(keyCount?.count)).toBe(0);
   });
 
   it("lists wallet access and policy binding metadata for selected-wallet keys", async () => {
@@ -955,6 +1016,6 @@ describe("API key wallet scope routes", () => {
       env
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(409);
   });
 });

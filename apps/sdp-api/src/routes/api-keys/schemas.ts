@@ -24,6 +24,7 @@ export const apiKeyCreateSchema = z.object({
   signingWalletIds: z.array(z.string().min(1)).optional(),
   walletBindings: z.array(apiKeyWalletBindingSchema).optional(),
   provisionWallet: z.boolean().optional(),
+  connectionId: z.string().min(1).optional(),
   walletLabel: z.string().max(100).optional(),
   walletPurpose: z
     .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])

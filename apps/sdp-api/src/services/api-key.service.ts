@@ -477,11 +477,13 @@ export class ApiKeyService {
 
       await tx
         .prepare(
-          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+          `INSERT INTO api_key_wallet_permissions
+             (id, api_key_id, wallet_id, custody_wallet_id, permissions)
            SELECT
              'akw_' || md5(random()::text || clock_timestamp()::text),
              ?,
              wallet_id,
+             custody_wallet_id,
              permissions
            FROM api_key_wallet_permissions
            WHERE api_key_id = ?`

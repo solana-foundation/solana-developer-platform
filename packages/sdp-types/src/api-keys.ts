@@ -20,6 +20,11 @@ export interface ApiKeyWalletBinding {
   permissions: Permission[];
 }
 
+/** Internal authorization identity carried only in API-key auth/cache state. */
+export interface ApiKeyWalletAuthorizationBinding extends ApiKeyWalletBinding {
+  custodyWalletId?: string;
+}
+
 export interface ApiKeyWalletPolicyBindingSummary {
   id: string;
   bindingScope: ApiKeyWalletPolicyBindingScope;
@@ -76,7 +81,7 @@ export interface CachedApiKey {
   signingWalletId: string | null;
   walletScope?: ApiKeyWalletScope;
   signingWalletIds?: string[];
-  walletBindings?: ApiKeyWalletBinding[];
+  walletBindings?: ApiKeyWalletAuthorizationBinding[];
   policyBindings?: ApiKeyWalletPolicyBindingSummary[];
   status: ApiKeyStatus;
   expiresAt: string | null;
@@ -103,6 +108,7 @@ export interface CreateApiKeyRequest {
     permissions?: Permission[];
   }>;
   provisionWallet?: boolean;
+  connectionId?: string;
   walletLabel?: string;
   walletPurpose?: string;
 }

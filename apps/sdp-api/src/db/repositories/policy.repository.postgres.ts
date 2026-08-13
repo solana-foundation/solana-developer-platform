@@ -58,7 +58,7 @@ const WALLET_CONTROL_PROFILE_REVISION_HISTORY_LIMIT = 100;
 
 const POLICY_CONTROL_INVENTORY_CTE = `
 WITH scope AS (
-  SELECT ?::text AS organization_id, ?::text AS project_id, ?::text[] AS wallet_ids
+  SELECT ?::text AS organization_id, ?::text AS project_id, ?::text[] AS custody_wallet_ids
 ),
 wallet_targets AS (
   SELECT
@@ -66,16 +66,17 @@ wallet_targets AS (
     w.wallet_id,
     COALESCE(NULLIF(w.label, ''), w.wallet_id) AS display_name,
     w.public_key AS wallet_address,
-    c.provider,
+    COALESCE(c.provider, connection.provider) AS provider,
     COALESCE(w.updated_at, w.created_at) AS target_updated_at
   FROM custody_wallets w
-  INNER JOIN custody_configs c ON c.id = w.custody_config_id
+  LEFT JOIN custody_configs c ON c.id = w.custody_config_id
+  LEFT JOIN custody_connections connection ON connection.id = w.custody_connection_id
   INNER JOIN scope s
-    ON c.organization_id = s.organization_id
-   AND c.project_id IS NOT DISTINCT FROM s.project_id
-  WHERE c.status = 'active'
+    ON COALESCE(c.organization_id, connection.organization_id) = s.organization_id
+   AND COALESCE(c.project_id, connection.project_id) IS NOT DISTINCT FROM s.project_id
+  WHERE COALESCE(c.status, connection.status) = 'active'
     AND w.status = 'active'
-    AND (s.wallet_ids IS NULL OR w.wallet_id = ANY(s.wallet_ids))
+    AND (s.custody_wallet_ids IS NULL OR w.id = ANY(s.custody_wallet_ids))
 ),
 api_key_targets AS (
   SELECT
@@ -999,15 +1000,19 @@ async function tenantOwnsWallet(
     .prepare(
       `SELECT w.id
        FROM custody_wallets w
-       INNER JOIN custody_configs c ON c.id = w.custody_config_id
+       LEFT JOIN custody_configs c ON c.id = w.custody_config_id
+       LEFT JOIN custody_connections connection ON connection.id = w.custody_connection_id
        WHERE (w.id = ? OR w.wallet_id = ?)
-         AND c.organization_id = ?
-         AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
+         AND COALESCE(c.organization_id, connection.organization_id) = ?
+         AND (
+           (c.id IS NOT NULL AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL))
+           OR (connection.id IS NOT NULL AND connection.project_id IS NOT DISTINCT FROM ?)
+         )
          AND w.status = 'active'
-         AND c.status = 'active'
+         AND COALESCE(c.status, connection.status) = 'active'
        LIMIT 1`
     )
-    .bind(walletId, walletId, scope.organizationId, scope.projectId)
+    .bind(walletId, walletId, scope.organizationId, scope.projectId, scope.projectId)
     .first<{ id: string }>();
   return Boolean(row);
 }
@@ -1024,19 +1029,24 @@ async function tenantOwnsWalletTarget(
     .prepare(
       `SELECT w.id
        FROM custody_wallets w
-       INNER JOIN custody_configs c ON c.id = w.custody_config_id
+       LEFT JOIN custody_configs c ON c.id = w.custody_config_id
+       LEFT JOIN custody_connections connection ON connection.id = w.custody_connection_id
        WHERE w.wallet_id = ?
          ${custodyPredicate}
-         AND c.organization_id = ?
-         AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
+         AND COALESCE(c.organization_id, connection.organization_id) = ?
+         AND (
+           (c.id IS NOT NULL AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL))
+           OR (connection.id IS NOT NULL AND connection.project_id IS NOT DISTINCT FROM ?)
+         )
          AND w.status = 'active'
-         AND c.status = 'active'
+         AND COALESCE(c.status, connection.status) = 'active'
        LIMIT 1`
     )
     .bind(
       walletId,
       ...(hasCustodyWalletId ? [custodyWalletId] : []),
       scope.organizationId,
+      scope.projectId,
       scope.projectId
     )
     .first<{ id: string }>();
@@ -1093,7 +1103,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         .bind(
           scope.organizationId,
           scope.projectId,
-          input.walletIds ?? null,
+          input.custodyWalletIds ?? null,
           ...(input.status ? [input.status] : []),
           ...summaryFilters.params
         )
@@ -1114,7 +1124,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         .bind(
           scope.organizationId,
           scope.projectId,
-          input.walletIds ?? null,
+          input.custodyWalletIds ?? null,
           ...rowFilters.params,
           pageSize,
           offset
@@ -1862,24 +1872,28 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
              ak.project_id,
              w.wallet_id,
              w.id AS custody_wallet_id,
-             c.project_id AS wallet_project_id,
+             COALESCE(c.project_id, connection.project_id) AS wallet_project_id,
              COALESCE(es.binding_count, 0) AS endpoint_binding_count,
              perm.id AS endpoint_wallet_binding_id
            FROM target_api_key ak
-           JOIN custody_configs c
-             ON c.organization_id = ak.organization_id
-            AND c.status = 'active'
            JOIN custody_wallets w
-             ON w.custody_config_id = c.id
-            AND w.status = 'active'
+             ON w.status = 'active'
             AND w.id = ?
+           LEFT JOIN custody_configs c ON c.id = w.custody_config_id
+           LEFT JOIN custody_connections connection ON connection.id = w.custody_connection_id
            LEFT JOIN endpoint_scope es ON es.api_key_id = ak.id
            LEFT JOIN api_key_wallet_permissions perm
              ON perm.api_key_id = ak.id
-            AND perm.wallet_id = w.wallet_id
+            AND perm.custody_wallet_id = w.id
+           WHERE COALESCE(c.organization_id, connection.organization_id) = ak.organization_id
+             AND COALESCE(c.status, connection.status) = 'active'
+             AND (
+               (c.id IS NOT NULL AND (c.project_id IS NOT DISTINCT FROM ak.project_id OR c.project_id IS NULL))
+               OR (connection.id IS NOT NULL AND connection.project_id IS NOT DISTINCT FROM ak.project_id)
+             )
            ORDER BY
              CASE
-               WHEN c.project_id = ak.project_id THEN 0
+               WHEN COALESCE(c.project_id, connection.project_id) = ak.project_id THEN 0
                WHEN c.project_id IS NULL THEN 1
                ELSE 2
              END,

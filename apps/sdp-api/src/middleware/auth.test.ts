@@ -472,6 +472,78 @@ describe("Auth Middleware", () => {
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
+
+    it("reloads stale string-only wallet authorization from the database", async () => {
+      await getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(TEST_USER.id, TEST_USER.email)
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO projects
+             (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, ?, 'active', ?)`
+        )
+        .bind(
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_PROJECT.name,
+          TEST_PROJECT.slug,
+          TEST_PROJECT.environment,
+          TEST_USER.id
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_keys
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+              role, permissions, status)
+           VALUES (?, ?, ?, ?, 'Exact auth key', ?, ?, 'api_admin', '["*"]', 'active')`
+        )
+        .bind(
+          TEST_API_KEY.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_USER.id,
+          TEST_API_KEY.prefix,
+          validKeyHash
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_key_wallet_permissions
+             (id, api_key_id, wallet_id, custody_wallet_id, permissions)
+           VALUES ('akw_auth_unresolved', ?, 'wallet_unresolved', NULL, '["*"]')`
+        )
+        .bind(TEST_API_KEY.id)
+        .run();
+
+      await createKVStoreSet(env).apiKeys.put(
+        `key:${validKeyHash}`,
+        JSON.stringify({
+          ...TEST_CACHED_API_KEY,
+          rotationDeadline: null,
+          walletScope: "selected",
+          walletBindings: [{ walletId: "wallet_unresolved", permissions: ["*"] }],
+        })
+      );
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(res.status).toBe(200);
+
+      const cached = await createKVStoreSet(env).apiKeys.get<{
+        walletScope: string;
+        walletBindings: unknown[];
+      }>(`key:${validKeyHash}`, "json");
+      expect(cached).toMatchObject({
+        walletScope: "selected",
+        walletBindings: [],
+      });
+    });
   });
 
   describe("permissions", () => {

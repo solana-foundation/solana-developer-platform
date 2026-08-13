@@ -56,6 +56,14 @@ const SECOND_CUSTODY_WALLET = {
   purpose: "payments",
 };
 
+const CONNECTION_CUSTODY_WALLET = {
+  id: "cw_policy_connection",
+  walletId: "wallet_policy_connection",
+  publicKey: "ConnectionPolicyWallet111111111111111111111",
+  label: "Connection policy wallet",
+  purpose: "payments",
+};
+
 const DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID = "ccfg_policy_duplicate_provider_wallet";
 const DUPLICATE_PROVIDER_CUSTODY_WALLET = {
   id: "cw_policy_duplicate_provider_wallet",
@@ -866,6 +874,52 @@ describe("PolicyRepository (postgres)", () => {
     });
   });
 
+  it("owns and binds active Connection wallets by exact custody identity", async () => {
+    await seedConnectionCustodyWallet();
+    const service = policyStores(repo);
+    const walletProfile = await repo.createWalletControlProfile({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: CONNECTION_CUSTODY_WALLET.id,
+      name: "Connection wallet controls",
+      createdBy: TEST_USER.id,
+    });
+
+    expect(walletProfile?.custody_wallet_id).toBe(CONNECTION_CUSTODY_WALLET.id);
+
+    const { profile } = await createActiveApiKeyControlProfile(repo, {
+      name: "Connection binding controls",
+      defaultAction: "review",
+    });
+    await seedEndpointWalletPermission(
+      "akw_policy_connection",
+      CONNECTION_CUSTODY_WALLET.walletId,
+      CONNECTION_CUSTODY_WALLET.id
+    );
+
+    const binding = await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "selected",
+      walletId: CONNECTION_CUSTODY_WALLET.walletId,
+      custodyWalletId: CONNECTION_CUSTODY_WALLET.id,
+      apiKeyControlProfileId: profile.id,
+    });
+
+    expect(binding).toMatchObject({
+      walletId: CONNECTION_CUSTODY_WALLET.walletId,
+      custodyWalletId: CONNECTION_CUSTODY_WALLET.id,
+    });
+    await expect(
+      service.resolveApiKeyWalletPolicyScope({
+        apiKeyId: TEST_API_KEY.id,
+        custodyWalletId: CONNECTION_CUSTODY_WALLET.id,
+      })
+    ).resolves.toMatchObject({
+      target: { custodyWalletId: CONNECTION_CUSTODY_WALLET.id },
+      binding: { custodyWalletId: CONNECTION_CUSTODY_WALLET.id },
+    });
+  });
+
   it("keeps selected policy bindings distinct when provider wallet IDs collide", async () => {
     await seedDuplicateProviderCustodyWallet();
 
@@ -943,10 +997,15 @@ describe("PolicyRepository (postgres)", () => {
   it("resolves selected-wallet API key policy bindings for multiple endpoint-scoped wallets", async () => {
     const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
-    await seedEndpointWalletPermission("akw_policy_selected_primary", TEST_CUSTODY_WALLET.walletId);
+    await seedEndpointWalletPermission(
+      "akw_policy_selected_primary",
+      TEST_CUSTODY_WALLET.walletId,
+      TEST_CUSTODY_WALLET.id
+    );
     await seedEndpointWalletPermission(
       "akw_policy_selected_second",
-      SECOND_CUSTODY_WALLET.walletId
+      SECOND_CUSTODY_WALLET.walletId,
+      SECOND_CUSTODY_WALLET.id
     );
     const { profile } = await createActiveApiKeyControlProfile(repo, {
       name: "Selected wallet controls",
@@ -1063,7 +1122,11 @@ describe("PolicyRepository (postgres)", () => {
   it("fails closed when an all-wallet policy binding would exceed selected endpoint wallet access", async () => {
     const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
-    await seedEndpointWalletPermission("akw_policy_endpoint_primary", TEST_CUSTODY_WALLET.walletId);
+    await seedEndpointWalletPermission(
+      "akw_policy_endpoint_primary",
+      TEST_CUSTODY_WALLET.walletId,
+      TEST_CUSTODY_WALLET.id
+    );
     const { profile } = await createActiveApiKeyControlProfile(repo, {
       name: "All policy selected endpoint",
       defaultAction: "review",
@@ -1203,10 +1266,11 @@ describe("PolicyRepository (postgres)", () => {
   it("preserves policy-scoped wallet bindings when an API key is rotated", async () => {
     await getDb(env)
       .prepare(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES ('akw_rotate_policy_test', ?, ?, '["payments:write"]')`
+        `INSERT INTO api_key_wallet_permissions
+           (id, api_key_id, wallet_id, custody_wallet_id, permissions)
+         VALUES ('akw_rotate_policy_test', ?, ?, ?, '["payments:write"]')`
       )
-      .bind(TEST_API_KEY.id, TEST_CUSTODY_WALLET.walletId)
+      .bind(TEST_API_KEY.id, TEST_CUSTODY_WALLET.walletId, TEST_CUSTODY_WALLET.id)
       .run();
 
     const apiKeyProfile = await repo.createApiKeyControlProfile({
@@ -1247,6 +1311,20 @@ describe("PolicyRepository (postgres)", () => {
       "pepper"
     );
     expect(rotation).not.toBeNull();
+
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT wallet_id, custody_wallet_id
+           FROM api_key_wallet_permissions
+           WHERE api_key_id = ?`
+        )
+        .bind(rotation?.apiKey.id)
+        .first()
+    ).toEqual({
+      wallet_id: TEST_CUSTODY_WALLET.walletId,
+      custody_wallet_id: TEST_CUSTODY_WALLET.id,
+    });
 
     const clonedBindings = await repo.listApiKeyWalletPolicyBindings(rotation?.apiKey.id ?? "");
     expect(clonedBindings).toHaveLength(2);
@@ -1508,13 +1586,75 @@ async function seedOtherProjectCustodyWallet(): Promise<void> {
   ]);
 }
 
-async function seedEndpointWalletPermission(id: string, walletId: string): Promise<void> {
+async function seedConnectionCustodyWallet(): Promise<void> {
+  const db = getDb(env);
+  const credentialId = "pcred_policy_connection";
+  const connectionId = "cconn_policy_connection";
+
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO provider_credentials (
+           id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, status, created_by
+         ) VALUES (?, ?, ?, 'privy', 'Policy runtime', 'project', 'runtime',
+                   'runtime_env', 'active', ?)`
+      )
+      .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+    db
+      .prepare(
+        `INSERT INTO custody_connections (
+           id, organization_id, project_id, provider, scope,
+           provider_credential_id, provider_credential_scope_key, status, created_by
+         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+      )
+      .bind(
+        connectionId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        credentialId,
+        TEST_PROJECT.id,
+        TEST_USER.id
+      ),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, label, purpose, status
+         ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        CONNECTION_CUSTODY_WALLET.id,
+        connectionId,
+        CONNECTION_CUSTODY_WALLET.walletId,
+        CONNECTION_CUSTODY_WALLET.publicKey,
+        CONNECTION_CUSTODY_WALLET.label,
+        CONNECTION_CUSTODY_WALLET.purpose
+      ),
+    db
+      .prepare(
+        `UPDATE custody_connections
+         SET default_custody_wallet_id = ?, status = 'active',
+             last_check_status = 'success', last_check_at = sdp_iso_now(),
+             provider_account_fingerprint = 'policy-account',
+             activated_at = sdp_iso_now()
+         WHERE id = ?`
+      )
+      .bind(CONNECTION_CUSTODY_WALLET.id, connectionId),
+  ]);
+}
+
+async function seedEndpointWalletPermission(
+  id: string,
+  walletId: string,
+  custodyWalletId?: string
+): Promise<void> {
   await getDb(env)
     .prepare(
-      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-       VALUES (?, ?, ?, '["payments:write"]')`
+      `INSERT INTO api_key_wallet_permissions
+         (id, api_key_id, wallet_id, custody_wallet_id, permissions)
+       VALUES (?, ?, ?, ?, '["payments:write"]')`
     )
-    .bind(id, TEST_API_KEY.id, walletId)
+    .bind(id, TEST_API_KEY.id, walletId, custodyWalletId ?? null)
     .run();
 }
 

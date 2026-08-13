@@ -189,9 +189,24 @@ async function seedAuthAndConfigs(): Promise<void> {
 
 async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+  const walletBindings = override.walletBindings
+    ? await Promise.all(
+        override.walletBindings.map(async (binding) => {
+          if (binding.custodyWalletId) {
+            return binding;
+          }
+          const wallet = await getDb(env)
+            .prepare("SELECT id FROM custody_wallets WHERE wallet_id = ? LIMIT 1")
+            .bind(binding.walletId)
+            .first<{ id: string }>();
+          return { ...binding, custodyWalletId: wallet?.id ?? binding.walletId };
+        })
+      )
+    : undefined;
   await seedCachedApiKey(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     ...override,
+    ...(walletBindings ? { walletBindings } : {}),
   });
 }
 
@@ -512,6 +527,79 @@ describe("Custody wallet scope routes", () => {
     expect(body.data.aggregate.balances.find((balance) => balance.token === "SOL")).toMatchObject({
       uiAmount: "3",
     });
+
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: sharedWalletId,
+      walletBindings: [
+        {
+          walletId: sharedWalletId,
+          custodyWalletId: "cwlt_scope_shared_a",
+          permissions: ["*"],
+        },
+      ],
+    });
+
+    const selectedList = await app.request(
+      "/v1/wallets?includeAllProviders=true",
+      {
+        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+      },
+      env
+    );
+    expect(selectedList.status).toBe(200);
+    const selectedListBody = (await selectedList.json()) as {
+      data: { wallets: Array<{ id: string }> };
+    };
+    expect(selectedListBody.data.wallets.map((wallet) => wallet.id)).toEqual([
+      "cwlt_scope_shared_a",
+    ]);
+
+    const selectedDetail = await app.request(
+      `/v1/wallets/${sharedWalletId}?includeBalance=false`,
+      {
+        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+      },
+      env
+    );
+    expect(selectedDetail.status).toBe(200);
+    expect(await selectedDetail.json()).toMatchObject({
+      data: { wallet: { id: "cwlt_scope_shared_a", publicKey: TEST_SOLANA_ADDRESSES.wallet2 } },
+    });
+
+    const selectedPublicKey = await app.request(
+      `/v1/wallets/public-key?walletId=${sharedWalletId}`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(selectedPublicKey.status).toBe(200);
+    expect(await selectedPublicKey.json()).toMatchObject({
+      data: { publicKey: TEST_SOLANA_ADDRESSES.wallet2 },
+    });
+
+    const selectedBalances = await app.request(
+      `/v1/payments/wallets/${sharedWalletId}/balances`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(selectedBalances.status).toBe(200);
+
+    const selectedDelete = await app.request(
+      "/v1/wallets",
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ walletId: sharedWalletId, provider: "privy" }),
+      },
+      env
+    );
+    expect(selectedDelete.status).toBe(400);
+    expect(await selectedDelete.json()).toMatchObject({
+      error: { message: "Wallet deletion not supported for provider: privy" },
+    });
   });
 
   it("returns the requested public key when the wallet is authorized", async () => {
@@ -532,7 +620,49 @@ describe("Custody wallet scope routes", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { publicKey: string } };
-    expect(body.data.publicKey).toBe(TEST_SOLANA_ADDRESSES.wallet2);
+    expect(body.data.publicKey).toBe("para_pubkey_a");
+  });
+
+  it("keeps an exact Config binding stable after a same-valued Project wallet appears", async () => {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, default_wallet_id, status)
+           VALUES ('cust_cfg_scope_privy_project', ?, ?, 'privy', 'test-config',
+                   'sdp-custody-encryption-v1', 'privy_wallet_a', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env).prepare(
+        `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES ('cwlt_scope_privy_project', 'cust_cfg_scope_privy_project',
+                   'privy_wallet_a', 'project_duplicate_pubkey', 'active')`
+      ),
+    ]);
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: "privy_wallet_a",
+      walletBindings: [
+        {
+          walletId: "privy_wallet_a",
+          custodyWalletId: "cwlt_scope_privy_a",
+          permissions: ["wallets:read"],
+        },
+      ],
+    });
+
+    const response = await app.request(
+      "/v1/wallets/public-key?walletId=privy_wallet_a",
+      {
+        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { publicKey: "privy_pubkey_a" } });
   });
 
   it("returns 404 when the requested wallet is outside the API key bindings", async () => {
