@@ -95,20 +95,20 @@ for i = 1, count do
   local per_tx = tonumber(ARGV[offset + 2])
   local hour_limit = tonumber(ARGV[offset + 3])
   local day_limit = tonumber(ARGV[offset + 4])
-  if amount > per_tx then return {0, i} end
+  if amount > per_tx then return {0, i, -1, -1} end
   counted_hour[i] = redis.call('HGET', KEYS[1], ownership_field .. ':' .. field)
   counted_day[i] = redis.call('HGET', KEYS[2], ownership_field .. ':' .. field)
   local hour_used = tonumber(redis.call('HGET', KEYS[1], field) or '0')
-  if counted_hour[i] then
-    if hour_used > hour_limit then return {0, i} end
-  elseif hour_used + amount > hour_limit then
-    return {0, i}
-  end
   local day_used = tonumber(redis.call('HGET', KEYS[2], field) or '0')
+  if counted_hour[i] then
+    if hour_used > hour_limit then return {0, i, hour_used, day_used} end
+  elseif hour_used + amount > hour_limit then
+    return {0, i, hour_used, day_used}
+  end
   if counted_day[i] then
-    if day_used > day_limit then return {0, i} end
+    if day_used > day_limit then return {0, i, hour_used, day_used} end
   elseif day_used + amount > day_limit then
-    return {0, i}
+    return {0, i, hour_used, day_used}
   end
 end
 for i = 1, count do
@@ -231,6 +231,10 @@ redis.call('SET', KEYS[4], actual, 'PX', ARGV[4 + count])
 return {1, delta}
 `;
 
+function atDenial(counter: number | undefined): number | undefined {
+  return counter === undefined || counter < 0 ? undefined : counter;
+}
+
 const SCRIPT_SHA = {
   initialize: createHash("sha1").update(INITIALIZE_LUA).digest("hex"),
   reserve: createHash("sha1").update(RESERVE_LUA).digest("hex"),
@@ -327,7 +331,7 @@ export class SponsorshipBudgetRedis {
       RESERVE_LUA,
       [keys.hour, keys.day, keys.reservation, keys.control, keys.settlement],
       args
-    )) as [number, number];
+    )) as [number, number, number?, number?];
     if (result[0] === 2) return "duplicate";
     if (result[0] === 1) return "admitted";
     const scopeType = this.scopeTypeAt(result[1]);
@@ -352,8 +356,8 @@ export class SponsorshipBudgetRedis {
       per_transaction_lamports: policy?.perTransactionLamports,
       hourly_lamports: policy?.hourlyLamports,
       daily_lamports: policy?.dailyLamports,
-      hour_used_lamports: input.usage.hour[scopeType],
-      day_used_lamports: input.usage.day[scopeType],
+      hour_used_lamports: atDenial(result[2]),
+      day_used_lamports: atDenial(result[3]),
     });
     return "denied";
   }

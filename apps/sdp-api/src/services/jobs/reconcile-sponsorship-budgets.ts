@@ -78,7 +78,17 @@ export async function reconcileSponsorshipBudgets(
     awaiting_expiry: 0,
   };
 
-  if (reservations.length === 0) return;
+  if (reservations.length === 0) {
+    logEvent("info", {
+      event: "sdp_api_sponsorship_reconciliation_tick",
+      network,
+      candidates: 0,
+      failed: 0,
+      batch_saturated: false,
+      ...outcomes,
+    });
+    return;
+  }
 
   let providerConfiguration: SponsorshipProviderConfiguration;
   try {
@@ -279,6 +289,13 @@ async function tripBreaker(
 ): Promise<void> {
   const policy = await repository.tripGlobalBreaker(network, reason);
   if (policy) await budgetRedis.syncPolicy(policy);
+  logEvent("error", {
+    event: "sdp_api_sponsorship_breaker_tripped",
+    network,
+    reason,
+    already_tripped: policy === null,
+    source: "reconciliation",
+  });
 }
 
 async function persistAmbiguousCharge(input: {

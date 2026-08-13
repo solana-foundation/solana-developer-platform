@@ -79,23 +79,37 @@ describe("SponsorshipBudgetRedis", () => {
     expect(Object.keys(hour).some((field) => field.includes("undefined"))).toBe(false);
   });
 
-  it("records which scope and limit rejected an admission", async () => {
+  it("records which scope and limit rejected an admission, with the counters it was rejected against", async () => {
     logEvent.mockClear();
+    const policies = [
+      policy("global", 1, true, 1000),
+      { ...policy("organization", 1, true, 1000), hourlyLamports: 5 },
+    ];
+    const window = {
+      network: "devnet" as const,
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      policies,
+    };
     await expect(
       budget.reserve({
-        network: "devnet",
-        organizationId: "org_1",
-        projectId: null,
-        hourBucket: "2026-08-03T10:00:00.000Z",
-        dayBucket: "2026-08-03T00:00:00.000Z",
+        ...window,
+        reservationId: "reservation_first",
+        attempt: 1,
+        amount: 4,
+        usage: EMPTY_USAGE,
+      })
+    ).resolves.toBe("admitted");
+
+    await expect(
+      budget.reserve({
+        ...window,
         reservationId: "reservation_denied",
         attempt: 1,
-        amount: 9,
-        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 5)],
-        usage: {
-          hour: { global: 4, organization: 4, project: 0 },
-          day: { global: 4, organization: 4, project: 0 },
-        },
+        amount: 4,
+        usage: EMPTY_USAGE,
       })
     ).resolves.toBe("denied");
 
@@ -106,10 +120,10 @@ describe("SponsorshipBudgetRedis", () => {
         network: "devnet",
         scope_type: "organization",
         organization_id: "org_1",
-        requested_lamports: 9,
-        per_transaction_lamports: 5,
+        requested_lamports: 4,
         hourly_lamports: 5,
         hour_used_lamports: 4,
+        day_used_lamports: 4,
       })
     );
   });
