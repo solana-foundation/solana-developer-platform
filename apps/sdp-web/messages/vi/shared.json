@@ -83,6 +83,8 @@
     "mainnetSoon": "Hỗ trợ Mainnet sắp ra mắt.",
     "createOrganization": "Tạo tổ chức",
     "manageOrganization": "Quản lý tổ chức",
+    "copyOrganizationId": "Sao chép ID tổ chức",
+    "organizationId": "ID tổ chức",
     "clear": "Xóa",
     "chooseDate": "Chọn ngày",
     "chooseDateAndTime": "Chọn ngày và giờ",
@@ -175,6 +177,7 @@
     "earn": "Earn",
     "earnNewDeposit": "Chiến lược Earn",
     "backToEarn": "Quay lại Earn",
+    "heliusRings": "Helius Rings",
     "apiKeys": "Khóa API",
     "policies": "Chính sách",
     "newApiKey": "Khóa API mới",
@@ -331,6 +334,8 @@
     "searchPlaceholder": "Tìm integrations",
     "filterAllFamilies": "Tất cả",
     "filterAllStatuses": "Mọi trạng thái",
+    "filterAll": "Tất cả",
+    "filterByStatus": "Lọc theo trạng thái",
     "clearFilters": "Xóa bộ lọc",
     "emptyTitle": "Không có integration khớp",
     "emptyBody": "Thử tìm kiếm khác hoặc xóa bộ lọc.",
@@ -359,5 +364,28 @@
     "connectYouWillNeed": "Bạn sẽ cần",
     "connectByArrangement": "Có sẵn theo thỏa thuận. Nhóm SDP cấp quyền truy cập và thiết lập kết nối với tổ chức của bạn.",
     "connectManaged": "Cấp phát theo từng deployment. Nhà cung cấp này do operator SDP cấu hình, không phải tự phục vụ."
+  },
+  "notifications": {
+    "ariaLabel": "Thông báo",
+    "ariaLabelUnread": "Thông báo, {count} chưa đọc",
+    "title": "Thông báo",
+    "markAllRead": "Đánh dấu đã đọc tất cả",
+    "loading": "Đang tải…",
+    "empty": "Bạn đã xem hết.",
+    "error": "Không tải được thông báo.",
+    "retry": "Thử lại",
+    "showMore": "Xem thêm",
+    "emailUnavailable": "Gửi email hiện không khả dụng.",
+    "types": {
+      "workflow_execution": "Automation đã chạy: {trigger}"
+    },
+    "triggerLabels": {
+      "kyc_approved": "KYC đã duyệt",
+      "kyc_rejected": "KYC bị từ chối",
+      "onramp_settled": "On-ramp đã tất toán",
+      "offramp_settled": "Off-ramp đã tất toán",
+      "recurring_payment_failed": "Thanh toán định kỳ thất bại",
+      "token_operation_completed": "Thao tác Token hoàn tất"
+    }
   }
 }
