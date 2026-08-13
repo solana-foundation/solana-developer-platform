@@ -248,6 +248,54 @@ describe("KoraAdapter user_id forwarding", () => {
     });
   });
 
+  it("rejects a policy whose authorities live on the prototype rather than the object", async () => {
+    getConfig.mockResolvedValueOnce({
+      validation_config: {
+        max_allowed_lamports: "2000000",
+        fee_payer_policy: Object.create(ZERO_OUTFLOW_FEE_PAYER_POLICY),
+      },
+    });
+    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
+      feePayerMayTransferLamports: true,
+    });
+  });
+
+  it("rejects a policy hiding an enabled authority behind a non-enumerable key", async () => {
+    getConfig.mockResolvedValueOnce({
+      validation_config: {
+        max_allowed_lamports: "2000000",
+        fee_payer_policy: {
+          ...ZERO_OUTFLOW_FEE_PAYER_POLICY,
+          loader_v4: Object.defineProperty({}, "allow_write", {
+            value: true,
+            enumerable: false,
+          }),
+        },
+      },
+    });
+    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
+      feePayerMayTransferLamports: true,
+    });
+  });
+
+  it("rejects a policy whose authority group is not a plain object", async () => {
+    getConfig.mockResolvedValueOnce({
+      validation_config: {
+        max_allowed_lamports: "2000000",
+        fee_payer_policy: {
+          ...ZERO_OUTFLOW_FEE_PAYER_POLICY,
+          loader_v4: new Map([["allow_write", true]]),
+        },
+      },
+    });
+    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
+      feePayerMayTransferLamports: true,
+    });
+  });
+
   it("treats a non-boolean policy leaf conservatively", async () => {
     getConfig.mockResolvedValueOnce({
       validation_config: {

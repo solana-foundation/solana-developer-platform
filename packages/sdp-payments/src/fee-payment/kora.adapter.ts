@@ -350,6 +350,20 @@ function formatErrorMessage(error: unknown): string {
 // pinning the schema keeps a newly added authority meaningful: one that arrives
 // disabled is still proof of zero outflow, while one that arrives enabled fails
 // closed even though this code has never heard of it.
+function policyMaySpendLamports(policy: FeePayerPolicy): boolean {
+  return !(reportsRequiredAuthorities(policy) && everyAuthorityDisabled(policy));
+}
+
+// Kora reports its policy as JSON, so anything that is not a plain object with
+// its authorities as own properties is not a policy this code can vouch for.
+// Reading inherited or hidden members would let an empty-looking payload pass
+// as proof of zero outflow while carrying an enabled authority out of sight.
+function isPlainRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 const REQUIRED_DISABLED_AUTHORITIES = [
   ["system", "allow_transfer"],
   ["system", "allow_assign"],
@@ -362,10 +376,6 @@ const REQUIRED_DISABLED_AUTHORITIES = [
   ["token_2022", "allow_close_account"],
 ] as const;
 
-function policyMaySpendLamports(policy: FeePayerPolicy): boolean {
-  return !(reportsRequiredAuthorities(policy) && everyAuthorityDisabled(policy));
-}
-
 // A policy Kora truncated, or one this code failed to parse, must not read as
 // proof of zero outflow: the authorities that move lamports have to be present
 // and explicitly disabled before the rest of the report is worth checking.
@@ -373,8 +383,8 @@ function reportsRequiredAuthorities(policy: FeePayerPolicy): boolean {
   return REQUIRED_DISABLED_AUTHORITIES.every((path) => {
     let current: unknown = policy;
     for (const key of path) {
-      if (current === null || typeof current !== "object" || Array.isArray(current)) return false;
-      current = (current as Record<string, unknown>)[key];
+      if (!isPlainRecord(current) || !Object.hasOwn(current, key)) return false;
+      current = current[key];
     }
     return current === false;
   });
@@ -382,8 +392,12 @@ function reportsRequiredAuthorities(policy: FeePayerPolicy): boolean {
 
 function everyAuthorityDisabled(value: unknown): boolean {
   if (typeof value === "boolean") return value === false;
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  return Object.values(value as Record<string, unknown>).every(everyAuthorityDisabled);
+  if (!isPlainRecord(value)) return false;
+  const keys: PropertyKey[] = [
+    ...Object.getOwnPropertyNames(value),
+    ...Object.getOwnPropertySymbols(value),
+  ];
+  return keys.every((key) => everyAuthorityDisabled(value[key]));
 }
 
 function extractRpcErrorCode(error: unknown): number | undefined {
