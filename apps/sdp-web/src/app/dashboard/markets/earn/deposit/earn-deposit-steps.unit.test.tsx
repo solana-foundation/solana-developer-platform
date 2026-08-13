@@ -14,7 +14,7 @@ vi.mock("next/link", () => ({
   default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,
 }));
 
-import { defaultStrategyFilters, visibleStrategies } from "./earn-deposit-model";
+import { rankedFundableStrategies } from "./earn-deposit-model";
 import { ReviewStep } from "./review-step";
 import { StrategyStep } from "./strategy-step";
 import { WalletStep } from "./wallet-step";
@@ -105,7 +105,8 @@ describe("WalletStep", () => {
         ]}
       />
     );
-    expect(html).toContain("DashboardEarn.deposit.walletHolding(1250,USDC)");
+    expect(html).toContain("DashboardEarn.deposit.walletAvailableToInvest");
+    expect(html).toContain("1,250 USDC");
   });
 
   it("offers the connect path when the org has no wallets", () => {
@@ -141,19 +142,14 @@ describe("WalletStep", () => {
 });
 
 describe("StrategyStep", () => {
-  const filters = defaultStrategyFilters();
-
   it("renders the full catalogue as a selectable comparison table", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
-        filters={filters}
         hasError={false}
         isLoading={false}
-        onFiltersChange={() => {}}
-        onReset={() => {}}
         onSelect={() => {}}
         selectedStrategyId={null}
-        strategies={visibleStrategies(CATALOGUE, filters)}
+        strategies={rankedFundableStrategies(CATALOGUE)}
         tokens={["usdc"]}
       />
     );
@@ -168,36 +164,32 @@ describe("StrategyStep", () => {
     expect(html).toContain("$40M");
     // Curator survives as metadata only — never as a selection step.
     expect(html).toContain("DashboardEarn.deposit.curatedBy(Gauntlet)");
-    expect(html).toContain("DashboardEarn.deposit.resultCount(2)");
+    expect(html).not.toContain("DashboardEarn.deposit.filterAccess");
+    expect(html).not.toContain("DashboardEarn.deposit.filterSort");
     // Single-stablecoin catalogue: no redundant column.
     expect(html).not.toContain("DashboardEarn.deposit.strategyStablecoinColumn");
   });
 
-  it("hides the stablecoin filter when the catalogue has a single lane", () => {
+  it("renders no filter banner for the short catalogue", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
-        filters={filters}
         hasError={false}
         isLoading={false}
-        onFiltersChange={() => {}}
-        onReset={() => {}}
         onSelect={() => {}}
         selectedStrategyId={null}
-        strategies={visibleStrategies(CATALOGUE, filters)}
+        strategies={rankedFundableStrategies(CATALOGUE)}
         tokens={["usdc"]}
       />
     );
-    expect(html).not.toContain("DashboardEarn.deposit.filterTokenAny");
+    expect(html).not.toContain("<select");
+    expect(html).not.toContain("DashboardEarn.deposit.clearFilters");
   });
 
-  it("invites widening the filters instead of showing a blank list", () => {
+  it("shows a clear notice instead of a blank list", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
-        filters={filters}
         hasError={false}
         isLoading={false}
-        onFiltersChange={() => {}}
-        onReset={() => {}}
         onSelect={() => {}}
         selectedStrategyId={null}
         strategies={[]}
@@ -205,17 +197,14 @@ describe("StrategyStep", () => {
       />
     );
     expect(html).toContain("DashboardEarn.deposit.strategiesEmpty");
-    expect(html).toContain("DashboardEarn.deposit.clearFilters");
+    expect(html).not.toContain("DashboardEarn.deposit.clearFilters");
   });
 
   it("renders an unreported pool without inventing a number", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
-        filters={filters}
         hasError={false}
         isLoading={false}
-        onFiltersChange={() => {}}
-        onReset={() => {}}
         onSelect={() => {}}
         selectedStrategyId={null}
         strategies={[strategy({ id: "no-pool", riskMetadata: {} })]}

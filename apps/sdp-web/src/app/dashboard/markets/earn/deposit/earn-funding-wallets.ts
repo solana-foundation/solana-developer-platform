@@ -1,6 +1,6 @@
 "use client";
 
-import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types";
 import useSWR from "swr";
 import { portfolioTokenForMint } from "../earn-program-presentation";
 
@@ -70,20 +70,18 @@ export function walletDisplayName(
 }
 
 /**
- * Stablecoin holdings worth naming on a wallet row, largest first. Uses the
- * token `uiAmount` rather than `usdValue`: the USD figure is optional on a
- * balance row, and rendering an absent one as "$0.00" would understate a funded
- * wallet.
+ * Spendable USDC observed in a custody wallet, or zero when the balance read
+ * found none. Earn currently funds over Ground's Solana USDC rail, so this is
+ * the number that belongs on the first screen rather than a generic roll-up of
+ * stablecoins the program cannot accept. `uiAmount` is authoritative here;
+ * `usdValue` is optional and must not turn a funded wallet into "$0.00".
  */
-export function walletStablecoinHoldings(
-  wallet: CustodyWalletSummary
-): readonly CustodyWalletTokenBalance[] {
-  const holdings = (wallet.balances ?? []).filter((balance) => {
-    if (portfolioTokenForMint(balance.mint) === undefined) return false;
+export function walletUsdcAmount(wallet: CustodyWalletSummary): number {
+  return (wallet.balances ?? []).reduce((total, balance) => {
+    if (portfolioTokenForMint(balance.mint) !== "usdc") return total;
     const amount = Number(balance.uiAmount);
-    return Number.isFinite(amount) && amount > 0;
-  });
-  return [...holdings].sort((left, right) => Number(right.uiAmount) - Number(left.uiAmount));
+    return Number.isFinite(amount) && amount > 0 ? total + amount : total;
+  }, 0);
 }
 
 /**
