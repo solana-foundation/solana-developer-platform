@@ -1,6 +1,12 @@
 "use server";
 
-import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
+import {
+  NOTIFICATION_CATEGORIES,
+  NOTIFICATION_CHANNELS,
+  type NotificationPreferenceDto,
+  ORGANIZATION_RPC_PROVIDERS,
+  type OrganizationRpcProvider,
+} from "@sdp/types";
 import { getTranslations } from "@/i18n/server";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
 
@@ -29,6 +35,43 @@ function toErrorMessage(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
+}
+
+type UpdateNotificationPreferencesResult = {
+  status: "success" | "error";
+  message: string;
+};
+
+// Upsert one cell of the caller's notification preference matrix. Per-user, no
+// permission gate beyond the session — the API scopes writes to the authenticated
+// (org, user) and validates category/channel server-side too.
+export async function updateNotificationPreferencesAction(
+  cell: NotificationPreferenceDto
+): Promise<UpdateNotificationPreferencesResult> {
+  const t = await getTranslations();
+  if (
+    !NOTIFICATION_CATEGORIES.includes(cell.category) ||
+    !NOTIFICATION_CHANNELS.includes(cell.channel) ||
+    typeof cell.enabled !== "boolean"
+  ) {
+    return { status: "error", message: t("Shared.notifications.preferences.saveFailed") };
+  }
+
+  try {
+    const client = await createOrgSdpApiClient();
+    await client.fetch("/v1/notifications/preferences", {
+      method: "PUT",
+      body: JSON.stringify({
+        preferences: [{ category: cell.category, channel: cell.channel, enabled: cell.enabled }],
+      }),
+    });
+    return { status: "success", message: t("Shared.notifications.preferences.saved") };
+  } catch (error) {
+    return {
+      status: "error",
+      message: toErrorMessage(error, t("Shared.notifications.preferences.saveFailed")),
+    };
+  }
 }
 
 export async function updateOrganizationRpcSettingsAction(

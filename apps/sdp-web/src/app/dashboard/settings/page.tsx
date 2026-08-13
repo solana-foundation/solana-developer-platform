@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { OrganizationRpcProvider } from "@sdp/types";
+import type { NotificationPreferencesResponse, OrganizationRpcProvider } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { assetProfiles } from "@/flags";
@@ -12,6 +12,7 @@ import { createTimedTrace } from "@/lib/request-tracing";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
 import { AppearanceSection } from "./appearance-section";
 import { MembersSection } from "./members-section";
+import { NotificationsSection } from "./notifications-section";
 import { OrganizationRpcSettingsForm } from "./organization-rpc-settings-form";
 
 type OrganizationSettings = {
@@ -69,12 +70,21 @@ export default async function SettingsPage({
   let isLinked = true;
   let loadError = false;
   let enabledRpcProviders: OrganizationRpcProvider[] = [];
+  // Notification preferences load independently of the org sections: their failure
+  // renders a section-local error, never the page-level one.
+  let notificationPreferences: NotificationPreferencesResponse | null = null;
 
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createOrgSdpApiClient(trace.childContext("dashboard.settings.api"))
     );
     let onboardingFailed = false;
+
+    try {
+      notificationPreferences = await trace.step("fetch_notification_preferences", () =>
+        apiClient.fetch<NotificationPreferencesResponse>("/v1/notifications/preferences")
+      );
+    } catch {}
 
     try {
       const onboarding = await trace.step("fetch_onboarding_status", () =>
@@ -197,6 +207,14 @@ export default async function SettingsPage({
             vercelEnvironment: process.env.VERCEL_ENV,
           })
         }
+      />
+
+      {/* Not permission-gated either: a member's own notification matrix is personal
+          state, same rationale as the appearance section above. */}
+      <NotificationsSection
+        preferences={notificationPreferences?.preferences ?? []}
+        emailEnabled={notificationPreferences?.emailEnabled ?? false}
+        loadError={notificationPreferences === null}
       />
     </div>
   );
