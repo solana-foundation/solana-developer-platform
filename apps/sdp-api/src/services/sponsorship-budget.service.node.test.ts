@@ -222,6 +222,36 @@ describe("BudgetedFeePayment", () => {
     expect(provider.signAndSend).not.toHaveBeenCalled();
   });
 
+  it("releases the durable row when the policy is disabled before the retry", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    budgetRedis.reserve.mockResolvedValueOnce("stale_policy");
+    repository.resolvePolicies
+      .mockResolvedValueOnce([policy("global"), policy("organization"), policy("project")])
+      .mockResolvedValue([policy("global", false), policy("organization"), policy("project")]);
+
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(repository.createReservation).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "sponsorship disabled during admission"
+    );
+    expect(provider.signAndSend).not.toHaveBeenCalled();
+  });
+
+  it("leaves an admission-released reservation reopenable by a later retry", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    budgetRedis.reserve.mockResolvedValueOnce("denied");
+
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(repository.markRedisSettled).toHaveBeenCalledWith(expect.any(String), 1);
+  });
+
   it("releases deterministic pre-send rejections", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     vi.mocked(provider.signAndSend).mockRejectedValueOnce(

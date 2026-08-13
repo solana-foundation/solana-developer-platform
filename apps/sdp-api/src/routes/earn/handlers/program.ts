@@ -614,7 +614,10 @@ export const previewEarnProgramWithdrawal = async (c: AppContext) => {
 
   const preview = await client.previewPortfolioWithdrawal(earnRuntime(c), {
     providerWalletRef: row.provider_wallet_ref,
-    amountUsd: body.amountUsd,
+    // Absent = the liquidity read (PRO-1675). Spread rather than passed as
+    // `undefined` so the provider contract sees a field that is genuinely not
+    // there — the Ground client keys the two request forms off presence.
+    ...(body.amountUsd !== undefined && { amountUsd: body.amountUsd }),
     token: body.token,
   });
 
