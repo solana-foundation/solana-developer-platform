@@ -401,7 +401,13 @@ export function useEarnStrategies() {
 }
 
 export interface EarnWithdrawalPreviewInput {
-  amountUsd: string;
+  /**
+   * Omit for the LIQUIDITY read — "what can this lane pay right now?" — which
+   * is what the withdraw modal asks on open, before the reader types anything
+   * (PRO-1675). Present, the preview also validates that exact amount and
+   * returns its fee and post-withdrawal total.
+   */
+  amountUsd?: string;
   token: EarnPortfolioToken;
 }
 
