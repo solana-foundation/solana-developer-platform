@@ -24,6 +24,7 @@ import {
   ClerkUsersService,
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
+import { notifyMemberJoined, notifyMemberRemoved } from "@/services/notifications";
 import { ProjectService } from "@/services/project.service";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
@@ -355,6 +356,12 @@ async function upsertVerifiedMembership(
       );
   }
 
+  if (existing?.status !== "active") {
+    // Guarded on not-already-active so Clerk role updates don't re-fire; the (org, user)
+    // dedupe key also collapses this with the token-link acceptance path's event.
+    notifyMemberJoined(c, { organizationId, userId: data.userId, email, role });
+  }
+
   const projectService = new ProjectService(getDb(c.env));
   await Promise.all([
     projectService.findOrCreateDefault(organizationId, "sandbox", data.userId),
@@ -413,6 +420,14 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
     .catch((error) =>
       getLogger().error({ error }, "Failed to revoke sessions after membership deletion")
     );
+
+  // Same (org, user) key as the API removal path, so an admin-initiated removal that
+  // also syncs back through this webhook notifies once, not twice.
+  notifyMemberRemoved(c, {
+    organizationId: mapping.organization_id,
+    removedUserId: identity.user_id,
+    email: await resolveMemberEmail(c, identity.user_id),
+  });
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
