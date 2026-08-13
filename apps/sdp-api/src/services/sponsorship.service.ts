@@ -1,12 +1,19 @@
-import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import {
+  createFeePaymentAdapter,
+  FeePaymentError,
+  type FeePaymentPort,
+  type SponsorshipProviderConfiguration,
+} from "@sdp/payments/fee-payment";
 import type { ProjectEnvironment } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
+import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
+import { BudgetedFeePayment } from "./sponsorship-budget.service";
 
 export type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
 
@@ -52,15 +59,32 @@ export function buildKoraUserId(scope: SponsorshipScope): string {
 
 /** Owned application boundary for constructing a fee-payment provider. */
 export function createSponsorshipFeePayment(env: Env, scope: SponsorshipScope): FeePaymentPort {
-  return createFeePaymentAdapter(env, buildKoraUserId(scope));
+  const provider = createFeePaymentAdapter(env, buildKoraUserId(scope));
+  return isSelfHostedDeployment(env) ? provider : new BudgetedFeePayment(env, scope, provider);
 }
 
-/**
- * Compatibility boundary for direct service consumers without tenant context.
- * The adapter emits `sdp:unscoped`, so these callers share a conservative quota
- * bucket instead of bypassing Kora's usage tracker.
- */
+/** Read Kora security configuration through the same owned construction boundary. */
+export async function getManagedSponsorshipProviderConfiguration(
+  env: Env
+): Promise<SponsorshipProviderConfiguration> {
+  const provider = createFeePaymentAdapter(env, "sdp:v1:system:sponsorship-reconciliation");
+  if (!provider.getSponsorshipConfiguration) {
+    throw new FeePaymentError(
+      "Managed sponsorship provider does not expose fail-closed configuration",
+      "PROVIDER_NOT_AVAILABLE"
+    );
+  }
+  return provider.getSponsorshipConfiguration();
+}
+
+/** Compatibility boundary for self-hosted consumers without tenant context. */
 export function createUnscopedSponsorshipFeePayment(env: Env): FeePaymentPort {
+  if (!isSelfHostedDeployment(env)) {
+    throw new AppError(
+      "FORBIDDEN",
+      "Managed sponsorship requires a trusted organization or project scope"
+    );
+  }
   return createFeePaymentAdapter(env);
 }
 
