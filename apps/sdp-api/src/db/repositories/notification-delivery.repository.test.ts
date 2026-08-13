@@ -77,4 +77,33 @@ describe("NotificationDeliveriesRepository (postgres)", () => {
     expect(await repo.claim(CLAIM)).toBeTruthy();
     expect(await repo.claim({ ...CLAIM, dedupeKey: "evt_2:usr_1" })).toBeTruthy();
   });
+
+  it("claimMany claims in one batch with per-row claim semantics", async () => {
+    // usr_sent is already sent, usr_failed is reclaimable, usr_fresh is new.
+    const sentId = await repo.claim({ ...CLAIM, dedupeKey: "evt_b:usr_sent" });
+    if (!sentId) throw new Error("expected claim");
+    await repo.markSent({ id: sentId, providerMessageId: "msg_b" });
+    const failedId = await repo.claim({ ...CLAIM, dedupeKey: "evt_b:usr_failed" });
+    if (!failedId) throw new Error("expected claim");
+    await repo.markFailed({ id: failedId, error: "provider 500" });
+
+    const claims = await repo.claimMany([
+      { ...CLAIM, dedupeKey: "evt_b:usr_sent" },
+      { ...CLAIM, dedupeKey: "evt_b:usr_failed", recipient: "corrected@example.com" },
+      { ...CLAIM, dedupeKey: "evt_b:usr_fresh" },
+    ]);
+
+    // Sent: absent. Failed: reclaimed under its original row id. Fresh: new claim.
+    expect(claims.has("evt_b:usr_sent")).toBe(false);
+    expect(claims.get("evt_b:usr_failed")).toBe(failedId);
+    expect(claims.get("evt_b:usr_fresh")).toBeTruthy();
+    expect(claims.size).toBe(2);
+
+    const reclaimed = await readStatus(failedId);
+    expect(reclaimed?.status).toBe("pending");
+    expect(reclaimed?.attempt_count).toBe(2);
+    expect(reclaimed?.recipient).toBe("corrected@example.com");
+
+    expect(await repo.claimMany([])).toEqual(new Map());
+  });
 });

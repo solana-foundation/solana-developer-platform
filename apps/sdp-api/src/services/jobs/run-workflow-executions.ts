@@ -279,6 +279,8 @@ export async function runDueWorkflowExecutions(
   const audit = new AuditService(getDb(env), createKVStoreSet(env).cache);
   const result: RunWorkflowExecutionsResult = { recovered: 0, succeeded: 0, failed: 0, retried: 0 };
   const caches: TickCaches = { rules: new Map(), gates: new Map() };
+  // Failure notifications started during this tick; drained before returning.
+  const pendingNotifications: Promise<unknown>[] = [];
 
   // Durable audit row for a terminal execution outcome (system actor → "SDP"). Only
   // terminal states are audited — transient reschedules would be noise. metadata.tokenId
@@ -311,7 +313,10 @@ export async function runDueWorkflowExecutions(
       });
     if (status === "failure") {
       const reason = typeof extra.reason === "string" ? extra.reason : null;
-      await notifyWorkflowRunFailed(env, row, reason);
+      // Fired without awaiting: the notification pipeline includes email round-trips,
+      // and a tick with many failures would otherwise serialize the 5-worker pool
+      // behind Resend. Drained before the tick returns so nothing outlives it.
+      pendingNotifications.push(notifyWorkflowRunFailed(env, row, reason));
     }
   };
 
@@ -350,6 +355,10 @@ export async function runDueWorkflowExecutions(
       }
     })
   );
+
+  // Notifications ride out the tick concurrently with the workers; settle them all
+  // before returning (dispatchNotification never throws, so allSettled is a formality).
+  await Promise.allSettled(pendingNotifications);
 
   return result;
 }

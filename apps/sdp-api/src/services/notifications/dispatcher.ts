@@ -25,10 +25,13 @@ import {
 } from "@/db/repositories";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
-import { publishInboxNudge } from "@/runtime/pubsub-redis";
+import { publishInboxNudges } from "@/runtime/pubsub-redis";
 import {
   createTransactionalEmailService,
   isEmailConfigured,
+  type TransactionalEmailDeliveryResult,
+  TransactionalEmailError,
+  type TransactionalEmailMessage,
   type TransactionalEmailService,
 } from "@/services/email";
 import { renderNotificationEmail } from "@/services/email/templates/notification";
@@ -75,31 +78,70 @@ export interface NotificationDispatchResult {
   error?: string;
 }
 
-async function sendClaimedEmail(params: {
+// Bounded fan-out concurrency: protects the pg pool (max 10 connections shared with
+// live traffic) and stays near Resend's rate limit — a whole-org audience queues
+// behind the cap instead of stampeding.
+const EMAIL_SEND_CONCURRENCY = 4;
+const TRANSIENT_SEND_RETRY_DELAY_MS = 1_500;
+
+function isTransientSendError(error: unknown): boolean {
+  if (!(error instanceof TransactionalEmailError)) return false;
+  return error.status === 429 || (error.status !== undefined && error.status >= 500);
+}
+
+// One delayed in-process retry for provider backpressure (429/5xx): most producers are
+// env-based with no external re-drive, so a rate-limited send would otherwise land as
+// a `failed` claim that nothing ever reclaims.
+async function sendWithOneRetry(
+  emailService: TransactionalEmailService,
+  message: TransactionalEmailMessage
+): Promise<TransactionalEmailDeliveryResult> {
+  try {
+    return await emailService.send(message);
+  } catch (error) {
+    if (!isTransientSendError(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, TRANSIENT_SEND_RETRY_DELAY_MS));
+    return emailService.send(message);
+  }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  task: (item: T) => Promise<R>
+): Promise<Array<PromiseSettledResult<R>>> {
+  const results: Array<PromiseSettledResult<R>> = new Array(items.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index] as T;
+      try {
+        results[index] = { status: "fulfilled", value: await task(item) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return results;
+}
+
+// Send one already-claimed email and settle its claim. Throws on send failure (after
+// marking the claim reclaimable) so the caller can count and log it.
+async function deliverClaimedEmail(params: {
   deliveries: NotificationDeliveriesRepository;
   emailService: TransactionalEmailService;
-  organizationId: string;
-  userId: string | null;
+  claimId: string;
   recipient: string;
-  dedupeKey: string;
   subject: string;
   html: string;
   text: string;
-}): Promise<boolean> {
-  const claimId = await params.deliveries.claim({
-    organizationId: params.organizationId,
-    userId: params.userId,
-    channel: "email",
-    recipient: params.recipient,
-    dedupeKey: params.dedupeKey,
-  });
-  if (!claimId) {
-    // Already sent (or in flight) for this event — a retried producer lands here.
-    return false;
-  }
-  let delivery: { messageId: string | null };
+}): Promise<void> {
+  let delivery: TransactionalEmailDeliveryResult;
   try {
-    delivery = await params.emailService.send({
+    delivery = await sendWithOneRetry(params.emailService, {
       to: [params.recipient],
       subject: params.subject,
       html: params.html,
@@ -107,21 +149,22 @@ async function sendClaimedEmail(params: {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await params.deliveries.markFailed({ id: claimId, error: message }).catch(() => undefined);
+    await params.deliveries
+      .markFailed({ id: params.claimId, error: message })
+      .catch(() => undefined);
     throw error;
   }
   // The mail is delivered; a bookkeeping failure here must NOT mark the claim `failed`
   // (that's the reclaimable state — the next producer run would send a duplicate).
   // Swallowed, the claim stays `pending`, which blocks re-sends: the at-most-once side.
   await params.deliveries
-    .markSent({ id: claimId, providerMessageId: delivery.messageId })
+    .markSent({ id: params.claimId, providerMessageId: delivery.messageId })
     .catch((error) =>
       getLogger().warn(
         { error: error instanceof Error ? error.message : String(error) },
         "notification email sent but markSent failed; claim left pending"
       )
     );
-  return true;
 }
 
 async function resolveRecipients(
@@ -193,25 +236,36 @@ async function sendEmailFanout(
       }),
     managePreferencesUrl: managePreferencesLink(env),
   });
-  const sends = await Promise.allSettled(
-    recipients.map((recipient) =>
-      sendClaimedEmail({
-        deliveries,
-        emailService,
-        organizationId: input.organizationId,
-        userId: recipient.userId,
-        recipient: recipient.email,
-        dedupeKey: `${input.eventKey}:${recipient.userId}`,
-        subject: input.emailSubject ?? input.title,
-        html,
-        text,
-      })
-    )
+  // One batched claim round-trip for the whole fan-out; recipients whose key is
+  // already owned (sent/pending — a retried producer) simply drop out here.
+  const claims = await deliveries.claimMany(
+    recipients.map((recipient) => ({
+      organizationId: input.organizationId,
+      userId: recipient.userId,
+      channel: "email" as const,
+      recipient: recipient.email,
+      dedupeKey: `${input.eventKey}:${recipient.userId}`,
+    }))
+  );
+  const claimed = recipients.flatMap((recipient) => {
+    const claimId = claims.get(`${input.eventKey}:${recipient.userId}`);
+    return claimId ? [{ recipient, claimId }] : [];
+  });
+  const sends = await mapWithConcurrency(claimed, EMAIL_SEND_CONCURRENCY, (entry) =>
+    deliverClaimedEmail({
+      deliveries,
+      emailService,
+      claimId: entry.claimId,
+      recipient: entry.recipient.email,
+      subject: input.emailSubject ?? input.title,
+      html,
+      text,
+    })
   );
   let emailed = 0;
   for (const send of sends) {
     if (send.status === "fulfilled") {
-      if (send.value) emailed += 1;
+      emailed += 1;
     } else {
       getLogger().error(
         { error: send.reason instanceof Error ? send.reason.message : String(send.reason) },
@@ -223,7 +277,8 @@ async function sendEmailFanout(
 }
 
 // Realtime is best-effort; the bell's polling covers a missed nudge. Nudge every
-// in-app recipient — a dedupe-skipped subset just refetches a stable count.
+// in-app recipient — a dedupe-skipped subset just refetches a stable count. One
+// pipelined Redis exchange for the whole fan-out.
 async function publishNudges(
   env: Env,
   organizationId: string,
@@ -235,14 +290,13 @@ async function publishNudges(
       userIds: recipients.map((r) => r.userId),
     });
     const ts = new Date().toISOString();
-    await Promise.allSettled(
-      recipients.map((recipient) => {
-        const nudge: NotificationInboxNudge = {
-          unread: counts.get(recipient.userId) ?? 0,
-          ts,
-        };
-        return publishInboxNudge(env, organizationId, recipient.userId, nudge);
-      })
+    await publishInboxNudges(
+      env,
+      organizationId,
+      recipients.map((recipient) => ({
+        userId: recipient.userId,
+        nudge: { unread: counts.get(recipient.userId) ?? 0, ts } satisfies NotificationInboxNudge,
+      }))
     );
   } catch (error) {
     getLogger().warn(
@@ -287,12 +341,16 @@ export async function dispatchNotification(
     );
 
     const inserted = await insertInAppRows(env, input, inAppRecipients);
-    const emailed = await sendEmailFanout(env, input, emailRecipients);
 
-    // Nudges fire only when something new landed (a retry inserts 0 → no nudges).
+    // Nudge BEFORE the email fan-out: the in-app rows are durable at this point, and
+    // realtime latency must never be gated on Resend round-trips (the SSE path would
+    // otherwise be slower than the 60s poll it exists to beat). Fires only when
+    // something new landed — a retry inserts 0 → no nudges.
     if (inserted > 0 && inAppRecipients.length > 0) {
       await publishNudges(env, input.organizationId, inAppRecipients);
     }
+
+    const emailed = await sendEmailFanout(env, input, emailRecipients);
 
     return { resolved: recipients.length, inserted, emailed };
   } catch (error) {
@@ -378,7 +436,7 @@ export async function dispatchCounterpartyEmail(
     const deliveries = createNotificationDeliveriesRepository(env);
     let delivery: { messageId: string | null };
     try {
-      delivery = await createTransactionalEmailService(env).send({
+      delivery = await sendWithOneRetry(createTransactionalEmailService(env), {
         to: [recipient],
         subject: input.emailSubject ?? input.title,
         html,

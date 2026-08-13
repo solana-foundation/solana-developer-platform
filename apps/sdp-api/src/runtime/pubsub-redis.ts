@@ -139,6 +139,28 @@ export async function publishInboxNudge(
 }
 
 /**
+ * Publish one nudge per recipient in a single pipelined round-trip — a fan-out to N
+ * users costs one network exchange, not N awaited PUBLISHes. Same best-effort
+ * contract as publishInboxNudge.
+ */
+export async function publishInboxNudges(
+  env: Env,
+  organizationId: string,
+  nudges: Array<{ userId: string; nudge: NotificationInboxNudge }>
+): Promise<void> {
+  if (nudges.length === 0) return;
+  const client = await getRedisClient(env);
+  const pipeline = client.pipeline();
+  for (const entry of nudges) {
+    pipeline.publish(
+      notificationInboxChannel(organizationId, entry.userId),
+      JSON.stringify(entry.nudge)
+    );
+  }
+  await pipeline.exec();
+}
+
+/**
  * Subscribe a listener to one (org, user) inbox channel. Returns an async unsubscribe.
  * The channel's SUBSCRIBE is issued on the first listener and UNSUBSCRIBE after the
  * last one leaves (refcounted via the listener set).

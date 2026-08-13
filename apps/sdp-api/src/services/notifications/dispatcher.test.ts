@@ -19,8 +19,7 @@ const { sendMock, emailConfiguredMock, publishMock, deliveriesWrap } = vi.hoiste
     async (
       _env: unknown,
       _orgId: string,
-      _userId: string,
-      _nudge: { unread: number; ts: string }
+      _nudges: Array<{ userId: string; nudge: { unread: number; ts: string } }>
     ) => {}
   ),
   // Lets a test inject repository faults (e.g. markSent failing after a delivered
@@ -55,7 +54,8 @@ vi.mock("@/services/email", async (importOriginal) => {
 });
 
 vi.mock("@/runtime/pubsub-redis", () => ({
-  publishInboxNudge: publishMock,
+  publishInboxNudge: vi.fn(),
+  publishInboxNudges: publishMock,
   subscribeInbox: vi.fn(),
   closeAllSubscribers: vi.fn(),
 }));
@@ -152,11 +152,13 @@ describe("dispatchNotification (postgres)", () => {
       expect(call[0].html).toContain("Member invited");
       expect(call[0].text).toContain("Member invited");
     }
-    // One nudge per recipient with that user's own unread count.
-    expect(publishMock).toHaveBeenCalledTimes(2);
-    for (const [, orgId, , nudge] of publishMock.mock.calls) {
-      expect(orgId).toBe(TEST_ORG.id);
-      expect(nudge?.unread).toBe(1);
+    // One pipelined publish carrying a per-recipient nudge with that user's own count.
+    expect(publishMock).toHaveBeenCalledTimes(1);
+    const [, publishOrgId, nudges] = publishMock.mock.calls[0] ?? [];
+    expect(publishOrgId).toBe(TEST_ORG.id);
+    expect(nudges).toHaveLength(2);
+    for (const entry of nudges ?? []) {
+      expect(entry.nudge.unread).toBe(1);
     }
   });
 

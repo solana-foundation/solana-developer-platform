@@ -43,6 +43,11 @@ export interface ClaimNotificationDeliveryInput {
 export interface NotificationDeliveriesRepository {
   // Returns the claimed row id, or null when the send is already owned (sent/pending).
   claim(input: ClaimNotificationDeliveryInput): Promise<string | null>;
+  // Batched claim for a fan-out: one round-trip for N recipients instead of N.
+  // Same per-row semantics as claim(); returns dedupeKey → claimed row id, with
+  // already-owned keys simply absent. Input dedupe keys must be distinct (a multi-row
+  // upsert cannot touch the same conflict key twice) — per-recipient keys are.
+  claimMany(inputs: ClaimNotificationDeliveryInput[]): Promise<Map<string, string>>;
   markSent(params: { id: string; providerMessageId: string | null }): Promise<void>;
   markFailed(params: { id: string; error: string }): Promise<void>;
 }
