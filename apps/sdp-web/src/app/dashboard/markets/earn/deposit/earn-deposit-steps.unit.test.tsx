@@ -109,6 +109,33 @@ describe("WalletStep", () => {
     expect(html).toContain("1,250 USDC");
   });
 
+  it("distinguishes an unavailable balance read from a confirmed zero", () => {
+    const unavailable = renderToStaticMarkup(
+      <WalletStep
+        fireblocksEnabled
+        hasError={false}
+        isLoading={false}
+        onSelect={() => {}}
+        selectedWalletId={null}
+        wallets={[wallet()]}
+      />
+    );
+    const confirmedZero = renderToStaticMarkup(
+      <WalletStep
+        fireblocksEnabled
+        hasError={false}
+        isLoading={false}
+        onSelect={() => {}}
+        selectedWalletId={null}
+        wallets={[wallet({ balances: [] })]}
+      />
+    );
+
+    expect(unavailable).toContain(">—</span>");
+    expect(unavailable).not.toContain("0 USDC");
+    expect(confirmedZero).toContain("0 USDC");
+  });
+
   it("offers the connect path when the org has no wallets", () => {
     const html = renderToStaticMarkup(
       <WalletStep

@@ -82,7 +82,7 @@ function WalletRow({
               {t("DashboardEarn.deposit.walletAvailableToInvest")}
             </span>
             <span className="text-sm font-medium text-primary tabular-nums">
-              {formatTokenQuantity(availableUsdc, "USDC")}
+              {availableUsdc === undefined ? "—" : formatTokenQuantity(availableUsdc, "USDC")}
             </span>
           </span>
         </span>

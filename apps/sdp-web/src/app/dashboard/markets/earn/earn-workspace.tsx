@@ -19,8 +19,8 @@ import { useCopy } from "@/lib/use-copy";
 import { fundableStrategies } from "./deposit/earn-deposit-model";
 import {
   shortenAddress,
+  totalWalletUsdcAmount,
   useEarnFundingWallets,
-  walletUsdcAmount,
 } from "./deposit/earn-funding-wallets";
 import { formatApy, formatTokenQuantity, formatUsd } from "./earn-format";
 import {
@@ -589,16 +589,16 @@ function StartSection() {
     .map((strategy) => strategyApy(strategy))
     .filter((apy): apy is number => apy !== undefined);
   const fastest = fundable.length > 0 ? Math.min(...fundable.map(settlementDays)) : undefined;
-  const availableUsdc = (wallets ?? []).reduce(
-    (total, wallet) => total + walletUsdcAmount(wallet),
-    0
-  );
+  const availableUsdc = wallets === undefined ? undefined : totalWalletUsdcAmount(wallets);
 
   const stats = [
     {
       id: "available-usdc",
       label: t("DashboardEarn.overview.startStatAvailableUsdc"),
-      value: walletsLoading || walletsError ? "—" : formatTokenQuantity(availableUsdc, "USDC"),
+      value:
+        walletsLoading || walletsError || availableUsdc === undefined
+          ? "—"
+          : formatTokenQuantity(availableUsdc, "USDC"),
     },
     {
       id: "strategies",

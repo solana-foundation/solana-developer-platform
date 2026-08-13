@@ -70,18 +70,33 @@ export function walletDisplayName(
 }
 
 /**
- * Spendable USDC observed in a custody wallet, or zero when the balance read
- * found none. Earn currently funds over Ground's Solana USDC rail, so this is
- * the number that belongs on the first screen rather than a generic roll-up of
- * stablecoins the program cannot accept. `uiAmount` is authoritative here;
- * `usdValue` is optional and must not turn a funded wallet into "$0.00".
+ * Spendable USDC observed in a custody wallet. `undefined` means the RPC read
+ * was unavailable; zero is reserved for a successful observation with no USDC.
+ * Earn currently funds over Ground's Solana USDC rail, so this is the number
+ * that belongs on the first screen rather than a generic roll-up of stablecoins
+ * the program cannot accept. `uiAmount` is authoritative here; `usdValue` is
+ * optional and must not turn a funded wallet into "$0.00".
  */
-export function walletUsdcAmount(wallet: CustodyWalletSummary): number {
-  return (wallet.balances ?? []).reduce((total, balance) => {
+export function walletUsdcAmount(wallet: CustodyWalletSummary): number | undefined {
+  if (wallet.balances === undefined) return undefined;
+  return wallet.balances.reduce((total, balance) => {
     if (portfolioTokenForMint(balance.mint) !== "usdc") return total;
     const amount = Number(balance.uiAmount);
     return Number.isFinite(amount) && amount > 0 ? total + amount : total;
   }, 0);
+}
+
+/** Aggregate only complete observations; one unknown wallet makes the total unknown. */
+export function totalWalletUsdcAmount(
+  wallets: readonly CustodyWalletSummary[]
+): number | undefined {
+  let total = 0;
+  for (const wallet of wallets) {
+    const amount = walletUsdcAmount(wallet);
+    if (amount === undefined) return undefined;
+    total += amount;
+  }
+  return total;
 }
 
 /**

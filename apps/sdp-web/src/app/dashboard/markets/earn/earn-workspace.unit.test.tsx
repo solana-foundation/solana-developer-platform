@@ -195,6 +195,18 @@ describe("EarnWorkspace with no program yet", () => {
     expect(html).toContain("DashboardEarn.liquidity.instant");
   });
 
+  it("does not understate aggregate USDC when one wallet balance is unavailable", () => {
+    data.fundingWallets.wallets = [
+      fundingWallet("1250"),
+      { ...fundingWallet("25"), id: "cw_2", balances: undefined },
+    ];
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+
+    expect(html).not.toContain("1,250 USDC");
+    expect(html).toContain("DashboardEarn.overview.startStatAvailableUsdc</dt><dd");
+    expect(html).toContain(">—</dd>");
+  });
+
   it("never routes through a curator, the removed first step", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).not.toContain("curator");
